@@ -1,0 +1,784 @@
+/* PROTOTYPE - direction 1, Case Files. Every rule is scoped under .d-case, the window's root.
+
+   A case row is exactly as tall as today's thread row, 52px: 6px, the 18px title line, 4px, the
+   18px crew line, 6px. The crew line trades today's 6px gap and 16px detail line for 4px and an
+   18px line, so the faces get two more pixels without the row growing. */
+
+/* ---------- the case row ---------- */
+
+.d-case .cf-case {
+  position: relative;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1);
+}
+.d-case .cf-row {
+  position: relative;
+  height: 52px;
+  min-height: 0;
+  padding: 6px 8px 6px 10px;
+  box-sizing: border-box;
+  cursor: default;
+  outline: none;
+}
+.d-case .cf-row:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.d-case .cf-row .side-text {
+  gap: 4px;
+  line-height: normal;
+}
+.d-case .cf-row .st-line .side-end {
+  min-width: 48px;
+}
+
+/* The status slot speaks for whoever is most urgent in the case. Under the pointer, Close
+   crossfades over it, as today's Mark done does over a thread's status. */
+.d-case .cf-slot {
+  padding: 0;
+  font: inherit;
+  font-size: var(--t-12);
+  transition: opacity var(--dur-1);
+}
+.d-case .cf-close-hover {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  opacity: 0;
+  transition: opacity var(--dur-1), background var(--dur-1);
+}
+.d-case .cf-close-hover:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.d-case .cf-row:hover .cf-close-hover,
+.d-case .cf-row:focus-visible .cf-close-hover {
+  opacity: 1;
+}
+.d-case .cf-row:hover .cf-slot,
+.d-case .cf-row:focus-visible .cf-slot {
+  opacity: 0;
+}
+
+/* Line 2: the crew strip, the exchange line, and the chevron. */
+.d-case .cf-line2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 18px;
+  min-width: 0;
+  font-size: var(--t-12);
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/* Faces overlap by 5px, like people standing close together. Each is a door: a click opens
+   that member. A waiting member sits on top, so its raised hand is never covered. */
+.d-case .cf-crew {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 18px;
+}
+/* Each face sits on a disc of the row's own color, 1.5px wider than the face, so where two
+   faces overlap the one on top cuts a clean edge into the one below (a facepile's ring). The
+   disc's color follows the row's background through --ring. */
+.d-case {
+  --ring: var(--bg);
+}
+.d-case .cf-case.is-open {
+  --ring: color-mix(in oklab, var(--ink) 3.5%, var(--bg));
+}
+.d-case .cf-row:hover {
+  --ring: color-mix(in oklab, var(--ink) 5%, var(--bg));
+}
+.d-case .cf-case.is-open .cf-row:hover {
+  --ring: color-mix(in oklab, var(--ink) 8.3%, var(--bg));
+}
+.d-case .cf-row.is-on,
+.d-case .cf-case.is-current:not(.is-open) > .cf-row {
+  --ring: color-mix(in oklab, var(--ink) 7%, var(--bg));
+}
+.d-case .cf-face {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--ring);
+  box-shadow: 0 0 0 1.5px var(--ring);
+  transition: transform var(--dur-1) var(--ease-out), background var(--dur-1), box-shadow var(--dur-1);
+}
+.d-case .cf-face + .cf-face {
+  margin-left: -5px;
+}
+.d-case .cf-face:hover {
+  transform: translateY(-1.5px);
+}
+.d-case .cf-face:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.d-case .cf-face .cr {
+  display: block;
+}
+
+/* The exchange line: who spoke (a partner's role, or "→ tests" for the lead's brief), then what
+   they said, cut short. The full text is in the case notes. */
+.d-case .cf-x {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.d-case .cf-x-who {
+  flex: none;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+/* A partner that waits takes line 2 with its question, in the color that means you. */
+.d-case .cf-x--ask .cf-x-who,
+.d-case .cf-x--ask .cf-x-text {
+  color: var(--you-ink);
+}
+.d-case .cf-x--ask .cf-x-who {
+  font-weight: var(--w-bold);
+}
+.d-case .cf-x-arrow {
+  margin: 0 3px 0 0;
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+.d-case .cf-x-who .cf-x-arrow:not(:first-child) {
+  margin-left: 3px;
+}
+.d-case .cf-x-text {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  text-overflow: ellipsis;
+}
+.d-case [data-notes] {
+  cursor: help;
+}
+
+.d-case .cf-chev {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-right: -2px;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  opacity: 0;
+  transition: opacity var(--dur-1), background var(--dur-1), color var(--dur-1);
+}
+.d-case .cf-chev svg {
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.d-case .cf-chev:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.d-case .cf-row:hover .cf-chev,
+.d-case .cf-row:focus-visible .cf-chev,
+.d-case .cf-case.is-open .cf-chev {
+  opacity: 1;
+}
+.d-case .cf-case.is-open .cf-chev svg {
+  transform: rotate(180deg);
+}
+
+/* A working case steps back, as a working thread's row does today, unless it holds the open thread. */
+.d-case .cf-case.is-receded > .cf-row {
+  opacity: 0.72;
+  transition: opacity var(--dur-1);
+}
+.d-case .cf-case.is-receded > .cf-row:hover,
+.d-case .cf-case.is-receded > .cf-row:focus-visible {
+  opacity: 1;
+}
+
+/* ---------- the case file ---------- */
+
+/* An unfolded case is one region: the case row, its members and its foot share a faint tint, so
+   the eye reads them as one thing (Gestalt: common region). */
+.d-case .cf-case.is-open {
+  background: color-mix(in oklab, var(--ink) 3.5%, transparent);
+}
+/* A folded case that holds the open thread is drawn as selected, so you always see where you are. */
+.d-case .cf-case.is-current:not(.is-open) > .cf-row {
+  background: var(--selected);
+}
+.d-case .cf-file {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 0 2px;
+}
+.d-case .cf-member {
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px 0 10px;
+}
+.d-case .cf-member.has-ask {
+  min-height: 42px;
+}
+.d-case .cf-member.is-receded {
+  opacity: 0.72;
+}
+.d-case .cf-member.is-receded:hover {
+  opacity: 1;
+}
+.d-case .cf-member > .cr {
+  flex: none;
+}
+.d-case .cf-m-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 1px;
+}
+.d-case .cf-m-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--t-13);
+  line-height: 18px;
+  white-space: nowrap;
+}
+.d-case .cf-m-role {
+  flex: none;
+  font-weight: var(--w-medium);
+}
+.d-case .cf-m-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+}
+.d-case .cf-m-agent > svg,
+.d-case .cf-m-agent > .pi {
+  flex: none;
+}
+.d-case .cf-m-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.d-case .cf-m-ask {
+  overflow: hidden;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.d-case .cf-member .side-end {
+  min-width: 48px;
+  align-self: center;
+}
+.d-case .cf-member.has-ask .side-end {
+  align-self: flex-start;
+  margin-top: 5px;
+}
+
+.d-case .cf-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 4px 0 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.d-case .cf-f-place {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+.d-case .cf-f-place > .ic {
+  flex: none;
+  margin-left: 3px;
+}
+.d-case .cf-f-place {
+  gap: 5px;
+}
+.d-case .cf-f-branch {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.d-case .cf-f-diff {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.d-case .cf-f-diff .minus {
+  color: var(--fail-ink);
+}
+.d-case .cf-f-close {
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1), color var(--dur-1);
+}
+.d-case .cf-f-close:hover,
+.d-case .cf-f-close.is-pressed {
+  background: var(--selected);
+  color: var(--ink);
+}
+.d-case .cf-f-close.is-pressed {
+  transform: scale(0.97);
+}
+
+/* ---------- Waiting on you: the case's name, then the asker's role and its question ---------- */
+.d-case .cf-w-role {
+  font-weight: var(--w-bold);
+}
+.d-case .cf-w-role::after {
+  content: " · ";
+  font-weight: var(--w-regular);
+}
+
+/* ---------- the threads with no project, and the lens ---------- */
+.d-case .cf-noproj::before {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+.d-case .cf-lensbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  margin: 6px 0 0;
+  padding: 0 2px 0 4px;
+}
+.d-case .cf-lens-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 7px 0 6px;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  font: inherit;
+  font-size: var(--t-12);
+}
+.d-case .cf-lens-pick b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.d-case .cf-lens-pick:hover {
+  background: var(--hover);
+  color: var(--muted);
+}
+.d-case .cf-status-h > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.d-case .cf-group--waiting .cf-status-h > span:first-child {
+  color: var(--you-ink);
+}
+.d-case .cf-gcount {
+  flex: none;
+  margin-right: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.d-case .cf-lens-tint {
+  flex: none;
+  gap: 0;
+  margin-right: -2px;
+}
+.d-case .cf-lens-proj {
+  flex: none;
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+
+.d-case .cf-run {
+  padding-left: 6px;
+}
+
+/* ---------- the Done shelf ---------- */
+.d-case .cf-shelf {
+  padding-top: 14px;
+}
+.d-case .cf-shelf-h button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.d-case .cf-shelf-h .ic {
+  transition: transform var(--dur-1);
+}
+.d-case .cf-shelf-h button[aria-expanded="true"] .ic {
+  transform: rotate(90deg);
+}
+.d-case .cf-shelf-n {
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.d-case .cf-done .cf-row {
+  opacity: 0.6;
+  transition: opacity var(--dur-1), background var(--dur-1);
+}
+.d-case .cf-done .cf-row:hover,
+.d-case .cf-done .cf-row.is-on {
+  opacity: 1;
+}
+.d-case .cf-done .st-glyph {
+  margin-right: 0;
+}
+
+/* ---------- motion ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  /* A partner joins: its face springs out from behind its lead's. The row keeps its height. */
+  .d-case .cf-face.is-entering {
+    animation: cf-join 620ms var(--ease-spring) 80ms both;
+  }
+  .d-case .cf-case.is-leaving {
+    overflow: hidden;
+    opacity: 0;
+    transition: height var(--dur-3) var(--ease-out), opacity 240ms var(--ease-out);
+  }
+  .d-case .cf-done.is-fresh .cf-row {
+    animation: cf-arrive 1400ms var(--ease-out);
+  }
+  .d-case .cf-tab.is-new {
+    animation: cf-tab-in 560ms var(--ease-spring) both;
+  }
+}
+@keyframes cf-join {
+  from {
+    opacity: 0;
+    transform: translateX(-13px) scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* The closed case lands on the shelf with an accent outline that fades. Only the outline moves,
+   so the row's background, which the faces' rings match, stays put. */
+@keyframes cf-arrive {
+  0%,
+  35% {
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+    opacity: 1;
+  }
+  100% {
+    box-shadow: inset 0 0 0 1.5px transparent;
+  }
+}
+@keyframes cf-tab-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- the header: the case's name, then its crew as tabs ---------- */
+.d-case .cf-crewbar {
+  max-width: calc(100% - 140px);
+  overflow: hidden;
+}
+.d-case .cf-h-case {
+  min-width: 0;
+  max-width: 320px;
+  overflow: hidden;
+  padding: 0 6px 0 2px;
+  font-weight: var(--w-bold);
+  text-overflow: ellipsis;
+}
+.d-case .cf-h-sep {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 4px 0 2px;
+  background: var(--line);
+}
+.d-case .cf-tab {
+  flex: none;
+  gap: 6px;
+  padding: 0 10px 0 4px;
+}
+.d-case .cf-tab .cr {
+  margin: -2px 0;
+}
+.d-case .cf-tab.is-waiting .cf-tab-role {
+  color: var(--you-ink);
+}
+
+/* ---------- the glass card beside the sidebar: a member, or the case notes ---------- */
+.d-case .cf-pop {
+  position: fixed;
+  z-index: 40;
+  width: 296px;
+  padding: 12px 14px 12px;
+  border-radius: var(--r-lg);
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+  color: var(--ink);
+  font-size: var(--t-13);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-4px);
+  transition: opacity var(--dur-1), transform var(--dur-1) var(--ease-out);
+}
+.d-case .cf-pop.is-shown {
+  opacity: 1;
+  transform: none;
+}
+.d-case .cf-pop--notes {
+  width: 344px;
+  padding: 14px 16px 12px;
+}
+
+.d-case .cf-notes-h {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.d-case .cf-notes-eyebrow {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.d-case .cf-notes-h b {
+  font-weight: var(--w-bold);
+  line-height: 1.35;
+}
+.d-case .cf-notes {
+  display: flex;
+  flex-direction: column;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+/* Each exchange is a telegram on a tape: the time, then who sent it to whom, then the text. */
+.d-case .cf-note {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+}
+.d-case .cf-note-at {
+  padding-top: 1px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+}
+.d-case .cf-note-body {
+  position: relative;
+  padding: 0 0 12px 14px;
+  border-left: 1px solid var(--line);
+}
+.d-case .cf-note:last-child .cf-note-body {
+  padding-bottom: 2px;
+}
+.d-case .cf-note-body::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1.5px var(--faint);
+}
+.d-case .cf-note--report .cf-note-body::before {
+  background: var(--faint);
+}
+.d-case .cf-note-who {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.d-case .cf-note-who b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.d-case .cf-note-arrow {
+  margin: 0 2px;
+  color: var(--faint);
+}
+.d-case .cf-note p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.d-case .cf-notes-foot {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+.d-case .cf-mc-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.d-case .cf-mc-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.d-case .cf-mc-title {
+  font-weight: var(--w-bold);
+  line-height: 1.35;
+}
+.d-case .cf-mc-role {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.4;
+}
+.d-case .cf-mc-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.d-case .cf-mc-row > svg,
+.d-case .cf-mc-row > .mark,
+.d-case .cf-mc-row > .pi {
+  flex: none;
+  width: 12px;
+}
+.d-case .cf-mc-head + .cf-mc-row {
+  margin-top: 10px;
+}
+.d-case .cf-mc-state {
+  align-items: flex-start;
+}
+.d-case .cf-mc-state > .mark {
+  margin-top: 2px;
+}
+.d-case .cf-mc-ask {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 7px 9px;
+  border-radius: var(--r-sm);
+  background: var(--you-tint);
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  line-height: 1.4;
+}
+.d-case .cf-mc-ask .mark {
+  margin-top: 1px;
+}
+
+/* ---------- the toast ---------- */
+/* It sits 8px above the list's bottom edge, over the last rows, as the app's does. */
+.d-case .stage-toast {
+  bottom: 194px;
+}
+/* The stage places the toast over the list's bottom edge but does not draw it, so it is drawn
+   here as the app's Done toast is (apps/desktop/src/renderer/shell/sidebar.css). */
+.d-case .side-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 5px 0 12px;
+  box-sizing: border-box;
+  border-radius: var(--r-md);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  box-shadow: var(--shadow-2);
+}
+.d-case .side-toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.d-case .side-toast button {
+  flex: none;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  color: inherit;
+  font: inherit;
+  font-weight: var(--w-bold);
+  transition: background var(--dur-1);
+}
+.d-case .side-toast button:hover {
+  background: color-mix(in oklab, var(--surface) 14%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .d-case .side-toast.is-new {
+    animation: cf-toast-rise var(--dur-2) var(--ease-out);
+  }
+}
+@keyframes cf-toast-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

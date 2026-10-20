@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../shared/book.css" />
+    <script src="../shared/book.js"></script>
+    <title>Case Files · The sidebar, regrouped · Hercule</title>
+    <style>
+      /* This page's own layouts. Everything else is the book's (../shared/book.css). */
+
+      /* book.css's .bk-frame { margin: 0 } comes after .bk-wide and cancels its margin-left, so
+         a wide frame would sit half off the page. Two classes restore it. */
+      .bk-frame.bk-wide {
+        margin-left: 50%;
+      }
+
+      /* Before and after: two sidebars side by side, and what to see in them. */
+      .cf-ba {
+        display: grid;
+        grid-template-columns: auto auto minmax(0, 1fr);
+        gap: 40px;
+        align-items: start;
+      }
+      .cf-ba-notes {
+        display: grid;
+        gap: 22px;
+        padding-top: 4px;
+      }
+      .cf-ba-notes .bk-stat {
+        padding: 0;
+        border: 0;
+      }
+
+      /* Anatomy: the sidebar beside its numbered parts. */
+      .cf-anat {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 56px;
+        align-items: start;
+      }
+      .cf-anat .bk-steps {
+        padding-top: 8px;
+      }
+      /* Numbered markers beside the anatomy frame, level with the parts the steps name. The
+         frame's crop starts at the list's top (y 116) and is drawn at 115%, so a part at y in
+         the page sits at (y - 116) x 1.15 here. */
+      .cf-marked {
+        position: relative;
+      }
+      .cf-mark {
+        position: absolute;
+        display: grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        margin-top: -11px;
+        border-radius: 50%;
+        background: var(--ink);
+        color: var(--surface);
+        font-size: var(--t-11);
+        font-weight: var(--w-bold);
+        box-shadow: 0 0 0 3px var(--bg);
+      }
+      .cf-mark--l {
+        left: -34px;
+      }
+      /* A marker for a part at the row's right end sits on the frame's right edge, so it
+         reads as the frame's and not as one of the steps beside it. */
+      .cf-mark--r {
+        left: calc(272px * 1.15 - 11px);
+      }
+
+      /* A state: the whole window, then the spot that matters, up close. */
+      .cf-state {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 396px;
+        gap: 28px;
+        align-items: start;
+      }
+      .cf-state-head {
+        margin-bottom: 20px;
+      }
+      .cf-state-head h3 {
+        font-size: 21px;
+        letter-spacing: -0.015em;
+      }
+      .cf-state-head p {
+        max-width: 760px;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.6;
+      }
+      .cf-loupes {
+        display: flex;
+        flex-direction: column;
+        gap: 28px;
+      }
+
+      /* The huh band holds its frame beside the words. */
+      .cf-huh {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+        gap: 44px;
+        align-items: center;
+      }
+      .cf-huh .bk-cap-text,
+      .cf-huh .bk-cap-text b,
+      .cf-huh .bk-cap-acts a,
+      .cf-huh .bk-cap-acts button {
+        color: color-mix(in oklab, var(--surface) 70%, transparent);
+      }
+      .cf-huh .bk-device {
+        box-shadow: 0 0 0 1px color-mix(in oklab, var(--surface) 14%, transparent), 0 30px 70px -24px oklch(0 0 0 / 0.6);
+      }
+
+      .cf-score td:nth-child(2) {
+        color: var(--ink);
+      }
+      .cf-score td:last-child {
+        white-space: nowrap;
+        color: var(--muted);
+      }
+      .cf-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 28px;
+        color: var(--muted);
+        font-weight: var(--w-medium);
+        text-decoration: none;
+      }
+      .cf-back:hover {
+        color: var(--ink);
+      }
+
+      @media (max-width: 1100px) {
+        .cf-state {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .cf-huh {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      @media (max-width: 900px) {
+        .cf-mark {
+          display: none;
+        }
+        .cf-ba,
+        .cf-anat {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .cf-ba {
+          gap: 28px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="bk-top">
+      <a class="bk-brand" href="../index.html"><i data-face="Hercule" data-pose="idle" data-size="24"></i>The sidebar, regrouped <small>four directions in Crew Bureau</small></a>
+      <nav class="bk-links">
+        <a href="../index.html#team">The team</a>
+        <a href="../index.html#brief">The brief</a>
+        <a href="../case-files/index.html" aria-current="page">Case Files</a>
+        <a href="../lineage/index.html">Lineage</a>
+        <a href="../workbench/index.html">Workbench</a>
+        <a href="../tracks/index.html">Tracks</a>
+        <a href="../index.html#compare">Compare</a>
+      </nav>
+      <div class="bk-themes"><button data-theme-option="whitehaven">Whitehaven</button><button data-theme-option="orient-express">Orient Express</button></div>
+    </header>
+
+    <main class="bk">
+      <!-- ---------------------------------------------------------------- hero -->
+      <section class="bk-hero">
+        <div class="bk-eyebrow">Direction 1 of 4 · organizes by the crew</div>
+        <h1><span class="bk-num">1</span>Case Files</h1>
+        <p class="bk-lever">One piece of work, one row. The threads working on it ride along as faces.</p>
+        <p class="bk-lede">You start a thread, and it starts a reviewer. Today that is two rows with two different titles, and each lands wherever its start time puts it. Case Files makes the piece of work the row: <b>a case</b>. Its crew is drawn on the row as faces, in their poses, and the last thing they said to each other sits right beside them.</p>
+        <p class="bk-lede">A case of one is today's row, unchanged. A partner joining adds a face, never a row, so the list never moves under you. And when the work is done, <b>Close</b> puts the whole crew away at once.</p>
+      </section>
+
+      <figure class="bk-frame bk-wide" data-src="desktop.html?state=everyday" data-h="1160" data-caption="The heavy morning, at 09:41" data-note="16 threads in 10 cases. The 3-D Secure case is open: its lead waits on a git push, its research partner is idle, its review partner is working. The header names the case once and seats its crew as tabs."></figure>
+
+      <!-- ---------------------------------------------------------------- before and after -->
+      <section class="bk-sec" id="before-after">
+        <div class="bk-eyebrow">Before and after</div>
+        <h2>Sixteen rows become ten, and every row is a piece of work.</h2>
+        <p class="bk-lede">The same world, the same window. On the left, today's sidebar: in webshop, the 3-D Secure fix and its review are four rows apart, with the cart work between them, because rows sort by when each thread started. On the right, each piece of work is one row, and you can see who is on it.</p>
+        <div class="cf-ba">
+          <figure class="bk-frame" data-src="../today/desktop.html" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption="Today" data-note="A partner is a row like any other."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=everyday" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption="Case Files" data-note="A partner is a face on its case."></figure>
+          <div class="cf-ba-notes">
+            <div class="bk-stat"><b>10</b><span>rows for 16 threads, against 16 today. Four rows hold a crew of two or three.</span></div>
+            <div class="bk-stat"><b>0</b><span>extra pixels for a thread that works alone. Its row is today's row: title, status, mark and branch.</span></div>
+            <div class="bk-stat"><b>52</b><span>pixels for every case row, the height of today's thread row. A crew costs no height until you open its file.</span></div>
+            <p class="bk-body">Waiting on you stays on top. Each of its rows now says which case the question belongs to, and who in the case is asking: <b>check · Settlement or payout date?</b> under <b>Payout report for September</b>.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- anatomy -->
+      <section class="bk-sec" id="anatomy">
+        <div class="bk-eyebrow">Anatomy</div>
+        <h2>A case row says the work's name once, then shows its crew.</h2>
+        <p class="bk-lede">Every part answers one of the five questions Rogier asks the sidebar. Hover any part of the live frame to try it: a face shows its member, the exchange line opens the case notes, the chevron opens the file.</p>
+        <div class="cf-anat">
+          <div class="cf-marked">
+            <figure class="bk-frame" data-src="desktop.html?state=everyday" data-h="1160" data-crop="0,116,272,1044" data-zoom="1.15" data-caption="The list at 115%" data-note="Live: hover, click, and press → on a case."></figure>
+            <span class="cf-mark cf-mark--l" style="top: 297px">1</span>
+            <span class="cf-mark cf-mark--r" style="top: 297px">2</span>
+            <span class="cf-mark cf-mark--l" style="top: 323px">3</span>
+            <span class="cf-mark cf-mark--l" style="top: 384px">4</span>
+            <span class="cf-mark cf-mark--l" style="top: 804px">5</span>
+            <span class="cf-mark cf-mark--l" style="top: 918px">6</span>
+            <span class="cf-mark cf-mark--l" style="top: 432px">7</span>
+          </div>
+          <ol class="bk-steps">
+            <li><h4>The case's name, said once</h4><p>A case takes its lead's title. The partners do not repeat it: inside the case they are named by their role, such as <b>review</b>, <b>research</b> or <b>check</b>.</p></li>
+            <li><h4>Whoever is most urgent speaks for the case</h4><p>The status slot is the most urgent member's: waiting, then working, then idle. <b>Question</b> on Payout report is the checker's, not the lead's. Under the pointer, <b>Close</b> takes the slot's place, as Mark done does today.</p></li>
+            <li><h4>The crew strip</h4><p>Every member's face, in its pose, the lead first. A member that waits raises its hand with the marigold palm and sits on top, so it is never covered. Each face is a door: one click opens that member.</p></li>
+            <li><h4>The exchange line</h4><p>The last message between members. <b>review</b> then text is a report to the lead. <b>→ tests</b> is the lead's brief to a partner. When a partner waits, its question takes the line instead, in marigold.</p></li>
+            <li><h4>The case file</h4><p>Opens with the chevron, with →, or by itself when you open any member. One short row per member: role, agent, status, and the question when it waits. The file and its row share one tint, so they read as one thing.</p></li>
+            <li><h4>The case's foot</h4><p>What the case has produced, its branch and its changes, and <b>Close</b>, which marks the whole crew done with one Undo.</p></li>
+            <li><h4>A case of one</h4><p>A thread that works alone draws exactly as today's row, with its provider's mark and branch on the second line. The crew strip appears only when a second thread joins.</p></li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- the huh -->
+      <section class="bk-sec" id="huh">
+        <div class="bk-huh">
+          <div class="cf-huh">
+            <div>
+              <div class="bk-eyebrow">The part nobody has done</div>
+              <h2>You can read your agents' conversation without opening a single thread.</h2>
+              <p>Every message one thread sends another is already stored by Hercule, as an input whose actor is a session. No tool shows it. Case Files puts the latest one on the row, and hovering it opens the <b>case notes</b>: the whole exchange as a tape of telegrams, who sent what to whom, and when.</p>
+              <p>And the faces do the status work before you read a word. The raised hand with the marigold palm is the one that needs you, whichever member of the case it is.</p>
+            </div>
+            <figure class="bk-frame" data-src="desktop.html?state=notes" data-h="1160" data-crop="0,690,650,410" data-zoom="1.2" data-caption="The case notes of the 3-D Secure case" data-note="research reported to the lead at 09:21, the lead briefed review at 09:30, review reported its first finding at 09:38."></figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- the states -->
+      <section class="bk-sec" id="states">
+        <div class="bk-eyebrow">The states</div>
+        <h2>Six moments, the same world.</h2>
+        <p class="bk-lede">Each frame is the live page. Use Open to try it at full size, and Replay on the two that move.</p>
+
+        <div class="bk-frames">
+          <div>
+            <div class="cf-state-head">
+              <h3>Inside a case: where am I?</h3>
+              <p>You are in the review of the 3-D Secure fix. The case is one tinted region, and the review row is selected inside it. The header names the case once, then seats its crew as tabs: lead, research, review. Switching to the lead is one click, in either place.</p>
+            </div>
+            <div class="cf-state">
+              <div class="cf-loupes">
+                <figure class="bk-frame" data-src="desktop.html?state=partner" data-caption="Partner open" data-note="The review partner is open. Its case keeps its tint, and the review row is selected inside it."></figure>
+                <figure class="bk-frame" data-src="desktop.html?state=partner" data-crop="282,4,700,44" data-zoom="1.15" data-caption="The crew as tabs" data-note="The case's name once, then lead, research and review, each with its face and its state."></figure>
+              </div>
+              <div class="cf-loupes">
+                <figure class="bk-frame" data-src="desktop.html?state=partner" data-crop="0,500,272,212" data-zoom="1.455" data-caption="The case file" data-note="Two levels of you-are-here: the case's tint, the member's row."></figure>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="cf-state-head">
+              <h3>A partner joins, and nothing moves</h3>
+              <p>Rotate staging secrets works alone, until it starts its first partner. The lone row becomes a case in place: the lead's face takes the mark's place, the new face springs out from behind it, and the brief types itself into the exchange line. The row stays 52px tall, so nothing below it moves. The header gains a tab.</p>
+            </div>
+            <div class="cf-state">
+              <figure class="bk-frame" data-src="desktop.html?state=spawn" data-replay data-caption="A lone thread becomes a case" data-note="About a second after load, Rotate staging secrets starts its first partner. A face joins the row; no row moves."></figure>
+              <div class="cf-loupes">
+                <figure class="bk-frame" data-src="desktop.html?state=spawn" data-replay data-crop="0,520,272,110" data-zoom="1.455" data-caption="The row, up close"></figure>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="cf-state-head">
+              <h3>Closing a case</h3>
+              <p>The 3-D Secure work has landed: the branch is pushed and the review found nothing more. Close takes all three threads to the Done shelf as one row, with one Undo. The crew keeps its faces on the shelf, in the done pose, so the case is still recognisable a week later.</p>
+            </div>
+            <div class="cf-state">
+              <figure class="bk-frame" data-src="desktop.html?state=done" data-replay data-caption="Close the case" data-note="About a second after load, Close runs on the 3-D Secure case. All three threads leave together."></figure>
+              <div class="cf-loupes">
+                <figure class="bk-frame" data-src="desktop.html?state=done" data-replay data-crop="0,330,272,420" data-zoom="1.455" data-caption="The shelf and the toast"></figure>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="cf-state-head">
+              <h3>The swarm</h3>
+              <p>35 threads in view, in 21 cases, and more behind each project's "more" row. Five cases per project: the ones that need you first, then the working ones. A waiting partner still surfaces on its case: Postgres 18's <b>rollback asks</b> on the ops row.</p>
+            </div>
+            <figure class="bk-frame" data-src="desktop.html?state=swarm" data-caption="35 threads, 21 cases" data-note="Every case is still one row. Only the open case unfolds."></figure>
+          </div>
+
+          <div>
+            <div class="cf-state-head">
+              <h3>Another lens: grouped by status</h3>
+              <p>A case is the atom any lens moves. Grouped by status, a case sits under the status of whoever speaks for it, and carries its project as a small tint. Waiting on you folds into Needs you, which is the same list, by case. The run's step waiting on you joins it.</p>
+            </div>
+            <div class="cf-state">
+              <figure class="bk-frame" data-src="desktop.html?state=lens" data-caption="Group by status" data-note="The same cases, each under the status of whoever speaks for it."></figure>
+              <div class="cf-loupes">
+                <figure class="bk-frame" data-src="desktop.html?state=lens" data-crop="0,110,272,430" data-zoom="1.455" data-caption="Needs you, by case"></figure>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="cf-state-head">
+              <h3>Orient Express</h3>
+              <p>The same morning in the dark flagship. The faces keep their hues, the rings follow the row's color, and marigold still means you.</p>
+            </div>
+            <figure class="bk-frame" data-src="desktop.html?state=expanded&theme=orient-express" data-caption="Every case file open, in the dark" data-note="Orient Express, with every case file open."></figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- needs and costs -->
+      <section class="bk-sec" id="needs">
+        <div class="bk-eyebrow">What it takes</div>
+        <h2>What it needs, and what it costs.</h2>
+        <div class="bk-grid">
+          <div class="bk-card">
+            <div class="bk-eyebrow">Data and spec</div>
+            <ul class="bk-list">
+              <li><b>startedBy on Session.</b> The controller already stores who started a session (<code>sessions.created_by</code>). The contract exposes it, so a thread started by a session joins that session's case.</li>
+              <li><b>The lead of a thread added by hand.</b> A thread started from the header's + stores the case it joins (<code>leadSessionId</code>), because a shared workspace is not proof.</li>
+              <li><b>A role per partner.</b> One Text Generation at start, from the brief (<code>sessions/thread.role</code>), as a thread's title is written today.</li>
+              <li><b>The last exchange per case.</b> Inputs whose actor is a session of the same case, already stored. The list needs only the newest per case; the case notes read the rest on hover.</li>
+              <li><b>Spec 17 §The sidebar</b> lists cases instead of threads, defines who speaks for a case, adds Close case (marking each member done, with one Undo), and turns the header's tabs into the crew.</li>
+              <li><b>CONTEXT.md</b> gains <b>Case</b>: a lead thread and its partners. Avoid: group, bundle, stack.</li>
+            </ul>
+          </div>
+          <div class="bk-card">
+            <div class="bk-eyebrow">Cost, in ADR 0037's terms</div>
+            <ul class="bk-list">
+              <li><b>Processes:</b> none new.</li>
+              <li><b>Memory:</b> one short string per case for the exchange line, and two or three small face SVGs per case row. The list stays virtualized, and it mounts fewer rows than today, because there are fewer rows.</li>
+              <li><b>Work while idle:</b> none. No timer, no polling, no live topic of its own.</li>
+              <li><b>Work per streamed token:</b> none. Line 2 changes only when an exchange lands or a member's pose changes.</li>
+              <li><b>Reads:</b> the newest exchange per case rides on the session list's read. The case notes read one case's exchanges on hover, a handful of rows.</li>
+              <li><b>Bundle bytes:</b> the case row, the case file and the notes card in the shell's chunk, a few KB. The case rules (lead, spokesperson) live in client-core with their tests.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- risks -->
+      <section class="bk-sec" id="risks">
+        <div class="bk-eyebrow">The team's doubts</div>
+        <h2>What the team pushed back on, and the answers.</h2>
+        <div class="bk-grid bk-grid--3">
+          <div class="bk-card bk-card--quiet"><h3>"A face is not a name."</h3><p class="bk-body">Faces are seeded at random, so nobody learns them. They do not have to be learned: they say who is working and who is waiting. The case's name and the members' roles carry the names.</p></div>
+          <div class="bk-card bk-card--quiet"><h3>"Another noun."</h3><p class="bk-body">Case is the Bureau's own word, and an honest one: a case has a crew. It takes no meaning from Task, which is intent, or Workspace, which is a place.</p></div>
+          <div class="bk-card bk-card--quiet"><h3>"The exchange line is cut short."</h3><p class="bk-body">At 272px it is a scent, not the message. The case notes hold the whole tape, one hover away, and a wider sidebar shows more of the line.</p></div>
+          <div class="bk-card bk-card--quiet"><h3>"Partners get hidden."</h3><p class="bk-body">Never the one that needs you. Its face raises a hand, its question takes line 2, and Waiting on you lists it under the case's name. The file also opens by itself on the case you are in.</p></div>
+          <div class="bk-card bk-card--quiet"><h3>"Close is a bigger hammer than Mark done."</h3><p class="bk-body">One Undo brings the whole crew back, and the shelf keeps them together. The model still lets a single member be marked done; this drawing shows only Close.</p></div>
+          <div class="bk-card bk-card--quiet"><h3>"18px faces are small."</h3><p class="bk-body">They overlap like people standing close, each cut by a ring in the row's own color, and the waiting one is drawn on top. The open case's file shows each member at a full row.</p></div>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- scorecard -->
+      <section class="bk-sec" id="score">
+        <div class="bk-eyebrow">Scorecard</div>
+        <h2>Against the job stories.</h2>
+        <div class="bk-scroll">
+          <table class="bk-table cf-score">
+            <thead><tr><th>Job</th><th>How Case Files does it</th><th>Moves</th></tr></thead>
+            <tbody>
+              <tr><td>Find</td><td>One row per piece of work, under its own name. 10 rows for 16 threads.</td><td>scan 10, not 16</td></tr>
+              <tr><td>Attend</td><td>The waiting face raises its hand on the row, a waiting partner's question takes line 2, and Waiting on you names the case and the asker.</td><td>1 click</td></tr>
+              <tr><td>Oversee</td><td>The faces show who works, who waits and who idles. The status slot is the most urgent member's.</td><td>a glance</td></tr>
+              <tr><td>Switch</td><td>The crew's tabs in the header, or the faces on the row.</td><td>1 click</td></tr>
+              <tr><td>Finish</td><td>Close on the row's hover, or in the case's foot, with one Undo.</td><td>1 click</td></tr>
+              <tr><td>A lone thread</td><td>Today's row, unchanged.</td><td>0 extra px</td></tr>
+              <tr><td>Calm</td><td>A partner joining adds a face, never a row. A case that just formed stays folded.</td><td>nothing moves</td></tr>
+              <tr><td>The lens</td><td>A case is the atom. By status, it sits under its spokesperson's status, with its project as a tint.</td><td>survives</td></tr>
+              <tr><td>Scale</td><td>21 cases in view in the swarm, five per project, waiting ones first.</td><td>reads</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- next -->
+      <section class="bk-sec" id="next">
+        <div class="bk-eyebrow">The four directions</div>
+        <nav class="bk-next">
+          <a href="../case-files/index.html" aria-current="page"><i>1</i><b>Case Files</b><span>One piece of work, one row. The crew rides on it as faces.</span></a>
+          <a href="../lineage/index.html"><i>2</i><b>Lineage</b><span>Every thread keeps its row. Kinship is drawn, not boxed.</span></a>
+          <a href="../workbench/index.html"><i>3</i><b>Workbench</b><span>The sidebar lists the work. The window seats the crew.</span></a>
+          <a href="../tracks/index.html"><i>4</i><b>Tracks</b><span>Every piece of work is a lane, every thread a track in it.</span></a>
+        </nav>
+        <a class="cf-back" href="../index.html">← Back to the book: the team, the brief and the comparison</a>
+      </section>
+    </main>
+
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+  </body>
+</html>
