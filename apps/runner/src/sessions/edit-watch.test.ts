@@ -192,6 +192,19 @@ const start = async (
   options.prepare?.(repository);
   const editMarksDir = realpathSync(createTemporaryDir("hercule-edit-marks-"));
   const clock = openFileClock(join(editMarksDir, "clock"));
+  /**
+   * Waits until the file clock has moved on. A write before this call is then
+   * strictly older than a mark taken after it, even on a filesystem whose
+   * clock ticks every few milliseconds.
+   */
+  const waitForClockTick = () => {
+    const before = clock.takeMark();
+    while (clock.takeMark() <= before);
+  };
+  // A file written by `prepare` can share a clock tick with the initial mark. The
+  // attribution then treats it as a possible missed write and narrows its window
+  // to that tick, which no later command holds. Waiting first keeps the file older.
+  waitForClockTick();
   const initialState =
     options.initialState ??
     (await Effect.runPromise(
@@ -246,15 +259,6 @@ const start = async (
   };
   const connection = makeConnection(options.writeHold, options.baseEnv);
   if (options.attached !== false) attach(connection.connection, options.readsFilesEdited);
-  /**
-   * Waits until the file clock has moved on. A write before this call is then
-   * strictly older than a mark taken after it, even on a filesystem whose
-   * clock ticks every few milliseconds.
-   */
-  const waitForClockTick = () => {
-    const before = clock.takeMark();
-    while (clock.takeMark() <= before);
-  };
   /** Writes a start mark the way a harness's hook does before a tool runs, with a shell command's text. */
   const markStart = (sessionId: string, itemId: string, shellCommand?: string) => {
     waitForClockTick();
