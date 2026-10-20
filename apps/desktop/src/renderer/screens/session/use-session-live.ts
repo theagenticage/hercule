@@ -26,8 +26,9 @@
  * stored row is wasted on a page nobody sees (spec 17, rule 3). When the
  * window is shown, the rows kept aside go into the cache in one write, so the
  * page renders once however many rows arrived. Rows kept aside are dropped if
- * something else writes the cache meanwhile, such as the read after a stream
- * `reset`, so that read wins as it does in a visible window.
+ * something else writes the cache meanwhile, such as a read another component
+ * starts, so that read wins as it does in a visible window. A stream `reset`
+ * drops them as well.
  *
  * The stream stays subscribed rather than being dropped like the tap, because
  * a new subscription replays what it missed: the controller sends the first
@@ -44,7 +45,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import { hashKey, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import {
   buildStreamCursor,
   createTailBuffer,
@@ -118,7 +119,8 @@ export interface SessionLiveOptions {
    * The key the agent's rows are cached under. An agent page passes
    * `queryKeys.transcript(sessionId, subagentId)`, the Conversation
    * `queryKeys.runningTurn(sessionId)`. Stream rows are merged into the rows
-   * held there, and a stream `reset` reads them again through this key.
+   * held there, a stream `reset` reads them again through this key, and the
+   * stream is followed only while this query is not fetching.
    */
   readonly rowsKey: QueryKey;
   /**
@@ -133,6 +135,11 @@ export interface SessionLiveOptions {
    * and a long session would otherwise keep every earlier turn in memory.
    */
   readonly trimRows?: ((rows: readonly TranscriptRow[]) => readonly TranscriptRow[]) | undefined;
+  /**
+   * Called once when the agent's stream reports `gone`: the session no longer
+   * exists. The thread's page uses it to delete the thread's saved copy.
+   */
+  readonly onGone?: (() => void) | undefined;
 }
 
 /**
@@ -145,23 +152,37 @@ export interface SessionLiveOptions {
  * message's text, stored and streamed. `options` are described on
  * `SessionLiveOptions`.
  *
- * The hook keeps one tail buffer, and reads `rowsKey` and `trimRows` once,
+ * The hook keeps one tail buffer, and reads `rowsKey`, `trimRows` and `onGone` once,
  * for the life of the component, so the caller mounts the component again
  * for another agent: the thread's routes key the page by session id and
  * subagent id. Reading them once also means a caller may build them inline
  * on every render without the subscriptions starting again.
+ *
+ * The stream is followed only while the query under `rowsKey` is not
+ * fetching. A fetch is a read that brings the rows up to date, such as the
+ * one after a thread opens from its saved copy, the read after a stream
+ * `reset`, or one that another component starts. While it runs the stream is
+ * not subscribed, so no row can arrive only to be replaced by the read's
+ * older snapshot and leave a hole in the rows. When the read ends,
+ * successfully or not, the stream is subscribed after the last row held then
+ * (`buildStreamCursor`), and its replay fills what the read could not. The
+ * hook learns of a read from the query cache's own notifications, which are
+ * synchronous, never from a React render: a fast read could start and end
+ * before React rendered, and a row delivered in between would be replaced.
  *
  * What the hook does with each delivery, as `decideStreamDelivery` and
  * `decideTapDelivery` decide it:
  *
  * - Stream rows not held yet update the tail buffer first, and are then
  *   merged into the cached rows, or kept aside while the window is hidden.
- *   The subscription starts after the last held row (`buildStreamCursor`).
- * - A stream `reset` means rows may have been missed, so the rows are read
- *   again, and the open items are skipped: their tails are cleared. The read
- *   replaces the cached rows, which drops the rows kept aside.
+ * - A stream `reset` means rows may have been missed. The hook stops
+ *   following the stream, skips the open items (their tails are cleared), and
+ *   reads the rows again, which holds the stream back as described above.
+ *   Deliveries already on their way are ignored. The rows kept aside are
+ *   dropped at once, because they cannot be trusted after a reset.
  * - A `gone` on either topic ends that subscription: the session no longer
- *   exists.
+ *   exists. A `gone` on the stream also calls `onGone`, and is final: the
+ *   stream is not subscribed again, even when the rows query fetches again.
  *
  * The tail buffer skips the items that were open while the tap was not
  * subscribed, because the taps sent in that time are lost:
@@ -174,6 +195,8 @@ export interface SessionLiveOptions {
  *   it was not subscribed, such as during an outage. An item that started in
  *   those rows may have sent taps nobody received, so the items open once
  *   the replay is merged are skipped too.
+ * - When the stream is subscribed, because the rows may have grown while it
+ *   was not (a read brought them up to date, or the stream was held back).
  *
  * The controller sends at most 500 rows in a replay's first delivery and each
  * later row in a delivery of its own, so only the first delivery is known to
@@ -189,10 +212,12 @@ export const useSessionLive = ({
   rowsKey: rowsKeyAtMount,
   rows,
   trimRows: trimRowsAtMount,
+  onGone: onGoneAtMount,
 }: SessionLiveOptions): AttachOpenParagraph => {
   const [buffer] = useState(createTailBuffer);
   const [rowsKey] = useState(() => rowsKeyAtMount);
   const [trimRows] = useState(() => trimRowsAtMount);
+  const [onGone] = useState(() => onGoneAtMount);
   const visible = useWindowVisible();
   /** The open message attached last, and the text node its open paragraph is written into. */
   const targetRef = useRef<{ readonly node: Text; readonly message: OpenMessage } | null>(null);
@@ -205,6 +230,12 @@ export const useSessionLive = ({
    * frame.
    */
   const rowsLandingRef = useRef(false);
+  /**
+   * True once the stream reported `gone`. The session does not come back, so
+   * the stream is never subscribed again, and `onGone` is called only once,
+   * however often the rows query fetches afterwards.
+   */
+  const goneRef = useRef(false);
   /**
    * The held rows with the stream rows delivered while the window is hidden
    * merged in (trimmed by `trimRows`), and the cached rows they were merged
@@ -294,46 +325,84 @@ export const useSessionLive = ({
 
   useEffect(() => {
     if (live === null) return;
-    const unsubscribe = live.subscribe(
-      buildAgentStreamTopic(sessionId, subagentId),
-      (delta) => {
-        const delivery = decideStreamDelivery(readHeldRows(), delta);
-        if (delivery.kind === "gone") {
-          unsubscribe();
-        } else if (delivery.kind === "reset") {
-          // The live connection subscribes again from the head at once, while
-          // the rows are still being read, so a row written in between
-          // is in neither. This gap is accepted: a reset happens only when
-          // the log was replaced, and waiting for the read would hold the
-          // stream back.
-          skipOpenItems();
-          void queryClient.invalidateQueries({ queryKey: rowsKey });
-        } else if (delivery.kind === "rows") {
-          buffer.applyRows(delivery.fresh);
-          const transcript =
-            trimRows === undefined ? delivery.transcript : trimRows(delivery.transcript);
-          // The document is read here, not the `visible` state, so that the
-          // stream is not subscribed again each time the window is hidden or
-          // shown: a new subscription would replay from the controller.
-          if (!isWindowVisible()) {
-            hiddenRowsRef.current = {
-              cached: queryClient.getQueryData<readonly TranscriptRow[]>(rowsKey),
-              transcript,
-            };
-          } else {
-            rowsLandingRef.current = true;
-            queryClient.setQueryData(rowsKey, transcript);
-            // The transcript includes the rows kept aside, and a row can
-            // arrive after the window was shown but before the effect that
-            // writes them ran.
+    const rowsHash = hashKey(rowsKey);
+    const isReadingRows = (): boolean =>
+      queryClient.getQueryState(rowsKey)?.fetchStatus === "fetching";
+    // Ends the current subscription to the stream, or is null when there is none.
+    let stopFollowing: (() => void) | null = null;
+    const stop = (): void => {
+      stopFollowing?.();
+      stopFollowing = null;
+    };
+    // Subscribes to the stream after the last row held now. The rows kept
+    // aside count when they are still valid: the stream must not replay them.
+    const follow = (): void => {
+      // False once this subscription ends. The live connection may still hand
+      // over a delivery that was already on its way, and merging it would put
+      // a row in the cache that a read is about to replace.
+      let active = true;
+      const unsubscribe = live.subscribe(
+        buildAgentStreamTopic(sessionId, subagentId),
+        (delta) => {
+          if (!active) return;
+          const delivery = decideStreamDelivery(readHeldRows(), delta);
+          if (delivery.kind === "gone") {
+            goneRef.current = true;
+            stop();
+            onGone?.();
+          } else if (delivery.kind === "reset") {
+            // The cache listener below follows the stream again when the read ends.
+            // "all" starts the read even when no component observes the rows, so
+            // the stream cannot stay stopped.
+            stop();
+            // Cache identity cannot prove the rows kept aside valid after a reset:
+            // a read that returns equal rows keeps the same cached array.
             hiddenRowsRef.current = null;
+            skipOpenItems();
+            void queryClient.invalidateQueries({ queryKey: rowsKey, refetchType: "all" });
+          } else if (delivery.kind === "rows") {
+            buffer.applyRows(delivery.fresh);
+            const transcript =
+              trimRows === undefined ? delivery.transcript : trimRows(delivery.transcript);
+            // The document is read here, not the `visible` state, so that the
+            // stream is not subscribed again each time the window is hidden or
+            // shown: a new subscription would replay from the controller.
+            if (!isWindowVisible()) {
+              hiddenRowsRef.current = {
+                cached: queryClient.getQueryData<readonly TranscriptRow[]>(rowsKey),
+                transcript,
+              };
+            } else {
+              rowsLandingRef.current = true;
+              queryClient.setQueryData(rowsKey, transcript);
+              // The transcript includes the rows kept aside, and a row can
+              // arrive after the window was shown but before the effect that
+              // writes them ran.
+              hiddenRowsRef.current = null;
+            }
+            if (delivery.replay) skipOpenItems();
           }
-          if (delivery.replay) skipOpenItems();
-        }
-      },
-      buildStreamCursor(readHeldRows()),
-    );
-    return unsubscribe;
+        },
+        buildStreamCursor(readHeldRows()),
+      );
+      stopFollowing = () => {
+        active = false;
+        unsubscribe();
+      };
+      skipOpenItems();
+    };
+    // The query cache calls this synchronously when the query changes: before
+    // a read's function runs, and before the read's result is stored.
+    const unsubscribeCache = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== "updated" || event.query.queryHash !== rowsHash) return;
+      if (event.query.state.fetchStatus === "fetching") stop();
+      else if (stopFollowing === null && !goneRef.current) follow();
+    });
+    if (!isReadingRows() && !goneRef.current) follow();
+    return () => {
+      unsubscribeCache();
+      stop();
+    };
   }, [
     live,
     queryClient,
@@ -341,6 +410,7 @@ export const useSessionLive = ({
     subagentId,
     rowsKey,
     trimRows,
+    onGone,
     buffer,
     readHeldRows,
     skipOpenItems,

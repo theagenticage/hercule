@@ -332,6 +332,7 @@ export {
   PassageFilter,
   StructuredResult,
   TRANSCRIPT_SORT_FIELDS,
+  TranscriptPosition,
   TranscriptRow,
 } from "./groups/transcript";
 export {

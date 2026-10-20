@@ -14,6 +14,8 @@
  * - a queued input shows above the composer, and Cancel removes it;
  * - a window hidden and shown again while a message streams ends with the
  *   whole message, no word doubled or skipped;
+ * - long messages of the user's are collapsed as they mount, without
+ *   setting off a resize loop;
  * - the app opens the last open thread again at launch;
  * - a step whose tool returned images opens to their thumbnails, a line for
  *   an image that could not be kept, and a lightbox.
@@ -457,6 +459,57 @@ describe("the thread view", () => {
       .find((numbers) => numbers.some((number, index) => number !== index + 1));
     expect(broken, "a snapshot doubled or skipped a word").toBeUndefined();
     expect(readWordNumbers(snapshots.at(-1)!).length).toBe(message.wordCount);
+  });
+
+  it("collapses a thread's long messages as they mount, with no resize loop", async () => {
+    const { url, fleet, client, waitForStatus } = await arrangeFleet();
+    const runner = await fleet.enlistRunner("studio");
+    const [thread] = await fleet.spawnThreads(1, { runner });
+    await waitForStatus(thread!.id, "busy");
+    // Each message is about 15 lines in the bubble, past the 10 lines above
+    // which a bubble is collapsed, and there are enough of them to fill the
+    // window several times over.
+    const paragraph =
+      "The checkout test fails because the payment form waits for the bank's reply, " +
+      "and the reply arrives after the test's timeout on a slow runner. ";
+    const text = Array.from({ length: 4 }, () => paragraph.repeat(3)).join("\n\n");
+    const count = 30;
+    for (let index = 0; index < count; index += 1) {
+      const { inputId } = await client.session.input({
+        params: { id: thread!.id },
+        payload: { text },
+      });
+      await client.input.steer({ params: { id: thread!.id, inputId } });
+    }
+    await expect
+      .poll(async () => {
+        const rows = await fleet.readTranscript(thread!.id);
+        return rows.filter(
+          ({ event }) => event._tag === "item.completed" && event.kind === "user_message",
+        ).length;
+      })
+      .toBe(count + 1);
+
+    const { page } = await openSignedIn(url);
+    // Chromium reports a resize loop as an error event on the window, which
+    // nothing else in the app listens for.
+    await page.evaluate(() => {
+      const errors: string[] = [];
+      Object.assign(globalThis, { resizeLoopErrors: errors });
+      window.addEventListener("error", (event) => {
+        if (event.message.includes("ResizeObserver")) errors.push(event.message);
+      });
+    });
+    await openThread(page, "Thread 1");
+    await expect.poll(() => page.locator(".bubble-toggle").count()).toBeGreaterThan(1);
+    const errors = await page.evaluate(async () => {
+      for (let frame = 0; frame < 20; frame += 1) {
+        await new Promise(requestAnimationFrame);
+      }
+      return (globalThis as typeof globalThis & { resizeLoopErrors: string[] }).resizeLoopErrors;
+    });
+    expect(errors).toEqual([]);
+    expect(await page.locator(".bubble-toggle").first().textContent()).toBe("Show full message");
   });
 
   it("opens the last open thread again at launch", async () => {

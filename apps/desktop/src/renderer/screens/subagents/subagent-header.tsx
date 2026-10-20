@@ -15,6 +15,7 @@ import type { Session, Subagent } from "@hercule/contract";
 import { buildHueStyle } from "../../faces";
 import { Mark } from "../../marks";
 import { SidePaneToggle } from "../thread/thread-header";
+import { TranscriptSyncMarker } from "../thread/transcript-sync-marker";
 import { buildSubagentLook } from "./subagent-face";
 import "./subagent-header.css";
 
@@ -31,6 +32,10 @@ const EXACT_PATH = { exact: true } as const;
  * - The thread and each ancestor are links to their pages.
  * - The subagent comes last, with its mark, its name and a "subagent" tag,
  *   tinted in its hue so the page cannot pass for a thread.
+ *
+ * The free space before the toggle holds "Syncing…" while the subagent's
+ * transcript is brought up to date after the thread opened from its saved
+ * copy.
  *
  * When the header runs out of room, the thread and the ancestors shrink
  * first, down to about four letters each, then the subagent's name. The
@@ -102,7 +107,7 @@ export function SubagentHeader({
           </span>
         </span>
       </nav>
-      <span className="spacer" />
+      <TranscriptSyncMarker sessionId={session.id} subagentId={subagent.id} />
       <SidePaneToggle sessionId={session.id} />
     </header>
   );

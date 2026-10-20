@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
+import { queryKeys } from "@hercule/client-core";
 import userEvent from "@testing-library/user-event";
 import {
   type Session,
@@ -23,6 +24,7 @@ import {
   createFakeBridge,
   FIXTURE_INSTANCE,
   FIXTURE_SUBAGENT,
+  holdAnswer,
   renderApp,
   setVisibility,
   SIDEBAR_FIXTURE,
@@ -30,6 +32,11 @@ import {
   stubElementSize,
   THREAD_FIXTURES,
 } from "../../../../../../app/testing";
+import {
+  answerTranscriptRead,
+  readTranscriptReads,
+} from "../../../../../../app/testing-transcript";
+import { saveThreadCopy } from "../../../../../../app/testing-thread-copies";
 
 const THREAD = THREAD_FIXTURES.delegating;
 const SESSION_ID = THREAD.session.id;
@@ -158,6 +165,56 @@ describe("the subagent's page", () => {
     await userEvent.click(screen.getByRole("link", { name: "Go to the thread" }));
     expect(router.state.location.pathname).toBe(`/threads/${SESSION_ID}`);
     expect(await screen.findByText(THREAD_MESSAGE)).toBeTruthy();
+  });
+});
+
+describe("the subagent's page opened from the thread's saved copy", () => {
+  it("shows the copy, reads only the subagent's newer rows, and subscribes its stream after that", async () => {
+    const subagentRows = THREAD.subagentTranscripts[SUBAGENT_ID]!;
+    const copiedRows = subagentRows.slice(0, -1);
+    await saveThreadCopy(THREAD, { subagentTranscripts: { [SUBAGENT_ID]: copiedRows } });
+    const newerRows = holdAnswer();
+    const answerFromThread = answerTranscriptRead(THREAD);
+    const calls = stubApi({
+      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+      ...buildThreadHandlers(THREAD),
+      [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: (call) =>
+        new URLSearchParams(call.search).get("subagentId") === SUBAGENT_ID
+          ? newerRows.handler()
+          : answerFromThread(call),
+    });
+    const { context, live } = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+      { path: `/threads/${SESSION_ID}/subagents/${SUBAGENT_ID}` },
+    );
+
+    // The page opened from the copy, while the read of newer rows is still out.
+    expect(screen.getByText(SUBAGENT_BRIEF)).toBeTruthy();
+    expect(readAgentTopics(live.readTopics())).toEqual([]);
+    await waitFor(() => {
+      expect(readTranscriptReads(calls, SESSION_ID)).toContainEqual({
+        // The read starts at the last copied row, to check it is still there.
+        after: String(copiedRows.at(-2)?.position ?? 0),
+        subagentId: SUBAGENT_ID,
+      });
+    });
+
+    const subscribe = vi.spyOn(context.controller!.live, "subscribe");
+    newerRows.answer({ body: { items: subagentRows.slice(-2) } });
+
+    await waitFor(() => {
+      expect(readAgentTopics(live.readTopics())).toEqual([SUBAGENT_TAP, SUBAGENT_STREAM]);
+    });
+    expect(subscribe).toHaveBeenCalledWith(
+      SUBAGENT_STREAM,
+      expect.any(Function),
+      String(subagentRows.at(-1)!.position),
+    );
+    expect(context.queryClient.getQueryData(queryKeys.transcript(SESSION_ID, SUBAGENT_ID))).toEqual(
+      subagentRows,
+    );
+    // No read of a whole transcript: the thread's own and the subagent's were both copied.
+    expect(readTranscriptReads(calls, SESSION_ID).every(({ after }) => after !== null)).toBe(true);
   });
 });
 

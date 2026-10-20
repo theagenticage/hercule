@@ -7,7 +7,8 @@
  * position, so reading it is a keyset walk over that position. Each agent of
  * a session has a transcript of its own: the session's own agent's, and one
  * per subagent. Reading one has no other filter; besides the agent, the only
- * choice a caller has is which end to start from.
+ * choices a caller has are which end to start from and which position to read
+ * after.
  *
  * `transcript.query` is the full-text search over every session's messages.
  * It returns passages: the text of one message that matched, with where it
@@ -28,6 +29,13 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { bounded } from "../strings";
 import { MAX_SEARCH_TEXT_LENGTH } from "./task";
+
+/**
+ * A position in a session's stream that a read can start after: an integer of
+ * 0 or more. 0 means "after nothing", so the read returns the whole stream.
+ * A position past the newest row is valid and returns an empty page.
+ */
+export const TranscriptPosition = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 /**
  * One row of a session's stream. `position` is the session's own monotonic
@@ -95,6 +103,13 @@ export const transcript = HttpApiGroup.make("transcript")
          * part of it.
          */
         subagentId: Schema.optionalKey(SubagentId),
+        /**
+         * Only the rows whose position is greater than this. A client that
+         * holds the rows up to a position reads the newer ones with it. A
+         * position beyond the newest row returns an empty page. A cursor is
+         * only valid for the listing with the same `after`.
+         */
+        after: Schema.optionalKey(TranscriptPosition),
         ...pageParams(TRANSCRIPT_SORT_FIELDS).fields,
       }),
       success: page(TranscriptRow),

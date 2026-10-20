@@ -1106,7 +1106,12 @@ describe("the library skills on a start frame", () => {
           const [start] = await waitForStartFrames(arranged, session.id, 1);
           expect("skills" in start!).toBe(false);
           expect(await readLibrarySkills(arranged, session.id)).toEqual([]);
-          const rows = await readStreamRows(arranged.harness, session.id);
+          // The runner's first event is stored after the start answers, so
+          // the rows are read once it is there, not at once.
+          const rows = await waitUntil("stored the session's first event", async () => {
+            const read = await readStreamRows(arranged.harness, session.id);
+            return read.some((row) => row.tag === "session.started") ? read : undefined;
+          });
           expect(rows.map((row) => row.tag)).toEqual(["runtime.warning", "session.started"]);
           const runner = await get(
             arranged.harness.base,
@@ -2511,6 +2516,45 @@ describe("transcript.read", () => {
       );
       expect(rest.items.map((row) => row.position)).toEqual([5, 6]);
       expect(rest.nextCursor).toBeUndefined();
+    });
+  });
+
+  it("reads only the rows past `after`, and refuses a cursor from a listing with another `after`", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      await reportTranscript(arranged, session.id);
+      await waitUntil("wrote the turn", async () => {
+        const found = await readTranscript(arranged, session.id);
+        return found.items.length === 6 ? found : undefined;
+      });
+
+      const newer = await readTranscript(arranged, session.id, "?after=4");
+      expect(newer.items.map((row) => row.position)).toEqual([5, 6]);
+      expect((await readTranscript(arranged, session.id, "?after=6")).items).toEqual([]);
+
+      const first = await readTranscript(arranged, session.id, "?after=1&limit=2");
+      expect(first.items.map((row) => row.position)).toEqual([2, 3]);
+      const rest = await readTranscript(
+        arranged,
+        session.id,
+        `?after=1&cursor=${encodeURIComponent(first.nextCursor!)}`,
+      );
+      expect(rest.items.map((row) => row.position)).toEqual([4, 5, 6]);
+
+      for (const query of [
+        `?after=2&cursor=${encodeURIComponent(first.nextCursor!)}`,
+        `?cursor=${encodeURIComponent(first.nextCursor!)}`,
+        "?after=-1",
+        "?after=1.5",
+        "?after=soon",
+      ]) {
+        const refused = await get(
+          arranged.harness.base,
+          `/api/v1/sessions/${session.id}/transcript${query}`,
+          arranged.token,
+        );
+        expect(refused.status, query).toBe(400);
+      }
     });
   });
 

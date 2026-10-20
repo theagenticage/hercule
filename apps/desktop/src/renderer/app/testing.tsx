@@ -327,20 +327,38 @@ export const neverAnswer = (): Promise<Answer> => new Promise(() => {});
  * Returns a handler that holds its request until the test calls `answer`,
  * and `answer`, which answers the latest held request with `reply` inside
  * `act`. A test uses it to look at the screen while a request is on its way.
+ *
+ * A request reaches the handler a few ticks after the app starts it, so a
+ * test can call `answer` before the first request has arrived. That reply is
+ * kept and answers the first request as soon as it arrives. Without this, the
+ * reply would be lost and the request would wait forever.
  */
 export const holdAnswer = (): {
   readonly handler: () => Promise<Answer>;
   readonly answer: (reply: Answer) => void;
 } => {
-  let answer: (reply: Answer) => void = () => {};
+  let heldRequest: ((reply: Answer) => void) | undefined;
+  let earlyReply: Answer | undefined;
   return {
     handler: () =>
       new Promise<Answer>((resolve) => {
-        answer = resolve;
+        heldRequest = resolve;
+        if (earlyReply !== undefined) {
+          const reply = earlyReply;
+          earlyReply = undefined;
+          act(() => {
+            resolve(reply);
+          });
+        }
       }),
     answer: (reply) => {
+      if (heldRequest === undefined) {
+        earlyReply = reply;
+        return;
+      }
+      const answerRequest = heldRequest;
       act(() => {
-        answer(reply);
+        answerRequest(reply);
       });
     },
   };

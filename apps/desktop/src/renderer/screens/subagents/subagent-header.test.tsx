@@ -55,6 +55,8 @@ describe("the header of a subagent's page", () => {
     // The thread's tabs, Open in editor and More belong to the thread's own page.
     expect(screen.queryByRole("navigation", { name: "Threads in this workspace" })).toBeNull();
     expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+    // The free space after the crumb holds the syncing marker, empty while nothing syncs.
+    expect(screen.getByRole("status").textContent).toBe("");
   });
 
   it("draws a subagent the thread started with the thread as its only earlier crumb", async () => {
