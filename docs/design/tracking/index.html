@@ -1,0 +1,54 @@
+<!doctype html>
+<!-- DRAWING - Tracking: the work Rogier handed to agents, followed in Intake until he marks it
+     done. Drawn on Round Trip (prototype/stay-in-the-loop) in the design session #800. The pixel
+     reference for spec 17 §Intake, Tracking; BRIEF.md says what it decides.
+     States (?state=): intake (default), finished, needs-you, needs-you-signal, failed, working,
+     stopped, done, empty, zero, load, load-tracking. Add &theme=orient-express for dark and
+     &bar=off to hide the bar.
+     Keys: J and K move; T opens and closes Tracking; Enter opens the pane and puts focus on the
+     suggested answer; E marks a Finished, Failed or Stopped row done; O opens the run; Esc steps
+     back: the pane, the selection, then Tracking. -->
+<html lang="en" data-theme="whitehaven" data-motion="off">
+  <head>
+    <script src="../shared/page.js"></script>
+    <link rel="stylesheet" href="../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../intake-directions/asks/asks.css" />
+    <link rel="stylesheet" href="tracking.css" />
+    <link rel="stylesheet" href="tracking-pane.css" />
+    <link rel="stylesheet" href="tracking-done.css" />
+    <meta charset="utf-8" />
+    <title>Intake · Tracking · Hercule</title>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="intake"></aside>
+      <main class="main">
+        <header class="bar">
+          <h1 class="title">Intake</h1>
+          <nav class="tabs" data-tabs></nav>
+          <span class="spacer"></span>
+          <button class="icon-btn asks-pane-btn" data-pane-toggle aria-label="Show the open item" aria-pressed="true"><i data-i="sidebar" data-size="16"></i></button>
+        </header>
+        <div class="asks" data-split>
+          <section class="asks-list rt-list" aria-label="Intake">
+            <div class="asks-head" data-head></div>
+            <div class="asks-scroll" data-list></div>
+            <section class="rt-tray" data-tray aria-label="Tracking"></section>
+            <div class="rt-fly" data-fly aria-hidden="true"></div>
+          </section>
+          <section class="asks-detail" data-detail aria-live="polite"></section>
+        </div>
+      </main>
+    </div>
+
+    <nav class="tr-proto" data-proto aria-label="Drawing"></nav>
+
+    <script src="../crew-bureau-2/brands.js"></script>
+    <script src="../crew-bureau-2/crew.js"></script>
+    <script src="tracking-data.js"></script>
+    <script src="tracking-pane.js"></script>
+    <script src="tracking-done.js"></script>
+    <script src="tracking.js"></script>
+  </body>
+</html>

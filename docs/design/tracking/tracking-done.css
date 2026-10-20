@@ -1,0 +1,100 @@
+/* DRAWING - Tracking: the Done view, as Round Trip draws it (round-trip.css, "Done: the trip").
+   No new tokens: Round Trip's --trip-line was --line, and the line is drawn with --line here. */
+
+/* ---------- The list ---------- */
+/* A handed-off row leads with the colleague's face; the source's mark starts the second line. */
+.rt-done-rows .rt-lead {
+  opacity: 1;
+}
+.rt-done-rows .rt-lead .cr {
+  display: block;
+}
+.rt-done-rows .rt-sub {
+  display: block;
+}
+.rt-done-rows .rt-src {
+  display: inline-grid;
+  margin-right: 6px;
+  vertical-align: -1px;
+  color: var(--ink);
+  opacity: 0.75;
+}
+/* Done is quiet, but the face still says who had it, so it is not faded with the marks. */
+.rt-done-rows.asks-rows--quiet .rt-lead {
+  opacity: 1;
+}
+
+/* ---------- The pane: the leg ---------- */
+.rt-done-pane .ad-kind .src {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rt-done-pane .rt-label {
+  display: block;
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.rt-done-pane .rt-chain-h {
+  margin: 24px 0 10px;
+}
+.rt-done-pane .rt-chain {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--t-13);
+}
+/* The hairline the steps hang on, through the middle of the 20px faces. */
+.rt-done-pane .rt-chain::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 57.5px;
+  width: 1px;
+  background: var(--line);
+}
+.rt-done-pane .rt-chain li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 38px 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+.rt-done-pane .rt-chain time {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+/* Each face sits on a ring of the pane's surface, so the hairline stops short of it. */
+.rt-done-pane .rt-chain li > svg,
+.rt-done-pane .rt-step-src {
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--surface);
+}
+/* A step the source made, such as checks failing on the PR: its mark on a sunken disc. */
+.rt-done-pane .rt-step-src {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  background: var(--sunken);
+  color: var(--ink);
+}
+.rt-done-pane .rt-chain code {
+  padding: 0 4px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  font-size: 12px;
+}
+/* The way to the work, under the leg and in line with its text. */
+.rt-done-act {
+  margin: 16px 0 0 68px;
+}
