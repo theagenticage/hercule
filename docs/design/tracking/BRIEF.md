@@ -121,14 +121,14 @@ Round Trip's: one trip, top to bottom, joined by a hairline.
 | Failed | **Try again**, Mark done, Cancel |
 | Stopped | Try again, Mark done, Cancel |
 
-**What it did, by the output's shape.** A workflow is the user's own, so there is no output contract: the pane draws what the step record holds ([spec 07 §4.3](../../spec/07-workflows.md)).
+**What it did, by the output's shape.** A workflow is the user's own, so there is no output contract: the pane draws what the step record holds ([spec 07 §4.3](../../spec/07-workflows.md)). Most workflows give their agent steps an `outputSchema`, so a structured value is the common case. A step without one, such as a workflow of a single agent step that just reports back, falls back to the agent's final message.
 
 | The last agent step | Its output | Drawn as |
 |---|---|---|
-| has no `outputSchema` | `{ text, exitStatus }`, where `text` is the turn's final message | the text, as markdown, cut, with "Read the rest in the thread" (`?state=needs-you-signal`) |
-| has an `outputSchema` | the JSON value the schema declares | its top-level fields, one ruled row each, labelled with the schema's `title` or else the property's name. A string, number or boolean shows as it is, a long string cut to two lines; a list shows how many items it holds, an object how many fields. Then "See the whole output in the run" (`?state=finished`) |
+| has an `outputSchema` (the common case) | the JSON value the schema declares | its top-level fields, one ruled row each, labelled with the schema's `title` or else the property's name. A string, number or boolean shows as it is, a long string cut to two lines; a list shows how many items it holds, an object how many fields. Then "See the whole output in the run" (`?state=finished`) |
+| has no `outputSchema` (the fallback) | `{ text, exitStatus }`, where `text` is the turn's final message | the text, as markdown, cut, with "Read the rest in the thread" (`?state=needs-you-signal`) |
 
-"The last message of the last agent step", as #797 and #803 had it, does not work for a step with a schema: on Codex the final message is the JSON itself, and on Claude and pi the last prose message is often narration before the structured result. A run that ends on an action step has no agent message after it at all.
+The agent's last message alone, as #797 and #803 first had it, is not enough for a step with a schema: on Codex the final message is the JSON itself, and on Claude and pi the last prose message is often narration before the structured result. A run that ends on an action step has no agent message after it at all.
 
 Open the run is in the head on every state, so the list of answers leaves it out, as Round Trip's did.
 
