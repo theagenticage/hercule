@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="../shared/page.js"></script>
+    <link rel="stylesheet" href="../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="shared/book.css" />
+    <script src="shared/book.js"></script>
+    <title>The sidebar, regrouped · four directions · Hercule</title>
+    <style>
+      /* ---------- the problem ---------- */
+      .ix-shot {
+        margin: 0;
+      }
+      .ix-shot-img {
+        overflow: hidden;
+        border-radius: 12px;
+        box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-2);
+        background: #fff;
+      }
+      /* The screenshot is a 4632px strip; show its left part, where the sidebar and the tabs are. */
+      .ix-shot-img img {
+        display: block;
+        width: 178%;
+        max-width: none;
+        height: auto;
+      }
+      .ix-problem {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 48px;
+        align-items: start;
+      }
+      .ix-problem ol {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 22px;
+        counter-reset: ix;
+      }
+      .ix-problem li {
+        position: relative;
+        padding-left: 44px;
+        counter-increment: ix;
+      }
+      .ix-problem li::before {
+        content: counter(ix);
+        position: absolute;
+        left: 0;
+        top: -2px;
+        color: var(--faint);
+        font-family: var(--font-deco);
+        font-size: 28px;
+        line-height: 1;
+      }
+      .ix-problem li b {
+        display: block;
+        margin-bottom: 3px;
+        font-size: 16px;
+      }
+      .ix-problem li span {
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.55;
+      }
+      .ix-question {
+        margin: 56px 0 0;
+        padding: 30px 34px;
+        border-radius: var(--r-xl);
+        background: var(--raised);
+        box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+        font-size: clamp(20px, 2.4vw, 26px);
+        font-weight: var(--w-medium);
+        letter-spacing: -0.012em;
+        line-height: 1.35;
+      }
+      .ix-question small {
+        display: block;
+        margin-bottom: 10px;
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      /* ---------- the team ---------- */
+      .ix-team {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 22px;
+      }
+      .ix-role {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        padding: 26px 26px 28px;
+        border-radius: var(--r-lg);
+        background: var(--raised);
+        box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+      }
+      .ix-role--wide {
+        grid-column: 1 / -1;
+      }
+      .ix-role-head {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .ix-role-head h3 {
+        margin: 0;
+        font-size: 19px;
+      }
+      .ix-role-head small {
+        display: block;
+        color: var(--faint);
+        font-size: var(--t-13);
+        font-weight: var(--w-medium);
+      }
+      .ix-ask {
+        margin: 0;
+        padding-left: 14px;
+        border-left: 3px solid var(--you);
+        font-size: 17px;
+        font-weight: var(--w-medium);
+        letter-spacing: -0.01em;
+        line-height: 1.4;
+      }
+      .ix-role dl {
+        display: grid;
+        grid-template-columns: 96px minmax(0, 1fr);
+        gap: 10px 16px;
+        margin: 0;
+        font-size: 14.5px;
+        line-height: 1.55;
+      }
+      .ix-role dt {
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        padding-top: 3px;
+      }
+      .ix-role dd {
+        margin: 0;
+        color: var(--muted);
+      }
+      .ix-role dd b {
+        color: var(--ink);
+      }
+      .ix-words {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .ix-process {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0;
+        margin-top: 8px;
+      }
+      .ix-phase {
+        position: relative;
+        padding: 22px 22px 24px 0;
+      }
+      .ix-phase + .ix-phase {
+        padding-left: 22px;
+        border-left: 1px solid var(--line-soft);
+      }
+      .ix-phase i {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--faint);
+        font-family: var(--font-deco);
+        font-size: 30px;
+        font-style: normal;
+        line-height: 1;
+      }
+      .ix-phase b {
+        display: block;
+        font-size: 16px;
+      }
+      .ix-phase p {
+        margin-top: 6px !important;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+      .ix-jobs {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .ix-job {
+        padding: 18px 18px 20px;
+        border-radius: var(--r-md);
+        background: var(--sunken);
+      }
+      .ix-job b {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 15px;
+      }
+      .ix-job span {
+        color: var(--muted);
+        font-size: 13.5px;
+        line-height: 1.5;
+      }
+      .ix-hmw {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px 28px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .ix-hmw li {
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
+        font-size: 16px;
+        font-weight: var(--w-medium);
+        line-height: 1.4;
+      }
+      .ix-hmw li::before {
+        content: "How might we ";
+        color: var(--faint);
+        font-weight: var(--w-regular);
+      }
+      .ix-glossary {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px 28px;
+      }
+      .ix-glossary div b {
+        display: block;
+        font-size: 14.5px;
+      }
+      .ix-glossary div span {
+        color: var(--muted);
+        font-size: 13.5px;
+        line-height: 1.5;
+      }
+
+      /* ---------- the brief ---------- */
+      .ix-model {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .ix-model .bk-card h4 {
+        margin-bottom: 6px;
+      }
+      .ix-principles {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 22px 28px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: pr;
+      }
+      .ix-principles li {
+        counter-increment: pr;
+      }
+      .ix-principles li::before {
+        content: counter(pr);
+        display: block;
+        margin-bottom: 6px;
+        color: var(--faint);
+        font-family: var(--font-deco);
+        font-size: 24px;
+        line-height: 1;
+      }
+      .ix-principles b {
+        display: block;
+        font-size: 15px;
+        line-height: 1.35;
+      }
+      .ix-principles span {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13.5px;
+        line-height: 1.5;
+      }
+      .ix-dirs {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 22px;
+      }
+      .ix-dir {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        text-decoration: none;
+      }
+      .ix-dir-text i {
+        display: block;
+        color: var(--faint);
+        font-family: var(--font-deco);
+        font-size: 26px;
+        font-style: normal;
+        line-height: 1;
+      }
+      .ix-dir-text b {
+        display: block;
+        margin-top: 6px;
+        font-size: 19px;
+        letter-spacing: -0.01em;
+      }
+      .ix-dir-text em {
+        display: block;
+        margin-top: 2px;
+        color: var(--faint);
+        font-size: var(--t-12);
+        font-style: normal;
+        font-weight: var(--w-bold);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .ix-dir-text span {
+        display: block;
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .ix-dir-link {
+        display: inline-block;
+        margin-top: 10px;
+        color: var(--accent-ink) !important;
+        font-size: var(--t-13);
+        font-weight: var(--w-bold);
+        text-decoration: none;
+      }
+      .ix-dir-link:hover {
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+
+      /* ---------- compare ---------- */
+      .ix-row4 {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 22px;
+      }
+      .ix-row5 {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 18px;
+      }
+      .ix-score td:not(:first-child) {
+        width: 19%;
+      }
+      .ix-score .ix-good {
+        color: var(--ok);
+        font-weight: var(--w-bold);
+      }
+      .ix-score .ix-mid {
+        color: var(--muted);
+      }
+      .ix-score .ix-weak {
+        color: var(--fail-ink);
+        font-weight: var(--w-medium);
+      }
+      .ix-pick {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+        gap: 40px;
+        align-items: start;
+      }
+
+      @media (max-width: 900px) {
+        .ix-problem,
+        .ix-team,
+        .ix-process,
+        .ix-jobs,
+        .ix-hmw,
+        .ix-glossary,
+        .ix-model,
+        .ix-principles,
+        .ix-dirs,
+        .ix-row4,
+        .ix-row5,
+        .ix-pick {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .ix-phase + .ix-phase {
+          padding-left: 0;
+          border-left: 0;
+          border-top: 1px solid var(--line-soft);
+        }
+        .ix-role dl {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 2px;
+        }
+        .ix-role dd {
+          margin-bottom: 10px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="bk-top">
+      <a class="bk-brand" href="index.html"><i data-face="Hercule" data-pose="idle" data-size="24"></i>The sidebar, regrouped <small>four directions in Crew Bureau</small></a>
+      <nav class="bk-links">
+        <a href="#team">The team</a>
+        <a href="#brief">The brief</a>
+        <a href="case-files/index.html">Case Files</a>
+        <a href="lineage/index.html">Lineage</a>
+        <a href="workbench/index.html">Workbench</a>
+        <a href="tracks/index.html">Tracks</a>
+        <a href="#compare">Compare</a>
+      </nav>
+      <div class="bk-themes"><button data-theme-option="whitehaven">Whitehaven</button><button data-theme-option="orient-express">Orient Express</button></div>
+    </header>
+
+    <main class="bk">
+      <!-- ================================================================ hero -->
+      <section class="bk-hero">
+        <div class="bk-eyebrow">Desktop sidebar · four directions · prototype</div>
+        <h1>The sidebar, regrouped</h1>
+        <p class="bk-lever">You work in crews now. The sidebar still lists threads one by one.</p>
+        <p class="bk-lede">More and more, one piece of work is two or three threads. You start a thread, and it starts a partner: Claude migrates the endpoints, Codex tries to break the migration. The lead writes the partner a better brief than you would, so this is how work will keep arriving.</p>
+        <p class="bk-lede">The sidebar does not know any of this. Every thread is a row like any other, sorted by when it started. Start three pieces of work and you get eight rows that nothing ties together. Below: what a full design team would do with that, the brief that came out of it, and <b>four directions that each organize the list by something different</b>: the crew, the lineage, the product, and time.</p>
+      </section>
+
+      <figure class="ix-shot">
+        <div class="ix-shot-img"><img src="shared/rogier-sidebar-today.png" alt="Rogier's sidebar and header: two threads of one piece of work, shown as two unrelated rows in the sidebar, while the header's tabs list both" /></div>
+        <figcaption class="bk-cap"><span class="bk-cap-text"><b>Your sidebar, as you sent it</b><span>Two threads, one piece of work. The header's tabs know they belong together (right). The sidebar shows two unrelated rows, each saying only "atlas" (left).</span></span></figcaption>
+      </figure>
+
+      <!-- ================================================================ the problem -->
+      <section class="bk-sec" id="problem">
+        <div class="bk-eyebrow">The baseline</div>
+        <h2>Today: one row per thread, and nothing ties them together</h2>
+        <p class="bk-lede">Today's desktop sidebar, drawn as the app draws it (spec 17, #626), on the book's morning: Tuesday 29 September, 09:41. Ten pieces of work are in flight; five of them have partners.</p>
+
+        <div class="bk-stats">
+          <div class="bk-stat"><b>14</b><span>rows for 10 pieces of work, and 2 lone threads pushed behind "more" by partners</span></div>
+          <div class="bk-stat"><b>3</b><span>rows between the 3-D Secure fix and its own review, with the cart work in between</span></div>
+          <div class="bk-stat"><b>2</b><span>rows that read "Adversarial review of the…": two reviews of two different pieces of work</span></div>
+          <div class="bk-stat"><b>0</b><span>of 6 partner rows say which piece of work they belong to</span></div>
+        </div>
+
+        <div class="ix-problem">
+          <figure class="bk-frame" data-src="today/desktop.html" data-crop="0,0,272,900" data-zoom="1.25" data-caption="Today" data-note="Spec 17's sidebar, with this book's world."></figure>
+          <ol>
+            <li><b>The list doubles.</b><span>Every partner is a full 52px row. Partners push lone threads behind each project's "more" row, so adding a reviewer can hide unrelated work.</span></li>
+            <li><b>A pair falls apart.</b><span>Rows sort by when each thread started. "Fix 3-D Secure checkout" started at 09:02 and its review at 09:30, so the cart work, started at 09:19, lands between them.</span></li>
+            <li><b>The rows do not say whose they are.</b><span>A partner's title repeats its lead's in other words, and at 272px it is cut before the words that differ. Line 2 is the branch, or only the machine when the controller named the branch.</span></li>
+            <li><b>What needs you hides in plain sight.</b><span>"Check payout totals against Stripe" asks how to count refunds. Waiting on you lists it, but nothing says it is the payout report's checker, so the question arrives without its context.</span></li>
+            <li><b>The header already knows.</b><span>Its tabs list the threads of the open workspace. The sidebar is the one place that cannot tell a crew from a crowd.</span></li>
+          </ol>
+        </div>
+
+        <p class="ix-question"><small>The question</small>How does the sidebar show pieces of work, not just threads, so you always know which row belongs to which piece of work, without making a lone thread cost more than it does today?</p>
+      </section>
+
+      <!-- ================================================================ the team -->
+      <section class="bk-sec" id="team">
+        <div class="bk-eyebrow">The team exercise</div>
+        <h2>Five people at the table, five different worries</h2>
+        <p class="bk-lede">Give this problem to a full design team and each person pulls on a different thread. None of them is right alone. The brief is what is left when all five have had their say.</p>
+
+        <div class="ix-team">
+          <article class="ix-role">
+            <div class="ix-role-head"><i data-face="Product owner" data-pose="idle" data-size="44"></i><div><h3>Product owner</h3><small>Outcomes, scope, and the roadmap</small></div></div>
+            <p class="ix-ask">"When you look at the sidebar, what are you trying to do? And how many of your threads are alone? If most are, we cannot tax them."</p>
+            <dl>
+              <dt>Worries</dt><dd>Whether the change makes you faster at the jobs you hire the sidebar for, <b>without making the common case worse</b>. Whether a new concept pays for itself. Whether it closes doors: grouping and sorting options later, the web app, the phone.</dd>
+              <dt>Brings</dt><dd>The job stories, the success measures, the scope line, and the veto on new nouns that do not earn their place.</dd>
+              <dt>Works by</dt><dd>Writing the jobs and a measurable outcome before anyone draws, and making each direction say what it needs from the controller, because the gap between a drawing and a ticket is where good ideas die.</dd>
+            </dl>
+            <div class="ix-words"><span class="bk-chip">jobs to be done</span><span class="bk-chip">outcome over output</span><span class="bk-chip">time to find</span><span class="bk-chip">the degenerate case</span><span class="bk-chip">must not preclude</span><span class="bk-chip">scope</span><span class="bk-chip">walking skeleton</span></div>
+          </article>
+
+          <article class="ix-role">
+            <div class="ix-role-head"><i data-face="Lead designer" data-pose="idle" data-size="44"></i><div><h3>Lead designer</h3><small>The idea, and whether it belongs to Hercule</small></div></div>
+            <p class="ix-ask">"What is the one thing this direction does that no other tool does? If we cannot say it in a sentence, it is not a direction yet."</p>
+            <dl>
+              <dt>Worries</dt><dd>A strong idea per direction, and <b>four directions that stay far apart</b>. Coherence with Crew Bureau: color is who, state is a pose and a mark. Hercule's unfair advantage is that every thread is a colleague with a face. No other tool can show a crew.</dd>
+              <dt>Brings</dt><dd>The concepts, the metaphor, the principles, and the critique. Decides which lever each direction pulls, so the four answers differ in kind, not in detail.</dd>
+              <dt>Works by</dt><dd>Diverging wide, then converging on four concepts, then pushing each to its most convincing form before comparing. Kills any direction that starts to look like another.</dd>
+            </dl>
+            <div class="ix-words"><span class="bk-chip">the big idea</span><span class="bk-chip">the lever</span><span class="bk-chip">signature moment</span><span class="bk-chip">hero state</span><span class="bk-chip">metaphor</span><span class="bk-chip">diverge, converge</span><span class="bk-chip">on brand</span></div>
+          </article>
+
+          <article class="ix-role">
+            <div class="ix-role-head"><i data-face="UX expert" data-pose="idle" data-size="44"></i><div><h3>UX expert</h3><small>The object, the model, and what the eye does</small></div></div>
+            <p class="ix-ask">"Workspace is the wrong key. A main workspace is shared by strangers, and a partner can work somewhere else. Who started whom is the honest key."</p>
+            <dl>
+              <dt>Worries</dt><dd>What the primary object is: the thread, the piece of work, the workspace, the branch. How deep the tree gets. What the eye does in the first glance. <b>Rows must never move under the pointer</b> (#626 learned that the hard way).</dd>
+              <dt>Brings</dt><dd>The object map, the state matrix, the heuristics, and the tests: a five-second test, a first-click test, "find the reviewer of the cart work".</dd>
+              <dt>Works by</dt><dd>Mapping objects and relations first, then running every direction through the edge cases: a group of one, a partner on another machine, two strangers in one main workspace, a waiting partner in a folded group, a swarm of 40.</dd>
+            </dl>
+            <div class="ix-words"><span class="bk-chip">mental model</span><span class="bk-chip">object-oriented UX</span><span class="bk-chip">recognition over recall</span><span class="bk-chip">information scent</span><span class="bk-chip">progressive disclosure</span><span class="bk-chip">Gestalt</span><span class="bk-chip">roll-up</span><span class="bk-chip">spatial memory</span></div>
+          </article>
+
+          <article class="ix-role">
+            <div class="ix-role-head"><i data-face="Senior designer" data-pose="idle" data-size="44"></i><div><h3>Senior designer</h3><small>Craft, at 13px, in every state</small></div></div>
+            <p class="ix-ask">"Show me the swarm, the waiting partner of a folded group, and a long title beside a long role. Then show me the lone thread, and prove it costs nothing."</p>
+            <dl>
+              <dt>Worries</dt><dd>Row anatomy at 272px on a 4px grid, truncation, how two, three or five partners draw, which one waits, how it moves when a partner joins. Hover, focus, selection, dark mode, Reduce Motion.</dd>
+              <dt>Brings</dt><dd>The state matrix drawn out, the motion specs, the token discipline, and pixel checks against today's 52px row.</dd>
+              <dt>Works by</dt><dd>Drawing the hardest states first and the hero state last, so the hero is honest.</dd>
+            </dl>
+            <div class="ix-words"><span class="bk-chip">visual hierarchy</span><span class="bk-chip">density</span><span class="bk-chip">containment vs connection</span><span class="bk-chip">facepile</span><span class="bk-chip">tree lines</span><span class="bk-chip">state matrix</span><span class="bk-chip">truncation</span></div>
+          </article>
+
+          <article class="ix-role ix-role--wide">
+            <div class="ix-role-head"><i data-face="Junior designer" data-pose="waiting" data-size="44"></i><div><h3>Junior designer</h3><small>Fresh eyes and the naive question that turns out to be sharp</small></div></div>
+            <p class="ix-ask">"Why is the partner a row at all? What if the threads just talked to each other in the sidebar, like a group chat? Why can't I see my morning, like a timeline? Isn't the branch the real thing, and the threads only the people working on it?"</p>
+            <dl>
+              <dt>Brings</dt><dd>The teardown of competitors and of everyday apps: iMessage group stacks, Slack huddles, Chrome tab groups, Arc's split view, Gmail's conversation view, a git graph, a film's call sheet. The mood board. The long list of wild ideas, including the ones that are too much, so the team can find the part that is not.</dd>
+              <dt>Works by</dt><dd>Sketching fast, many and badly. Each of the four questions above became a direction.</dd>
+            </dl>
+            <div class="ix-words"><span class="bk-chip">teardown</span><span class="bk-chip">mood board</span><span class="bk-chip">"like Arc does it"</span><span class="bk-chip">pattern library</span><span class="bk-chip">"what if…"</span></div>
+          </article>
+        </div>
+
+        <div class="bk-sec" style="padding-top: 72px">
+          <h3>How the team works it</h3>
+          <div class="ix-process">
+            <div class="ix-phase"><i>1</i><b>Discover</b><p>A teardown of 14 tools. VS Code nests "peer chats" in one worktree. Conductor names this exact pattern. T3 Code built task groups and dropped them on 30 July. Nobody shows roles, a status summary that points at who needs you, or the conversation between threads.</p></div>
+            <div class="ix-phase"><i>2</i><b>Define</b><p>Five job stories, the question, the "how might we"s, eight principles, the state matrix, and one shared model of a piece of work that all four directions build on.</p></div>
+            <div class="ix-phase"><i>3</i><b>Develop</b><p>A wide round of sketches, then four concepts, each pulling one lever, each pushed to its most convincing form on the same world and the same six states.</p></div>
+            <div class="ix-phase"><i>4</i><b>Deliver</b><p>Four hi-fi drawings, each with a story page, compared side by side against the job stories, with a recommendation.</p></div>
+          </div>
+        </div>
+
+        <div class="bk-sec" style="padding-top: 72px">
+          <h3>The jobs the sidebar is hired for</h3>
+          <p class="bk-body" style="margin-bottom: 18px">The product owner's frame for every critique. Each direction is scored against these at the end.</p>
+          <div class="ix-jobs">
+            <div class="ix-job"><b>Find</b><span>When I want to get back to a piece of work, I want to find it by what it is, not by which of its threads I was in.</span></div>
+            <div class="ix-job"><b>Attend</b><span>When any thread needs me, I want to see it and reach it in one move, even if its piece of work is folded away.</span></div>
+            <div class="ix-job"><b>Oversee</b><span>When I glance at the sidebar, I want to know what is moving, what is stuck, and what is done.</span></div>
+            <div class="ix-job"><b>Switch</b><span>When I am in a piece of work, I want to move between its lead and its partners without going back to the list.</span></div>
+            <div class="ix-job"><b>Finish</b><span>When a piece of work is done, I want to put all of it away at once.</span></div>
+          </div>
+        </div>
+
+        <div class="bk-sec" style="padding-top: 72px">
+          <h3>The questions, as the team framed them</h3>
+          <ul class="ix-hmw" style="margin-top: 14px">
+            <li>make the piece of work, not the thread, the thing you find?</li>
+            <li>keep a lead and its partners together without doubling the list?</li>
+            <li>let what needs you reach you, even from a partner tucked away?</li>
+            <li>keep a lone thread exactly as light as today?</li>
+            <li>let grouping and sorting change later, without redesigning the row?</li>
+            <li>show the conversation between the threads, which nobody shows today?</li>
+          </ul>
+        </div>
+
+        <div class="bk-sec" style="padding-top: 72px">
+          <h3>The words that frame the problem</h3>
+          <p class="bk-body" style="margin-bottom: 22px">Each word names a choice the four directions make differently.</p>
+          <div class="ix-glossary">
+            <div><b>The degenerate case</b><span>A piece of work with one thread. It must look exactly like today's row, or every lone thread pays for the crews.</span></div>
+            <div><b>Containment or connection</b><span>Box the crew together (a common region), or draw a line between them (connectedness). Case Files contains; Lineage connects.</span></div>
+            <div><b>Roll-up</b><span>One status standing for several threads. The rule: the most urgent wins, and a click goes to the thread that speaks.</span></div>
+            <div><b>Implicit grouping</b><span>Grouping by a key the system already knows (who started whom), so you never drag anything.</span></div>
+            <div><b>Information scent</b><span>The cues that tell you a row is the one you want: a role, an agent, a branch, a face, a diff.</span></div>
+            <div><b>Progressive disclosure</b><span>The piece of work first, its threads on demand. Every direction picks a different "on demand".</span></div>
+            <div><b>Spatial memory</b><span>You remember where a row was. A list that re-sorts under you breaks it, which is why rows hold still.</span></div>
+            <div><b>Pre-attentive attributes</b><span>Hue, shape, motion and position, seen before reading. Crew Bureau already spends them: hue is who, a pose is state, marigold is you.</span></div>
+            <div><b>A lens</b><span>A grouping or sorting over the same atoms. The piece of work is the atom; a lens only decides where it sits.</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ the brief -->
+      <section class="bk-sec" id="brief">
+        <div class="bk-eyebrow">The brief</div>
+        <h2>One shared model, four ways to show it</h2>
+        <p class="bk-lede">The four directions disagree about how a piece of work looks. They agree about what it is. That model is small, and Hercule already stores most of it.</p>
+
+        <div class="ix-model">
+          <div class="bk-card"><h4>Lead and partner</h4><p class="bk-body">A thread you start is a lead. A thread started by a session is a partner of that session's lead. A thread you start with the header's <code>+</code> joins that thread's lead. Always one level deep.</p></div>
+          <div class="bk-card"><h4>It is already stored</h4><p class="bk-body"><code>sessions.created_by</code> records who started every session. Every input records its <code>actor</code>, so the messages between threads are stored too. Neither is exposed yet.</p></div>
+          <div class="bk-card"><h4>A role</h4><p class="bk-body">A partner gets a one-word role ("review", "tests"), written once from its brief, as a title is. It says what the partner adds instead of repeating its lead's title.</p></div>
+          <div class="bk-card"><h4>Who speaks for the group</h4><p class="bk-body">Waiting, then failed, then working, then idle. The most urgent thread sets the group's status, and a click on that status opens it.</p></div>
+          <div class="bk-card"><h4>A group of one is a thread</h4><p class="bk-body">A lone thread draws exactly as today. Group chrome appears only when a second thread joins.</p></div>
+          <div class="bk-card"><h4>Finish together</h4><p class="bk-body">Marking a lead done offers its partners too, with one Undo. A partner can still be marked done alone.</p></div>
+          <div class="bk-card"><h4>Not the workspace</h4><p class="bk-body">"Tidy checkout CSS" and "Audit checkout for screen readers" share a main workspace and have nothing to do with each other. The checker of the payout report works on another machine.</p></div>
+          <div class="bk-card"><h4>Lenses stay open</h4><p class="bk-body">Group by project, status, machine or nothing; sort by started, activity or name. The piece of work is the atom a lens moves. Every direction shows one other lens.</p></div>
+        </div>
+
+        <div class="bk-sec" style="padding-top: 72px">
+          <h3>Principles</h3>
+          <ol class="ix-principles" style="margin-top: 18px">
+            <li><b>One piece of work reads as one thing.</b><span>You see what belongs together without reading every title.</span></li>
+            <li><b>What needs you always rises.</b><span>A folded group, a quiet partner, another machine: a waiting Request reaches the surface, and one move reaches it.</span></li>
+            <li><b>A lone thread costs nothing.</b><span>No extra chrome, height or words.</span></li>
+            <li><b>Nothing moves under the pointer.</b><span>A partner joining or a status changing never shifts the row you are about to click.</span></li>
+            <li><b>Say it once.</b><span>The piece of work is named once. A partner is named by what it adds.</span></li>
+            <li><b>Grouping is a lens, not a wall.</b><span>The model survives any grouping or sorting.</span></li>
+            <li><b>Crew Bureau.</b><span>Color is who. State is a pose and a mark. Places get tints. Marigold means you.</span></li>
+            <li><b>Cheap while idle.</b><span>No polling, no timers while nothing changes, nothing per streamed token. Each direction states its cost.</span></li>
+          </ol>
+        </div>
+
+        <div class="bk-sec" style="padding-top: 72px">
+          <h3>The four directions</h3>
+          <p class="bk-body" style="margin-bottom: 26px">Same world, same six states (everyday, a partner open, a partner joining, the swarm, finishing, another lens), both themes. Each organizes the list by something different.</p>
+          <div class="ix-dirs">
+            <div class="ix-dir">
+              <figure class="bk-frame" data-src="case-files/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption=""></figure>
+              <span class="ix-dir-text"><i>1</i><b>Case Files</b><em>Organizes by the crew</em><span>One piece of work, one row. Its crew rides on it as faces, and the row tells you what the crew last said to each other.</span><a class="ix-dir-link" href="case-files/index.html">Read the story →</a></span>
+            </div>
+            <div class="ix-dir">
+              <figure class="bk-frame" data-src="lineage/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption=""></figure>
+              <span class="ix-dir-text"><i>2</i><b>Lineage</b><em>Organizes by who started whom</em><span>Every thread keeps its row. A line in the lead's own color ties the family together, and the kinship survives any sort.</span><a class="ix-dir-link" href="lineage/index.html">Read the story →</a></span>
+            </div>
+            <div class="ix-dir">
+              <figure class="bk-frame" data-src="workbench/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption=""></figure>
+              <span class="ix-dir-text"><i>3</i><b>Workbench</b><em>Organizes by what the work produces</em><span>The sidebar lists the work by its branch and changes. The crew sits in the window, where you can watch two agents talk.</span><a class="ix-dir-link" href="workbench/index.html">Read the story →</a></span>
+            </div>
+            <div class="ix-dir">
+              <figure class="bk-frame" data-src="tracks/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption=""></figure>
+              <span class="ix-dir-text"><i>4</i><b>Tracks</b><em>Organizes by time</em><span>Every piece of work is a lane, and every thread a track in it, running up to now. You see the rhythm of your morning.</span><a class="ix-dir-link" href="tracks/index.html">Read the story →</a></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ compare -->
+      <section class="bk-sec" id="compare">
+        <div class="bk-eyebrow">Compare</div>
+        <h2>Side by side, on the same morning</h2>
+        <p class="bk-lede">Today's sidebar and the four directions, cropped to the sidebar at its real size. Switch the theme at the top right to see them in Orient Express.</p>
+        <h3>The everyday morning</h3>
+        <p class="bk-body" style="margin-bottom: 20px">The 3-D Secure lead is open and waiting on you. Find its review, and the checker of the payout report, in each.</p>
+        <div class="ix-row5 bk-wide">
+          <figure class="bk-frame" data-src="today/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption="Today" data-note="One row per thread."></figure>
+          <figure class="bk-frame" data-src="case-files/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption="1 · Case Files" data-note="One row per case."></figure>
+          <figure class="bk-frame" data-src="lineage/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption="2 · Lineage" data-note="Families on a line."></figure>
+          <figure class="bk-frame" data-src="workbench/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption="3 · Workbench" data-note="One row per bench."></figure>
+          <figure class="bk-frame" data-src="tracks/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption="4 · Tracks" data-note="One lane per piece of work."></figure>
+        </div>
+
+        <h3 style="margin-top: 64px">The swarm</h3>
+        <p class="bk-body" style="margin-bottom: 20px">35 threads in view and more behind each project. Does it still read?</p>
+        <div class="ix-row5 bk-wide">
+          <figure class="bk-frame" data-src="today/desktop.html?state=swarm" data-crop="0,0,272,900" data-zoom="1" data-caption="Today"></figure>
+          <figure class="bk-frame" data-src="case-files/desktop.html?state=swarm" data-crop="0,0,272,900" data-zoom="1" data-caption="1 · Case Files"></figure>
+          <figure class="bk-frame" data-src="lineage/desktop.html?state=swarm" data-crop="0,0,272,900" data-zoom="1" data-caption="2 · Lineage"></figure>
+          <figure class="bk-frame" data-src="workbench/desktop.html?state=swarm" data-crop="0,0,272,900" data-zoom="1" data-caption="3 · Workbench"></figure>
+          <figure class="bk-frame" data-src="tracks/desktop.html?state=swarm" data-crop="0,0,272,900" data-zoom="1" data-caption="4 · Tracks"></figure>
+        </div>
+
+        <h3 style="margin-top: 64px">Another lens: grouped by status</h3>
+        <p class="bk-body" style="margin-bottom: 20px">The same world, grouped by Needs you, Working and Quiet. The proof that none of the four closes the door on grouping and sorting.</p>
+        <div class="ix-row4">
+          <figure class="bk-frame" data-src="case-files/desktop.html?state=lens" data-crop="0,0,272,900" data-zoom="1" data-caption="1 · Case Files"></figure>
+          <figure class="bk-frame" data-src="lineage/desktop.html?state=lens" data-crop="0,0,272,900" data-zoom="1" data-caption="2 · Lineage"></figure>
+          <figure class="bk-frame" data-src="workbench/desktop.html?state=lens" data-crop="0,0,272,900" data-zoom="1" data-caption="3 · Workbench"></figure>
+          <figure class="bk-frame" data-src="tracks/desktop.html?state=lens" data-crop="0,0,272,900" data-zoom="1" data-caption="4 · Tracks"></figure>
+        </div>
+
+        <!-- SCORECARD and PICK: filled in once the four drawings are reviewed. -->
+      </section>
+    </main>
+
+    <script src="../crew-bureau-2/brands.js"></script>
+    <script src="../crew-bureau-2/crew.js"></script>
+  </body>
+</html>

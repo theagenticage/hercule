@@ -8,6 +8,7 @@
 //     Draws the page live in a scaled iframe. With data-crop ("x,y,w,h" in the page's pixels) it
 //     shows only that part of the page, at data-zoom when the column is wide enough, else as large
 //     as fits. data-replay adds a Replay button that reloads the frame, for states that animate.
+//     data-theme="orient-express" pins a frame to one theme, whatever the book's theme is.
 //   <button data-theme-option="whitehaven">Whitehaven</button>
 //     Switches the book and every frame to that theme; the choice is kept per book.
 (function () {
@@ -22,10 +23,16 @@
   function frameUrl(fig) {
     var src = fig.dataset.src;
     var joiner = src.indexOf("?") >= 0 ? "&" : "?";
-    return src + joiner + "theme=" + encodeURIComponent(fig.dataset.theme || root.dataset.theme);
+    return src + joiner + "theme=" + encodeURIComponent(fig.dataset.frameTheme || root.dataset.theme);
   }
 
   function build(fig) {
+    // A frame pinned to a theme may say so with data-theme. That attribute would also restyle the
+    // figure itself (the tokens sit on [data-theme] selectors), so it moves to data-frame-theme.
+    if (fig.dataset.theme) {
+      fig.dataset.frameTheme = fig.dataset.theme;
+      fig.removeAttribute("data-theme");
+    }
     var w = Number(fig.dataset.w || 1440);
     var h = Number(fig.dataset.h || 900);
     var crop = fig.dataset.crop ? fig.dataset.crop.split(",").map(Number) : [0, 0, w, h];
@@ -84,7 +91,7 @@
       b.setAttribute("aria-pressed", String(b.dataset.themeOption === next));
     });
     document.querySelectorAll(".bk-frame").forEach(function (f) {
-      if (f._reload && !f.dataset.theme) f._reload();
+      if (f._reload && !f.dataset.frameTheme) f._reload();
     });
   }
 
