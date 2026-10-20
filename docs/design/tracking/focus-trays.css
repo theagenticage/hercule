@@ -1,0 +1,91 @@
+/* DRAWING - Tracking, focus variant: trays (?focus=trays). In and Out side by side.
+
+   The list column holds two columns: In (To do's signals) and Out (Tracking), with a hairline
+   between them. The view switcher spans both, and under it the two heads read as a pair. Out runs
+   the full height and never folds.
+
+   The pane keeps the split beside them, so every column stays in view while a row is open; a
+   sheet over the columns would hide Out, or the very row the pane is about. At 1440px the split
+   gives In 322px, Out 358px and the pane 488px, with the pane's sides at 28px instead of 36px so
+   an answer's describe line takes two lines, not four. That is the cost of this variant: In is
+   narrower than today's 432px list, and a signal's title cuts sooner. */
+
+/* In 9 parts, Out 10: Out's Request row needs 296px for its three answers in their fixed slots. */
+html[data-focus="trays"] .asks {
+  --list-w: 680px;
+}
+html[data-focus="trays"] .asks-list {
+  display: grid;
+  grid-template-columns: minmax(0, 9fr) minmax(0, 10fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+/* Outside To do there is no Out: the list is one column at the split's own width. */
+html[data-focus="trays"] .asks:has([data-tray][hidden]) {
+  --list-w: 432px;
+}
+html[data-focus="trays"] .asks-list:has(> [data-tray][hidden]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* The view switcher spans both columns at the width it has in the split: In alone is too
+   narrow for its four views and their counts. */
+html[data-focus="trays"] .asks-head {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  width: auto;
+  max-width: 432px;
+}
+html[data-focus="trays"] .tr-in-h {
+  grid-column: 1;
+  grid-row: 2;
+  padding: 0 10px;
+}
+html[data-focus="trays"] .tr-in-h[hidden] {
+  display: none;
+}
+html[data-focus="trays"] [data-list] {
+  grid-column: 1;
+  grid-row: 3;
+}
+/* Out starts level with In's head, so the two heads sit on one line. */
+html[data-focus="trays"] .rt-tray {
+  grid-column: 2;
+  grid-row: 2 / 4;
+  min-height: 0;
+  max-height: none;
+  padding: 0 10px 16px;
+  box-shadow: inset 1px 0 0 var(--line-soft);
+}
+html[data-focus="trays"] .rt-tray-h {
+  top: 0;
+}
+
+/* The pair: the tray's word, then the view it holds, both in the book's small capitals. */
+html[data-focus="trays"] .tr-pair {
+  gap: 6px;
+}
+html[data-focus="trays"] .tr-pair-word {
+  color: var(--muted);
+}
+html[data-focus="trays"] .tr-pair-name::before {
+  content: "· ";
+}
+html[data-focus="trays"] .tr-pair .count {
+  margin-left: 2px;
+}
+
+/* The first section starts right under In's head, as Out's first row does under its own. */
+html[data-focus="trays"] [data-list] > .asks-sec:first-child {
+  height: 30px;
+  padding-top: 0;
+}
+
+/* The pane, narrower than in the plain split. */
+html[data-focus="trays"] .asks-detail .ad {
+  padding-right: 28px;
+  padding-left: 28px;
+}
+html[data-focus="trays"] .asks-detail .ad-keys {
+  padding-right: 28px;
+  padding-left: 28px;
+}

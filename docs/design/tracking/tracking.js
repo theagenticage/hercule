@@ -22,17 +22,26 @@
   //   focus: how Tracking sets itself apart from the list, and how focus moves between them.
   //     shelf      Tracking sits on its own sunken surface, with space around it. Nothing moves.
   //     spotlight  the same surface; while Rogier works in Tracking, the list fades back.
-  //     drawer     a raised sheet over the list; unfolded, it rises over the list, which dims.
+  //     drawer     a raised sheet over the list, in three sizes: minimized to one summary row,
+  //                open (what waits, at most 40%), and unfolded (every row, at most 62%).
+  //     desk, trays, blotter: drawn in focus-<name>.js; BRIEF.md says what each tries.
   //   finished: how a Finished row tells itself apart from the rows that need something.
   //     tint       a green row, its line in green
+  //     soft       the same at half strength: a wash, its line in green
+  //     edge       a green edge at the row's left and a faint wash
   //     mark       its line in green, and a green check by its time
   var FOCUS_VARIANTS = [
     ["shelf", "Shelf"],
     ["spotlight", "Spotlight"],
     ["drawer", "Drawer"],
+    ["desk", "Desk: a dialog"],
+    ["trays", "In and out trays"],
+    ["blotter", "Blotter: the pane at rest"],
   ];
   var FINISHED_VARIANTS = [
     ["tint", "Green row"],
+    ["soft", "Green wash"],
+    ["edge", "Green edge"],
     ["mark", "Green check"],
   ];
   root.dataset.focus = query.get("focus") || "shelf";
@@ -73,6 +82,8 @@
   var selected = scene.open;
   var paneOpen = !!selected;
   var unfolded = !!scene.unfolded;
+  // The drawer's smallest size: one row that sums Tracking up. A click on its head opens it.
+  var drawerMin = query.get("drawer") === "min";
   var cleared = 7;
 
   function byId(r) {
@@ -163,7 +174,7 @@
   /** Returns the rows the tray draws one by one, and the rows it folds into one row of faces. */
   function splitTray() {
     var all = sortedTasks();
-    if (unfolded || all.length <= TRAY_ROWS) return { shown: all, folded: [] };
+    if (unfolded || focusVariant().foldsTray === false || all.length <= TRAY_ROWS) return { shown: all, folded: [] };
     var waiting = all.filter(waits);
     var rest = all.filter(function (t) {
       return !waits(t);
@@ -185,8 +196,14 @@
           return !s.now;
         }),
       )
-      .concat(splitTray().shown)
+      .concat(isTrayWalked() ? splitTray().shown : [])
       .map(byId);
+  }
+
+  // J and K walk on into the tray only where its rows are on screen: not while the drawer is
+  // minimized, and not in a variant that sets `hidesTray` because it draws Tracking elsewhere.
+  function isTrayWalked() {
+    return !(root.dataset.focus === "drawer" && drawerMin) && !focusVariant().hidesTray;
   }
 
   function findItem(id) {
@@ -320,6 +337,7 @@
     var waiting = countWaiting();
     var split = splitTray();
     var foldable = tasks.length > TRAY_ROWS;
+    if (root.dataset.focus === "drawer") return renderDrawer(el, waiting, split);
     var head =
       '<h2 class="rt-tray-h">' +
       (foldable
@@ -340,9 +358,45 @@
     el.innerHTML = head + '<div class="rt-runs">' + rows.join("") + folded + "</div>";
   }
 
+  // The drawer's head is one button across the sheet: a click minimizes the drawer to it, or opens
+  // it again. Minimized, it sums Tracking up: the count, the faces of the agents whose work waits
+  // on Rogier, and how many wait.
+  function renderDrawer(el, waiting, split) {
+    el.classList.toggle("is-unfolded", unfolded && !drawerMin);
+    var faces = sortedTasks()
+      .filter(waits)
+      .slice(0, 4)
+      .map(function (t) {
+        return T.face(t.wf, T.STATES[t.state].pose, 20);
+      })
+      .join("");
+    var head =
+      '<h2 class="rt-tray-h rt-drawer-h"><button class="rt-drawer-bar" data-drawer-toggle aria-expanded="' + !drawerMin + '" title="' + (drawerMin ? "Open Tracking" : "Minimize Tracking") + '">' +
+      '<span class="rt-tray-toggle"><span>Tracking</span>' + (tasks.length ? '<b class="count">' + tasks.length + "</b>" : "") + "</span>" +
+      (drawerMin && faces ? '<span class="stack rt-drawer-faces">' + faces + "</span>" : "") +
+      (waiting ? '<span class="rt-tray-sum you-ink">' + window.Crew.mark("waiting", 12) + waiting + " wait" + (waiting === 1 ? "s" : "") + " on you</span>" : '<span class="rt-tray-sum"></span>') +
+      '<span class="rt-drawer-chev">' + T.icon("chev-d", 12) + "</span></button></h2>";
+    if (drawerMin) {
+      el.innerHTML = head;
+      return;
+    }
+    if (!tasks.length) {
+      el.innerHTML = head + '<p class="rt-tray-empty">Hand a signal to an agent, and follow it here until you mark it done.</p>';
+      return;
+    }
+    var rows = split.shown.map(function (t, i) {
+      var gap = i > 0 && waits(split.shown[i - 1]) && !waits(t);
+      return (gap ? '<div class="rt-runs-gap" aria-hidden="true"></div>' : "") + trayRow(t);
+    });
+    var lastWaits = split.shown.length && waits(split.shown[split.shown.length - 1]);
+    var folded = split.folded.length ? (lastWaits ? '<div class="rt-runs-gap" aria-hidden="true"></div>' : "") + foldedRow(split.folded) : "";
+    el.innerHTML = head + '<div class="rt-runs">' + rows.join("") + folded + "</div>";
+  }
+
   /** Checks whether Rogier works in Tracking now: a tracked row is open, or the tray is unfolded. */
   function isWorkingInTracking() {
-    return view === "todo" && (unfolded || (isTask(findItem(selected)) && paneOpen));
+    if (view !== "todo" || (root.dataset.focus === "drawer" && drawerMin)) return false;
+    return unfolded || (isTask(findItem(selected)) && paneOpen);
   }
 
   /** Returns the second line of a Tracking row: what waits, what went wrong, or what the agent is doing. */
@@ -428,6 +482,13 @@
     var item = selected && paneOpen ? findItem(selected) : null;
     split.classList.toggle("is-wide", !item);
     document.querySelector("[data-pane-toggle]").setAttribute("aria-pressed", String(!!item));
+    var rest = !item && view === "todo" && focusVariant().paneWhenEmpty ? focusVariant().paneWhenEmpty(shell) : "";
+    if (rest) {
+      split.classList.remove("is-wide");
+      pane.innerHTML = rest;
+      window.Crew.drawPlaceholders(pane);
+      return;
+    }
     if (!item) {
       pane.innerHTML = "";
       return;
@@ -476,9 +537,29 @@
     var leaving = Object.keys(before).filter(function (k) {
       return !after[k];
     });
+    var trayHead = document.querySelector("[data-tray] .rt-tray-h");
     leaving.forEach(function (k) {
       var b = before[k];
       var ghost = placeGhost(fly, box, b.clone, b.rect);
+      // A signal handed off while its Task's row is folded away, or the drawer is minimized,
+      // flies to Tracking's head and fades there, so the handoff still shows where it went.
+      var handedOff = tasks.some(function (t) {
+        return t.key === k;
+      });
+      if (handedOff && trayHead && !b.tray) {
+        var h = trayHead.getBoundingClientRect();
+        ghost.classList.add("rt-ghost--lift");
+        ghost.animate(
+          [
+            { transform: "none", opacity: 1 },
+            { transform: "translate(0," + (h.top - b.rect.top) + "px) scale(0.96)", opacity: 0 },
+          ],
+          { duration: DUR_3, easing: EASE, fill: "forwards" },
+        ).onfinish = function () {
+          ghost.remove();
+        };
+        return;
+      }
       ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: DUR_1, easing: "linear", fill: "forwards" }).onfinish = function () {
         ghost.remove();
       };
@@ -545,7 +626,13 @@
     document.querySelector(".asks-list").classList.toggle("is-tracking", isWorkingInTracking());
     if (root.dataset.focus === "drawer") placeDrawer(tray, trayTop);
     renderPane();
+    if (focusVariant().afterRender) focusVariant().afterRender(shell);
     animateFrom(before);
+  }
+
+  /** Returns the focus variant drawn in a file of its own (focus-<name>.js), or an empty one. */
+  function focusVariant() {
+    return (window.TrackingFocus || {})[root.dataset.focus] || {};
   }
 
   // The drawer lies over the list. Folded, the list keeps room under its last row for it, so
@@ -745,7 +832,7 @@
   });
 
   document.addEventListener("click", function (e) {
-    var el = e.target.closest("[data-id], [data-tab], [data-view], [data-view-link], [data-task-done], [data-signal-done], [data-answer], [data-question], [data-select], [data-toast], [data-unfold], [data-pane-toggle], [data-play]");
+    var el = e.target.closest("[data-id], [data-tab], [data-view], [data-view-link], [data-task-done], [data-signal-done], [data-answer], [data-question], [data-select], [data-toast], [data-unfold], [data-drawer-toggle], [data-pane-toggle], [data-play]");
     if (!el) return;
     var d = el.dataset;
     if (d.toast !== undefined && !d.answer) {
@@ -754,7 +841,11 @@
     } else if (d.taskDone) tickOff(d.taskDone, "done");
     else if (d.signalDone) markSignalDone(d.signalDone);
     else if (d.question) answerQuestion(d.question, Number(d.q));
-    else if (d.unfold !== undefined) {
+    else if (d.drawerToggle !== undefined) {
+      drawerMin = !drawerMin;
+      if (drawerMin) unfolded = false;
+      render();
+    } else if (d.unfold !== undefined) {
       unfolded = !unfolded;
       render();
     } else if (d.id) select(d.id);
@@ -902,6 +993,43 @@
       tickOff("t-1296", "done");
     }
   }
+
+  /* ------------------------------------------------------------------ the shell, for the focus variants */
+
+  // A focus variant in its own file (focus-<name>.js) registers itself in window.TrackingFocus with
+  // two optional hooks and two optional flags:
+  //   afterRender(shell)    runs after every render;
+  //   paneWhenEmpty(shell)  returns what the pane shows on To do while nothing is open;
+  //   hidesTray: true       keeps J and K out of the tray, for a variant that draws it elsewhere;
+  //   foldsTray: false      shows every tray row, for a variant with room for them all.
+  // This is what they may use.
+  var shell = {
+    T: T,
+    root: root,
+    sortedTasks: sortedTasks,
+    splitTray: splitTray,
+    waits: waits,
+    countWaiting: countWaiting,
+    findItem: findItem,
+    isTask: isTask,
+    trayRow: trayRow,
+    foldedRow: foldedRow,
+    select: select,
+    render: render,
+    motionAllowed: motionAllowed,
+    state: function () {
+      return { view: view, tab: tab, selected: selected, paneOpen: paneOpen, unfolded: unfolded };
+    },
+    setUnfolded: function (value) {
+      unfolded = value;
+      render();
+    },
+    closePane: function () {
+      paneOpen = false;
+      selected = null;
+      render(true);
+    },
+  };
 
   /* ------------------------------------------------------------------ start */
 

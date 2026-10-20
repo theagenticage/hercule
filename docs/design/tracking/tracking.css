@@ -234,6 +234,24 @@ html[data-finished="tint"] .rt-run-item.is-finished.is-on > .rt-run {
 html[data-finished="tint"] .rt-run-item.is-finished {
   --row-fill: color-mix(in oklab, var(--ok) 14%, var(--ok-tint));
 }
+/* A green wash: the tint at half strength, so the row reads green without lifting off the list. */
+html[data-finished="soft"] .rt-run-item.is-finished > .rt-run {
+  background: color-mix(in oklab, var(--ok-tint) 55%, transparent);
+}
+html[data-finished="soft"] .rt-run-item.is-finished:hover > .rt-run,
+html[data-finished="soft"] .rt-run-item.is-finished.is-on > .rt-run {
+  background: var(--ok-tint);
+}
+/* A green edge: a 2px rule at the row's left, as the book marks the message that mentions you,
+   over a faint wash. */
+html[data-finished="edge"] .rt-run-item.is-finished > .rt-run {
+  background: color-mix(in oklab, var(--ok-tint) 35%, transparent);
+  box-shadow: inset 2px 0 0 var(--ok);
+}
+html[data-finished="edge"] .rt-run-item.is-finished:hover > .rt-run,
+html[data-finished="edge"] .rt-run-item.is-finished.is-on > .rt-run {
+  background: color-mix(in oklab, var(--ok-tint) 70%, transparent);
+}
 /* A green check by the time. */
 html[data-finished="mark"] .rt-finished-mark {
   display: inline-grid;
@@ -243,21 +261,25 @@ html[data-finished="mark"] .rt-finished-mark {
 
 /* ---------- Focus: how Tracking stands apart from the list ---------- */
 
-/* Shelf: Tracking sits on its own sunken surface, inset from the column with space above it, so
-   the list ends where the surface changes. Nothing moves. */
+/* Shelf: Tracking sits on its own surface, inset from the column with space above it, so the list
+   ends where the surface changes. Nothing moves. The surface is a 4% wash of ink over the page,
+   not --sunken: in the dark themes --sunken is the darkest surface there is, and a shelf of it
+   read as a hole. Ink is dark in light themes and light in dark ones, so the same wash shades the
+   shelf a little in light and lifts it a little in dark. */
 html[data-focus="shelf"] .rt-tray {
+  --shelf: color-mix(in oklab, var(--ink) 4%, var(--surface));
   margin: 8px 10px 10px;
   padding: 0 6px 6px;
   border-radius: var(--r-lg);
-  background: var(--sunken);
+  background: var(--shelf);
   box-shadow: none;
 }
 html[data-focus="shelf"] .rt-tray-h {
   top: 0;
-  background: var(--sunken);
+  background: var(--shelf);
 }
 html[data-focus="shelf"] .rt-run-item {
-  --row-fill: var(--sunken);
+  --row-fill: var(--shelf);
 }
 
 /* Spotlight: the same surface, with more room above. While Rogier works in Tracking (a tracked row
@@ -288,7 +310,7 @@ html[data-focus="drawer"] .rt-tray {
   right: 0;
   bottom: 0;
   left: 0;
-  max-height: 62%;
+  max-height: 40%;
   padding-top: 6px;
   border-radius: var(--r-xl) var(--r-xl) 0 0;
   background: var(--raised);
@@ -296,11 +318,49 @@ html[data-focus="drawer"] .rt-tray {
     inset 0 1px 0 var(--line-soft),
     var(--shadow-3);
 }
+html[data-focus="drawer"] .rt-tray.is-unfolded {
+  max-height: 62%;
+}
 html[data-focus="drawer"] .rt-tray-h {
   background: var(--raised);
 }
 html[data-focus="drawer"] .rt-run-item {
   --row-fill: var(--raised);
+}
+/* The drawer's head is one button across the sheet. Minimized, it is the whole drawer. */
+html[data-focus="drawer"] .rt-drawer-h {
+  padding: 0;
+}
+.rt-drawer-bar {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 10px 0 4px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+.rt-drawer-bar:hover {
+  background: var(--hover);
+}
+.rt-drawer-bar .rt-tray-sum {
+  margin-left: auto;
+}
+.rt-drawer-faces .cr {
+  display: block;
+}
+.rt-drawer-chev {
+  display: grid;
+  color: var(--faint);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.rt-drawer-bar[aria-expanded="false"] .rt-drawer-chev {
+  transform: rotate(180deg);
+}
+html[data-focus="drawer"] .rt-tray:has(.rt-drawer-bar[aria-expanded="false"]) {
+  padding-bottom: 6px;
 }
 
 /* ---------- Motion layer ---------- */

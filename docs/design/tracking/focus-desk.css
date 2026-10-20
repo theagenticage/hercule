@@ -1,0 +1,164 @@
+/* DRAWING - Tracking, focus variant: desk (?focus=desk). Tracking is one summary row at the foot
+   of the list; it opens as a large dialog over the list and the pane, with a list and a pane of its
+   own. No new tokens: the dialog is the book's raised surface, --shadow-3 and --r-xl, over --scrim. */
+
+/* ---------- The summary row ---------- */
+html[data-focus="desk"] .rt-tray {
+  padding: 6px 10px 8px;
+}
+html[data-focus="desk"] .desk-sum {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px 0 10px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+html[data-focus="desk"] .desk-sum:hover {
+  background: var(--hover);
+}
+html[data-focus="desk"] .desk-sum[aria-expanded="true"] {
+  background: var(--selected);
+}
+html[data-focus="desk"] .desk-sum-h {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+html[data-focus="desk"] .desk-sum-h .count,
+html[data-focus="desk"] .desk-title .count {
+  height: 17px;
+  letter-spacing: 0;
+}
+html[data-focus="desk"] .desk-wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+html[data-focus="desk"] .desk-sum-open {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--muted);
+}
+html[data-focus="desk"] .desk-sum:hover .desk-sum-open {
+  color: var(--ink);
+}
+
+/* ---------- The dialog ---------- */
+/* It covers the list and the pane, never the app's sidebar or the bar above, and leaves 16px of
+   the screen it covers showing under the scrim, so it reads as lifted off the page. */
+html[data-focus="desk"] .desk-scrim {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  background: var(--scrim);
+}
+html[data-focus="desk"] .desk {
+  position: absolute;
+  z-index: 6;
+  inset: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--r-xl);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-3);
+}
+html[data-focus="desk"] .desk[hidden],
+html[data-focus="desk"] .desk-scrim[hidden] {
+  display: none;
+}
+html[data-focus="desk"] .desk-h {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 12px 0 20px;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+html[data-focus="desk"] .desk-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--t-16);
+  font-weight: var(--w-bold);
+}
+html[data-focus="desk"] .desk-h .desk-wait {
+  margin-left: 4px;
+}
+html[data-focus="desk"] .desk-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The dialog's list: every tracked row, as the tray draws them, on the raised surface. */
+html[data-focus="desk"] .desk-list {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 380px;
+  overflow-y: auto;
+  padding: 8px 10px 0;
+  scrollbar-width: thin;
+}
+html[data-focus="desk"] .desk-rows {
+  flex: 1;
+}
+html[data-focus="desk"] .desk .rt-run-item {
+  --row-fill: var(--raised);
+}
+html[data-focus="desk"] .desk .rt-run-item:hover {
+  --row-fill: color-mix(in srgb, var(--ink) 5%, var(--raised));
+}
+html[data-focus="desk"] .desk .rt-run-item.is-on {
+  --row-fill: color-mix(in srgb, var(--ink) 7%, var(--raised));
+}
+html[data-focus="desk"] .desk-foot {
+  position: sticky;
+  bottom: 0;
+  margin: 8px -10px 0;
+  padding: 10px 20px;
+  background: var(--raised);
+  box-shadow: inset 0 1px 0 var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+html[data-focus="desk"] .desk-foot kbd {
+  margin-right: 4px;
+}
+
+/* The dialog's pane: the Task's pane as the split draws it, with its keys at the foot. */
+html[data-focus="desk"] .desk-detail {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow-y: auto;
+  box-shadow: inset 1px 0 0 var(--line-soft);
+}
+html[data-focus="desk"] .desk-detail .ad-keys {
+  background: var(--raised);
+}
+html[data-focus="desk"] .desk-none {
+  margin: auto;
+  color: var(--faint);
+  font-size: var(--t-13);
+}
