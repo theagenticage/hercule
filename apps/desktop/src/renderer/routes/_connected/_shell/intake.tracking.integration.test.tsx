@@ -14,6 +14,7 @@ import type {
   TrackingRun,
   TrackingTask,
 } from "@hercule/contract";
+import type { TrackingRead } from "@hercule/client-core";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -773,6 +774,71 @@ describe("handing a signal off while the pointer is on the list", () => {
 
     // Folded Tracking counts the rows it shows: four before, five once the new one applies.
     expect(within(getTray()).getByRole("heading").textContent).toContain("Tracking4");
+    await waitFor(() => {
+      expect(within(getTray()).getByRole("heading").textContent).toContain("Tracking5");
+    });
+  });
+  it("shows the new row when the push's read finishes before the action's answer and no later push comes", async () => {
+    const task: Task = {
+      ...buildTask("01a06d02-7b00-7000-8000-000000000009", "Retry failed webhooks", 40),
+      provenance: [],
+    };
+    let committed = false;
+    let answerAction!: (answer: Answer) => void;
+    const readRows = () => (committed ? [...ROWS, [task, "running"] as const] : ROWS);
+    const { live, context } = await openIntake(`/intake?signal=${FIRST_SIGNAL.id}`, {
+      signals: [HANDOFF_SIGNAL, SECOND_SIGNAL],
+      extra: {
+        ...storeTracking(ROWS, { readRows }),
+        [`GET /api/v1/signals/${FIRST_SIGNAL.id}`]: { body: HANDOFF_SIGNAL },
+        [`POST /api/v1/signals/${FIRST_SIGNAL.id}/act`]: () => {
+          committed = true;
+          return new Promise<Answer>((resolve) => {
+            answerAction = resolve;
+          });
+        },
+      },
+    });
+    await live.waitForFirstPushes();
+    const pane = await screen.findByRole("region", { name: "The open signal" });
+    const button = await within(pane).findByRole("button", { name: "Hand to Implement" });
+    // The pointer stays on the list while the keyboard hands the signal off.
+    act(() => {
+      button.focus();
+    });
+    await userEvent.hover(getList());
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(committed).toBe(true);
+    });
+
+    // The commit's push reads Tracking before the action's answer arrives: five rows are cached, four shown.
+    act(() => live.pushInvalidation("task"));
+    await waitFor(() => {
+      expect(context.queryClient.getQueryData<TrackingRead>(["tracking"])?.rows).toHaveLength(5);
+    });
+    expect(within(getTray()).getByRole("heading").textContent).toContain("Tracking4");
+
+    // The answer arrives, and no push follows. The hook reads again, and that read, which
+    // changes no row, is the one that shows the handoff.
+    await act(async () => {
+      answerAction({
+        body: {
+          ...HANDOFF_SIGNAL,
+          status: "resolved",
+          actions: [],
+          resolution: {
+            kind: "decided",
+            actionId: `hand-to-${WORKFLOW_ID}`,
+            outcome: "Handed to Implement",
+            actor: "user",
+            origin: "web",
+            at: at(41),
+          },
+        },
+      });
+      await Promise.resolve();
+    });
     await waitFor(() => {
       expect(within(getTray()).getByRole("heading").textContent).toContain("Tracking5");
     });

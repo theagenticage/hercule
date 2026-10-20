@@ -65,7 +65,7 @@ export const followListedTrackingRows = (
   const taskIds = new Set(listed.map((row) => row.task.taskId));
   const markedDone = [...held.markedDoneTaskIds].filter((id) => !taskIds.has(id));
   const shownHandoffs = [...held.handoffs]
-    .filter(([, committedAt]) => committedAt !== null && committedAt < readStartedAt)
+    .filter(([, committedAt]) => committedAt !== null && committedAt <= readStartedAt)
     .map(([signalId]) => signalId);
   const shown =
     !held.holding || shownHandoffs.length > 0
@@ -81,6 +81,27 @@ export const followListedTrackingRows = (
     ),
     handoffs: new Map([...held.handoffs].filter(([id]) => !shownHandoffs.includes(id))),
   };
+};
+
+/**
+ * Follows a read of Tracking as a whole: its `rows` and when it started. It is
+ * `followListedTrackingRows`, except that it leaves `held` as it is, the very
+ * same record, when `rows` are the rows already listed and the read
+ * acknowledges no handoff. A read that changed none of the rows, which the
+ * query then shares with the read before it, can still be the first that started
+ * after a handoff committed.
+ */
+export const followTrackingRead = (
+  held: HeldTrackingRows,
+  rows: ReadonlyArray<TrackingRow>,
+  readStartedAt: number,
+): HeldTrackingRows => {
+  const acknowledges = [...held.handoffs.values()].some(
+    (committedAt) => committedAt !== null && committedAt <= readStartedAt,
+  );
+  return rows === held.listed && !acknowledges
+    ? held
+    : followListedTrackingRows(held, rows, readStartedAt);
 };
 
 /**

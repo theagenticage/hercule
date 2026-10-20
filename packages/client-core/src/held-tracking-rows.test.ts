@@ -8,6 +8,7 @@ import {
   dropTrackingHandoff,
   dropTrackingRowMarkedDone,
   followListedTrackingRows,
+  followTrackingRead,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
   recordTrackingRowMarkedDone,
@@ -170,5 +171,44 @@ describe("dropping the user's own changes", () => {
     held = dropTrackingHandoff(recordTrackingHandoff(held, "signal-c"), "signal-c");
     held = followListedTrackingRows(held, [A, C], 10);
     expect(readIds(held.shown)).toEqual(["a"]);
+  });
+});
+
+describe("followTrackingRead", () => {
+  const holdingWithConfirmedHandoff = (committedAt: number | null) => {
+    let held = updateTrackingRowsHolding(startHeldTrackingRows([A], 10), true);
+    held = recordTrackingHandoff(held, "signal-c");
+    return committedAt === null
+      ? held
+      : recordTrackingHandoffCommitted(held, "signal-c", committedAt);
+  };
+
+  it("leaves the record as it is for a read that changes no row and acknowledges nothing", () => {
+    const held = holdingWithConfirmedHandoff(100);
+    expect(followTrackingRead(held, held.listed, 50)).toBe(held);
+    expect(followTrackingRead(holdingWithConfirmedHandoff(null), A ? [A] : [], 500)).not.toBe(held);
+  });
+
+  it("acknowledges the handoff on a read that changes no row but started after it committed", () => {
+    // The first read, which started before the commit, listed a Task that the held rows lack.
+    let held = holdingWithConfirmedHandoff(100);
+    held = followListedTrackingRows(held, [A, B], 90);
+    expect(readIds(held.shown)).toEqual(["a"]);
+    // The next read lists the same rows, as the query shares them, and started after the commit.
+    held = followTrackingRead(held, held.listed, 120);
+    expect(readIds(held.shown)).toEqual(["a", "b"]);
+    expect(held.handoffs.size).toBe(0);
+  });
+
+  it("counts a read that started at the very moment of the commit as after it", () => {
+    let held = holdingWithConfirmedHandoff(100);
+    held = followListedTrackingRows(held, [A, B], 90);
+    held = followTrackingRead(held, held.listed, 100);
+    expect(readIds(held.shown)).toEqual(["a", "b"]);
+  });
+
+  it("waits for a handoff that is still being sent, whatever the read", () => {
+    const held = holdingWithConfirmedHandoff(null);
+    expect(followTrackingRead(held, held.listed, 1_000)).toBe(held);
   });
 });

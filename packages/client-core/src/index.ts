@@ -501,6 +501,7 @@ export {
   dropTrackingHandoff,
   dropTrackingRowMarkedDone,
   followListedTrackingRows,
+  followTrackingRead,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
   recordTrackingRowMarkedDone,

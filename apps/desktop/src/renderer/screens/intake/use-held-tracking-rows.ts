@@ -1,9 +1,9 @@
-import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { hashKey, useQueryClient } from "@tanstack/react-query";
 import {
   dropTrackingHandoff,
   dropTrackingRowMarkedDone,
-  followListedTrackingRows,
+  followTrackingRead,
   queryKeys,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
@@ -26,7 +26,11 @@ export interface HeldTrackingRowsState {
   readonly registerHandoff: (signalId: string) => void;
   /** Forgets the handoff of `signalId`, because it failed. */
   readonly forgetHandoff: (signalId: string) => void;
-  /** Records that the handoff of `signalId` committed. Call it when the controller answers the handoff. */
+  /**
+   * Records that the handoff of `signalId` committed, and reads Tracking again:
+   * that read starts after the commit, so it shows the handoff. Call it when the
+   * controller answers the handoff.
+   */
   readonly confirmHandoff: (signalId: string) => void;
 }
 
@@ -34,7 +38,9 @@ export interface HeldTrackingRowsState {
  * Returns the rows Tracking shows, as `held-tracking-rows` in client-core
  * describes. `listed` is the last read of Tracking's rows, and keeps its identity
  * until the read changes; the time that read started is the one in the cached
- * `TrackingRead`. `holding` is set while the changes the user did not
+ * `TrackingRead`. The hook also follows the cache for a read that changes no row,
+ * which can still be the first that started after the user's handoff, without
+ * drawing the screen again for it. `holding` is set while the changes the user did not
  * make wait: while the pointer is on the list column.
  */
 export const useHeldTrackingRows = (
@@ -46,9 +52,22 @@ export const useHeldTrackingRows = (
     queryClient.getQueryData<TrackingRead>(queryKeys.tracking())?.readStartedAt ?? 0;
   const [held, setHeld] = useState(() => startHeldTrackingRows(listed, readStartedAt()));
   let next = held;
-  if (next.listed !== listed) next = followListedTrackingRows(next, listed, readStartedAt());
+  if (next.listed !== listed) next = followTrackingRead(next, listed, readStartedAt());
   next = updateTrackingRowsHolding(next, holding);
   if (next !== held) setHeld(next);
+
+  // A read that changes no row leaves the rows array as it was, so the screen is not told of it.
+  // The record follows the cache itself, and changes only when the read acknowledges a handoff.
+  useEffect(() => {
+    const trackingHash = hashKey(queryKeys.tracking());
+    return queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== "updated" || event.action.type !== "success") return;
+      if (event.query.queryHash !== trackingHash) return;
+      const read = event.query.state.data as TrackingRead | undefined;
+      if (read === undefined) return;
+      setHeld((current) => followTrackingRead(current, read.rows, read.readStartedAt));
+    });
+  }, [queryClient]);
   return {
     shown: next.shown,
     registerMarkedDone: (taskId) => {
@@ -65,6 +84,12 @@ export const useHeldTrackingRows = (
     },
     confirmHandoff: (signalId) => {
       setHeld((current) => recordTrackingHandoffCommitted(current, signalId, performance.now()));
+      // A read already under way may have started before the commit, so it is
+      // replaced by one that starts now.
+      void queryClient.refetchQueries(
+        { queryKey: queryKeys.tracking(), exact: true },
+        { cancelRefetch: true },
+      );
     },
   };
 };
