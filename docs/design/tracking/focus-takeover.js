@@ -111,7 +111,8 @@
       if (marks.indexOf(s.src) < 0) marks.push(s.src);
     });
     return (
-      '<header class="tk-head"><h2 class="tk-title">Tracking <span class="count">' + tasks.length + "</span></h2>" +
+      '<header class="tk-head"><button class="btn btn--quiet btn--sm tk-back" data-takeover-toggle title="Back to Intake (T)">' + T.icon("chev-l", 14) + "Intake</button>" +
+      '<h2 class="tk-title">Tracking <span class="count">' + tasks.length + "</span></h2>" +
       (waiting ? '<span class="tk-wait you-ink">' + window.Crew.mark("waiting", 12) + waiting + " wait" + (waiting === 1 ? "s" : "") + " on you</span>" : "") +
       "</header>" +
       '<div class="tk-scroll">' + (groups || '<p class="rt-tray-empty">Hand a signal to an agent, and follow it here until you mark it done.</p>') + "</div>" +

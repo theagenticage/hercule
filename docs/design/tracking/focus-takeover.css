@@ -46,6 +46,13 @@ html[data-focus="takeover"] .tk-head {
   height: 46px;
   padding: 12px 20px 0;
 }
+/* The way back sits where a Mac puts it, at the head's left, so it is never far from the eye. */
+html[data-focus="takeover"] .tk-back {
+  gap: 2px;
+  margin-left: -8px;
+  padding: 0 8px 0 4px;
+  color: var(--muted);
+}
 html[data-focus="takeover"] .tk-title {
   display: flex;
   align-items: center;
