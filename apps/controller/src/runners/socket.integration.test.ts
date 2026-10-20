@@ -735,17 +735,12 @@ describe("the liveness check", () => {
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
-        expect(
-          (
-            await waitForRunner(
-              harness.base,
-              token,
-              joined.runnerId,
-              (one) => one.connectivity === "online",
-            )
-          ).connectivity,
-        ).toBe("online");
-
+        // The runner sends nothing after its hello, so the silence limit of
+        // 200 ms can pass before the test reads the row once. The test must
+        // therefore never wait for the row to read `online`: on a slow
+        // machine the row is already `unreachable` by then and that wait
+        // never ends. The audit log below proves the runner was online.
+        //
         // The socket stays open but the runner sends nothing, which a
         // WebSocket-level ping would have hidden.
         const row = await waitForRunner(
