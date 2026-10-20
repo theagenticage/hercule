@@ -772,8 +772,8 @@ describe("handing a signal off while the pointer is on the list", () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     act(() => live.pushInvalidation("task"));
 
-    // Folded Tracking counts the rows it shows: four before, five once the new one applies.
-    expect(within(getTray()).getByRole("heading").textContent).toContain("Tracking4");
+    // Folded Tracking counts the rows it shows: the handoff's own read brings the fifth, though the
+    // pointer is on the list and the read lists ten later handoffs and not this one.
     await waitFor(() => {
       expect(within(getTray()).getByRole("heading").textContent).toContain("Tracking5");
     });

@@ -83,7 +83,10 @@ export const useHeldTrackingRows = (
       setHeld((current) => dropTrackingHandoff(current, signalId));
     },
     confirmHandoff: (signalId) => {
-      setHeld((current) => recordTrackingHandoffCommitted(current, signalId, performance.now()));
+      // The time is taken here, not in the updater: React may run the updater later, after the
+      // read below has started, and that read could then not tell it started after the commit.
+      const committedAt = performance.now();
+      setHeld((current) => recordTrackingHandoffCommitted(current, signalId, committedAt));
       // A read already under way may have started before the commit, so it is
       // replaced by one that starts now.
       void queryClient.refetchQueries(
