@@ -117,6 +117,10 @@ body {
 }
 
 /* ---------- page column ---------- */
+/* A link to a section lands below the sticky toolbar. */
+.bk [id] {
+  scroll-margin-top: 80px;
+}
 .bk {
   width: min(1240px, 100% - 64px);
   margin: 0 auto;
@@ -603,5 +607,8 @@ body {
   }
   .bk-themes button {
     padding: 0 8px;
+  }
+  .bk [id] {
+    scroll-margin-top: 124px;
   }
 }

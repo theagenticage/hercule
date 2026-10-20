@@ -384,10 +384,23 @@
         .ix-model,
         .ix-principles,
         .ix-dirs,
-        .ix-row4,
-        .ix-row5,
         .ix-pick {
           grid-template-columns: minmax(0, 1fr);
+        }
+        /* On a phone the comparison rows swipe sideways, one sidebar at a time. */
+        .ix-row4,
+        .ix-row5 {
+          grid-template-columns: none;
+          grid-auto-flow: column;
+          grid-auto-columns: 272px;
+          gap: 16px;
+          overflow-x: auto;
+          scroll-snap-type: x mandatory;
+          padding-bottom: 8px;
+        }
+        .ix-row4 > *,
+        .ix-row5 > * {
+          scroll-snap-align: start;
         }
         .ix-phase + .ix-phase {
           padding-left: 0;
@@ -415,6 +428,7 @@
         <a href="workbench/index.html">Workbench</a>
         <a href="tracks/index.html">Tracks</a>
         <a href="#compare">Compare</a>
+        <a href="#pick">The pick</a>
       </nav>
       <div class="bk-themes"><button data-theme-option="whitehaven">Whitehaven</button><button data-theme-option="orient-express">Orient Express</button></div>
     </header>
@@ -426,7 +440,7 @@
         <h1>The sidebar, regrouped</h1>
         <p class="bk-lever">You work in crews now. The sidebar still lists threads one by one.</p>
         <p class="bk-lede">More and more, one piece of work is two or three threads. You start a thread, and it starts a partner: Claude migrates the endpoints, Codex tries to break the migration. The lead writes the partner a better brief than you would, so this is how work will keep arriving.</p>
-        <p class="bk-lede">The sidebar does not know any of this. Every thread is a row like any other, sorted by when it started. Start three pieces of work and you get eight rows that nothing ties together. Below: what a full design team would do with that, the brief that came out of it, and <b>four directions that each organize the list by something different</b>: the crew, the lineage, the product, and time.</p>
+        <p class="bk-lede">The sidebar does not know any of this. Every thread is a row like any other, sorted by when it started. Start three pieces of work and you get eight rows that nothing ties together. Below: what a full design team would do with that, the brief that came out of it, and <b>four directions that each organize the list by something different</b>: the crew, the lineage, the product, and time. <a href="#pick"><b>Skip to the recommendation →</b></a></p>
       </section>
 
       <figure class="ix-shot">
@@ -448,7 +462,7 @@
         </div>
 
         <div class="ix-problem">
-          <figure class="bk-frame" data-src="today/desktop.html" data-crop="0,0,272,900" data-zoom="1.25" data-caption="Today" data-note="Spec 17's sidebar, with this book's world."></figure>
+          <figure class="bk-frame" data-src="today/desktop.html" data-h="1160" data-crop="0,0,272,1160" data-zoom="1.25" data-caption="Today" data-note="Spec 17's sidebar, with this book's world."></figure>
           <ol>
             <li><b>The list doubles.</b><span>Every partner is a full 52px row. Partners push lone threads behind each project's "more" row, so adding a reviewer can hide unrelated work.</span></li>
             <li><b>A pair falls apart.</b><span>Rows sort by when each thread started. "Fix 3-D Secure checkout" started at 09:02 and its review at 09:30, so the cart work, started at 09:19, lands between them.</span></li>
@@ -610,19 +624,19 @@
           <p class="bk-body" style="margin-bottom: 26px">Same world, same six states (everyday, a partner open, a partner joining, the swarm, finishing, another lens), both themes. Each organizes the list by something different.</p>
           <div class="ix-dirs">
             <div class="ix-dir">
-              <figure class="bk-frame" data-src="case-files/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption=""></figure>
+              <figure class="bk-frame" data-src="case-files/desktop.html" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption=""></figure>
               <span class="ix-dir-text"><i>1</i><b>Case Files</b><em>Organizes by the crew</em><span>One piece of work, one row. Its crew rides on it as faces, and the row tells you what the crew last said to each other.</span><a class="ix-dir-link" href="case-files/index.html">Read the story →</a></span>
             </div>
             <div class="ix-dir">
-              <figure class="bk-frame" data-src="lineage/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption=""></figure>
+              <figure class="bk-frame" data-src="lineage/desktop.html" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption=""></figure>
               <span class="ix-dir-text"><i>2</i><b>Lineage</b><em>Organizes by who started whom</em><span>Every thread keeps its row. A line in the lead's own color ties the family together, and the kinship survives any sort.</span><a class="ix-dir-link" href="lineage/index.html">Read the story →</a></span>
             </div>
             <div class="ix-dir">
-              <figure class="bk-frame" data-src="workbench/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption=""></figure>
+              <figure class="bk-frame" data-src="workbench/desktop.html" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption=""></figure>
               <span class="ix-dir-text"><i>3</i><b>Workbench</b><em>Organizes by what the work produces</em><span>The sidebar lists the work by its branch and changes. The crew sits in the window, where you can watch two agents talk.</span><a class="ix-dir-link" href="workbench/index.html">Read the story →</a></span>
             </div>
             <div class="ix-dir">
-              <figure class="bk-frame" data-src="tracks/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption=""></figure>
+              <figure class="bk-frame" data-src="tracks/desktop.html" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption=""></figure>
               <span class="ix-dir-text"><i>4</i><b>Tracks</b><em>Organizes by time</em><span>Every piece of work is a lane, and every thread a track in it, running up to now. You see the rhythm of your morning.</span><a class="ix-dir-link" href="tracks/index.html">Read the story →</a></span>
             </div>
           </div>
@@ -637,11 +651,11 @@
         <h3>The everyday morning</h3>
         <p class="bk-body" style="margin-bottom: 20px">The 3-D Secure lead is open and waiting on you. Find its review, and the checker of the payout report, in each.</p>
         <div class="ix-row5 bk-wide">
-          <figure class="bk-frame" data-src="today/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption="Today" data-note="One row per thread."></figure>
-          <figure class="bk-frame" data-src="case-files/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption="1 · Case Files" data-note="One row per case."></figure>
-          <figure class="bk-frame" data-src="lineage/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption="2 · Lineage" data-note="Families on a line."></figure>
-          <figure class="bk-frame" data-src="workbench/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption="3 · Workbench" data-note="One row per bench."></figure>
-          <figure class="bk-frame" data-src="tracks/desktop.html" data-crop="0,0,272,900" data-zoom="1" data-caption="4 · Tracks" data-note="One lane per piece of work."></figure>
+          <figure class="bk-frame" data-src="today/desktop.html" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption="Today" data-note="One row per thread."></figure>
+          <figure class="bk-frame" data-src="case-files/desktop.html" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption="1 · Case Files" data-note="One row per case."></figure>
+          <figure class="bk-frame" data-src="lineage/desktop.html" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption="2 · Lineage" data-note="Families on a line."></figure>
+          <figure class="bk-frame" data-src="workbench/desktop.html" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption="3 · Workbench" data-note="One row per bench."></figure>
+          <figure class="bk-frame" data-src="tracks/desktop.html" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption="4 · Tracks" data-note="One lane per piece of work."></figure>
         </div>
 
         <h3 style="margin-top: 64px">The swarm</h3>
@@ -657,13 +671,70 @@
         <h3 style="margin-top: 64px">Another lens: grouped by status</h3>
         <p class="bk-body" style="margin-bottom: 20px">The same world, grouped by Needs you, Working and Quiet. The proof that none of the four closes the door on grouping and sorting.</p>
         <div class="ix-row4">
-          <figure class="bk-frame" data-src="case-files/desktop.html?state=lens" data-crop="0,0,272,900" data-zoom="1" data-caption="1 · Case Files"></figure>
-          <figure class="bk-frame" data-src="lineage/desktop.html?state=lens" data-crop="0,0,272,900" data-zoom="1" data-caption="2 · Lineage"></figure>
-          <figure class="bk-frame" data-src="workbench/desktop.html?state=lens" data-crop="0,0,272,900" data-zoom="1" data-caption="3 · Workbench"></figure>
-          <figure class="bk-frame" data-src="tracks/desktop.html?state=lens" data-crop="0,0,272,900" data-zoom="1" data-caption="4 · Tracks"></figure>
+          <figure class="bk-frame" data-src="case-files/desktop.html?state=lens" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption="1 · Case Files"></figure>
+          <figure class="bk-frame" data-src="lineage/desktop.html?state=lens" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption="2 · Lineage"></figure>
+          <figure class="bk-frame" data-src="workbench/desktop.html?state=lens" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption="3 · Workbench"></figure>
+          <figure class="bk-frame" data-src="tracks/desktop.html?state=lens" data-h="1160" data-crop="0,0,272,1160" data-zoom="1" data-caption="4 · Tracks"></figure>
         </div>
 
-        <!-- SCORECARD and PICK: filled in once the four drawings are reviewed. -->
+        <h3 style="margin-top: 72px">Against the jobs</h3>
+        <p class="bk-body" style="margin-bottom: 18px">My read of the four drawings, job by job. Green is where a direction is the strongest answer, red where it pays for its idea.</p>
+        <div class="bk-scroll">
+          <table class="bk-table ix-score">
+            <thead>
+              <tr><th></th><th>1 · Case Files</th><th>2 · Lineage</th><th>3 · Workbench</th><th>4 · Tracks</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Find</td><td class="ix-good">One row per piece of work, named once</td><td>Families sit together; partners say their role</td><td class="ix-good">One row per piece of work, named by its PR or lead</td><td>One row per piece of work, but line 2 drops the branch</td></tr>
+              <tr><td>Attend</td><td class="ix-good">The waiting partner raises its hand on its case, and its question takes line 2</td><td class="ix-good">The waiting partner has its own row, and Waiting on you names its role and lead</td><td>A marigold dot and the status word; the question only in Waiting on you</td><td>A marigold cap and the status word</td></tr>
+              <tr><td>Oversee</td><td>The faces show who works and who waits</td><td>Every thread's status is on its row</td><td class="ix-mid">Dots only</td><td class="ix-good">The rhythm of each piece of work, and the day sheet</td></tr>
+              <tr><td>Switch</td><td class="ix-good">Click a face, or the crew's tabs</td><td>Partner rows and the family's tabs</td><td class="ix-good">The crew bar, ⌥1 to ⌥4, and the duet</td><td class="ix-mid">The tabs; a track opens its thread on hover and click</td></tr>
+              <tr><td>Finish</td><td class="ix-good">Close the case: one move, one Undo</td><td class="ix-good">Done on the lead takes the family</td><td class="ix-good">Finish the bench, offered when the PR merges</td><td>The lane finishes as one</td></tr>
+              <tr><td>The lone thread</td><td class="ix-good">Today's row, exactly</td><td class="ix-good">Today's row, exactly</td><td>Today's row, with changes on line 2</td><td class="ix-weak">One track in place of the branch</td></tr>
+              <tr><td>Calm</td><td class="ix-good">A partner adds a face, never a row</td><td>A "+1" waits until the pointer leaves, then a row grows</td><td class="ix-good">A partner adds a dot</td><td class="ix-good">A partner adds a track</td></tr>
+              <tr><td>Another lens</td><td>The case is the atom; it never splits</td><td class="ix-good">Families split, and kin tags and one hover keep them whole</td><td>By status or by PR state</td><td>Lanes group like any atom</td></tr>
+              <tr><td>The swarm</td><td class="ix-good">21 rows for 35 threads</td><td class="ix-mid">Partner rows and knots add height</td><td class="ix-good">21 rows for 35 threads</td><td>21 rows, but the strips get small</td></tr>
+              <tr><td>New data</td><td>Who started whom, roles, the last exchange</td><td>Who started whom, roles, exchanges</td><td class="ix-weak">Plus change counts and PR state</td><td class="ix-weak">Plus activity spans and "last looked"</td></tr>
+              <tr><td>Cost</td><td class="ix-good">The lowest: one more line of text per case</td><td>Low: one SVG line per family</td><td class="ix-weak">The duet doubles a thread's memory while open</td><td>A once-a-minute shift of visible strips</td></tr>
+              <tr><td>The huh</td><td>Read your agents' conversation on the row</td><td>The kinship survives any grouping</td><td>Watch two agents talk; findings on the diff</td><td>See your morning</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ================================================================ pick -->
+      <section class="bk-sec" id="pick">
+        <div class="bk-eyebrow">The recommendation</div>
+        <h2>Build Case Files as the sidebar. Take Workbench's findings into the thread.</h2>
+        <div class="ix-pick">
+          <div>
+            <p class="bk-lede">Your two complaints were that the list doubles and that you cannot tell which row belongs to which piece of work. <b>Case Files answers both with one move</b>: a piece of work is one row, and a partner is a face on it, named by its role. Lineage softens the first complaint but keeps a row per thread. Workbench and Tracks also give one row per piece of work, but spend line 2 on the product or on time, and lose who is on it.</p>
+            <p class="bk-lede">It also spends what only Hercule has. Every thread is a colleague with a face, and a waiting partner raises its hand on its case's row before you read a word. It is the cheapest of the four: who started whom and the messages between threads are already stored. And a partner joining never moves the list.</p>
+            <p class="bk-lede"><b>Workbench's findings in the margin and its duet are not a sidebar idea.</b> They answer a different job, reviewing, and they work beside any sidebar. They are the best answer to your actual pattern, Claude building while Codex tries to break it, so they belong on the roadmap right after the sidebar.</p>
+          </div>
+          <div class="bk-card">
+            <h4>Take from the others</h4>
+            <ul class="bk-list">
+              <li><b>From Lineage:</b> a partner is named by its role and agent everywhere, Waiting on you included ("check · Payout report for September"). Keep its kin tag for the day a lens splits a case, such as grouping by machine.</li>
+              <li><b>From Workbench:</b> the case's branch, changes and PR in the case's foot, and later the findings margin and the duet.</li>
+              <li><b>From Tracks:</b> a crew never shares a hue (a partner takes the free hue farthest from its crew's), and the day sheet as a later overview beside the Office, not as the row.</li>
+            </ul>
+            <h4 style="margin-top: 22px">In this order</h4>
+            <ol class="bk-list">
+              <li><b>The model.</b> Expose <code>sessions.created_by</code> as <code>startedBy</code>, store the lead for a thread started with the header's <code>+</code>, write a role per partner. Every direction needs this, so it is safe to start now.</li>
+              <li><b>Case rows,</b> the crew as tabs, and Close the case.</li>
+              <li><b>The exchange line</b> and the case notes.</li>
+              <li><b>Findings in the margin.</b> This needs a reviewer to report findings as data (file, line, severity), not prose.</li>
+              <li><b>The duet,</b> then the day sheet.</li>
+            </ol>
+            <h4 style="margin-top: 22px">For you to decide</h4>
+            <ul class="bk-list">
+              <li>Is "case" the word? CONTEXT.md needs one name for a lead and its partners, and "Task" is taken.</li>
+              <li>Should a thread you start with the header's <code>+</code> always join that case, or should the draft ask?</li>
+              <li>May review partners get an output schema for findings?</li>
+            </ul>
+          </div>
+        </div>
       </section>
     </main>
 
