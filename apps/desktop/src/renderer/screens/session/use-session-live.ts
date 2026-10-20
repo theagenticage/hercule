@@ -145,7 +145,8 @@ export interface SessionLiveOptions {
  *   following the stream and reads the rows again, which holds the stream
  *   back as described above. Deliveries already on their way are ignored.
  * - A `gone` on either topic ends that subscription: the session no longer
- *   exists. A `gone` on the stream also calls `onGone`.
+ *   exists. A `gone` on the stream also calls `onGone`, and is final: the
+ *   stream is not subscribed again, even when the rows query fetches again.
  *
  * The tail buffer skips the items that were open while the tap was not
  * subscribed, because the taps sent in that time are lost:
@@ -199,6 +200,12 @@ export const useSessionLive = ({
    * frame.
    */
   const rowsLandingRef = useRef(false);
+  /**
+   * True once the stream reported `gone`. The session does not come back, so
+   * the stream is never subscribed again, and `onGone` is called only once,
+   * however often the rows query fetches afterwards.
+   */
+  const goneRef = useRef(false);
 
   /**
    * Paints the open message's paragraph being written: its text, stored and
@@ -251,7 +258,7 @@ export const useSessionLive = ({
   }, [rows, paint]);
 
   useEffect(() => {
-    if (live === null || fetching) return;
+    if (live === null || fetching || goneRef.current) return;
     const readHeldRows = (): readonly TranscriptRow[] =>
       queryClient.getQueryData<readonly TranscriptRow[]>(rowsKey) ?? [];
     // False once the stream is gone or reset, or this effect is cleaned up.
@@ -266,6 +273,7 @@ export const useSessionLive = ({
         if (!following) return;
         const delivery = decideStreamDelivery(readHeldRows(), delta);
         if (delivery.kind === "gone") {
+          goneRef.current = true;
           following = false;
           unsubscribe();
           onGone?.();

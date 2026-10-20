@@ -688,4 +688,28 @@ describe("useSessionLive", () => {
     fake.deliver(STREAM_TOPIC, { gone: true });
     expect(onGone).toHaveBeenCalledTimes(1);
   });
+
+  it("stays unsubscribed from the stream after it is gone, even when the transcript is read again", async () => {
+    const onGone = vi.fn();
+    const { fake, queryClient, readTranscript } = mountHook(undefined, onGone);
+    fake.deliver(STREAM_TOPIC, { gone: true });
+
+    // Hold the read open until React has seen the query fetch, then let it end.
+    let finish!: () => void;
+    readTranscript.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve(THREAD.transcript);
+        }),
+    );
+    void queryClient.invalidateQueries({ queryKey: queryKeys.transcript(SESSION_ID) });
+    await settle();
+    await act(async () => {
+      finish();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(readTranscript).toHaveBeenCalledOnce();
+    expect(fake.readSubscriptions().map(({ topic }) => topic)).not.toContain(STREAM_TOPIC);
+    expect(onGone).toHaveBeenCalledTimes(1);
+  });
 });
