@@ -76,11 +76,12 @@ const COLLAPSE_ABOVE_HEIGHT = 217;
  * `COLLAPSED_TEXT_HEIGHT`, fading out, with "Show full message" under it.
  * Clicked, the button opens the text in full and reads "Show less".
  *
- * Whether the text is long depends on its width, so a `ResizeObserver`
- * decides it again each time the text changes size, as when the window is
- * resized. The observer reports after layout and before paint, and the
- * decision is drawn at once with `flushSync`, so a long message is never
- * painted in full first. The open state lives in this component, so a
+ * Whether the text is long is decided when it mounts, before the first
+ * paint, so a long message is never painted in full first. It depends on
+ * the text's width, so a `ResizeObserver` decides it again each time the
+ * text changes size, as when the window is resized. The observer reports
+ * after layout and before paint, and its decision is drawn at once with
+ * `flushSync`. The open state lives in this component, so a
  * message the virtualized list unmounts is collapsed again when it returns.
  */
 function BubbleText({ children }: { readonly children: ReactNode }): JSX.Element {
@@ -90,6 +91,11 @@ function BubbleText({ children }: { readonly children: ReactNode }): JSX.Element
   useLayoutEffect(() => {
     const text = textRef.current!;
     // The text's `scrollHeight` is the height of all of it, collapsed or not.
+    // The first decision is made here, before the first paint, and not in the
+    // observer's first report: collapsing the text inside that report resizes
+    // what it reports on, and the list's own observers then settle over
+    // several frames, which leaves a thread opened at the bottom short of it.
+    setLong(text.scrollHeight > COLLAPSE_ABOVE_HEIGHT);
     const observer = new ResizeObserver(() => {
       flushSync(() => setLong(text.scrollHeight > COLLAPSE_ABOVE_HEIGHT));
     });
