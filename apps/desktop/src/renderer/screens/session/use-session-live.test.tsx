@@ -2,10 +2,11 @@
  * Tests `useSessionLive` against a fake live connection: rows merged into the
  * cached transcript, the paragraph being written painted once per frame, the
  * finished paragraphs drawn as markdown, the tap dropped while the window is
- * hidden, the open items skipped wherever taps were lost, a stream reset
- * read in full before the stream is subscribed again, and a subagent's
- * page following the subagent's topics alone. Animation frames are faked,
- * so a test runs each frame when it chooses.
+ * hidden, the rows delivered meanwhile kept out of the cache and written to
+ * it in one go when the window is shown, the open items skipped wherever taps
+ * were lost, a stream reset read in full before the stream is subscribed
+ * again, and a subagent's page following the subagent's topics alone.
+ * Animation frames are faked, so a test runs each frame when it chooses.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
@@ -138,7 +139,7 @@ const buildTextRow = (delta: string): EventBody => ({
 });
 
 /** Returns the transcript `queryClient` holds for the thread, or for its subagent `subagentId`. */
-const readHeldRows = (queryClient: QueryClient, subagentId?: string) =>
+const readCachedRows = (queryClient: QueryClient, subagentId?: string) =>
   queryClient.getQueryData<readonly TranscriptRow[]>(
     queryKeys.transcript(SESSION_ID, subagentId),
   ) ?? [];
@@ -150,6 +151,18 @@ const readStoredText = (rows: readonly TranscriptRow[]): string =>
       event._tag === "content.delta" && event.itemId === NEW_ITEM_ID ? event.delta : "",
     )
     .join("");
+
+/**
+ * Starts counting the writes to the transcript `queryClient` holds, as the
+ * query's readers see them, and returns the function that reads the count.
+ */
+const countCacheWrites = (queryClient: QueryClient): (() => number) => {
+  let writes = 0;
+  queryClient.getQueryCache().subscribe((event) => {
+    if (event.type === "updated" && event.action.type === "success") writes += 1;
+  });
+  return () => writes;
+};
 
 /**
  * Renders an agent's page the way `AgentPage` does, reduced to the new
@@ -219,7 +232,7 @@ const mountHook = (subagentId?: string, onGone?: () => void) => {
   queryClient.setQueryData(queryKeys.transcript(SESSION_ID, subagentId), THREAD.transcript);
   // Reading the transcript again returns what the cache holds, as a
   // controller that has lost no rows would.
-  const readTranscript = vi.fn(() => Promise.resolve(readHeldRows(queryClient, subagentId)));
+  const readTranscript = vi.fn(() => Promise.resolve(readCachedRows(queryClient, subagentId)));
   const { container, unmount } = render(
     <QueryClientProvider client={queryClient}>
       <Page
@@ -259,7 +272,7 @@ describe("useSessionLive", () => {
     const rows = buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED);
     fake.pushRows(rows);
     await settle();
-    expect(readHeldRows(queryClient)).toEqual([...THREAD.transcript, ...rows]);
+    expect(readCachedRows(queryClient)).toEqual([...THREAD.transcript, ...rows]);
   });
 
   it("paints the open item's taps at most once per frame, however many arrive", async () => {
@@ -373,14 +386,14 @@ describe("useSessionLive", () => {
     await settle();
     frames.run();
     expect(findOpenParagraph()?.textContent).toBe("The fix is to ");
-    const heldBefore = readHeldRows(queryClient);
+    const heldBefore = readCachedRows(queryClient);
 
     // Applying the stored row a second time would look for "The fix " at the
     // start of the tail, "is to ", and skip the item when it is not there.
     fake.pushRows([started!, stored!]);
     await settle();
     frames.run();
-    expect(readHeldRows(queryClient)).toBe(heldBefore);
+    expect(readCachedRows(queryClient)).toBe(heldBefore);
     expect(findOpenParagraph()?.textContent).toBe("The fix is to ");
   });
 
@@ -453,7 +466,7 @@ describe("useSessionLive", () => {
       // The controller wrote two rows while the transcript was read.
       await read.finish([...THREAD.transcript, started, first]);
       await settle();
-      expect(readHeldRows(queryClient)).toEqual([...THREAD.transcript, started, first]);
+      expect(readCachedRows(queryClient)).toEqual([...THREAD.transcript, started, first]);
       expect(fake.readSubscriptions()).toContainEqual({
         topic: STREAM_TOPIC,
         cursor: String(first.position),
@@ -461,7 +474,7 @@ describe("useSessionLive", () => {
 
       fake.deliver(STREAM_TOPIC, { items: [second], replay: true });
       await settle();
-      expect(readHeldRows(queryClient)).toEqual([...THREAD.transcript, started, first, second]);
+      expect(readCachedRows(queryClient)).toEqual([...THREAD.transcript, started, first, second]);
     });
 
     it("ignores a delivery that was on its way when the stream was reset", async () => {
@@ -479,7 +492,7 @@ describe("useSessionLive", () => {
       );
       await settle();
       // Merged now, the row would be gone again once the read replaces the cache.
-      expect(readHeldRows(queryClient)).toEqual(THREAD.transcript);
+      expect(readCachedRows(queryClient)).toEqual(THREAD.transcript);
       await read.finish(THREAD.transcript);
     });
 
@@ -501,7 +514,7 @@ describe("useSessionLive", () => {
       const rows = buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED);
       fake.deliver(STREAM_TOPIC, { items: rows, replay: true });
       await settle();
-      expect(readHeldRows(queryClient)).toEqual([...THREAD.transcript, ...rows]);
+      expect(readCachedRows(queryClient)).toEqual([...THREAD.transcript, ...rows]);
     });
 
     it("does not subscribe the stream again when the page unmounts while the transcript is read", async () => {
@@ -553,7 +566,7 @@ describe("useSessionLive", () => {
     // row while it runs, and the read returns the rows it held when it started, as
     // an older controller's snapshot would.
     readTranscript.mockImplementationOnce(() => {
-      const snapshot = readHeldRows(queryClient);
+      const snapshot = readCachedRows(queryClient);
       deliverToStream({ cursor: null, items: [started], reset: false, replay: false, gone: false });
       return Promise.resolve(snapshot);
     });
@@ -567,7 +580,7 @@ describe("useSessionLive", () => {
     // through the subscription held from before the read.
     deliverToStream({ cursor: null, items: [first], reset: false, replay: false, gone: false });
     await settle();
-    expect(readHeldRows(queryClient)).toEqual(THREAD.transcript);
+    expect(readCachedRows(queryClient)).toEqual(THREAD.transcript);
     // The stream starts again after the rows held, so its replay brings the
     // row that was ignored, and the rows have no hole.
     expect(fake.readSubscriptions()).toContainEqual({
@@ -576,7 +589,7 @@ describe("useSessionLive", () => {
     });
     fake.deliver(STREAM_TOPIC, { items: [started, first], replay: true });
     await settle();
-    expect(readHeldRows(queryClient)).toEqual([...THREAD.transcript, started, first]);
+    expect(readCachedRows(queryClient)).toEqual([...THREAD.transcript, started, first]);
   });
 
   it("draws fewer finished paragraphs when the tail is dropped", async () => {
@@ -616,6 +629,108 @@ describe("useSessionLive", () => {
 
     setVisibility("visible");
     expect(fake.readSubscriptions().map(({ topic }) => topic)).toEqual([STREAM_TOPIC, TAP_TOPIC]);
+    // Taps sent while hidden are lost, so the item's text now comes only in
+    // its rows.
+    fake.pushTaps("await");
+    frames.run();
+    expect(findOpenParagraph()?.textContent).toBe("");
+  });
+
+  it("keeps the rows delivered while the window is hidden out of the cache, and writes them in one go on show", async () => {
+    const { fake, queryClient, findOpenParagraph } = mountHook();
+    const rows = buildNextRows(
+      THREAD.session.id,
+      THREAD.transcript,
+      NEW_ITEM_STARTED,
+      buildTextRow("The fix "),
+      buildTextRow("is to "),
+    );
+    const readWriteCount = countCacheWrites(queryClient);
+
+    setVisibility("hidden");
+    for (const row of rows) fake.pushRows([row]);
+    await settle();
+    expect(readCachedRows(queryClient)).toEqual(THREAD.transcript);
+    expect(readWriteCount()).toBe(0);
+    expect(findOpenParagraph()).toBeNull();
+
+    setVisibility("visible");
+    await settle();
+    expect(readCachedRows(queryClient)).toEqual([...THREAD.transcript, ...rows]);
+    expect(readWriteCount()).toBe(1);
+    expect(findOpenParagraph()).not.toBeNull();
+  });
+
+  it("lets the transcript read after a reset win over the rows kept aside", async () => {
+    const { fake, queryClient, readTranscript } = mountHook();
+    const [started] = buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED);
+    // The log was replaced by a shorter one, so the read differs from the cache.
+    const authoritative = THREAD.transcript.slice(0, -1);
+    let finishRead: (rows: readonly TranscriptRow[]) => void = () => {};
+    readTranscript.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRead = resolve;
+        }),
+    );
+
+    setVisibility("hidden");
+    fake.pushRows([started!]);
+    fake.deliver(STREAM_TOPIC, { reset: true });
+    await settle();
+    expect(readTranscript).toHaveBeenCalledOnce();
+    finishRead(authoritative);
+    await settle();
+
+    setVisibility("visible");
+    await settle();
+    expect(readCachedRows(queryClient)).toEqual(authoritative);
+  });
+
+  it("drops the rows kept aside when the transcript is read meanwhile, and follows the stream from the rows that read wrote", async () => {
+    const { fake, queryClient } = mountHook();
+    const [started, text] = buildNextRows(
+      THREAD.session.id,
+      THREAD.transcript,
+      NEW_ITEM_STARTED,
+      buildTextRow("The fix "),
+    ) as [TranscriptRow, TranscriptRow];
+    const readWriteCount = countCacheWrites(queryClient);
+
+    setVisibility("hidden");
+    fake.pushRows([started, text]);
+    // Another component reads the transcript, and the controller has only the first row.
+    await act(() =>
+      queryClient.prefetchQuery({
+        queryKey: queryKeys.transcript(SESSION_ID),
+        queryFn: () => Promise.resolve([...THREAD.transcript, started]),
+        staleTime: 0,
+      }),
+    );
+    await settle();
+    expect(readWriteCount()).toBe(1);
+    expect(readCachedRows(queryClient)).toEqual([...THREAD.transcript, started]);
+    // The stream starts after the read's last row, not after the rows kept
+    // aside, so the second row comes again in its replay.
+    expect(fake.readSubscriptions()).toContainEqual({
+      topic: STREAM_TOPIC,
+      cursor: String(started.position),
+    });
+
+    setVisibility("visible");
+    await settle();
+    expect(readWriteCount()).toBe(1);
+    expect(readCachedRows(queryClient)).toEqual([...THREAD.transcript, started]);
+  });
+
+  it("skips an item that started while the window was hidden once it is shown", async () => {
+    const { fake, findOpenParagraph } = mountHook();
+
+    setVisibility("hidden");
+    fake.pushRows(buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED));
+    setVisibility("visible");
+    await settle();
+    expect(findOpenParagraph()).not.toBeNull();
     // Taps sent while hidden are lost, so the item's text now comes only in
     // its rows.
     fake.pushTaps("await");
@@ -688,8 +803,8 @@ describe("useSessionLive", () => {
     const rows = buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED);
     fake.deliver(stream, { items: rows });
     await settle();
-    expect(readHeldRows(queryClient, SUBAGENT_ID)).toEqual([...THREAD.transcript, ...rows]);
-    expect(readHeldRows(queryClient)).toEqual([]);
+    expect(readCachedRows(queryClient, SUBAGENT_ID)).toEqual([...THREAD.transcript, ...rows]);
+    expect(readCachedRows(queryClient)).toEqual([]);
 
     fake.deliver(tap, {
       items: [

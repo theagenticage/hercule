@@ -6,15 +6,17 @@
  * - an assistant opens from the sidebar, a message sent from the composer
  *   shows in the Conversation, the reply streams in, a Request is answered
  *   on the dock, and Stop ends the turn with the controller's notice;
- * - a window hidden while a reply streams drops the tap, subscribes to it
- *   again when it is shown, and ends with the whole reply, no word doubled
- *   or skipped.
+ * - a window hidden while a reply streams drops the tap and draws no new
+ *   text, subscribes to the tap again and draws the rows stored meanwhile
+ *   when it is shown, and ends with the whole reply, no word doubled or
+ *   skipped.
  *
  * The harness retires the controller's own runner, so the assistant's
  * session lands on the scripted runner each test enlists.
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
+import { setTimeout as sleep } from "node:timers/promises";
 import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import type { HerculeClient } from "../../packages/client-core/src/index";
@@ -26,6 +28,7 @@ import {
   createMessagePause,
   buildLiveCheck,
   buildTapCheck,
+  countStoredTextRows,
   joinShownText,
   keepWindowOnTop,
   launchPlainAppForTest,
@@ -219,7 +222,8 @@ describe("the Conversation", () => {
     await fleet.waitForTurn(session.id, 1, "waiting");
 
     // Playwright's focus emulation keeps a hidden page "visible", and the tap
-    // is unsubscribed only on a real hide, so the app runs as a plain process.
+    // is unsubscribed and the rows are kept aside only on a real hide, so the
+    // app runs as a plain process.
     const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url);
     const readVisibility = () => evaluateInPage("document.visibilityState");
     const readTaps = () => evaluateInPage(buildTapCheck(session.id)) as Promise<TapSubscriptions>;
@@ -258,22 +262,32 @@ describe("the Conversation", () => {
     const tapsWhenHidden = await readTaps();
     expect(tapsWhenHidden.made).toBe(tapsWhenHidden.ended);
     const shownWhenHidden = joinShownText((await readLastSnapshot())!);
-    // The stream stays subscribed while the window is hidden, so the rows
-    // keep landing. A hidden page runs its timers at most once a second.
+    const rowsWhenHidden = await countStoredTextRows(client, session.id);
     message.resumeAfterHide();
     await expect
-      .poll(async () => joinShownText((await readLastSnapshot())!).length, { timeout: 10_000 })
-      .toBeGreaterThan(shownWhenHidden.length);
+      .poll(() => countStoredTextRows(client, session.id), { timeout: 10_000 })
+      .toBeGreaterThan(rowsWhenHidden);
+    // The page still receives the stored rows while it is hidden, but keeps
+    // them aside instead of drawing them. A hidden page runs its timers at
+    // most once a second, so a page that drew them anyway would show them
+    // within that time. Wait a little longer before checking that it shows
+    // nothing new.
+    await sleep(2_000);
+    expect(joinShownText((await readLastSnapshot())!)).toBe(shownWhenHidden);
     expect(await readTaps()).toEqual(tapsWhenHidden);
 
     await callWindowMethod("show");
     await expect.poll(readVisibility).toBe("visible");
-    // The reply is paused, so it is still being written.
-    expect((await readLastSnapshot())!.openParagraph).not.toBeNull();
     await expect.poll(readTaps).toEqual({
       made: tapsWhenHidden.made + 1,
       ended: tapsWhenHidden.ended,
     });
+    // The rows kept aside while the window was hidden are drawn together.
+    await expect
+      .poll(async () => joinShownText((await readLastSnapshot())!).length, { timeout: 10_000 })
+      .toBeGreaterThan(shownWhenHidden.length);
+    // The reply is paused, so it is still being written.
+    expect((await readLastSnapshot())!.openParagraph).not.toBeNull();
     message.resumeAfterShow();
 
     await played;

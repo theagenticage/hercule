@@ -2261,7 +2261,7 @@ These rules keep the budgets:
    - A change of appearance snaps: the page switches in one frame, with no transition, as the window's native frame does.
    - Reduce motion turns every animation off. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* macOS's Reduce motion or the Appearance page's. *(Amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* With Reduce motion, the Office stands still as it does on battery, and its camera moves in one step where it would glide.
 3. **Work stops when nobody is looking.** While the window is hidden or minimized:
-   - The renderer drops the open thread's `session:<id>:tap` subscription, and the open subagent's `session:<id>:subagent:<subagentId>:tap` *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*, and the open Conversation's newest session's `:tap` *(amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448))*. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.
+   - The renderer drops the open thread's `session:<id>:tap` subscription, and the open subagent's `session:<id>:subagent:<subagentId>:tap` *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*, and the open Conversation's newest session's `:tap` *(amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448))*. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. ~~The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.~~ *(Amended 2026-10-19, [#783](https://github.com/theagenticage/hercule/issues/783).)* The `session:<id>:stream` stays subscribed, so no row is missed, but the rows it delivers while the window is hidden are kept aside instead of being written to the transcript, because each write cost the hidden page its block building and a render ([Measured](#measured)). When the window is shown, they go into the transcript in one write, so the page renders once, and the tap resumes. The stream is not dropped like the tap: a new subscription replays the first 500 rows it missed in one message and each later row in a message of its own, so after a long hide the page would take hundreds of rows one at a time, and could reach the controller's cap of 1,000 queued messages per subscription. *(Amended 2026-10-20, [#796](https://github.com/theagenticage/hercule/issues/796).)* While a read of the rows runs, the page does not follow the stream, hidden or not (see [Thread copies](#thread-copies)), so nothing is kept aside then. When the read ends, the stream is subscribed from the newest row held, counting the rows kept aside while they are still valid, so none of them is replayed. A read that wrote different rows has already dropped them.
    - The `session` topic stays subscribed, because the dock badge and notifications depend on it. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So does the `signal` topic, because the Hercule segment's count and Now's notifications depend on it ([Intake](#what-the-screen-reads)).
    - `backgroundThrottling` stays on.
    - *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* The Workflows pages drop the `workflow` and `run` topics, and read them again when the window is shown ([What the pages read](#what-the-pages-read)).
@@ -3701,6 +3701,48 @@ The cost of reading and saving a copy, in ms, medians of 9 (the structured clone
 
 - **Every expectation held.** One number is above its plan: the read of the 3.08 MB copy took 13.6 ms against about 11 ms for 3.1 MB. That is inside a frame and inside the noise of a shared Mac. The save (9.3 ms, longest block 5.8 ms) is under the plan's 18 and 13 ms, and the open from a copy (about 0.1 s) is under the 0.2 to 0.4 s of a network open over this link.
 - **The first screen is over its 250 kB guide by 192 to 194 kB, before and after.** That predates this change; the guide passes.
+
+**A hidden window and the thread's rows,** measured 2026-10-19 with a Chromium trace and `app.getAppMetrics()` on the packaged app against a scratch controller, on `main` at f09116eea (Before) and on this change (After), for [#783](https://github.com/theagenticage/hercule/issues/783). A hidden window keeps the `:stream` subscribed, but the open thread, subagent page and Conversation now keep the rows it delivers aside, and write them to the transcript in one write when the window is shown. The kept rows are dropped if something else writes the transcript first, such as the read after a reset. The change adds no process, no timer, no polling and no topic.
+
+The scenario is a thread of 709 rows open, then a tool-heavy turn that stores 256 rows in 22.8 s. Before and After runs were interleaved, at a one-minute load average of 2 to 8. Before is 3 runs, and its cells are ranges. After is 1 complete run for the hidden and visible rows. Three more After runs failed in the harness's own sign-in step, where a typed key reached the window, and were discarded. After is 2 runs for each show scenario.
+
+| Hidden, turn running | Before | After |
+|---|---|---|
+| Renderer main thread busy (trace) | 1638 to 1857 ms | 1127 ms |
+| JavaScript (trace) | 1184 to 1340 ms | 635 ms |
+| React commits (batches of DOM mutation records) | 61 to 63 | 0 |
+| Timer fires | 527 to 531 | 279 |
+| Renderer CPU, share of one core | 4.6 to 6.2% | 4.2% |
+
+A hidden window with no turn running costs the same in both builds: the renderer is busy 166 to 173 ms and uses 0.4 to 0.7% of a core. A visible window with the turn running is unchanged within the noise: busy 591 to 981 ms Before and 975 ms After, 170 to 188 commits Before and 172 After.
+
+A CPU profile of the Before build, hidden with the turn running, shows where a stored row went. The values are medians of 3 runs, per stored row.
+
+| Per stored row, Before | JavaScript |
+|---|---|
+| The page's `select` inside `setQueryData` (`buildThreadBlocks` and its comparison) | about 2.0 ms |
+| React render and commit | about 2.3 ms |
+| Receiving and decoding | about 0.8 ms |
+| The hook's merge | about 0.5 ms |
+| Invalidations from `session` nudges, not from the stream ([#785](https://github.com/theagenticage/hercule/issues/785)) | about 0.5 ms |
+
+After was not profiled. The page's `select` runs only when the transcript is written, which a hidden window no longer does, and the After trace shows no commits.
+
+| Showing the window again | Before | After |
+|---|---|---|
+| 256 rows missed: `show()` to the last row on screen | 15 to 20 ms | 16 to 25 ms |
+| 256 rows missed: longest task | 5 ms | 5 ms |
+| 1624 rows missed: `show()` to the last row on screen | 13 to 19 ms | 11 to 14 ms |
+| 1624 rows missed: longest task | 5 ms | 4 ms |
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| The first screen's JavaScript, gzipped | a guide of 250 kB | 434.3 kB | 434.4 kB: 0.1 kB more |
+
+- **A hidden row costs about half the JavaScript, and the hidden page no longer commits.** The trace's JavaScript falls from 1184 to 1340 ms to 635 ms, and React commits from 61 to 63 to 0.
+- **What remains is receiving and decoding the rows, and the `session` nudges.** The nudges do not come from the stream; see [#785](https://github.com/theagenticage/hercule/issues/785).
+- **Showing the window costs the same as before, whatever the number of rows kept aside.** 256 and 1624 rows both take 11 to 25 ms to the last row on screen, with a longest task of 5 ms or less, and the transcript ends at the bottom in both builds. Nothing is subscribed again and nothing is replayed.
+- **The CPU share is one After run, so the trace counters carry the comparison.** The share's Before range (4.6 to 6.2%) is wide, and the After value sits just below it.
 
 ## Slices
 

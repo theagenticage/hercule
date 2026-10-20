@@ -911,6 +911,20 @@ export function buildTapCheck(sessionId: string): string {
   })()`;
 }
 
+/**
+ * Counts the rows of text that the controller has stored for the session
+ * `sessionId`'s own agent so far: its `content.delta` rows, each of which
+ * holds a run of deltas the controller merged. Reads the first page of the
+ * transcript, which holds more rows than a test with one scripted message writes.
+ */
+export async function countStoredTextRows(
+  client: HerculeClient,
+  sessionId: string,
+): Promise<number> {
+  const { items } = await client.transcript.read({ params: { id: sessionId }, query: {} });
+  return items.filter((row) => row.event._tag === "content.delta").length;
+}
+
 /** Returns the assistant named `name`, read through the API. Fails when there is none. */
 export async function readAssistant(client: HerculeClient, name: string): Promise<Assistant> {
   const { items } = await client.assistant.query({ query: { limit: 50 } });
@@ -1029,9 +1043,9 @@ export interface CountedMessage {
  *
  * - after 400 words (about 1.8 KiB, before the first row), until the window
  *   is hidden: the paragraph being written shows text and no row has landed;
- * - after 1,800 words (about 9.5 KiB), until the window is shown again: two
- *   rows have landed while the window was hidden, and the message still
- *   streams when it is shown.
+ * - after 1,800 words (about 9.5 KiB), until the window is shown again: the
+ *   controller has stored two rows while the window was hidden, and the
+ *   message still streams when it is shown.
  */
 export function buildCountedMessage(): CountedMessage {
   const wordCount = 3_000;
