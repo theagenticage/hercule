@@ -158,6 +158,13 @@ const NEW_OPERATIONS = [
   { id: "signal.raise", requires: "signal.write", method: "POST", path: "/api/v1/signals/raise" },
   { id: "signal.act", requires: "signal.write", method: "POST", path: "/api/v1/signals/:id/act" },
   {
+    id: "signal.handOff",
+    requires: "signal.write",
+    method: "POST",
+    path: "/api/v1/signals/:id/hand-off",
+    usableIn: ["signal.answer"],
+  },
+  {
     id: "signal.withdraw",
     requires: "signal.write",
     method: "POST",

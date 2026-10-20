@@ -59,6 +59,8 @@ export interface NewRun {
   readonly entryStepIds: ReadonlyArray<string>;
   /** The run this one re-runs, when `run.rerun` starts it. */
   readonly originalRunId?: string;
+  /** The Task the run works on, when a handoff started it. */
+  readonly taskId?: string;
   /** The event that started the run, when a start trigger started it. */
   readonly triggerEvent?: TriggerEvent;
 }
@@ -182,6 +184,7 @@ interface RunRow {
   readonly failure_message: string | null;
   readonly output: string | null;
   readonly original_run_id: Uint8Array | null;
+  readonly task_id: Uint8Array | null;
   readonly trigger_event: string | null;
   readonly created_at: string;
   readonly started_at: string | null;
@@ -196,6 +199,7 @@ interface SummaryRow {
   readonly workflow_id: Uint8Array | null;
   readonly workflow_name: string;
   readonly origin: string;
+  readonly task_id: Uint8Array | null;
   readonly status: RunStatus;
   readonly failure_reason: FailureReason | null;
   readonly failed_step_id: string | null;
@@ -439,6 +443,7 @@ const parseRunRow = (
     steps: steps.map(parseStepRow),
     edgeTraversals,
     ...(row.original_run_id === null ? {} : { originalRunId: uuidToString(row.original_run_id) }),
+    ...(row.task_id === null ? {} : { taskId: uuidToString(row.task_id) }),
     ...(row.trigger_event === null
       ? {}
       : { triggerEvent: JSON.parse(row.trigger_event) as TriggerEvent }),
@@ -495,6 +500,7 @@ const parseSummaryRow = (
     workflowId: row.workflow_id === null ? null : uuidToString(row.workflow_id),
     workflowName: row.workflow_name,
     origin: JSON.parse(row.origin) as RunOrigin,
+    ...(row.task_id === null ? {} : { taskId: uuidToString(row.task_id) }),
     createdAt: row.created_at,
   };
   const status = parseStatusColumns(row);
@@ -630,7 +636,7 @@ const make = Effect.gen(function* () {
    * the runs `filters` keep are found through the same index: pending and
    * running runs through `runs_unfinished`, the runs live since an instant
    * through the `finished_at` indexes, a run's re-runs through
-   * `runs_original_run_id`. Only those runs are ranked, by a window function
+   * `runs_original_run_id`, the runs of some Tasks through `runs_task_id`. Only those runs are ranked, by a window function
    * per workflow. A lookup per workflow on `runs_workflow` would instead read
    * every run of a workflow whose history holds many runs the filters refuse.
    * Without a narrowing filter, ranking this way would rank every run the
@@ -665,12 +671,14 @@ const make = Effect.gen(function* () {
         const id = mintUuid();
         yield* sql`
           INSERT INTO runs
-            (id, workflow_id, plan, inputs, origin, original_run_id, trigger_event, status, created_at)
+            (id, workflow_id, plan, inputs, origin, original_run_id, task_id, trigger_event, status,
+             created_at)
           VALUES (${id},
                   ${run.workflowId === null ? null : uuidFromString(run.workflowId)},
                   ${JSON.stringify(run.plan)}, ${JSON.stringify(run.inputs)},
                   ${JSON.stringify(run.origin)},
                   ${run.originalRunId === undefined ? null : uuidFromString(run.originalRunId)},
+                  ${run.taskId === undefined ? null : uuidFromString(run.taskId)},
                   ${run.triggerEvent === undefined ? null : JSON.stringify(run.triggerEvent)},
                   'pending', ${at})
         `;
@@ -755,6 +763,13 @@ const make = Effect.gen(function* () {
           if (request.originalRunId !== undefined) {
             otherFilters.push(sql`original_run_id = ${uuidFromString(request.originalRunId)}`);
           }
+          if (request.taskIds !== undefined) {
+            otherFilters.push(
+              request.taskIds.length === 0
+                ? sql`1 = 0`
+                : sql`task_id IN ${sql.in(request.taskIds.map((id) => uuidFromString(id)))}`,
+            );
+          }
           if (request.since !== undefined) otherFilters.push(sql`created_at >= ${request.since}`);
           if (request.until !== undefined) otherFilters.push(sql`created_at <= ${request.until}`);
           if (request.actor !== undefined) {
@@ -771,7 +786,8 @@ const make = Effect.gen(function* () {
             request.status === "pending" ||
             request.status === "running" ||
             request.activeSince !== undefined ||
-            request.originalRunId !== undefined;
+            request.originalRunId !== undefined ||
+            request.taskIds !== undefined;
           // With `newestPerWorkflow`, the filters pick each workflow's newest
           // runs inside the source, and the keyset pages through what the
           // source returns, so a cursor never changes which runs are newest.
@@ -794,7 +810,7 @@ const make = Effect.gen(function* () {
                   clauses: [keyset],
                 };
           const rows = yield* sql<SummaryRow>`
-          SELECT id, workflow_id, json_extract(plan, '$.name') AS workflow_name, origin, status,
+          SELECT id, workflow_id, json_extract(plan, '$.name') AS workflow_name, origin, task_id, status,
                  failure_reason, failed_step_id, failure_message, created_at, started_at,
                  finished_at,
                  CASE WHEN status = 'running' THEN json_extract(plan, '$.triggers') END AS triggers

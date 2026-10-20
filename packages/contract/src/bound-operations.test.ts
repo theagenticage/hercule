@@ -70,6 +70,7 @@ describe("the operations an answer may run", () => {
     expect(SIGNAL_OPERATIONS).toEqual([
       "task.create",
       "task.update",
+      "signal.handOff",
       "ignoreRule.create",
       "run.start",
     ]);

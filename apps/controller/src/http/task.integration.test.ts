@@ -1,6 +1,6 @@
 /**
- * Tests `GET /tasks` over a real socket: the order of a listing, and how it
- * pages.
+ * Tests `GET /tasks` over a real socket: the order of a listing, how it
+ * pages, and the boolean `handedOff` filter.
  *
  * Both orders are tested through the API only: a request sets `sort` or
  * `text`, and the tests check only the response.
@@ -132,6 +132,16 @@ describe("the order of a task listing", () => {
         "?status=open&sort=priority:desc&sort=createdAt:desc&limit=3",
       );
       expect(listTitles(page)).toEqual(["B", "A", "C"]);
+    });
+  });
+
+  it("reads handedOff as a boolean: no task here has a handoff entry, so true lists none and false lists all", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      await createTask(base, token, { title: "A" });
+
+      expect(listTitles(await listTasks(base, token, "?handedOff=true"))).toEqual([]);
+      expect(listTitles(await listTasks(base, token, "?handedOff=false"))).toEqual(["A"]);
     });
   });
 

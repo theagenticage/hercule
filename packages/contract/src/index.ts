@@ -558,6 +558,8 @@ export {
   SignalAction,
   SignalActInput,
   SignalFilter,
+  SignalHandOffCall,
+  SignalHandOffInput,
   SignalIdsInput,
   SignalKind,
   SignalLowerPriorityResult,

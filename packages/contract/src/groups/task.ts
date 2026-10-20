@@ -75,13 +75,19 @@ const TaskDescription = bounded(0, MAX_TASK_DESCRIPTION_LENGTH);
 
 /**
  * One entry in a task's record of what created or touched it: the external
- * thing, the event, the run, or any combination of the three.
+ * thing, the event, the run, the signal, or any combination of the four.
  */
 export const ProvenanceEntry = Schema.Struct({
   ref: Schema.optionalKey(ExternalRef),
   /** An event's id, which is its position in the log, and so an integer. */
   eventId: Schema.optionalKey(EventId),
   runId: Schema.optionalKey(Id),
+  /**
+   * The signal the user handed to an agent, when this entry records that
+   * handoff. Only `signal.handOff` writes it, so a task with such an entry is
+   * work the user handed off from Intake.
+   */
+  signalId: Schema.optionalKey(Id),
   at: Timestamp,
   actor: Actor,
 });
@@ -108,6 +114,7 @@ const ProvenanceInput = Schema.Struct({
   ref: Schema.optionalKey(ExternalRef),
   eventId: Schema.optionalKey(EventId),
   runId: Schema.optionalKey(Id),
+  signalId: Schema.optionalKey(CoreStampedField),
   at: Schema.optionalKey(CoreStampedField),
   actor: Schema.optionalKey(CoreStampedField),
 }).check(
@@ -195,6 +202,12 @@ export const TaskFilter = Schema.Struct({
   labels: Schema.optionalKey(atMost(Label, MAX_FILTER_VALUES)),
   status: Schema.optionalKey(atMost(TaskStatus, MAX_FILTER_VALUES)),
   projectId: Schema.optionalKey(Id),
+  /**
+   * `true` lists only the tasks with a handoff entry in their provenance: an
+   * entry that names a signal the user handed to an agent. `false` lists only
+   * the tasks without one.
+   */
+  handedOff: Schema.optionalKey(Schema.Boolean),
   text: Schema.optionalKey(bounded(1, MAX_SEARCH_TEXT_LENGTH)),
 });
 

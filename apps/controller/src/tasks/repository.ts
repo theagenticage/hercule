@@ -62,6 +62,8 @@ export interface TaskFilter {
   readonly labels?: ReadonlyArray<string>;
   readonly status?: ReadonlyArray<TaskStatus>;
   readonly projectId?: string;
+  /** `true` keeps the tasks with a handoff entry, `false` the tasks without one. */
+  readonly handedOff?: boolean;
 }
 
 /** A field a keyset listing can order by. */
@@ -90,6 +92,7 @@ export interface ProvenanceInput {
   readonly ref?: ExternalRef;
   readonly eventId?: number;
   readonly runId?: string;
+  readonly signalId?: string;
 }
 
 /** The fields of a new task row, with the defaults already applied. */
@@ -134,6 +137,7 @@ interface ProvenanceRow {
   readonly ref: string | null;
   readonly event_id: number | null;
   readonly run_id: Uint8Array | null;
+  readonly signal_id: Uint8Array | null;
   readonly at: string;
   readonly actor: string;
 }
@@ -211,6 +215,7 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
         filter.labels ?? null,
         filter.status ?? null,
         filter.projectId ?? null,
+        filter.handedOff ?? null,
       ])}`,
       direction: "asc",
     },
@@ -229,6 +234,16 @@ const make = Effect.gen(function* () {
     if (filter.status !== undefined) clauses.push(buildAnyOfClause("tasks.status", filter.status));
     if (filter.projectId !== undefined) {
       clauses.push(sql`tasks.project_id = ${uuidFromString(filter.projectId)}`);
+    }
+    if (filter.handedOff !== undefined) {
+      // `task_provenance_signal` holds exactly the entries that name a
+      // signal, so both forms read that index alone. `task_id` is never NULL,
+      // so NOT IN cannot match nothing by mistake.
+      clauses.push(
+        filter.handedOff
+          ? sql`tasks.id IN (SELECT task_id FROM task_provenance WHERE signal_id IS NOT NULL)`
+          : sql`tasks.id NOT IN (SELECT task_id FROM task_provenance WHERE signal_id IS NOT NULL)`,
+      );
     }
     if (filter.labels !== undefined) {
       clauses.push(
@@ -259,7 +274,7 @@ const make = Effect.gen(function* () {
       ? Effect.succeed([])
       : Effect.map(
           sql<ProvenanceRow>`
-            SELECT task_id, ref, event_id, run_id, at, actor FROM task_provenance
+            SELECT task_id, ref, event_id, run_id, signal_id, at, actor FROM task_provenance
             WHERE ${sql.in(
               "task_id",
               rows.map((row) => row.id),
@@ -275,6 +290,7 @@ const make = Effect.gen(function* () {
                 ...(entry.ref === null ? {} : { ref: entry.ref }),
                 ...(entry.event_id === null ? {} : { eventId: entry.event_id }),
                 ...(entry.run_id === null ? {} : { runId: uuidToString(entry.run_id) }),
+                ...(entry.signal_id === null ? {} : { signalId: uuidToString(entry.signal_id) }),
                 at: entry.at,
                 actor: entry.actor,
               });
@@ -309,9 +325,11 @@ const make = Effect.gen(function* () {
     Effect.forEach(
       entries,
       (entry) => sql`
-        INSERT INTO task_provenance (id, task_id, ref, event_id, run_id, at, actor)
+        INSERT INTO task_provenance (id, task_id, ref, event_id, run_id, signal_id, at, actor)
         VALUES (${mintUuid()}, ${taskId}, ${entry.ref ?? null}, ${entry.eventId ?? null},
-                ${entry.runId === undefined ? null : uuidFromString(entry.runId)}, ${at}, ${actor})
+                ${entry.runId === undefined ? null : uuidFromString(entry.runId)},
+                ${entry.signalId === undefined ? null : uuidFromString(entry.signalId)},
+                ${at}, ${actor})
       `,
       { discard: true },
     );

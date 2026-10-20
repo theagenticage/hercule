@@ -70,6 +70,7 @@ import { Settings } from "../../settings";
 import { signalRepository } from "../../signals";
 import { taskRepository } from "../../tasks";
 import { readDefaultSpawnBound, workflowRepository } from "../../workflows";
+import { findTaskToContinue, readThreadRef } from "./hand-off";
 
 /** Returns a `text` part: words of the line itself. */
 const buildTextPart = (value: string): DescribeLinePart => ({ kind: "text", text: value });
@@ -384,6 +385,22 @@ export const buildDescribe: Effect.Effect<
     );
 
     /**
+     * Returns the fields of a signal that a handoff reads, or nothing when no
+     * signal has this id. The signal's id is the value of a bound input, so
+     * anything that is not an id is not looked up.
+     */
+    const readSignalForHandOff = readOncePerId((id) =>
+      isId(id) ? signals.readForHandOff(id) : Effect.succeed(Option.none()),
+    );
+
+    /**
+     * Returns the open Task a handoff of a signal on this thread would
+     * continue, or nothing. Several handoffs in one describe call usually name
+     * signals of the same thread, so each thread is looked up once.
+     */
+    const readTaskToContinue = readOncePerId((ref) => findTaskToContinue(tasks, ref));
+
+    /**
      * Returns a session's name as a `marked` part, and every Request the
      * session waits on, or none when the session is gone. The name is the
      * session's title, or its id once the session is gone.
@@ -611,6 +628,32 @@ export const buildDescribe: Effect.Effect<
               Option.match(definition, { onNone: () => workflowId, onSome: (found) => found.name }),
             ),
             ...(described.length === 0 ? [] : [buildTextPart(" with "), ...described]),
+          ];
+        }),
+      "signal.handOff": ({ signalId, workflowId }) =>
+        Effect.gen(function* () {
+          const definition = yield* readWorkflowDefinition(workflowId);
+          const signal = yield* readSignalForHandOff(signalId);
+          const ref = Option.flatMap(signal, (found) => readThreadRef(found.origin));
+          const continued = Option.isSome(ref)
+            ? yield* readTaskToContinue(ref.value)
+            : Option.none();
+          // The signal is named as the Intake row names where it comes from,
+          // such as "acme/webshop#1296", and by its title when it has no place.
+          const where = Option.match(signal, {
+            onNone: () => signalId,
+            onSome: (found) => found.place ?? found.title,
+          });
+          return [
+            buildTextPart("Starts "),
+            buildMarkedPart(
+              Option.match(definition, { onNone: () => workflowId, onSome: (found) => found.name }),
+            ),
+            buildTextPart(" on "),
+            buildMarkedPart(where),
+            ...(Option.isSome(continued)
+              ? [buildTextPart(", continues "), buildMarkedPart(continued.value.title)]
+              : [buildTextPart(", tracked as a new Task")]),
           ];
         }),
       "session.input": ({ sessionId, text, model, options }) =>

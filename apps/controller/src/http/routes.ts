@@ -297,6 +297,9 @@ const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
       .handle("act", ({ params, payload }) =>
         withApiErrors(signals.act({ id: params.id, ...payload })),
       )
+      .handle("handOff", ({ params, payload }) =>
+        withApiErrors(signals.handOff({ id: params.id, ...payload })),
+      )
       .handle("withdraw", ({ params, payload }) =>
         withApiErrors(signals.withdraw({ id: params.id, ...payload })),
       )

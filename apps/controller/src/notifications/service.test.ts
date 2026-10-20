@@ -1143,7 +1143,7 @@ describe("notification.act", () => {
             const notifier = yield* Notifier;
             return BoundOperations.of({
               check: () => Effect.die("the notification service checks its own answers"),
-              run: (operation) => run(operation, notifier),
+              run: (operation) => Effect.as(run(operation, notifier), undefined),
               runPluginAction: () => Effect.die("a notification's answer runs no plugin action"),
               describe: () => Effect.succeed([]),
             });

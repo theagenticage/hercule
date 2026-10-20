@@ -37,6 +37,7 @@ import { createValidationError, listSchemaIssues, type Validation } from "./erro
 import { IgnoreRuleCreateInput } from "./groups/ignore-rule";
 import { PermissionDecideCall } from "./groups/permission";
 import { RunStartCall } from "./groups/run";
+import { SignalHandOffCall } from "./groups/signal";
 import { SessionInputCall, SessionRespondToApprovalRequestCall } from "./groups/session";
 import { TaskCreateInput, TaskUpdateCall } from "./groups/task";
 import { TriggerResumeCall } from "./groups/trigger";
@@ -67,6 +68,7 @@ const ANSWER_OPERATION_INPUTS = {
   "task.create": TaskCreateInput,
   "task.update": TaskUpdateCall,
   "run.start": RunStartCall,
+  "signal.handOff": SignalHandOffCall,
   "session.input": SessionInputCall,
   "session.respondToApprovalRequest": SessionRespondToApprovalRequestCall,
   "permission.decide": PermissionDecideCall,

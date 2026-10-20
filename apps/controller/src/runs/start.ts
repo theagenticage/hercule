@@ -138,13 +138,15 @@ const REPLAY_REFUSALS: RefusalMessages = {
 
 /**
  * A run about to be written: the plan it runs, the stored workflow the plan
- * belongs to, if any, the inputs as given, and the run it re-runs, if any.
+ * belongs to, if any, the inputs as given, the run it re-runs, if any, and
+ * the Task it works on, if any.
  */
 interface RunToWrite {
   readonly plan: WorkflowDefinition;
   readonly workflowId: string | null;
   readonly inputs: Readonly<Record<string, unknown>>;
   readonly originalRunId?: string;
+  readonly taskId?: string;
 }
 
 /**
@@ -368,7 +370,7 @@ export const makeRunStart = (
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const { plan, workflowId, inputs, originalRunId } = yield* readRunToWrite;
+          const { plan, workflowId, inputs, originalRunId, taskId } = yield* readRunToWrite;
           const resolvedInputs = yield* checkRunnable(plan, inputs, refusals);
           yield* checkCapableRunner(plan);
           yield* checkNesting(origin);
@@ -381,6 +383,7 @@ export const makeRunStart = (
               origin,
               entryStepIds: listEntrySteps(plan).map((step) => step.id),
               ...(originalRunId === undefined ? {} : { originalRunId }),
+              ...(taskId === undefined ? {} : { taskId }),
             },
             at,
           );
@@ -434,8 +437,15 @@ export const makeRunStart = (
      *   controller's `run.nestingLimit`.
      *
      * The `run.start` action calls it too, as the run whose step it is.
+     *
+     * `taskId` is the Task the run works on. The public `run.start` never
+     * sets it: a run the user starts by hand has no Task. Only
+     * `startOnTask` passes it.
      */
-    const start = (input: RunStartInput): Effect.Effect<RunStarted, RunStartError> =>
+    const startRun = (
+      input: RunStartInput,
+      taskId: string | undefined,
+    ): Effect.Effect<RunStarted, RunStartError> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("run.start");
         const {
@@ -464,7 +474,7 @@ export const makeRunStart = (
             if (chosenInput !== undefined) {
               yield* requireConnectionUse(actor, describeConnectionInputRefusal(chosenInput));
             }
-            return { plan, workflowId, inputs };
+            return { plan, workflowId, inputs, ...(taskId === undefined ? {} : { taskId }) };
           });
           return yield* writeRun(readStoredRun, origin, STORED_WORKFLOW_REFUSALS);
         }
@@ -473,10 +483,27 @@ export const makeRunStart = (
           if ((yield* workflows.listConnectionParams(plan)).length > 0) {
             yield* requireConnectionUse(actor, SENT_WORKFLOW_CONNECTION_USE_REFUSAL);
           }
-          return { plan, workflowId: null, inputs };
+          return { plan, workflowId: null, inputs, ...(taskId === undefined ? {} : { taskId }) };
         });
         return yield* writeRun(readSentRun, origin, SENT_WORKFLOW_REFUSALS);
       });
+
+    /** `run.start`, for a run that works on no Task. */
+    const start = (input: RunStartInput): Effect.Effect<RunStarted, RunStartError> =>
+      startRun(input, undefined);
+
+    /**
+     * Starts a run as `start` does, and links it to the Task `taskId`, which
+     * the caller has already created or read. Joins the caller's transaction,
+     * and hands the run to the Run Executor after the outermost transaction
+     * commits, so a caller can start the run inside the transaction that
+     * writes the Task without waiting on a runner. It is the one way to give
+     * a run a Task: the public `run.start` has no such field.
+     */
+    const startOnTask = (
+      input: RunStartInput,
+      taskId: string,
+    ): Effect.Effect<RunStarted, RunStartError> => startRun(input, taskId);
 
     /**
      * Returns the run `run.rerun` re-runs: the run with the id, once it has
@@ -550,6 +577,7 @@ export const makeRunStart = (
               workflowId: original.workflowId,
               inputs: original.inputs,
               originalRunId: original.id,
+              ...(original.taskId === undefined ? {} : { taskId: original.taskId }),
             };
           });
           return yield* writeRun(readReplayedRun, origin, REPLAY_REFUSALS);
@@ -573,6 +601,7 @@ export const makeRunStart = (
             workflowId: original.workflowId,
             inputs: original.inputs,
             originalRunId: original.id,
+            ...(original.taskId === undefined ? {} : { taskId: original.taskId }),
           };
         });
         return yield* writeRun(readRestampedRun, origin, RESTAMP_REFUSALS);
@@ -652,5 +681,5 @@ export const makeRunStart = (
         return runId;
       });
 
-    return { start, rerun, startTriggeredRun };
+    return { start, startOnTask, rerun, startTriggeredRun };
   });

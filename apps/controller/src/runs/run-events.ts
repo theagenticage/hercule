@@ -26,6 +26,7 @@ export const buildRunEndedEvent = (
     runId: run.id,
     workflowId: run.workflowId,
     origin: run.origin,
+    ...(run.taskId === undefined ? {} : { taskId: run.taskId }),
     inputs: run.inputs,
     ...(run.status === "running" ? { startedAt: run.startedAt } : {}),
     finishedAt: at,

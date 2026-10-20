@@ -178,6 +178,13 @@ const TABLE = {
   // the collection's plus the verb, as `run.start`'s is.
   "signal.raise": { requires: "signal.write", method: "POST", path: "/api/v1/signals/raise" },
   "signal.act": { requires: "signal.write", method: "POST", path: "/api/v1/signals/:id/act" },
+  // The Hand to an agent answers bind it, so it is usable in a signal's answer.
+  "signal.handOff": {
+    requires: "signal.write",
+    method: "POST",
+    path: "/api/v1/signals/:id/hand-off",
+    usableIn: ["signal.answer"],
+  },
   "signal.withdraw": {
     requires: "signal.write",
     method: "POST",

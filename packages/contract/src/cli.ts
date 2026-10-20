@@ -558,6 +558,10 @@ export const CLI = {
         flag: "project",
         help: "Only tasks in this project, by its full id.",
       },
+      handedOff: {
+        flag: "handed-off",
+        help: "true for the tasks with a handoff entry in their provenance - the tasks that work the user handed to an agent from Intake - and false for the rest.",
+      },
       text: {
         flag: "text",
         help: "Full-text search over title and description; a label or a ref is never found this way.",
@@ -892,6 +896,24 @@ export const CLI = {
         stdin: true,
         flag: "text",
         help: "The typed reply, for an action that asks for one.",
+      },
+    },
+    errors: { forbidden: USER_ONLY_FORBIDDEN },
+  },
+  "signal.handOff": {
+    command: "signal hand-off",
+    help: "Hands a signal to a workflow, as you, and tracks the work on a Task. It starts a run of the workflow with the signal as its signal input, and puts the run on the open Task that carries the signal's thread, or on a new Task when there is none, then resolves the signal. If the run cannot start, nothing is written and the signal stays open. Find the workflow with `hercule workflow list`; the workflows that take the signal are the ones its `hand-to-` actions name.",
+    examples: [{ args: ["0b1c2d3e", "--workflow", "9f8e7d6c"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The signal's id, or a tail of eight or more characters.",
+        resolves: "signal.query",
+      },
+      workflowId: {
+        flag: "workflow",
+        help: "The workflow to hand the signal to, by its id or a tail of eight or more characters.",
+        resolves: "workflow.query",
       },
     },
     errors: { forbidden: USER_ONLY_FORBIDDEN },
@@ -2034,6 +2056,11 @@ export const CLI = {
         flag: "original-run",
         help: "Only the re-runs of this run, by its id or a tail of eight or more characters.",
         resolves: "run.query",
+      },
+      taskIds: {
+        flag: "task",
+        help: "Only the runs that work on this task, by its id or a tail of eight or more characters; repeat the flag to list the runs of several tasks. Find a task with `hercule task list`.",
+        resolves: "task.query",
       },
       newestPerWorkflow: {
         flag: "newest-per-workflow",

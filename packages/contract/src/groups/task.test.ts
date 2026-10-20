@@ -67,3 +67,17 @@ describe("the bounds on a task's lists", () => {
     ).toBe("Failure");
   });
 });
+
+describe("the signal a provenance entry records", () => {
+  const SIGNAL_ID = "0199e0e7-0005-7000-8000-000000000000";
+  const RUN_ID = "0199e0e7-0006-7000-8000-000000000000";
+
+  it("is refused in an entry a request writes, on create and on update", () => {
+    const provenance = [{ runId: RUN_ID, signalId: SIGNAL_ID }];
+
+    expect(decodeOutcome(TaskCreateInput, { title: "t", description: "", provenance })).toBe(
+      "Failure",
+    );
+    expect(decodeOutcome(TaskUpdateInput, { provenance })).toBe("Failure");
+  });
+});

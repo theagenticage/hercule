@@ -86,6 +86,9 @@ const THREAD_REF = "gmail:thread:19b2c";
 
 const UNKNOWN_ID = "0199e0e7-9999-7000-8000-000000000000";
 
+const SIGNAL_ID = "0199e0e7-0005-7000-8000-000000000000";
+const HANDOFF_RUN_ID = "0199e0e7-0006-7000-8000-000000000000";
+
 /** A minute, so two writes never land on the same instant by accident. */
 const A_MINUTE = 60_000;
 
@@ -401,6 +404,29 @@ describe("task.query", () => {
     ]);
   });
 
+  it("lists the tasks with a handoff entry for handedOff true, and the rest for false", async () => {
+    const { handedOff, notHandedOff, all } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* withThreeTasks;
+        const { items } = yield* tasks.query({ status: ["in-progress"] });
+        const running = items[0];
+        if (running === undefined) return yield* Effect.die("the fixture has a task in progress");
+        yield* tasks.update({
+          id: running.id,
+          provenance: [{ signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID }],
+        });
+        return {
+          handedOff: (yield* tasks.query({ handedOff: true })).items,
+          notHandedOff: (yield* tasks.query({ handedOff: false })).items,
+          all: (yield* tasks.query({})).items,
+        };
+      }),
+    );
+    expect(sortTitles(handedOff)).toEqual(["in progress and labelled"]);
+    expect(sortTitles(notHandedOff)).toEqual(["done and unlabelled", "open and labelled"]);
+    expect(all).toHaveLength(3);
+  });
+
   it("matches no task for a project that has no tasks", async () => {
     const items = await run(
       Effect.flatMap(withThreeTasks, (tasks) =>
@@ -524,6 +550,43 @@ describe("provenance", () => {
     );
     expect(withAt).toMatchObject({ error: { code: "validation" } });
     expect(withActor).toMatchObject({ error: { code: "validation" } });
+  });
+
+  it("records the signal and the run of a handoff in an update, and returns them with the entry on read and in the event", async () => {
+    const { read, events } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const created = yield* tasks.create({ title: "t", description: "d" });
+        yield* tasks.update({
+          id: created.id,
+          provenance: [{ signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID, ref: ISSUE_REF }],
+        });
+        return {
+          read: yield* tasks.read(created.id),
+          events: yield* readEventsOfKind("task.updated"),
+        };
+      }),
+    );
+    const entry = { signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID, ref: ISSUE_REF, actor: "user" };
+    expect(read.provenance).toEqual([expect.objectContaining(entry)]);
+    expect(events[0]?.payload).toMatchObject({
+      changes: { provenance: { added: [expect.objectContaining(entry)] } },
+    });
+  });
+
+  it("refuses a signalId on create, which only a handoff may write", async () => {
+    const error = await runError(
+      Effect.flatMap(TaskService, (tasks) =>
+        tasks.create(
+          castMalformedInput({
+            title: "t",
+            description: "d",
+            provenance: [{ ref: ISSUE_REF, signalId: SIGNAL_ID }],
+          }),
+        ),
+      ),
+    );
+    expect(error).toMatchObject({ error: { code: "validation" } });
   });
 
   it("sets at and actor itself", async () => {

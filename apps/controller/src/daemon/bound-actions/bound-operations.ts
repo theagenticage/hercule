@@ -30,6 +30,7 @@ import {
   type BoundAction,
   type BoundOperation,
   type Issue,
+  type RunStarted,
   type Validation,
 } from "@hercule/contract";
 import type { AnswerPlace } from "@hercule/plugin-host";
@@ -50,6 +51,7 @@ import { WorkflowService } from "../../workflows";
 import { PermissionRequests } from "../permissions";
 import { Live } from "../sessions";
 import { buildDescribe } from "./describer";
+import { makeHandOff } from "./hand-off";
 
 /**
  * Lists the problems with a typed reply's field on a plugin action. The field
@@ -95,23 +97,29 @@ const make = Effect.gen(function* () {
   const connections = yield* connectionRepository;
   const connectionTypes = yield* ConnectionTypes;
   const workflows = yield* WorkflowService;
+  const handOff = yield* makeHandOff;
 
   // Each runs in the caller's transaction and sends nothing to a runner until
-  // it commits: `queueInput` stores the input and delivers it afterwards, and
-  // `respondToApprovalRequest` sends its frame afterwards.
+  // it commits: `run.start` and `signal.handOff` place the run's first
+  // session afterwards, `queueInput` stores the input and delivers it
+  // afterwards, and `respondToApprovalRequest` sends its frame afterwards.
+  // Each returns the run it started, or `undefined`.
   const handlers: AnswerOperationHandlers<
     AnswerPlace,
-    Effect.Effect<unknown, BoundOperationError>
+    Effect.Effect<RunStarted | undefined, BoundOperationError>
   > = {
-    "task.create": (input) => tasks.create(input),
-    "task.update": ({ taskId, ...changes }) => tasks.update({ id: taskId, ...changes }),
+    "task.create": (input) => Effect.as(tasks.create(input), undefined),
+    "task.update": ({ taskId, ...changes }) =>
+      Effect.as(tasks.update({ id: taskId, ...changes }), undefined),
     "run.start": (input) => runs.start(input),
-    "session.input": ({ sessionId, ...input }) => live.queueInput({ id: sessionId, ...input }),
+    "signal.handOff": (input) => handOff(input),
+    "session.input": ({ sessionId, ...input }) =>
+      Effect.as(live.queueInput({ id: sessionId, ...input }), undefined),
     "session.respondToApprovalRequest": ({ sessionId, ...decided }) =>
-      live.respondToApprovalRequest({ id: sessionId, ...decided }),
-    "permission.decide": (input) => permissionRequests.decide(input),
-    "ignoreRule.create": (input) => ignoreRules.create(input),
-    "trigger.resume": (input) => workflows.resumeTrigger(input),
+      Effect.as(live.respondToApprovalRequest({ id: sessionId, ...decided }), undefined),
+    "permission.decide": (input) => Effect.as(permissionRequests.decide(input), undefined),
+    "ignoreRule.create": (input) => Effect.as(ignoreRules.create(input), undefined),
+    "trigger.resume": (input) => Effect.as(workflows.resumeTrigger(input), undefined),
   };
 
   /**
@@ -270,7 +278,7 @@ const make = Effect.gen(function* () {
         : decodeAnswerOperation(place, operation, [...path, "operation"]);
     },
 
-    run: (operation) => Effect.asVoid(dispatchAnswerOperation(handlers, operation)),
+    run: (operation) => dispatchAnswerOperation(handlers, operation),
 
     runPluginAction: (operation) =>
       Effect.gen(function* () {

@@ -87,7 +87,7 @@ const IgnoreRuleCreatingOperationsLayer = Layer.effect(BoundOperations)(
       ...fake,
       run: (operation) =>
         operation.op === "ignoreRule.create"
-          ? Effect.asVoid(ignoreRules.create(operation.input))
+          ? Effect.as(ignoreRules.create(operation.input), undefined)
           : fake.run(operation),
     });
   }),
@@ -176,7 +176,7 @@ const buildHeldOperations = () => {
       isQualifiedId(operation.op)
         ? Effect.succeed(operation)
         : decodeAnswerOperation(place, operation, [...path, "operation"]),
-    run: () => hold,
+    run: () => Effect.as(hold, undefined),
     runPluginAction: () =>
       Effect.andThen(
         Effect.sync(() => counts.pluginRuns++),
@@ -352,10 +352,7 @@ describe("signal.raise", () => {
     expect(listActionIds(signal)).toEqual(["start", `hand-to-${workflowId}`, "dismiss"]);
     expect(signal.actions[1]).toMatchObject({
       label: "Hand to Merge bot",
-      operation: {
-        op: "run.start",
-        input: { workflowId, inputs: { signal: signal.id } },
-      },
+      operation: { op: "signal.handOff", input: { signalId: signal.id, workflowId } },
     });
   });
 
@@ -682,6 +679,102 @@ describe("signal.act", () => {
     expect(refused).toMatchObject({ error: { code: "invalid_state" } });
     expect(held.counts.pluginRuns).toBe(1);
     expect(acted.resolution).toMatchObject({ kind: "decided", actionId: "approve" });
+  });
+});
+
+describe("signal.handOff", () => {
+  /** Raises an offer that offers a Hand to an agent for "Merge bot", and returns it with the workflow's id. */
+  const raiseOfferedToMergeBot = Effect.gen(function* () {
+    const workflowId = yield* insertEnabledWorkflow(
+      buildSignalInputWorkflow("Merge bot", ["offer"]),
+    );
+    return { workflowId, signal: yield* raiseAndRead(OFFER) };
+  });
+
+  it("takes the signal's Hand to an agent answer for the workflow, as the user", async () => {
+    const { handed, workflowId, entries } = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const { workflowId, signal } = yield* raiseOfferedToMergeBot;
+        const handed = yield* as(USER)(signals.handOff({ id: signal.id, workflowId }));
+        return { handed, workflowId, entries: yield* readEventsOfKind("signal.decided") };
+      }),
+    );
+
+    const actionId = `hand-to-${workflowId}`;
+    expect(handed.resolution).toMatchObject({
+      kind: "decided",
+      actionId,
+      outcome: "Handed to Merge bot",
+      actor: "user",
+    });
+    expect(entries.map((entry) => [entry.actor, entry.payload])).toEqual([
+      ["user", { signalId: handed.id, actionId, op: "signal.handOff" }],
+    ]);
+  });
+
+  it("refuses a session, even one that holds signal.write, and leaves the signal open", async () => {
+    const { error, still } = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const { workflowId, signal } = yield* raiseOfferedToMergeBot;
+        return {
+          error: yield* Effect.flip(as(TRIAGE)(signals.handOff({ id: signal.id, workflowId }))),
+          still: yield* as(USER)(signals.read(signal.id)),
+        };
+      }),
+    );
+
+    expect(error).toMatchObject({ error: { code: "forbidden" } });
+    expect(still.status).toBe("open");
+  });
+
+  it("fails with NotFound for a workflow the signal does not offer, naming the ones it offers", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const { workflowId, signal } = yield* raiseOfferedToMergeBot;
+        const other = yield* insertEnabledWorkflow(buildSignalInputWorkflow("Mail bot", ["fyi"]));
+        const unsure = yield* raiseAndRead({ ...OFFER, kind: "unsure" });
+        return {
+          workflowId,
+          other,
+          notOffered: yield* Effect.flip(
+            as(USER)(signals.handOff({ id: signal.id, workflowId: other })),
+          ),
+          offersNone: yield* Effect.flip(as(USER)(signals.handOff({ id: unsure.id, workflowId }))),
+        };
+      }),
+    );
+
+    expect(result.notOffered).toMatchObject({
+      error: {
+        code: "not_found",
+        message: expect.stringContaining(`not offered to the workflow ${result.other}`) as unknown,
+      },
+    });
+    expect(result.notOffered).toMatchObject({
+      error: { message: expect.stringContaining(result.workflowId) as unknown },
+    });
+    expect(result.offersNone).toMatchObject({
+      error: {
+        code: "not_found",
+        message: expect.stringContaining("cannot be handed to any workflow") as unknown,
+      },
+    });
+  });
+
+  it("fails with InvalidState for a signal that is already resolved", async () => {
+    const error = await fail(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const { workflowId, signal } = yield* raiseOfferedToMergeBot;
+        yield* as(USER)(signals.act({ id: signal.id, actionId: "dismiss" }));
+        return yield* as(USER)(signals.handOff({ id: signal.id, workflowId }));
+      }),
+    );
+
+    expect(error).toMatchObject({ error: { code: "invalid_state" } });
   });
 });
 

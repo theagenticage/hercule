@@ -28,11 +28,13 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Mutable } from "effect/Types";
 import {
+  atMost,
   createDecodeValidationError,
   createNotFoundError,
   createValidationError,
   DEFAULT_PAGE_LIMIT,
   Id,
+  MAX_PROVENANCE_APPEND,
   MAX_TASK_LABELS,
   TASK_SORT_FIELDS,
   TaskCreateInput,
@@ -60,6 +62,7 @@ import {
 } from "../db";
 import { AuditLog, PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
+import { CoreProvenanceInput } from "./provenance-input";
 import { taskRepository, type TaskEdit, type TaskOrder, type TaskSortField } from "./repository";
 
 /** The input of `task.query`: the filter, plus the page size, cursor and sort. */
@@ -74,10 +77,17 @@ export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
  * The input of `task.update`: the task's id and the fields to change. Decoding
  * fails when the edit sets no field. The check is the same one the request
  * schema uses, so both reject the same edits.
+ *
+ * Its provenance entries may carry a `signalId`, which a request cannot send.
+ * Every request, workflow step and bound answer is decoded with the contract's
+ * `TaskUpdateInput` before it reaches this schema, and that one refuses a
+ * `signalId`, so only the controller's own code can record a handoff.
  */
-const UpdateInput = Schema.Struct({ id: Id, ...TaskUpdateInput.fields }).check(
-  refuseEmptyTaskUpdate,
-);
+const UpdateInput = Schema.Struct({
+  id: Id,
+  ...TaskUpdateInput.fields,
+  provenance: Schema.optionalKey(atMost(CoreProvenanceInput, MAX_PROVENANCE_APPEND)),
+}).check(refuseEmptyTaskUpdate);
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 

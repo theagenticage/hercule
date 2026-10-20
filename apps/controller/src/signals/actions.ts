@@ -44,13 +44,21 @@ const CORE_ONLY_OPERATIONS: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
+ * Returns the first input of a workflow that takes signals of `kind`, or
+ * `undefined` when it has none. A Hand to an agent action fills this input
+ * with the signal's id.
+ */
+export const findSignalInput = (definition: WorkflowDefinition, kind: string) =>
+  (definition.inputs ?? []).find((declared) => declared.signal?.kinds.includes(kind));
+
+/**
  * Returns one Hand to an agent action for each workflow that has a signal
- * input accepting `kind`. Each binds `run.start` with the signal's id as the
- * first such input. A proposal gets none: a workflow input cannot accept
- * `proposal`, so work always keeps its Task.
+ * input accepting `kind`. Each binds `signal.handOff`, which fills the first
+ * such input with the signal's id. A proposal gets none: a workflow input
+ * cannot accept `proposal`, so work always keeps its Task.
  *
  * A workflow with another required input that has no default is left out.
- * The action fills only the signal input, so `run.start` would refuse its
+ * The handoff fills only the signal input, so `run.start` would refuse its
  * click.
  */
 export const buildHandToActions = (
@@ -59,9 +67,8 @@ export const buildHandToActions = (
   workflows: ReadonlyArray<{ readonly id: string; readonly definition: WorkflowDefinition }>,
 ): ReadonlyArray<BoundAction> =>
   workflows.flatMap(({ id, definition }) => {
-    const inputs = definition.inputs ?? [];
-    const input = inputs.find((declared) => declared.signal?.kinds.includes(kind));
-    const needsMore = inputs.some(
+    const input = findSignalInput(definition, kind);
+    const needsMore = (definition.inputs ?? []).some(
       (declared) => declared !== input && declared.required && declared.default === undefined,
     );
     return input === undefined || needsMore
@@ -70,10 +77,7 @@ export const buildHandToActions = (
           {
             id: `${HAND_TO_ACTION_PREFIX}${id}`,
             label: `Hand to ${definition.name}`,
-            operation: {
-              op: "run.start",
-              input: { workflowId: id, inputs: { [input.name]: signalId } },
-            },
+            operation: { op: "signal.handOff", input: { signalId, workflowId: id } },
           },
         ];
   });

@@ -26,6 +26,7 @@ import {
   type Forbidden,
   type InvalidState,
   type NotFound,
+  type RunStarted,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
@@ -112,14 +113,18 @@ export class BoundOperations extends Context.Service<
 
     /**
      * Runs one contract operation as the current actor, in the caller's
-     * transaction. Fails with the operation's own error.
+     * transaction. Returns the run the operation started (`run.start` and
+     * `signal.handOff`), or `undefined` when it started none. Fails with the
+     * operation's own error.
      *
      * Nothing it does outside the database happens before the transaction
      * commits: a frame to a runner is sent after the commit, and not at all
      * if the transaction rolls back. So the caller can resolve the record in
      * the same transaction, and both commit or neither does.
      */
-    readonly run: (operation: AnswerOperation) => Effect.Effect<void, BoundOperationError>;
+    readonly run: (
+      operation: AnswerOperation,
+    ) => Effect.Effect<RunStarted | undefined, BoundOperationError>;
 
     /**
      * Runs one checked plugin action with its Connection's credentials, and

@@ -83,6 +83,7 @@ const make = Effect.gen(function* () {
 
   return {
     start: engine.start,
+    startOnTask: engine.startOnTask,
     rerun: engine.rerun,
     startTriggeredRun: engine.startTriggeredRun,
     recordSignalMatch: engine.recordSignalMatch,

@@ -302,7 +302,7 @@ export const makeRunEngine = Effect.gen(function* () {
   // defines below, which itself calls `start` for the `run.start` action, so
   // the reference is passed as a function. A run that cannot start ends
   // through `writeRunEnding`, defined below for the same reason.
-  const { start, rerun, startTriggeredRun } = yield* makeRunStart(
+  const { start, startOnTask, rerun, startTriggeredRun } = yield* makeRunStart(
     (runId) => executeInBackground(runId),
     (runId, outcome, at) => writeRunEnding(runId, outcome, at),
   );
@@ -1076,6 +1076,9 @@ export const makeRunEngine = Effect.gen(function* () {
 
   return {
     start,
+
+    /** Starts a run linked to a Task, for a handoff (see `start.ts`). */
+    startOnTask,
 
     /** `run.rerun`: starts a new run that re-runs an ended one (see `start.ts`). */
     rerun,
