@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { THREAD_FIXTURES } from "../../app/testing";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { stubResizeObserver, THREAD_FIXTURES } from "../../app/testing";
 import { renderThreadPart } from "../thread/testing";
 import { UserMessage } from "./messages";
 
@@ -17,6 +17,56 @@ it("shows the HTML a user typed as text, not as elements", () => {
 
   expect(screen.getByText("make it <b>bold</b>")).toBeTruthy();
   expect(container.querySelector("b")).toBeNull();
+});
+
+describe("a long message", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** Renders a message whose text is `height` pixels tall, as the browser lays it out. */
+  const renderMessageOfHeight = (height: number) => {
+    const resize = stubResizeObserver();
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(height);
+    render(
+      <UserMessage
+        text="a message"
+        attachments={[]}
+        at="2026-09-29T09:14:00.000Z"
+        timezone="UTC"
+        today={Date.UTC(2026, 8, 29)}
+      />,
+    );
+    act(() => {
+      resize();
+    });
+  };
+  const text = (): HTMLElement => document.querySelector(".bubble-text")!;
+
+  it("is drawn in full, with no button, when it is 10 lines or shorter", () => {
+    renderMessageOfHeight(217);
+
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(text().style.maxHeight).toBe("");
+  });
+
+  it("is collapsed, and its button opens it in full and collapses it again", () => {
+    renderMessageOfHeight(400);
+
+    const button = screen.getByRole("button", { name: "Show full message" });
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(text().style.maxHeight).toBe("162px");
+
+    fireEvent.click(button);
+    expect(button.textContent).toBe("Show less");
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(text().style.maxHeight).toBe("");
+
+    fireEvent.click(button);
+    expect(button.textContent).toBe("Show full message");
+    expect(text().style.maxHeight).toBe("162px");
+  });
 });
 
 const THREAD = THREAD_FIXTURES.finished;

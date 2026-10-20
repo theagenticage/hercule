@@ -1106,7 +1106,12 @@ describe("the library skills on a start frame", () => {
           const [start] = await waitForStartFrames(arranged, session.id, 1);
           expect("skills" in start!).toBe(false);
           expect(await readLibrarySkills(arranged, session.id)).toEqual([]);
-          const rows = await readStreamRows(arranged.harness, session.id);
+          // The runner's first event is stored after the start answers, so
+          // the rows are read once it is there, not at once.
+          const rows = await waitUntil("stored the session's first event", async () => {
+            const read = await readStreamRows(arranged.harness, session.id);
+            return read.some((row) => row.tag === "session.started") ? read : undefined;
+          });
           expect(rows.map((row) => row.tag)).toEqual(["runtime.warning", "session.started"]);
           const runner = await get(
             arranged.harness.base,

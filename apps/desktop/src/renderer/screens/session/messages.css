@@ -42,6 +42,24 @@
   font-size: var(--t-14);
   line-height: 1.55;
 }
+/* Not in the book. A long message's text is cut and fades out over its last
+   two lines, with "Show full message" under it (`BubbleText`). The fade is a
+   mask, not a gradient laid over the text, so it works on every bubble's
+   fill: the user's, an agent's tint, in both themes. */
+.bubble-text[data-collapsed] {
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), transparent);
+}
+.bubble-toggle {
+  display: block;
+  margin: 6px 0 0 auto;
+  color: var(--muted);
+  font-size: var(--t-13);
+  transition: color var(--dur-1);
+}
+.bubble-toggle:hover {
+  color: var(--ink);
+}
 .bubble-meta {
   display: flex;
   justify-content: flex-end;
@@ -78,12 +96,21 @@
   );
 }
 
+/* Not in the book. A word too long for the line, such as a URL, breaks at the
+   edge rather than running past it. `break-word` leaves the min-content width
+   alone, so a table or a code block still scrolls sideways. */
+.msg-body,
+.bubble {
+  overflow-wrap: break-word;
+}
+
 /* A reader may copy the messages' words and code. The rest of the window,
    the faces and times included, is chrome and stays unselectable. */
 .msg-body,
 .bubble {
   user-select: text;
 }
-.msg-body .msg-meta {
+.msg-body .msg-meta,
+.bubble-toggle {
   user-select: none;
 }
