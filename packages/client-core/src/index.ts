@@ -426,6 +426,21 @@ export {
   type UrgentSignal,
 } from "./intake";
 export {
+  buildTrackingRows,
+  countToDoWithTracking,
+  countWaitingTrackingRows,
+  describeRunFailureCause,
+  describeTrackingLine,
+  groupTrackingRows,
+  isTrackingStateWaitingOnUser,
+  listRecentTrackingRows,
+  TRACKING_PEEK_ROWS,
+  type TrackingGroup,
+  type TrackingLine,
+  type TrackingRow,
+  type TrackingState,
+} from "./tracking";
+export {
   decideSidebarDragEnd,
   DEFAULT_SIDEBAR_LAYOUT,
   DEFAULT_SIDEBAR_WIDTH,
