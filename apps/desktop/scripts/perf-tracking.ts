@@ -279,6 +279,8 @@ interface Activity {
   readonly taskPushes: number;
   readonly runPushes: number;
   readonly firstMessages: number;
+  /** How many of the first messages are on the task and run topics, the two whose first message may re-read Tracking. */
+  readonly firstTaskAndRunMessages: number;
   /** The `task.queryTracking` reads' median time and time to first byte, and the largest body, from the protocol's timings. */
   readonly snapshotTiming: string;
 }
@@ -287,7 +289,7 @@ const median = (numbers: readonly number[]): number =>
   numbers.toSorted((a, b) => a - b)[Math.floor(numbers.length / 2)] ?? 0;
 
 /** Counts the reads and pushes in `recording`. */
-function summarizeActivity({ requests, pushes }: Recording): Activity {
+export function summarizeActivity({ requests, pushes }: Recording): Activity {
   const gets = requests.filter(
     ({ method, url }) => method === "GET" && TASKS_OR_RUNS_ROUTE.test(url.pathname),
   );
@@ -301,6 +303,9 @@ function summarizeActivity({ requests, pushes }: Recording): Activity {
     taskPushes: changes.filter(({ topic }) => topic === "task").length,
     runPushes: changes.filter(({ topic }) => topic === "run").length,
     firstMessages: pushes.length - changes.length,
+    firstTaskAndRunMessages: pushes.filter(
+      ({ initial, topic }) => initial && (topic === "task" || topic === "run"),
+    ).length,
     snapshotTiming:
       snapshots.length === 0
         ? ""
@@ -710,6 +715,18 @@ const formatSeries = (cost: SeriesCost): string =>
 const formatMotionCell = (cost: MotionCost): string =>
   `${formatMotion(cost)}; properties ${cost.properties.join(", ")}; animations: ${cost.kinds.join("; ")}`;
 
+/**
+ * Whether the reads of the shell's start are within the bound the spec sets:
+ * one `task.queryTracking`, and at most one more for the first message of each
+ * of the task and run topics (the other topics' first messages read nothing of
+ * Tracking's), no `run.read` and no other read of `/tasks` or `/runs`.
+ */
+export const loadWithinBound = (load: Activity): boolean =>
+  load.snapshots >= 1 &&
+  load.snapshots <= 1 + load.firstTaskAndRunMessages &&
+  load.runReads === 0 &&
+  load.otherReads === 0;
+
 /** Whether a series read Tracking once for each push on the task topic, and read no run. */
 const readsOncePerPush = (cost: SeriesCost): boolean =>
   cost.snapshots >= cost.changes && cost.snapshots <= cost.taskPushes && cost.runReads === 0;
@@ -752,10 +769,7 @@ export function reportTrackingInteractions(result: TrackingInteractions): void {
       "Reads while the shell loads",
       "one task.queryTracking, and at most one more for the first message of each of the task and run topics; no run.read",
       formatActivity(load),
-      load.snapshots >= 1 &&
-        load.snapshots <= 1 + load.firstMessages &&
-        load.runReads === 0 &&
-        load.otherReads === 0,
+      loadWithinBound(load),
     ],
     [
       "A Task created, nothing tracked",

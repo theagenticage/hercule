@@ -153,21 +153,26 @@ export function createFrameTracker(): FrameTracker {
           continue;
         }
         const key = `${socketId}:${String(message.requestId)}`;
-        if (message._tag === "Interrupt" || message._tag === "Exit")
+        if (message._tag === "Interrupt" || message._tag === "Exit") {
           topicBySubscription.delete(key);
+          subscriptionsWithMessage.delete(key);
+        }
         const topic = topicBySubscription.get(key);
         if (message._tag !== "Chunk" || topic === undefined) continue;
-        const initial = !subscriptionsWithMessage.has(key);
-        subscriptionsWithMessage.add(key);
+        // One Chunk can carry several messages, so "first" is decided for each message.
         for (const value of message.values ?? []) {
-          if (value._tag === "invalidate") pushes.push({ topic, initial });
+          if (value._tag !== "invalidate") continue;
+          pushes.push({ topic, initial: !subscriptionsWithMessage.has(key) });
+          subscriptionsWithMessage.add(key);
         }
       }
       return pushes;
     },
     forgetSocket: (socketId) => {
       for (const key of [...topicBySubscription.keys()]) {
-        if (key.startsWith(`${socketId}:`)) topicBySubscription.delete(key);
+        if (!key.startsWith(`${socketId}:`)) continue;
+        topicBySubscription.delete(key);
+        subscriptionsWithMessage.delete(key);
       }
     },
     listHeldTopics: () => [...new Set(topicBySubscription.values())].sort(),

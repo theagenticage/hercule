@@ -60,3 +60,25 @@ describe("createFrameTracker", () => {
     expect(tracker.listHeldTopics()).toEqual(["run"]);
   });
 });
+
+describe("createFrameTracker, first messages", () => {
+  it("marks only the first message of a Chunk that carries a baseline and a change", () => {
+    const tracker = createFrameTracker();
+    tracker.readFrame("socket", subscribe(1, "task"));
+    expect(tracker.readFrame("socket", chunk(1, "invalidate", "invalidate"))).toEqual([
+      { topic: "task", initial: true },
+      { topic: "task", initial: false },
+    ]);
+  });
+
+  it("marks the first message again after the subscription is interrupted and made anew", () => {
+    const tracker = createFrameTracker();
+    tracker.readFrame("socket", subscribe(1, "run"));
+    tracker.readFrame("socket", chunk(1, "invalidate"));
+    tracker.readFrame("socket", JSON.stringify({ _tag: "Interrupt", requestId: 1 }));
+    tracker.readFrame("socket", subscribe(1, "run"));
+    expect(tracker.readFrame("socket", chunk(1, "invalidate"))).toEqual([
+      { topic: "run", initial: true },
+    ]);
+  });
+});
