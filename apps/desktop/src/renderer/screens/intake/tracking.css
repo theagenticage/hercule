@@ -178,6 +178,16 @@
   flex-direction: column;
   gap: 2px;
 }
+/* In opened Tracking, the rows are one flat list with the headings, and each row
+   carries the gap under it, except a group's last, so the virtual list knows
+   each row's height without measuring it. Folded Tracking's rows sit in
+   `.tr-runs`, which gaps them. */
+.tr-rows > .tr-run-item {
+  margin-bottom: 2px;
+}
+.tr-rows > .tr-run-item--last {
+  margin-bottom: 0;
+}
 /* A row holds its Mark done beside the row's button, as a signal's row holds
    its moves, so the row stays one button. --row-fill is the row's background
    made solid, for the control to fade over. */
@@ -289,8 +299,7 @@
   pointer-events: none;
 }
 /* Over the whole list column, in front of the sheet. A handoff's lifted copy
-   flies here from the list to folded Tracking, and the sheet's copy drops here
-   when Tracking closes. It takes no pointer. */
+   flies here from the list to folded Tracking. It takes no pointer. */
 .tr-fly {
   position: absolute;
   z-index: 4;

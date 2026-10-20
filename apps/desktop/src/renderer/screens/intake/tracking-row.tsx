@@ -44,6 +44,10 @@ export interface TrackingRowFacts {
  * - Failed and Finished rows wait on the user, so their line and time are
  *   marigold and green, and a Finished row sits on a green wash.
  * - `selected` marks the open row. A press on the row calls `onOpen`.
+ * - `onScreen` is whether the row is in view, which keeps its time current.
+ * - `lastInGroup` marks the row that ends its group, which has no gap under it.
+ *   Each row of opened Tracking carries its own gap, as Intake's rows do, so the
+ *   virtual list knows each row's height without measuring it.
  * - A Finished, Failed or Stopped row has a Mark done control beside it, which
  *   shows while the pointer is on the row or the keyboard's focus is on the
  *   control, as Intake's row controls do. It calls `onMarkDone`. A Working row
@@ -55,14 +59,15 @@ export interface TrackingRowFacts {
 export const TrackingRowItem = memo(function TrackingRowItem({
   facts,
   selected,
-  rowRef,
+  onScreen,
+  lastInGroup = false,
   onOpen,
   onMarkDone,
 }: {
   readonly facts: TrackingRowFacts;
   readonly selected: boolean;
-  /** A ref for the row's element, which its caller uses to watch the row come into view. */
-  readonly rowRef?: (row: HTMLElement | null) => (() => void) | undefined;
+  readonly onScreen: boolean;
+  readonly lastInGroup?: boolean;
   readonly onOpen: (taskId: string) => void;
   readonly onMarkDone: (taskId: string) => void;
 }): JSX.Element {
@@ -74,10 +79,10 @@ export const TrackingRowItem = memo(function TrackingRowItem({
     state === "failed" ? "is-you" : "",
     state === "finished" ? "is-finished" : "",
     selected ? "is-on" : "",
+    lastInGroup ? "tr-run-item--last" : "",
   ];
   return (
     <div
-      ref={rowRef}
       className={classes.filter((each) => each !== "").join(" ")}
       data-item-key={taskId}
       data-state={state}
@@ -103,7 +108,13 @@ export const TrackingRowItem = memo(function TrackingRowItem({
             {` ${lineText}`}
           </span>
         </span>
-        <AgeLabel at={since} onScreen descriptionId={ageId} as="span" className="tr-run-end" />
+        <AgeLabel
+          at={since}
+          onScreen={onScreen}
+          descriptionId={ageId}
+          as="span"
+          className="tr-run-end"
+        />
       </button>
       {canMarkTrackingStateDone(state) && (
         <span className="ask-acts">

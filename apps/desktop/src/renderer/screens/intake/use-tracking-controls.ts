@@ -48,7 +48,8 @@ export interface TrackingControls {
   /**
    * Runs a key pressed while Tracking is opened. `key` is the key as the
    * screen read it, and `extending` is whether Shift was held. `J`/`K` and the
-   * arrows walk the rows, `E` ticks the selected row off, and Esc clears the
+   * arrows walk the rows, `E` ticks off the row that has the focus, or else the
+   * selected row, and Esc clears the
    * selection and then closes Tracking. Every other key does nothing.
    */
   readonly handleOpenedKey: (
@@ -150,10 +151,16 @@ export const useTrackingControls = ({
         event.preventDefault();
         if (!extending) moveSelection(-1);
         return;
-      case "e":
+      case "e": {
         event.preventDefault();
-        if (!extending && selectedTaskId !== null) markTaskDone(selectedTaskId);
+        // With the focus in a row, the row is the one ticked off, its Mark done
+        // control included, whatever row is selected.
+        const focusedTaskId = (event.target as HTMLElement).closest<HTMLElement>(".tr-run-item")
+          ?.dataset.itemKey;
+        const taskId = focusedTaskId ?? selectedTaskId;
+        if (!extending && taskId !== null) markTaskDone(taskId);
         return;
+      }
       case "Escape":
         event.preventDefault();
         if (selectedTaskId !== null) setSelection(null);

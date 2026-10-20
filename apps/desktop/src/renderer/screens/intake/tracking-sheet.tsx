@@ -3,9 +3,7 @@
  * §Tracking).
  */
 import {
-  useCallback,
   useEffect,
-  useLayoutEffect,
   useId,
   useImperativeHandle,
   useRef,
@@ -21,6 +19,7 @@ import { TrackingRowItem, type TrackingRowFacts } from "./tracking-row";
 import { describeWaitingOnYou, TRACKING_STATE_LOOKS } from "./tracking-states";
 import { useLineFade } from "./use-line-fade";
 import { useRowMotion } from "./use-row-motion";
+import { useVirtualLines } from "./use-virtual-lines";
 import "./tracking.css";
 
 /** The rows of Tracking that are in one state, drawn under the state's mark and word. */
@@ -29,25 +28,40 @@ export interface TrackingSheetGroup {
   readonly rows: ReadonlyArray<TrackingRowFacts>;
 }
 
-/** One drawn line of the sheet: a state's heading or one of its rows. */
+/** One line of the sheet: a state's heading, or one of its rows. */
 type SheetItem =
-  | { readonly kind: "heading"; readonly key: string; readonly state: TrackingState }
-  | { readonly kind: "row"; readonly key: string; readonly facts: TrackingRowFacts };
+  | {
+      readonly kind: "heading";
+      readonly key: string;
+      readonly state: TrackingState;
+      readonly count: number;
+    }
+  | {
+      readonly kind: "row";
+      readonly key: string;
+      readonly facts: TrackingRowFacts;
+      readonly lastInGroup: boolean;
+    };
 
-/** Returns the sheet's headings and rows as one list in the order they are drawn, which the motion moves. */
+/** Returns the sheet's headings and rows as one flat list in the order they are drawn, which the motion and the virtual list move. */
 const flattenGroups = (groups: ReadonlyArray<TrackingSheetGroup>): ReadonlyArray<SheetItem> =>
   groups.flatMap(({ state, rows }) => [
-    { kind: "heading" as const, key: `section:${state}`, state },
-    ...rows.map((facts) => ({ kind: "row" as const, key: facts.taskId, facts })),
+    { kind: "heading" as const, key: `section:${state}`, state, count: rows.length },
+    ...rows.map((facts, index) => ({
+      kind: "row" as const,
+      key: facts.taskId,
+      facts,
+      lastInGroup: index === rows.length - 1,
+    })),
   ]);
 
-/** Returns `items` in groups again: each state's heading and the rows that follow it. */
-const regroupItems = (items: ReadonlyArray<SheetItem>): ReadonlyArray<TrackingSheetGroup> =>
-  items.reduce<TrackingSheetGroup[]>((groups, item) => {
-    if (item.kind === "heading") return [...groups, { state: item.state, rows: [] }];
-    const last = groups.at(-1)!;
-    return [...groups.slice(0, -1), { ...last, rows: [...last.rows, item.facts] }];
-  }, []);
+/**
+ * Returns the height of a line in pixels, as the stylesheet fixes it: a
+ * heading is 40px, and a row is 46px with the 2px gap under it, except the
+ * last row of a group, which has no gap.
+ */
+const estimateLineHeight = (item: SheetItem): number =>
+  item.kind === "heading" ? 40 : item.lastInGroup ? 46 : 48;
 
 /**
  * Renders opened Tracking, over the whole list column under the bar's
@@ -67,21 +81,24 @@ const regroupItems = (items: ReadonlyArray<SheetItem>): ReadonlyArray<TrackingSh
  * scrolling rows and sticks to the bottom of them: the toast of the last move,
  * which the list's own dock cannot show while this sheet covers the list.
  *
- * The rows move as Intake's do when they change (`useRowMotion`), with the
- * gap closing over `--dur-3`, and a row whose state changed fades its line in
- * anew. `ref` is the sheet's element.
+ * The headings and rows are one flat list, drawn through a virtual list as
+ * Intake's is: only the lines in view and a few past its edges are drawn
+ * (`useVirtualLines`). A row that changes state stays one element, which moves
+ * to its new place under another heading. React puts the focus back on a
+ * focused element it moves, as Chromium drops it at the move, so the row
+ * keeps the focus. The rows move as Intake's do when
+ * they change (`useRowMotion`), with the gap closing over `--dur-3`, and a row
+ * whose state changed fades its line in anew. `ref` is the sheet's element.
+ *
+ * With `leaving` set, the sheet is on its way out, as it drops back over the
+ * list: it takes no pointer and no focus, so the list under it is the one the
+ * user works with.
  *
  * The sheet takes the focus when it mounts, so Intake's keys keep working
  * after the press or the key that opened it. The keys move the selection, and
  * the focus follows it to the selected row while the focus is in the sheet.
  * When the row that had the focus leaves, the focus goes to the sheet instead
  * of to the page, where no key would reach Intake.
- *
- * `onRowsSeen` is called with the ids of the Tasks whose rows have come into
- * view, which one observer watches, each row from the moment it is drawn.
- * A row drawn again in another place, such as under another state's heading,
- * keeps the focus it had. The caller reads
- * for a row only once it is seen.
  *
  * The component takes the place of the list column, so the column must be its
  * nearest positioned ancestor.
@@ -94,8 +111,8 @@ export function TrackingSheet({
   signalCount,
   signalMarks,
   dock,
+  leaving = false,
   ref,
-  onRowsSeen,
   onClose,
   onOpenRow,
   onMarkDone,
@@ -107,8 +124,8 @@ export function TrackingSheet({
   readonly signalCount: number;
   readonly signalMarks: ReactNode;
   readonly dock?: ReactNode;
+  readonly leaving?: boolean;
   readonly ref?: Ref<HTMLElement>;
-  readonly onRowsSeen?: (taskIds: ReadonlyArray<string>) => void;
   readonly onClose: () => void;
   readonly onOpenRow: (taskId: string) => void;
   readonly onMarkDone: (taskId: string) => void;
@@ -121,71 +138,32 @@ export function TrackingSheet({
   const drawn = useRowMotion(flattenGroups(groups), "sheet", scrollRef, ghostsRef, {
     slide: "--dur-3",
   });
-  const drawnGroups = regroupItems(drawn);
+  const { lines, totalSize, scrollToSelected } = useVirtualLines(
+    drawn,
+    scrollRef,
+    estimateLineHeight,
+    selectedTaskId,
+  );
   useLineFade(
-    drawnGroups.flatMap((group) => group.rows),
+    drawn.flatMap((item) => (item.kind === "row" ? [item.facts] : [])),
     scrollRef,
   );
   // The rows drawn, which lag `groups` while a row that leaves is still drawn.
-  const rowCount = drawnGroups.reduce((count, group) => count + group.rows.length, 0);
+  const rowCount = drawn.filter((item) => item.kind === "row").length;
 
   useEffect(() => {
     sheetRef.current!.focus({ preventScroll: true });
   }, []);
-  // One observer watches the rows. Each row's element is watched from the
-  // moment it is drawn to the moment it goes, whatever else changes, so a row
-  // that is drawn again under another heading, as a row that changes state
-  // is, is watched in its new place.
-  const seenObserver = useRef<IntersectionObserver | null>(null);
-  const reportSeen = useRef(onRowsSeen);
-  useLayoutEffect(() => {
-    reportSeen.current = onRowsSeen;
-  });
-  // The row that had the focus when its element went, to be focused again in its new element.
-  const refocusTaskId = useRef<string | null>(null);
-  const attachRow = useCallback((row: HTMLElement | null) => {
-    if (row === null) return undefined;
-    if (reportSeen.current !== undefined) {
-      seenObserver.current ??= new IntersectionObserver((entries) => {
-        const seen = entries
-          .filter((entry) => entry.isIntersecting)
-          .map((entry) => (entry.target as HTMLElement).dataset.itemKey!);
-        if (seen.length > 0) reportSeen.current?.(seen);
-      });
-      seenObserver.current.observe(row);
-    }
-    return () => {
-      seenObserver.current?.unobserve(row);
-      // The element goes while it holds the focus, and the focus would drop to the page's body.
-      if (row.contains(document.activeElement)) refocusTaskId.current = row.dataset.itemKey!;
-    };
-  }, []);
-  useEffect(
-    () => () => {
-      seenObserver.current?.disconnect();
-      seenObserver.current = null;
-    },
-    [],
-  );
-  // After the rows are drawn: the row that lost the focus to a new element of its own gets it back.
-  useLayoutEffect(() => {
-    const taskId = refocusTaskId.current;
-    if (taskId === null) return;
-    refocusTaskId.current = null;
-    if (document.activeElement !== document.body) return;
-    const sheet = sheetRef.current!;
-    const row = sheet.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(taskId)}"]`);
-    (row ?? sheet).focus({ preventScroll: true });
-  });
   useEffect(() => {
     if (selectedTaskId === null) return;
+    scrollToSelected();
     const sheet = sheetRef.current!;
+    // The virtual list always draws the selected row, so it is there to take the focus.
     const row = sheet.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(selectedTaskId)}"]`);
     if (row === null) return;
-    row.scrollIntoView({ block: "nearest" });
     const focused = document.activeElement;
     if (focused === document.body || sheet.contains(focused)) row.focus({ preventScroll: true });
-  }, [selectedTaskId]);
+  }, [selectedTaskId, scrollToSelected]);
   useEffect(() => {
     if (document.activeElement === document.body) sheetRef.current!.focus({ preventScroll: true });
   }, [rowCount]);
@@ -203,6 +181,7 @@ export function TrackingSheet({
       className="tr-tray is-open"
       aria-labelledby={`${id}-title`}
       tabIndex={-1}
+      inert={leaving}
     >
       <header className="tr-head">
         <button
@@ -227,31 +206,31 @@ export function TrackingSheet({
               Hand a signal to an agent, and follow it here until you mark it done.
             </p>
           )}
-          {drawnGroups.map(({ state, rows }) => (
-            <section key={state} aria-labelledby={`${id}-${state}`}>
-              <h3
-                className="section-h asks-sec tr-sec"
-                id={`${id}-${state}`}
-                data-item-key={`section:${state}`}
-              >
-                <Mark state={TRACKING_STATE_LOOKS[state].mark} size={14} />
-                {TRACKING_STATE_LOOKS[state].word}
-                <span className="count">{rows.length}</span>
-              </h3>
-              <div className="tr-runs">
-                {rows.map((facts) => (
-                  <TrackingRowItem
-                    key={facts.taskId}
-                    facts={facts}
-                    selected={facts.taskId === selectedTaskId}
-                    rowRef={attachRow}
-                    onOpen={onOpenRow}
-                    onMarkDone={onMarkDone}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
+          <div className="tr-rows" style={{ minHeight: totalSize }}>
+            {lines.map((line) => {
+              if (line.kind === "gap") {
+                return <div key={line.key} style={{ height: line.height }} />;
+              }
+              const { item, onScreen } = line;
+              return item.kind === "heading" ? (
+                <h3 key={item.key} className="section-h asks-sec tr-sec" data-item-key={item.key}>
+                  <Mark state={TRACKING_STATE_LOOKS[item.state].mark} size={14} />
+                  {TRACKING_STATE_LOOKS[item.state].word}
+                  <span className="count">{item.count}</span>
+                </h3>
+              ) : (
+                <TrackingRowItem
+                  key={item.key}
+                  facts={item.facts}
+                  selected={item.key === selectedTaskId}
+                  onScreen={onScreen}
+                  lastInGroup={item.lastInGroup}
+                  onOpen={onOpenRow}
+                  onMarkDone={onMarkDone}
+                />
+              );
+            })}
+          </div>
           {dock}
         </div>
         {/* The copies of rows that leave fade here, over the rows. */}

@@ -110,6 +110,7 @@ export function TrackingFold({
             key={facts.taskId}
             facts={facts}
             selected={facts.taskId === selectedTaskId}
+            onScreen
             onOpen={onOpenRow}
             onMarkDone={onMarkDone}
           />

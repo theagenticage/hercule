@@ -422,6 +422,14 @@ export function IntakeScreen({
     // Shift only extends the checks with the keys that move the selection.
     if (extending && !["j", "k", "ArrowDown", "ArrowUp"].includes(key)) return;
     const target = event.target as HTMLElement;
+    // A key pressed with the focus anywhere in a row of folded Tracking, its
+    // Mark done control included, belongs to that row's Task, never to the
+    // selected signal.
+    const focusedTaskId = target.closest<HTMLElement>(".tr-run-item")?.dataset.itemKey;
+    if (focusedTaskId !== undefined && ["x", "h", "u"].includes(key)) {
+      event.preventDefault();
+      return;
+    }
     switch (key) {
       case "j":
       case "ArrowDown":
@@ -445,7 +453,6 @@ export function IntakeScreen({
       case "e": {
         event.preventDefault();
         // On a row of folded Tracking, `E` marks that row done, not the selected signal.
-        const focusedTaskId = target.closest<HTMLElement>("[data-task-id]")?.dataset.taskId;
         if (focusedTaskId !== undefined) tracking.markTaskDone(focusedTaskId);
         else runKeyMove("done");
         return;

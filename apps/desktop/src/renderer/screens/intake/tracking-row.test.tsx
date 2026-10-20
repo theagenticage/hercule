@@ -27,6 +27,7 @@ const renderRow = (state: TrackingState) => {
     <TrackingRowItem
       facts={buildFacts(state)}
       selected={false}
+      onScreen
       onOpen={onOpen}
       onMarkDone={onMarkDone}
     />,

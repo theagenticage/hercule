@@ -258,8 +258,8 @@ const openIntake = async (
 
 /** Returns the Signals list, the region the signal rows and folded Tracking sit in. */
 const getList = () => screen.getByRole("region", { name: "Signals" });
-// Not the copy of the sheet that drops while Tracking closes, which sits in the motion layer.
-const getTray = () => document.querySelector<HTMLElement>(".asks-list > .tr-tray")!;
+// Not the sheet that is still dropping while Tracking closes: it is inert.
+const getTray = () => document.querySelector<HTMLElement>(".asks-list > .tr-tray:not([inert])")!;
 const isOpen = () => getTray().classList.contains("is-open");
 const getRowButtons = () => [...getTray().querySelectorAll<HTMLElement>("[data-task-id]")];
 const getRowButton = (task: Task) =>
@@ -297,6 +297,57 @@ const findToast = () =>
     return toast!;
   });
 
+/**
+ * Stands in for a Web Animation, which jsdom lacks: it never ends by itself,
+ * and a test ends it with `finish`. It records what the code asks of it.
+ */
+class FakeAnimation {
+  playbackRate = 1;
+  cancelled = false;
+  reversed = 0;
+  readonly finished: Promise<void>;
+  private end: { resolve: () => void; reject: (reason: unknown) => void } | null = null;
+
+  readonly target: Element;
+
+  constructor(target: Element) {
+    this.target = target;
+    this.finished = new Promise((resolve, reject) => {
+      this.end = { resolve, reject };
+    });
+    // A test that never ends the animation leaves this promise pending, and a cancelled one rejects.
+    this.finished.catch(() => {});
+  }
+
+  reverse(): void {
+    this.playbackRate = -this.playbackRate;
+    this.reversed += 1;
+  }
+
+  cancel(): void {
+    this.cancelled = true;
+    this.end?.reject(new DOMException("Cancelled", "AbortError"));
+  }
+
+  finish(): void {
+    this.end?.resolve();
+  }
+}
+
+/** Ends `animation`, and lets what waits on it run. */
+const finishAnimation = (animation: FakeAnimation) =>
+  act(async () => {
+    await Promise.resolve();
+    animation.finish();
+  });
+
+/** The animations the code under test started, in order. */
+const animations: FakeAnimation[] = [];
+
+/** Returns the animation that moves the sheet itself, the last one started on it. */
+const findSheetAnimation = (): FakeAnimation | undefined =>
+  animations.findLast((animation) => animation.target.matches(".tr-tray.is-open"));
+
 describe("folded Tracking", () => {
   it("lies under the list with its count, how many wait on the user, and the two rows that changed last", async () => {
     await openIntake();
@@ -310,67 +361,10 @@ describe("folded Tracking", () => {
     expect(tray.textContent).toContain("Show all");
   });
 
-  it("says what the failed row failed on, from one read of its run", async () => {
+  it("says only that the failed row failed, and reads no run for its reason", async () => {
     const { calls } = await openIntake("/intake?tracking=true");
-    await waitFor(() => {
-      expect(getRowButton(FAILED_TASK).textContent).toContain(
-        "Implement failed · permission denied on ops-db",
-      );
-    });
-    expect(calls.filter((call) => call.path === `/api/v1/runs/${FAILED_RUN.id}`)).toHaveLength(1);
-  });
-
-  it("reads the reason of a Failed row of opened Tracking only once the row has been in view", async () => {
-    // A row is in view only when a test says so, as a scroll would.
-    const watched = new Map<Element, IntersectionObserverCallback>();
-    vi.stubGlobal(
-      "IntersectionObserver",
-      class {
-        readonly callback: IntersectionObserverCallback;
-        constructor(callback: IntersectionObserverCallback) {
-          this.callback = callback;
-        }
-        observe(element: Element): void {
-          watched.set(element, this.callback);
-        }
-        unobserve(element: Element): void {
-          watched.delete(element);
-        }
-        disconnect(): void {
-          watched.clear();
-        }
-      },
-    );
-    const { calls, live } = await openIntake("/intake?tracking=true");
-    await live.waitForFirstPushes();
-    const failedReads = () => calls.filter((call) => call.path === `/api/v1/runs/${FAILED_RUN.id}`);
     expect(getRowButton(FAILED_TASK).textContent).toContain("Implement failed");
     expect(getRowButton(FAILED_TASK).textContent).not.toContain("permission denied");
-    expect(failedReads()).toHaveLength(0);
-
-    const item = getRowButton(FAILED_TASK).closest(".tr-run-item")!;
-    act(() => {
-      watched.get(item)!(
-        [{ target: item, isIntersecting: true } as IntersectionObserverEntry],
-        {} as IntersectionObserver,
-      );
-    });
-    await waitFor(() => {
-      expect(getRowButton(FAILED_TASK).textContent).toContain(
-        "Implement failed · permission denied on ops-db",
-      );
-    });
-    expect(failedReads()).toHaveLength(1);
-  });
-
-  it("reads no run for rows that did not fail", async () => {
-    const { calls } = await openIntake("/intake?tracking=true", {
-      extra: storeTracking([
-        [FINISHED_TASK, "completed"],
-        [WORKING_TASK, "running"],
-      ]),
-    });
-    expect(getRowButtons()).toHaveLength(2);
     expect(calls.filter((call) => /^\/api\/v1\/runs\/[^/]+$/.test(call.path))).toHaveLength(0);
   });
 
@@ -438,6 +432,30 @@ describe("opened Tracking", () => {
     expect(isOpen()).toBe(true);
     expect(getTray().textContent).toContain("Signals2");
     expect(getTray().textContent).toContain("Back to Intake");
+  });
+
+  it("draws a bounded number of rows for 200 Tracked Tasks, and the selected row wherever it is", async () => {
+    const tasks = Array.from({ length: 200 }, (_, index) =>
+      buildTask(
+        `01a06d02-7b00-7000-8000-${String(index + 100).padStart(12, "0")}`,
+        `Task ${String(index)}`,
+        index,
+      ),
+    );
+    await openIntake("/intake?tracking=true", {
+      extra: storeTracking(tasks.map((task) => [task, "completed"] as const)),
+    });
+    expect(getRowButtons().length).toBeGreaterThan(0);
+    expect(getRowButtons().length).toBeLessThan(60);
+    expect(getTray().querySelectorAll("*").length).toBeLessThan(2000);
+
+    // K from nothing selects the last row, which is far out of view and is drawn.
+    await userEvent.keyboard("k");
+    expect(readSelected()).toHaveLength(1);
+    expect(getRowButtons().length).toBeLessThan(60);
+    expect(document.activeElement).toBe(
+      getRowButtons().find((row) => row.getAttribute("aria-current") === "true"),
+    );
   });
 
   it("opens only on To do, and T does nothing on Later", async () => {
@@ -526,19 +544,6 @@ describe("opened Tracking over the list", () => {
 });
 
 describe("a row that moves to another state's heading", () => {
-  /** The failed run of the Working Task, as `run.read` returns it, with its own reason. */
-  const MOVED_RUN = {
-    ...FAILED_RUN,
-    id: getRunId(WORKING_TASK),
-    taskId: WORKING_TASK.id,
-    steps: [
-      {
-        ...FAILED_RUN.steps[0]!,
-        error: { code: "full", message: "disk full on ops-db" },
-      },
-    ],
-  } as Run;
-
   /** Opens opened Tracking with a Failed and a Working row, and returns how to fail the Working one. */
   const openWithMovableRow = async () => {
     let status: RunSummary["status"] = "running";
@@ -551,7 +556,6 @@ describe("a row that moves to another state's heading", () => {
             items: [buildRunSummary(FAILED_TASK, "failed"), buildRunSummary(WORKING_TASK, status)],
           },
         }),
-        [`GET /api/v1/runs/${MOVED_RUN.id}`]: { body: MOVED_RUN },
       },
     });
     await opened.live.waitForFirstPushes();
@@ -569,7 +573,7 @@ describe("a row that moves to another state's heading", () => {
     };
   };
 
-  it("keeps the focus on the row, so the keys still reach Intake", async () => {
+  it("keeps its element and the focus, so the keys still reach Intake", async () => {
     const { failWorkingRow } = await openWithMovableRow();
     await userEvent.keyboard("jj");
     expect(readSelected()).toEqual([WORKING_TASK.id]);
@@ -578,62 +582,12 @@ describe("a row that moves to another state's heading", () => {
 
     await failWorkingRow();
 
-    // The row is drawn again under the Failed heading, as another element.
+    // One flat list keeps the row's element, which moves under the Failed heading.
     const after = getRowButton(WORKING_TASK);
-    expect(after).not.toBe(before);
+    expect(after).toBe(before);
     expect(document.activeElement).toBe(after);
     await userEvent.keyboard("k");
     expect(readSelected()).toEqual([FAILED_TASK.id]);
-  });
-
-  it("reads its reason once the new element comes into view, not before", async () => {
-    // A row is in view only when a test says so, as a scroll would.
-    const watched = new Map<Element, IntersectionObserverCallback>();
-    vi.stubGlobal(
-      "IntersectionObserver",
-      class {
-        readonly callback: IntersectionObserverCallback;
-        constructor(callback: IntersectionObserverCallback) {
-          this.callback = callback;
-        }
-        observe(element: Element): void {
-          watched.set(element, this.callback);
-        }
-        unobserve(element: Element): void {
-          watched.delete(element);
-        }
-        disconnect(): void {
-          watched.clear();
-        }
-      },
-    );
-    const { calls, failWorkingRow } = await openWithMovableRow();
-    const reasonReads = () => calls.filter((call) => call.path === `/api/v1/runs/${MOVED_RUN.id}`);
-    const showRow = (task: Task) => {
-      const item = getRowButton(task).closest(".tr-run-item")!;
-      expect(watched.has(item)).toBe(true);
-      act(() => {
-        watched.get(item)!(
-          [{ target: item, isIntersecting: true } as IntersectionObserverEntry],
-          {} as IntersectionObserver,
-        );
-      });
-    };
-    const oldItem = getRowButton(WORKING_TASK).closest(".tr-run-item")!;
-
-    await failWorkingRow();
-    const newItem = getRowButton(WORKING_TASK).closest(".tr-run-item")!;
-    expect(newItem).not.toBe(oldItem);
-    expect(watched.has(oldItem)).toBe(false);
-    expect(reasonReads()).toHaveLength(0);
-
-    showRow(WORKING_TASK);
-    await waitFor(() => {
-      expect(getRowButton(WORKING_TASK).textContent).toContain(
-        "Implement failed · disk full on ops-db",
-      );
-    });
-    expect(reasonReads()).toHaveLength(1);
   });
 });
 
@@ -802,6 +756,74 @@ describe("marking a row done", () => {
     expect(findMarkDone(calls)[0]!.path).toBe(`/api/v1/tasks/${row!.dataset.taskId}`);
   });
 
+  /** A signal that offers Done, which E on a signal would mark done. */
+  const SIGNAL_WITH_DONE: Signal = {
+    ...FIRST_SIGNAL,
+    actions: [
+      {
+        id: "done",
+        label: "Done",
+        operation: null,
+        describeLine: [{ kind: "text", text: "Marks it done" }],
+      },
+    ],
+  };
+
+  it("marks the row of a folded Mark done control done with E, and moves no signal", async () => {
+    const { calls } = await openIntake(`/intake?signal=${FIRST_SIGNAL.id}`, {
+      signals: [SIGNAL_WITH_DONE, SECOND_SIGNAL],
+      extra: {
+        ...storeTracking(),
+        "POST /api/v1/signals/mark-done": { body: { done: [FIRST_SIGNAL.id], skipped: [] } },
+      },
+    });
+    const control = within(
+      getRowButton(STOPPED_TASK).closest<HTMLElement>(".tr-run-item")!,
+    ).getByRole("button", { name: "Mark done" });
+    control.focus();
+    await userEvent.keyboard("e");
+    await waitFor(() => {
+      expect(findMarkDone(calls).map((call) => call.path)).toEqual([
+        `/api/v1/tasks/${STOPPED_TASK.id}`,
+      ]);
+    });
+    expect(calls.some((call) => call.path === "/api/v1/signals/mark-done")).toBe(false);
+  });
+
+  it("moves no signal with X, H or U while the focus is on a row of folded Tracking", async () => {
+    const { calls } = await openIntake(`/intake?signal=${FIRST_SIGNAL.id}`, {
+      signals: [SIGNAL_WITH_DONE, SECOND_SIGNAL],
+    });
+    const control = within(
+      getRowButton(STOPPED_TASK).closest<HTMLElement>(".tr-run-item")!,
+    ).getByRole("button", { name: "Mark done" });
+    control.focus();
+    await userEvent.keyboard("xhu");
+    await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
+    expect(
+      calls
+        .filter((call) => call.method !== "GET" && call.path.startsWith("/api/v1/signals"))
+        .map((call) => `${call.method} ${call.path}`),
+    ).toEqual([]);
+    expect(document.querySelector(".asks-bulk")).toBeNull();
+  });
+
+  it("marks the row with the focus done in opened Tracking, not the selected row", async () => {
+    const { calls } = await openIntake("/intake?tracking=true");
+    await userEvent.keyboard("j");
+    expect(readSelected()).toEqual([FAILED_TASK.id]);
+    const control = within(
+      getRowButton(STOPPED_TASK).closest<HTMLElement>(".tr-run-item")!,
+    ).getByRole("button", { name: "Mark done" });
+    control.focus();
+    await userEvent.keyboard("e");
+    await waitFor(() => {
+      expect(findMarkDone(calls).map((call) => call.path)).toEqual([
+        `/api/v1/tasks/${STOPPED_TASK.id}`,
+      ]);
+    });
+  });
+
   describe("with motion", () => {
     // With motion on, the list draws the row that leaves for one more render
     // before it goes, which jsdom shows only when the durations are not 0.
@@ -809,8 +831,13 @@ describe("marking a row done", () => {
       document.documentElement.style.setProperty("--dur-1", "120ms");
       document.documentElement.style.setProperty("--dur-2", "200ms");
       document.documentElement.style.setProperty("--dur-3", "320ms");
+      animations.length = 0;
       Object.defineProperty(Element.prototype, "animate", {
-        value: () => ({ finished: new Promise(() => {}), cancel: () => {} }),
+        value: function (this: Element) {
+          const animation = new FakeAnimation(this);
+          animations.push(animation);
+          return animation;
+        },
         configurable: true,
       });
     });
@@ -848,6 +875,76 @@ describe("marking a row done", () => {
       await waitFor(() => {
         expect(isOpen()).toBe(false);
       });
+    });
+
+    /** Opens Tracking with T, from the focus on a signal's row, and returns the sheet. */
+    const openWithT = async (): Promise<HTMLElement> => {
+      await userEvent.keyboard("t");
+      return document.querySelector<HTMLElement>(".asks-list > .tr-tray.is-open:not([inert])")!;
+    };
+
+    it("drops the sheet itself, inert, while the list and folded Tracking are in use, and removes it when the drop ends", async () => {
+      await openIntake();
+      getSignalRow(FIRST_SIGNAL).focus();
+      const sheet = await openWithT();
+      await userEvent.keyboard("t");
+
+      expect(sheet.isConnected).toBe(true);
+      expect(sheet.hasAttribute("inert")).toBe(true);
+      expect(document.querySelector(".asks-frame")!.hasAttribute("inert")).toBe(false);
+      expect(getTray().classList.contains("is-open")).toBe(false);
+      const drop = findSheetAnimation()!;
+      await finishAnimation(drop);
+      await waitFor(() => {
+        expect(sheet.isConnected).toBe(false);
+      });
+      // Nothing is kept: the drop is cancelled, and no copy of the sheet is anywhere.
+      expect(drop.cancelled).toBe(true);
+      expect(document.querySelectorAll(".tr-tray.is-open")).toHaveLength(0);
+      expect(document.querySelector(".tr-fly")!.children).toHaveLength(0);
+    });
+
+    it("turns the drop around when T opens Tracking again, and keeps the one sheet", async () => {
+      await openIntake();
+      getSignalRow(FIRST_SIGNAL).focus();
+      const sheet = await openWithT();
+      await userEvent.keyboard("t");
+      const drop = findSheetAnimation()!;
+      await userEvent.keyboard("t");
+
+      expect(drop.reversed).toBe(1);
+      expect(sheet.hasAttribute("inert")).toBe(false);
+      await finishAnimation(drop);
+      await waitFor(() => {
+        expect(drop.cancelled).toBe(true);
+      });
+      expect(sheet.isConnected).toBe(true);
+      expect(document.querySelectorAll(".tr-tray.is-open")).toHaveLength(1);
+      expect(getTray()).toBe(sheet);
+    });
+
+    it("ends in the state of the last of rapid T presses, with no sheet left over", async () => {
+      await openIntake();
+      getSignalRow(FIRST_SIGNAL).focus();
+      await userEvent.keyboard("tttt");
+      for (const animation of [...animations]) {
+        await finishAnimation(animation);
+      }
+      await waitFor(() => {
+        expect(document.querySelectorAll(".tr-tray.is-open")).toHaveLength(0);
+      });
+      expect(isOpen()).toBe(false);
+      expect(getList().contains(document.activeElement)).toBe(true);
+
+      await userEvent.keyboard("ttt");
+      for (const animation of [...animations]) {
+        await finishAnimation(animation);
+      }
+      await waitFor(() => {
+        expect(document.querySelectorAll(".tr-tray.is-open")).toHaveLength(1);
+      });
+      expect(getTray().hasAttribute("inert")).toBe(false);
+      expect(isOpen()).toBe(true);
     });
 
     it("keeps the focus in the list when the last row of folded Tracking is marked done", async () => {

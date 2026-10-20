@@ -2,8 +2,9 @@
  * Tests the words folded and opened Tracking show: the counts, how many wait
  * on the user, and the line of an empty Tracking.
  */
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { stubElementSize } from "../../app/testing";
 import { TrackingFold } from "./tracking-fold";
 import type { TrackingRowFacts } from "./tracking-row";
 import { TrackingSheet } from "./tracking-sheet";
@@ -20,6 +21,11 @@ const ROW: TrackingRowFacts = {
 };
 
 const nothing = (): void => undefined;
+
+// jsdom lays nothing out, and the sheet's virtual list draws only what fits its height.
+beforeEach(() => {
+  stubElementSize(400, 800);
+});
 
 describe("TrackingFold", () => {
   it("says what Tracking is for when nothing is handed off, and offers no way to open it", () => {

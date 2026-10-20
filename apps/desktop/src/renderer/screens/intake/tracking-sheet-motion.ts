@@ -4,18 +4,19 @@
  * - Opening: the sheet rises from where folded Tracking stood, over 240ms
  *   with a slight spring. Its head, section headings and rows cascade in on
  *   top of the rise, each over `--dur-2`, 16ms apart from 60ms.
- * - Closing: a copy of the sheet drops back to where folded Tracking stands,
- *   over 180ms, easing in. The sheet itself is gone at once, so the keys and
- *   the folded rows work from the first frame.
+ * - Closing: the sheet itself drops back to where folded Tracking stands,
+ *   over 180ms, easing in, and is removed when it ends. Folded Tracking and the
+ *   list are drawn and in use from the first frame, and the dropping sheet takes
+ *   no pointer. Opening again while it drops turns the drop around.
  *
  * Everything is `transform` and `opacity`, plays once, and plays only for
  * parts on screen. With Reduce motion, or while the window is hidden, the
  * sheet and the fold swap with no motion.
  */
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { HandoffFlights } from "./handoff-flight";
 import { readMotionDuration, readMotionEasing } from "./motion-tokens";
-import { copyElementWithoutIds, isMotionShown, isOnScreen, type RowPlace } from "./motion-helpers";
+import { isMotionShown, isOnScreen, type RowPlace } from "./motion-helpers";
 
 /** How long the sheet takes to rise, in milliseconds. */
 const RISE_DURATION = 240;
@@ -125,29 +126,30 @@ const riseSheet = (sheet: HTMLElement, foldedHeight: number): void => {
 };
 
 /**
- * Plays the drop of `sheet`, the sheet that has just left: a copy of it
- * drops in `layer`, over the column, until its head stands at the top of
- * `fold`, folded Tracking. Returns the drop, so a new opening can end it.
+ * Plays the drop of `sheet`, which is still drawn over the column: it moves
+ * down until its head stands at the top of `fold`, folded Tracking. The sheet
+ * stays where it ended until it is removed.
  */
-const dropSheet = (sheet: HTMLElement, layer: HTMLElement, fold: HTMLElement): Animation => {
-  const copy = copyElementWithoutIds(sheet);
-  copy.setAttribute("aria-hidden", "true");
-  copy.inert = true;
-  layer.append(copy);
-  const distance = copy.getBoundingClientRect().height - fold.getBoundingClientRect().height;
-  const drop = copy.animate(
-    { transform: ["none", `translateY(${String(distance)}px)`] },
+const dropSheet = (sheet: HTMLElement, fold: HTMLElement): Animation =>
+  sheet.animate(
+    {
+      transform: [
+        "none",
+        `translateY(${String(sheet.getBoundingClientRect().height - fold.getBoundingClientRect().height)}px)`,
+      ],
+    },
     { duration: DROP_DURATION, easing: DROP_EASING, fill: "forwards" },
   );
-  const removeCopy = (): void => {
-    copy.remove();
-  };
-  drop.finished.then(removeCopy, removeCopy);
-  return drop;
-};
 
-/** The refs that hand Tracking's elements to the motion. */
+/** The refs that hand Tracking's elements to the motion, and whether the sheet is still to be drawn. */
 export interface TrackingSheetMotion {
+  /**
+   * Whether the sheet is drawn: while Tracking is open, and while the sheet
+   * drops after it closed.
+   */
+  readonly sheetDrawn: boolean;
+  /** Whether the drawn sheet is on its way out, which is the drop. */
+  readonly sheetLeaving: boolean;
   /**
    * A ref for folded Tracking's element. It also tells `flights` where folded
    * Tracking is while it is drawn.
@@ -155,7 +157,7 @@ export interface TrackingSheetMotion {
   readonly setFoldElement: (fold: HTMLElement | null) => (() => void) | undefined;
   /** A ref for the sheet's element. */
   readonly setSheetElement: (sheet: HTMLElement | null) => void;
-  /** A ref for the layer over the list column, which the drop and the flights move in. */
+  /** A ref for the layer over the list column, which the flights move in. */
   readonly setLayerElement: (layer: HTMLElement | null) => void;
 }
 
@@ -164,23 +166,29 @@ export interface TrackingSheetMotion {
  * false, as this module describes. Nothing plays when Tracking is drawn
  * already open, such as on opening the page, or after a view change.
  *
- * The drop plays in `flights`' layer over the list column. The caller puts
- * `setFoldElement` and `setSheetElement` on the two elements.
- *
- * The rise needs the height folded Tracking had, which is gone once the sheet
- * is drawn, so `setFoldElement` records it as the fold is removed. The drop needs
- * the sheet, which React has removed by then, so `setSheetElement` keeps the last
- * one. A removed element still holds its rows, and a copy of it looks the
- * same as the sheet did.
+ * Closing keeps the sheet drawn (`sheetDrawn`) until its drop ends, and the
+ * caller draws folded Tracking at the same time. The rise needs the height
+ * folded Tracking had, which is gone once the sheet is drawn, so
+ * `setFoldElement` records it as the fold is removed. The only animation the
+ * hook keeps is the drop that is running, and it lets go of it when the drop
+ * ends, is turned around, or the component goes.
  */
 export const useTrackingSheetMotion = (
   open: boolean,
   flights: HandoffFlights,
 ): TrackingSheetMotion => {
   const foldedHeight = useRef(0);
-  const lastSheet = useRef<HTMLElement | null>(null);
+  const sheet = useRef<HTMLElement | null>(null);
   const drop = useRef<Animation | null>(null);
   const wasOpen = useRef(open);
+  // Whether the sheet is dropping. It is set while drawing, as `open` turns
+  // false, so that the sheet is never removed for a frame before its drop starts.
+  const [previouslyOpen, setPreviouslyOpen] = useState(open);
+  const [dropping, setDropping] = useState(false);
+  if (open !== previouslyOpen) {
+    setPreviouslyOpen(open);
+    setDropping(!open);
+  }
 
   const setFoldElement = useCallback(
     (fold: HTMLElement | null) => {
@@ -194,24 +202,67 @@ export const useTrackingSheetMotion = (
     },
     [flights],
   );
-  const setSheetElement = useCallback((sheet: HTMLElement | null) => {
-    if (sheet !== null) lastSheet.current = sheet;
+  const setSheetElement = useCallback((element: HTMLElement | null) => {
+    sheet.current = element;
   }, []);
-  const setLayerElement = flights.setLayer;
 
+  // Opening: turns a drop that is still running around, or lifts a sheet that
+  // was just drawn from where folded Tracking stood.
   useLayoutEffect(() => {
     if (open === wasOpen.current) return;
     wasOpen.current = open;
-    if (!isMotionShown()) return;
-    if (open) {
-      drop.current?.cancel();
-      // Without a folded Tracking just before, the sheet did not come from it.
-      if (foldedHeight.current > 0) riseSheet(lastSheet.current!, foldedHeight.current);
-      foldedHeight.current = 0;
-    } else {
-      drop.current = dropSheet(lastSheet.current!, flights.readLayer()!, flights.readFold()!);
+    if (!open) return;
+    if (drop.current !== null) drop.current.reverse();
+    else if (foldedHeight.current > 0 && isMotionShown()) {
+      riseSheet(sheet.current!, foldedHeight.current);
     }
-  }, [open, flights]);
+    foldedHeight.current = 0;
+  }, [open]);
 
-  return { setFoldElement, setSheetElement, setLayerElement };
+  // Closing: drops the sheet that is still drawn, or turns a rise or a
+  // reversed drop around. With no motion, the sheet goes at once.
+  useLayoutEffect(() => {
+    if (!dropping) return;
+    const element = sheet.current;
+    const fold = flights.readFold();
+    if (drop.current !== null) {
+      drop.current.reverse();
+      return;
+    }
+    if (element === null || fold === null || !isMotionShown()) {
+      // With no motion to play, the sheet goes before the browser paints.
+      setDropping(false);
+      return;
+    }
+    const animation = dropSheet(element, fold);
+    drop.current = animation;
+    animation.finished.then(
+      () => {
+        // The drop ended going down, or a reopening turned it around and it ended going up.
+        const wentDown = animation.playbackRate > 0;
+        if (drop.current === animation) drop.current = null;
+        animation.cancel();
+        if (wentDown) setDropping(false);
+      },
+      // A cancelled drop, as the component goes, has nothing left to do.
+      () => {},
+    );
+  }, [dropping, flights]);
+
+  // The drop that is running stops with the component.
+  useEffect(
+    () => () => {
+      drop.current?.cancel();
+      drop.current = null;
+    },
+    [],
+  );
+
+  return {
+    sheetDrawn: open || dropping,
+    sheetLeaving: !open && dropping,
+    setFoldElement,
+    setSheetElement,
+    setLayerElement: flights.setLayer,
+  };
 };
