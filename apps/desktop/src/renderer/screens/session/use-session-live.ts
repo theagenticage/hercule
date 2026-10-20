@@ -26,8 +26,9 @@
  * stored row is wasted on a page nobody sees (spec 17, rule 3). When the
  * window is shown, the rows kept aside go into the cache in one write, so the
  * page renders once however many rows arrived. Rows kept aside are dropped if
- * something else writes the cache meanwhile, such as the read after a stream
- * `reset`, so that read wins as it does in a visible window.
+ * something else writes the cache meanwhile, such as a read another component
+ * starts, so that read wins as it does in a visible window. A stream `reset`
+ * drops them as well.
  *
  * The stream stays subscribed rather than being dropped like the tap, because
  * a new subscription replays what it missed: the controller sends the first
@@ -177,8 +178,8 @@ export interface SessionLiveOptions {
  * - A stream `reset` means rows may have been missed. The hook stops
  *   following the stream, skips the open items (their tails are cleared), and
  *   reads the rows again, which holds the stream back as described above.
- *   Deliveries already on their way are ignored. The read replaces the cached
- *   rows, which drops the rows kept aside.
+ *   Deliveries already on their way are ignored. The rows kept aside are
+ *   dropped at once, because they cannot be trusted after a reset.
  * - A `gone` on either topic ends that subscription: the session no longer
  *   exists. A `gone` on the stream also calls `onGone`, and is final: the
  *   stream is not subscribed again, even when the rows query fetches again.
@@ -354,6 +355,9 @@ export const useSessionLive = ({
             // "all" starts the read even when no component observes the rows, so
             // the stream cannot stay stopped.
             stop();
+            // Cache identity cannot prove the rows kept aside valid after a reset:
+            // a read that returns equal rows keeps the same cached array.
+            hiddenRowsRef.current = null;
             skipOpenItems();
             void queryClient.invalidateQueries({ queryKey: rowsKey, refetchType: "all" });
           } else if (delivery.kind === "rows") {

@@ -723,6 +723,30 @@ describe("useSessionLive", () => {
     expect(readCachedRows(queryClient)).toEqual([...THREAD.transcript, started]);
   });
 
+  it("drops the rows kept aside on a reset, even when the read returns the rows the cache already holds", async () => {
+    const { fake, queryClient } = mountHook();
+    const [removed] = buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED);
+    const readWriteCount = countCacheWrites(queryClient);
+
+    setVisibility("hidden");
+    fake.pushRows([removed!]);
+    // The controller's log was replaced by one that ends where the cache does,
+    // so the read returns equal rows and Query keeps the cached array.
+    fake.deliver(STREAM_TOPIC, { reset: true });
+    await settle();
+    // The read is the one write.
+    expect(readWriteCount()).toBe(1);
+    expect(fake.readSubscriptions()).toContainEqual({
+      topic: STREAM_TOPIC,
+      cursor: String(THREAD.transcript.at(-1)!.position),
+    });
+
+    setVisibility("visible");
+    await settle();
+    expect(readCachedRows(queryClient)).toEqual(THREAD.transcript);
+    expect(readWriteCount()).toBe(1);
+  });
+
   it("skips an item that started while the window was hidden once it is shown", async () => {
     const { fake, findOpenParagraph } = mountHook();
 
