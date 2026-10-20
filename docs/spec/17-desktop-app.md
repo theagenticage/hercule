@@ -1120,6 +1120,9 @@ The plan for slice 24, measured by it and recorded in [Measured](#measured):
 ### The count and attention
 
 - **The To do count** is every open signal on To do, across every tab, `fyi` and the triage workflow's rows included. A snoozed signal never counts, until its snooze runs out. Example: 1 Now, 4 from GitHub and 3 from triage show as 8. A count that left rows out would make inbox zero untrue.
+- *(Amended 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* **Tracking's waiting rows count too.** The To do count is the open signals plus the Tracking rows that wait on the user ([Tracking](#tracking)). In this slice those are the Finished and Failed rows. A Working row never counts, and neither does a Stopped one: the user stopped it. Example: 7 signals and 4 waiting rows show as 11, so inbox zero stays true while a result waits for its tick.
+  - They count in the global To do count and in the All tab's count, and in no plugin's tab ([Tabs](#tabs)).
+  - **The count shows on the Hercule segment on every screen, so its reads are shell data.** Tracking's two reads (below), and the `task` and `run` topics that keep them current, are the shell's, not the Intake screen's. The shell loads them with its other data and keeps them for the life of the window.
 - It shows on the Hercule segment, on Intake's row, and on Intake's tabs. It hides at 0.
 - **A new Now signal notifies** while the window is not focused ([Native behaviour](#native-behaviour)). Nothing else on Intake notifies.
 - **The dock badge, Waiting on you and the Go menu show no signals.** They stay about agents waiting on the user.
@@ -1161,6 +1164,68 @@ The bar's four views: **To do**, **Later**, **Done** and **Everything**. To do, 
   - A Now row shows its Your work line, such as "Fixing in *Fix 3-D Secure checkout*", when a thread or a Task is on it; otherwise who asks, the kind and where. "Escalates at 11:23" waits for a `when` block, which has no schema yet.
   - `unsure` shows its kind: "Unsure".
   - A row whose snooze ran out shows "Back".
+
+### Tracking
+
+*(Added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* The place in To do where the user follows the work they handed to agents, until they mark it done. It is drawn in [`docs/design/tracking/index.html`](../design/tracking/index.html); its [BRIEF](../design/tracking/BRIEF.md) lists every state, key, motion and cost, and this section is the part of it the app builds. Why it exists, and what a handoff does, are [ADR 0046](../adr/0046-handing-a-signal-off-tracks-the-work-on-a-task.md) and [`signal.handOff`](./11-public-api-and-agent-surface.md#signal). The screen never calls a row a Task. **This section covers the first slice, [#801](https://github.com/theagenticage/hercule/issues/801):** the states Failed, Working, Finished and Stopped. Needs you, the agent's face on a signal about a tracked Task, and the pane come with [#802](https://github.com/theagenticage/hercule/issues/802) and [#803](https://github.com/theagenticage/hercule/issues/803); each place for them is named below.
+
+- **What it lists:** the Tasks that have a handoff entry and are `in-progress`, read as `task.query { handedOff: true, status: ["in-progress"] }`. Ticking a row off sets its Task `done`, which takes it out of that read.
+- **Its runs:** one `run.query { taskIds }` for all those Tasks, never one read per Task. Each Task's state is worked out from its runs.
+- **Where it shows:** on the To do view only. Later, Done and Everything draw no Tracking, and `T` does nothing there. Tracking belongs to To do, not to a tab: it shows the same rows on every tab ([Tabs](#tabs)).
+
+**Either Intake or Tracking, never both.** Two lists of the same rows in one column are hard to tell apart.
+
+- **Folded,** Tracking lies over the foot of the list. Its head reads "TRACKING 7 · 4 wait on you · Show all ⌃". Under the head are the two rows that changed state last, newest first. A handoff lands there. The list keeps room under its last row for it.
+- **Opened** (a click on the head, or `T`), it covers the whole list column under the title bar's hairline.
+  - At the top: "‹ Intake", the title "Tracking 7" and "4 wait on you".
+  - Then every row, grouped by state under the state's mark.
+  - At the foot: a row that sums up the signals ("SIGNALS 7", the sources' marks, "Back to Intake"), which closes Tracking.
+- **While it is open,** `J` and `K` walk only its rows.
+- **Empty:** the head and one line: "Hand a signal to an agent, and follow it here until you mark it done."
+- **"N wait on you"** is what Tracking adds to the To do count ([The count and attention](#the-count-and-attention)).
+
+**States.** Each row is in one state, worked out from its Task's runs in one `@hercule/client-core` function with its own tests. Highest first:
+
+- **Failed:** the last run failed.
+- **Working:** a run is live. Its line names the signal triggers the run only waits on, from `RunSummary.awaitedSignalIds` (see the table below).
+- **Finished:** no run is live, and the last run completed.
+- **Stopped:** the last run was cancelled.
+
+The last run is the newest by `createdAt`, so a re-run moves its row to the state of the re-run. Needs you, the highest state, is added by [#802](https://github.com/theagenticage/hercule/issues/802).
+
+**Order:** Failed, Finished, Working, Stopped. Inside a state, the oldest handoff first. Failed and Finished lead because they wait on the user; Working and Stopped do not. Needs you goes first once #802 adds it.
+
+**The row** leads with the face of the agent that has the work (the workflow's colleague), in its state's pose, not with the source's mark. Then the title and one line under it:
+
+| State | Line |
+|---|---|
+| Failed | "*Investigate* failed · *reason*", in marigold |
+| Finished | "*Review PR* finished", in `--ok`, on a wash of `--ok-tint` at about half strength |
+| Working | "*Fix bug* · working", or "*Implement* · waiting for *the awaited signal trigger ids*" |
+| Stopped | "*Implement* · stopped" |
+
+- The workflow's name is in its colleague's hue.
+- The time on the right is how long the row has been in its state. It is bold, in marigold for Failed and in `--ok` for Finished.
+- **Finished is green, not marigold.** It waits on the user and counts, but it is good news: the work only needs a tick.
+- *reason* is the failure message of the run: a validation failure's message, the failed edge's message, or the failed step's error. When the run has none, it is the failure reason in plain words. The app reads it with `run.read` for the Failed rows on screen only, because a `RunSummary` carries the reason's code and not its text. Until the read answers, the line is "*Investigate* failed".
+- **Stopped reads "stopped", not "stopped by you".** A `RunSummary` does not say who cancelled the run, so the line cannot tell.
+- **A Working run that only waits on signal triggers** reads "waiting for *ids*", where *ids* are the awaited signal trigger ids joined with ", ", such as "waiting for checks_passed". The drawing's "waiting for checks on #1311" needs the run's plan and inputs, which a `RunSummary` does not carry.
+- **The agent's latest message is not shown in slice 1.** No field, read or push carries it, and the `session` topic does not bring it. The Working row reads "*Fix bug* · working". Showing the message needs a new field on the session, kept by the controller, and is left to a follow-up ticket.
+- **Faces on signals.** A signal about a tracked Task, such as the checks that failed on the agent's PR, will wear the agent's face, with its source's mark moved to the start of its second line. That comes with #802, because it needs the Task Your work names. The row leaves the place for it.
+
+**Tick-off.** `E`, and Mark done on hover over the row, mark a Finished, Failed or Stopped row done: `task.update { taskId, status: "done" }`. Mark done is not drawn on a Working row, and `E` does nothing there, because it would leave a run going. The row fades over `--dur-1`, then the gap closes over `--dur-3`. A failed tick-off shows its error in the toast's place, in `--fail`, and the row stays ([The foot, the toast and failures](#the-foot-the-toast-and-failures)).
+
+**Opening a row** (a click, or `↩`) opens its last run's page in Workflows (`/runs/$runId`, [The routes](#the-routes)), until the pane lands with [#803](https://github.com/theagenticage/hercule/issues/803).
+
+**Motion.** Every motion here is `transform` or `opacity` on an HTML element, plays once, only for rows on screen, and stops with Reduce motion ([Rules](#rules), rule 2). A change the user did not make waits while the pointer is on the list column, as [Intake's own changes do](#motion).
+
+- **Opening:** the sheet rises from where folded Tracking stood, in 240ms, with a slight spring (`cubic-bezier(0.3, 1.2, 0.5, 1)`). Its head, sections and rows cascade in, 16ms apart from 60ms, each over `--dur-2`.
+- **Closing:** the sheet drops back in 180ms, easing in.
+- **A handoff:** a lifted copy of the signal's row (`--shadow-2`) flies from Signals to the top of folded Tracking over `--dur-3`. The rows below it in Signals close up.
+- **A state change** (Working to Finished): the row's line fades in anew over `--dur-2`. When its place changes, the rows between slide over `--dur-3`.
+- **Marking done:** as above.
+
+**Live updates.** The `task` and `run` topics. A push names the Tasks or runs that changed, and the app reads Tracking's two reads again.
 
 ### Row controls and the bulk bar
 
@@ -1276,16 +1341,17 @@ Keys work only while focus is in the list or the pane, never while it is in a te
 
 | Key | Does |
 |---|---|
-| `J` / `K`, `↓` / `↑` | moves the selection down or up |
+| `J` / `K`, `↓` / `↑` | moves the selection down or up. *(Amended 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* While Tracking is open, it walks only Tracking's rows |
 | `X`, `⇧J` / `⇧K`, `⇧↓` / `⇧↑` | checks the selected row; the shifted keys check while moving |
 | `↩` | on a row: opens the pane and puts focus on the suggested answer, whose describe line is then in view. A second `↩` presses it |
-| `E` | Done, on the checked rows or else the selected one |
+| `E` | Done, on the checked rows or else the selected one. *(Amended 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* On a Tracking row it marks a Finished, Failed or Stopped row done, and does nothing on a Working one |
+| `T` | *(Added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* opens and closes Tracking, on the To do view |
 | `H`, then `1` to `5` | Snooze, with the menu's choice |
 | `U` | Unsnooze, in Later |
 | `R` | opens the Reply box; nothing when the signal has no action with a field |
 | `⌘↩` | sends the Reply box |
 | `O` | opens the signal on its source, in the default browser |
-| Esc | steps back, as above |
+| Esc | steps back, as above. *(Amended 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* While Tracking is open it steps back in order: the pane, then the selection, then Tracking. Until the pane lands (#803), the selection, then Tracking |
 
 `↩` never answers from the list in one press. The drawing's `↩` took the suggested answer at once, so `J`, `J`, `↩` could approve a pull request the user never read. The Requests dock already answers from the keyboard only while it has focus.
 
@@ -1333,11 +1399,14 @@ With a triage workflow named, the triage line under it reads "triage runs at 13:
 - The triage workflow's last run, and its trigger's `nextFireAt`.
 - `plugin.query`, for each plugin's name and mark.
 - *(Amended 2026-10-11, [#524](https://github.com/theagenticage/hercule/issues/524).)* `workflow.query` and `assistant.query`, for the name of the workflow or the assistant that raised a core signal ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md) Section 9.1). The shell already reads the assistants. The workflows are read each time Intake opens, not kept current by the `workflow` topic, because the controller pushes on that topic at every cron fire, which would cost requests while the app is idle. A workflow renamed while Intake is open shows its new name the next time Intake opens.
+- *(Added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* Tracking's reads, which are shell data ([The count and attention](#the-count-and-attention)): `task.query { handedOff: true, status: ["in-progress"] }`, then `run.query { taskIds }` for those Tasks. The shell's loader loads both through `ensureShellData`, with the shell's read options that keep them for the life of the window, and each component reads them where it draws them. The Hercule segment's count and the Tracking rows read the same cache, so they cannot disagree.
+- *(Added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* The `task` and `run` live topics, subscribed by the shell like `signal`: a push re-reads Tracking's two reads, and makes no read while no Task is tracked.
+- *(Added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* `run.read` for each Failed row on screen, for its reason ([Tracking](#tracking)).
 - The `signal` live topic. A push names the signals that changed, and the app reads To do again. The topic stays subscribed while the window is hidden, as `session` does, because the Hercule segment's count and Now's notifications depend on it ([Rules](#rules), rule 3). The shell subscribes to it, not the screen.
 - The To do list is virtualized like every list (rule 1), though it is read whole.
 - ~~The first page of Later, soonest first, gives the soonest snooze's `until` for the snooze timer ([Rules](#rules), rule 4). The shell reads it with the count, so the timer runs while Intake is closed.~~ Each read of To do first reads Later with a limit of one, soonest first, for the soonest snooze's `until`, which sets the snooze timer ([Rules](#rules), rule 4). In that order, a snooze that runs out between the two reads is missing from To do but still sets the timer, which reads To do again. The shell keeps that `until` for the life of the window, so the timer runs while Intake is closed. Intake's paged Later is a read of its own. *(Amended 2026-10-11, [#525](https://github.com/theagenticage/hercule/issues/525).)*
 
-**Interpretation goes to `@hercule/client-core`,** each function with its own tests: the sections and their order, which controls a row gets, the tab set and what moves into More, which checked rows a bulk action takes with the bar's and the toast's wording, the foot's two numbers, the triage header, the snooze choices, the handlings' cut-off, and the inbox zero line. How that splits into functions, and their names, is the implementer's choice. One possible split: `groupSignalsIntoSections`, `decideSignalRowControls`, `buildIntakeTabs`, `planBulkAction`, `countClearedToday`, `describeTriageHeader`, `buildSnoozeChoices`, `cutHandlings`, `describeInboxZero`.
+**Interpretation goes to `@hercule/client-core`,** each function with its own tests: the sections and their order, which controls a row gets, the tab set and what moves into More, which checked rows a bulk action takes with the bar's and the toast's wording, the foot's two numbers, the triage header, the snooze choices, the handlings' cut-off, and the inbox zero line, *(added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801))* each Tracking row's state, Tracking's order, and the waiting rows the count takes in. How that splits into functions, and their names, is the implementer's choice. One possible split: `groupSignalsIntoSections`, `decideSignalRowControls`, `buildIntakeTabs`, `planBulkAction`, `countClearedToday`, `describeTriageHeader`, `buildSnoozeChoices`, `cutHandlings`, `describeInboxZero`.
 
 ### What Intake costs
 
@@ -1353,7 +1422,17 @@ The plan for slices 25 to 35, each measuring its part and recording it in [Measu
 | Inbox zero | 800ms of compositor-only animation per arrival, nothing after. *(Amended 2026-10-12, [#534](https://github.com/theagenticage/hercule/issues/534).)* When the pane was open, a wait of `--dur-3` with nothing drawn comes first | ~~the Performance panel, once~~ the perf script, after the user's own Done of the last signal. *(Amended 2026-10-12, [#534](https://github.com/theagenticage/hercule/issues/534).)* |
 | Opening or closing the split | layout on each frame of the transition, no dropped frame with 50 rows in the list, nothing after | the Performance panel, once |
 | Images | loaded only for the open signal | the Network panel, once |
-| The first screen's JavaScript | grows only by the Go item, the `/intake` route stub, the `signal` subscription and the count. Intake is a chunk of its own, loaded the first time it opens; Everything's screen is a chunk of its own inside it, loaded the first time the view opens | `pnpm build:desktop`'s bundle check, before and after |
+| The first screen's JavaScript | grows only by the Go item, the `/intake` route stub, the `signal` subscription and the count. *(Amended 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* The count also takes in Tracking's reads, the `task` and `run` subscriptions and the state function, because the count shows on every screen. Intake is a chunk of its own, loaded the first time it opens; Everything's screen is a chunk of its own inside it, loaded the first time the view opens | `pnpm build:desktop`'s bundle check, before and after |
+| Tracking: reads | two reads when the shell loads, `task.query` with `handedOff` and `in-progress`, then `run.query` by `taskIds`, both on an index; both are shell data, because the To do count shows on every screen. One `run.read` per Failed row on screen. No read on a push while no Task is tracked | to be measured by the measurement slice |
+| Tracking: live topics | the `task` and `run` topics, subscribed wherever the count shows, so also while the window is hidden. A push re-reads Tracking's two reads, once per push, not once per Task | to be measured by the measurement slice |
+| Tracking: idle | no work added beyond a push. The times on the rows read the shared age clock once a minute | to be measured by the measurement slice |
+| Tracking: opening and closing | one animation for the sheet, plus at most 13 for the cascade, done within 450ms; closing is one animation | to be measured by the measurement slice |
+| Tracking: a handoff | one animation for the lifted copy, plus one transform per row that moves on screen | to be measured by the measurement slice |
+| Tracking: a state change or a tick-off | one opacity animation, plus one transform per row that moves; a tick-off is as Intake's own Done | to be measured by the measurement slice |
+| Tracking: a Working row's line | not built in slice 1, so it costs nothing. The line would show the agent's latest message, and no field, read or push carries that message yet. It needs a new field on the session, kept by the controller, and is left to a follow-up ticket, which states its cost before it is built | not applicable |
+| Tracking: bundle bytes | the Tracking screen joins Intake's chunk; the reads and the state function join the first screen's JavaScript (above) | `pnpm build:desktop`'s bundle check, before and after |
+
+*(Added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* The rows beginning "Tracking" are the planned costs of [Tracking](#tracking), from the BRIEF's cost list. Their "Measured by" column is filled in, and the numbers recorded in [Measured](#measured), by the slice that measures them ([ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md)).
 
 ## Workflows
 
@@ -2276,6 +2355,7 @@ These rules keep the budgets:
    - The renderer drops the open thread's `session:<id>:tap` subscription, and the open subagent's `session:<id>:subagent:<subagentId>:tap` *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*, and the open Conversation's newest session's `:tap` *(amended 2026-10-06, [#448](https://github.com/theagenticage/hercule/issues/448))*. Chromium stops animation frames in a hidden window, so buffered token deltas would otherwise pile up without being painted. ~~The `session:<id>:stream` rows keep the transcript current, and the tap resumes when the window is shown.~~ *(Amended 2026-10-19, [#783](https://github.com/theagenticage/hercule/issues/783).)* The `session:<id>:stream` stays subscribed, so no row is missed, but the rows it delivers while the window is hidden are kept aside instead of being written to the transcript, because each write cost the hidden page its block building and a render ([Measured](#measured)). When the window is shown, they go into the transcript in one write, so the page renders once, and the tap resumes. The stream is not dropped like the tap: a new subscription replays the first 500 rows it missed in one message and each later row in a message of its own, so after a long hide the page would take hundreds of rows one at a time, and could reach the controller's cap of 1,000 queued messages per subscription. *(Amended 2026-10-20, [#796](https://github.com/theagenticage/hercule/issues/796).)* While a read of the rows runs, the page does not follow the stream, hidden or not (see [Thread copies](#thread-copies)), so nothing is kept aside then. When the read ends, the stream is subscribed from the newest row held, counting the rows kept aside while they are still valid, so none of them is replayed. A read that wrote different rows has already dropped them.
    - The `session` topic stays subscribed, because the dock badge and notifications depend on it. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So does the `signal` topic, because the Hercule segment's count and Now's notifications depend on it ([Intake](#what-the-screen-reads)).
    - `backgroundThrottling` stays on.
+   - *(Amended 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* So do the `task` and `run` topics, because the Hercule segment's count takes in Tracking's waiting rows ([Tracking](#tracking)). The shell holds these two subscriptions, so the Workflows pages dropping theirs (next) does not stop them.
    - *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* The Workflows pages drop the `workflow` and `run` topics, and read them again when the window is shown ([What the pages read](#what-the-pages-read)).
    - *(Amended 2026-10-15, [#669](https://github.com/theagenticage/hercule/issues/669).)* The Discussions and Wiki screens drop the `discussion` and `wikiPage` topics, and read them again when the window is shown ([./19-agent-coordination.md](./19-agent-coordination.md) section 8.5).
    - *(Added 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332).)* The Office draws its frames from `requestAnimationFrame`, which Chromium stops in a hidden, minimized or covered window. The colleagues' timers count only the time the window is shown, so they pause with the frames, and the first frame after the window is shown again advances the colleagues by one frame, not by the time it was hidden. While the Office stands still, it runs no timer that repeats~~.~~ *(amended 2026-10-09, [#505](https://github.com/theagenticage/hercule/issues/505))*, except the Secretariat's clock, which moves its hands once a minute. The clock's timer counts only the time the window is shown, as the colleagues' timers do, so a hidden window gets no wakeups from it, and the hands jump to the time when the window shows again. An Office with no assistants has no clock, so it runs no clock timer either.

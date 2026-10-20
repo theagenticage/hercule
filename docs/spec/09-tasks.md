@@ -10,6 +10,7 @@ type TaskPriority = 'urgent' | 'high' | 'normal' | 'low';
 
 interface ProvenanceEntry {
   ref?: string;      // External Ref in canonical form, e.g. "github:issue:owner/repo#42"
+  signalId?: string; // id of an Intake signal handed to an agent (./10 section 9.4)
   eventId?: number;  // id of an event in the event log (./08); integer log position (./04)
   runId?: string;    // id of a Run (./07)
   at: string;        // timestamp of the append
@@ -100,11 +101,13 @@ Which labels a triage workflow sets~~, and when `proposed` is removed,~~ *(Amend
 
 ## Provenance and External Refs
 
-Provenance is a task's append-only record of what created or touched it. Each entry is `{ref?, eventId?, runId?, at, actor}`; every field except `at` and `actor` is optional, and an entry may carry any combination (an event that was the trigger, the run that enriched the task, a ref the triage agent recognised inside an email). Entries are never edited or removed; a deleted task is soft-deleted, so its entries stay with the row (see [Delete](#delete)).
+Provenance is a task's append-only record of what created or touched it. Each entry is `{ref?, eventId?, signalId?, runId?, at, actor}`; every field except `at` and `actor` is optional, and an entry may carry any combination (an event that was the trigger, the run that enriched the task, a ref the triage agent recognised inside an email). Entries are never edited or removed; a deleted task is soft-deleted, so its entries stay with the row (see [Delete](#delete)).
 
 Provenance is what lets a ~~duplicate signal~~ later event about the same thing *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* find its existing task, and what the Intake "made from" line and the proactive "related to task X" link are rendered from.
 
 *(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* A task that a run's `task.create` step creates always records its run: the core adds the entry `{ runId }` after the entries the step's params give, unless one of those already names the run. The entry is the core's own, so it does not count toward the limit on how many entries one request may add. A run's `task.update` step adds no such entry, because the run did not create the task ([./07-workflows.md](./07-workflows.md) section 8).
+
+*(Added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801), [ADR 0046](../adr/0046-handing-a-signal-off-tracks-the-work-on-a-task.md).)* An entry may carry `signalId`: the Intake signal the user handed to an agent. `signal.handOff` appends it together with the `runId` of the run it started and, when the signal has them, the `ref` (the signal's thread ref) and the `eventId` (the signal's origin event), stamped `user` ([./10](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)). So an entry with a `signalId` is the explicit fact "this Task was handed off from that signal", and each handoff is one entry. Intake's Tracking lists the Tasks that have such an entry ([./17](./17-desktop-app.md#intake)). Only `signal.handOff` writes `signalId`; no other path does. A ref in the entry is what lets a later signal about the same thing find the Task, so handing that signal off continues it. `signalId` is indexed, so `task.query` finds the Tasks with a handoff entry in one read.
 
 ### External Ref canonical form
 
@@ -119,12 +122,13 @@ For systems with no plugin in v1 (Sentry, Tailscale, Hetzner notices arriving th
 
 ### What `task.query` matches
 
-`task.query` performs exact identity matching only: a provenance ref (string equality on the canonical form), labels, status, and `projectId`. It never matches content. An agent's `hercule task search` adds full text on top of the same filters (see [Search](#search)).
+`task.query` performs exact identity matching only: a provenance ref (string equality on the canonical form), labels, status, `projectId`, and *(added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801))* whether the Task has a handoff entry (a provenance entry with a `signalId`). It never matches content. An agent's `hercule task search` adds full text on top of the same filters (see [Search](#search)).
 
 ## Relations: project, runs, sessions
 
 - **Project:** at most one per task, via `projectId`. Optional. Project is defined in [./02](./02-domain-model.md). A task keeps its `projectId` when the project is soft-deleted.
 - **Runs and sessions:** a task holds no run or session ids. The links live on the run and session side (all links optional, per the work triangle in [./02](./02-domain-model.md)); a task's run list is derived by querying runs that reference it. Provenance may additionally record a `runId` for a run that created or touched the task, but that is a history entry, not the link.
+  - *(Amended 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* A run links to its Task by `taskId` ([./07-workflows.md](./07-workflows.md)). Only a handoff sets it, so the Tasks that have runs are the handed-off ones. A task's runs are `run.query` with `taskIds`; Tracking reads them that way and works out each Task's state from them.
 
 ## Platform events
 
@@ -181,6 +185,7 @@ One operation, `task.query`, serves every caller: the built-in action in agent-l
 | Field | Matching |
 |---|---|
 | `refs`, `labels`, `status`, `projectId` | exact identity; `refs` against the canonical External Ref form |
+| `handedOff` | *(Added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* A boolean. `true` keeps the Tasks that have a provenance entry with a `signalId`; `false` keeps the Tasks that have none. Absent, it filters nothing |
 | `text` | SQLite FTS over `title` + `description` only; labels and refs are never reached through FTS |
 
 Within one field the listed values are **any-of**; across fields the filter is **and**; no filters lists every task. No `or` across fields and no negation in v1. Pagination and sorting follow [./11](./11-public-api-and-agent-surface.md) section 1.6.
