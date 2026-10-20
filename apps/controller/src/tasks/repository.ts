@@ -29,6 +29,7 @@ import type * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { MAX_TRACKING_HANDOFFS } from "@hercule/contract";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type {
   ExternalRef,
@@ -102,7 +103,7 @@ export interface TrackedHandoff {
   readonly at: string;
 }
 
-/** A Task that Tracking follows, with its handoffs, oldest first. */
+/** A Task that Tracking follows, with its newest handoffs, newest first. */
 export interface TrackedTask {
   readonly id: string;
   readonly title: string;
@@ -264,7 +265,7 @@ const make = Effect.gen(function* () {
       clauses.push(sql`tasks.project_id = ${uuidFromString(filter.projectId)}`);
     }
     if (filter.handedOff !== undefined) {
-      // `task_provenance_signal` holds exactly the entries that name a
+      // `task_provenance_handoff` holds exactly the entries that name a
       // signal, so both forms read that index alone. `task_id` is never NULL,
       // so NOT IN cannot match nothing by mistake.
       clauses.push(
@@ -372,13 +373,18 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns every in-progress task that has a handoff entry, with its
-     * handoff entries oldest first, the most recently updated task first.
-     * A deleted task is left out. One statement: it walks the partial index of
-     * entries that name a signal and looks each task up by its key, so it
-     * reads nothing of a task that has no handoff. The unary `+` on the status
-     * keeps SQLite off the status index, which would start from every
-     * in-progress task and read the provenance of each.
+     * Returns every in-progress task that has a handoff entry, the most
+     * recently updated task first. Each task holds its newest handoff entries,
+     * at most `MAX_TRACKING_HANDOFFS`, newest first. A deleted task is left
+     * out.
+     *
+     * One statement, and its work follows the in-progress tasks, not the
+     * handoffs ever made. It walks the in-progress tasks on the status index,
+     * and for each one looks up the end of its range in
+     * `task_provenance_handoff` (task, then time), so a task that has no
+     * handoff costs one probe, and a task with thousands reads ten entries.
+     * The handoffs of tasks that are done are never touched. `CROSS JOIN`
+     * makes SQLite keep that order, because it never reorders one.
      */
     listTracked: (): Effect.Effect<ReadonlyArray<TrackedTask>, SqlError> =>
       Effect.map(
@@ -390,9 +396,12 @@ const make = Effect.gen(function* () {
           readonly run_id: Uint8Array | null;
           readonly at: string;
         }>`
-          SELECT p.task_id, t.title, t.updated_at, p.signal_id, p.run_id, p.at
-          FROM task_provenance p JOIN tasks t ON t.id = p.task_id
-          WHERE p.signal_id IS NOT NULL AND +t.status = 'in-progress' AND t.deleted_at IS NULL`,
+          SELECT t.id AS task_id, t.title, t.updated_at, p.signal_id, p.run_id, p.at
+          FROM tasks t CROSS JOIN task_provenance p ON p.rowid IN (
+            SELECT rowid FROM task_provenance
+            WHERE task_id = t.id AND signal_id IS NOT NULL
+            ORDER BY at DESC LIMIT ${MAX_TRACKING_HANDOFFS})
+          WHERE t.status = 'in-progress' AND t.deleted_at IS NULL`,
         (rows) => {
           const byTask = new Map<
             string,
@@ -424,7 +433,7 @@ const make = Effect.gen(function* () {
             .map(({ id, title, handoffs }) => ({
               id,
               title,
-              handoffs: handoffs.toSorted((a, b) => a.at.localeCompare(b.at)),
+              handoffs: handoffs.toSorted((a, b) => b.at.localeCompare(a.at)),
             }));
         },
       ),

@@ -67,8 +67,8 @@ const make = Effect.gen(function* () {
      * statements, and the push that change makes brings the next read.
      *
      * The reply is not paged: Tracking counts every row, and a row holds one
-     * Task's handoffs and two runs, so its size is bounded by the Tasks the
-     * user has not ticked off.
+     * Task's newest handoffs (at most `MAX_TRACKING_HANDOFFS`) and two runs, so
+     * its size follows the Tasks in progress, not the work handed off before.
      */
     query: (): Effect.Effect<TaskTrackingReading, Unauthenticated | Forbidden | SqlError> =>
       Effect.gen(function* () {

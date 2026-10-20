@@ -43,7 +43,7 @@ describe("the task tracking migration", () => {
         }>`SELECT CAST(id AS TEXT) AS id, task_id FROM runs`;
         const indexes = yield* sql<{ readonly name: string; readonly sql: string }>`
           SELECT name, sql FROM sqlite_master
-          WHERE type = 'index' AND name IN ('task_provenance_signal', 'runs_task_id')
+          WHERE type = 'index' AND name IN ('task_provenance_handoff', 'runs_task_id')
           ORDER BY name`;
         // The query of the task filter for the tasks that were handed off.
         const handedOffPlan = yield* sql<{ readonly detail: string }>`
@@ -67,13 +67,14 @@ describe("the task tracking migration", () => {
         "CREATE INDEX runs_task_id ON runs (task_id, created_at, id) WHERE task_id IS NOT NULL",
       ],
       [
-        "task_provenance_signal",
-        "CREATE INDEX task_provenance_signal ON task_provenance (signal_id, task_id) WHERE signal_id IS NOT NULL",
+        "task_provenance_handoff",
+        "CREATE INDEX task_provenance_handoff ON task_provenance (task_id, at) WHERE signal_id IS NOT NULL",
       ],
     ]);
-    // The index alone answers the subquery: no read of the provenance table.
+    // The partial index holds only the entries that name a signal, so the
+    // subquery walks those and not the whole provenance table.
     expect(handedOffPlan.map((step) => step.detail)).toContain(
-      "SEARCH task_provenance USING COVERING INDEX task_provenance_signal (signal_id>?)",
+      "SCAN task_provenance USING INDEX task_provenance_handoff",
     );
     // One lookup per task id, then a sort, because the rows of several tasks
     // are not in order across the ids.

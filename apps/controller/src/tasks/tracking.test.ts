@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Statement from "effect/unstable/sql/Statement";
-import type { Grant, TrackingRun } from "@hercule/contract";
+import { MAX_TRACKING_HANDOFFS, type Grant, type TrackingRun } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { taskRepository, type NewTask } from "./repository";
@@ -147,7 +147,7 @@ describe("task.queryTracking", () => {
     expect(asked[0]).toHaveLength(1);
   });
 
-  it("gives each row its handoffs oldest first, and orders the rows by the Task's last update, newest first", async () => {
+  it("gives each row its handoffs newest first, and orders the rows by the Task's last update, newest first", async () => {
     const rows = await runTracking(
       USER,
       [],
@@ -183,11 +183,45 @@ describe("task.queryTracking", () => {
 
     expect(rows.map((row) => row.title)).toEqual(["newer", "older"]);
     expect(rows[0]!.handoffs).toEqual([
-      { signalId: SIGNAL_A, runId: RUN_A, at: LATER },
       { signalId: SIGNAL_B, runId: RUN_B, at: "2026-10-20T12:00:00.000Z" },
+      { signalId: SIGNAL_A, runId: RUN_A, at: LATER },
     ]);
     expect(rows[0]).toMatchObject({ latestRun: buildRun(RUN_A) });
     expect(rows[0]).not.toHaveProperty("latestLiveRun");
+  });
+
+  it("returns only the newest handoffs of a Task that was handed many, newest first", async () => {
+    const total = MAX_TRACKING_HANDOFFS + 5;
+    const rows = await runTracking(
+      USER,
+      [],
+      Effect.gen(function* () {
+        const repository = yield* taskRepository;
+        yield* inTransaction(
+          Effect.gen(function* () {
+            const task = yield* repository.insert({ ...NEW_TASK, title: "handed often" });
+            for (let n = 1; n <= total; n++) {
+              yield* repository.update(
+                task.id,
+                {},
+                [{ signalId: SIGNAL_A, runId: RUN_A }],
+                `2026-10-20T12:${String(n).padStart(2, "0")}:00.000Z`,
+                "user",
+              );
+            }
+          }),
+        );
+        const tracking = yield* TaskTracking;
+        return (yield* tracking.query()).rows;
+      }),
+    );
+
+    expect(rows[0]!.handoffs.map((handoff) => handoff.at)).toEqual(
+      Array.from(
+        { length: MAX_TRACKING_HANDOFFS },
+        (_, index) => `2026-10-20T12:${String(total - index).padStart(2, "0")}:00.000Z`,
+      ),
+    );
   });
 
   it("leaves out a Task that has no run", async () => {
@@ -246,7 +280,7 @@ describe("task.queryTracking", () => {
 });
 
 describe("the query plan of Tracking's Task statement", () => {
-  it("walks the entries that name a signal and reads each Task by its key, never the status index", async () => {
+  it("walks the in-progress Tasks and probes each one's newest handoffs, never the handoffs of other Tasks", async () => {
     const plan = await Effect.runPromise(
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -269,9 +303,12 @@ describe("the query plan of Tracking's Task statement", () => {
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
-    expect(plan).toContain("SEARCH p USING INDEX task_provenance_signal (signal_id>?)");
-    expect(plan).toContain("SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)");
-    expect(plan.some((step) => step.includes("tasks_status"))).toBe(false);
+    expect(plan).toContain("SEARCH t USING INDEX tasks_status_updated_at (status=?)");
+    expect(plan).toContain(
+      "SEARCH task_provenance USING INDEX task_provenance_handoff (task_id=?)",
+    );
+    expect(plan).toContain("SEARCH p USING INTEGER PRIMARY KEY (rowid=?)");
     expect(plan.some((step) => step.startsWith("SCAN"))).toBe(false);
+    expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
   });
 });

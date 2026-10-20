@@ -474,6 +474,7 @@ export {
   TaskUpdateCall,
   TaskUpdateInput,
   TaskUpdatedEventPayload,
+  MAX_TRACKING_HANDOFFS,
   TaskTracking,
   TrackingHandoff,
   TrackingRun,

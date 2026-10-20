@@ -169,7 +169,7 @@ Within one field the values are **any-of**; across fields the filter is **and**.
 interface TrackingTask {
   taskId: string
   title: string
-  handoffs: { signalId: string; runId: string; at: string }[]   // every handoff entry, oldest first
+  handoffs: { signalId: string; runId: string; at: string }[]   // the Task's newest handoffs, at most 10, newest first
   latestRun: TrackingRun                                         // newest by createdAt, then id
   latestLiveRun?: TrackingRun                                    // newest pending or running run, when one exists
 }
@@ -183,10 +183,10 @@ interface TrackingRun {
 ```
 
 - **`failureCause`** is the text `describeFailureCause` gives for the run: its failure message, else the message of the edge it failed at, else the error of the step that failed, else the failure reason in plain words ("workspace failed"). The words for a reason are one function in the contract, which the controller and `client-core` both import.
-- **Not paged.** Tracking counts and orders every row, as the to-do view of `signal.query` does (section 1.6). A row holds one Task's title and handoffs and two runs, never a Task's history, so the reply grows with the number of Tasks the user has not ticked off.
+- **Not paged.** Tracking counts and orders every row, as the to-do view of `signal.query` does (section 1.6). A row holds one Task's title, its newest handoffs (at most 10, `MAX_TRACKING_HANDOFFS` in the contract) and two runs, never a Task's history, so the reply grows with the number of Tasks in progress and not with the work handed off before. A client that waits for its own handoff looks for its receipt among these; an older handoff has no bearing on where the work stands.
 - **A Task with no run** is left out. A handoff starts its run in the transaction that tracks the Task, so none occurs.
 - **Grants.** The operation's row names `task.read`, and the service also checks `run.read`, because a row holds what `task.query` and what `run.query` give. Any caller that holds both may read it, a session included: it could read the same facts from those two operations. A caller that lacks one is refused with `forbidden` naming it.
-- **How it reads.** The tasks domain declares a read port for the runs, `TaskTrackingRuns`, and the controller daemon answers it from the runs repository, because the runs domain depends on the tasks domain (ADR 0033). It opens no transaction, so it reads on the read-only connection and never waits for a writer. The newest run of each Task is one lookup per Task on `runs_task_id`, and the live runs come from `runs_unfinished`, so no Task's history is read.
+- **How it reads.** The tasks domain declares a read port for the runs, `TaskTrackingRuns`, and the controller daemon answers it from the runs repository, because the runs domain depends on the tasks domain (ADR 0033). It opens no transaction, so it reads on the read-only connection and never waits for a writer. The newest run of each Task is one lookup per Task on `runs_task_id`, and the live runs come from `runs_unfinished`, so no Task's history is read. The Tasks are the in-progress Tasks on the status index, each probed once for its newest handoffs on `task_provenance_handoff`, so the read does not touch the handoffs of Tasks that are done.
 - Its CLI row is `hercule task tracking`. Purpose: "Lists the work handed off from Intake that is still followed." It takes no field.
 - `task.query`'s `handedOff` filter stays: it is a general read of Tasks that other callers may use. `run.query` has no Task filter: Tracking is the only reader that asks for runs by Task, and `task.queryTracking` answers it.
 

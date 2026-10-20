@@ -18,12 +18,13 @@ export default Effect.gen(function* () {
   yield* sql`ALTER TABLE task_provenance ADD COLUMN signal_id BLOB`;
   yield* sql`ALTER TABLE runs ADD COLUMN task_id BLOB`;
 
-  // Serves the `handedOff` filter of `task.query`, which looks for the tasks
-  // that have a provenance entry with a signal. The index is partial because
-  // most entries name no signal. It also holds `task_id`, so the filter's
-  // subquery is answered from the index alone.
+  // Serves two reads of a Task's handoff entries. The `handedOff` filter of
+  // `task.query` looks for the tasks that have one, answered from the index
+  // alone. `task.queryTracking` reads one Task's newest handoff entries, newest
+  // first, from the end of the Task's range, so it never reads the older ones.
+  // The index is partial because most entries name no signal.
   yield* sql`
-    CREATE INDEX task_provenance_signal ON task_provenance (signal_id, task_id)
+    CREATE INDEX task_provenance_handoff ON task_provenance (task_id, at)
     WHERE signal_id IS NOT NULL
   `;
 

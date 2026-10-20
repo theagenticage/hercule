@@ -288,6 +288,13 @@ export const TaskUpdateCall = Schema.Struct({ taskId: Id, ...TASK_UPDATE_FIELDS 
 export type TaskUpdateCall = Schema.Schema.Type<typeof TaskUpdateCall>;
 
 /**
+ * The most handoffs a Tracking row holds. A Task that was handed more than
+ * this many signals returns its newest ones, so the reply does not grow with a
+ * Task's history.
+ */
+export const MAX_TRACKING_HANDOFFS = 10;
+
+/**
  * One handoff of a signal to the Task's workflow: the signal the user handed
  * off, the run that started, and when. It is a provenance entry that names a
  * signal.
@@ -331,8 +338,12 @@ export type TrackingRun = Schema.Schema.Type<typeof TrackingRun>;
 export const TrackingTask = Schema.Struct({
   taskId: Id,
   title: Schema.String,
-  /** Every handoff the Task holds, oldest first. */
-  handoffs: Schema.Array(TrackingHandoff),
+  /**
+   * The Task's newest handoffs, newest first, at most `MAX_TRACKING_HANDOFFS`.
+   * A client that waits for its own handoff to show looks for the receipt
+   * here; an older handoff has no bearing on where the work stands.
+   */
+  handoffs: atMost(TrackingHandoff, MAX_TRACKING_HANDOFFS),
   /** The Task's newest run, by creation time. */
   latestRun: TrackingRun,
   /** The Task's newest run that is pending or running, when one is. */
