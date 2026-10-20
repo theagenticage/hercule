@@ -171,9 +171,17 @@ function SignalDetail({
   const act = useMutation({
     mutationFn: (input: { readonly actionId: string; readonly text?: string }) =>
       client.signal.act({ params: { id: signal.id }, payload: input }),
-    onMutate: () => {
+    onMutate: ({ actionId }) => {
       setFailure(null);
       moves.registerOwnChanges([signal.id]);
+      // A signal handed off before `signal.handOff` existed starts its run
+      // untracked, so no row of Tracking waits to land the flight.
+      if (
+        answers.find((answer) => answer.action.id === actionId)?.action.operation?.op ===
+        "signal.handOff"
+      ) {
+        moves.registerHandoff(signal.id);
+      }
     },
     onSuccess: (acted) => {
       setActedHere(true);
@@ -183,6 +191,7 @@ function SignalDetail({
     },
     onError: (error, input) => {
       moves.forgetOwnChanges([signal.id]);
+      moves.forgetHandoff(signal.id);
       setFailure({ actionId: input.actionId, message: readErrorMessage(error) });
     },
   });

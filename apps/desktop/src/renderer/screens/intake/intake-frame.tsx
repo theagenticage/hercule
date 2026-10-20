@@ -160,7 +160,10 @@ export function IntakeViewSwitcher({
  * caller passes it only while `split.paneDrawn`.
  *
  * `onKeyDown` is the screen's keys, handled here where every key press in
- * the list and the pane arrives, rather than on each row and answer. A
+ * the list and the pane arrives, rather than on each row and answer.
+ * `onListPointerEnter` and `onListPointerLeave`, when given, are called as the
+ * pointer enters and leaves the list's column whole, its view switcher and
+ * the Tracking under it included. A
  * closing pane stays drawn until the list's width transition ends, so it
  * slides out as the list widens over it. The split clips it, and `inert`
  * keeps the focus and screen readers out of it.
@@ -171,6 +174,8 @@ export function IntakeSplit({
   list,
   pane,
   onKeyDown,
+  onListPointerEnter,
+  onListPointerLeave,
 }: {
   readonly split: IntakeSplitState;
   /** The list's accessible name, such as "Signals". */
@@ -178,6 +183,8 @@ export function IntakeSplit({
   readonly list: ReactNode;
   readonly pane: ReactNode;
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  readonly onListPointerEnter?: () => void;
+  readonly onListPointerLeave?: () => void;
 }): JSX.Element {
   const { available, width, splitRef, listRef } = split;
   return (
@@ -197,6 +204,8 @@ export function IntakeSplit({
         className="asks-list"
         aria-label={listLabel}
         tabIndex={-1}
+        onPointerEnter={onListPointerEnter}
+        onPointerLeave={onListPointerLeave}
         onTransitionEnd={(event) => {
           // A row's own transitions end here too, so only the list's width counts.
           if (event.target === event.currentTarget && event.propertyName === "width") {

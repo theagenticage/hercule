@@ -37,7 +37,7 @@ import { AgeLabel } from "../age-label";
 import { describeMoveTitle, SIGNAL_MOVE_GLYPHS } from "./move-glyphs";
 import { SNOOZE_ANCHOR } from "./snooze-menu";
 import { SignalMark } from "./source-mark";
-import { useRowMotion } from "./use-row-motion";
+import { useRowMotion, type TakeLeavingRow } from "./use-row-motion";
 
 /** What a press on a row's own controls asks for: its checkbox, or one of its moves. */
 export type SignalRowAction = "check" | SignalMove;
@@ -113,6 +113,8 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
  *   describes; a change of scope draws the new rows at once.
  * - `onPointerEnter` and `onPointerLeave` are called as the pointer enters
  *   and leaves the rows, the foot included.
+ * - `takeLeavingRow`, when given, may take the exit of a row that leaves on
+ *   screen, as `useRowMotion` describes. A handed-off signal's row flies this way.
  *
  * Only the rows in view, and a few past each edge, are drawn, so a list of
  * hundreds of signals costs as little as a short one. The selected row is
@@ -141,6 +143,7 @@ export const IntakeList = memo(function IntakeList({
   onRowAction,
   onNearEnd,
   onFocusedSelectedRow,
+  takeLeavingRow,
   onPointerEnter,
   onPointerLeave,
 }: {
@@ -162,6 +165,7 @@ export const IntakeList = memo(function IntakeList({
   readonly onNearEnd: () => void;
   /** Called once the list has put the focus on the selected row that `focusSelectedRow` asked for. */
   readonly onFocusedSelectedRow: () => void;
+  readonly takeLeavingRow?: TakeLeavingRow;
   readonly onPointerEnter: () => void;
   readonly onPointerLeave: () => void;
 }): JSX.Element {
@@ -177,7 +181,7 @@ export const IntakeList = memo(function IntakeList({
     [workflows, assistants],
   );
   const listedItems = useMemo(() => flattenSections(sections), [sections]);
-  const items = useRowMotion(listedItems, scope, scrollRef, ghostsRef);
+  const items = useRowMotion(listedItems, scope, scrollRef, ghostsRef, "--dur-2", takeLeavingRow);
   const selectedIndex = useMemo(
     () => items.findIndex((item) => item.key === selectedId),
     [items, selectedId],

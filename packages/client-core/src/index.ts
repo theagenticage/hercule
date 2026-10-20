@@ -498,6 +498,16 @@ export {
   updateHolding,
   type HeldSignals,
 } from "./held-signals";
+export {
+  dropHandedOff,
+  dropMarkedDone,
+  followListedTrackingRows,
+  recordHandedOff,
+  recordMarkedDone,
+  startHeldTrackingRows,
+  updateTrackingRowsHolding,
+  type HeldTrackingRows,
+} from "./held-tracking-rows";
 export { describeInboxZeroLine, type InboxZeroLine } from "./inbox-zero";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";

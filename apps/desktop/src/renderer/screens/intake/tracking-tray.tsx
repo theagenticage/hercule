@@ -12,9 +12,11 @@ import {
   type TrackingRow,
 } from "@hercule/client-core";
 import { pluginsQuery, runFailureCauseQuery } from "../../app/queries";
+import type { HandoffFlights } from "./handoff-flight";
 import { TrackingFold } from "./tracking-fold";
 import type { TrackingRowFacts } from "./tracking-row";
 import { TrackingSheet } from "./tracking-sheet";
+import { useTrackingSheetMotion } from "./tracking-sheet-motion";
 
 /**
  * Returns what a row draws, from the row and why its run failed. A run of a
@@ -31,6 +33,9 @@ const buildRowFacts = (row: TrackingRow, failureCause: string | undefined): Trac
     workflowName: line.workflowName,
     lineText: line.text,
     since: row.since,
+    handoffSignalIds: row.task.provenance.flatMap((entry) =>
+      entry.signalId === undefined ? [] : [entry.signalId],
+    ),
   };
 };
 
@@ -46,6 +51,11 @@ const buildRowFacts = (row: TrackingRow, failureCause: string | undefined): Trac
  * - `dock` is drawn inside opened Tracking, for the toast of the last move.
  * - `onOpen` and `onClose` open and close Tracking. `onOpenRow` and
  *   `onMarkDone` are called with a Task's id.
+ * - `flights` carries a handoff's flight from the list to the first row of
+ *   folded Tracking. This component draws the layer over the whole list column
+ *   that the flights and the closing sheet move in, and tells `flights` where
+ *   that layer and folded Tracking are. The sheet rises when it opens and
+ *   drops when it closes (`useTrackingSheetMotion`).
  *
  * It reads the plugins, which name the signals' sources, and for each Failed
  * row it draws, why its run failed. The read of a run is one `run.read`, and
@@ -59,6 +69,7 @@ export function TrackingTray({
   signalCount,
   signalSources,
   dock,
+  flights,
   onOpen,
   onClose,
   onOpenRow,
@@ -70,6 +81,7 @@ export function TrackingTray({
   readonly signalCount: number;
   readonly signalSources: ReadonlyArray<string | null>;
   readonly dock: ReactNode;
+  readonly flights: HandoffFlights;
   readonly onOpen: () => void;
   readonly onClose: () => void;
   readonly onOpenRow: (taskId: string) => void;
@@ -85,36 +97,42 @@ export function TrackingTray({
   const buildFacts = (row: TrackingRow): TrackingRowFacts =>
     buildRowFacts(row, failureCauses[failedRows.indexOf(row)]?.data);
   const waitingCount = countWaitingTrackingRows(rows);
+  const { trackFold, trackSheet, trackLayer } = useTrackingSheetMotion(open, flights);
 
-  if (open) {
-    return (
-      <TrackingSheet
-        total={rows.length}
-        waitingCount={waitingCount}
-        groups={groupTrackingRows(rows).map((group) => ({
-          state: group.state,
-          rows: group.rows.map(buildFacts),
-        }))}
-        selectedTaskId={selectedTaskId}
-        signalCount={signalCount}
-        signalSources={signalSources}
-        plugins={plugins}
-        dock={dock}
-        onClose={onClose}
-        onOpenRow={onOpenRow}
-        onMarkDone={onMarkDone}
-      />
-    );
-  }
   return (
-    <TrackingFold
-      total={rows.length}
-      waitingCount={waitingCount}
-      rows={shown.map(buildFacts)}
-      selectedTaskId={selectedTaskId}
-      onOpen={onOpen}
-      onOpenRow={onOpenRow}
-      onMarkDone={onMarkDone}
-    />
+    <>
+      <div ref={trackLayer} className="tr-fly" aria-hidden="true" inert />
+      {open ? (
+        <TrackingSheet
+          ref={trackSheet}
+          total={rows.length}
+          waitingCount={waitingCount}
+          groups={groupTrackingRows(rows).map((group) => ({
+            state: group.state,
+            rows: group.rows.map(buildFacts),
+          }))}
+          selectedTaskId={selectedTaskId}
+          signalCount={signalCount}
+          signalSources={signalSources}
+          plugins={plugins}
+          dock={dock}
+          onClose={onClose}
+          onOpenRow={onOpenRow}
+          onMarkDone={onMarkDone}
+        />
+      ) : (
+        <TrackingFold
+          ref={trackFold}
+          total={rows.length}
+          waitingCount={waitingCount}
+          rows={shown.map(buildFacts)}
+          selectedTaskId={selectedTaskId}
+          flights={flights}
+          onOpen={onOpen}
+          onOpenRow={onOpenRow}
+          onMarkDone={onMarkDone}
+        />
+      )}
+    </>
   );
 }

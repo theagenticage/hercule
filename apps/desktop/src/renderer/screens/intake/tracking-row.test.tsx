@@ -17,6 +17,7 @@ const buildFacts = (state: TrackingState): TrackingRowFacts => ({
   workflowName: "Review PR",
   lineText: "finished",
   since: "2026-09-29T09:20:00.000Z",
+  handoffSignalIds: [],
 });
 
 const renderRow = (state: TrackingState) => {

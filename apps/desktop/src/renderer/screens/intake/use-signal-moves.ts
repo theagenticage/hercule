@@ -285,6 +285,15 @@ export interface IntakeMoves {
   readonly registerOwnChanges: (signalIds: ReadonlyArray<string>) => void;
   /** Forgets the changes to `signalIds` an action did not make after all, such as a failed answer. */
   readonly forgetOwnChanges: (signalIds: ReadonlyArray<string>) => void;
+  /**
+   * Records that the user is handing the signal `signalId` off to an agent
+   * from the pane: its row flies into Tracking, and the Task's row shows at
+   * once, even under the pointer. Call it when the answer starts, before it is
+   * sent. It is a change of the signal too, which `registerOwnChanges` records.
+   */
+  readonly registerHandoff: (signalId: string) => void;
+  /** Forgets the handoff of `signalId`, because its answer failed. */
+  readonly forgetHandoff: (signalId: string) => void;
 }
 
 /** Carries Intake's moves from the screen to the pane. */

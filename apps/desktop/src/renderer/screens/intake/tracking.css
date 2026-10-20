@@ -150,9 +150,14 @@
 .tr-head .tr-wait {
   margin-left: auto;
 }
-.tr-scroll {
+/* The scrolling rows and the layer of copies that leave over them. */
+.tr-body {
+  position: relative;
   flex: 1;
   min-height: 0;
+}
+.tr-scroll {
+  height: 100%;
   overflow-y: auto;
   padding: 0 10px 16px;
   scrollbar-width: thin;
@@ -168,6 +173,7 @@
 
 /* ---------- Tracking's rows ---------- */
 .tr-runs {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -271,4 +277,30 @@
 .tr-run-item:has(> .ask-acts :focus-visible) > .ask-acts {
   opacity: 1;
   pointer-events: auto;
+}
+
+/* ---------- Motion layers ---------- */
+/* Over the rows, clipped to them, so a copy of a row that leaves fades where
+   the row was. It takes no pointer. */
+.tr-ghosts {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  pointer-events: none;
+}
+/* Over the whole list column, in front of the sheet. A handoff's lifted copy
+   flies here from the list to folded Tracking, and the sheet's copy drops here
+   when Tracking closes. It takes no pointer. */
+.tr-fly {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  overflow: clip;
+  pointer-events: none;
+}
+/* A row lifted off the list for its flight. */
+.tr-lifted {
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: var(--shadow-2);
 }

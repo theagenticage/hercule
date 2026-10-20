@@ -2,7 +2,15 @@
  * Opened Tracking, which covers Intake's whole list column (spec 17
  * §Tracking).
  */
-import { useEffect, useId, useRef, type JSX, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useRef,
+  type JSX,
+  type ReactNode,
+  type Ref,
+} from "react";
 import type { PluginIdentity, TrackingState } from "@hercule/client-core";
 import { ChevronLeftIcon } from "../../icons/chevron-left";
 import { ChevronRightIcon } from "../../icons/chevron-right";
@@ -10,6 +18,8 @@ import { Mark } from "../../marks";
 import { SourceMark } from "./source-mark";
 import { TrackingRowItem, type TrackingRowFacts } from "./tracking-row";
 import { describeWaitingOnYou, TRACKING_STATE_LOOKS } from "./tracking-states";
+import { useLineFade } from "./use-line-fade";
+import { useRowMotion } from "./use-row-motion";
 import "./tracking.css";
 
 /** The rows of Tracking that are in one state, drawn under the state's mark and word. */
@@ -17,6 +27,26 @@ export interface TrackingSheetGroup {
   readonly state: TrackingState;
   readonly rows: ReadonlyArray<TrackingRowFacts>;
 }
+
+/** One drawn line of the sheet: a state's heading or one of its rows. */
+type SheetItem =
+  | { readonly kind: "heading"; readonly key: string; readonly state: TrackingState }
+  | { readonly kind: "row"; readonly key: string; readonly facts: TrackingRowFacts };
+
+/** Returns the sheet's headings and rows as one list in the order they are drawn, which the motion moves. */
+const flattenGroups = (groups: ReadonlyArray<TrackingSheetGroup>): ReadonlyArray<SheetItem> =>
+  groups.flatMap(({ state, rows }) => [
+    { kind: "heading" as const, key: `section:${state}`, state },
+    ...rows.map((facts) => ({ kind: "row" as const, key: facts.taskId, facts })),
+  ]);
+
+/** Returns `items` in groups again: each state's heading and the rows that follow it. */
+const regroupItems = (items: ReadonlyArray<SheetItem>): ReadonlyArray<TrackingSheetGroup> =>
+  items.reduce<TrackingSheetGroup[]>((groups, item) => {
+    if (item.kind === "heading") return [...groups, { state: item.state, rows: [] }];
+    const last = groups.at(-1)!;
+    return [...groups.slice(0, -1), { ...last, rows: [...last.rows, item.facts] }];
+  }, []);
 
 /**
  * Renders opened Tracking, over the whole list column under the bar's
@@ -35,6 +65,10 @@ export interface TrackingSheetGroup {
  * its Mark done control `onMarkDone`. `dock` is drawn at the end of the
  * scrolling rows and sticks to the bottom of them: the toast of the last move,
  * which the list's own dock cannot show while this sheet covers the list.
+ *
+ * The rows move as Intake's do when they change (`useRowMotion`), with the
+ * gap closing over `--dur-3`, and a row whose state changed fades its line in
+ * anew. `ref` is the sheet's element.
  *
  * The sheet takes the focus when it mounts, so Intake's keys keep working
  * after the press or the key that opened it. The keys move the selection, and
@@ -57,6 +91,7 @@ export function TrackingSheet({
   signalSources,
   plugins,
   dock,
+  ref,
   onClose,
   onOpenRow,
   onMarkDone,
@@ -69,12 +104,22 @@ export function TrackingSheet({
   readonly signalSources: ReadonlyArray<string | null>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly dock?: ReactNode;
+  readonly ref?: Ref<HTMLElement>;
   readonly onClose: () => void;
   readonly onOpenRow: (taskId: string) => void;
   readonly onMarkDone: (taskId: string) => void;
 }): JSX.Element {
   const id = useId();
   const sheetRef = useRef<HTMLElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const ghostsRef = useRef<HTMLDivElement>(null);
+  useImperativeHandle(ref, () => sheetRef.current!, []);
+  const drawn = useRowMotion(flattenGroups(groups), "sheet", scrollRef, ghostsRef, "--dur-3");
+  const drawnGroups = regroupItems(drawn);
+  useLineFade(
+    drawnGroups.flatMap((group) => group.rows),
+    scrollRef,
+  );
   const rowCount = groups.reduce((count, group) => count + group.rows.length, 0);
 
   useEffect(() => {
@@ -123,33 +168,41 @@ export function TrackingSheet({
         </h2>
         {waitingLine}
       </header>
-      <div className="tr-scroll">
-        {groups.length === 0 && (
-          <p className="tr-empty">
-            Hand a signal to an agent, and follow it here until you mark it done.
-          </p>
-        )}
-        {groups.map(({ state, rows }) => (
-          <section key={state} aria-labelledby={`${id}-${state}`}>
-            <h3 className="section-h asks-sec tr-sec" id={`${id}-${state}`}>
-              <Mark state={TRACKING_STATE_LOOKS[state].mark} size={14} />
-              {TRACKING_STATE_LOOKS[state].word}
-              <span className="count">{rows.length}</span>
-            </h3>
-            <div className="tr-runs">
-              {rows.map((facts) => (
-                <TrackingRowItem
-                  key={facts.taskId}
-                  facts={facts}
-                  selected={facts.taskId === selectedTaskId}
-                  onOpen={onOpenRow}
-                  onMarkDone={onMarkDone}
-                />
-              ))}
-            </div>
-          </section>
-        ))}
-        {dock}
+      <div className="tr-body">
+        <div ref={scrollRef} className="tr-scroll">
+          {groups.length === 0 && (
+            <p className="tr-empty">
+              Hand a signal to an agent, and follow it here until you mark it done.
+            </p>
+          )}
+          {drawnGroups.map(({ state, rows }) => (
+            <section key={state} aria-labelledby={`${id}-${state}`}>
+              <h3
+                className="section-h asks-sec tr-sec"
+                id={`${id}-${state}`}
+                data-item-key={`section:${state}`}
+              >
+                <Mark state={TRACKING_STATE_LOOKS[state].mark} size={14} />
+                {TRACKING_STATE_LOOKS[state].word}
+                <span className="count">{rows.length}</span>
+              </h3>
+              <div className="tr-runs">
+                {rows.map((facts) => (
+                  <TrackingRowItem
+                    key={facts.taskId}
+                    facts={facts}
+                    selected={facts.taskId === selectedTaskId}
+                    onOpen={onOpenRow}
+                    onMarkDone={onMarkDone}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+          {dock}
+        </div>
+        {/* The copies of rows that leave fade here, over the rows. */}
+        <div ref={ghostsRef} className="tr-ghosts" aria-hidden="true" inert />
       </div>
       <h2 className="tr-bar tr-bar--back">
         <button

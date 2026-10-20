@@ -39,6 +39,7 @@ import {
   signalsToDoQuery,
 } from "../../app/queries";
 import { useTrackingRows } from "../../app/tracking";
+import { createHandoffFlights } from "./handoff-flight";
 import { IntakeDock } from "./intake-dock";
 import { InboxZero } from "./inbox-zero";
 import { IntakeFoot } from "./intake-foot";
@@ -52,6 +53,7 @@ import { TrackingTray } from "./tracking-tray";
 import { canMarkTrackingStateDone } from "./tracking-states";
 import { useIntakeSplit } from "./use-intake-split";
 import { useHeldSignals } from "./use-held-signals";
+import { useHeldTrackingRows } from "./use-held-tracking-rows";
 import { useIntakeTabs } from "./use-intake-tabs";
 import { useTrackingTickOff } from "./use-tracking-tick-off";
 import {
@@ -139,7 +141,16 @@ export function IntakeScreen({
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const { tabs, plugins } = useIntakeTabs(pluginId);
-  const trackingRows = useTrackingRows();
+  // The rows as last read give the counts, which follow each read at once.
+  // The rows Tracking draws, and the keys walk, are held while the pointer is
+  // on the list column (below).
+  const readTrackingRows = useTrackingRows();
+  const [pointerOverColumn, setPointerOverColumn] = useState(false);
+  const heldTracking = useHeldTrackingRows(readTrackingRows, pointerOverColumn);
+  const trackingRows = heldTracking.shown;
+  // A handoff's flight carries a copy of the signal's row from the list to
+  // folded Tracking, in a layer over the list column.
+  const [flights] = useState(createHandoffFlights);
   // Tracking covers the list, so no signal is selected while it is open.
   const trackingOpen = view === "to-do" && trackingOpenParam;
   const selectedId = trackingOpen ? null : selectedIdParam;
@@ -262,9 +273,16 @@ export function IntakeScreen({
     const row = trackingRows.find((each) => each.task.id === taskId);
     if (row === undefined || !canMarkTrackingStateDone(row.state)) return;
     const next = pickSelectionAfterMove(trackingIds, taskId, [taskId]);
-    tickOff.run({ taskId, title: row.task.title }, () => {
-      setTrackingSelection((current) => (current === taskId ? next : current));
-    });
+    heldTracking.registerMarkedDone(taskId);
+    tickOff.run(
+      { taskId, title: row.task.title },
+      () => {
+        setTrackingSelection((current) => (current === taskId ? next : current));
+      },
+      () => {
+        heldTracking.forgetMarkedDone(taskId);
+      },
+    );
   };
 
   const openTrackingRow = (taskId: string): void => {
@@ -568,11 +586,19 @@ export function IntakeScreen({
     select: openSignal,
     registerOwnChanges: held.registerOwnChanges,
     forgetOwnChanges: held.forgetOwnChanges,
+    registerHandoff: (signalId) => {
+      flights.expect(signalId);
+      heldTracking.registerHandedOff(signalId);
+    },
+    forgetHandoff: (signalId) => {
+      flights.forget(signalId);
+      heldTracking.forgetHandedOff(signalId);
+    },
   };
   // Inbox zero takes the place of the empty To do list on the All tab, and
   // shows the cleared count itself, so the foot goes with the rows.
   // Rows of Tracking that wait on the user keep To do from being at zero.
-  const waitingTrackingRows = countWaitingTrackingRows(trackingRows);
+  const waitingTrackingRows = countWaitingTrackingRows(readTrackingRows);
   const inboxZero =
     view === "to-do" &&
     pluginId === null &&
@@ -605,6 +631,12 @@ export function IntakeScreen({
           split={split}
           listLabel="Signals"
           onKeyDown={handleKeys}
+          onListPointerEnter={() => {
+            setPointerOverColumn(true);
+          }}
+          onListPointerLeave={() => {
+            setPointerOverColumn(false);
+          }}
           list={
             <>
               <div className="asks-head">
@@ -684,6 +716,7 @@ export function IntakeScreen({
                 onFocusedSelectedRow={() => {
                   setFocusSelectedRow(false);
                 }}
+                takeLeavingRow={flights.takeLeavingRow}
               />
               {view === "to-do" && (
                 <TrackingTray
@@ -697,6 +730,7 @@ export function IntakeScreen({
                   dock={
                     <IntakeDock toast={toast.toast} bulk={null} onDismissToast={toast.dismiss} />
                   }
+                  flights={flights}
                   onOpen={openTracking}
                   onClose={closeTracking}
                   onOpenRow={openTrackingRow}

@@ -27,6 +27,8 @@ export interface TrackingRowFacts {
   readonly lineText: string;
   /** When the row entered its state, as an ISO time. The time at the row's end shows how long ago that was. */
   readonly since: string;
+  /** The ids of the signals the Task was handed off from. A handoff's flight lands on the row of the Task that names its signal. */
+  readonly handoffSignalIds: ReadonlyArray<string>;
 }
 
 /**

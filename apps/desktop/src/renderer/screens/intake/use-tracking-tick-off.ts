@@ -22,9 +22,10 @@ interface TickOff {
 export interface TrackingTickOff {
   /**
    * Sets the Task `done`, which takes its row out of Tracking, then calls
-   * `onDone`. Does nothing while another tick-off is being sent.
+   * `onDone`. When the tick-off fails, it calls `onFailed` instead. Does
+   * nothing while another tick-off is being sent.
    */
-  readonly run: (tickOff: TickOff, onDone?: () => void) => void;
+  readonly run: (tickOff: TickOff, onDone?: () => void, onFailed?: () => void) => void;
 }
 
 /**
@@ -56,9 +57,12 @@ export const useTrackingTickOff = (
     },
   });
   return {
-    run: (input, onDone) => {
+    run: (input, onDone, onFailed) => {
       if (tickOff.isPending) return;
-      tickOff.mutate(input, onDone === undefined ? undefined : { onSuccess: onDone });
+      tickOff.mutate(input, {
+        onSuccess: () => onDone?.(),
+        onError: () => onFailed?.(),
+      });
     },
   };
 };
