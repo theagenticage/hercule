@@ -13,7 +13,7 @@
   margin: 0 0 10px;
 }
 /* The last block ends the message: its margin would add space under it. */
-:is(.msg-body, .bubble) > :last-child {
+:is(.msg-body, .bubble-text) > :last-child {
   margin-bottom: 0;
 }
 :is(.msg-body, .bubble) :is(h1, h2, h3, h4, h5, h6) {
@@ -22,7 +22,7 @@
   font-weight: var(--w-bold);
   line-height: 1.45;
 }
-:is(.msg-body, .bubble) > :is(h1, h2, h3, h4, h5, h6):first-child {
+:is(.msg-body, .bubble-text) > :is(h1, h2, h3, h4, h5, h6):first-child {
   margin-top: 0;
 }
 :is(.msg-body, .bubble) :is(ul, ol) {

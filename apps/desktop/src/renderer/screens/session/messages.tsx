@@ -14,7 +14,8 @@
  * current day, so every message draws again when the day changes and "09:04"
  * becomes "4 Sep 09:04".
  */
-import { memo, useMemo, useState, type JSX } from "react";
+import { memo, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import {
   formatMessageTime,
   splitStreamingText,
@@ -54,6 +55,70 @@ export function AgentFace({
   readonly pose: Pose;
 }): JSX.Element {
   return <Face look={look} pose={pose} size={FACE_SIZE} animated={pose === "working"} />;
+}
+
+/**
+ * The height of a long message's text while it is collapsed, in CSS pixels:
+ * 7 lines of the bubble's 14px type at a line height of 1.55, plus one gap
+ * between paragraphs. That is about one and a half paragraphs.
+ */
+const COLLAPSED_TEXT_HEIGHT = 162;
+
+/**
+ * The height above which a message's text is collapsed, in CSS pixels: 10
+ * lines. A message only a line or two taller than the collapsed height is
+ * drawn in full, because collapsing it would hide almost nothing.
+ */
+const COLLAPSE_ABOVE_HEIGHT = 217;
+
+/**
+ * Renders the text of a bubble, collapsed when it is long: cut to
+ * `COLLAPSED_TEXT_HEIGHT`, fading out, with "Show full message" under it.
+ * Clicked, the button opens the text in full and reads "Show less".
+ *
+ * Whether the text is long depends on its width, so a `ResizeObserver`
+ * decides it again each time the text changes size, as when the window is
+ * resized. The observer reports after layout and before paint, and the
+ * decision is drawn at once with `flushSync`, so a long message is never
+ * painted in full first. The open state lives in this component, so a
+ * message the virtualized list unmounts is collapsed again when it returns.
+ */
+function BubbleText({ children }: { readonly children: ReactNode }): JSX.Element {
+  const textRef = useRef<HTMLDivElement>(null);
+  const [long, setLong] = useState(false);
+  const [open, setOpen] = useState(false);
+  useLayoutEffect(() => {
+    const text = textRef.current!;
+    // The text's `scrollHeight` is the height of all of it, collapsed or not.
+    const observer = new ResizeObserver(() => {
+      flushSync(() => setLong(text.scrollHeight > COLLAPSE_ABOVE_HEIGHT));
+    });
+    observer.observe(text);
+    return () => observer.disconnect();
+  }, []);
+  const collapsed = long && !open;
+  return (
+    <>
+      <div
+        ref={textRef}
+        className="bubble-text"
+        data-collapsed={collapsed ? "" : undefined}
+        style={collapsed ? { maxHeight: COLLAPSED_TEXT_HEIGHT } : undefined}
+      >
+        {children}
+      </div>
+      {long ? (
+        <button
+          type="button"
+          className="bubble-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+        >
+          {open ? "Show less" : "Show full message"}
+        </button>
+      ) : null}
+    </>
+  );
 }
 
 /** The skills of a message that used none. One shared array, so the bubble's props do not change. */
@@ -111,6 +176,8 @@ function SkillMessageText({
  * in the text that is in the list is drawn as a chip, and the hover card of the
  * chip comes from the skills of session `sessionId`, which a message with
  * skills must be given. Any other `$name` stays text.
+ * Text taller than 10 lines is collapsed, with a button that shows it in
+ * full (`BubbleText`).
  * A message sent with images and no text draws no bubble. A message steered
  * into the running turn reads "Steered" before its time. A message still on
  * its way into the session reads "Sending…" in place of its time.
@@ -165,16 +232,18 @@ export const UserMessage = memo(function UserMessage({
         {attachments.length === 0 ? null : <SentImages attachments={attachments} />}
         {text === "" ? null : (
           <div className="bubble">
-            {skills.length === 0 || sessionId === undefined ? (
-              <Markdown text={text} breaks embeddedHtml={sender !== undefined} />
-            ) : (
-              <SkillMessageText
-                sessionId={sessionId}
-                text={text}
-                skills={skills}
-                embeddedHtml={sender !== undefined}
-              />
-            )}
+            <BubbleText>
+              {skills.length === 0 || sessionId === undefined ? (
+                <Markdown text={text} breaks embeddedHtml={sender !== undefined} />
+              ) : (
+                <SkillMessageText
+                  sessionId={sessionId}
+                  text={text}
+                  skills={skills}
+                  embeddedHtml={sender !== undefined}
+                />
+              )}
+            </BubbleText>
           </div>
         )}
         <div className="bubble-meta">
