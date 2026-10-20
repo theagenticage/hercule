@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError, queryKeys, type HerculeClient, type ThreadCopy } from "@hercule/client-core";
 import { buildId, buildThreadCopyFixture } from "./testing-thread-copies";
 import { createThreadCopies, type ThreadCopies } from "./thread-copies";
-import { buildThreadCopy, useKeepThreadCopy } from "./keep-thread-copy";
+import { useKeepThreadCopy } from "./keep-thread-copy";
 
 const SESSION_ID = buildId(1);
 
@@ -20,35 +20,6 @@ const seedCache = (queryClient: QueryClient, copy: ThreadCopy): void => {
     queryClient.setQueryData(queryKeys.transcript(id, subagentId), rows);
   }
 };
-
-describe("buildThreadCopy", () => {
-  it("collects the four reads and the transcript of each subagent opened", () => {
-    const queryClient = new QueryClient();
-    const base = buildThreadCopyFixture(SESSION_ID);
-    const copy: ThreadCopy = {
-      ...base,
-      subagentTranscripts: { a1: base.transcript.slice(0, 1) },
-    };
-    seedCache(queryClient, copy);
-    // Another thread's subagent transcript is not this thread's.
-    queryClient.setQueryData(queryKeys.transcript(buildId(2), "a9"), base.transcript);
-
-    expect(buildThreadCopy(queryClient, SESSION_ID)).toEqual(copy);
-  });
-
-  it.each([
-    ["session", queryKeys.session(SESSION_ID)],
-    ["subagents", queryKeys.subagents(SESSION_ID)],
-    ["queued inputs", queryKeys.inputs(SESSION_ID)],
-    ["transcript", queryKeys.transcript(SESSION_ID)],
-  ])("returns undefined when the cache lacks the %s", (_name, key) => {
-    const queryClient = new QueryClient();
-    seedCache(queryClient, buildThreadCopyFixture(SESSION_ID));
-    queryClient.removeQueries({ queryKey: key, exact: true });
-
-    expect(buildThreadCopy(queryClient, SESSION_ID)).toBeUndefined();
-  });
-});
 
 describe("useKeepThreadCopy", () => {
   /**
@@ -103,6 +74,34 @@ describe("useKeepThreadCopy", () => {
     await flushSaves(save);
 
     expect(await threadCopies.read(SESSION_ID)).toEqual(copy);
+  });
+
+  it("saves the transcript of each subagent opened, and none of another thread's", async () => {
+    const { queryClient, copy, threadCopies, save, unmount } = renderSaving();
+    const rows = copy.transcript.slice(0, 1);
+    queryClient.setQueryData(queryKeys.transcript(SESSION_ID, "a1"), rows);
+    queryClient.setQueryData(queryKeys.transcript(buildId(2), "a9"), rows);
+
+    unmount();
+    await flushSaves(save);
+
+    expect((await threadCopies.read(SESSION_ID))?.subagentTranscripts).toEqual({ a1: rows });
+  });
+
+  it.each([
+    ["session", queryKeys.session(SESSION_ID)],
+    ["subagents", queryKeys.subagents(SESSION_ID)],
+    ["queued inputs", queryKeys.inputs(SESSION_ID)],
+    ["transcript", queryKeys.transcript(SESSION_ID)],
+  ])("saves nothing when the cache lacks the %s", async (_name, key) => {
+    const { queryClient, threadCopies, save, unmount } = renderSaving();
+    queryClient.removeQueries({ queryKey: key, exact: true });
+
+    unmount();
+    await flushSaves(save);
+
+    expect(save).not.toHaveBeenCalled();
+    expect(await threadCopies.read(SESSION_ID)).toBeUndefined();
   });
 
   it("saves the copy of the thread that was open when the session id changes", async () => {

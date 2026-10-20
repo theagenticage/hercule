@@ -21,10 +21,7 @@ import { sessionQuery } from "./queries";
  * almost nothing to build. It also holds the transcript of every subagent
  * whose page was opened and is still cached.
  */
-export const buildThreadCopy = (
-  queryClient: QueryClient,
-  sessionId: string,
-): ThreadCopy | undefined => {
+const buildThreadCopy = (queryClient: QueryClient, sessionId: string): ThreadCopy | undefined => {
   const session = queryClient.getQueryData<Session>(queryKeys.session(sessionId));
   const subagents = queryClient.getQueryData<readonly Subagent[]>(queryKeys.subagents(sessionId));
   const queuedInputs = queryClient.getQueryData<readonly Input[]>(queryKeys.inputs(sessionId));
@@ -87,9 +84,6 @@ const selectStatus = (session: Session): SessionStatus => session.status;
  * status leaves `busy`). It saves nothing per stored row, so a streaming
  * thread costs no disk work. Where the thread no longer exists, it deletes
  * the copy instead.
- *
- * The store skips a save of values it already holds on disk (see
- * `ThreadCopies.save`), so this hook saves without checking for changes.
  *
  * Only the thread's own route calls it. The Office's drawer shows a thread
  * page outside that route and does not save copies.
