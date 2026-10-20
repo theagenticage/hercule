@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../shared/book.css" />
+    <script src="../shared/book.js"></script>
+    <title>4 · Tracks · The sidebar, regrouped · Hercule</title>
+    <style>
+      /* This page's own pieces: the lane diagram in the hero and the scorecard's grades. */
+      .tk-hero-lane {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 34px;
+        max-width: 560px;
+      }
+      .tk-hero-lane svg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .tk-hero-key {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 18px;
+        color: var(--muted);
+        font-size: var(--t-12);
+      }
+      .tk-hero-key span {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .tk-hero-key i {
+        display: inline-block;
+        width: 16px;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--who-shade);
+      }
+      .tk-grade {
+        display: inline-flex;
+        align-items: center;
+        height: 22px;
+        padding: 0 9px;
+        border-radius: var(--r-pill);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+        white-space: nowrap;
+      }
+      .tk-grade--strong {
+        background: color-mix(in oklab, var(--accent) 14%, transparent);
+        color: var(--accent-ink);
+      }
+      .tk-grade--good {
+        background: color-mix(in oklab, var(--ink) 7%, transparent);
+        color: var(--ink);
+      }
+      .tk-grade--fair {
+        background: var(--you-tint);
+        color: var(--you-ink);
+      }
+      .tk-costs td:first-child {
+        width: 180px;
+      }
+      .tk-lens-pair {
+        align-items: center;
+      }
+      .tk-lens-pair .bk-card {
+        padding: 30px 32px 32px;
+      }
+      .tk-huh-frame {
+        margin-top: 56px;
+      }
+      .tk-anat {
+        grid-template-columns: minmax(280px, 1fr) minmax(0, 660px);
+        gap: 48px;
+      }
+      .tk-zooms {
+        display: flex;
+        flex-direction: column;
+        gap: 36px;
+        min-width: 0;
+      }
+      .tk-time {
+        margin-top: 72px;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+      }
+      .tk-time > .bk-frame {
+        width: 408px;
+      }
+      .tk-time-card {
+        padding: 32px 34px 34px;
+      }
+      @media (max-width: 900px) {
+        .tk-anat {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .tk-time {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .tk-time > .bk-frame {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="bk-top">
+      <a class="bk-brand" href="../index.html"><i data-face="Hercule" data-pose="idle" data-size="24"></i>The sidebar, regrouped <small>four directions in Crew Bureau</small></a>
+      <nav class="bk-links">
+        <a href="../index.html#team">The team</a>
+        <a href="../index.html#brief">The brief</a>
+        <a href="../case-files/index.html">Case Files</a>
+        <a href="../lineage/index.html">Lineage</a>
+        <a href="../workbench/index.html">Workbench</a>
+        <a href="../tracks/index.html" aria-current="page">Tracks</a>
+        <a href="../index.html#compare">Compare</a>
+      </nav>
+      <div class="bk-themes"><button data-theme-option="whitehaven">Whitehaven</button><button data-theme-option="orient-express">Orient Express</button></div>
+    </header>
+
+    <main class="bk">
+      <!-- ---------------------------------------------------------------- hero -->
+      <section class="bk-hero">
+        <div class="bk-eyebrow">Direction 4 of 4 · organizes by time</div>
+        <h1><span class="bk-num">4</span>Tracks</h1>
+        <p class="bk-lever">Time organizes the list. Every piece of work is a lane, and every thread a track in it, running up to now.</p>
+        <p class="bk-lede">Today a lead and its partners are three rows that nothing ties together. In Tracks they are <b>one row, exactly as tall as today's</b>. Line 1 is still the title and the status word. Line 2 becomes the last hour of that work: one track per thread, in the thread's own color, ending at now.</p>
+        <p class="bk-lede">So you stop reading the sidebar and start seeing it. Which work is moving, which partner never got going, which one has been waiting on you for ten minutes, what happened while you were in a meeting. <b>The words are today's. The picture under them is new.</b></p>
+
+        <div class="tk-hero-lane" aria-hidden="true">
+          <svg viewBox="0 0 560 64">
+            <g style="--hue: var(--hue-peach)">
+              <rect x="0" y="11.5" width="410" height="1" fill="var(--who-shade)" opacity=".55" />
+              <rect x="40" y="9" width="38" height="6" rx="3" fill="var(--who-shade)" />
+              <rect x="88" y="9" width="22" height="6" rx="3" fill="var(--who-shade)" />
+              <rect x="250" y="9" width="70" height="6" rx="3" fill="var(--who-shade)" />
+              <rect x="330" y="9" width="40" height="6" rx="3" fill="var(--who-shade)" />
+              <rect x="380" y="9" width="30" height="6" rx="3" fill="var(--who-shade)" />
+              <rect x="410" y="10.5" width="130" height="3" fill="var(--you)" />
+              <circle cx="548" cy="12" r="5.5" fill="var(--bg)" stroke="var(--you)" stroke-width="1.8" />
+              <circle cx="548" cy="12" r="2.4" fill="var(--you)" />
+            </g>
+            <g style="--hue: var(--hue-sky)">
+              <path d="M50 12C58 12 58 32 66 32" fill="none" stroke="var(--who-shade)" stroke-width="1.5" />
+              <rect x="66" y="31.5" width="474" height="1" fill="var(--who-shade)" opacity=".55" />
+              <rect x="66" y="29" width="90" height="6" rx="3" fill="var(--who-shade)" />
+              <rect x="210" y="29" width="34" height="6" rx="3" fill="var(--who-shade)" />
+            </g>
+            <g style="--hue: var(--hue-lime)">
+              <path d="M370 12C378 12 378 52 386 52" fill="none" stroke="var(--who-shade)" stroke-width="1.5" />
+              <rect x="386" y="51.5" width="154" height="1" fill="var(--who-shade)" opacity=".55" />
+              <rect x="386" y="49" width="70" height="6" rx="3" fill="var(--who-shade)" />
+              <rect x="462" y="49" width="78" height="6" rx="3" fill="var(--who-shade)" />
+              <circle cx="540" cy="52" r="4.5" fill="var(--who-shade)" stroke="var(--bg)" stroke-width="2" />
+            </g>
+            <g style="--hue: var(--hue-sky)"><path d="M244.5 32V14" stroke="var(--who-ink)" stroke-width="1.5" /><circle cx="244.5" cy="12" r="2.6" fill="var(--who-ink)" /></g>
+            <g style="--hue: var(--hue-lime)"><path d="M480.5 52V14" stroke="var(--who-ink)" stroke-width="1.5" /><circle cx="480.5" cy="12" r="2.6" fill="var(--who-ink)" /></g>
+            <rect x="540" y="2" width="1" height="60" fill="var(--line)" />
+          </svg>
+          <div class="tk-hero-key">
+            <span style="--hue: var(--hue-peach)"><i></i>the lead worked</span>
+            <span style="--hue: var(--hue-sky)"><i></i>research, added at 09:05</span>
+            <span style="--hue: var(--hue-lime)"><i></i>review, started by the lead at 09:30</span>
+            <span><i style="background: var(--you)"></i>waiting on you since 09:31</span>
+          </div>
+        </div>
+      </section>
+
+      <figure class="bk-frame bk-wide" data-src="desktop.html?state=everyday" data-caption="Tuesday 09:41, the heavy morning" data-note="Ten lanes for sixteen threads. The 3-D Secure work is one row with three tracks; the header's tabs are its crew, and their faces are the tracks' legend."></figure>
+
+      <!-- ---------------------------------------------------------------- before and after -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">Before and after</div>
+        <h2>Same morning, same width, one row per piece of work.</h2>
+        <p class="bk-lede">On the left, today's sidebar on this morning: the 3-D Secure work is three rows in three places, and "Adversarial review of the…" appears twice, for two different pieces of work. On the right, Tracks: every piece of work is one lane, and its threads are drawn inside it.</p>
+        <div class="bk-stats">
+          <div class="bk-stat"><b>16 → 10</b><span>rows needed for sixteen threads</span></div>
+          <div class="bk-stat"><b>0 px</b><span>taller than today's 52px row</span></div>
+          <div class="bk-stat"><b>1</b><span>transform a minute per strip while nothing happens</span></div>
+          <div class="bk-stat"><b>0</b><span>words added to a row</span></div>
+        </div>
+        <div class="bk-pair tk-before-after">
+          <figure class="bk-frame" data-src="../today/desktop.html?state=everyday" data-crop="0,96,272,640" data-zoom="1.5" data-caption="Today" data-note="Every thread is a row. Partners land wherever their start time puts them."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=everyday" data-crop="0,96,272,640" data-zoom="1.5" data-caption="Tracks" data-note="Every piece of work is a lane. Its threads are tracks, its partners branch off its lead."></figure>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- anatomy -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">Anatomy</div>
+        <h2>How to read a lane</h2>
+        <p class="bk-lede">The 3-D Secure lane, at three times its size. Seven things to know, and after a day you will not need any of them.</p>
+        <div class="bk-duo tk-anat">
+          <ol class="bk-steps">
+            <li><h4>Line 1 is today's row</h4><p>The lead's title, and the status of whoever needs you most: Approval, because the lead wants to push. Click the word to open that thread.</p></li>
+            <li><h4>One track per thread, lead on top</h4><p>Each track is drawn in its thread's own color, the color of its face. The faces in the header's tabs are the legend.</p></li>
+            <li><h4>Beads are turns, hairlines are idle</h4><p>A thick bead is a turn that ran. A hairline is a thread that is loaded and free. A dotted line is a thread asleep.</p></li>
+            <li><h4>Partners branch off their lead</h4><p>A partner's track leaves its lead's at the minute it was started. A tick joins two tracks where one thread messaged the other.</p></li>
+            <li><h4>Marigold is you</h4><p>From the moment a thread started waiting on you, its track turns marigold and runs into the waiting mark at now.</p></li>
+            <li><h4>The caret is where you were</h4><p>It marks when you last looked at the lane. What came before is faint, what came after is bright. The open lane has no caret: you are looking at it.</p></li>
+            <li><h4>The right edge is now</h4><p>Once a minute every strip slides one step left. Rows never move.</p></li>
+          </ol>
+          <div class="tk-zooms">
+            <figure class="bk-frame" data-src="desktop.html?state=everyday" data-crop="4,638,264,60" data-zoom="3" data-caption="The 3-D Secure lane, 3×" data-note="The lead (peach) waits on you since 09:31. Research (sky) went quiet at 09:21, after its report: the tick. Review (lime) branched off at 09:30 and is working."></figure>
+            <figure class="bk-frame" data-src="desktop.html?state=everyday" data-crop="4,309,264,60" data-zoom="3" data-caption="Seen and new" data-note="You last looked at the Result migration at 09:13. Before the caret it is faint; the review's report at 09:31 and the lead's fix since are bright."></figure>
+            <figure class="bk-frame" data-src="desktop.html?state=everyday" data-crop="4,500,264,60" data-zoom="3" data-caption="Marigold is you" data-note="The dashboards lead turned marigold at 09:36, when it asked to keep the old Grafana folder. The alerts partner reported at 09:29 and has been idle since."></figure>
+          </div>
+        </div>
+        <div class="bk-duo tk-time">
+          <figure class="bk-frame" data-src="desktop.html?state=everyday&amp;speed=30" data-crop="0,300,272,400" data-zoom="1.5" data-caption="Time moves" data-note="The clock at thirty times its speed."></figure>
+          <div class="bk-card bk-card--quiet tk-time-card">
+            <div class="bk-eyebrow">The right edge is now</div>
+            <h3>One step a minute, and nothing redrawn</h3>
+            <p class="bk-body">In this frame the clock runs at thirty times its speed, a minute every two seconds. Every strip slides one step left as one transform. A working track already runs past now and is cut at the edge, so it grows into now for free. A turn starting or ending redraws one strip; a streamed token changes nothing.</p>
+            <p class="bk-body">At its real speed this happens once a minute, with a 0.7 second ease, and as a jump under Reduce Motion. Rows never move.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- the huh -->
+      <section class="bk-sec">
+        <div class="bk-huh">
+          <div class="bk-eyebrow">The huh</div>
+          <h2>You can see your morning.</h2>
+          <p>Every agentic tool shows you a list of words: titles, statuses, ages. None shows you rhythm. Which work has been stuck for an hour. Which partner never started. That the reviewer and the implementer have been passing messages for twenty minutes. That nothing moved while you were away, or that everything did.</p>
+          <p>Tracks draws it once, in the row you already have. Press <b>⌘⇧T</b>, or click the ruler, and the lanes spread out into a day sheet over the main pane: every thread of every piece of work on one clock, like a film's call sheet.</p>
+        </div>
+        <figure class="bk-frame bk-wide tk-huh-frame" data-src="desktop.html?state=daysheet" data-caption="The day sheet" data-note="Every lane on one time axis, grouped by project. Beads are turns; arrows are messages between threads; the caret is where you last looked. Hover a bead for its times, click a row to open the thread. 1 hour, 2 hours or the whole morning."></figure>
+        <figure class="bk-frame bk-wide tk-huh-frame" data-src="desktop.html?state=away" data-replay data-caption="Back after forty minutes" data-note="Rogier stepped out at 09:01. Every lane's caret sits at 09:01, one column down the list, and everything bright to its right happened while he was away. Two seconds after he opens the 3-D Secure lane, its caret slides to now."></figure>
+      </section>
+
+      <!-- ---------------------------------------------------------------- states -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The states</div>
+        <h2>Every state the brief asks for</h2>
+        <p class="bk-lede">The same world in every direction. Each frame is live: hover a track, click a lane, press ⌘⇧T.</p>
+        <div class="bk-frames">
+          <figure class="bk-frame" data-src="desktop.html?state=partner" data-caption="In a partner" data-note="The review is open. Its lane is selected, its own track stays bright while the lead's and the research's step back, and the header's review tab is pressed. You always know whose work you are in."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=spawn" data-replay data-caption="A lone thread gets a partner" data-note="Rotate staging secrets starts verify at 09:41. Its track moves up, a second track branches off at now, a tick marks the brief, and the clock runs four minutes fast so you can watch it grow. The row does not grow and nothing below it moves. The header gains a verify tab."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=done" data-replay data-caption="Finishing the 3-D Secure work" data-note="After the push: Mark done on the lane ends all three tracks in checks, folds the lane away and puts it on the Done shelf as one row with its three faces. One toast, one Undo."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=swarm" data-caption="The swarm" data-note="35 threads, 21 pieces of work, more behind every project's row. Up to four tracks a lane; the strips stay one line tall. Busy lanes look busy and quiet lanes look quiet before you read a word."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=lens" data-caption="Another lens: grouped by status" data-note="Needs you, Working, Quiet. A lane moves as one: its tracks never split. A small diamond keeps the project, and a bar on top says a lens is on. Waiting on you folds into Needs you, which says the same thing."></figure>
+          <div class="bk-pair tk-lens-pair">
+            <figure class="bk-frame" data-src="desktop.html?state=lens&amp;menu=1" data-crop="0,80,400,400" data-zoom="1.4" data-caption="The lens menu" data-note="Next to Search. Group by project, status, machine or nothing; sort by started, last activity or name."></figure>
+            <div class="bk-card bk-card--quiet">
+              <div class="bk-eyebrow">Grouping is a lens</div>
+              <h3>The lane is the atom, so any grouping works</h3>
+              <p class="bk-body">Every lens moves whole lanes. A piece of work never splits across groups, because its threads are drawn inside one row. The time axis is the same under every lens, so a lane reads the same wherever it lands.</p>
+              <p class="bk-body">Today's sidebar has no lens at all. Adding one later is a menu and a sort, not a redesign of the row.</p>
+            </div>
+          </div>
+          <figure class="bk-frame" data-src="desktop.html?state=everyday" data-theme="orient-express" data-caption="Orient Express" data-note="On dark themes the beads take the face's fill, the brighter of its two tones, so a track never sinks into the wood."></figure>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- needs and costs -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">What it needs</div>
+        <h2>Two new reads and one change to faces</h2>
+        <p class="bk-lede">On top of the shared model every direction needs (a thread's <code>startedBy</code>, the lead of a thread started with the header's +, a partner's role, and the exchanges, which are already stored).</p>
+        <div class="bk-grid">
+          <div class="bk-card">
+            <h3>Activity spans</h3>
+            <p class="bk-body">When each thread's turns ran, for the last few hours: a start and an end per turn, derived from the session's stored stream (the turn's start and end events). Read once with the session list for the threads in view, then kept live from the status updates the app already receives: a turn starting or ending is one new span.</p>
+          </div>
+          <div class="bk-card">
+            <h3>Last looked</h3>
+            <p class="bk-body">When Rogier last had a thread of each piece of work open. The client keeps it in <code>localStorage</code>, as it keeps the sidebar's layout, because it belongs to this Mac. The phone keeps its own.</p>
+          </div>
+          <div class="bk-card">
+            <h3>A crew never shares a color</h3>
+            <p class="bk-body">Faces are seeded from the thread, so two threads of one piece of work can wear the same hue. This morning the 3-D Secure research and review would both be sky. A track that carries its thread's color needs a rule: <b>a partner's face takes the hue farthest from its crew's</b>, decided once when it starts. Amends spec 17's "A thread's face is seeded by its session id". It helps every direction, and the Office.</p>
+          </div>
+          <div class="bk-card">
+            <h3>Spec 17, §The sidebar</h3>
+            <p class="bk-body">The thread row becomes the lane row. Its second line is the strip; the place (branch, machine) moves to the hover card and the composer's lip. The ruler, the day sheet (<code>⌘⇧T</code>) and the lens menu are new. The 5-per-project cap counts lanes.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="bk-sec">
+        <div class="bk-eyebrow">What it costs</div>
+        <h2>Cheap while idle, nothing per token</h2>
+        <p class="bk-lede">In ADR 0037's terms. To be measured with a new perf scenario: 500 threads, the minute tick and a turn ending, against rule 2's bar of at most 2 ms of style and layout in a frame.</p>
+        <div class="bk-scroll">
+          <table class="bk-table tk-costs">
+            <thead><tr><th>Budget</th><th>What Tracks spends</th></tr></thead>
+            <tbody>
+              <tr><td>Processes</td><td>None new.</td></tr>
+              <tr><td>Memory</td><td>The spans of the threads in view: about twenty numbers a thread, a few kilobytes for a heavy morning. One small SVG per lane in view, which the virtualized list mounts and unmounts as it does rows.</td></tr>
+              <tr><td>Work while idle</td><td>One style write a minute: the list's <code>--tk-shift</code> moves every strip's group by one transform. No layout, no redraw. A working track already reaches past now and is clipped at the edge, so it grows into now for free.</td></tr>
+              <tr><td>Per streamed token</td><td>Nothing. A turn starting or ending redraws one strip, about a kilobyte of SVG.</td></tr>
+              <tr><td>The day sheet</td><td>Mounted only while it is open, drawn once, and redrawn on the minute tick while open.</td></tr>
+              <tr><td>Bundle bytes</td><td>The strip and the ruler in the shell's chunk, a few kilobytes. The day sheet and the lens menu in a chunk of their own, loaded on first open.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- risks -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">Risks the team raised</div>
+        <h2>And the answers</h2>
+        <div class="bk-grid">
+          <div class="bk-card bk-card--quiet"><h4>"Data viz in a sidebar is unfamiliar."</h4><p class="bk-body">Line 1 is today's row, untouched, so everything a Codex or Claude Code user reads first is where they expect it. The strip replaces only line 2, which today is often just a machine's name.</p></div>
+          <div class="bk-card bk-card--quiet"><h4>"Hairlines are too subtle."</h4><p class="bk-body">They are meant to be quiet. Only three things speak up: now, marigold, and the caret. The beads are a step darker than a face on light themes and its fill on dark ones.</p></div>
+          <div class="bk-card bk-card--quiet"><h4>"Where did the branch go?"</h4><p class="bk-body">To the hover card and the composer's lip. The row now says when and who instead of where. For the threads Rogier runs, "where" was mostly a generated branch or a machine.</p></div>
+          <div class="bk-card bk-card--quiet"><h4>"Which track is which?"</h4><p class="bk-body">Lead on top, partners in the order they started, each in its face's color, with the faces in the header as the legend. Hover a track and the card names it; click it and that thread opens.</p></div>
+          <div class="bk-card bk-card--quiet"><h4>"A list that is always moving is distracting."</h4><p class="bk-body">The strips step once a minute, with a 0.7 second ease, and jump under Reduce Motion. Rows never move; a partner joining changes a strip, not the list.</p></div>
+          <div class="bk-card bk-card--quiet"><h4>"A lane with six threads?"</h4><p class="bk-body">The strip draws four tracks at 3px. Beyond four, quiet partners would fold into their lead's hairline. Not drawn here: no lane this morning has more than three.</p></div>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- scorecard -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">Scorecard</div>
+        <h2>Against the job stories</h2>
+        <div class="bk-scroll">
+          <table class="bk-table">
+            <thead><tr><th>Job</th><th>How Tracks does it</th><th>Grade</th></tr></thead>
+            <tbody>
+              <tr><td>Find</td><td>One row per piece of work, under its project, by its lead's title. The partner is found inside its lead's lane.</td><td><span class="tk-grade tk-grade--good">Good</span></td></tr>
+              <tr><td>Attend</td><td>Waiting on you on top, the status word on line 1, a marigold track and mark on every lane, "n need you" on headers. A waiting partner is impossible to miss.</td><td><span class="tk-grade tk-grade--strong">Strong</span></td></tr>
+              <tr><td>Oversee</td><td>The reason this direction exists: moving, stuck, quiet and new are visible before reading.</td><td><span class="tk-grade tk-grade--strong">Strong</span></td></tr>
+              <tr><td>Switch</td><td>Click a track, or a crew tab in the header. Two moves from the list, one from the window.</td><td><span class="tk-grade tk-grade--good">Good</span></td></tr>
+              <tr><td>Finish</td><td>Mark done on the lane: every track ends in a check, one row on the shelf, one Undo.</td><td><span class="tk-grade tk-grade--good">Good</span></td></tr>
+              <tr><td>The lone thread</td><td>Same height, no extra words. But its line 2 changes from where it works to one track, so it is not quite today's row.</td><td><span class="tk-grade tk-grade--fair">Fair</span></td></tr>
+              <tr><td>Calm</td><td>Rows hold still; a partner joining changes a strip only. The strips themselves move, once a minute.</td><td><span class="tk-grade tk-grade--good">Good</span></td></tr>
+              <tr><td>The lens</td><td>A lane is the atom: by status, by machine, by nothing, sorted by start, activity or name. The time axis stays.</td><td><span class="tk-grade tk-grade--strong">Strong</span></td></tr>
+              <tr><td>Scale</td><td>The swarm stays one row per piece of work, four tracks at most. Busy reads as busy.</td><td><span class="tk-grade tk-grade--good">Good</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------- next -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The four directions</div>
+        <h2>Compare them</h2>
+        <div class="bk-next">
+          <a href="../case-files/index.html"><i>1</i><b>Case Files</b><span>One piece of work, one row. The crew rides on it as faces.</span></a>
+          <a href="../lineage/index.html"><i>2</i><b>Lineage</b><span>Every thread keeps its row. Kinship is drawn, not boxed.</span></a>
+          <a href="../workbench/index.html"><i>3</i><b>Workbench</b><span>The sidebar lists the work. The window seats the crew.</span></a>
+          <a href="../tracks/index.html" aria-current="page"><i>4</i><b>Tracks</b><span>Every piece of work is a lane, and every thread a track in it.</span></a>
+        </div>
+        <p class="bk-body" style="margin-top: 28px"><a href="../index.html">Back to the book: the team, the brief and the comparison →</a></p>
+      </section>
+    </main>
+
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+  </body>
+</html>

@@ -1,0 +1,1116 @@
+/* PROTOTYPE - direction 4, Tracks. Every rule is scoped under .d-tracks, the window's root, except
+   the hover card and the lens menu, which sit on <body> and carry their own tk- classes.
+
+   Color doctrine, as Crew Bureau has it:
+   - a track is its thread's hue (--who, from --hue), because color is who;
+   - marigold (--you) only where a thread waits on Rogier;
+   - --ok only for the check of a finished track;
+   - the "new since you looked" wash is ink at a few percent: news is not addressed to anyone. */
+
+.d-tracks {
+  position: relative;
+}
+
+/* The list's edges fade, so a row cut by the top or the bottom reads as scrolled, not broken. */
+.d-tracks .stage-list {
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 8px, #000 calc(100% - 8px), transparent 100%);
+}
+
+/* ---------- the ruler: the strips' time axis, and the way into the day sheet ---------- */
+
+.d-tracks .tk-ruler {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: 30px;
+  margin: 0;
+  padding: 8px 8px 0 10px;
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--faint);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--dur-1), color var(--dur-1);
+}
+.d-tracks .tk-ruler::after {
+  content: "";
+  position: absolute;
+  left: -12px;
+  right: -12px;
+  bottom: -2px;
+  height: 2px;
+  background: var(--bg);
+}
+.d-tracks .tk-ruler:hover,
+.d-tracks .tk-ruler.is-pressed {
+  color: var(--ink);
+}
+.d-tracks .tk-ruler:hover .tk-ruler-in {
+  background: color-mix(in oklab, var(--ink) 4%, var(--bg));
+}
+.d-tracks .tk-ruler-in {
+  position: relative;
+  display: block;
+  height: 22px;
+  border-radius: 6px;
+  transition: background var(--dur-1);
+}
+.d-tracks .tk-tick {
+  position: absolute;
+  bottom: 3px;
+  width: 1px;
+  height: 4px;
+  margin-left: -0.5px;
+  background: currentColor;
+  opacity: 0.55;
+}
+.d-tracks .tk-mark {
+  position: absolute;
+  top: 3px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--w-medium);
+  letter-spacing: 0.01em;
+  line-height: 12px;
+  white-space: nowrap;
+}
+.d-tracks .tk-left {
+  position: absolute;
+  top: 2px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 10.5px;
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+.d-tracks .tk-mark--mid {
+  transform: translateX(-50%);
+}
+.d-tracks .tk-mark--end {
+  color: var(--muted);
+}
+
+/* ---------- a lane: today's 52px row, with the strip as its second line ---------- */
+
+.d-tracks .tk-lane > .side-row {
+  padding-bottom: 6px;
+}
+.d-tracks .tk-text {
+  gap: 2px;
+}
+.d-tracks .tk-strip {
+  position: relative;
+  display: block;
+  height: 20px;
+}
+.d-tracks .tk-svg {
+  display: block;
+  overflow: visible;
+}
+.d-tracks .tk-slot {
+  cursor: pointer;
+}
+.d-tracks .st-end--done {
+  color: var(--ok);
+  font-weight: var(--w-medium);
+}
+.d-tracks .tk-lane {
+  transition: opacity var(--dur-1), height var(--dur-3) var(--ease-out);
+}
+/* A working lane steps back as today's working row does, but only its first line: the strip
+   already says what is old (faint) and what is new (bright). */
+.d-tracks .tk-lane.is-receded {
+  opacity: 1;
+}
+.d-tracks .tk-lane.is-receded .st-line {
+  opacity: 0.72;
+  transition: opacity var(--dur-1);
+}
+.d-tracks .tk-lane.is-receded:hover .st-line {
+  opacity: 1;
+}
+.d-tracks .tk-lane.is-leaving {
+  height: 0 !important;
+  opacity: 0;
+  overflow: hidden;
+}
+
+/* The strip slides left as time moves: one transform on one group per strip, from one custom
+   property on the list. */
+.d-tracks .tk-shift {
+  transform: translateX(calc(var(--tk-shift, 0px) * -1));
+  transition: transform 700ms var(--ease-out);
+}
+
+/* The strip's left edge fades in, so a track that began before the hour reads as continuing. */
+.d-tracks .tk-strip {
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px);
+  mask-image: linear-gradient(90deg, transparent 0, #000 14px);
+}
+
+/* A track: a hairline where the thread existed, beads where it worked. The beads take the face's
+   rim shade, a step darker than its fill, so a 4px bead holds its own on the light themes. */
+.d-tracks .tk-base {
+  fill: var(--who-shade);
+  opacity: 0.55;
+}
+.d-tracks .tk-sleep {
+  fill: none;
+  stroke: var(--who-shade);
+  stroke-width: 1;
+  stroke-dasharray: 1 2.5;
+  opacity: 0.6;
+}
+.d-tracks .tk-bead {
+  fill: var(--who-shade);
+}
+.d-tracks .tk-wait {
+  fill: var(--you);
+}
+.d-tracks .tk-elbow {
+  fill: none;
+  stroke: var(--who-shade);
+  stroke-width: 1;
+  opacity: 0.8;
+}
+.d-tracks .tk-msg path {
+  fill: none;
+  stroke: var(--who-ink);
+  stroke-width: 1;
+}
+.d-tracks .tk-msg circle {
+  fill: var(--who-ink);
+}
+.d-tracks .tk-edge {
+  fill: var(--line);
+}
+
+/* What sits on the now edge. */
+.d-tracks .tk-nib,
+.tk-sheet .tk-nib {
+  fill: var(--who-shade);
+  stroke: var(--bg);
+  stroke-width: 1.5;
+}
+.d-tracks .tk-ask-ring,
+.tk-sheet .tk-ask-ring {
+  fill: var(--bg);
+  stroke: var(--you);
+  stroke-width: 1.3;
+}
+.d-tracks .tk-ask-dot,
+.tk-sheet .tk-ask-dot {
+  fill: var(--you);
+}
+.d-tracks .tk-queued {
+  fill: var(--bg);
+  stroke: var(--who-shade);
+  stroke-width: 1.2;
+}
+.d-tracks .tk-check {
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: tk-pop var(--dur-3) var(--ease-spring) both;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+@keyframes tk-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+
+/* What happened since Rogier last looked: a notch where he looked, a light wash after it. */
+.d-tracks .tk-seen {
+  fill: #6b6b6b;
+}
+.d-tracks .tk-new {
+  fill: #fff;
+}
+.d-tracks .tk-notch,
+.tk-sheet .tk-notch {
+  fill: var(--muted);
+}
+
+/* In a lane of several, the open thread's track stays bright and the others step back. */
+.d-tracks .tk-track,
+.d-tracks .tk-term {
+  transition: opacity var(--dur-1);
+}
+.d-tracks .tk-svg.has-open .is-dim:not(.is-fresh) {
+  opacity: 0.42;
+}
+/* While the pointer is on a track, that track leads and the rest wait. */
+.d-tracks .tk-svg.is-hovering .tk-track:not(.is-hot),
+.d-tracks .tk-svg.is-hovering .tk-term:not(.is-hot) {
+  opacity: 0.3;
+}
+.d-tracks .tk-svg.is-hovering .tk-track.is-hot,
+.d-tracks .tk-svg.is-hovering .tk-term.is-hot {
+  opacity: 1;
+}
+.d-tracks .tk-svg.is-hovering .tk-track.is-hot .tk-base {
+  opacity: 0.9;
+}
+.d-tracks .tk-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+/* A partner that just joined draws in from the branch point. */
+.d-tracks .tk-track.is-fresh .tk-elbow {
+  stroke-dasharray: 14;
+  stroke-dashoffset: 14;
+  animation: tk-draw 420ms var(--ease-out) 120ms forwards;
+}
+.d-tracks .tk-track.is-fresh rect {
+  transform-box: fill-box;
+  transform-origin: left center;
+  transform: scaleX(0);
+  animation: tk-grow 520ms var(--ease-out) 420ms forwards;
+}
+.d-tracks .tk-term.is-fresh,
+.d-tracks .tk-msg.is-fresh {
+  opacity: 0;
+  animation: tk-fade var(--dur-3) var(--ease-out) 620ms forwards;
+}
+@keyframes tk-grow {
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes tk-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes tk-fade {
+  to {
+    opacity: 1;
+  }
+}
+.d-tracks .tk-joined {
+  position: absolute;
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px 0 3px;
+  border-radius: var(--r-pill);
+  background: var(--who-tint);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--who) 40%, transparent);
+  color: var(--who-ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  transform: translateY(-50%);
+  animation: tk-joined-in var(--dur-3) var(--ease-spring) 500ms both;
+  transition: opacity var(--dur-3), transform var(--dur-3) var(--ease-out);
+}
+.d-tracks .tk-joined b {
+  font-weight: var(--w-bold);
+}
+.d-tracks .tk-joined.is-gone {
+  opacity: 0;
+  transform: translate(4px, -50%);
+}
+@keyframes tk-joined-in {
+  from {
+    opacity: 0;
+    transform: translate(6px, -50%) scale(0.92);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .d-tracks .tk-shift,
+  .d-tracks .tk-lane {
+    transition: none;
+  }
+  .d-tracks .tk-track.is-fresh *,
+  .d-tracks .tk-track.is-fresh rect,
+  .d-tracks .tk-term.is-fresh,
+  .d-tracks .tk-msg.is-fresh,
+  .d-tracks .tk-check,
+  .d-tracks .tk-joined {
+    animation: none;
+    stroke-dashoffset: 0;
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* ---------- lanes shown outside their project: the project's diamond before the title ---------- */
+
+.d-tracks .tk-diamond {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin: 0 7px 0 1px;
+  border-radius: 2.5px;
+  background: var(--rug);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 14%, transparent);
+  transform: rotate(45deg);
+  vertical-align: 1px;
+}
+.d-tracks .tk-diamond.is-none {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+.d-tracks .tk-lens-sec .side-h .count {
+  margin-right: 4px;
+}
+.d-tracks .tk-noproj::before,
+.tk-sheet .tk-noproj::before {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+
+/* ---------- Waiting on you: a partner's row says which work it belongs to ---------- */
+
+.d-tracks .tk-role {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.d-tracks .tk-waiting .side-name {
+  color: var(--muted);
+}
+.d-tracks .tk-waiting .side-name .tk-role + * {
+  color: inherit;
+}
+
+/* ---------- the Done shelf ---------- */
+
+.d-tracks .side-h--done > button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.d-tracks .side-h--done .ic {
+  transition: transform var(--dur-1);
+}
+.d-tracks .side-h--done > button[aria-expanded="true"] .ic {
+  transform: rotate(90deg);
+}
+.d-tracks .side-h--done .count {
+  min-width: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+}
+.d-tracks .tk-lane--done {
+  opacity: 0.66;
+}
+.d-tracks .tk-lane--done:hover {
+  opacity: 1;
+}
+.d-tracks .tk-lane--done .tk-text {
+  gap: 6px;
+}
+.d-tracks .tk-done-detail {
+  gap: 0;
+}
+.d-tracks .tk-done-detail .cr + .cr {
+  margin-left: -4px;
+}
+.d-tracks .tk-done-detail .st-clip {
+  margin-left: 7px;
+}
+.d-tracks .tk-reopen {
+  color: var(--muted);
+}
+.d-tracks .tk-lane--done.is-arriving {
+  animation: tk-arrive var(--dur-3) var(--ease-out) both;
+}
+@keyframes tk-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* ---------- the lens button, the bar that says a lens is on, and the menu ---------- */
+
+.d-tracks .tk-lensbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  margin-top: 4px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.d-tracks .tk-lensbar span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.d-tracks .tk-lensbar b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.d-tracks .tk-lensbar button {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  font: inherit;
+  font-weight: var(--w-medium);
+}
+.d-tracks .tk-lensbar button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.d-tracks .tk-lens-btn.is-pressed {
+  background: var(--selected);
+  color: var(--ink);
+}
+.tk-lens-pop {
+  position: fixed;
+  z-index: 40;
+  width: 216px;
+  padding: 6px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--t-13);
+}
+.tk-lens-h {
+  padding: 6px 8px 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.tk-lens-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+.tk-lens-opt:hover {
+  background: var(--hover);
+}
+.tk-lens-opt.is-on {
+  font-weight: var(--w-medium);
+}
+.tk-lens-opt .ic {
+  color: var(--accent-ink);
+}
+.tk-lens-sep {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--line-soft);
+}
+.tk-lens-note {
+  margin: 6px 8px 4px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.4;
+}
+
+/* ---------- the hover card: which track is which ---------- */
+
+.tk-card {
+  position: fixed;
+  z-index: 30;
+  width: 292px;
+  padding: 10px 10px 8px;
+  border-radius: var(--r-lg);
+  background: color-mix(in oklab, var(--raised) calc(100% - 12% * var(--glass-level)), transparent);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--t-13);
+  pointer-events: none;
+}
+.tk-card[hidden] {
+  display: none;
+}
+.tk-c-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.tk-c-head .proj {
+  font-size: var(--t-12);
+}
+.tk-c-place {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tk-c-title {
+  margin: 4px 4px 6px;
+  font-weight: var(--w-bold);
+  line-height: 1.35;
+}
+.tk-c-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: var(--r-sm);
+}
+.tk-c-row.is-hot {
+  background: color-mix(in oklab, var(--who) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--who) 34%, transparent);
+}
+.tk-c-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.tk-c-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: var(--t-13);
+  white-space: nowrap;
+}
+.tk-c-name b {
+  font-weight: var(--w-bold);
+}
+.tk-c-name .br,
+.tk-c-name svg {
+  flex: none;
+  color: var(--faint);
+}
+.tk-c-agent {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+}
+.tk-c-sub {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tk-c-status {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 1px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.tk-c-status.is-you {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.tk-c-status.is-working {
+  color: var(--accent-ink);
+}
+.tk-c-foot {
+  margin: 6px 4px 0;
+  padding-top: 7px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.tk-c-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ---------- the header: the lane's crew as tabs ---------- */
+
+.d-tracks .tk-crewbar {
+  max-width: calc(100% - 300px);
+  min-width: 0;
+}
+.d-tracks .tk-tab {
+  gap: 6px;
+  padding-left: 5px;
+  min-width: 0;
+}
+.d-tracks .tk-tab .cr {
+  flex: none;
+}
+.d-tracks .tk-tab-title {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.d-tracks .tk-tab-role {
+  font-weight: var(--w-medium);
+}
+.d-tracks .tk-tab svg.br,
+.d-tracks .tk-tab .br {
+  color: var(--faint);
+}
+.d-tracks .tk-tab .pi {
+  color: var(--faint);
+}
+.d-tracks .tk-sheet-btn kbd {
+  margin-left: 4px;
+}
+.d-tracks .tk-sheet-btn.is-pressed {
+  background: var(--selected);
+}
+
+/* ---------- the day sheet ---------- */
+
+.tk-sheet {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 272px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  box-shadow: -1px 0 0 var(--line-soft);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition: opacity var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
+}
+.tk-sheet.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+.tk-s-top {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex: none;
+  height: 64px;
+  padding: 8px 24px 0 24px;
+}
+.tk-s-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tk-s-title h2 {
+  margin: 0;
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.tk-s-title span {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.tk-s-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.tk-s-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.tk-lg {
+  display: inline-block;
+  width: 18px;
+  height: 8px;
+  border-radius: 2.5px;
+  --hue: var(--hue-sky);
+}
+.tk-lg--bead {
+  background: oklch(var(--char-l) var(--char-c) var(--hue-sky));
+}
+.tk-lg--idle {
+  height: 1px;
+  border-radius: 0;
+  background: oklch(var(--char-l) var(--char-c) var(--hue-sky) / 0.6);
+}
+.tk-lg--wait {
+  background: var(--you-tint);
+  box-shadow: inset 0 0 0 1px var(--you);
+}
+.tk-lg--msg {
+  width: 1px;
+  height: 12px;
+  border-radius: 0;
+  margin: 0 4px;
+  background: var(--muted);
+}
+.tk-lg--seen {
+  background: oklch(var(--char-l) var(--char-c) var(--hue-sky) / 0.42);
+  margin-right: 2px;
+}
+.tk-lg--seen + .tk-lg--bead {
+  margin-left: 10px;
+}
+.tk-s-span {
+  flex: none;
+}
+.tk-s-span button {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--t-12);
+}
+.tk-s-close kbd {
+  margin-left: 6px;
+}
+.tk-s-axis {
+  position: relative;
+  display: flex;
+  flex: none;
+  height: 30px;
+  margin: 0 24px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.tk-s-axis-label {
+  flex: none;
+  width: 268px;
+  padding-top: 9px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.tk-s-axis-chart {
+  position: relative;
+}
+.tk-s-hour {
+  position: absolute;
+  top: 9px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.tk-s-hour:not(.is-hour) {
+  opacity: 0.7;
+}
+.tk-s-hour.is-hour {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.tk-s-hour:first-child {
+  transform: none;
+}
+.tk-s-now {
+  position: absolute;
+  top: 8px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.tk-s-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 24px 40px;
+}
+.tk-s-rows {
+  position: relative;
+  padding-top: 4px;
+}
+.tk-s-grid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed var(--line-soft);
+}
+.tk-s-grid.is-hour {
+  border-left: 1px solid var(--line-soft);
+}
+.tk-s-grid.is-now {
+  border-left: 1px solid color-mix(in oklab, var(--ink) 30%, transparent);
+}
+.tk-s-proj {
+  position: relative;
+  padding-top: 14px;
+}
+.tk-s-proj-h {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 26px;
+  background: var(--surface);
+  width: 268px;
+}
+.tk-s-proj-h .proj {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.tk-s-count {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.tk-s-lane {
+  position: relative;
+  margin-top: 4px;
+  border-radius: var(--r-md);
+}
+.tk-s-lane:hover {
+  background: color-mix(in oklab, var(--ink) 2.5%, transparent);
+}
+.tk-s-lane-h {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 256px;
+  height: 30px;
+  padding: 0 6px 0 8px;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  text-align: left;
+}
+.tk-s-lane-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tk-s-slot {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.tk-s-slot.st-end--working {
+  color: var(--accent-ink);
+}
+.tk-s-slot.st-end--approval,
+.tk-s-slot.st-end--question {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.tk-s-label {
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 256px;
+  padding: 0 6px 0 14px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+  text-align: left;
+}
+.tk-s-label:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.tk-s-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.tk-s-name b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.tk-s-name svg,
+.tk-s-name .pi {
+  flex: none;
+  color: var(--faint);
+}
+.tk-s-agent {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  text-overflow: ellipsis;
+}
+.tk-s-svg {
+  position: absolute;
+  top: 0;
+  overflow: visible;
+}
+.tk-s-track .tk-base {
+  fill: none;
+  stroke: var(--who-shade);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+.tk-s-track .tk-sleep {
+  fill: none;
+  stroke: var(--who);
+  stroke-width: 1;
+  stroke-dasharray: 1 3;
+  opacity: 0.55;
+}
+.tk-s-track .tk-elbow {
+  fill: none;
+  stroke: var(--who);
+  stroke-width: 1.25;
+  opacity: 0.8;
+}
+.tk-s-bead {
+  fill: var(--who-shade);
+  cursor: default;
+}
+.tk-s-bead:hover {
+  fill: var(--who-ink);
+}
+.tk-s-wait {
+  fill: var(--you-tint);
+  stroke: var(--you);
+  stroke-width: 1;
+}
+.tk-s-msg path {
+  fill: none;
+  stroke: var(--who-ink);
+  stroke-width: 1;
+}
+.tk-s-msg .tk-s-arrow {
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tk-s-msg:hover path {
+  stroke-width: 1.6;
+}
+.tk-sheet .tk-seen {
+  fill: #6b6b6b;
+}
+.tk-sheet .tk-new {
+  fill: #fff;
+}
+.tk-s-looked {
+  fill: var(--faint);
+  font-size: 11px;
+  font-family: var(--font-ui);
+}
+.tk-s-tip {
+  position: absolute;
+  z-index: 3;
+  max-width: 320px;
+  padding: 6px 9px;
+  border-radius: var(--r-sm);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  line-height: 1.4;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+}
+.tk-s-tip b {
+  font-weight: var(--w-bold);
+}
+
+/* ---------- the toast, as the app's Done toast (shell/sidebar.css); the stage only places it ---------- */
+
+.d-tracks .side-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 12px;
+  border-radius: var(--r-md);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  box-shadow: var(--shadow-2);
+}
+.d-tracks .side-toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.d-tracks .side-toast button {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: inherit;
+  font: inherit;
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.d-tracks .side-toast button:hover {
+  background: color-mix(in oklab, var(--surface) 14%, transparent);
+}
+.d-tracks .side-toast.is-new {
+  animation: tk-toast-rise var(--dur-2) var(--ease-out);
+}
+@keyframes tk-toast-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* ---------- dark themes: a bead takes the face's fill, which is the brighter one there ---------- */
+
+:is([data-theme="orient-express"], [data-theme="dark"], [data-theme="nile"], [data-theme="end-house"]) .d-tracks .tk-bead,
+:is([data-theme="orient-express"], [data-theme="dark"], [data-theme="nile"], [data-theme="end-house"]) .tk-s-bead,
+:is([data-theme="orient-express"], [data-theme="dark"], [data-theme="nile"], [data-theme="end-house"]) .d-tracks .tk-nib,
+:is([data-theme="orient-express"], [data-theme="dark"], [data-theme="nile"], [data-theme="end-house"]) .tk-sheet .tk-nib {
+  fill: var(--who);
+}
+:is([data-theme="orient-express"], [data-theme="dark"], [data-theme="nile"], [data-theme="end-house"]) .d-tracks .tk-seen,
+:is([data-theme="orient-express"], [data-theme="dark"], [data-theme="nile"], [data-theme="end-house"]) .tk-sheet .tk-seen {
+  fill: #5a5a5a;
+}
