@@ -38,35 +38,42 @@ export const findNewRows = (
  * Returns the `after` position to read the rows written since `held` with:
  * the position of the row before `held`'s last row, or 0 when `held` has one
  * row. The page then starts with the last row held, which
- * `continuesHeldRows` compares with the row the controller has at that
+ * `classifyCatchUpPage` compares with the row the controller has at that
  * position. Returns undefined when `held` is empty, because then the whole
  * transcript is read.
  */
 export const findCatchUpAfterPosition = (held: readonly TranscriptRow[]): number | undefined =>
   held.length === 0 ? undefined : (held.at(-2)?.position ?? 0);
 
+/** What a catch-up page is, compared with the rows held. See `classifyCatchUpPage`. */
+export type CatchUpPageKind = "continuesHeldRows" | "wholeTranscript" | "replacedLog";
+
 /**
- * Checks that `page`, read with the `after` position `findCatchUpAfterPosition`
- * returned for `held`, continues the rows held: its first row is the last row
- * held, with the same position and the same event id. Returns true when
- * `held` is empty, because there is nothing to continue.
- *
- * It returns false when the controller's log is not the one `held` came from,
- * such as when it was restored from a backup. Its newer rows then sit at the
- * positions the held rows had, or the page is empty because the log is
- * shorter. Merging such a page into `held` would store a transcript that
- * mixes two histories, so the caller reads the whole transcript instead.
+ * Classifies `page`, read with the `after` position `findCatchUpAfterPosition`
+ * returned for `held`. Returns:
+ * - `wholeTranscript` when `after` is above 0 and the first row is at or below
+ *   it. A controller that predates `after` ignores it and answers from the
+ *   start of the log, so the page is the whole transcript.
+ * - `continuesHeldRows` when the first row is the last row held, with the
+ *   same position and event id, or when `held` is empty (there is nothing to
+ *   continue). The caller merges the page into `held`.
+ * - `replacedLog` otherwise. The controller's log is not the one `held` came
+ *   from, such as when it was restored from a backup: its newer rows sit at
+ *   the positions the held rows had, or the page is empty because the log is
+ *   shorter. Merging such a page into `held` would store a transcript that
+ *   mixes two histories, so the caller reads the whole transcript instead.
  */
-export const continuesHeldRows = (
+export const classifyCatchUpPage = (
   held: readonly TranscriptRow[],
   page: readonly TranscriptRow[],
-): boolean => {
+): CatchUpPageKind => {
   const last = held.at(-1);
-  if (last === undefined) return true;
+  if (last === undefined) return "continuesHeldRows";
   const first = page[0];
-  return (
-    first !== undefined &&
-    first.position === last.position &&
-    first.event.eventId === last.event.eventId
-  );
+  if (first === undefined) return "replacedLog";
+  const after = findCatchUpAfterPosition(held) ?? 0;
+  if (after > 0 && first.position <= after) return "wholeTranscript";
+  return first.position === last.position && first.event.eventId === last.event.eventId
+    ? "continuesHeldRows"
+    : "replacedLog";
 };

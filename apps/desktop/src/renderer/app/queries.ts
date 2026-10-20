@@ -20,7 +20,7 @@ import {
   ApiError,
   collectRunningTurnRows,
   collectSenderSessionIds,
-  continuesHeldRows,
+  classifyCatchUpPage,
   detectLocalRunner,
   findCatchUpAfterPosition,
   type EventListFilter,
@@ -1630,7 +1630,7 @@ const buildTranscriptCatchUpKey = (sessionId: string, subagentId?: string): Quer
  * stores the answer for it instead.
  *
  * The read starts at the last row held, not after it, and the first row it
- * returns must be that row (`continuesHeldRows`). Reading after the last row
+ * returns must be that row (`classifyCatchUpPage`). Reading after the last row
  * would not notice a controller log that was replaced since the copy was
  * saved, such as one restored from a backup: once the new log is as long as
  * the copy, the rows after the copy's last position belong to the new
@@ -1641,6 +1641,11 @@ const buildTranscriptCatchUpKey = (sessionId: string, subagentId?: string): Quer
  * fails, the page must subscribe from the start of the stream, not from the
  * position of a stale copy, and a copy saved meanwhile holds no transcript,
  * so the next open reads everything.
+ *
+ * A controller that predates the `after` position ignores it and answers the
+ * whole transcript from the start. `classifyCatchUpPage` recognises such a
+ * page, and it replaces the cached transcript at once, with no clearing and
+ * no second read.
  *
  * Fails with the read's error, without trying again: the stream's replay
  * fills the same gap, so waiting for a second attempt would only hold the
@@ -1673,9 +1678,16 @@ export const transcriptCatchUpQuery = (
           }),
         );
       const newRows = await readRows(findCatchUpAfterPosition(heldRows));
-      if (continuesHeldRows(heldRows, newRows)) {
+      const pageKind = classifyCatchUpPage(heldRows, newRows);
+      if (pageKind === "continuesHeldRows") {
         queryClient.setQueryData<readonly TranscriptRow[]>(transcriptKey, (current) =>
           current === undefined ? undefined : mergeTranscript(current, newRows),
+        );
+        return true;
+      }
+      if (pageKind === "wholeTranscript") {
+        queryClient.setQueryData<readonly TranscriptRow[]>(transcriptKey, (current) =>
+          current === undefined ? undefined : newRows,
         );
         return true;
       }

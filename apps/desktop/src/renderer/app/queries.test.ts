@@ -9,7 +9,8 @@
  * ones held are old. Tests that `setupQuery` is kept for the life of the
  * window, so the entry guard never waits for a second read. Tests that
  * `transcriptCatchUpQuery` merges only the rows after the ones held, replaces
- * them when the controller's log was replaced, and does not retry; that
+ * them when the controller's log was replaced, takes the whole transcript
+ * from a controller that ignores `after`, and does not retry; that
  * `forgetGoneThread` reads the session before it deletes the copy; and that
  * `showThreadCopy` starts the catch-up the copy needs.
  */
@@ -462,6 +463,30 @@ describe("transcriptCatchUpQuery", () => {
 
       expect(queryClient.getQueryData(transcriptKey)).toEqual(restored.transcript);
     });
+  });
+
+  it("takes the whole transcript from a controller that ignores `after`, with one read and no empty cache", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(transcriptKey, heldRows);
+    const written: (readonly TranscriptRow[] | undefined)[] = [];
+    queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === "updated" && event.action.type === "success") {
+        written.push(event.query.state.data as readonly TranscriptRow[] | undefined);
+      }
+    });
+    // An older controller answers from position 1 whatever `after` says.
+    const { fetch, calls } = createApiStub({
+      [`GET /api/v1/sessions/${sessionId}/transcript`]: { body: { items: thread.transcript } },
+    });
+    const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
+
+    await queryClient.fetchQuery(transcriptCatchUpQuery(client, sessionId));
+
+    expect(readTranscriptReads(calls, sessionId)).toEqual([
+      { after: String(heldRows.at(-2)!.position), subagentId: null },
+    ]);
+    expect(queryClient.getQueryData(transcriptKey)).toEqual(thread.transcript);
+    expect(written.filter((rows) => rows?.length === 0)).toEqual([]);
   });
 
   it("writes nothing when the transcript is no longer cached, so a missing start is not stored", async () => {
