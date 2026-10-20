@@ -4,7 +4,7 @@
  * over its bottom. The agent is the session's own agent, or one of its
  * subagents. A subagent takes no messages, so its page has no composer.
  */
-import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import { useRef, useState, type JSX, type ReactNode } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Navigate, notFound, useLocation, useRouteContext } from "@tanstack/react-router";
 import {
@@ -89,11 +89,10 @@ export type DrawSubagentParts = (records: {
  * agent's transcript. While it is mounted, the agent's stream and tap keep
  * the transcript and the tail current.
  *
- * A thread that opened from its saved copy holds the copy's rows. The page
- * subscribes to the agent's stream only while the transcript's query is not
- * reading: after it has merged the rows written since, or has failed (the
- * stream then replays them). When that read finds that the thread no longer exists and the
- * page is in the thread's route (`inThreadRoute`), the page shows the
+ * A thread that opened from its saved copy holds the copy's rows until the
+ * transcript's query has merged the rows written since (`useSessionLive`
+ * follows the stream after that). When that read finds that the thread no
+ * longer exists and the page is in the thread's route (`inThreadRoute`), the page shows the
  * thread's not-found screen, or goes to the new-thread screen when the app
  * opened the thread at launch. Elsewhere, such as in the Office's drawer,
  * the page keeps showing what it holds: leaving a route that is not on
@@ -177,19 +176,8 @@ export function AgentPage({
     ...queuedInputsQuery(client, sessionId),
     enabled: subagentId === undefined,
   }).data;
-  // A thread opened from its saved copy holds the copy's rows until the
-  // transcript's read has merged the newer ones. The stream is subscribed
-  // after it, from the newest row, so its replay stays small. A read that
-  // fails is no reason to stay unsubscribed: the stream's replay then fills
-  // the gap from the rows held.
-  const transcriptError = transcript.error;
-  useEffect(() => {
-    if (transcriptError !== null && !isNotFound(transcriptError)) {
-      console.error("Could not bring the thread's saved transcript up to date:", transcriptError);
-    }
-  }, [transcriptError]);
   const attachOpenParagraph = useSessionLive({
-    live: transcript.isFetching ? null : live,
+    live,
     queryClient,
     sessionId,
     subagentId,
@@ -225,7 +213,7 @@ export function AgentPage({
           ),
         }
       : splitSubagentBrief(threadBlocks);
-  if (inThreadRoute && isNotFound(transcriptError)) {
+  if (inThreadRoute && isNotFound(transcript.error)) {
     // The transcript read found that the thread no longer exists, which the saved
     // copy could not know. Show what the thread's loader shows for it, see
     // `throwScreenNotFound`. A redirect cannot be thrown from a component.

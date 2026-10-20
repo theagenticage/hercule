@@ -395,6 +395,8 @@ describe("useSessionLive", () => {
     fake.deliver(STREAM_TOPIC, { reset: true });
     await settle();
     expect(readTranscript).toHaveBeenCalledOnce();
+    // The read ended before React saw it start, and the stream is followed again.
+    expect(fake.readSubscriptions().map(({ topic }) => topic)).toContain(STREAM_TOPIC);
     frames.run();
     expect(findOpenParagraph()?.textContent).toBe("");
     // Rows may have been missed, so the item's taps can no longer be lined up

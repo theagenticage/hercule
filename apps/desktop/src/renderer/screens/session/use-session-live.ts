@@ -28,7 +28,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import { useIsFetching, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import {
   buildStreamCursor,
   createTailBuffer,
@@ -88,7 +88,8 @@ export interface SessionLiveOptions {
    * The key the agent's rows are cached under. An agent page passes
    * `queryKeys.transcript(sessionId, subagentId)`, the Conversation
    * `queryKeys.runningTurn(sessionId)`. Stream rows are merged into the rows
-   * held there, and a stream `reset` reads them again through this key.
+   * held there, a stream `reset` reads them again through this key, and the
+   * stream is followed only while this query is not fetching.
    */
   readonly rowsKey: QueryKey;
   /**
@@ -126,20 +127,23 @@ export interface SessionLiveOptions {
  * subagent id. Reading them once also means a caller may build them inline
  * on every render without the subscriptions starting again.
  *
+ * The stream is followed only while the query under `rowsKey` is not
+ * fetching. A fetch is a read that brings the rows up to date, such as the
+ * one after a thread opens from its saved copy, or the read after a stream
+ * `reset`. While it runs the stream is not subscribed, so no row can arrive
+ * only to be replaced by the read's older snapshot and leave a hole in the
+ * rows. When the read ends, successfully or not, the stream is subscribed
+ * after the last row held then (`buildStreamCursor`), and its replay fills
+ * what the read could not.
+ *
  * What the hook does with each delivery, as `decideStreamDelivery` and
  * `decideTapDelivery` decide it:
  *
  * - Stream rows not held yet update the tail buffer first, and are then
- *   merged into the cached rows. The subscription starts after the last
- *   held row (`buildStreamCursor`).
+ *   merged into the cached rows.
  * - A stream `reset` means rows may have been missed. The hook stops
- *   following the stream, reads the rows again in full and waits for the
- *   read to finish, then skips the open items (their tails are cleared) and
- *   subscribes again after the last row held then. Nothing is merged in
- *   between, so a row the stream delivers can never be replaced by the
- *   read's older snapshot and leave a hole in the rows. If the read fails,
- *   the stream is subscribed again after the rows held before it, and its
- *   replay fills what it can.
+ *   following the stream and reads the rows again, which holds the stream
+ *   back as described above. Deliveries already on their way are ignored.
  * - A `gone` on either topic ends that subscription: the session no longer
  *   exists. A `gone` on the stream also calls `onGone`.
  *
@@ -154,6 +158,8 @@ export interface SessionLiveOptions {
  *   it was not subscribed, such as during an outage. An item that started in
  *   those rows may have sent taps nobody received, so the items open once
  *   the replay is merged are skipped too.
+ * - When the stream is subscribed, because the rows may have grown while it
+ *   was not (a read brought them up to date, or the stream was held back).
  *
  * A long replay is sent in pages, and only the first page is known to be the
  * replay. An item that starts in a later page and is still open can show its
@@ -175,11 +181,13 @@ export const useSessionLive = ({
   const [trimRows] = useState(() => trimRowsAtMount);
   const [onGone] = useState(() => onGoneAtMount);
   const visible = useWindowVisible();
+  const fetching = useIsFetching({ queryKey: rowsKey, exact: true }, queryClient) > 0;
   /**
-   * Counts the stream resets whose full read has finished. The stream's
-   * effect depends on it, so each finished read subscribes the stream again.
+   * Counts the stream resets. The stream's effect depends on it, so a reset
+   * ends the subscription even when the read it starts finishes before React
+   * has seen `fetching` change.
    */
-  const [streamGeneration, setStreamGeneration] = useState(0);
+  const [resets, setResets] = useState(0);
   /** The open message attached last, and the text node its open paragraph is written into. */
   const targetRef = useRef<{ readonly node: Text; readonly message: OpenMessage } | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -243,16 +251,15 @@ export const useSessionLive = ({
   }, [rows, paint]);
 
   useEffect(() => {
-    if (live === null) return;
+    if (live === null || fetching) return;
     const readHeldRows = (): readonly TranscriptRow[] =>
       queryClient.getQueryData<readonly TranscriptRow[]>(rowsKey) ?? [];
-    // False once the stream is gone or reset, and while its full read runs:
-    // the live connection may still hand over a delivery that was already on
-    // its way, and merging it would put a row in the cache that the read
-    // is about to replace.
+    // False once the stream is gone or reset, or this effect is cleaned up.
+    // The live connection may still hand over a delivery that was already on
+    // its way, since the cleanup runs only after the next render, and
+    // merging it would put a row in the cache that the read is about to
+    // replace.
     let following = true;
-    // False once this effect has been cleaned up, such as when the page unmounts.
-    let mounted = true;
     const unsubscribe = live.subscribe(
       buildAgentStreamTopic(sessionId, subagentId),
       (delta) => {
@@ -263,24 +270,10 @@ export const useSessionLive = ({
           unsubscribe();
           onGone?.();
         } else if (delivery.kind === "reset") {
-          // The live connection has already started to subscribe again from
-          // the head. Leave it, read the rows in full, and subscribe again
-          // after the last row held then. Subscribing at once would let a
-          // row arrive while the read runs, only for the read's older
-          // snapshot to replace the cache without it. The rows after it
-          // would then land after a hole that no later catch-up fills.
-          //
-          // The read settles even when it fails, and the stream is then
-          // subscribed again after the rows held before it: a failed read
-          // must not leave the page without live changes, and the stream's
-          // replay fills what it can.
           following = false;
           unsubscribe();
-          void queryClient.invalidateQueries({ queryKey: rowsKey }).then(() => {
-            if (!mounted) return;
-            skipOpenItems();
-            setStreamGeneration((generation) => generation + 1);
-          });
+          void queryClient.invalidateQueries({ queryKey: rowsKey });
+          setResets((count) => count + 1);
         } else if (delivery.kind === "rows") {
           buffer.applyRows(delivery.fresh);
           rowsLandingRef.current = true;
@@ -293,13 +286,15 @@ export const useSessionLive = ({
       },
       buildStreamCursor(readHeldRows()),
     );
+    skipOpenItems();
     return () => {
-      mounted = false;
       following = false;
       unsubscribe();
     };
   }, [
     live,
+    fetching,
+    resets,
     queryClient,
     sessionId,
     subagentId,
@@ -308,7 +303,6 @@ export const useSessionLive = ({
     onGone,
     buffer,
     skipOpenItems,
-    streamGeneration,
   ]);
 
   useEffect(() => {

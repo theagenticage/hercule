@@ -400,14 +400,17 @@ describe("a thread opened from its saved copy", () => {
   it("subscribes the stream from the copy's newest row when the read of the newer rows fails, and logs the failure", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await saveThreadCopy(thread, { transcript: copiedRows });
+    const transcriptRead = holdAnswer();
     const { app } = openApp(`/threads/${sessionId}`, {
-      [`GET ${transcriptPath}`]: {
-        status: 500,
-        body: buildErrorBody("internal", "The transcript could not be read."),
-      },
+      [`GET ${transcriptPath}`]: transcriptRead.handler,
     });
     const { context, live } = await app;
+    expect(live.readTopics()).not.toContain(stream);
     const subscribe = vi.spyOn(context.controller!.live, "subscribe");
+    transcriptRead.answer({
+      status: 500,
+      body: buildErrorBody("internal", "The transcript could not be read."),
+    });
 
     await waitFor(() => {
       expect(live.readTopics()).toContain(stream);
@@ -418,6 +421,7 @@ describe("a thread opened from its saved copy", () => {
       String(lastCopiedPosition),
     );
     expect(screen.queryByText(ANSWER)).toBeNull();
+    expect(logged).toHaveBeenCalledOnce();
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("up to date"), expect.anything());
   });
 

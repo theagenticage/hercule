@@ -473,7 +473,10 @@ describe("transcriptQuery", () => {
       });
       const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
 
-      await expect(queryClient.fetchQuery(readAgain(client))).rejects.toThrow();
+      // `retry: false` keeps the test from waiting for the second try.
+      await expect(
+        queryClient.fetchQuery({ ...readAgain(client), retry: false }),
+      ).rejects.toThrow();
 
       expect(readTranscriptReads(calls, sessionId)).toHaveLength(2);
       expect(queryClient.getQueryData(transcriptKey)).toEqual([]);
@@ -519,7 +522,8 @@ describe("transcriptQuery", () => {
     expect(written.filter((rows) => rows?.length === 0)).toEqual([]);
   });
 
-  it("fails at once, without trying again, when a read from held rows cannot reach the controller", async () => {
+  it("logs once and keeps the held rows, without trying again, when a read from held rows fails", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const queryClient = new QueryClient();
     queryClient.setQueryData(transcriptKey, heldRows);
     const { fetch, calls } = createApiStub({
@@ -529,10 +533,31 @@ describe("transcriptQuery", () => {
     });
     const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
 
+    await expect(queryClient.fetchQuery(readAgain(client))).resolves.toBe(heldRows);
+
+    expect(readTranscriptReads(calls, sessionId)).toHaveLength(1);
+    expect(logged).toHaveBeenCalledOnce();
+    logged.mockRestore();
+  });
+
+  it("fails at once, without logging, when a read from held rows finds the thread gone", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(transcriptKey, heldRows);
+    const { fetch, calls } = createApiStub({
+      [`GET /api/v1/sessions/${sessionId}/transcript`]: {
+        status: 404,
+        body: buildErrorBody("not_found", "no such session"),
+      },
+    });
+    const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
+
     await expect(queryClient.fetchQuery(readAgain(client))).rejects.toThrow();
 
     expect(readTranscriptReads(calls, sessionId)).toHaveLength(1);
+    expect(logged).not.toHaveBeenCalled();
     expect(queryClient.getQueryData(transcriptKey)).toEqual(heldRows);
+    logged.mockRestore();
   });
 });
 

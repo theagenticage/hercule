@@ -203,7 +203,7 @@ describe("the subagent's page opened from the thread's saved copy", () => {
     newerRows.answer({ body: { items: subagentRows.slice(-2) } });
 
     await waitFor(() => {
-      expect(readAgentTopics(live.readTopics())).toEqual([SUBAGENT_STREAM, SUBAGENT_TAP]);
+      expect(readAgentTopics(live.readTopics())).toEqual([SUBAGENT_TAP, SUBAGENT_STREAM]);
     });
     expect(subscribe).toHaveBeenCalledWith(
       SUBAGENT_STREAM,

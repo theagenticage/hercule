@@ -1571,13 +1571,6 @@ export const senderSessionQuery = (client: HerculeClient, id: string) =>
   });
 
 /**
- * The errors of reads of a transcript that started from rows the cache held.
- * `transcriptQuery` does not retry them: its `retry` option sees only the
- * error, not the cache, so `queryFn` marks the errors here.
- */
-const failedHeldRowsReads = new WeakSet<Error>();
-
-/**
  * Reads one agent's transcript, oldest first, into a list of rows that holds
  * the whole transcript, because the thread screen draws every row. Without
  * `subagentId` it reads the session's own agent; with it, that subagent's
@@ -1605,10 +1598,12 @@ const failedHeldRowsReads = new WeakSet<Error>();
  *     stale last row, and a copy saved meanwhile must hold no transcript, so
  *     the next open reads everything.
  *
- * A read that started from held rows is not retried. The page's stream
- * replays what is missing from the same rows, so waiting for another attempt
- * would only hold the stream back (see `AgentPage`). A read of the whole
- * transcript is retried like the other reads of a thread.
+ * When the read from held rows fails, the error is logged once and the rows
+ * held are the result: the page's stream subscribes after them and its replay
+ * fills the gap (see `useSessionLive`), so retrying would only hold the
+ * stream back. The exception is `not_found`: the thread is gone, so the
+ * query fails with it and the page shows that. A read of the whole transcript
+ * is retried like the other reads of a thread.
  *
  * Reading the query again, with `fetchQuery` and a `staleTime` of 0 or
  * `invalidateQueries`, is how a transcript is brought up to date. Nothing
@@ -1639,25 +1634,26 @@ export const transcriptQuery = (client: HerculeClient, sessionId: string, subage
       const key = queryKeys.transcript(sessionId, subagentId);
       const heldRows = queryClient.getQueryData<readonly TranscriptRow[]>(key) ?? [];
       if (heldRows.length === 0) return readRows(undefined);
+      let page: readonly TranscriptRow[];
       try {
-        const page = await readRows(findTranscriptAfterPosition(heldRows));
-        const pageKind = classifyTranscriptPage(heldRows, page);
-        if (pageKind === "continuesHeldRows") {
-          return mergeTranscript(
-            queryClient.getQueryData<readonly TranscriptRow[]>(key) ?? heldRows,
-            page,
-          );
-        }
-        if (pageKind === "wholeTranscript") return page;
-        queryClient.setQueryData<readonly TranscriptRow[]>(key, []);
-        return await readRows(undefined);
+        page = await readRows(findTranscriptAfterPosition(heldRows));
       } catch (error) {
-        if (error instanceof Error) failedHeldRowsReads.add(error);
-        throw error;
+        if (isNotFound(error)) throw error;
+        console.error("Could not bring the thread's saved transcript up to date:", error);
+        return heldRows;
       }
+      const pageKind = classifyTranscriptPage(heldRows, page);
+      if (pageKind === "continuesHeldRows") {
+        return mergeTranscript(
+          queryClient.getQueryData<readonly TranscriptRow[]>(key) ?? heldRows,
+          page,
+        );
+      }
+      if (pageKind === "wholeTranscript") return page;
+      queryClient.setQueryData<readonly TranscriptRow[]>(key, []);
+      return readRows(undefined);
     },
-    retry: (failureCount, error) =>
-      !failedHeldRowsReads.has(error) && isWorthRetrying(failureCount, error),
+    retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
