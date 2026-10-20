@@ -32,6 +32,7 @@ export function SubagentPage({
       sessionId={sessionId}
       subagentId={subagentId}
       drawSubagentParts={drawSubagentParts}
+      inThreadRoute
     />
   );
 }

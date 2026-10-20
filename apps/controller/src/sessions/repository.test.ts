@@ -6,7 +6,9 @@
  *
  * - the last page ends the paging;
  * - a cursor works only for the sort direction it was created for;
- * - one session's transcript never shows another session's rows.
+ * - one session's transcript never shows another session's rows;
+ * - a read after a position returns only the newer rows, and a cursor works
+ *   only for the same position.
  *
  * The other tests check the status and token rules of single writes, and
  * the profile filter of the session list, and its `activeSince` filter,
@@ -21,7 +23,7 @@ import type { ProviderEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { inputRepository } from "./inputs";
-import { sessionRepository } from "./repository";
+import { sessionRepository, type TranscriptPageRequest } from "./repository";
 import { fold, startTracking } from "./stream";
 
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
@@ -111,6 +113,7 @@ describe("paging through a transcript", () => {
         return yield* sessions.transcript({
           sessionId,
           subagentId: undefined,
+          after: undefined,
           limit: 3,
           cursor: undefined,
           direction: "asc",
@@ -133,6 +136,7 @@ describe("paging through a transcript", () => {
         const page = yield* sessions.transcript({
           sessionId: mine,
           subagentId: undefined,
+          after: undefined,
           limit: 50,
           cursor: undefined,
           direction: "asc",
@@ -153,6 +157,7 @@ describe("paging through a transcript", () => {
         const forwards = yield* sessions.transcript({
           sessionId,
           subagentId: undefined,
+          after: undefined,
           limit: 2,
           cursor: undefined,
           direction: "asc",
@@ -160,6 +165,7 @@ describe("paging through a transcript", () => {
         return yield* sessions.transcript({
           sessionId,
           subagentId: undefined,
+          after: undefined,
           limit: 2,
           cursor: forwards.nextCursor,
           direction: "desc",
@@ -181,6 +187,7 @@ describe("paging through a transcript", () => {
         const theirPage = yield* sessions.transcript({
           sessionId: theirs,
           subagentId: undefined,
+          after: undefined,
           limit: 4,
           cursor: undefined,
           direction: "asc",
@@ -190,6 +197,7 @@ describe("paging through a transcript", () => {
         return yield* sessions.transcript({
           sessionId: mine,
           subagentId: undefined,
+          after: undefined,
           limit: 4,
           cursor: theirPage.nextCursor,
           direction: "asc",
@@ -198,6 +206,114 @@ describe("paging through a transcript", () => {
     );
 
     expect(error).toBeInstanceOf(CursorError);
+  });
+});
+
+describe("reading a transcript after a position", () => {
+  /** Reads one page of the session's own agent's transcript, with the given request fields. */
+  const readPage = (sessionId: string, request: Partial<TranscriptPageRequest>) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      return yield* sessions.transcript({
+        sessionId,
+        subagentId: undefined,
+        after: undefined,
+        limit: 50,
+        cursor: undefined,
+        direction: "asc",
+        ...request,
+      });
+    });
+
+  const positions = (page: { readonly items: ReadonlyArray<{ readonly position: number }> }) =>
+    page.items.map((row) => row.position);
+
+  it("returns only the rows past the position, oldest first", async () => {
+    const found = await run(
+      Effect.gen(function* () {
+        const sessionId = yield* aSession;
+        yield* fillStream(sessionId, 6);
+        return positions(yield* readPage(sessionId, { after: 3 }));
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(found).toEqual([4, 5, 6]);
+  });
+
+  it("returns an empty page for a position at or beyond the newest row", async () => {
+    const pages = await run(
+      Effect.gen(function* () {
+        const sessionId = yield* aSession;
+        yield* fillStream(sessionId, 3);
+        return [
+          yield* readPage(sessionId, { after: 3 }),
+          yield* readPage(sessionId, { after: 100 }),
+        ];
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(pages).toEqual([{ items: [] }, { items: [] }]);
+  });
+
+  it("continues with the cursor to the rest of the rows past the position", async () => {
+    const found = await run(
+      Effect.gen(function* () {
+        const sessionId = yield* aSession;
+        yield* fillStream(sessionId, 9);
+        const first = yield* readPage(sessionId, { after: 2, limit: 3 });
+        const second = yield* readPage(sessionId, {
+          after: 2,
+          limit: 3,
+          cursor: first.nextCursor,
+        });
+        const third = yield* readPage(sessionId, { after: 2, limit: 3, cursor: second.nextCursor });
+        return [positions(first), positions(second), positions(third), third.nextCursor];
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(found).toEqual([[3, 4, 5], [6, 7, 8], [9], undefined]);
+  });
+
+  it("reads the rows past the position newest first, and pages through them", async () => {
+    const found = await run(
+      Effect.gen(function* () {
+        const sessionId = yield* aSession;
+        yield* fillStream(sessionId, 7);
+        const first = yield* readPage(sessionId, { after: 2, limit: 3, direction: "desc" });
+        const second = yield* readPage(sessionId, {
+          after: 2,
+          limit: 3,
+          direction: "desc",
+          cursor: first.nextCursor,
+        });
+        return [positions(first), positions(second), second.nextCursor];
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    // Position 2 is never returned, and the last page ends the walk.
+    expect(found).toEqual([[7, 6, 5], [4, 3], undefined]);
+  });
+
+  it("rejects a cursor from a listing with another position, or with none", async () => {
+    const errors = await run(
+      Effect.gen(function* () {
+        const sessionId = yield* aSession;
+        yield* fillStream(sessionId, 8);
+        const withAfter = yield* readPage(sessionId, { after: 2, limit: 2 });
+        const without = yield* readPage(sessionId, { limit: 2 });
+        return [
+          yield* Effect.flip(
+            readPage(sessionId, { after: 3, limit: 2, cursor: withAfter.nextCursor }),
+          ),
+          yield* Effect.flip(readPage(sessionId, { limit: 2, cursor: withAfter.nextCursor })),
+          yield* Effect.flip(
+            readPage(sessionId, { after: 2, limit: 2, cursor: without.nextCursor }),
+          ),
+        ];
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    for (const error of errors) expect(error).toBeInstanceOf(CursorError);
   });
 });
 

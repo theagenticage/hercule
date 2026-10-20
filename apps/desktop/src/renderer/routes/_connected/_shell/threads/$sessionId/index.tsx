@@ -17,5 +17,5 @@ function ThreadPage(): JSX.Element {
   // Keyed by the session id, so another thread starts with fresh state: its
   // own live tail, scroll position and expanded work stretches. The router
   // does not mount the page again when only the param changes.
-  return <AgentPage key={sessionId} sessionId={sessionId} subagentId={undefined} />;
+  return <AgentPage key={sessionId} sessionId={sessionId} subagentId={undefined} inThreadRoute />;
 }

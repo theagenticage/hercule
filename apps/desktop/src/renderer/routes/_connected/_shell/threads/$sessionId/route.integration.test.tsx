@@ -6,23 +6,27 @@
  * it waits for only briefly.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import type { Session, TranscriptRow } from "@hercule/contract";
 import userEvent from "@testing-library/user-event";
 import { focusManager } from "@tanstack/react-query";
-import { queryKeys } from "@hercule/client-core";
+import { isNotFound, queryKeys } from "@hercule/client-core";
+import { buildSessionStreamTopic } from "@hercule/contract";
 import {
   buildErrorBody,
   buildSidebarHandlers,
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
+  holdAnswer,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
   stubElementSize,
   THREAD_FIXTURES,
 } from "../../../../../app/testing";
+import { answerTranscriptRead, readTranscriptReads } from "../../../../../app/testing-transcript";
+import { saveThreadCopy } from "../../../../../app/testing-thread-copies";
 
 /** A thread id no controller holds. */
 const GONE_ID = "01a06d02-7400-7000-8000-0000000000ff";
@@ -330,5 +334,280 @@ describe("a message another session's agent sent into the thread", () => {
     });
     focusManager.setFocused(undefined);
     expect(calls.filter((call) => call.path === senderPath)).toHaveLength(1);
+  });
+});
+
+describe("a thread opened from its saved copy", () => {
+  const thread = THREAD_FIXTURES.finished;
+  const sessionId = thread.session.id;
+  const transcriptPath = `/api/v1/sessions/${sessionId}/transcript`;
+  const stream = buildSessionStreamTopic(sessionId);
+  // The copy was saved before the agent's last answer.
+  const copiedRows = thread.transcript.slice(0, -4);
+  const lastCopiedPosition = copiedRows.at(-1)!.position;
+  const lastPosition = thread.transcript.at(-1)!.position;
+  const ANSWER = /The pin is now/;
+
+  beforeEach(() => {
+    stubElementSize(800, 800);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the copy at once, reads only the rows after it, and subscribes the stream from the newest row after that", async () => {
+    await saveThreadCopy(thread, { transcript: copiedRows });
+    const transcriptRead = holdAnswer();
+    const { app, calls } = openApp(`/threads/${sessionId}`, {
+      [`GET ${transcriptPath}`]: transcriptRead.handler,
+    });
+    const { context, live } = await app;
+
+    // The app opened while the read of the newer rows is still out.
+    expect(screen.getByRole("region", { name: "Transcript" })).toBeTruthy();
+    expect(
+      screen.getByText("Bump the Bun pin to 1.3.2 and make sure CI still passes."),
+    ).toBeTruthy();
+    expect(screen.queryByText(ANSWER)).toBeNull();
+    // The read starts at the last row of the copy, to check it is still there.
+    expect(readTranscriptReads(calls, sessionId)).toEqual([
+      { after: String(copiedRows.at(-2)!.position), subagentId: null },
+    ]);
+    expect(live.readTopics()).not.toContain(stream);
+    // The session, the subagents and the queued inputs are read again.
+    await waitFor(() => {
+      expect(calls.filter((call) => call.path === `/api/v1/sessions/${sessionId}`)).toHaveLength(1);
+    });
+
+    const subscribe = vi.spyOn(context.controller!.live, "subscribe");
+    transcriptRead.answer({
+      body: { items: thread.transcript.filter((row) => row.position >= lastCopiedPosition) },
+    });
+
+    expect(await screen.findByText(ANSWER)).toBeTruthy();
+    await waitFor(() => {
+      expect(live.readTopics()).toContain(stream);
+    });
+    expect(subscribe).toHaveBeenCalledWith(stream, expect.any(Function), String(lastPosition));
+    expect(context.queryClient.getQueryData(queryKeys.transcript(sessionId))).toEqual(
+      thread.transcript,
+    );
+    // The whole transcript was never read.
+    expect(readTranscriptReads(calls, sessionId)).toHaveLength(1);
+  });
+
+  it("subscribes the stream from the copy's newest row when the read of the newer rows fails, and logs the failure", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await saveThreadCopy(thread, { transcript: copiedRows });
+    const transcriptRead = holdAnswer();
+    const { app } = openApp(`/threads/${sessionId}`, {
+      [`GET ${transcriptPath}`]: transcriptRead.handler,
+    });
+    const { context, live } = await app;
+    expect(live.readTopics()).not.toContain(stream);
+    const subscribe = vi.spyOn(context.controller!.live, "subscribe");
+    transcriptRead.answer({
+      status: 500,
+      body: buildErrorBody("internal", "The transcript could not be read."),
+    });
+
+    await waitFor(() => {
+      expect(live.readTopics()).toContain(stream);
+    });
+    expect(subscribe).toHaveBeenCalledWith(
+      stream,
+      expect.any(Function),
+      String(lastCopiedPosition),
+    );
+    expect(screen.queryByText(ANSWER)).toBeNull();
+    expect(logged).toHaveBeenCalledOnce();
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("up to date"), expect.anything());
+  });
+
+  it("shows that the thread was not found, and deletes the copy, when the read of the newer rows says it is gone", async () => {
+    await saveThreadCopy(thread, { transcript: copiedRows });
+    const gone = {
+      status: 404,
+      body: buildErrorBody("not_found", "no such session"),
+    };
+    const { app } = openApp(`/threads/${sessionId}`, {
+      [`GET ${transcriptPath}`]: gone,
+      [`GET /api/v1/sessions/${sessionId}`]: gone,
+    });
+    const { context } = await app;
+
+    expect(await screen.findByRole("heading", { name: "This thread was not found." })).toBeTruthy();
+    await waitFor(async () => {
+      expect(await context.controller!.threadCopies.read(sessionId)).toBeUndefined();
+    });
+  });
+
+  it("deletes the copy and reads the session again when the stream says the thread is gone", async () => {
+    await saveThreadCopy(thread);
+    const gone = { status: 404, body: buildErrorBody("not_found", "no such session") };
+    let isGone = false;
+    const transcriptRead = holdAnswer();
+    const { app } = openApp(`/threads/${sessionId}`, {
+      [`GET ${transcriptPath}`]: transcriptRead.handler,
+      [`GET /api/v1/sessions/${sessionId}`]: () => (isGone ? gone : { body: thread.session }),
+    });
+    const { context } = await app;
+    // The page subscribes once the read of the newer rows has ended; catch the stream's handler then.
+    const { live } = context.controller!;
+    const handlers = new Map<string, Parameters<typeof live.subscribe>[1]>();
+    const subscribe = live.subscribe.bind(live);
+    vi.spyOn(live, "subscribe").mockImplementation((topic, handler, cursor) => {
+      handlers.set(topic, handler);
+      return subscribe(topic, handler, cursor);
+    });
+    transcriptRead.answer({ body: { items: thread.transcript.slice(-1) } });
+    await waitFor(() => {
+      expect(handlers.has(stream)).toBe(true);
+    });
+
+    isGone = true;
+    act(() => {
+      handlers.get(stream)!({
+        cursor: null,
+        items: [],
+        reset: false,
+        replay: false,
+        gone: true,
+      });
+    });
+
+    await waitFor(async () => {
+      expect(await context.controller!.threadCopies.read(sessionId)).toBeUndefined();
+    });
+    await waitFor(() => {
+      expect(
+        isNotFound(context.queryClient.getQueryState(queryKeys.session(sessionId))?.error),
+      ).toBe(true);
+    });
+  });
+
+  it("keeps no copy when the page closes while the session is read again after a gone stream", async () => {
+    await saveThreadCopy(thread);
+    const gone = { status: 404, body: buildErrorBody("not_found", "no such session") };
+    let isGone = false;
+    let releaseSession: () => void = () => undefined;
+    const sessionReleased = new Promise<void>((resolve) => {
+      releaseSession = resolve;
+    });
+    const transcriptRead = holdAnswer();
+    const { app } = openApp(`/threads/${sessionId}`, {
+      [`GET ${transcriptPath}`]: transcriptRead.handler,
+      [`GET /api/v1/sessions/${sessionId}`]: async () => {
+        if (!isGone) return { body: thread.session };
+        await sessionReleased;
+        return gone;
+      },
+    });
+    const { context, router } = await app;
+    const { live, threadCopies } = context.controller!;
+    const handlers = new Map<string, Parameters<typeof live.subscribe>[1]>();
+    const subscribe = live.subscribe.bind(live);
+    vi.spyOn(live, "subscribe").mockImplementation((topic, handler, cursor) => {
+      handlers.set(topic, handler);
+      return subscribe(topic, handler, cursor);
+    });
+    const save = vi.spyOn(threadCopies, "save");
+    transcriptRead.answer({ body: { items: thread.transcript.slice(-1) } });
+    await waitFor(() => {
+      expect(handlers.has(stream)).toBe(true);
+    });
+
+    isGone = true;
+    act(() => {
+      handlers.get(stream)!({ cursor: null, items: [], reset: false, replay: false, gone: true });
+    });
+    // The session read is out and has not said the thread is gone yet: the
+    // user leaves the page, and closing it saves the copy.
+    await act(() => router.navigate({ to: "/" }));
+    await waitFor(() => {
+      expect(save).toHaveBeenCalled();
+    });
+    releaseSession();
+
+    await waitFor(() => {
+      expect(
+        isNotFound(context.queryClient.getQueryState(queryKeys.session(sessionId))?.error),
+      ).toBe(true);
+    });
+    // The save that closing the page made has been written or dropped by now.
+    await Promise.all(save.mock.results.map((result) => result.value as Promise<void>));
+    expect(await threadCopies.read(sessionId)).toBeUndefined();
+  });
+
+  it("shows Syncing… in the header while the read of the newer rows runs past 400 ms, and not after it ends", async () => {
+    await saveThreadCopy(thread, { transcript: copiedRows });
+    const transcriptRead = holdAnswer();
+    const { app } = openApp(`/threads/${sessionId}`, {
+      [`GET ${transcriptPath}`]: transcriptRead.handler,
+    });
+    await app;
+
+    expect(await screen.findByText("Syncing…", {}, { timeout: 3000 })).toBeTruthy();
+
+    transcriptRead.answer({
+      body: { items: thread.transcript.filter((row) => row.position >= lastCopiedPosition) },
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Syncing…")).toBeNull();
+    });
+    expect(await screen.findByText(ANSWER)).toBeTruthy();
+  });
+
+  it("goes to the new-thread screen when the app opened the gone thread at launch", async () => {
+    localStorage.setItem(`last-screen:${CONTROLLER_URL}`, `/threads/${sessionId}`);
+    await saveThreadCopy(thread, { transcript: copiedRows });
+    const gone = {
+      status: 404,
+      body: buildErrorBody("not_found", "no such session"),
+    };
+    stubApi({
+      ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+      ...buildThreadHandlers(thread),
+      [`GET ${transcriptPath}`]: gone,
+      [`GET /api/v1/sessions/${sessionId}`]: gone,
+    });
+    const { router } = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+    );
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/");
+    });
+  });
+
+  it("opens the thread without a copy as it always did: reads all of it and subscribes at once", async () => {
+    const { app, calls } = openApp(`/threads/${sessionId}`, {
+      [`GET ${transcriptPath}`]: answerTranscriptRead(thread),
+    });
+    const { context, live } = await app;
+
+    expect(readTranscriptReads(calls, sessionId)).toEqual([{ after: null, subagentId: null }]);
+    // The transcript is not being read, so nothing waits to subscribe.
+    expect(context.queryClient.isFetching({ queryKey: queryKeys.transcript(sessionId) })).toBe(0);
+    await waitFor(() => {
+      expect(live.readTopics()).toContain(stream);
+    });
+    expect(readTranscriptReads(calls, sessionId)).toHaveLength(1);
+  });
+
+  it("ignores the copy when the transcript is already cached", async () => {
+    const { app, calls } = openApp(`/threads/${sessionId}`, {
+      [`GET ${transcriptPath}`]: answerTranscriptRead(thread),
+    });
+    const { router } = await app;
+    await act(() => router.navigate({ to: "/" }));
+    // The first visit saved a copy; make it older than the cache.
+    await saveThreadCopy(thread, { transcript: copiedRows });
+    await act(() => router.navigate({ to: "/threads/$sessionId", params: { sessionId } }));
+
+    expect(await screen.findByText(ANSWER)).toBeTruthy();
+    // Only the first visit read the transcript.
+    expect(readTranscriptReads(calls, sessionId)).toEqual([{ after: null, subagentId: null }]);
   });
 });

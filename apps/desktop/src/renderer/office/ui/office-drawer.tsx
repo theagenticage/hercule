@@ -76,7 +76,12 @@ export const OfficeDrawer = memo(function OfficeDrawer({
             {shown.kind === "assistant" ? (
               <AssistantScreen key={shown.id} assistantId={shown.id} />
             ) : (
-              <AgentPage key={shown.id} sessionId={shown.id} subagentId={undefined} />
+              <AgentPage
+                key={shown.id}
+                sessionId={shown.id}
+                subagentId={undefined}
+                inThreadRoute={false}
+              />
             )}
           </Suspense>
         </div>

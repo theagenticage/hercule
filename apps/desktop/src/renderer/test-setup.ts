@@ -1,3 +1,4 @@
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { beforeEach, vi } from "vitest";
 
 /**
@@ -30,6 +31,21 @@ const createMemoryStorage = (): Storage => {
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());
+});
+
+/**
+ * jsdom has no IndexedDB, which the saved thread copies use. Each test gets an
+ * empty database, so no copy one test saves reaches the next.
+ *
+ * These are plain assignments, not `vi.stubGlobal`, on purpose. A thread page
+ * that unmounts when a test ends queues an idle write, and the write reads
+ * `indexedDB` and `IDBKeyRange` a moment later. A test file that calls
+ * `vi.unstubAllGlobals()` in its `afterEach` would remove stubbed globals
+ * first, and the write would fail with "IDBKeyRange is not defined".
+ */
+globalThis.IDBKeyRange = IDBKeyRange;
+beforeEach(() => {
+  globalThis.indexedDB = new IDBFactory();
 });
 
 /**
@@ -191,3 +207,16 @@ const EMPTY_RECT: DOMRect = {
 Range.prototype.getBoundingClientRect = () => EMPTY_RECT;
 Range.prototype.getClientRects = () =>
   Object.assign([EMPTY_RECT], { item: () => EMPTY_RECT }) satisfies DOMRectList;
+
+/**
+ * jsdom has no `requestIdleCallback`. The thread copy store saves a copy with
+ * it, once the browser is idle. The stand-in runs the callback on the next
+ * timer tick, as if the browser were always idle.
+ */
+window.requestIdleCallback = (callback) =>
+  window.setTimeout(() => {
+    callback({ didTimeout: false, timeRemaining: () => 0 });
+  }, 0);
+window.cancelIdleCallback = (handle) => {
+  window.clearTimeout(handle);
+};

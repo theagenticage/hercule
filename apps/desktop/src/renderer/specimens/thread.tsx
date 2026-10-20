@@ -25,7 +25,10 @@
  * `?state=permission-long-profile` names a profile of 128 characters with no
  * space, which the answer's line wraps. The book draws no
  * Permission Request, so none of these is compared; they are for comparing
- * by eye with its dock.
+ * by eye with its dock. With `?state=syncing`, the thread was opened from its
+ * saved copy and the read that brings it up to date never answers, so the
+ * header says "Syncing…" once 400 ms have passed; the book draws no such
+ * state either.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
@@ -92,6 +95,8 @@ if (state === "senders") {
     },
     thread,
   );
+} else if (state === "syncing") {
+  await mountThreadSpecimen(THREAD_PAGE_RECORDS, { ...FIX_THREAD, syncing: true });
 } else {
   await mountThreadSpecimen(
     THREAD_PAGE_RECORDS,

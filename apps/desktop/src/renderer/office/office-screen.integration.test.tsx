@@ -11,6 +11,8 @@
  *   card, then from the card to nothing;
  * - the drawer shows neither the side pane toggle nor the tally pill,
  *   because the drawer has no side pane;
+ * - the drawer keeps its thread, and the Office stays, when the read of a
+ *   cached transcript finds the thread gone;
  * - Tab reaches a waiting assistant, among the waiting threads;
  * - an assistant's card shows its Request, its runner, its model and when it
  *   was last active, and an assistant with no session shows none of those;
@@ -57,6 +59,7 @@ import {
   THREAD_FIXTURES,
   type AssistantRecords,
 } from "../app/testing";
+import { transcriptQuery } from "../app/queries";
 import type { mountOfficeScene as MountOfficeScene } from "./office-scene";
 import { readOffice, setOffice } from "./office-store";
 
@@ -261,6 +264,34 @@ describe("the thread drawer", () => {
 
     expect(readOffice().selectedId).toBeNull();
     expect(findCard(runbook.title).dataset.open).toBe("false");
+  });
+
+  it("keeps showing the thread when the read of its transcript finds it gone, and stays on the Office", async () => {
+    const waiting = THREAD_FIXTURES.waiting;
+    const { router, context } = await openOffice("/office", waiting, {
+      [`GET /api/v1/sessions/${runbook.id}/transcript`]: {
+        status: 404,
+        body: buildErrorBody("not_found", "no such session"),
+      },
+    });
+    // A transcript cached before the drawer opens, as a saved copy leaves it.
+    context.queryClient.setQueryData(queryKeys.transcript(runbook.id), waiting.transcript);
+
+    await act(() => router.navigate({ to: "/office", search: { session: runbook.id } }));
+    // The read that brings it up to date, which the thread's route starts
+    // when it shows a copy, finds the thread gone while the drawer is open.
+    await act(() =>
+      context.queryClient.prefetchQuery({
+        ...transcriptQuery(context.controller!.client, runbook.id),
+        staleTime: 0,
+      }),
+    );
+
+    expect(context.queryClient.getQueryState(queryKeys.transcript(runbook.id))?.status).toBe(
+      "error",
+    );
+    expect(router.state.location.pathname).toBe("/office");
+    expect(within(findDrawer()).getByRole("region", { name: "Transcript" })).toBeTruthy();
   });
 
   it("draws neither the side pane toggle nor the tally pill, because the drawer has no side pane", async () => {

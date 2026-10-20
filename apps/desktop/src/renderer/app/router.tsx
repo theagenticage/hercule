@@ -26,13 +26,26 @@ import { openLaunchScreen, trackLastScreen } from "./last-screen";
  * or, for the first navigation, when the app started. Everything in the
  * caches was read as the user who was signed in. Most of the sidebar's reads
  * are kept until something invalidates them, so a user who signs in again
- * would see them as they were, possibly for hours. The user can be signed
- * out in several ways, and this one rule covers all of them:
+ * would see them as they were, possibly for hours. The user can be signed out
+ * in several ways, and this one rule covers all of them:
  *
  * - Sign Out from the app menu;
  * - the controller rejects the token on the live connection;
  * - the controller rejects the token in the shell's reads, at launch or
  *   later.
+ *
+ * The thread copies have a rule of their own: every navigation that ends with
+ * no token deletes every copy, whether or not the app held a token before.
+ * The copies hold threads on disk, which the next user of this Mac must not
+ * open. The rule is not tied to the sign-out itself because that can fail to
+ * finish: the app can quit during Sign Out before the navigation ends, and
+ * the next launch then starts with no token and no sign-out to notice; and
+ * the delete can fail once. Deleting again on every navigation without a
+ * token repairs both, and costs almost nothing when the store is empty.
+ *
+ * Switching to another controller needs no rule here: main reloads the window
+ * then, and the thread copies delete themselves when the reloaded page opens
+ * them for another controller URL (see `createThreadCopies`).
  *
  * The caches are emptied only once the navigation has ended, on the sign-in
  * screen or the connect screen. Emptied earlier, a screen still on display
@@ -65,6 +78,10 @@ export const createAppRouter = (context: RouterContext) => {
       context.queryClient.clear();
       router.clearCache();
     }
+    // A page that closes while signing out must not save its copy: the thread
+    // copy hook saves nothing while the token is gone, and this delete also
+    // drops a save that was already waiting.
+    if (!hasToken) void context.controller?.threadCopies.deleteAll();
     signedIn = hasToken;
   });
 

@@ -15,6 +15,7 @@ import { PlusIcon } from "../../icons/plus";
 import { SidebarIcon } from "../../icons/sidebar";
 import { useHasSidePane, useSidePaneLayout } from "../subagents/use-side-pane";
 import { MorePill, ProjectCrumb, ThreadTabsPill } from "./header-pills";
+import { TranscriptSyncMarker } from "./transcript-sync-marker";
 import "../session/floating-header.css";
 import "./thread-header.css";
 
@@ -43,6 +44,8 @@ const RunSessionCrumbs = lazy(() =>
  *   A session alone in its workspace, or in none, has one tab: its own. A
  *   thread in no workspace, or in one that is not ready, has no `+`, because
  *   a new thread could not join it.
+ * - The free space after the tabs holds "Syncing…" while the thread, opened
+ *   from its saved copy, is brought up to date (`TranscriptSyncMarker`).
  * - The side pane's toggle follows, on the thread's screen only.
  * - Open in editor and More are drawn but do nothing yet, and carry
  *   `aria-disabled` to say so.
@@ -112,7 +115,7 @@ export function ThreadHeader({ session }: { readonly session: Session }): JSX.El
           </Link>
         ) : null}
       </ThreadTabsPill>
-      <span className="spacer" />
+      <TranscriptSyncMarker sessionId={session.id} />
       <SidePaneToggle sessionId={session.id} />
       <span className="pill">
         <button type="button" className="icon-btn" title="Open in editor" aria-disabled="true">

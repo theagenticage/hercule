@@ -19,23 +19,46 @@ import { NotFound } from "../../../../../../screens/not-found";
  * reads the list again before it gives up. When the app opened the page at
  * launch, a subagent the session does not have goes to the new-thread
  * screen instead (see `throwScreenNotFound`).
+ *
+ * A thread that opens from its saved copy has the subagent list, and the
+ * transcript of each subagent opened before, in the cache once the thread's
+ * own loader has run. When the thread is not cached yet, this loader waits
+ * for that loader first, so it finds them and makes no read the copy
+ * answers. A transcript that is already cached, such as one from the copy,
+ * is shown at once, and the loader starts a read in the background that
+ * brings it up to date (see `transcriptQuery`). The page does not subscribe
+ * to the stream until that read has ended.
  */
 export const Route = createFileRoute("/_connected/_shell/threads/$sessionId/subagents/$subagentId")(
   {
     staticData: { title: "Subagent" },
-    loader: async ({ context: { controller, queryClient }, params, location }) => {
-      const query = subagentsQuery(controller.client, params.sessionId);
+    loader: async ({
+      context: { controller, queryClient },
+      params,
+      location,
+      parentMatchPromise,
+    }) => {
+      const { client } = controller;
+      const { sessionId, subagentId } = params;
+      if (queryClient.getQueryData(transcriptQuery(client, sessionId).queryKey) === undefined) {
+        await parentMatchPromise;
+      }
+      const query = subagentsQuery(client, sessionId);
       const hasSubagent = (subagents: readonly Subagent[]): boolean =>
-        subagents.some((subagent) => subagent.id === params.subagentId);
+        subagents.some((subagent) => subagent.id === subagentId);
       if (
         !hasSubagent(await queryClient.ensureQueryData(query)) &&
         !hasSubagent(await queryClient.fetchQuery({ ...query, staleTime: 0 }))
       ) {
         throwScreenNotFound(location);
       }
-      await queryClient.ensureQueryData(
-        transcriptQuery(controller.client, params.sessionId, params.subagentId),
-      );
+      const transcript = transcriptQuery(client, sessionId, subagentId);
+      if (queryClient.getQueryData(transcript.queryKey) === undefined) {
+        await queryClient.ensureQueryData(transcript);
+      } else {
+        // A failure stays in the query, where the page reads it.
+        void queryClient.prefetchQuery({ ...transcript, staleTime: 0 });
+      }
     },
     component: SubagentPageRoute,
     notFoundComponent: SubagentNotFound,
