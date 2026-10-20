@@ -25,7 +25,7 @@ A unit of human intent: a described piece of work someone wants done. Work-type-
 _Avoid_: ticket, issue (reserved for external trackers)
 
 **Provenance**:
-A task's append-only record of what created or touched it: entries pointing at events, runs, and external refs. What lets a later event about the same thing find its existing task.
+A task's append-only record of what created or touched it: entries pointing at events, runs, external refs, and the signals handed off onto it. What lets a later event about the same thing find its existing task.
 _Avoid_: history, audit trail (reserved for the event log)
 
 **External Ref**:
@@ -555,7 +555,7 @@ The line the core writes under a Bound Action to say what taking it does to the 
 _Avoid_: summary, preview, action description (the producer's own `description` of what an answer means)
 
 **Intake**:
-Where events become something for the user to deal with: Signals they handle one by one, among them what triage prepares across many events (Proposals, Offers). Which events triage may read is set per event kind by the plugin, with your overrides for the plugin and per Connection; Intake never shows the full event stream. Also the name of the view that presents it: To do, Later and Done over Signals, and Everything over the events behind them.
+Where events become something for the user to deal with: Signals they handle one by one, among them what triage prepares across many events (Proposals, Offers). Which events triage may read is set per event kind by the plugin, with your overrides for the plugin and per Connection; Intake never shows the full event stream. Also the name of the view that presents it: To do, Later and Done over Signals, with Tracking at the foot of To do, and Everything over the events behind them.
 _Avoid_: command center, inbox, dashboard; "considered for Intake" (retired: an event kind is *available to triage*, a signal kind is *on* or *off*)
 
 **Signal**:
@@ -581,6 +581,14 @@ _Avoid_: review, check
 **Ignore Rule**:
 The user's rule that keeps signals of one kind, with given field values, from being raised ("review requests from dependabot in webshop"). Made by the user from a signal, or accepted from a suggestion Hercule offers after the user marked several such signals done without answering. Never edited, only deleted; always visible in Intake settings. The events it catches still show in Everything, with the rule named.
 _Avoid_: filter, mute (a Notification delivery setting)
+
+**Handoff**:
+Handing a Signal to an agent from Intake: the user's pick of a Hand to an agent answer. It resolves the signal and puts the work on a Task, continuing the open Task that carries the signal's thread ref, or creating one. The Task's provenance records it as one entry naming the signal and the run it started. Each handoff is one leg of the Task's trip: its signal, its run and that run's re-runs. A run started any other way is not a handoff.
+_Avoid_: delegation, dispatch; "handoff" for a Migration
+
+**Tracking**:
+The section at the foot of To do that lists the Tasks the user handed off from Intake, until they mark one done or cancel it. A view over Tasks, not a record, and never called a Task on screen. Each row is in one state, worked out on read, highest first: Needs you (a Request, or an open signal that names the Task), Failed, Working, Finished (the agent is done and the user has not ticked it off) or Stopped. The rows that wait on the user count toward To do.
+_Avoid_: follow-up (the provider's word for queued input), out with agents, handed off; "Back" for a finished row (that is a snooze that ran out)
 
 **Handling**:
 What came of an event in Intake, or what is still to come: raised a signal, ended one, caught by an Ignore Rule, evidence for triage's signals, on a Task, known work, pending triage, or no action. Worked out when read, never stored. Shown to the user as "What came of it".
