@@ -38,7 +38,7 @@ import {
   signalsLaterQuery,
   signalsToDoQuery,
 } from "../../app/queries";
-import { useTrackingRows } from "../../app/tracking";
+import { useTrackingSnapshot } from "../../app/tracking";
 import { createHandoffFlights } from "./handoff-flight";
 import { IntakeDock } from "./intake-dock";
 import { InboxZero } from "./inbox-zero";
@@ -50,11 +50,11 @@ import { pickSelectionAfterMove } from "./pick-selection-after-move";
 import { SignalPane, type SignalPaneHandle } from "./signal-pane";
 import { SnoozeMenu } from "./snooze-menu";
 import { TrackingTray } from "./tracking-tray";
-import { canMarkTrackingStateDone } from "./tracking-states";
 import { useIntakeSplit } from "./use-intake-split";
 import { useHeldSignals } from "./use-held-signals";
 import { useHeldTrackingRows } from "./use-held-tracking-rows";
 import { useIntakeTabs } from "./use-intake-tabs";
+import { useTrackingControls } from "./use-tracking-controls";
 import { useTrackingTickOff } from "./use-tracking-tick-off";
 import {
   IntakeMovesContext,
@@ -141,12 +141,13 @@ export function IntakeScreen({
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const { tabs, plugins } = useIntakeTabs(pluginId);
-  // The rows as last read give the counts, which follow each read at once.
-  // The rows Tracking draws, and the keys walk, are held while the pointer is
-  // on the list column (below).
-  const readTrackingRows = useTrackingRows();
+  // Tracking as last read gives what follows each read at once: the counts of
+  // the Hercule segment, Intake's row and the tabs, and inbox zero. The rows
+  // Tracking draws, its head's counts and the keys' walk use the held rows,
+  // which lag the read while the pointer is on the list column.
+  const trackingSnapshot = useTrackingSnapshot();
   const [pointerOverColumn, setPointerOverColumn] = useState(false);
-  const heldTracking = useHeldTrackingRows(readTrackingRows, pointerOverColumn);
+  const heldTracking = useHeldTrackingRows(trackingSnapshot, pointerOverColumn);
   const trackingRows = heldTracking.shown;
   // A handoff's flight carries a copy of the signal's row from the list to
   // folded Tracking, in a layer over the list column.
@@ -234,61 +235,20 @@ export function IntakeScreen({
     if (ids.size === 0) setPreview(null);
   };
 
-  // The selected row of opened Tracking. A row that left Tracking is not
-  // selected any more.
-  const [trackingSelection, setTrackingSelection] = useState<string | null>(null);
-  const trackingIds = trackingRows.map((row) => row.task.id);
-  const selectedTaskId =
-    trackingOpen && trackingSelection !== null && trackingIds.includes(trackingSelection)
-      ? trackingSelection
-      : null;
-
-  const openTracking = (): void => {
-    updateChecks(new Set());
-    setMenu(null);
-    setTrackingSelection(null);
-    onTrackingOpenChange(true);
-  };
-
-  const closeTracking = (): void => {
-    setTrackingSelection(null);
-    onTrackingOpenChange(false);
-    // The sheet holds the focus and is about to go. The list holds it until the signals are back.
-    listRef.current?.focus({ preventScroll: true });
-  };
-
-  /** Moves the selection of opened Tracking by `step`, and stops at the first and the last row. */
-  const moveTrackingSelection = (step: 1 | -1): void => {
-    if (trackingIds.length === 0) return;
-    const at = selectedTaskId === null ? -1 : trackingIds.indexOf(selectedTaskId);
-    const next = at < 0 ? (step === 1 ? 0 : trackingIds.length - 1) : at + step;
-    setTrackingSelection(trackingIds[Math.min(Math.max(next, 0), trackingIds.length - 1)]!);
-  };
-
-  /**
-   * Marks the row of `taskId` done, unless it is Working. When the row was the
-   * selected one, the selection goes to the next row that stays.
-   */
-  const markTaskDone = (taskId: string): void => {
-    const row = trackingRows.find((each) => each.task.id === taskId);
-    if (row === undefined || !canMarkTrackingStateDone(row.state)) return;
-    const next = pickSelectionAfterMove(trackingIds, taskId, [taskId]);
-    heldTracking.registerMarkedDone(taskId);
-    tickOff.run(
-      { taskId, title: row.task.title },
-      () => {
-        setTrackingSelection((current) => (current === taskId ? next : current));
-      },
-      () => {
-        heldTracking.forgetMarkedDone(taskId);
-      },
-    );
-  };
-
-  const openTrackingRow = (taskId: string): void => {
-    const row = trackingRows.find((each) => each.task.id === taskId);
-    if (row !== undefined) onOpenRun(row.run.id);
-  };
+  const tracking = useTrackingControls({
+    open: trackingOpen,
+    readRows: trackingSnapshot.rows,
+    shownRows: trackingRows,
+    heldTracking,
+    tickOff,
+    listRef,
+    onOpening: () => {
+      updateChecks(new Set());
+      setMenu(null);
+    },
+    onOpenChange: onTrackingOpenChange,
+    onOpenRun,
+  });
 
   /** Selects `signalId` and shows the pane, as a click on its row does. */
   const openSignal = (signalId: string): void => {
@@ -439,35 +399,6 @@ export function IntakeScreen({
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  /** Runs the keys of opened Tracking, which are few: it has no pane, checks or snooze yet. */
-  const handleTrackingKeys = (
-    event: KeyboardEvent<HTMLDivElement>,
-    key: string,
-    extending: boolean,
-  ): void => {
-    switch (key) {
-      case "j":
-      case "ArrowDown":
-        event.preventDefault();
-        if (!extending) moveTrackingSelection(1);
-        return;
-      case "k":
-      case "ArrowUp":
-        event.preventDefault();
-        if (!extending) moveTrackingSelection(-1);
-        return;
-      case "e":
-        event.preventDefault();
-        if (!extending && selectedTaskId !== null) markTaskDone(selectedTaskId);
-        return;
-      case "Escape":
-        event.preventDefault();
-        if (selectedTaskId !== null) setTrackingSelection(null);
-        else closeTracking();
-        return;
-    }
-  };
-
   const handleKeys = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (isTextField(event.target)) return;
     // A key pressed in a dialog or a menu the pane opened, such as the
@@ -479,13 +410,13 @@ export function IntakeScreen({
     if (key === "t" && view === "to-do") {
       event.preventDefault();
       if (!extending) {
-        if (trackingOpen) closeTracking();
-        else openTracking();
+        if (trackingOpen) tracking.closeTracking();
+        else tracking.openTracking();
       }
       return;
     }
     if (trackingOpen) {
-      handleTrackingKeys(event, key, extending);
+      tracking.handleOpenedKey(event, key, extending);
       return;
     }
     // Shift only extends the checks with the keys that move the selection.
@@ -515,7 +446,7 @@ export function IntakeScreen({
         event.preventDefault();
         // On a row of folded Tracking, `E` marks that row done, not the selected signal.
         const focusedTaskId = target.closest<HTMLElement>("[data-task-id]")?.dataset.taskId;
-        if (focusedTaskId !== undefined) markTaskDone(focusedTaskId);
+        if (focusedTaskId !== undefined) tracking.markTaskDone(focusedTaskId);
         else runKeyMove("done");
         return;
       }
@@ -588,17 +519,17 @@ export function IntakeScreen({
     forgetOwnChanges: held.forgetOwnChanges,
     registerHandoff: (signalId) => {
       flights.expect(signalId);
-      heldTracking.registerHandedOff(signalId);
+      heldTracking.registerHandoff(signalId);
     },
     forgetHandoff: (signalId) => {
       flights.forget(signalId);
-      heldTracking.forgetHandedOff(signalId);
+      heldTracking.forgetHandoff(signalId);
     },
   };
   // Inbox zero takes the place of the empty To do list on the All tab, and
   // shows the cleared count itself, so the foot goes with the rows.
   // Rows of Tracking that wait on the user keep To do from being at zero.
-  const waitingTrackingRows = countWaitingTrackingRows(readTrackingRows);
+  const waitingTrackingRows = countWaitingTrackingRows(trackingSnapshot.rows);
   const inboxZero =
     view === "to-do" &&
     pluginId === null &&
@@ -639,11 +570,13 @@ export function IntakeScreen({
           }}
           list={
             <>
-              <div className="asks-head">
+              {/* Opened Tracking covers the view switcher and the list, which take no focus. */}
+              <div className="asks-head" inert={trackingOpen}>
                 <IntakeViewSwitcher view={view} onViewChange={onViewChange} />
               </div>
               <IntakeList
                 view={view}
+                inert={trackingOpen}
                 scope={listScope}
                 sections={sections}
                 plugins={plugins}
@@ -722,7 +655,7 @@ export function IntakeScreen({
                 <TrackingTray
                   rows={trackingRows}
                   open={trackingOpen}
-                  selectedTaskId={selectedTaskId}
+                  selectedTaskId={tracking.selectedTaskId}
                   signalCount={listedSignals.length}
                   signalSources={[
                     ...new Set(listedSignals.map((signal) => parsePluginId(signal.kind))),
@@ -731,10 +664,10 @@ export function IntakeScreen({
                     <IntakeDock toast={toast.toast} bulk={null} onDismissToast={toast.dismiss} />
                   }
                   flights={flights}
-                  onOpen={openTracking}
-                  onClose={closeTracking}
-                  onOpenRow={openTrackingRow}
-                  onMarkDone={markTaskDone}
+                  onOpen={tracking.openTracking}
+                  onClose={tracking.closeTracking}
+                  onOpenRow={tracking.openTrackingRow}
+                  onMarkDone={tracking.markTaskDone}
                 />
               )}
             </>

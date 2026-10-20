@@ -37,7 +37,7 @@ import { AgeLabel } from "../age-label";
 import { describeMoveTitle, SIGNAL_MOVE_GLYPHS } from "./move-glyphs";
 import { SNOOZE_ANCHOR } from "./snooze-menu";
 import { SignalMark } from "./source-mark";
-import { useRowMotion, type TakeLeavingRow } from "./use-row-motion";
+import { useRowMotion, type RowExitHandler } from "./use-row-motion";
 
 /** What a press on a row's own controls asks for: its checkbox, or one of its moves. */
 export type SignalRowAction = "check" | SignalMove;
@@ -128,6 +128,7 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
  */
 export const IntakeList = memo(function IntakeList({
   view,
+  inert,
   scope,
   sections,
   plugins,
@@ -148,6 +149,8 @@ export const IntakeList = memo(function IntakeList({
   onPointerLeave,
 }: {
   readonly view: SignalView;
+  /** Whether the list takes no pointer, focus or screen reader: opened Tracking covers it. */
+  readonly inert: boolean;
   readonly scope: string;
   readonly sections: ReadonlyArray<IntakeSection>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
@@ -165,7 +168,7 @@ export const IntakeList = memo(function IntakeList({
   readonly onNearEnd: () => void;
   /** Called once the list has put the focus on the selected row that `focusSelectedRow` asked for. */
   readonly onFocusedSelectedRow: () => void;
-  readonly takeLeavingRow?: TakeLeavingRow;
+  readonly takeLeavingRow?: RowExitHandler;
   readonly onPointerEnter: () => void;
   readonly onPointerLeave: () => void;
 }): JSX.Element {
@@ -181,7 +184,7 @@ export const IntakeList = memo(function IntakeList({
     [workflows, assistants],
   );
   const listedItems = useMemo(() => flattenSections(sections), [sections]);
-  const items = useRowMotion(listedItems, scope, scrollRef, ghostsRef, "--dur-2", takeLeavingRow);
+  const items = useRowMotion(listedItems, scope, scrollRef, ghostsRef, { takeLeavingRow });
   const selectedIndex = useMemo(
     () => items.findIndex((item) => item.key === selectedId),
     [items, selectedId],
@@ -270,7 +273,12 @@ export const IntakeList = memo(function IntakeList({
   }
 
   return (
-    <div className="asks-frame" onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
+    <div
+      className="asks-frame"
+      inert={inert}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+    >
       <div ref={scrollRef} className="asks-scroll">
         {items.length === 0 ? (
           empty

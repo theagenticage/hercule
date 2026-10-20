@@ -16,6 +16,8 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   stubElementSize,
+  stubIntersectionObserver,
+  type Answer,
   type Call,
   type Handler,
 } from "../../../app/testing";
@@ -25,6 +27,8 @@ vi.mock("../../../office/office-screen", () => ({ OfficeScreen: () => <p>The Off
 
 beforeEach(() => {
   stubElementSize(1168, 800);
+  // Every row is in view as soon as it is watched, until a test scrolls it away.
+  stubIntersectionObserver();
   // jsdom lays nothing out, so it has no `scrollIntoView`.
   Element.prototype.scrollIntoView = () => {};
 });
@@ -254,7 +258,8 @@ const openIntake = async (
 
 /** Returns the Signals list, the region the signal rows and folded Tracking sit in. */
 const getList = () => screen.getByRole("region", { name: "Signals" });
-const getTray = () => document.querySelector<HTMLElement>(".tr-tray")!;
+// Not the copy of the sheet that drops while Tracking closes, which sits in the motion layer.
+const getTray = () => document.querySelector<HTMLElement>(".asks-list > .tr-tray")!;
 const isOpen = () => getTray().classList.contains("is-open");
 const getRowButtons = () => [...getTray().querySelectorAll<HTMLElement>("[data-task-id]")];
 const getRowButton = (task: Task) =>
@@ -313,6 +318,49 @@ describe("folded Tracking", () => {
       );
     });
     expect(calls.filter((call) => call.path === `/api/v1/runs/${FAILED_RUN.id}`)).toHaveLength(1);
+  });
+
+  it("reads the reason of a Failed row of opened Tracking only once the row has been in view", async () => {
+    // A row is in view only when a test says so, as a scroll would.
+    const watched = new Map<Element, IntersectionObserverCallback>();
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        readonly callback: IntersectionObserverCallback;
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+        observe(element: Element): void {
+          watched.set(element, this.callback);
+        }
+        unobserve(element: Element): void {
+          watched.delete(element);
+        }
+        disconnect(): void {
+          watched.clear();
+        }
+      },
+    );
+    const { calls, live } = await openIntake("/intake?tracking=true");
+    await live.waitForFirstPushes();
+    const failedReads = () => calls.filter((call) => call.path === `/api/v1/runs/${FAILED_RUN.id}`);
+    expect(getRowButton(FAILED_TASK).textContent).toContain("Implement failed");
+    expect(getRowButton(FAILED_TASK).textContent).not.toContain("permission denied");
+    expect(failedReads()).toHaveLength(0);
+
+    const item = getRowButton(FAILED_TASK).closest(".tr-run-item")!;
+    act(() => {
+      watched.get(item)!(
+        [{ target: item, isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver,
+      );
+    });
+    await waitFor(() => {
+      expect(getRowButton(FAILED_TASK).textContent).toContain(
+        "Implement failed · permission denied on ops-db",
+      );
+    });
+    expect(failedReads()).toHaveLength(1);
   });
 
   it("reads no run for rows that did not fail", async () => {
@@ -461,6 +509,22 @@ describe("opened Tracking", () => {
   });
 });
 
+describe("opened Tracking over the list", () => {
+  it("makes the covered view switcher and signal list inert, and the sheet not", async () => {
+    await openIntake();
+    expect(document.querySelector(".asks-head")!.hasAttribute("inert")).toBe(false);
+    expect(document.querySelector(".asks-frame")!.hasAttribute("inert")).toBe(false);
+    getSignalRow(FIRST_SIGNAL).focus();
+    await userEvent.keyboard("t");
+    expect(document.querySelector(".asks-head")!.hasAttribute("inert")).toBe(true);
+    expect(document.querySelector(".asks-frame")!.hasAttribute("inert")).toBe(true);
+    expect(getTray().hasAttribute("inert")).toBe(false);
+    await userEvent.keyboard("t");
+    expect(document.querySelector(".asks-head")!.hasAttribute("inert")).toBe(false);
+    expect(document.querySelector(".asks-frame")!.hasAttribute("inert")).toBe(false);
+  });
+});
+
 describe("opening a row", () => {
   it("opens its run's page, folded or opened, by click and by ↩", async () => {
     const { router } = await openIntake();
@@ -532,6 +596,73 @@ describe("marking a row done", () => {
     });
   });
 
+  it("sends two tick-offs side by side, one per Task, and takes both rows off", async () => {
+    const releases: Array<() => void> = [];
+    const handlers = storeTracking();
+    const hold = (task: Task): Handler => {
+      const answer = handlers[`PATCH /api/v1/tasks/${task.id}`] as (call: Call) => Answer;
+      return (call) =>
+        new Promise((resolve) => {
+          releases.push(() => resolve(answer(call)));
+        });
+    };
+    const { calls } = await openIntake("/intake?tracking=true", {
+      extra: {
+        ...handlers,
+        [`PATCH /api/v1/tasks/${FINISHED_TASK.id}`]: hold(FINISHED_TASK),
+        [`PATCH /api/v1/tasks/${STOPPED_TASK.id}`]: hold(STOPPED_TASK),
+      },
+    });
+    const markDone = (task: Task) =>
+      userEvent.click(
+        within(getRowButton(task).closest<HTMLElement>(".tr-run-item")!).getByRole("button", {
+          name: "Mark done",
+        }),
+        { pointerEventsCheck: 0 },
+      );
+    await markDone(FINISHED_TASK);
+    await markDone(STOPPED_TASK);
+    // The second is sent while the first is still pending, not dropped.
+    await waitFor(() => {
+      expect(findMarkDone(calls)).toHaveLength(2);
+    });
+    act(() => {
+      for (const release of releases) release();
+    });
+    await waitFor(() => {
+      expect(readRowIds()).toEqual([FAILED_TASK.id, WORKING_TASK.id]);
+    });
+  });
+
+  it("does not tick a row off that is Working in the last read, though it is still drawn Finished", async () => {
+    let status: RunSummary["status"] = "completed";
+    const { calls, live } = await openIntake("/intake?tracking=true", {
+      extra: {
+        ...storeTracking([[FINISHED_TASK, "completed"]]),
+        "GET /api/v1/runs": () => ({
+          body: { items: [buildRunSummary(FINISHED_TASK, status)] },
+        }),
+      },
+    });
+    await live.waitForFirstPushes();
+    // While the pointer is on the list column, a change the user did not make waits.
+    await userEvent.hover(getList());
+    status = "running";
+    act(() => live.pushInvalidation("run", [getRunId(FINISHED_TASK)]));
+    await waitFor(() => {
+      expect(calls.filter((call) => call.path === "/api/v1/runs").length).toBeGreaterThan(1);
+    });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(getRowButton(FINISHED_TASK).closest(".tr-run-item")!.getAttribute("data-state")).toBe(
+      "finished",
+    );
+
+    await userEvent.keyboard("j");
+    await userEvent.keyboard("e");
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(findMarkDone(calls)).toHaveLength(0);
+  });
+
   it("marks a row done with its Mark done control", async () => {
     const { calls } = await openIntake("/intake?tracking=true");
     const item = getRowButton(FAILED_TASK).closest<HTMLElement>(".tr-run-item")!;
@@ -559,6 +690,65 @@ describe("marking a row done", () => {
     expect(findMarkDone(calls)[0]!.path).toBe(`/api/v1/tasks/${row!.dataset.taskId}`);
   });
 
+  describe("with motion", () => {
+    // With motion on, the list draws the row that leaves for one more render
+    // before it goes, which jsdom shows only when the durations are not 0.
+    beforeEach(() => {
+      document.documentElement.style.setProperty("--dur-1", "120ms");
+      document.documentElement.style.setProperty("--dur-2", "200ms");
+      document.documentElement.style.setProperty("--dur-3", "320ms");
+      Object.defineProperty(Element.prototype, "animate", {
+        value: () => ({ finished: new Promise(() => {}), cancel: () => {} }),
+        configurable: true,
+      });
+    });
+    afterEach(() => {
+      document.documentElement.removeAttribute("style");
+      Reflect.deleteProperty(Element.prototype, "animate");
+    });
+
+    const LAST_ROW = [[FAILED_TASK, "failed"]] as const;
+
+    it("keeps the keys working when E marks the last row of opened Tracking done: Esc closes Tracking", async () => {
+      await openIntake("/intake?tracking=true", { extra: storeTracking(LAST_ROW) });
+      await userEvent.keyboard("j");
+      expect(readSelected()).toEqual([FAILED_TASK.id]);
+      await userEvent.keyboard("e");
+      await waitFor(() => {
+        expect(readRowIds()).toEqual([]);
+      });
+      await userEvent.keyboard("{Escape}");
+      await waitFor(() => {
+        expect(isOpen()).toBe(false);
+      });
+    });
+
+    it("keeps the keys working when Mark done is pressed on the last row of opened Tracking", async () => {
+      await openIntake("/intake?tracking=true", { extra: storeTracking(LAST_ROW) });
+      const item = getRowButton(FAILED_TASK).closest<HTMLElement>(".tr-run-item")!;
+      await userEvent.click(within(item).getByRole("button", { name: "Mark done" }), {
+        pointerEventsCheck: 0,
+      });
+      await waitFor(() => {
+        expect(readRowIds()).toEqual([]);
+      });
+      await userEvent.keyboard("{Escape}");
+      await waitFor(() => {
+        expect(isOpen()).toBe(false);
+      });
+    });
+
+    it("keeps the focus in the list when the last row of folded Tracking is marked done", async () => {
+      await openIntake("/intake", { extra: storeTracking(LAST_ROW) });
+      getRowButtons()[0]!.focus();
+      await userEvent.keyboard("e");
+      await waitFor(() => {
+        expect(readRowIds()).toEqual([]);
+      });
+      expect(getList().contains(document.activeElement)).toBe(true);
+    });
+  });
+
   it("shows a failed tick-off in the toast's place, and the row stays", async () => {
     await openIntake("/intake?tracking=true", {
       extra: {
@@ -574,7 +764,9 @@ describe("marking a row done", () => {
     const toast = await findToast();
     expect(toast.getAttribute("role")).toBe("alert");
     expect(toast.classList.contains("asks-toast--fail")).toBe(true);
-    expect(toast.textContent).toBe("Couldn't mark done: The database is busy.");
+    expect(toast.textContent).toBe(
+      "Couldn't mark Nightly backup job timing out done: The database is busy.",
+    );
     expect(getRowButton(FAILED_TASK)).not.toBeNull();
   });
 });
@@ -629,24 +821,54 @@ describe("the To do count", () => {
 });
 
 describe("Tracking's reads", () => {
-  it("reads the Tasks once and their runs once as the shell loads, and reads the runs once on a run push", async () => {
+  /** Waits for the shell's reads and the pushes' first reads, then returns how many Tracking reads there are. */
+  const countReads = (calls: ReadonlyArray<Call>) => ({
+    tasks: findTrackingTasksCalls(calls).length,
+    runs: findTrackedRunsCalls(calls).length,
+  });
+
+  it("reads the Tasks, then all their runs in one request, when the shell loads", async () => {
     const { calls, live } = await openIntake();
     await live.waitForFirstPushes();
-    const tasksBefore = findTrackingTasksCalls(calls).length;
-    const runsBefore = findTrackedRunsCalls(calls);
-    expect(runsBefore.length).toBeGreaterThan(0);
-    expect(new URLSearchParams(runsBefore[0]!.search).getAll("taskIds").toSorted()).toEqual(
-      [FINISHED_TASK, FAILED_TASK, WORKING_TASK, STOPPED_TASK].map((task) => task.id).toSorted(),
+    const reads = calls.filter(
+      (call) =>
+        call.method === "GET" && (call.path === "/api/v1/tasks" || call.path === "/api/v1/runs"),
     );
-    expect(new URLSearchParams(findTrackingTasksCalls(calls)[0]!.search).get("handedOff")).toBe(
-      "true",
-    );
+    // The first read is the Tasks, and then their runs. The first pushes of the
+    // `task` and `run` topics read the snapshot again after it.
+    expect(reads[0]!.path).toBe("/api/v1/tasks");
+    expect(new URLSearchParams(reads[0]!.search).get("handedOff")).toBe("true");
+    expect(reads[1]!.path).toBe("/api/v1/runs");
+    for (const runRead of findTrackedRunsCalls(calls)) {
+      expect(new URLSearchParams(runRead.search).getAll("taskIds").toSorted()).toEqual(
+        [FINISHED_TASK, FAILED_TASK, WORKING_TASK, STOPPED_TASK].map((task) => task.id).toSorted(),
+      );
+    }
+  });
 
-    act(() => live.pushInvalidation("run", [getRunId(WORKING_TASK)]));
-    await waitFor(() => {
-      expect(findTrackedRunsCalls(calls)).toHaveLength(runsBefore.length + 1);
+  it("reads the runs in chunks of at most 100 Tasks, and the Tasks to their last page", async () => {
+    const many = Array.from({ length: 150 }, (_, index) =>
+      buildTask(
+        `01a06d02-7b00-7000-8000-${String(index + 100).padStart(12, "0")}`,
+        `Task ${String(index)}`,
+        index,
+      ),
+    );
+    const { calls } = await openIntake("/intake", {
+      extra: {
+        "GET /api/v1/tasks": (call) =>
+          new URLSearchParams(call.search).has("cursor")
+            ? { body: { items: many.slice(100) } }
+            : { body: { items: many.slice(0, 100), nextCursor: "page-2" } },
+        "GET /api/v1/runs": () => ({ body: { items: [] } }),
+      },
     });
-    expect(findTrackingTasksCalls(calls)).toHaveLength(tasksBefore);
+    expect(findTrackingTasksCalls(calls)).toHaveLength(2);
+    expect(
+      findTrackedRunsCalls(calls)
+        .map((call) => new URLSearchParams(call.search).getAll("taskIds").length)
+        .toSorted((a, b) => a - b),
+    ).toEqual([50, 100]);
   });
 
   it("makes no run request while no Task is tracked, also on a push", async () => {
@@ -656,7 +878,52 @@ describe("Tracking's reads", () => {
     act(() => live.pushInvalidation("task"));
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(findTrackedRunsCalls(calls)).toHaveLength(0);
-    expect(findTrackingTasksCalls(calls).length).toBeGreaterThan(0);
+    expect(findTrackingTasksCalls(calls).length).toBeGreaterThan(1);
+  });
+
+  it("reads again on a task push", async () => {
+    const { calls, live } = await openIntake();
+    await live.waitForFirstPushes();
+    const before = countReads(calls);
+    act(() => live.pushInvalidation("task", [WORKING_TASK.id]));
+    await waitFor(() => {
+      expect(countReads(calls)).toEqual({ tasks: before.tasks + 1, runs: before.runs + 1 });
+    });
+  });
+
+  it("reads again once on a run push that names a tracked run, an older run of a Task too", async () => {
+    const { calls, live } = await openIntake();
+    await live.waitForFirstPushes();
+    const before = countReads(calls);
+    act(() => live.pushInvalidation("run", [getRunId(WORKING_TASK)]));
+    await waitFor(() => {
+      expect(countReads(calls)).toEqual({ tasks: before.tasks + 1, runs: before.runs + 1 });
+    });
+  });
+
+  it("reads again on the creation of a run, which may be a re-run, and on a push that names no run", async () => {
+    const { calls, live } = await openIntake();
+    await live.waitForFirstPushes();
+    const before = countReads(calls);
+    act(() =>
+      live.pushInvalidation("run", ["01a06d02-7c00-7000-8000-0000000000ff"], undefined, "created"),
+    );
+    await waitFor(() => {
+      expect(countReads(calls).runs).toBe(before.runs + 1);
+    });
+    act(() => live.pushInvalidation("run"));
+    await waitFor(() => {
+      expect(countReads(calls).runs).toBe(before.runs + 2);
+    });
+  });
+
+  it("does not read again on a change to a run of no tracked Task", async () => {
+    const { calls, live } = await openIntake();
+    await live.waitForFirstPushes();
+    const before = countReads(calls);
+    act(() => live.pushInvalidation("run", ["01a06d02-7c00-7000-8000-0000000000fe"]));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(countReads(calls)).toEqual(before);
   });
 });
 

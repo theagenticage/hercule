@@ -3,11 +3,11 @@
  * they handed to agents (spec 17 §Tracking).
  */
 import { memo, useId, type JSX } from "react";
-import type { TrackingState } from "@hercule/client-core";
+import { canMarkTrackingStateDone, type TrackingState } from "@hercule/client-core";
 import { buildHueStyle, buildLook, Face } from "../../faces";
 import { CheckIcon } from "../../icons/check";
 import { AgeLabel } from "../age-label";
-import { canMarkTrackingStateDone, TRACKING_STATE_LOOKS } from "./tracking-states";
+import { TRACKING_STATE_LOOKS } from "./tracking-states";
 import "./tracking.css";
 
 /**
@@ -19,8 +19,12 @@ export interface TrackingRowFacts {
   readonly taskId: string;
   readonly title: string;
   readonly state: TrackingState;
-  /** The id of the workflow that has the work. Its colleague's face leads the row. */
-  readonly workflowId: string;
+  /**
+   * The text the colleague's face that leads the row is drawn from: the id of
+   * the workflow that has the work, or its name when the run has no workflow
+   * (a workflow sent with the request). The same text always gives the same face.
+   */
+  readonly faceSeed: string;
   /** The workflow's name, which the line draws in the colleague's hue. */
   readonly workflowName: string;
   /** What follows the workflow's name on the line, with its own separator: "failed · reason", "finished", "· stopped". */
@@ -59,9 +63,9 @@ export const TrackingRowItem = memo(function TrackingRowItem({
   readonly onOpen: (taskId: string) => void;
   readonly onMarkDone: (taskId: string) => void;
 }): JSX.Element {
-  const { taskId, title, state, workflowId, workflowName, lineText, since } = facts;
+  const { taskId, title, state, faceSeed, workflowName, lineText, since } = facts;
   const ageId = useId();
-  const look = buildLook(workflowId);
+  const look = buildLook(faceSeed);
   const classes = [
     "tr-run-item",
     state === "failed" ? "is-you" : "",

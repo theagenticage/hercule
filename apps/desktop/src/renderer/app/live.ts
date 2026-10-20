@@ -35,10 +35,39 @@
 import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { invalidateWithoutCancelling, queryKeys, type Live } from "@hercule/client-core";
+import {
+  invalidateWithoutCancelling,
+  isTrackingAffectedByRunPush,
+  queryKeys,
+  type Live,
+  type LiveInvalidatePush,
+  type LiveQueryKey,
+  type TrackingSnapshot,
+} from "@hercule/client-core";
 import type { MutableLiveTopic } from "@hercule/contract";
 import { ageClock } from "./age-clock";
 import { useWindowVisible } from "./window-visibility";
+
+/**
+ * Reads again every query a push on `topic` makes stale: the queries under
+ * `keys`, and for a `run` push, Tracking's snapshot when the push can change it
+ * (see `isTrackingAffectedByRunPush`). A `run` push is about every run, such as
+ * the ones cron fires start, and Tracking holds only the runs of its Tasks, so
+ * most of them leave it as it is.
+ */
+export const invalidateForPush = (
+  queryClient: QueryClient,
+  topic: MutableLiveTopic,
+  keys: ReadonlyArray<LiveQueryKey>,
+  push: LiveInvalidatePush,
+): void => {
+  for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
+  if (topic !== "run") return;
+  const snapshot = queryClient.getQueryData<TrackingSnapshot>(queryKeys.tracking());
+  if (snapshot === undefined || isTrackingAffectedByRunPush(snapshot, push)) {
+    invalidateWithoutCancelling(queryClient, queryKeys.tracking());
+  }
+};
 
 /** The topics the shell keeps subscribed. */
 const SHELL_TOPICS: readonly MutableLiveTopic[] = [
@@ -186,8 +215,8 @@ export const useScreenTopicsLive = (
   useEffect(() => {
     if (!visible) return;
     const unsubscribes = topics.map((topic) =>
-      live.subscribe(topic, (keys) => {
-        for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
+      live.subscribe(topic, (keys, push) => {
+        invalidateForPush(queryClient, topic, keys, push);
       }),
     );
     return () => {

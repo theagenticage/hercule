@@ -60,7 +60,7 @@ export function TrackingFold({
     "folded",
     runsRef,
     ghostsRef,
-    "--dur-3",
+    { slide: "--dur-3" },
   );
   const drawnRows = drawn.map((item) => item.facts);
   useLineFade(drawnRows, runsRef);

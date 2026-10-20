@@ -7,7 +7,7 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import type { TrackingState } from "@hercule/client-core";
 import { readMotionDuration } from "./motion-tokens";
-import { isMotionShown, isOnScreen } from "./use-row-motion";
+import { isMotionShown, isOnScreen } from "./motion-helpers";
 
 /** What the fade needs to know of a row of Tracking: which Task it is, and its state. */
 interface FadedRow {

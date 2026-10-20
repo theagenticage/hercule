@@ -4,6 +4,7 @@
  */
 import {
   useEffect,
+  useEffectEvent,
   useId,
   useImperativeHandle,
   useRef,
@@ -11,11 +12,10 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import type { PluginIdentity, TrackingState } from "@hercule/client-core";
+import type { TrackingState } from "@hercule/client-core";
 import { ChevronLeftIcon } from "../../icons/chevron-left";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { Mark } from "../../marks";
-import { SourceMark } from "./source-mark";
 import { TrackingRowItem, type TrackingRowFacts } from "./tracking-row";
 import { describeWaitingOnYou, TRACKING_STATE_LOOKS } from "./tracking-states";
 import { useLineFade } from "./use-line-fade";
@@ -58,8 +58,8 @@ const regroupItems = (items: ReadonlyArray<SheetItem>): ReadonlyArray<TrackingSh
  *   groups come in Tracking's order, and no group is empty. `selectedTaskId`
  *   is the open row. With no group, a line says what Tracking is for.
  * - At the foot, the row that sums up the signals: "Signals" with
- *   `signalCount`, the marks of the sources the signals come from, and "Back
- *   to Intake".
+ *   `signalCount`, `signalMarks`, the marks of the sources the signals come
+ *   from, and "Back to Intake".
  *
  * Both ways back call `onClose`. A press on a row calls `onOpenRow`, and on
  * its Mark done control `onMarkDone`. `dock` is drawn at the end of the
@@ -76,8 +76,9 @@ const regroupItems = (items: ReadonlyArray<SheetItem>): ReadonlyArray<TrackingSh
  * When the row that had the focus leaves, the focus goes to the sheet instead
  * of to the page, where no key would reach Intake.
  *
- * `signalSources` are the plugins the signals on To do come from, each once,
- * as `parsePluginId` returns them: `null` is the core. `plugins` names them.
+ * `onRowsSeen` is called with the ids of the Tasks whose rows have come into
+ * view in the scrolling rows, which one observer watches. The caller reads
+ * for a row only once it is seen.
  *
  * The component takes the place of the list column, so the column must be its
  * nearest positioned ancestor.
@@ -88,10 +89,10 @@ export function TrackingSheet({
   groups,
   selectedTaskId,
   signalCount,
-  signalSources,
-  plugins,
+  signalMarks,
   dock,
   ref,
+  onRowsSeen,
   onClose,
   onOpenRow,
   onMarkDone,
@@ -101,10 +102,10 @@ export function TrackingSheet({
   readonly groups: ReadonlyArray<TrackingSheetGroup>;
   readonly selectedTaskId: string | null;
   readonly signalCount: number;
-  readonly signalSources: ReadonlyArray<string | null>;
-  readonly plugins: ReadonlyArray<PluginIdentity>;
+  readonly signalMarks: ReactNode;
   readonly dock?: ReactNode;
   readonly ref?: Ref<HTMLElement>;
+  readonly onRowsSeen?: (taskIds: ReadonlyArray<string>) => void;
   readonly onClose: () => void;
   readonly onOpenRow: (taskId: string) => void;
   readonly onMarkDone: (taskId: string) => void;
@@ -114,17 +115,43 @@ export function TrackingSheet({
   const scrollRef = useRef<HTMLDivElement>(null);
   const ghostsRef = useRef<HTMLDivElement>(null);
   useImperativeHandle(ref, () => sheetRef.current!, []);
-  const drawn = useRowMotion(flattenGroups(groups), "sheet", scrollRef, ghostsRef, "--dur-3");
+  const drawn = useRowMotion(flattenGroups(groups), "sheet", scrollRef, ghostsRef, {
+    slide: "--dur-3",
+  });
   const drawnGroups = regroupItems(drawn);
   useLineFade(
     drawnGroups.flatMap((group) => group.rows),
     scrollRef,
   );
-  const rowCount = groups.reduce((count, group) => count + group.rows.length, 0);
+  // The rows drawn, which lag `groups` while a row that leaves is still drawn.
+  const rowCount = drawnGroups.reduce((count, group) => count + group.rows.length, 0);
 
   useEffect(() => {
     sheetRef.current!.focus({ preventScroll: true });
   }, []);
+  // One observer watches every row, and is made again when the rows change.
+  const reportSeen = useEffectEvent((taskIds: ReadonlyArray<string>) => {
+    onRowsSeen?.(taskIds);
+  });
+  const rowKey = drawnGroups.flatMap((group) => group.rows.map((row) => row.taskId)).join(" ");
+  const watching = onRowsSeen !== undefined;
+  useEffect(() => {
+    if (!watching) return;
+    const scroll = scrollRef.current!;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const seen = entries
+          .filter((entry) => entry.isIntersecting)
+          .map((entry) => (entry.target as HTMLElement).dataset.itemKey!);
+        if (seen.length > 0) reportSeen(seen);
+      },
+      { root: scroll },
+    );
+    for (const row of scroll.querySelectorAll(".tr-run-item")) observer.observe(row);
+    return () => {
+      observer.disconnect();
+    };
+  }, [rowKey, watching]);
   useEffect(() => {
     if (selectedTaskId === null) return;
     const sheet = sheetRef.current!;
@@ -215,16 +242,7 @@ export function TrackingSheet({
             <span>Signals</span>
             <span className="count">{signalCount}</span>
           </span>
-          <span className="tr-marks">
-            {signalSources.map((pluginId) => (
-              <SourceMark
-                key={pluginId ?? "core"}
-                pluginId={pluginId}
-                plugins={plugins}
-                size={14}
-              />
-            ))}
-          </span>
+          <span className="tr-marks">{signalMarks}</span>
           <span className="tr-all">
             Back to Intake
             <span className="tr-chev">

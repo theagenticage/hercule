@@ -2,14 +2,16 @@
  * Marking a Tracking row done: the tick-off by `E` or by a row's Mark done
  * (spec 17 §Tracking).
  */
+import { useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   invalidateWithoutCancelling,
   queryKeys,
   readErrorMessage,
   type HerculeClient,
+  type TrackingSnapshot,
 } from "@hercule/client-core";
-import { trackedTasksQuery } from "../../app/queries";
+import { trackingQuery } from "../../app/queries";
 import type { MoveToastState } from "./use-signal-moves";
 
 /** What a tick-off needs to know of the row: which Task, and the title the toast names. */
@@ -22,8 +24,10 @@ interface TickOff {
 export interface TrackingTickOff {
   /**
    * Sets the Task `done`, which takes its row out of Tracking, then calls
-   * `onDone`. When the tick-off fails, it calls `onFailed` instead. Does
-   * nothing while another tick-off is being sent.
+   * `onDone`. When the tick-off fails, it calls `onFailed` instead. Tick-offs
+   * of different Tasks run side by side, each with its own toast. A second
+   * tick-off of a Task that is being marked done is ignored: the first one
+   * does what it asks, and reports it.
    */
   readonly run: (tickOff: TickOff, onDone?: () => void, onFailed?: () => void) => void;
 }
@@ -40,29 +44,41 @@ export const useTrackingTickOff = (
   toast: MoveToastState,
 ): TrackingTickOff => {
   const queryClient = useQueryClient();
+  const pendingTaskIds = useRef(new Set<string>());
+  // The options of the mutation, not the call's callbacks, run for every
+  // tick-off, also when several are under way at once.
   const tickOff = useMutation({
     mutationFn: ({ taskId }: TickOff) =>
       client.task.update({ params: { id: taskId }, payload: { status: "done" } }),
     onSuccess: (_task, { taskId, title }) => {
-      queryClient.setQueryData(
-        trackedTasksQuery(client).queryKey,
-        (tasks) => tasks && tasks.filter((each) => each.id !== taskId),
+      queryClient.setQueryData<TrackingSnapshot>(
+        trackingQuery(client).queryKey,
+        (snapshot) =>
+          snapshot && { ...snapshot, rows: snapshot.rows.filter((row) => row.task.id !== taskId) },
       );
       invalidateWithoutCancelling(queryClient, queryKeys.tasks());
       invalidateWithoutCancelling(queryClient, queryKeys.task(taskId));
+      invalidateWithoutCancelling(queryClient, queryKeys.tracking());
       toast.show(`Marked done: ${title}`, false);
     },
-    onError: (error) => {
-      toast.show(`Couldn't mark done: ${readErrorMessage(error)}`, true);
+    onError: (error, { title }) => {
+      toast.show(`Couldn't mark ${title} done: ${readErrorMessage(error)}`, true);
     },
   });
   return {
     run: (input, onDone, onFailed) => {
-      if (tickOff.isPending) return;
-      tickOff.mutate(input, {
-        onSuccess: () => onDone?.(),
-        onError: () => onFailed?.(),
-      });
+      if (pendingTaskIds.current.has(input.taskId)) return;
+      pendingTaskIds.current.add(input.taskId);
+      tickOff.mutateAsync(input).then(
+        () => {
+          pendingTaskIds.current.delete(input.taskId);
+          onDone?.();
+        },
+        () => {
+          pendingTaskIds.current.delete(input.taskId);
+          onFailed?.();
+        },
+      );
     },
   };
 };

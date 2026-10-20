@@ -1,13 +1,14 @@
 import { useState } from "react";
 import {
-  dropHandedOff,
-  dropMarkedDone,
-  followListedTrackingRows,
-  recordHandedOff,
-  recordMarkedDone,
+  dropTrackingHandoff,
+  dropTrackingRowMarkedDone,
+  followTrackingSnapshot,
+  recordTrackingHandoff,
+  recordTrackingRowMarkedDone,
   startHeldTrackingRows,
   updateTrackingRowsHolding,
   type TrackingRow,
+  type TrackingSnapshot,
 } from "@hercule/client-core";
 
 /** The rows Tracking shows, and the screen's ways to mark the user's own changes. */
@@ -18,40 +19,40 @@ export interface HeldTrackingRowsState {
   readonly registerMarkedDone: (taskId: string) => void;
   /** Forgets that the user is marking `taskId` done, because the action failed. */
   readonly forgetMarkedDone: (taskId: string) => void;
-  /** Records that the user is handing the signal `signalId` off. Call it when the action starts. */
-  readonly registerHandedOff: (signalId: string) => void;
-  /** Forgets that the user is handing `signalId` off, because the action failed. */
-  readonly forgetHandedOff: (signalId: string) => void;
+  /** Records that the user is handing the signal `signalId` off. Call it when the handoff starts. */
+  readonly registerHandoff: (signalId: string) => void;
+  /** Forgets the handoff of `signalId`, because it failed. */
+  readonly forgetHandoff: (signalId: string) => void;
 }
 
 /**
  * Returns the rows Tracking shows, as `held-tracking-rows` in client-core
- * describes. `listed` is the last read of Tracking's rows, and keeps its
- * identity until the read changes. `holding` is set while the changes the
- * user did not make wait: while the pointer is on the list column.
+ * describes. `snapshot` is the last read of Tracking, and keeps its identity
+ * until the read changes. `holding` is set while the changes the user did not
+ * make wait: while the pointer is on the list column.
  */
 export const useHeldTrackingRows = (
-  listed: ReadonlyArray<TrackingRow>,
+  snapshot: TrackingSnapshot,
   holding: boolean,
 ): HeldTrackingRowsState => {
-  const [held, setHeld] = useState(() => startHeldTrackingRows(listed));
+  const [held, setHeld] = useState(() => startHeldTrackingRows(snapshot));
   let next = held;
-  if (next.listed !== listed) next = followListedTrackingRows(next, listed);
+  if (next.snapshot !== snapshot) next = followTrackingSnapshot(next, snapshot);
   next = updateTrackingRowsHolding(next, holding);
   if (next !== held) setHeld(next);
   return {
     shown: next.shown,
     registerMarkedDone: (taskId) => {
-      setHeld((current) => recordMarkedDone(current, taskId));
+      setHeld((current) => recordTrackingRowMarkedDone(current, taskId));
     },
     forgetMarkedDone: (taskId) => {
-      setHeld((current) => dropMarkedDone(current, taskId));
+      setHeld((current) => dropTrackingRowMarkedDone(current, taskId));
     },
-    registerHandedOff: (signalId) => {
-      setHeld((current) => recordHandedOff(current, signalId));
+    registerHandoff: (signalId) => {
+      setHeld((current) => recordTrackingHandoff(current, signalId));
     },
-    forgetHandedOff: (signalId) => {
-      setHeld((current) => dropHandedOff(current, signalId));
+    forgetHandoff: (signalId) => {
+      setHeld((current) => dropTrackingHandoff(current, signalId));
     },
   };
 };

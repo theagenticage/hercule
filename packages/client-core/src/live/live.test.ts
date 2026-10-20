@@ -819,19 +819,24 @@ describe("createLive", () => {
 });
 
 describe("buildQueryKeys", () => {
-  it("maps a task push to the list prefix and one detail key per id", () => {
+  it("maps a task push to the list prefix, one detail key per id, and Tracking's snapshot", () => {
     assert.deepStrictEqual(buildQueryKeys("task", ["a", "b"]), [
       ["tasks"],
       ["task", "a"],
       ["task", "b"],
+      ["tracking"],
     ]);
 
     // The same key builders the task queries use.
-    assert.deepStrictEqual(buildQueryKeys("task", ["a"]), [queryKeys.tasks(), queryKeys.task("a")]);
+    assert.deepStrictEqual(buildQueryKeys("task", ["a"]), [
+      queryKeys.tasks(),
+      queryKeys.task("a"),
+      queryKeys.tracking(),
+    ]);
   });
 
   it("covers every record of the topic when no id is named", () => {
-    assert.deepStrictEqual(buildQueryKeys("task", []), [["tasks"], ["task"]]);
+    assert.deepStrictEqual(buildQueryKeys("task", []), [["tasks"], ["task"], ["tracking"]]);
   });
 
   it("maps a runner push to the runner list, the page of each runner in it, and the controller", () => {

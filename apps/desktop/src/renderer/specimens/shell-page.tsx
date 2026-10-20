@@ -88,6 +88,7 @@ import type {
   Workspace,
 } from "@hercule/contract";
 import {
+  buildTrackingSnapshot,
   createClient,
   type FetchLike,
   type HerculeClient,
@@ -141,8 +142,7 @@ import {
   startTasksQuery,
   subagentsQuery,
   threadsQuery,
-  trackedRunsQuery,
-  trackedTasksQuery,
+  trackingQuery,
   transcriptQuery,
   triggersQuery,
   userQuery,
@@ -583,14 +583,7 @@ const seedQueryCache = (
   );
   queryClient.setQueryData(pluginsQuery(client).queryKey, records.plugins ?? []);
   const { tasks = [], runs = [], failedRuns = [] } = records.tracking ?? {};
-  queryClient.setQueryData(trackedTasksQuery(client).queryKey, tasks);
-  queryClient.setQueryData(
-    trackedRunsQuery(
-      client,
-      tasks.map((task) => task.id),
-    ).queryKey,
-    runs,
-  );
+  queryClient.setQueryData(trackingQuery(client).queryKey, buildTrackingSnapshot(tasks, runs));
   for (const failedRun of failedRuns) {
     queryClient.setQueryData(runQuery(client, failedRun.id).queryKey, failedRun);
   }

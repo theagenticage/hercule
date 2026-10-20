@@ -2059,7 +2059,7 @@ export const CLI = {
       },
       taskIds: {
         flag: "task",
-        help: "Only the runs that work on this task, by its id or a tail of eight or more characters; repeat the flag to list the runs of several tasks. Find a task with `hercule task list`.",
+        help: "Only the runs that work on this task, by its id or a tail of eight or more characters; repeat the flag to list the runs of several tasks, at most 100. Find a task with `hercule task list`.",
         resolves: "task.query",
       },
       newestPerWorkflow: {

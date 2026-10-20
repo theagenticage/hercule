@@ -13,7 +13,7 @@ const buildFacts = (state: TrackingState): TrackingRowFacts => ({
   taskId: "task-1",
   title: "Rate-limit the public API",
   state,
-  workflowId: "workflow-1",
+  faceSeed: "workflow-1",
   workflowName: "Review PR",
   lineText: "finished",
   since: "2026-09-29T09:20:00.000Z",

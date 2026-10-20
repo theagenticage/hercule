@@ -1,5 +1,4 @@
-import type { Run, RunSummary, Signal, Task } from "@hercule/contract";
-import { countToDo } from "./intake";
+import type { Run, RunSummary, Task } from "@hercule/contract";
 import { describeFailureReason, isRunLive } from "./run-display";
 import { findFailureMessage } from "./run-page-rows";
 
@@ -27,7 +26,7 @@ const TRACKING_STATE_ORDER: ReadonlyArray<TrackingState> = [
 ];
 
 /** How many rows folded Tracking shows: the ones that changed state last. */
-export const TRACKING_PEEK_ROWS = 2;
+const TRACKING_PEEK_ROWS = 2;
 
 /** One row of Tracking: a Task that has runs, and the state of its work. */
 export interface TrackingRow {
@@ -65,14 +64,15 @@ const decideTrackingState = (run: RunSummary): TrackingState => {
 
 /**
  * Returns when a run entered the state it puts its Task in: when it ended, or
- * for a live run when it started (`createdAt` while it is still pending).
+ * for a live run when it was created. A live run's `createdAt` is used while
+ * it is pending and while it runs, so a run that moves from pending to
+ * running does not start its row's age again or move it in folded Tracking.
  */
 const readStateStart = (run: RunSummary): string => {
   switch (run.status) {
     case "pending":
-      return run.createdAt;
     case "running":
-      return run.startedAt;
+      return run.createdAt;
     case "completed":
     case "failed":
     case "cancelled":
@@ -110,8 +110,15 @@ export const buildTrackingRows = (
   tasks: ReadonlyArray<Task>,
   runs: ReadonlyArray<RunSummary>,
 ): ReadonlyArray<TrackingRow> => {
+  const runsByTaskId = new Map<string, RunSummary[]>();
+  for (const run of runs) {
+    if (run.taskId === undefined) continue;
+    const taskRuns = runsByTaskId.get(run.taskId);
+    if (taskRuns === undefined) runsByTaskId.set(run.taskId, [run]);
+    else taskRuns.push(run);
+  }
   const rows = tasks.flatMap((task): ReadonlyArray<TrackingRow> => {
-    const taskRuns = runs.filter((run) => run.taskId === task.id).toSorted(compareNewestFirst);
+    const taskRuns = (runsByTaskId.get(task.id) ?? []).toSorted(compareNewestFirst);
     const lastRun = taskRuns[0];
     if (lastRun === undefined) return [];
     const run =
@@ -141,22 +148,66 @@ export const listRecentTrackingRows = (
  * Checks whether a row in `state` waits on the user: Failed and Finished do,
  * Working and Stopped never do. Waiting rows count toward To do.
  */
-export const isTrackingStateWaitingOnUser = (state: TrackingState): boolean =>
+const isTrackingStateWaitingOnUser = (state: TrackingState): boolean =>
   state === "failed" || state === "finished";
 
-/** Returns how many of `rows` wait on the user. It is the "N wait on you" of Tracking's head. */
+/**
+ * Returns how many of `rows` wait on the user. It is the "N wait on you" of
+ * Tracking's head, and what Tracking adds to the To do count.
+ */
 export const countWaitingTrackingRows = (rows: ReadonlyArray<TrackingRow>): number =>
   rows.filter((row) => isTrackingStateWaitingOnUser(row.state)).length;
 
 /**
- * Returns the To do count with Tracking: the signals on To do, and the rows of
- * Tracking that wait on the user. The sidebar's Hercule segment and Intake's
- * row show it.
+ * Checks whether a row in `state` can be marked done: the work has stopped, so
+ * ticking it off leaves no run going. A Working row cannot, because marking it
+ * done would leave its run running.
  */
-export const countToDoWithTracking = (
-  signals: ReadonlyArray<Signal>,
-  rows: ReadonlyArray<TrackingRow>,
-): number => countToDo(signals) + countWaitingTrackingRows(rows);
+export const canMarkTrackingStateDone = (state: TrackingState): boolean => state !== "working";
+
+/**
+ * Tracking as one read returns it: the rows, and the ids of every run they
+ * were worked out from. The rows are built from one read of the Tasks and one
+ * of their runs, so they agree with each other.
+ */
+export interface TrackingSnapshot {
+  /** Tracking's rows, in Tracking's order. */
+  readonly rows: ReadonlyArray<TrackingRow>;
+  /**
+   * The ids of every run of the tracked Tasks that the read returned, sorted.
+   * A row holds one run only, but a push about any of these runs can change
+   * its row, such as an older run of the Task that is still live.
+   */
+  readonly runIds: ReadonlyArray<string>;
+}
+
+/** Builds the snapshot of `tasks` and their `runs`, as `buildTrackingRows` builds its rows. */
+export const buildTrackingSnapshot = (
+  tasks: ReadonlyArray<Task>,
+  runs: ReadonlyArray<RunSummary>,
+): TrackingSnapshot => ({
+  rows: buildTrackingRows(tasks, runs),
+  runIds: runs.map((run) => run.id).toSorted(),
+});
+
+/**
+ * Checks whether a push on the `run` topic can change Tracking, so it must be
+ * read again. `push` is the push's `ids` and `kind`. It can when:
+ *
+ * - it lists no ids, which means every run may have changed;
+ * - it names a run that `snapshot` holds, whatever happened to it;
+ * - it is the creation of a run, because a re-run keeps its Task's id and
+ *   starts a run no `snapshot` holds yet, and a re-run makes no `task` push.
+ *
+ * Every other run, such as one a cron fire started, leaves Tracking as it is.
+ */
+export const isTrackingAffectedByRunPush = (
+  snapshot: TrackingSnapshot,
+  push: { readonly ids: ReadonlyArray<string>; readonly kind: "created" | "updated" | "deleted" },
+): boolean =>
+  push.ids.length === 0 ||
+  push.kind === "created" ||
+  push.ids.some((id) => snapshot.runIds.includes(id));
 
 /**
  * Returns why `run` failed, in a few words for a row's line, such as

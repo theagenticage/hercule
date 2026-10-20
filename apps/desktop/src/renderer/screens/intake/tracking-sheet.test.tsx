@@ -12,7 +12,7 @@ const ROW: TrackingRowFacts = {
   taskId: "task-1",
   title: "Rate-limit the public API",
   state: "finished",
-  workflowId: "workflow-1",
+  faceSeed: "workflow-1",
   workflowName: "Review PR",
   lineText: "finished",
   since: "2026-09-29T09:20:00.000Z",
@@ -66,8 +66,7 @@ describe("TrackingSheet", () => {
         groups={[{ state: "finished", rows: [ROW, { ...ROW, taskId: "task-2" }] }]}
         selectedTaskId={null}
         signalCount={5}
-        signalSources={[]}
-        plugins={[]}
+        signalMarks={null}
         onClose={nothing}
         onOpenRow={nothing}
         onMarkDone={nothing}

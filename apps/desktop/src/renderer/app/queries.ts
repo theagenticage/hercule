@@ -20,6 +20,7 @@ import {
   ApiError,
   collectRunningTurnRows,
   collectSenderSessionIds,
+  buildTrackingSnapshot,
   classifyTranscriptPage,
   describeRunFailureCause,
   detectLocalRunner,
@@ -36,6 +37,7 @@ import {
   type MessagePage,
   type MessagePages,
   type ThreadCopy,
+  type TrackingSnapshot,
   waitForOptionalReads,
 } from "@hercule/client-core";
 import { WALK_CATCH_UP_SECONDS } from "../office/engine/contracts";
@@ -44,6 +46,7 @@ import {
   DEFAULT_PAGE_LIMIT,
   LIVE_SESSION_STATUSES,
   MAX_PAGE_LIMIT,
+  MAX_RUN_FILTER_TASK_IDS,
   type ConversationMessage,
   type EventHandling,
   type Input,
@@ -634,41 +637,46 @@ export const assistantsQuery = (client: HerculeClient) =>
 const TRACKED_TASK_FILTER = { handedOff: true, status: ["in-progress"] } as const;
 
 /**
- * Reads the Tasks Tracking lists, at most one page of them, the largest page
- * the controller allows: `run.query` takes at most one page of Task ids
- * (`trackedRunsQuery`). The Hercule segment's count and Tracking's rows both
- * come from it, so it is shell data, kept for the life of the window. A push
- * on the `task` topic reads it again.
- */
-export const trackedTasksQuery = (client: HerculeClient) =>
-  queryOptions({
-    queryKey: queryKeys.tasks(TRACKED_TASK_FILTER),
-    queryFn: async (): Promise<ReadonlyArray<Task>> =>
-      (await client.task.query({ query: { ...TRACKED_TASK_FILTER, limit: MAX_PAGE_LIMIT } })).items,
-    ...SHELL_READ_OPTIONS,
-  });
-
-/**
- * Reads every run of the Tasks `taskIds`, in one `run.query` (more only when
- * the runs need more than one page). With no Task the read makes no request
- * and returns an empty list.
+ * Reads Tracking as one snapshot: every tracked Task, then every run of them,
+ * and the rows built from the two (`buildTrackingSnapshot`). The Hercule
+ * segment's count and Tracking's rows both come from it, so it is shell data,
+ * kept for the life of the window, and every reader shares the one array of
+ * rows.
  *
- * The key holds the sorted ids, so the same Tasks in another order share an
- * entry, and a Task that joins or leaves Tracking reads under a new key.
- * Sits under the `runs` prefix, so a push on the `run` topic reads it again.
- * It is shell data, like `trackedTasksQuery`.
+ * - The Tasks are read to the last page.
+ * - Their runs are read in chunks of `MAX_RUN_FILTER_TASK_IDS` ids, each to
+ *   its last page. The ids travel in the request's address, and one with
+ *   hundreds of them is refused by the HTTP server, which as shell data would
+ *   fail the whole app's load.
+ * - With no Task, no run is read.
+ *
+ * The key is stable, so the entry is the same whichever Tasks are tracked. A
+ * push on the `task` topic reads it again, and one on the `run` topic when
+ * the push can change it (see `isTrackingAffectedByRunPush`).
  */
-export const trackedRunsQuery = (client: HerculeClient, taskIds: ReadonlyArray<string>) => {
-  const sortedIds = taskIds.toSorted();
-  return queryOptions({
-    queryKey: queryKeys.runs({ taskIds: sortedIds }),
-    queryFn: async (): Promise<ReadonlyArray<RunSummary>> =>
-      sortedIds.length === 0
-        ? []
-        : readEveryPage((page) => client.run.query({ query: { taskIds: sortedIds, ...page } })),
+export const trackingQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.tracking(),
+    queryFn: async (): Promise<TrackingSnapshot> => {
+      const tasks = await readEveryPage((page) =>
+        client.task.query({ query: { ...TRACKED_TASK_FILTER, ...page } }),
+      );
+      const taskIds = tasks.map((task) => task.id);
+      const chunks: string[][] = [];
+      for (let start = 0; start < taskIds.length; start += MAX_RUN_FILTER_TASK_IDS) {
+        chunks.push(taskIds.slice(start, start + MAX_RUN_FILTER_TASK_IDS));
+      }
+      const runs = (
+        await Promise.all(
+          chunks.map((chunk) =>
+            readEveryPage((page) => client.run.query({ query: { taskIds: chunk, ...page } })),
+          ),
+        )
+      ).flat();
+      return buildTrackingSnapshot(tasks, runs);
+    },
     ...SHELL_READ_OPTIONS,
   });
-};
 
 /** The key of the soonest `until` on Later, which each read of To do writes. See `snoozeTimerQuery`. */
 const SNOOZE_TIMER_KEY = ["snooze-timer"] as const;
@@ -1820,14 +1828,7 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(userQuery(client)),
     queryClient.ensureQueryData(signalsToDoQuery(client)),
     queryClient.ensureQueryData(snoozeTimerQuery(client)),
-    queryClient.ensureQueryData(trackedTasksQuery(client)).then((tasks) =>
-      queryClient.ensureQueryData(
-        trackedRunsQuery(
-          client,
-          tasks.map((task) => task.id),
-        ),
-      ),
-    ),
+    queryClient.ensureQueryData(trackingQuery(client)),
     queryClient.ensureQueryData(pluginsQuery(client)),
     queryClient
       .ensureQueryData(assistantsQuery(client))

@@ -1,6 +1,7 @@
 /** Tests which rows of Intake's list leave, arrive and slide when the list changes. */
 import { describe, expect, it } from "vitest";
-import { listLeavingRows, planRowMoves, type RowPlace } from "./use-row-motion";
+import type { RowPlace } from "./motion-helpers";
+import { listLeavingRows, planRowMoves } from "./use-row-motion";
 
 /** The list's viewport: 400px tall, from 100px under the window's top. */
 const VIEWPORT: RowPlace = { top: 100, bottom: 500 };

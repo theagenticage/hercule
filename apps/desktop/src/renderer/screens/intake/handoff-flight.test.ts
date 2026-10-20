@@ -47,6 +47,19 @@ describe("takeLeavingRow", () => {
     expect(layer.children).toHaveLength(0);
   });
 
+  it("forgets a handoff whose row never left the list on screen, so no id stays for good", () => {
+    vi.useFakeTimers();
+    try {
+      const { flights, layer } = setUp();
+      flights.expect("signal-1");
+      vi.advanceTimersByTime(10_000);
+      expect(flights.takeLeavingRow("signal-1", document.createElement("div"), place)).toBe(false);
+      expect(layer.children).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("lifts the copy of an expected row and plays nothing until the Task's row is drawn", () => {
     const { flights, layer } = setUp();
     flights.expect("signal-1");

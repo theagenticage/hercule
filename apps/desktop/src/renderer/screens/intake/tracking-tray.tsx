@@ -1,7 +1,7 @@
 /**
  * Tracking in Intake's list column, folded or opened (spec 17 §Tracking).
  */
-import type { JSX, ReactNode } from "react";
+import { useState, type JSX, type ReactNode } from "react";
 import { useQueries, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@hercule/client-core";
 import { pluginsQuery, runFailureCauseQuery } from "../../app/queries";
 import type { HandoffFlights } from "./handoff-flight";
+import { SourceMark } from "./source-mark";
 import { TrackingFold } from "./tracking-fold";
 import type { TrackingRowFacts } from "./tracking-row";
 import { TrackingSheet } from "./tracking-sheet";
@@ -29,7 +30,7 @@ const buildRowFacts = (row: TrackingRow, failureCause: string | undefined): Trac
     taskId: row.task.id,
     title: row.task.title,
     state: row.state,
-    workflowId: row.run.workflowId ?? row.run.workflowName,
+    faceSeed: row.run.workflowId ?? row.run.workflowName,
     workflowName: line.workflowName,
     lineText: line.text,
     since: row.since,
@@ -57,10 +58,11 @@ const buildRowFacts = (row: TrackingRow, failureCause: string | undefined): Trac
  *   that layer and folded Tracking are. The sheet rises when it opens and
  *   drops when it closes (`useTrackingSheetMotion`).
  *
- * It reads the plugins, which name the signals' sources, and for each Failed
- * row it draws, why its run failed. The read of a run is one `run.read`, and
- * only a Failed row on screen asks for it: a `RunSummary` carries the failure
- * reason's code, not the step's error message.
+ * It reads, for each Failed row it draws, why its run failed. The read of a
+ * run is one `run.read`, and only a Failed row on screen asks for it: a
+ * `RunSummary` carries the failure reason's code, not the step's error
+ * message. Folded Tracking is on screen, and a row of opened Tracking is once
+ * it has come into view. Until then its line says "failed" alone.
  */
 export function TrackingTray({
   rows,
@@ -88,23 +90,32 @@ export function TrackingTray({
   readonly onMarkDone: (taskId: string) => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
+  // The Tasks whose rows of opened Tracking have been in view. A seen row stays
+  // seen: its read is cached, and the row keeps its reason when it scrolls away.
+  const [seenTaskIds, setSeenTaskIds] = useState<ReadonlySet<string>>(new Set());
   const shown = open ? rows : listRecentTrackingRows(rows);
-  const failedRows = shown.filter((row) => row.state === "failed");
+  const failedRows = shown.filter(
+    (row) => row.state === "failed" && (!open || seenTaskIds.has(row.task.id)),
+  );
   const failureCauses = useQueries({
     queries: failedRows.map((row) => runFailureCauseQuery(client, row.run.id)),
   });
   const buildFacts = (row: TrackingRow): TrackingRowFacts =>
     buildRowFacts(row, failureCauses[failedRows.indexOf(row)]?.data);
   const waitingCount = countWaitingTrackingRows(rows);
-  const { trackFold, trackSheet, trackLayer } = useTrackingSheetMotion(open, flights);
+  // The motion hook names its ref setters for the elements they hand over.
+  const {
+    trackFold: setFoldElement,
+    trackSheet: setSheetElement,
+    trackLayer: setLayerElement,
+  } = useTrackingSheetMotion(open, flights);
 
   return (
     <>
-      <div ref={trackLayer} className="tr-fly" aria-hidden="true" inert />
+      <div ref={setLayerElement} className="tr-fly" aria-hidden="true" inert />
       {open ? (
         <TrackingSheet
-          ref={trackSheet}
+          ref={setSheetElement}
           total={rows.length}
           waitingCount={waitingCount}
           groups={groupTrackingRows(rows).map((group) => ({
@@ -113,16 +124,20 @@ export function TrackingTray({
           }))}
           selectedTaskId={selectedTaskId}
           signalCount={signalCount}
-          signalSources={signalSources}
-          plugins={plugins}
+          signalMarks={<SignalSourceMarks sources={signalSources} />}
           dock={dock}
+          onRowsSeen={(taskIds) => {
+            setSeenTaskIds((seen) =>
+              taskIds.every((id) => seen.has(id)) ? seen : new Set([...seen, ...taskIds]),
+            );
+          }}
           onClose={onClose}
           onOpenRow={onOpenRow}
           onMarkDone={onMarkDone}
         />
       ) : (
         <TrackingFold
-          ref={trackFold}
+          ref={setFoldElement}
           total={rows.length}
           waitingCount={waitingCount}
           rows={shown.map(buildFacts)}
@@ -133,6 +148,27 @@ export function TrackingTray({
           onMarkDone={onMarkDone}
         />
       )}
+    </>
+  );
+}
+
+/**
+ * Renders the marks of the sources the signals come from, one each, in the
+ * order of `sources` (`null` is the core). It reads the plugins, which name
+ * the sources, where it draws them.
+ */
+function SignalSourceMarks({
+  sources,
+}: {
+  readonly sources: ReadonlyArray<string | null>;
+}): JSX.Element {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
+  return (
+    <>
+      {sources.map((pluginId) => (
+        <SourceMark key={pluginId ?? "core"} pluginId={pluginId} plugins={plugins} size={14} />
+      ))}
     </>
   );
 }

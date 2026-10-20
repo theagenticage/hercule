@@ -15,7 +15,7 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
 import type { HandoffFlights } from "./handoff-flight";
 import { readMotionDuration, readMotionEasing } from "./motion-tokens";
-import { copyElementWithoutIds, isMotionShown, isOnScreen, type RowPlace } from "./use-row-motion";
+import { copyElementWithoutIds, isMotionShown, isOnScreen, type RowPlace } from "./motion-helpers";
 
 /** How long the sheet takes to rise, in milliseconds. */
 const RISE_DURATION = 240;
@@ -59,34 +59,42 @@ export interface CascadedPart {
 }
 
 /**
- * Plans the cascade. `places` are where the sheet's parts stand in document
- * order, `viewport` is the part of the sheet that shows, and `duration` is
- * how long one part takes.
+ * Plans the cascade of `count` parts, which stand one under the other in
+ * document order. `readPlace` returns where a part stands, `viewport` is the
+ * part of the sheet that shows, and `duration` is how long one part takes.
  *
  * Only the first `MAX_CASCADED_PARTS` parts on screen cascade, each starting
  * `CASCADE_STEP` after the one before it from `CASCADE_START`. A part never
  * starts so late that it would end after `CASCADE_END`: the last parts of a
- * full cascade start together.
+ * full cascade start together. The planning reads the place of a part only
+ * while it can still be one of them: it stops at the last part that
+ * cascades, or at the first part that starts below the viewport.
  */
 export const planCascade = (
-  places: ReadonlyArray<RowPlace>,
+  count: number,
+  readPlace: (index: number) => RowPlace,
   viewport: RowPlace,
   duration: number,
-): ReadonlyArray<CascadedPart> =>
-  places
-    .flatMap((place, index) => (isOnScreen(place, viewport) ? [index] : []))
-    .slice(0, MAX_CASCADED_PARTS)
-    .map((index, order) => ({
+): ReadonlyArray<CascadedPart> => {
+  const parts: CascadedPart[] = [];
+  for (let index = 0; index < count && parts.length < MAX_CASCADED_PARTS; index++) {
+    const place = readPlace(index);
+    if (place.top >= viewport.bottom) break;
+    if (!isOnScreen(place, viewport)) continue;
+    parts.push({
       index,
-      delay: Math.min(CASCADE_START + order * CASCADE_STEP, CASCADE_END - duration),
-    }));
+      delay: Math.min(CASCADE_START + parts.length * CASCADE_STEP, CASCADE_END - duration),
+    });
+  }
+  return parts;
+};
 
 /**
  * Plays the rise of `sheet`, which has just been drawn in its place over the
  * column, from where folded Tracking stood: `foldedHeight` tall, at the foot
  * of the column. Every place is read before any animation starts, so the page
  * lays out once and the parts are measured where they stand, not where the
- * rise starts them.
+ * rise starts them. Only the parts that cascade are measured.
  */
 const riseSheet = (sheet: HTMLElement, foldedHeight: number): void => {
   const sheetPlace = sheet.getBoundingClientRect();
@@ -94,7 +102,8 @@ const riseSheet = (sheet: HTMLElement, foldedHeight: number): void => {
   const parts = [...sheet.querySelectorAll<HTMLElement>(CASCADE_PARTS)];
   const duration = readMotionDuration("--dur-2");
   const cascade = planCascade(
-    parts.map((part) => part.getBoundingClientRect()),
+    parts.length,
+    (index) => parts[index]!.getBoundingClientRect(),
     { top: sheetPlace.top, bottom: scrollPlace.bottom },
     duration,
   );

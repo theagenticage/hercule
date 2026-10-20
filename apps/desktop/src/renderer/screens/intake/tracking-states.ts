@@ -20,13 +20,6 @@ export const TRACKING_STATE_LOOKS: Readonly<Record<TrackingState, TrackingStateL
 };
 
 /**
- * Checks whether a row in `state` can be marked done: the work has stopped, so
- * ticking it off leaves no run going. A Working row cannot, because marking it
- * done would leave its run running.
- */
-export const canMarkTrackingStateDone = (state: TrackingState): boolean => state !== "working";
-
-/**
  * Returns the words of "N wait on you", Tracking's count of rows that wait on
  * the user, or `null` for none: the head then says nothing about waiting.
  */

@@ -19,6 +19,29 @@ describe("workspace pushes", () => {
   });
 });
 
+describe("Tracking's key", () => {
+  it("is read again on every task push, with or without ids", () => {
+    for (const ids of [[], ["t1"]]) {
+      assert.isTrue(
+        buildQueryKeys("task", ids).some((key) => isPrefixOf(key, queryKeys.tracking())),
+      );
+    }
+  });
+
+  it("is left to the run push's own rule, so no key maps it for a run push", () => {
+    for (const ids of [[], ["r1"]]) {
+      assert.isFalse(
+        buildQueryKeys("run", ids).some((key) => isPrefixOf(key, queryKeys.tracking())),
+      );
+    }
+  });
+
+  it("is apart from the task and run lists, so no filtered read shares it", () => {
+    assert.isFalse(isPrefixOf(queryKeys.tracking(), queryKeys.tasks()));
+    assert.isFalse(isPrefixOf(queryKeys.tracking(), queryKeys.runs()));
+  });
+});
+
 describe("signal pushes", () => {
   it("invalidates every list and the changed signals", () => {
     assert.deepStrictEqual(buildQueryKeys("signal", ["first", "second"]), [

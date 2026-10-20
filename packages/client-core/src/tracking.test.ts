@@ -1,13 +1,14 @@
-import type { Run, RunSummary, Signal, Task } from "@hercule/contract";
+import type { Run, RunSummary, Task } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   buildTrackingRows,
-  countToDoWithTracking,
+  buildTrackingSnapshot,
+  canMarkTrackingStateDone,
   countWaitingTrackingRows,
   describeRunFailureCause,
   describeTrackingLine,
   groupTrackingRows,
-  isTrackingStateWaitingOnUser,
+  isTrackingAffectedByRunPush,
   listRecentTrackingRows,
   type TrackingRow,
   type TrackingState,
@@ -32,20 +33,6 @@ const buildTask = (id: string, handedOffAt = 0, overrides: Partial<Task> = {}): 
   updatedAt: at(handedOffAt),
   statusChangedAt: at(handedOffAt),
   ...overrides,
-});
-
-/** Builds an open signal on To do. */
-const buildSignal = (id: string): Signal => ({
-  id,
-  kind: "github/mentioned",
-  origin: { type: "event", eventId: 1, connectionId: "c-1", threadRef: "acme/webshop#1296" },
-  title: `Signal ${id}`,
-  priority: "normal",
-  blocks: [],
-  actions: [],
-  match: {},
-  status: "open",
-  createdAt: START,
 });
 
 const SUMMARY_FIELDS = {
@@ -151,7 +138,8 @@ describe("buildTrackingRows", () => {
     expect(since(buildRun("r", "a", 0, "failed"))).toBe(at(10));
     expect(since(buildRun("r", "a", 0, "completed"))).toBe(at(10));
     expect(since(buildRun("r", "a", 0, "cancelled"))).toBe(at(10));
-    expect(since(buildRun("r", "a", 0, "running"))).toBe(at(1));
+    // A live run's row is as old as the run, so pending to running keeps its age.
+    expect(since(buildRun("r", "a", 0, "running"))).toBe(at(0));
     expect(since(buildRun("r", "a", 0, "pending"))).toBe(at(0));
   });
 
@@ -214,13 +202,6 @@ describe("listRecentTrackingRows", () => {
 });
 
 describe("waiting on the user", () => {
-  it("counts Failed and Finished, never Working or Stopped", () => {
-    expect(isTrackingStateWaitingOnUser("failed")).toBe(true);
-    expect(isTrackingStateWaitingOnUser("finished")).toBe(true);
-    expect(isTrackingStateWaitingOnUser("working")).toBe(false);
-    expect(isTrackingStateWaitingOnUser("stopped")).toBe(false);
-  });
-
   it("counts the waiting rows", () => {
     const tasks = ["a", "b", "c", "d"].map((id) => buildTask(id));
     const rows = buildTrackingRows(tasks, [
@@ -233,18 +214,42 @@ describe("waiting on the user", () => {
     expect(countWaitingTrackingRows([])).toBe(0);
   });
 
-  it("adds the waiting rows to the signals on To do", () => {
-    const signals = ["s1", "s2", "s3"].map(buildSignal);
-    const rows = buildTrackingRows(
-      [buildTask("a"), buildTask("b"), buildTask("c")],
-      [
-        buildRun("r1", "a", 0, "failed"),
-        buildRun("r2", "b", 0, "completed"),
-        buildRun("r3", "c", 0, "running"),
-      ],
-    );
-    expect(countToDoWithTracking(signals, rows)).toBe(5);
-    expect(countToDoWithTracking([], rows.slice(-1))).toBe(0);
+  it("lets Finished, Failed and Stopped rows be marked done, and never a Working one", () => {
+    expect(canMarkTrackingStateDone("finished")).toBe(true);
+    expect(canMarkTrackingStateDone("failed")).toBe(true);
+    expect(canMarkTrackingStateDone("stopped")).toBe(true);
+    expect(canMarkTrackingStateDone("working")).toBe(false);
+  });
+});
+
+describe("buildTrackingSnapshot", () => {
+  it("holds the rows and the ids of every run read, also the runs a row does not hold", () => {
+    const task = buildTask("a");
+    const runs = [buildRun("r2", "a", 5, "completed"), buildRun("r1", "a", 0, "running")];
+    const snapshot = buildTrackingSnapshot([task], runs);
+    expect(snapshot.rows).toEqual(buildTrackingRows([task], runs));
+    expect(snapshot.runIds).toEqual(["r1", "r2"]);
+  });
+});
+
+describe("isTrackingAffectedByRunPush", () => {
+  const snapshot = buildTrackingSnapshot(
+    [buildTask("a")],
+    [buildRun("r1", "a", 0, "running"), buildRun("r2", "a", 5, "completed")],
+  );
+
+  it("is affected by a push that names a run of the snapshot, even one a row does not hold", () => {
+    expect(isTrackingAffectedByRunPush(snapshot, { ids: ["r1"], kind: "updated" })).toBe(true);
+    expect(isTrackingAffectedByRunPush(snapshot, { ids: ["x", "r2"], kind: "deleted" })).toBe(true);
+  });
+
+  it("is affected by a push that lists no ids, and by the creation of a run, which may be a re-run", () => {
+    expect(isTrackingAffectedByRunPush(snapshot, { ids: [], kind: "updated" })).toBe(true);
+    expect(isTrackingAffectedByRunPush(snapshot, { ids: ["new"], kind: "created" })).toBe(true);
+  });
+
+  it("is not affected by a change to a run of no tracked Task", () => {
+    expect(isTrackingAffectedByRunPush(snapshot, { ids: ["x", "y"], kind: "updated" })).toBe(false);
   });
 });
 

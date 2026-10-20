@@ -17,11 +17,18 @@
  * or when the row is off screen: the list then plays its ordinary motion.
  * Nothing runs while no handoff is under way.
  */
-import type { TakeLeavingRow } from "./use-row-motion";
+import type { RowExitHandler } from "./use-row-motion";
 import { readMotionDuration, readMotionEasing } from "./motion-tokens";
 
 /** How long a lifted copy waits for its Task's row before it gives up and fades, in milliseconds. */
 const LANDING_TIMEOUT = 1500;
+
+/**
+ * How long a handoff stays expected, in milliseconds, while its signal's row
+ * has not left the list on screen. A row that leaves out of view never asks
+ * for a flight, so the expectation expires instead of staying for good.
+ */
+const EXPECTATION_TIMEOUT = 10_000;
 
 /** The flights of the handoffs the user has under way. */
 export interface HandoffFlights {
@@ -45,7 +52,7 @@ export interface HandoffFlights {
   /** Forgets the handoff of `signalId`, because its answer failed. A copy already lifted fades. */
   readonly forget: (signalId: string) => void;
   /** Gives the list the exit of a row whose handoff is expected, as `useRowMotion` takes it. */
-  readonly takeLeavingRow: TakeLeavingRow;
+  readonly takeLeavingRow: RowExitHandler;
   /**
    * Sends on its way each lifted copy whose signal is named by
    * `handoffSignalIds`, the signals that the Task of the first row of folded
@@ -70,11 +77,20 @@ interface LiftedCopy {
 export const createHandoffFlights = (): HandoffFlights => {
   let layer: HTMLElement | null = null;
   let fold: HTMLElement | null = null;
-  const expected = new Set<string>();
+  /** The handoffs expected, each with the timer that forgets it. */
+  const expected = new Map<string, ReturnType<typeof setTimeout>>();
   const lifted = new Map<string, LiftedCopy>();
   // What folded Tracking drew last, for a copy that is lifted after its row arrived.
   let drawn: { readonly signalIds: ReadonlyArray<string>; readonly rows: HTMLElement } | null =
     null;
+
+  /** Stops expecting the handoff of `signalId`. Returns whether it was expected. */
+  const stopExpecting = (signalId: string): boolean => {
+    const timer = expected.get(signalId);
+    if (timer === undefined) return false;
+    clearTimeout(timer);
+    return expected.delete(signalId);
+  };
 
   /** Fades `copy` out where it stands, and removes it. */
   const fadeOut = (signalId: string): void => {
@@ -91,36 +107,43 @@ export const createHandoffFlights = (): HandoffFlights => {
       .finished.then(remove, remove);
   };
 
+  /**
+   * Flies the lifted copy of `signalId` to `slot`, where the first of the
+   * rows `rows` stands, and hides that row until the copy lands. `slot` is
+   * read by the caller, so that the reads of one change come before its writes.
+   */
+  const fly = (signalId: string, rows: HTMLElement, slot: DOMRect): void => {
+    const waiting = lifted.get(signalId);
+    const firstRow = rows.firstElementChild;
+    if (waiting === undefined || !(firstRow instanceof HTMLElement)) return;
+    lifted.delete(signalId);
+    clearTimeout(waiting.timeout);
+    const { copy, place } = waiting;
+    const duration = readMotionDuration("--dur-3");
+    const remove = (): void => {
+      copy.remove();
+    };
+    copy
+      .animate(
+        {
+          transform: [
+            "none",
+            `translate(${String(slot.left - place.left)}px, ${String(slot.top - place.top)}px)`,
+          ],
+        },
+        { duration, easing: readMotionEasing(), fill: "forwards" },
+      )
+      .finished.then(remove, remove);
+    // The copy stands in for the row until it lands. This animation comes
+    // after the row's own arrival, so its opacity wins.
+    firstRow.animate({ opacity: [0, 0] }, { duration });
+  };
+
   const land: HandoffFlights["land"] = (handoffSignalIds, rows) => {
     drawn = rows === null ? null : { signalIds: handoffSignalIds, rows };
-    const firstRow = rows?.firstElementChild;
-    if (rows === null || !(firstRow instanceof HTMLElement)) return;
-    for (const signalId of handoffSignalIds) {
-      const waiting = lifted.get(signalId);
-      if (waiting === undefined) continue;
-      lifted.delete(signalId);
-      clearTimeout(waiting.timeout);
-      const { copy, place } = waiting;
-      const slot = rows.getBoundingClientRect();
-      const duration = readMotionDuration("--dur-3");
-      const remove = (): void => {
-        copy.remove();
-      };
-      copy
-        .animate(
-          {
-            transform: [
-              "none",
-              `translate(${String(slot.left - place.left)}px, ${String(slot.top - place.top)}px)`,
-            ],
-          },
-          { duration, easing: readMotionEasing(), fill: "forwards" },
-        )
-        .finished.then(remove, remove);
-      // The copy stands in for the row until it lands. This animation comes
-      // after the row's own arrival, so its opacity wins.
-      firstRow.animate({ opacity: [0, 0] }, { duration });
-    }
+    if (rows === null || !handoffSignalIds.some((signalId) => lifted.has(signalId))) return;
+    const slot = rows.getBoundingClientRect();
+    for (const signalId of handoffSignalIds) fly(signalId, rows, slot);
   };
 
   return {
@@ -133,15 +156,26 @@ export const createHandoffFlights = (): HandoffFlights => {
     },
     readFold: () => fold,
     expect: (signalId) => {
-      expected.add(signalId);
+      stopExpecting(signalId);
+      expected.set(
+        signalId,
+        setTimeout(() => {
+          expected.delete(signalId);
+        }, EXPECTATION_TIMEOUT),
+      );
     },
     forget: (signalId) => {
-      expected.delete(signalId);
+      stopExpecting(signalId);
       fadeOut(signalId);
     },
     takeLeavingRow: (key, copy, place) => {
-      if (!expected.delete(key) || layer === null || fold === null) return false;
+      if (!stopExpecting(key) || layer === null || fold === null) return false;
+      // Everything is read before anything is written, so the page lays out once.
       const layerPlace = layer.getBoundingClientRect();
+      // The Task's row may have arrived before its signal left the list.
+      const arrivedRows =
+        drawn?.rows.isConnected === true && drawn.signalIds.includes(key) ? drawn.rows : null;
+      const slot = arrivedRows?.getBoundingClientRect() ?? null;
       copy.classList.add("tr-lifted");
       Object.assign(copy.style, {
         position: "absolute",
@@ -159,8 +193,7 @@ export const createHandoffFlights = (): HandoffFlights => {
           fadeOut(key);
         }, LANDING_TIMEOUT),
       });
-      // The Task's row may have arrived before its signal left the list.
-      if (drawn?.rows.isConnected === true) land(drawn.signalIds, drawn.rows);
+      if (arrivedRows !== null && slot !== null) fly(key, arrivedRows, slot);
       return true;
     },
     land,

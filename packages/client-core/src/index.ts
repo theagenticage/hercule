@@ -344,7 +344,7 @@ export {
   type RunInputIssues,
   type RunInputValue,
 } from "./run-inputs";
-export { createLive, type Live } from "./live/live";
+export { createLive, type Live, type LiveInvalidatePush } from "./live/live";
 export { invalidateWithoutCancelling } from "./live/invalidation";
 export { readEveryPage } from "./read-every-page";
 export { isMutationRunning } from "./mutation-running";
@@ -427,17 +427,18 @@ export {
 } from "./intake";
 export {
   buildTrackingRows,
-  countToDoWithTracking,
+  buildTrackingSnapshot,
+  canMarkTrackingStateDone,
   countWaitingTrackingRows,
   describeRunFailureCause,
   describeTrackingLine,
   groupTrackingRows,
-  isTrackingStateWaitingOnUser,
+  isTrackingAffectedByRunPush,
   listRecentTrackingRows,
-  TRACKING_PEEK_ROWS,
   type TrackingGroup,
   type TrackingLine,
   type TrackingRow,
+  type TrackingSnapshot,
   type TrackingState,
 } from "./tracking";
 export {
@@ -499,11 +500,11 @@ export {
   type HeldSignals,
 } from "./held-signals";
 export {
-  dropHandedOff,
-  dropMarkedDone,
-  followListedTrackingRows,
-  recordHandedOff,
-  recordMarkedDone,
+  dropTrackingHandoff,
+  dropTrackingRowMarkedDone,
+  followTrackingSnapshot,
+  recordTrackingHandoff,
+  recordTrackingRowMarkedDone,
   startHeldTrackingRows,
   updateTrackingRowsHolding,
   type HeldTrackingRows,
