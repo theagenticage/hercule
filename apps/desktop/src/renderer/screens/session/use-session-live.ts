@@ -28,7 +28,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { useIsFetching, type QueryClient, type QueryKey } from "@tanstack/react-query";
+import { hashKey, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import {
   buildStreamCursor,
   createTailBuffer,
@@ -129,12 +129,15 @@ export interface SessionLiveOptions {
  *
  * The stream is followed only while the query under `rowsKey` is not
  * fetching. A fetch is a read that brings the rows up to date, such as the
- * one after a thread opens from its saved copy, or the read after a stream
- * `reset`. While it runs the stream is not subscribed, so no row can arrive
- * only to be replaced by the read's older snapshot and leave a hole in the
- * rows. When the read ends, successfully or not, the stream is subscribed
- * after the last row held then (`buildStreamCursor`), and its replay fills
- * what the read could not.
+ * one after a thread opens from its saved copy, the read after a stream
+ * `reset`, or one that another component starts. While it runs the stream is
+ * not subscribed, so no row can arrive only to be replaced by the read's
+ * older snapshot and leave a hole in the rows. When the read ends,
+ * successfully or not, the stream is subscribed after the last row held then
+ * (`buildStreamCursor`), and its replay fills what the read could not. The
+ * hook learns of a read from the query cache's own notifications, which are
+ * synchronous, never from a React render: a fast read could start and end
+ * before React rendered, and a row delivered in between would be replaced.
  *
  * What the hook does with each delivery, as `decideStreamDelivery` and
  * `decideTapDelivery` decide it:
@@ -182,13 +185,6 @@ export const useSessionLive = ({
   const [trimRows] = useState(() => trimRowsAtMount);
   const [onGone] = useState(() => onGoneAtMount);
   const visible = useWindowVisible();
-  const fetching = useIsFetching({ queryKey: rowsKey, exact: true }, queryClient) > 0;
-  /**
-   * Counts the stream resets. The stream's effect depends on it, so a reset
-   * ends the subscription even when the read it starts finishes before React
-   * has seen `fetching` change.
-   */
-  const [resets, setResets] = useState(0);
   /** The open message attached last, and the text node its open paragraph is written into. */
   const targetRef = useRef<{ readonly node: Text; readonly message: OpenMessage } | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -258,60 +254,71 @@ export const useSessionLive = ({
   }, [rows, paint]);
 
   useEffect(() => {
-    if (live === null || fetching || goneRef.current) return;
+    if (live === null) return;
     const readHeldRows = (): readonly TranscriptRow[] =>
       queryClient.getQueryData<readonly TranscriptRow[]>(rowsKey) ?? [];
-    // False once the stream is gone or reset, or this effect is cleaned up.
-    // The live connection may still hand over a delivery that was already on
-    // its way, since the cleanup runs only after the next render, and
-    // merging it would put a row in the cache that the read is about to
-    // replace.
-    let following = true;
-    const unsubscribe = live.subscribe(
-      buildAgentStreamTopic(sessionId, subagentId),
-      (delta) => {
-        if (!following) return;
-        const delivery = decideStreamDelivery(readHeldRows(), delta);
-        if (delivery.kind === "gone") {
-          goneRef.current = true;
-          following = false;
-          unsubscribe();
-          onGone?.();
-        } else if (delivery.kind === "reset") {
-          following = false;
-          unsubscribe();
-          void queryClient.invalidateQueries({ queryKey: rowsKey });
-          setResets((count) => count + 1);
-        } else if (delivery.kind === "rows") {
-          buffer.applyRows(delivery.fresh);
-          rowsLandingRef.current = true;
-          queryClient.setQueryData(
-            rowsKey,
-            trimRows === undefined ? delivery.transcript : trimRows(delivery.transcript),
-          );
-          if (delivery.replay) skipOpenItems();
-        }
-      },
-      buildStreamCursor(readHeldRows()),
-    );
-    skipOpenItems();
-    return () => {
-      following = false;
-      unsubscribe();
+    const rowsHash = hashKey(rowsKey);
+    const isReadingRows = (): boolean =>
+      queryClient.getQueryState(rowsKey)?.fetchStatus === "fetching";
+    // Ends the current subscription to the stream, or is null when there is none.
+    let stopFollowing: (() => void) | null = null;
+    const stop = (): void => {
+      stopFollowing?.();
+      stopFollowing = null;
     };
-  }, [
-    live,
-    fetching,
-    resets,
-    queryClient,
-    sessionId,
-    subagentId,
-    rowsKey,
-    trimRows,
-    onGone,
-    buffer,
-    skipOpenItems,
-  ]);
+    // Subscribes to the stream after the last row held now.
+    const follow = (): void => {
+      // False once this subscription ends. The live connection may still hand
+      // over a delivery that was already on its way, and merging it would put
+      // a row in the cache that a read is about to replace.
+      let active = true;
+      const unsubscribe = live.subscribe(
+        buildAgentStreamTopic(sessionId, subagentId),
+        (delta) => {
+          if (!active) return;
+          const delivery = decideStreamDelivery(readHeldRows(), delta);
+          if (delivery.kind === "gone") {
+            goneRef.current = true;
+            stop();
+            onGone?.();
+          } else if (delivery.kind === "reset") {
+            // The cache listener below follows the stream again when the read ends.
+            // "all" starts the read even when no component observes the rows, so
+            // the stream cannot stay stopped.
+            stop();
+            skipOpenItems();
+            void queryClient.invalidateQueries({ queryKey: rowsKey, refetchType: "all" });
+          } else if (delivery.kind === "rows") {
+            buffer.applyRows(delivery.fresh);
+            rowsLandingRef.current = true;
+            queryClient.setQueryData(
+              rowsKey,
+              trimRows === undefined ? delivery.transcript : trimRows(delivery.transcript),
+            );
+            if (delivery.replay) skipOpenItems();
+          }
+        },
+        buildStreamCursor(readHeldRows()),
+      );
+      stopFollowing = () => {
+        active = false;
+        unsubscribe();
+      };
+      skipOpenItems();
+    };
+    // The query cache calls this synchronously when the query changes: before
+    // a read's function runs, and before the read's result is stored.
+    const unsubscribeCache = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== "updated" || event.query.queryHash !== rowsHash) return;
+      if (event.query.state.fetchStatus === "fetching") stop();
+      else if (stopFollowing === null && !goneRef.current) follow();
+    });
+    if (!isReadingRows() && !goneRef.current) follow();
+    return () => {
+      unsubscribeCache();
+      stop();
+    };
+  }, [live, queryClient, sessionId, subagentId, rowsKey, trimRows, onGone, buffer, skipOpenItems]);
 
   useEffect(() => {
     if (live === null || !visible) return;

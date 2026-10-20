@@ -540,6 +540,45 @@ describe("useSessionLive", () => {
     });
   });
 
+  it("ignores a row delivered while a read that another component started is in flight, and gets it back from the replay", async () => {
+    const { fake, queryClient, readTranscript } = mountHook();
+    const [started, first] = buildNextRows(
+      THREAD.session.id,
+      THREAD.transcript,
+      NEW_ITEM_STARTED,
+      buildTextRow("one "),
+    ) as [TranscriptRow, TranscriptRow];
+    const deliverToStream = fake.captureStreamHandler();
+    // A read that starts and ends before React renders: the stream delivers a
+    // row while it runs, and the read returns the rows it held when it started, as
+    // an older controller's snapshot would.
+    readTranscript.mockImplementationOnce(() => {
+      const snapshot = readHeldRows(queryClient);
+      deliverToStream({ cursor: null, items: [started], reset: false, replay: false, gone: false });
+      return Promise.resolve(snapshot);
+    });
+
+    await queryClient.prefetchQuery({
+      queryKey: queryKeys.transcript(SESSION_ID),
+      queryFn: readTranscript,
+      staleTime: 0,
+    });
+    // The read has ended, but React has not rendered yet: the next row comes
+    // through the subscription held from before the read.
+    deliverToStream({ cursor: null, items: [first], reset: false, replay: false, gone: false });
+    await settle();
+    expect(readHeldRows(queryClient)).toEqual(THREAD.transcript);
+    // The stream starts again after the rows held, so its replay brings the
+    // row that was ignored, and the rows have no hole.
+    expect(fake.readSubscriptions()).toContainEqual({
+      topic: STREAM_TOPIC,
+      cursor: String(THREAD.transcript.at(-1)!.position),
+    });
+    fake.deliver(STREAM_TOPIC, { items: [started, first], replay: true });
+    await settle();
+    expect(readHeldRows(queryClient)).toEqual([...THREAD.transcript, started, first]);
+  });
+
   it("draws fewer finished paragraphs when the tail is dropped", async () => {
     const { fake, findOpenParagraph, readFinishedBlocks } = mountHook();
     const [started, stored] = buildNextRows(
