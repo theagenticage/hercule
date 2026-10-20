@@ -14,7 +14,11 @@ import { signalsToDoQuery, trackingQuery } from "./queries";
  */
 export function useTrackingRows(): ReadonlyArray<TrackingRow> {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  return useSuspenseQuery(trackingQuery(client)).data;
+  // Only the rows are selected, so a read that changes none of them draws nothing again.
+  return useSuspenseQuery({
+    ...trackingQuery(client),
+    select: (read) => read.rows,
+  }).data;
 }
 
 /**

@@ -27,6 +27,17 @@ const TRACKING_STATE_ORDER: ReadonlyArray<TrackingState> = [
 /** How many rows folded Tracking shows: the ones that changed state last. */
 const TRACKING_PEEK_ROWS = 2;
 
+/**
+ * What a read of Tracking gives: the rows, and when the read started. The time
+ * is on the clock of `performance.now()`, taken before the request was sent, so
+ * everything the rows show is as the controller held it from that moment on.
+ * The app compares it with the time the user's own handoff committed.
+ */
+export interface TrackingRead {
+  readonly rows: ReadonlyArray<TrackingRow>;
+  readonly readStartedAt: number;
+}
+
 /** One row of Tracking: a Task that has runs, and the state of its work. */
 export interface TrackingRow {
   /** The Task as `task.queryTracking` returns it: its title, its handoffs and its newest runs. */

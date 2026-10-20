@@ -9,7 +9,7 @@ import {
   queryKeys,
   readErrorMessage,
   type HerculeClient,
-  type TrackingRow,
+  type TrackingRead,
 } from "@hercule/client-core";
 import { trackingQuery } from "../../app/queries";
 import type { MoveToastState } from "./use-signal-moves";
@@ -51,9 +51,9 @@ export const useTrackingTickOff = (
     mutationFn: ({ taskId }: TickOff) =>
       client.task.update({ params: { id: taskId }, payload: { status: "done" } }),
     onSuccess: (_task, { taskId, title }) => {
-      queryClient.setQueryData<ReadonlyArray<TrackingRow>>(
+      queryClient.setQueryData<TrackingRead>(
         trackingQuery(client).queryKey,
-        (rows) => rows && rows.filter((row) => row.task.taskId !== taskId),
+        (read) => read && { ...read, rows: read.rows.filter((row) => row.task.taskId !== taskId) },
       );
       invalidateWithoutCancelling(queryClient, queryKeys.tasks());
       invalidateWithoutCancelling(queryClient, queryKeys.task(taskId));

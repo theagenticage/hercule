@@ -7,7 +7,10 @@
  *
  * - Marking a row done takes that row off, and nothing else moves.
  * - A handoff adds the row of its Task, and the rows show the last read
- *   whole, because the new row lands among them.
+ *   whole, because the new row lands among them. A read shows the handoff
+ *   when it started after the handoff committed, not when it lists the
+ *   handoff: a read lists only a Task's newest handoffs, so later handoffs can
+ *   push this one out of it.
  */
 import type { TrackingRow } from "./tracking";
 
@@ -21,42 +24,49 @@ export interface HeldTrackingRows {
   readonly holding: boolean;
   /** The Tasks the user marked done, until `listed` has no row of them. */
   readonly markedDoneTaskIds: ReadonlySet<string>;
-  /** The signals the user handed off, until `listed` shows the handoff. */
-  readonly handoffSignalIds: ReadonlySet<string>;
+  /**
+   * When the read that gave `listed` started, on the clock `TrackingRead` names.
+   * Everything in `listed` is as the controller held it from that moment on.
+   */
+  readonly readStartedAt: number;
+  /**
+   * The signals the user is handing off, each with when its handoff
+   * committed, or `null` while it is still being sent. A handoff stays until a
+   * read that started after it committed gives `listed`, or the holding stops.
+   */
+  readonly handoffs: ReadonlyMap<string, number | null>;
 }
 
 /** Returns the record for rows that open on `listed`: nothing held. */
-export const startHeldTrackingRows = (listed: ReadonlyArray<TrackingRow>): HeldTrackingRows => ({
+export const startHeldTrackingRows = (
+  listed: ReadonlyArray<TrackingRow>,
+  readStartedAt = 0,
+): HeldTrackingRows => ({
   listed,
   shown: listed,
   holding: false,
   markedDoneTaskIds: new Set(),
-  handoffSignalIds: new Set(),
+  readStartedAt,
+  handoffs: new Map(),
 });
 
 /**
- * Checks whether `rows` show the handoff of the signal `signalId`: a row has a
- * handoff of the signal in its Task. One read is one snapshot, so the receipt
- * proves that the run's creation committed, even when a later handoff or a
- * re-run has since made another run the Task's newest.
- */
-const showsHandoff = (rows: ReadonlyArray<TrackingRow>, signalId: string): boolean =>
-  rows.some((row) => row.task.handoffs.some((handoff) => handoff.signalId === signalId));
-
-/**
- * Follows a new read of the rows, `listed`. The user's own changes that
- * `listed` shows apply and are forgotten. While holding, every other change
- * waits. Otherwise the rows shown are `listed`.
+ * Follows a new read of the rows, `listed`, which started at `readStartedAt`.
+ * The user's own changes that `listed` shows apply and are forgotten: a row
+ * marked done that it lacks, and a handoff that committed before the read
+ * started. While holding, every other change waits. Otherwise the rows shown
+ * are `listed`.
  */
 export const followListedTrackingRows = (
   held: HeldTrackingRows,
   listed: ReadonlyArray<TrackingRow>,
+  readStartedAt: number,
 ): HeldTrackingRows => {
   const taskIds = new Set(listed.map((row) => row.task.taskId));
   const markedDone = [...held.markedDoneTaskIds].filter((id) => !taskIds.has(id));
-  const shownHandoffs = [...held.handoffSignalIds].filter((signalId) =>
-    showsHandoff(listed, signalId),
-  );
+  const shownHandoffs = [...held.handoffs]
+    .filter(([, committedAt]) => committedAt !== null && committedAt < readStartedAt)
+    .map(([signalId]) => signalId);
   const shown =
     !held.holding || shownHandoffs.length > 0
       ? listed
@@ -65,12 +75,11 @@ export const followListedTrackingRows = (
     ...held,
     listed,
     shown,
+    readStartedAt,
     markedDoneTaskIds: new Set(
       [...held.markedDoneTaskIds].filter((id) => !markedDone.includes(id)),
     ),
-    handoffSignalIds: new Set(
-      [...held.handoffSignalIds].filter((id) => !shownHandoffs.includes(id)),
-    ),
+    handoffs: new Map([...held.handoffs].filter(([id]) => !shownHandoffs.includes(id))),
   };
 };
 
@@ -102,8 +111,23 @@ export const recordTrackingHandoff = (
   signalId: string,
 ): HeldTrackingRows => ({
   ...held,
-  handoffSignalIds: new Set([...held.handoffSignalIds, signalId]),
+  handoffs: new Map([...held.handoffs, [signalId, null]]),
 });
+
+/**
+ * Records that the handoff of `signalId` committed at `committedAt`, on the
+ * clock `TrackingRead` names: the controller answered the handoff. Does
+ * nothing when the handoff is no longer recorded, such as after the holding
+ * stopped.
+ */
+export const recordTrackingHandoffCommitted = (
+  held: HeldTrackingRows,
+  signalId: string,
+  committedAt: number,
+): HeldTrackingRows =>
+  held.handoffs.has(signalId)
+    ? { ...held, handoffs: new Map([...held.handoffs, [signalId, committedAt]]) }
+    : held;
 
 /** Forgets the handoff of `signalId`, because it failed. */
 export const dropTrackingHandoff = (
@@ -111,17 +135,21 @@ export const dropTrackingHandoff = (
   signalId: string,
 ): HeldTrackingRows => ({
   ...held,
-  handoffSignalIds: new Set([...held.handoffSignalIds].filter((id) => id !== signalId)),
+  handoffs: new Map([...held.handoffs].filter(([id]) => id !== signalId)),
 });
 
 /**
  * Starts or stops holding back the changes the user did not make. Stopping
- * shows the last read in one step, so its changes move as one block.
+ * shows the last read in one step, so its changes move as one block, and
+ * forgets the handoffs still waiting for a read: nothing is held back for them
+ * any more.
  */
 export const updateTrackingRowsHolding = (
   held: HeldTrackingRows,
   holding: boolean,
 ): HeldTrackingRows => {
   if (held.holding === holding) return held;
-  return holding ? { ...held, holding } : { ...held, holding, shown: held.listed };
+  return holding
+    ? { ...held, holding }
+    : { ...held, holding, shown: held.listed, handoffs: new Map() };
 };

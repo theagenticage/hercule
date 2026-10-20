@@ -168,23 +168,22 @@ function SignalDetail({
   // must name the answer it belongs to, so the failure is kept here.
   const [failure, setFailure] = useState<AnswerFailure | null>(null);
 
+  // A signal handed off before `signal.handOff` existed starts its run
+  // untracked, so no row of Tracking waits to land the flight.
+  const isHandOff = (actionId: string): boolean =>
+    answers.find((answer) => answer.action.id === actionId)?.action.operation?.op ===
+    "signal.handOff";
   const act = useMutation({
     mutationFn: (input: { readonly actionId: string; readonly text?: string }) =>
       client.signal.act({ params: { id: signal.id }, payload: input }),
     onMutate: ({ actionId }) => {
       setFailure(null);
       moves.registerOwnChanges([signal.id]);
-      // A signal handed off before `signal.handOff` existed starts its run
-      // untracked, so no row of Tracking waits to land the flight.
-      if (
-        answers.find((answer) => answer.action.id === actionId)?.action.operation?.op ===
-        "signal.handOff"
-      ) {
-        moves.registerHandoff(signal.id);
-      }
+      if (isHandOff(actionId)) moves.registerHandoff(signal.id);
     },
-    onSuccess: (acted) => {
+    onSuccess: (acted, { actionId }) => {
       setActedHere(true);
+      if (isHandOff(actionId)) moves.confirmHandoff(signal.id);
       // The lists need no read here: the answer writes an audit entry on the
       // `signal` topic, and its live push reads every signal list again.
       queryClient.setQueryData(signalQuery(client, signal.id).queryKey, acted);

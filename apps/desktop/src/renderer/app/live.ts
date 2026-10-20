@@ -42,7 +42,7 @@ import {
   type Live,
   type LiveInvalidatePush,
   type LiveQueryKey,
-  type TrackingRow,
+  type TrackingRead,
 } from "@hercule/client-core";
 import type { MutableLiveTopic } from "@hercule/contract";
 import { ageClock } from "./age-clock";
@@ -63,8 +63,8 @@ export const invalidateForPush = (
 ): void => {
   for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
   if (topic !== "run") return;
-  const rows = queryClient.getQueryData<ReadonlyArray<TrackingRow>>(queryKeys.tracking());
-  if (rows === undefined || isTrackingAffectedByRunPush(rows, push)) {
+  const read = queryClient.getQueryData<TrackingRead>(queryKeys.tracking());
+  if (read === undefined || isTrackingAffectedByRunPush(read.rows, push)) {
     invalidateWithoutCancelling(queryClient, queryKeys.tracking());
   }
 };

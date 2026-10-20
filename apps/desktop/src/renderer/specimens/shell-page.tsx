@@ -575,10 +575,10 @@ const seedQueryCache = (
     records.later?.[0]?.snooze?.until ?? null,
   );
   queryClient.setQueryData(pluginsQuery(client).queryKey, records.plugins ?? []);
-  queryClient.setQueryData(
-    trackingQuery(client).queryKey,
-    buildTrackingRows(records.tracking ?? []),
-  );
+  queryClient.setQueryData(trackingQuery(client).queryKey, {
+    rows: buildTrackingRows(records.tracking ?? []),
+    readStartedAt: 0,
+  });
   queryClient.setQueryData(liveAgentSessionsQuery(client).queryKey, records.agentSessions ?? []);
   queryClient.setQueryData(
     assistantsQuery(client).queryKey,

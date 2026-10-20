@@ -36,7 +36,7 @@ import {
   type MessagePage,
   type MessagePages,
   type ThreadCopy,
-  type TrackingRow,
+  type TrackingRead,
   waitForOptionalReads,
 } from "@hercule/client-core";
 import { WALK_CATCH_UP_SECONDS } from "../office/engine/contracts";
@@ -630,9 +630,10 @@ export const assistantsQuery = (client: HerculeClient) =>
 /**
  * Reads Tracking: `task.queryTracking` returns every Task Tracking follows,
  * with its title, its handoffs, and its newest run and newest live run, and
- * the rows are built from that (`buildTrackingRows`). The Hercule segment's
- * count and Tracking's rows both come from it, so it is shell data, kept for
- * the life of the window, and every reader shares the one array of rows.
+ * the rows are built from that (`buildTrackingRows`), with the time the read
+ * started (`TrackingRead`). The Hercule segment's count and Tracking's rows
+ * both come from it, so it is shell data, kept for the life of the window, and
+ * every reader shares the one array of rows.
  *
  * The key is stable, so the entry is the same whichever Tasks are tracked. A
  * push on the `task` topic reads it again, and one on the `run` topic when
@@ -641,8 +642,11 @@ export const assistantsQuery = (client: HerculeClient) =>
 export const trackingQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.tracking(),
-    queryFn: async (): Promise<ReadonlyArray<TrackingRow>> =>
-      buildTrackingRows((await client.task.queryTracking()).rows),
+    queryFn: async (): Promise<TrackingRead> => {
+      // Taken before the request, so a read that started after a change committed shows the change.
+      const readStartedAt = performance.now();
+      return { rows: buildTrackingRows((await client.task.queryTracking()).rows), readStartedAt };
+    },
     ...SHELL_READ_OPTIONS,
   });
 

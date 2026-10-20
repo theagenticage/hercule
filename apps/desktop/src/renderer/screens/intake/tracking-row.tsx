@@ -2,7 +2,7 @@
  * One row of Tracking, the place in Intake where the user follows the work
  * they handed to agents (spec 17 §Tracking).
  */
-import { memo, useId, type JSX } from "react";
+import { memo, useId, useLayoutEffect, useRef, type JSX } from "react";
 import { canMarkTrackingStateDone, type TrackingState } from "@hercule/client-core";
 import { buildHueStyle, buildLook, Face } from "../../faces";
 import { CheckIcon } from "../../icons/check";
@@ -55,6 +55,12 @@ export interface TrackingRowFacts {
  *
  * The row is one button, with its control beside it, so a screen reader reads
  * the title, the line and the time as one name.
+ *
+ * When the element that holds the focus is removed from the row while the row
+ * stays, as Mark done is when a re-run turns the row Working, the row's button
+ * takes the focus. Otherwise the focus would drop to the page's body, where
+ * none of Intake's keys reach. A row that goes itself hands the focus to what
+ * holds the rows, and one that only moves keeps it.
  */
 export const TrackingRowItem = memo(function TrackingRowItem({
   facts,
@@ -73,6 +79,29 @@ export const TrackingRowItem = memo(function TrackingRowItem({
 }): JSX.Element {
   const { taskId, title, state, faceSeed, workflowName, lineText, since } = facts;
   const ageId = useId();
+  const rowRef = useRef<HTMLDivElement>(null);
+  // The element of the row that has the focus, until it loses it to something else.
+  const focusedRef = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const focused = focusedRef.current;
+    if (focused === null || focused.isConnected) return;
+    focusedRef.current = null;
+    if (document.activeElement === document.body) {
+      rowRef.current!.querySelector<HTMLElement>(".tr-run")?.focus({ preventScroll: true });
+    }
+  });
+  // A row that goes while it holds the focus, such as one pushed out of folded Tracking, hands
+  // the focus to what holds the rows: the sheet, or the list while Tracking is folded.
+  useLayoutEffect(() => {
+    const row = rowRef.current!;
+    return () => {
+      const holder = row.closest<HTMLElement>(".tr-tray.is-open, .asks-list");
+      if (!row.contains(document.activeElement) || holder === null) return;
+      queueMicrotask(() => {
+        if (document.activeElement === document.body) holder.focus({ preventScroll: true });
+      });
+    };
+  }, []);
   const look = buildLook(faceSeed);
   const classes = [
     "tr-run-item",
@@ -83,9 +112,21 @@ export const TrackingRowItem = memo(function TrackingRowItem({
   ];
   return (
     <div
+      ref={rowRef}
       className={classes.filter((each) => each !== "").join(" ")}
       data-item-key={taskId}
       data-state={state}
+      onFocus={(event) => {
+        focusedRef.current = event.target;
+      }}
+      onBlur={(event) => {
+        // A blur comes before the removal of a focused element too. The element is gone by
+        // the microtask, which is how a removal differs from the focus moving on.
+        const lost = event.target;
+        queueMicrotask(() => {
+          if (focusedRef.current === lost && lost.isConnected) focusedRef.current = null;
+        });
+      }}
     >
       <button
         type="button"

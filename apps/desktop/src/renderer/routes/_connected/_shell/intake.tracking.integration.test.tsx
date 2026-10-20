@@ -636,6 +636,149 @@ describe("a row that moves to another state's heading", () => {
   });
 });
 
+describe("a focused control that leaves its row", () => {
+  it.each([false, true])(
+    "moves the focus to the row's button when a re-run takes away its Mark done (opened: %s)",
+    async (opened) => {
+      let status: RunSummary["status"] = "completed";
+      const readRows = () => [[FINISHED_TASK, status] as const];
+      const { live } = await openIntake(opened ? "/intake?tracking=true" : "/intake", {
+        extra: storeTracking(readRows(), { readRows }),
+      });
+      await live.waitForFirstPushes();
+      const item = getRowButton(FINISHED_TASK).closest<HTMLElement>(".tr-run-item")!;
+      const control = within(item).getByRole("button", { name: "Mark done" });
+      act(() => {
+        control.focus();
+      });
+
+      // The run starts again: the row is Working, which has no Mark done, and it keeps its element.
+      status = "running";
+      act(() => live.pushInvalidation("task"));
+      await waitFor(() => {
+        expect(
+          getRowButton(FINISHED_TASK).closest(".tr-run-item")!.getAttribute("data-state"),
+        ).toBe("working");
+      });
+
+      expect(control.isConnected).toBe(false);
+      await waitFor(() => {
+        expect(document.activeElement).toBe(getRowButton(FINISHED_TASK));
+      });
+      // The keys still reach Intake: Esc closes opened Tracking, and T opens folded Tracking.
+      await userEvent.keyboard(opened ? "{Escape}" : "t");
+      await waitFor(() => {
+        expect(getTray().classList.contains("is-open")).toBe(!opened);
+      });
+    },
+  );
+});
+
+describe("a focused row that another client takes off Tracking", () => {
+  it.each([false, true])(
+    "hands the focus to the list or the sheet, so the keys still reach Intake (opened: %s)",
+    async (opened) => {
+      let rows: ReadonlyArray<readonly [Task, RunSummary["status"]]> = ROWS;
+      const { live } = await openIntake(opened ? "/intake?tracking=true" : "/intake", {
+        extra: storeTracking(ROWS, { readRows: () => rows }),
+      });
+      await live.waitForFirstPushes();
+      const focused = getRowButtons()[0]!;
+      const taskId = focused.dataset.taskId!;
+      act(() => {
+        focused.focus();
+      });
+
+      rows = ROWS.filter(([task]) => task.id !== taskId);
+      act(() => live.pushInvalidation("task"));
+      await waitFor(() => {
+        expect(getTray().querySelector(`[data-task-id="${taskId}"]`)).toBeNull();
+      });
+
+      await waitFor(() => {
+        expect(document.activeElement).not.toBe(document.body);
+      });
+      await userEvent.keyboard(opened ? "{Escape}" : "t");
+      await waitFor(() => {
+        expect(getTray().classList.contains("is-open")).toBe(!opened);
+      });
+    },
+  );
+});
+
+describe("handing a signal off while the pointer is on the list", () => {
+  /** A signal that offers a Hand to answer binding `signal.handOff`. */
+  const HANDOFF_SIGNAL: Signal = {
+    ...FIRST_SIGNAL,
+    actions: [
+      {
+        id: `hand-to-${WORKFLOW_ID}`,
+        label: "Hand to Implement",
+        operation: {
+          op: "signal.handOff",
+          input: { signalId: FIRST_SIGNAL.id, workflowId: WORKFLOW_ID },
+        },
+        describeLine: [{ kind: "text", text: "Starts Implement" }],
+      },
+    ],
+  };
+
+  it("shows the new row once a read that started after the handoff arrives, though the read lists ten later handoffs and not this one", async () => {
+    // The Task has later handoffs from other signals only, as when ten of them pushed this one out.
+    const LATE = Array.from({ length: 10 }, (_, index) => ({
+      signalId: `01a06d02-7a00-7000-8000-${String(index + 900).padStart(12, "0")}`,
+      runId: `01a06d02-7c00-7000-8000-${String(index + 900).padStart(12, "0")}`,
+      at: at(30 + index),
+    }));
+    const NEW_TASK: Task = {
+      ...buildTask("01a06d02-7b00-7000-8000-000000000009", "Retry failed webhooks", 40),
+      provenance: LATE.map((entry) => ({ ...entry, actor: "user" as const })),
+    };
+    let handedOff = false;
+    const readRows = () => (handedOff ? [...ROWS, [NEW_TASK, "running"] as const] : ROWS);
+    const { live } = await openIntake(`/intake?signal=${FIRST_SIGNAL.id}`, {
+      signals: [HANDOFF_SIGNAL, SECOND_SIGNAL],
+      extra: {
+        ...storeTracking(ROWS, { readRows }),
+        [`GET /api/v1/signals/${FIRST_SIGNAL.id}`]: { body: HANDOFF_SIGNAL },
+        [`POST /api/v1/signals/${FIRST_SIGNAL.id}/act`]: () => {
+          handedOff = true;
+          return {
+            body: {
+              ...HANDOFF_SIGNAL,
+              status: "resolved",
+              actions: [],
+              resolution: {
+                kind: "decided",
+                actionId: `hand-to-${WORKFLOW_ID}`,
+                outcome: "Handed to Implement",
+                actor: "user",
+                origin: "web",
+                at: at(41),
+              },
+            },
+          };
+        },
+      },
+    });
+    await live.waitForFirstPushes();
+    // The pointer is on the list column: changes the user did not make wait.
+    await userEvent.hover(getList());
+
+    const pane = await screen.findByRole("region", { name: "The open signal" });
+    await userEvent.click(await within(pane).findByRole("button", { name: "Hand to Implement" }));
+    // The controller's push reads Tracking again, a read that starts after the handoff committed.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    act(() => live.pushInvalidation("task"));
+
+    // Folded Tracking counts the rows it shows: four before, five once the new one applies.
+    expect(within(getTray()).getByRole("heading").textContent).toContain("Tracking4");
+    await waitFor(() => {
+      expect(within(getTray()).getByRole("heading").textContent).toContain("Tracking5");
+    });
+  });
+});
+
 describe("opening a row", () => {
   it("opens its run's page, folded or opened, by click and by ↩", async () => {
     const { router } = await openIntake();

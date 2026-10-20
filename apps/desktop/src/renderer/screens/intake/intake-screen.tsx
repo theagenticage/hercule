@@ -532,6 +532,7 @@ export function IntakeScreen({
       flights.forget(signalId);
       heldTracking.forgetHandoff(signalId);
     },
+    confirmHandoff: heldTracking.confirmHandoff,
   };
   // Inbox zero takes the place of the empty To do list on the All tab, and
   // shows the cleared count itself, so the foot goes with the rows.

@@ -294,6 +294,11 @@ export interface IntakeMoves {
   readonly registerHandoff: (signalId: string) => void;
   /** Forgets the handoff of `signalId`, because its answer failed. */
   readonly forgetHandoff: (signalId: string) => void;
+  /**
+   * Records that the handoff of `signalId` committed: the controller answered
+   * it. Tracking shows the handoff in the first read that starts after this.
+   */
+  readonly confirmHandoff: (signalId: string) => void;
 }
 
 /** Carries Intake's moves from the screen to the pane. */

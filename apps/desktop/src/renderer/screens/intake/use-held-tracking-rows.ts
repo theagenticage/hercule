@@ -1,12 +1,16 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   dropTrackingHandoff,
   dropTrackingRowMarkedDone,
   followListedTrackingRows,
+  queryKeys,
   recordTrackingHandoff,
+  recordTrackingHandoffCommitted,
   recordTrackingRowMarkedDone,
   startHeldTrackingRows,
   updateTrackingRowsHolding,
+  type TrackingRead,
   type TrackingRow,
 } from "@hercule/client-core";
 
@@ -22,21 +26,27 @@ export interface HeldTrackingRowsState {
   readonly registerHandoff: (signalId: string) => void;
   /** Forgets the handoff of `signalId`, because it failed. */
   readonly forgetHandoff: (signalId: string) => void;
+  /** Records that the handoff of `signalId` committed. Call it when the controller answers the handoff. */
+  readonly confirmHandoff: (signalId: string) => void;
 }
 
 /**
  * Returns the rows Tracking shows, as `held-tracking-rows` in client-core
  * describes. `listed` is the last read of Tracking's rows, and keeps its identity
- * until the read changes. `holding` is set while the changes the user did not
+ * until the read changes; the time that read started is the one in the cached
+ * `TrackingRead`. `holding` is set while the changes the user did not
  * make wait: while the pointer is on the list column.
  */
 export const useHeldTrackingRows = (
   listed: ReadonlyArray<TrackingRow>,
   holding: boolean,
 ): HeldTrackingRowsState => {
-  const [held, setHeld] = useState(() => startHeldTrackingRows(listed));
+  const queryClient = useQueryClient();
+  const readStartedAt = (): number =>
+    queryClient.getQueryData<TrackingRead>(queryKeys.tracking())?.readStartedAt ?? 0;
+  const [held, setHeld] = useState(() => startHeldTrackingRows(listed, readStartedAt()));
   let next = held;
-  if (next.listed !== listed) next = followListedTrackingRows(next, listed);
+  if (next.listed !== listed) next = followListedTrackingRows(next, listed, readStartedAt());
   next = updateTrackingRowsHolding(next, holding);
   if (next !== held) setHeld(next);
   return {
@@ -52,6 +62,9 @@ export const useHeldTrackingRows = (
     },
     forgetHandoff: (signalId) => {
       setHeld((current) => dropTrackingHandoff(current, signalId));
+    },
+    confirmHandoff: (signalId) => {
+      setHeld((current) => recordTrackingHandoffCommitted(current, signalId, performance.now()));
     },
   };
 };

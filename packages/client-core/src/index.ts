@@ -435,6 +435,7 @@ export {
   listRecentTrackingRows,
   type TrackingGroup,
   type TrackingLine,
+  type TrackingRead,
   type TrackingRow,
   type TrackingState,
 } from "./tracking";
@@ -501,6 +502,7 @@ export {
   dropTrackingRowMarkedDone,
   followListedTrackingRows,
   recordTrackingHandoff,
+  recordTrackingHandoffCommitted,
   recordTrackingRowMarkedDone,
   startHeldTrackingRows,
   updateTrackingRowsHolding,
