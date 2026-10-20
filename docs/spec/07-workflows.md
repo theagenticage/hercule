@@ -767,7 +767,7 @@ interface StepRecord {
   - Only `signal.handOff` sets it, when it starts the run for a handed-off signal ([./10](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)).
   - `run.start` never sets it: it takes no `taskId`, so a run started by hand, from the CLI, by a trigger or by another run has no Task and never shows in Intake.
   - A re-run keeps its original's `taskId` (section 7.4), so a retry stays on the same Task.
-  - It is fixed when the run is created and never changes. It is indexed, and `run.query` filters by `taskIds`.
+  - It is fixed when the run is created and never changes. It is indexed, and `task.queryTracking` reads the newest runs of a Task by it.
 - **`origin`.** `manual` when the user starts a run by hand, from the web app or the CLI; `api` when a session calls ~~`workflow.run`; always `api` for `workflow.submit`, whoever calls it (section 9)~~ `run.start`, for a stored workflow or a sent one alike *(amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79))*; `action` for a run that a ~~`workflow.run`~~ `run.start` step started (section 8). `actor` is the starter's actor stamp. The user who sends a workflow with `run.start` starts it by hand as much as one who names a stored workflow, so the origin follows who started the run, not which kind of workflow it runs.
 - **A step record's `error` is `{ code, message }`**, not a string, so a client can tell the kinds of failure apart. `code` is one of:
   - an error code of the API, when the action's operation failed with one, such as `not_found` or `validation`. `validation` is also the code when the rendered params do not match the action's input (section 5);

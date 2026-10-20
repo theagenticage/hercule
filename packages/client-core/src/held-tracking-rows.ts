@@ -9,68 +9,67 @@
  * - A handoff adds the row of its Task, and the rows show the last read
  *   whole, because the new row lands among them.
  */
-import type { TrackingRow, TrackingSnapshot } from "./tracking";
+import type { TrackingRow } from "./tracking";
 
 /** The rows Tracking shows, and what decides them. */
 export interface HeldTrackingRows {
-  /** Tracking as last read: its rows in Tracking's order, and the runs they were worked out from. */
-  readonly snapshot: TrackingSnapshot;
-  /** The rows Tracking shows: the snapshot's rows, less the changes held back. */
+  /** Tracking's rows as last read, in Tracking's order. */
+  readonly listed: ReadonlyArray<TrackingRow>;
+  /** The rows Tracking shows: `listed`, less the changes held back. */
   readonly shown: ReadonlyArray<TrackingRow>;
   /** Whether changes the user did not make wait, because the pointer is on the list column. */
   readonly holding: boolean;
-  /** The Tasks the user marked done, until the snapshot has no row of them. */
+  /** The Tasks the user marked done, until `listed` has no row of them. */
   readonly markedDoneTaskIds: ReadonlySet<string>;
-  /** The signals the user handed off, until the snapshot holds the run of the handoff. */
+  /** The signals the user handed off, until `listed` shows the handoff. */
   readonly handoffSignalIds: ReadonlySet<string>;
 }
 
-/** Returns the record for rows that open on `snapshot`: nothing held. */
-export const startHeldTrackingRows = (snapshot: TrackingSnapshot): HeldTrackingRows => ({
-  snapshot,
-  shown: snapshot.rows,
+/** Returns the record for rows that open on `listed`: nothing held. */
+export const startHeldTrackingRows = (listed: ReadonlyArray<TrackingRow>): HeldTrackingRows => ({
+  listed,
+  shown: listed,
   holding: false,
   markedDoneTaskIds: new Set(),
   handoffSignalIds: new Set(),
 });
 
 /**
- * Checks whether `snapshot` shows the handoff of the signal `signalId`: a row
- * whose Task has a handoff entry for the signal, and the run that entry names
- * is among the runs of the snapshot. A read of the Tasks can answer before the
- * read of their runs does, so the entry alone does not show the run is there.
+ * Checks whether `rows` show the handoff of the signal `signalId`: a row that
+ * has a handoff of the signal, and the run of that handoff is the row's newest
+ * run or its newest live run. A row can already have an older handoff of the
+ * signal's Task while the run of the new one is not its newest yet.
  */
-const showsHandoff = (snapshot: TrackingSnapshot, signalId: string): boolean =>
-  snapshot.rows.some((row) =>
-    row.task.provenance.some(
-      (entry) =>
-        entry.signalId === signalId &&
-        entry.runId !== undefined &&
-        snapshot.runIds.includes(entry.runId),
+const showsHandoff = (rows: ReadonlyArray<TrackingRow>, signalId: string): boolean =>
+  rows.some((row) =>
+    row.task.handoffs.some(
+      (handoff) =>
+        handoff.signalId === signalId &&
+        (handoff.runId === row.task.latestRun.id || handoff.runId === row.task.latestLiveRun?.id),
     ),
   );
 
 /**
- * Follows a new read of Tracking, `snapshot`. The user's own changes that it
- * shows apply and are forgotten. While holding, every other change waits.
- * Otherwise the rows shown are the snapshot's.
+ * Follows a new read of the rows, `listed`. The user's own changes that
+ * `listed` shows apply and are forgotten. While holding, every other change
+ * waits. Otherwise the rows shown are `listed`.
  */
-export const followTrackingSnapshot = (
+export const followListedTrackingRows = (
   held: HeldTrackingRows,
-  snapshot: TrackingSnapshot,
+  listed: ReadonlyArray<TrackingRow>,
 ): HeldTrackingRows => {
-  const taskIds = new Set(snapshot.rows.map((row) => row.task.id));
+  const taskIds = new Set(listed.map((row) => row.task.taskId));
   const markedDone = [...held.markedDoneTaskIds].filter((id) => !taskIds.has(id));
   const shownHandoffs = [...held.handoffSignalIds].filter((signalId) =>
-    showsHandoff(snapshot, signalId),
+    showsHandoff(listed, signalId),
   );
   const shown =
     !held.holding || shownHandoffs.length > 0
-      ? snapshot.rows
-      : held.shown.filter((row) => !markedDone.includes(row.task.id));
+      ? listed
+      : held.shown.filter((row) => !markedDone.includes(row.task.taskId));
   return {
     ...held,
-    snapshot,
+    listed,
     shown,
     markedDoneTaskIds: new Set(
       [...held.markedDoneTaskIds].filter((id) => !markedDone.includes(id)),
@@ -130,5 +129,5 @@ export const updateTrackingRowsHolding = (
   holding: boolean,
 ): HeldTrackingRows => {
   if (held.holding === holding) return held;
-  return holding ? { ...held, holding } : { ...held, holding, shown: held.snapshot.rows };
+  return holding ? { ...held, holding } : { ...held, holding, shown: held.listed };
 };

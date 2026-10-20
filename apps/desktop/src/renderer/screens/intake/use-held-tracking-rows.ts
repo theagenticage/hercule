@@ -2,13 +2,12 @@ import { useState } from "react";
 import {
   dropTrackingHandoff,
   dropTrackingRowMarkedDone,
-  followTrackingSnapshot,
+  followListedTrackingRows,
   recordTrackingHandoff,
   recordTrackingRowMarkedDone,
   startHeldTrackingRows,
   updateTrackingRowsHolding,
   type TrackingRow,
-  type TrackingSnapshot,
 } from "@hercule/client-core";
 
 /** The rows Tracking shows, and the screen's ways to mark the user's own changes. */
@@ -27,17 +26,17 @@ export interface HeldTrackingRowsState {
 
 /**
  * Returns the rows Tracking shows, as `held-tracking-rows` in client-core
- * describes. `snapshot` is the last read of Tracking, and keeps its identity
+ * describes. `listed` is the last read of Tracking's rows, and keeps its identity
  * until the read changes. `holding` is set while the changes the user did not
  * make wait: while the pointer is on the list column.
  */
 export const useHeldTrackingRows = (
-  snapshot: TrackingSnapshot,
+  listed: ReadonlyArray<TrackingRow>,
   holding: boolean,
 ): HeldTrackingRowsState => {
-  const [held, setHeld] = useState(() => startHeldTrackingRows(snapshot));
+  const [held, setHeld] = useState(() => startHeldTrackingRows(listed));
   let next = held;
-  if (next.snapshot !== snapshot) next = followTrackingSnapshot(next, snapshot);
+  if (next.listed !== listed) next = followListedTrackingRows(next, listed);
   next = updateTrackingRowsHolding(next, holding);
   if (next !== held) setHeld(next);
   return {

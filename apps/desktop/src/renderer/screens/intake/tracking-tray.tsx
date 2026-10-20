@@ -19,28 +19,23 @@ import type { TrackingRowFacts } from "./tracking-row";
 import { TrackingSheet } from "./tracking-sheet";
 import { useTrackingSheetMotion } from "./tracking-sheet-motion";
 
-/** A row of Tracking, and why its run failed once the row data carries it. */
-export type TrackedRow = TrackingRow & { readonly failureCause?: string | undefined };
-
 /**
- * Returns what a row draws. A Failed row says why its run failed when the row
- * has a `failureCause`, and "failed" alone when it has none. A run of a
+ * Returns what a row draws. A Failed row says why its run failed when the run
+ * carries a `failureCause`, and "failed" alone when it has none. A run of a
  * workflow that was sent with the request has no workflow id, so its face is
  * drawn from the workflow's name: every run of that name wears the same face.
  */
-const buildRowFacts = (row: TrackedRow): TrackingRowFacts => {
-  const line = describeTrackingLine(row, row.failureCause);
+const buildRowFacts = (row: TrackingRow): TrackingRowFacts => {
+  const line = describeTrackingLine(row);
   return {
-    taskId: row.task.id,
+    taskId: row.task.taskId,
     title: row.task.title,
     state: row.state,
     faceSeed: row.run.workflowId ?? row.run.workflowName,
     workflowName: line.workflowName,
     lineText: line.text,
     since: row.since,
-    handoffSignalIds: row.task.provenance.flatMap((entry) =>
-      entry.signalId === undefined ? [] : [entry.signalId],
-    ),
+    handoffSignalIds: row.task.handoffs.map((handoff) => handoff.signalId),
   };
 };
 
@@ -63,8 +58,6 @@ const buildRowFacts = (row: TrackedRow): TrackingRowFacts => {
  *   drops when it closes, and stays drawn, taking no pointer, until the drop
  *   ends (`useTrackingSheetMotion`).
  *
- * A Failed row says why its run failed when its `failureCause` is set, and
- * "failed" alone otherwise.
  */
 export function TrackingTray({
   rows,
@@ -79,7 +72,7 @@ export function TrackingTray({
   onOpenRow,
   onMarkDone,
 }: {
-  readonly rows: ReadonlyArray<TrackedRow>;
+  readonly rows: ReadonlyArray<TrackingRow>;
   readonly open: boolean;
   readonly selectedTaskId: string | null;
   readonly signalCount: number;

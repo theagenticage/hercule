@@ -74,7 +74,7 @@ export const useTrackingControls = ({
   // The selected row of opened Tracking. A row that left Tracking is not
   // selected any more.
   const [selection, setSelection] = useState<string | null>(null);
-  const shownIds = shownRows.map((row) => row.task.id);
+  const shownIds = shownRows.map((row) => row.task.taskId);
   const selectedTaskId =
     open && selection !== null && shownIds.includes(selection) ? selection : null;
 
@@ -114,7 +114,7 @@ export const useTrackingControls = ({
   };
 
   const markTaskDone = (taskId: string): void => {
-    const row = readRows.find((each) => each.task.id === taskId);
+    const row = readRows.find((each) => each.task.taskId === taskId);
     if (row === undefined || !canMarkTrackingStateDone(row.state)) return;
     const next = pickSelectionAfterMove(shownIds, taskId, [taskId]);
     heldTracking.registerMarkedDone(taskId);
@@ -131,7 +131,7 @@ export const useTrackingControls = ({
   };
 
   const openTrackingRow = (taskId: string): void => {
-    const row = shownRows.find((each) => each.task.id === taskId);
+    const row = shownRows.find((each) => each.task.taskId === taskId);
     if (row !== undefined) onOpenRun(row.run.id);
   };
 

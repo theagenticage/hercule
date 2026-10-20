@@ -9,7 +9,7 @@
  * - the run a re-run names in `originalRunId`, as it is written, read back
  *   and filtered on;
  * - the Task a handed-off run works on in `taskId`, as it is written, read
- *   back, listed on a run summary and filtered on with `taskIds`;
+ *   back and listed on a run summary;
  * - where a running run's summary says the run is: its active steps and the
  *   signals it waits on;
  * - the `activeSince` filter, which keeps the runs that had not ended before
@@ -118,7 +118,6 @@ describe("originalRunId", () => {
 
 describe("taskId", () => {
   const TASK = "0190c000-0000-7000-8000-0000000000a1";
-  const OTHER_TASK = "0190c000-0000-7000-8000-0000000000a2";
 
   it("reads back the Task a run works on, on the run and on its summary, and leaves the field out for a run with none", async () => {
     const [onTask, withoutTask, summaries] = await Effect.runPromise(
@@ -137,29 +136,6 @@ describe("taskId", () => {
     expect(onTask.taskId).toBe(TASK);
     expect(withoutTask).not.toHaveProperty("taskId");
     expect(summaries.map((summary) => summary.taskId).sort()).toEqual([TASK, undefined]);
-  });
-
-  it("lists only the runs of the Tasks the filter names, and none for an empty list", async () => {
-    const [runIds, listed, none] = await Effect.runPromise(
-      Effect.gen(function* () {
-        const runs = yield* runRepository;
-        const first = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, "2026-09-24T10:01:00.000Z");
-        const second = yield* runs.insert(
-          { ...NEW_RUN, taskId: OTHER_TASK },
-          "2026-09-24T10:02:00.000Z",
-        );
-        yield* runs.insert({ ...NEW_RUN, taskId: "0190c000-0000-7000-8000-0000000000a3" }, AT);
-        yield* runs.insert(NEW_RUN, AT);
-        return [
-          [second, first],
-          yield* listRuns({ taskIds: [TASK, OTHER_TASK] }),
-          yield* listRuns({ taskIds: [] }),
-        ] as const;
-      }).pipe(inTransaction, Effect.provide(TestDatabase)),
-    );
-
-    expect(listed.map((summary) => summary.id)).toEqual(runIds);
-    expect(none).toEqual([]);
   });
 });
 
@@ -669,11 +645,6 @@ describe("the run list's query plans", () => {
       { originalRunId: "0190c000-0000-7000-8000-000000000001" },
       "runs_original_run_id (original_run_id=?)",
     ],
-    [
-      "runs of some Tasks",
-      { taskIds: ["0190c000-0000-7000-8000-000000000001"] },
-      "runs_task_id (task_id=?)",
-    ],
   ] as const)(
     "finds each workflow's newest %s through the filter's own index, not runs_workflow",
     async (_, filter, index) => {
@@ -711,15 +682,6 @@ describe("the run list's query plans", () => {
       expect(plan).not.toContain("SCAN runs");
     },
   );
-
-  it("finds the runs of some Tasks with runs_task_id", async () => {
-    const plan = await explainListQuery({
-      taskIds: ["0190c000-0000-7000-8000-000000000001", "0190c000-0000-7000-8000-000000000002"],
-    });
-
-    expect(plan).toContain("runs_task_id (task_id=?)");
-    expect(plan).not.toContain("SCAN runs");
-  });
 
   it("finds the running runs with runs_unfinished", async () => {
     const plan = await explainListQuery({ status: "running" });

@@ -769,13 +769,6 @@ const make = Effect.gen(function* () {
           if (request.originalRunId !== undefined) {
             otherFilters.push(sql`original_run_id = ${uuidFromString(request.originalRunId)}`);
           }
-          if (request.taskIds !== undefined) {
-            otherFilters.push(
-              request.taskIds.length === 0
-                ? sql`1 = 0`
-                : sql`task_id IN ${sql.in(request.taskIds.map((id) => uuidFromString(id)))}`,
-            );
-          }
           if (request.since !== undefined) otherFilters.push(sql`created_at >= ${request.since}`);
           if (request.until !== undefined) otherFilters.push(sql`created_at <= ${request.until}`);
           if (request.actor !== undefined) {
@@ -792,8 +785,7 @@ const make = Effect.gen(function* () {
             request.status === "pending" ||
             request.status === "running" ||
             request.activeSince !== undefined ||
-            request.originalRunId !== undefined ||
-            request.taskIds !== undefined;
+            request.originalRunId !== undefined;
           // With `newestPerWorkflow`, the filters pick each workflow's newest
           // runs inside the source, and the keyset pages through what the
           // source returns, so a cursor never changes which runs are newest.

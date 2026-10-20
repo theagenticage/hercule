@@ -427,10 +427,8 @@ export {
 } from "./intake";
 export {
   buildTrackingRows,
-  buildTrackingSnapshot,
   canMarkTrackingStateDone,
   countWaitingTrackingRows,
-  describeRunFailureCause,
   describeTrackingLine,
   groupTrackingRows,
   isTrackingAffectedByRunPush,
@@ -438,7 +436,6 @@ export {
   type TrackingGroup,
   type TrackingLine,
   type TrackingRow,
-  type TrackingSnapshot,
   type TrackingState,
 } from "./tracking";
 export {
@@ -502,7 +499,7 @@ export {
 export {
   dropTrackingHandoff,
   dropTrackingRowMarkedDone,
-  followTrackingSnapshot,
+  followListedTrackingRows,
   recordTrackingHandoff,
   recordTrackingRowMarkedDone,
   startHeldTrackingRows,

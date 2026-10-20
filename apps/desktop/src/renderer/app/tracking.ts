@@ -4,34 +4,17 @@
  */
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import {
-  countToDo,
-  countWaitingTrackingRows,
-  type TrackingRow,
-  type TrackingSnapshot,
-} from "@hercule/client-core";
+import { countToDo, countWaitingTrackingRows, type TrackingRow } from "@hercule/client-core";
 import { signalsToDoQuery, trackingQuery } from "./queries";
 
-/** Returns the rows of a snapshot. Its identity is the query's, so the selection keeps its result. */
-const selectRows = (snapshot: TrackingSnapshot): ReadonlyArray<TrackingRow> => snapshot.rows;
-
 /**
- * Returns Tracking as last read: its rows in Tracking's order, and the ids of
- * the runs they were worked out from. The shell's loader reads it, so it
- * never waits in practice.
- */
-export function useTrackingSnapshot(): TrackingSnapshot {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  return useSuspenseQuery(trackingQuery(client)).data;
-}
-
-/**
- * Returns Tracking's rows, in Tracking's order. The array is built once, by
- * the read, so every caller gets the same array until a read changes a row.
+ * Returns Tracking's rows, in Tracking's order. The shell's loader reads
+ * them, so they never wait in practice. The array is built once, by the read,
+ * so every caller gets the same array until a read changes a row.
  */
 export function useTrackingRows(): ReadonlyArray<TrackingRow> {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  return useSuspenseQuery({ ...trackingQuery(client), select: selectRows }).data;
+  return useSuspenseQuery(trackingQuery(client)).data;
 }
 
 /**

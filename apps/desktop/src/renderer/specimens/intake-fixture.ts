@@ -1426,10 +1426,7 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
     records: {
       ...RECORDS,
       signals: [],
-      tracking: {
-        tasks: TRACKING_RECORDS.tasks.filter((task) => ["t-checkout", "t-sku"].includes(task.id)),
-        runs: TRACKING_RECORDS.runs,
-      },
+      tracking: TRACKING_RECORDS.filter((task) => ["t-checkout", "t-sku"].includes(task.taskId)),
     },
     intake: { signal: null, event: null },
   }),

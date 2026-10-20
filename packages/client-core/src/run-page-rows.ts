@@ -145,7 +145,7 @@ export const decideRunMark = (run: Run, sessions: ReadonlyArray<Session>): RunMa
  * `undefined` for a run that did not fail, or that failed with none of these
  * (a workspace failure, for instance).
  */
-export const findFailureMessage = (run: Run): string | undefined => {
+const findFailureMessage = (run: Run): string | undefined => {
   if (run.status !== "failed") return undefined;
   if ("failureMessage" in run) return run.failureMessage;
   if ("failedEdge" in run && run.failedEdge !== undefined) return run.failedEdge.message;

@@ -5,7 +5,7 @@
  * - `startOnTask`, the controller's own way to link a run to a Task, which the
  *   public `start` does not offer;
  * - what carries the Task: the run record, its summary in the run list, the
- *   `taskIds` filter, the event the run emits when it ends, and a re-run of
+ *   `taskId` on the summary, the event the run emits when it ends, and a re-run of
  *   the run in both modes.
  */
 import { describe, expect, it } from "vitest";
@@ -105,10 +105,12 @@ const waitForRunToEnd = (runId: string) =>
     return yield* Effect.die(`timed out waiting for run ${runId} to end`);
   });
 
-/** Returns the runs the `taskIds` filter lists, as their ids. */
-const listRunIdsOfTasks = (taskIds: ReadonlyArray<string>) =>
+/** Returns the ids of the runs the run list shows with `taskId` as their Task. */
+const listRunIdsOfTask = (taskId: string) =>
   Effect.flatMap(RunService, (runs) =>
-    Effect.map(runs.query({ taskIds }), (page) => page.items.map((summary) => summary.id)),
+    Effect.map(runs.query({}), (page) =>
+      page.items.filter((summary) => summary.taskId === taskId).map((summary) => summary.id),
+    ),
   );
 
 describe("a run that works on a Task", () => {
@@ -124,8 +126,8 @@ describe("a run that works on a Task", () => {
         expect(ended.status).toBe("completed");
         expect(ended.taskId).toBe(TASK_ID);
         expect(untracked).not.toHaveProperty("taskId");
-        expect(yield* listRunIdsOfTasks([TASK_ID])).toEqual([runId]);
-        expect(yield* listRunIdsOfTasks([OTHER_TASK_ID])).toEqual([]);
+        expect(yield* listRunIdsOfTask(TASK_ID)).toEqual([runId]);
+        expect(yield* listRunIdsOfTask(OTHER_TASK_ID)).toEqual([]);
         const payloads = (yield* readEventsOfKind("run.completed")).map((event) => event.payload);
         expect(payloads.find((payload) => payload["runId"] === runId)?.["taskId"]).toBe(TASK_ID);
         expect(payloads.find((payload) => payload["runId"] === untrackedId)).not.toHaveProperty(
@@ -150,7 +152,7 @@ describe("a run that works on a Task", () => {
         const reruns: Array<Run> = [];
         for (const rerun of [restamped, replayed]) reruns.push(yield* waitForRunToEnd(rerun.runId));
         expect(reruns.map((rerun) => rerun.taskId)).toEqual([TASK_ID, TASK_ID]);
-        expect(yield* listRunIdsOfTasks([TASK_ID])).toHaveLength(3);
+        expect(yield* listRunIdsOfTask(TASK_ID)).toHaveLength(3);
       }),
     );
   });

@@ -6,7 +6,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { PluginDetail, Run, RunSummary, Signal, Task } from "@hercule/contract";
+import type {
+  PluginDetail,
+  RunSummary,
+  Signal,
+  Task,
+  TrackingRun,
+  TrackingTask,
+} from "@hercule/contract";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -166,38 +173,38 @@ const buildRunSummary = (
   }
 };
 
-/** The failed run as `run.read` returns it, with the error of the step that failed. */
-const FAILED_RUN = {
-  id: getRunId(FAILED_TASK),
-  taskId: FAILED_TASK.id,
-  workflowId: WORKFLOW_ID,
-  plan: {
-    name: "Implement",
-    triggers: [{ id: "manual", kind: "start", on: { kind: "manual" } }],
-    steps: [{ id: "code", kind: "action", action: "task.create" }],
-    edges: [],
-  },
-  inputs: {},
-  origin: { kind: "manual", actor: "user" },
-  subscriptions: [],
-  edgeTraversals: [],
-  createdAt: at(10),
-  status: "failed",
-  failureReason: "step-failed",
-  failedStepId: "code",
-  startedAt: at(11),
-  finishedAt: at(20),
-  steps: [
-    {
-      stepId: "code",
-      iteration: 1,
-      status: "failed",
-      startedAt: at(11),
-      finishedAt: at(20),
-      error: { code: "denied", message: "permission denied on ops-db" },
-    },
-  ],
-} as Run;
+/** Why each failed run failed, as the controller says it in `failureCause`. */
+const FAILURE_CAUSES: Readonly<Record<string, string>> = {
+  [getRunId(FAILED_TASK)]: "permission denied on ops-db",
+};
+
+/** Returns the run facts `task.queryTracking` holds for `run`, with the cause of a failed one. */
+const buildTrackingRun = (run: RunSummary): TrackingRun => ({
+  id: run.id,
+  workflowId: run.workflowId,
+  workflowName: run.workflowName,
+  status: run.status,
+  createdAt: run.createdAt,
+  ...("startedAt" in run && run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
+  ...("finishedAt" in run ? { finishedAt: run.finishedAt } : {}),
+  awaitedSignalIds: "awaitedSignalIds" in run ? run.awaitedSignalIds : [],
+  ...(run.status === "failed" ? { failureCause: FAILURE_CAUSES[run.id] ?? "step failed" } : {}),
+});
+
+/** Returns what `task.queryTracking` holds for `task`, whose one run is `run`. */
+const buildTrackingTask = (task: Task, run: RunSummary): TrackingTask => ({
+  taskId: task.id,
+  title: task.title,
+  handoffs: task.provenance.flatMap((entry) =>
+    entry.signalId === undefined || entry.runId === undefined
+      ? []
+      : [{ signalId: entry.signalId, runId: entry.runId, at: entry.at }],
+  ),
+  latestRun: buildTrackingRun(run),
+  ...(run.status === "pending" || run.status === "running"
+    ? { latestLiveRun: buildTrackingRun(run) }
+    : {}),
+});
 
 /** The four rows Tracking shows by default: one in each state. */
 const ROWS = [
@@ -208,27 +215,36 @@ const ROWS = [
 ] as const;
 
 /**
- * Returns handlers that play the controller's Tasks and runs on one stored
- * list: `task.query` lists the Tasks still in progress, `run.query` the runs of
- * the Tasks it names, and `task.update` marks a Task done.
+ * Returns handlers that play the controller's Tracking: `task.queryTracking`
+ * lists the rows, minus the Tasks the user marked done, and `task.update`
+ * marks a Task done. `readRows` gives the rows at the time of each read, so a
+ * test can change a run's status between two reads; `buildRun` builds the run
+ * of a row.
  */
-const storeTracking = (rows: ReadonlyArray<readonly [Task, RunSummary["status"]]> = ROWS) => {
-  let tasks = rows.map(([task]) => task);
-  const runs = rows.map(([task, status]) => buildRunSummary(task, status));
+const storeTracking = (
+  rows: ReadonlyArray<readonly [Task, RunSummary["status"]]> = ROWS,
+  {
+    readRows = () => rows,
+    buildRun = buildRunSummary,
+  }: {
+    readRows?: () => ReadonlyArray<readonly [Task, RunSummary["status"]]>;
+    buildRun?: (task: Task, status: RunSummary["status"]) => RunSummary;
+  } = {},
+) => {
+  const done = new Set<string>();
   const handlers: Record<string, Handler> = {
-    "GET /api/v1/tasks": () => ({
-      body: { items: tasks.filter((t) => t.status === "in-progress") },
+    "GET /api/v1/tasks/tracking": () => ({
+      body: {
+        rows: readRows()
+          .filter(([task]) => !done.has(task.id))
+          .map(([task, status]) => buildTrackingTask(task, buildRun(task, status))),
+      },
     }),
-    "GET /api/v1/runs": (call) => {
-      const taskIds = new URLSearchParams(call.search).getAll("taskIds");
-      return { body: { items: runs.filter((run) => taskIds.includes(run.taskId ?? "")) } };
-    },
-    [`GET /api/v1/runs/${FAILED_RUN.id}`]: { body: FAILED_RUN },
   };
   for (const [task] of rows) {
     handlers[`PATCH /api/v1/tasks/${task.id}`] = () => {
-      tasks = tasks.map((each) => (each.id === task.id ? { ...each, status: "done" } : each));
-      return { body: tasks.find((each) => each.id === task.id) };
+      done.add(task.id);
+      return { body: { ...task, status: "done" } };
     };
   }
   return handlers;
@@ -279,15 +295,9 @@ const readViewSwitcher = () =>
   within(screen.getByRole("group", { name: "View" }))
     .getAllByRole("button")
     .map((button) => button.textContent);
-const findTrackingTasksCalls = (calls: ReadonlyArray<Call>) =>
-  calls.filter((call) => call.method === "GET" && call.path === "/api/v1/tasks");
-const findTrackedRunsCalls = (calls: ReadonlyArray<Call>) =>
-  calls.filter(
-    (call) =>
-      call.method === "GET" &&
-      call.path === "/api/v1/runs" &&
-      new URLSearchParams(call.search).has("taskIds"),
-  );
+/** Returns the reads of Tracking, which are the only reads of Tasks or runs the app makes. */
+const findTrackingReads = (calls: ReadonlyArray<Call>) =>
+  calls.filter((call) => call.method === "GET" && call.path === "/api/v1/tasks/tracking");
 const findMarkDone = (calls: ReadonlyArray<Call>) =>
   calls.filter((call) => call.method === "PATCH" && call.path.startsWith("/api/v1/tasks/"));
 const findToast = () =>
@@ -361,11 +371,12 @@ describe("folded Tracking", () => {
     expect(tray.textContent).toContain("Show all");
   });
 
-  it("says only that the failed row failed, and reads no run for its reason", async () => {
+  it("says why the failed row failed from the read itself, and reads no run for it", async () => {
     const { calls } = await openIntake("/intake?tracking=true");
-    expect(getRowButton(FAILED_TASK).textContent).toContain("Implement failed");
-    expect(getRowButton(FAILED_TASK).textContent).not.toContain("permission denied");
-    expect(calls.filter((call) => /^\/api\/v1\/runs\/[^/]+$/.test(call.path))).toHaveLength(0);
+    expect(getRowButton(FAILED_TASK).textContent).toContain(
+      "Implement failed · permission denied on ops-db",
+    );
+    expect(calls.filter((call) => call.path.startsWith("/api/v1/runs"))).toHaveLength(0);
   });
 
   it("says what Tracking is for when nothing is handed off", async () => {
@@ -547,16 +558,9 @@ describe("a row that moves to another state's heading", () => {
   /** Opens opened Tracking with a Failed and a Working row, and returns how to fail the Working one. */
   const openWithMovableRow = async () => {
     let status: RunSummary["status"] = "running";
+    const rows = () => [[FAILED_TASK, "failed"] as const, [WORKING_TASK, status] as const];
     const opened = await openIntake("/intake?tracking=true", {
-      extra: {
-        ...storeTracking([[FAILED_TASK, "failed"]]),
-        "GET /api/v1/tasks": () => ({ body: { items: [FAILED_TASK, WORKING_TASK] } }),
-        "GET /api/v1/runs": () => ({
-          body: {
-            items: [buildRunSummary(FAILED_TASK, "failed"), buildRunSummary(WORKING_TASK, status)],
-          },
-        }),
-      },
+      extra: storeTracking(rows(), { readRows: rows }),
     });
     await opened.live.waitForFirstPushes();
     return {
@@ -584,6 +588,8 @@ describe("a row that moves to another state's heading", () => {
 
     // One flat list keeps the row's element, which moves under the Failed heading.
     const after = getRowButton(WORKING_TASK);
+    // The cause comes with the read, so the row says it as soon as it fails.
+    expect(after.textContent).toContain("Implement failed · step failed");
     expect(after).toBe(before);
     expect(document.activeElement).toBe(after);
     await userEvent.keyboard("k");
@@ -703,20 +709,18 @@ describe("marking a row done", () => {
   it("does not tick a row off that is Working in the last read, though it is still drawn Finished", async () => {
     let status: RunSummary["status"] = "completed";
     const { calls, live } = await openIntake("/intake?tracking=true", {
-      extra: {
-        ...storeTracking([[FINISHED_TASK, "completed"]]),
-        "GET /api/v1/runs": () => ({
-          body: { items: [buildRunSummary(FINISHED_TASK, status)] },
-        }),
-      },
+      extra: storeTracking([[FINISHED_TASK, "completed"]], {
+        readRows: () => [[FINISHED_TASK, status]],
+      }),
     });
     await live.waitForFirstPushes();
+    const reads = findTrackingReads(calls).length;
     // While the pointer is on the list column, a change the user did not make waits.
     await userEvent.hover(getList());
     status = "running";
     act(() => live.pushInvalidation("run", [getRunId(FINISHED_TASK)]));
     await waitFor(() => {
-      expect(calls.filter((call) => call.path === "/api/v1/runs").length).toBeGreaterThan(1);
+      expect(findTrackingReads(calls).length).toBeGreaterThan(reads);
     });
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(getRowButton(FINISHED_TASK).closest(".tr-run-item")!.getAttribute("data-state")).toBe(
@@ -1009,14 +1013,10 @@ describe("the To do count", () => {
 
   it("is read again when a Task joins Tracking or a run changes state", async () => {
     let status: RunSummary["status"] = "running";
-    const handlers = storeTracking([[WORKING_TASK, "running"]]);
     const { live } = await openIntake("/intake", {
-      extra: {
-        ...handlers,
-        "GET /api/v1/runs": () => ({
-          body: { items: [buildRunSummary(WORKING_TASK, status)] },
-        }),
-      },
+      extra: storeTracking([[WORKING_TASK, "running"]], {
+        readRows: () => [[WORKING_TASK, status]],
+      }),
     });
     await live.waitForFirstPushes();
     expect(screen.getByRole("tab", { name: "Hercule, 2 to do" })).toBeTruthy();
@@ -1030,109 +1030,70 @@ describe("the To do count", () => {
 });
 
 describe("Tracking's reads", () => {
-  /** Waits for the shell's reads and the pushes' first reads, then returns how many Tracking reads there are. */
-  const countReads = (calls: ReadonlyArray<Call>) => ({
-    tasks: findTrackingTasksCalls(calls).length,
-    runs: findTrackedRunsCalls(calls).length,
-  });
-
-  it("reads the Tasks, then all their runs in one request, when the shell loads", async () => {
-    const { calls, live } = await openIntake();
-    await live.waitForFirstPushes();
-    const reads = calls.filter(
-      (call) =>
-        call.method === "GET" && (call.path === "/api/v1/tasks" || call.path === "/api/v1/runs"),
-    );
-    // The first read is the Tasks, and then their runs. The first pushes of the
-    // `task` and `run` topics read the snapshot again after it.
-    expect(reads[0]!.path).toBe("/api/v1/tasks");
-    expect(new URLSearchParams(reads[0]!.search).get("handedOff")).toBe("true");
-    expect(reads[1]!.path).toBe("/api/v1/runs");
-    for (const runRead of findTrackedRunsCalls(calls)) {
-      expect(new URLSearchParams(runRead.search).getAll("taskIds").toSorted()).toEqual(
-        [FINISHED_TASK, FAILED_TASK, WORKING_TASK, STOPPED_TASK].map((task) => task.id).toSorted(),
-      );
-    }
-  });
-
-  it("reads the runs in chunks of at most 100 Tasks, and the Tasks to their last page", async () => {
-    const many = Array.from({ length: 150 }, (_, index) =>
+  it("is one request, task.queryTracking, whatever the number of Tasks, with no read of Tasks or runs beside it", async () => {
+    const many = Array.from({ length: 200 }, (_, index) =>
       buildTask(
         `01a06d02-7b00-7000-8000-${String(index + 100).padStart(12, "0")}`,
         `Task ${String(index)}`,
         index,
       ),
     );
-    const { calls } = await openIntake("/intake", {
-      extra: {
-        "GET /api/v1/tasks": (call) =>
-          new URLSearchParams(call.search).has("cursor")
-            ? { body: { items: many.slice(100) } }
-            : { body: { items: many.slice(0, 100), nextCursor: "page-2" } },
-        "GET /api/v1/runs": () => ({ body: { items: [] } }),
-      },
+    const { calls, live } = await openIntake("/intake", {
+      extra: storeTracking(many.map((task) => [task, "completed"] as const)),
     });
-    expect(findTrackingTasksCalls(calls)).toHaveLength(2);
-    expect(
-      findTrackedRunsCalls(calls)
-        .map((call) => new URLSearchParams(call.search).getAll("taskIds").length)
-        .toSorted((a, b) => a - b),
-    ).toEqual([50, 100]);
-  });
-
-  it("makes no run request while no Task is tracked, also on a push", async () => {
-    const { calls, live } = await openIntake("/intake", { extra: storeTracking([]) });
     await live.waitForFirstPushes();
-    act(() => live.pushInvalidation("run"));
-    act(() => live.pushInvalidation("task"));
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
-    expect(findTrackedRunsCalls(calls)).toHaveLength(0);
-    expect(findTrackingTasksCalls(calls).length).toBeGreaterThan(1);
+    expect(findTrackingReads(calls).length).toBeGreaterThan(0);
+    expect(
+      calls.filter(
+        (call) =>
+          call.method === "GET" && (call.path === "/api/v1/runs" || call.path === "/api/v1/tasks"),
+      ),
+    ).toHaveLength(0);
   });
 
   it("reads again on a task push", async () => {
     const { calls, live } = await openIntake();
     await live.waitForFirstPushes();
-    const before = countReads(calls);
+    const before = findTrackingReads(calls).length;
     act(() => live.pushInvalidation("task", [WORKING_TASK.id]));
     await waitFor(() => {
-      expect(countReads(calls)).toEqual({ tasks: before.tasks + 1, runs: before.runs + 1 });
+      expect(findTrackingReads(calls)).toHaveLength(before + 1);
     });
   });
 
-  it("reads again once on a run push that names a tracked run, an older run of a Task too", async () => {
+  it("reads again once on a run push that names a row's newest run, and on one that names its newest live run", async () => {
     const { calls, live } = await openIntake();
     await live.waitForFirstPushes();
-    const before = countReads(calls);
+    const before = findTrackingReads(calls).length;
     act(() => live.pushInvalidation("run", [getRunId(WORKING_TASK)]));
     await waitFor(() => {
-      expect(countReads(calls)).toEqual({ tasks: before.tasks + 1, runs: before.runs + 1 });
+      expect(findTrackingReads(calls)).toHaveLength(before + 1);
     });
   });
 
   it("reads again on the creation of a run, which may be a re-run, and on a push that names no run", async () => {
     const { calls, live } = await openIntake();
     await live.waitForFirstPushes();
-    const before = countReads(calls);
+    const before = findTrackingReads(calls).length;
     act(() =>
       live.pushInvalidation("run", ["01a06d02-7c00-7000-8000-0000000000ff"], undefined, "created"),
     );
     await waitFor(() => {
-      expect(countReads(calls).runs).toBe(before.runs + 1);
+      expect(findTrackingReads(calls)).toHaveLength(before + 1);
     });
     act(() => live.pushInvalidation("run"));
     await waitFor(() => {
-      expect(countReads(calls).runs).toBe(before.runs + 2);
+      expect(findTrackingReads(calls)).toHaveLength(before + 2);
     });
   });
 
-  it("does not read again on a change to a run of no tracked Task", async () => {
+  it("does not read again on a change to a run no row holds", async () => {
     const { calls, live } = await openIntake();
     await live.waitForFirstPushes();
-    const before = countReads(calls);
+    const before = findTrackingReads(calls).length;
     act(() => live.pushInvalidation("run", ["01a06d02-7c00-7000-8000-0000000000fe"]));
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
-    expect(countReads(calls)).toEqual(before);
+    expect(findTrackingReads(calls)).toHaveLength(before);
   });
 });
 
@@ -1177,16 +1138,13 @@ describe("To do with Tracking", () => {
 
 describe("a face for a run of a workflow sent with the request", () => {
   it("draws the row with the workflow's name when the run has no workflow id", async () => {
-    const handlers = storeTracking([[FINISHED_TASK, "completed"]]);
     await openIntake("/intake", {
-      extra: {
-        ...handlers,
-        "GET /api/v1/runs": () => ({
-          body: {
-            items: [{ ...buildRunSummary(FINISHED_TASK, "completed", "Sent"), workflowId: null }],
-          },
+      extra: storeTracking([[FINISHED_TASK, "completed"]], {
+        buildRun: (task, status) => ({
+          ...buildRunSummary(task, status, "Sent"),
+          workflowId: null,
         }),
-      },
+      }),
     });
     expect(getRowButton(FINISHED_TASK).textContent).toContain("Sent finished");
   });

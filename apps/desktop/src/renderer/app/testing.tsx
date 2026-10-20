@@ -680,6 +680,8 @@ export const buildSidebarHandlers = (
   "GET /api/v1/settings": { body: { controller: {}, user: {} } },
   "GET /api/v1/profiles": { body: { items: [] } },
   "GET /api/v1/tasks": { body: { items: [] } },
+  // The shell reads what Tracking follows, for the To do count.
+  "GET /api/v1/tasks/tracking": { body: { rows: [] } },
   // A draft's composer reads the skills a start would have, for its `$` list.
   "GET /api/v1/sessions/preview-skills": { body: { items: [], skipped: [] } },
   // The shell reads the Connections, for New project and the starter threads.

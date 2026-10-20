@@ -2,127 +2,138 @@
  * Tests the record behind the rows Tracking shows: which changes wait while
  * the pointer is on the list column, and which apply at once.
  */
-import type { RunSummary, Task } from "@hercule/contract";
+import type { TrackingRun, TrackingTask } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   dropTrackingHandoff,
   dropTrackingRowMarkedDone,
-  followTrackingSnapshot,
+  followListedTrackingRows,
   recordTrackingHandoff,
   recordTrackingRowMarkedDone,
   startHeldTrackingRows,
   updateTrackingRowsHolding,
 } from "./held-tracking-rows";
-import type { TrackingRow, TrackingSnapshot } from "./tracking";
+import { buildTrackingRows, type TrackingRow } from "./tracking";
 
 const AT = "2026-10-20T09:00:00.000Z";
 
-/** Builds a row of Tracking for the Task `id`, handed off from the signal `signal-<id>`. */
-const buildRow = (id: string, state: TrackingRow["state"] = "working"): TrackingRow => {
-  const task: Task = {
-    id,
-    title: `Task ${id}`,
-    description: "",
-    status: "in-progress",
-    priority: "normal",
-    labels: [],
-    provenance: [{ signalId: `signal-${id}`, runId: `run-${id}`, at: AT, actor: "user" }],
-    createdAt: AT,
-    updatedAt: AT,
-    statusChangedAt: AT,
-  };
-  const run = {
-    id: `run-${id}`,
+/** Builds the newest run of the Task `id`, in `status`. */
+const buildRun = (id: string, status: TrackingRun["status"]): TrackingRun => ({
+  id: `run-${id}`,
+  workflowId: null,
+  workflowName: "Implement",
+  status,
+  createdAt: AT,
+  ...(status === "completed" ? { finishedAt: AT } : {}),
+  awaitedSignalIds: [],
+});
+
+/**
+ * Builds the row of Tracking for the Task `id`, handed off from the signal
+ * `signal-<id>`, with the run of that handoff as its newest run.
+ */
+const buildRow = (id: string, status: TrackingRun["status"] = "running"): TrackingRow => {
+  const latestRun = buildRun(id, status);
+  const task: TrackingTask = {
     taskId: id,
-    workflowId: null,
-    workflowName: "Implement",
-    origin: { kind: "manual", actor: "user" },
-    createdAt: AT,
-    status: "pending",
-  } satisfies RunSummary;
-  return { task, state, run, since: AT };
+    title: `Task ${id}`,
+    handoffs: [{ signalId: `signal-${id}`, runId: latestRun.id, at: AT }],
+    latestRun,
+  };
+  return buildTrackingRows([task])[0]!;
 };
 
 const A = buildRow("a");
 const B = buildRow("b");
 const C = buildRow("c");
 
-/** Returns the snapshot of `rows`, which holds the run each row holds. */
-const snapshotOf = (...rows: ReadonlyArray<TrackingRow>): TrackingSnapshot => ({
-  rows,
-  runIds: rows.map((row) => row.run.id),
-});
+const readIds = (rows: ReadonlyArray<TrackingRow>) => rows.map((row) => row.task.taskId);
 
-const readIds = (rows: ReadonlyArray<TrackingRow>) => rows.map((row) => row.task.id);
-
-describe("followTrackingSnapshot", () => {
+describe("followListedTrackingRows", () => {
   it("shows every read as it is while nothing is held", () => {
-    const held = followTrackingSnapshot(startHeldTrackingRows(snapshotOf(A, B)), snapshotOf(B, C));
+    const held = followListedTrackingRows(startHeldTrackingRows([A, B]), [B, C]);
     expect(readIds(held.shown)).toEqual(["b", "c"]);
   });
 
   it("keeps the rows shown while holding, and shows the last read once the holding stops", () => {
-    let held = updateTrackingRowsHolding(startHeldTrackingRows(snapshotOf(A, B)), true);
-    const finished = buildRow("a", "finished");
-    held = followTrackingSnapshot(held, snapshotOf(B, finished, C));
+    let held = updateTrackingRowsHolding(startHeldTrackingRows([A, B]), true);
+    const finished = buildRow("a", "completed");
+    held = followListedTrackingRows(held, [B, finished, C]);
     expect(held.shown).toEqual([A, B]);
     held = updateTrackingRowsHolding(held, false);
     expect(held.shown).toEqual([B, finished, C]);
   });
 
   it("takes a row the user marked done off at once while other changes wait", () => {
-    let held = updateTrackingRowsHolding(startHeldTrackingRows(snapshotOf(A, B)), true);
+    let held = updateTrackingRowsHolding(startHeldTrackingRows([A, B]), true);
     held = recordTrackingRowMarkedDone(held, "a");
-    held = followTrackingSnapshot(held, snapshotOf(B, C));
+    held = followListedTrackingRows(held, [B, C]);
     expect(readIds(held.shown)).toEqual(["b"]);
     expect(held.markedDoneTaskIds.size).toBe(0);
   });
 
   it("waits for the read that shows the row gone, and holds nothing back after it", () => {
-    let held = updateTrackingRowsHolding(startHeldTrackingRows(snapshotOf(A, B)), true);
+    let held = updateTrackingRowsHolding(startHeldTrackingRows([A, B]), true);
     held = recordTrackingRowMarkedDone(held, "a");
-    held = followTrackingSnapshot(held, snapshotOf(A, B));
+    held = followListedTrackingRows(held, [A, B]);
     expect(readIds(held.shown)).toEqual(["a", "b"]);
     expect(held.markedDoneTaskIds.has("a")).toBe(true);
   });
 
   it("shows the whole read once the Task of a signal the user handed off has a row", () => {
-    let held = updateTrackingRowsHolding(startHeldTrackingRows(snapshotOf(A)), true);
+    let held = updateTrackingRowsHolding(startHeldTrackingRows([A]), true);
     held = recordTrackingHandoff(held, "signal-c");
-    held = followTrackingSnapshot(held, snapshotOf(A, buildRow("b", "finished")));
+    held = followListedTrackingRows(held, [A, buildRow("b", "completed")]);
     expect(readIds(held.shown)).toEqual(["a"]);
-    held = followTrackingSnapshot(held, snapshotOf(A, buildRow("b", "finished"), C));
+    held = followListedTrackingRows(held, [A, buildRow("b", "completed"), C]);
     expect(readIds(held.shown)).toEqual(["a", "b", "c"]);
     expect(held.handoffSignalIds.size).toBe(0);
   });
 });
 
 describe("a handoff whose run the read has not brought yet", () => {
-  it("waits for the run the handoff entry names, though the Task already has a row", () => {
-    let held = updateTrackingRowsHolding(startHeldTrackingRows(snapshotOf(A)), true);
-    held = recordTrackingHandoff(held, "signal-c");
-    // The Task's entry for the signal is read, but the read of the runs came first and lacks its run.
-    const early: TrackingSnapshot = { rows: [A, C], runIds: [A.run.id] };
-    held = followTrackingSnapshot(held, early);
+  /** Builds the row of a Task handed off twice, whose newest run is the run of `newestRunOf`. */
+  const buildContinuedRow = (newestRunOf: "first" | "second"): TrackingRow => {
+    const first = buildRun("c1", "completed");
+    const second = buildRun("c2", "running");
+    return buildTrackingRows([
+      {
+        taskId: "c",
+        title: "Task c",
+        handoffs: [
+          { signalId: "signal-c1", runId: first.id, at: AT },
+          { signalId: "signal-c2", runId: second.id, at: AT },
+        ],
+        latestRun: newestRunOf === "first" ? first : second,
+        ...(newestRunOf === "second" ? { latestLiveRun: second } : {}),
+      },
+    ])[0]!;
+  };
+
+  it("waits until the run the handoff names is the row's newest run or newest live run", () => {
+    let held = updateTrackingRowsHolding(startHeldTrackingRows([A]), true);
+    held = recordTrackingHandoff(held, "signal-c2");
+    // The Task already has a row, with the handoff entry, but the read lacks the new run.
+    held = followListedTrackingRows(held, [A, buildContinuedRow("first")]);
     expect(readIds(held.shown)).toEqual(["a"]);
-    expect(held.handoffSignalIds.has("signal-c")).toBe(true);
-    held = followTrackingSnapshot(held, snapshotOf(A, C));
+    expect(held.handoffSignalIds.has("signal-c2")).toBe(true);
+    held = followListedTrackingRows(held, [A, buildContinuedRow("second")]);
     expect(readIds(held.shown)).toEqual(["a", "c"]);
   });
 });
 
 describe("dropping the user's own changes", () => {
   it("makes a later change to the row wait again once its mark done failed", () => {
-    let held = updateTrackingRowsHolding(startHeldTrackingRows(snapshotOf(A, B)), true);
+    let held = updateTrackingRowsHolding(startHeldTrackingRows([A, B]), true);
     held = dropTrackingRowMarkedDone(recordTrackingRowMarkedDone(held, "a"), "a");
-    held = followTrackingSnapshot(held, snapshotOf(B));
+    held = followListedTrackingRows(held, [B]);
     expect(readIds(held.shown)).toEqual(["a", "b"]);
   });
 
   it("makes a row for the signal wait again once its handoff failed", () => {
-    let held = updateTrackingRowsHolding(startHeldTrackingRows(snapshotOf(A)), true);
+    let held = updateTrackingRowsHolding(startHeldTrackingRows([A]), true);
     held = dropTrackingHandoff(recordTrackingHandoff(held, "signal-c"), "signal-c");
-    held = followTrackingSnapshot(held, snapshotOf(A, C));
+    held = followListedTrackingRows(held, [A, C]);
     expect(readIds(held.shown)).toEqual(["a"]);
   });
 });

@@ -76,19 +76,18 @@ import type {
   Project,
   ProviderInstance,
   Resource,
-  Run,
   Runner,
-  RunSummary,
   Session,
   Signal,
   SignedInUser,
   SkillsPreviewFilter,
   Task,
+  TrackingTask,
   TranscriptRow,
   Workspace,
 } from "@hercule/contract";
 import {
-  buildTrackingSnapshot,
+  buildTrackingRows,
   createClient,
   type FetchLike,
   type HerculeClient,
@@ -231,16 +230,10 @@ export interface SidebarRecords {
    */
   readonly agentSessions?: ReadonlyArray<Session>;
   /**
-   * The Tasks Tracking lists, with their runs, which the Hercule segment's
-   * count and Intake's Tracking read. `failedRuns` are the runs of the Failed
-   * rows as `run.read` returns them, whose step records give the reason a
-   * row's line shows. None when left out.
+   * What `task.queryTracking` returns: the Tasks Tracking follows, which the
+   * Hercule segment's count and Intake's Tracking read. None when left out.
    */
-  readonly tracking?: {
-    readonly tasks: ReadonlyArray<Task>;
-    readonly runs: ReadonlyArray<RunSummary>;
-    readonly failedRuns?: ReadonlyArray<Run>;
-  };
+  readonly tracking?: ReadonlyArray<TrackingTask>;
 }
 
 /** What the thread screen reads of the one thread it shows, as the thread route's loader reads it. */
@@ -582,11 +575,10 @@ const seedQueryCache = (
     records.later?.[0]?.snooze?.until ?? null,
   );
   queryClient.setQueryData(pluginsQuery(client).queryKey, records.plugins ?? []);
-  const { tasks = [], runs = [], failedRuns = [] } = records.tracking ?? {};
-  queryClient.setQueryData(trackingQuery(client).queryKey, buildTrackingSnapshot(tasks, runs));
-  for (const failedRun of failedRuns) {
-    queryClient.setQueryData(runQuery(client, failedRun.id).queryKey, failedRun);
-  }
+  queryClient.setQueryData(
+    trackingQuery(client).queryKey,
+    buildTrackingRows(records.tracking ?? []),
+  );
   queryClient.setQueryData(liveAgentSessionsQuery(client).queryKey, records.agentSessions ?? []);
   queryClient.setQueryData(
     assistantsQuery(client).queryKey,

@@ -2063,11 +2063,6 @@ export const CLI = {
         help: "Only the re-runs of this run, by its id or a tail of eight or more characters.",
         resolves: "run.query",
       },
-      taskIds: {
-        flag: "task",
-        help: "Only the runs that work on this task, by its id or a tail of eight or more characters; repeat the flag to list the runs of several tasks, at most 100. Find a task with `hercule task list`.",
-        resolves: "task.query",
-      },
       newestPerWorkflow: {
         flag: "newest-per-workflow",
         help: "Only each workflow's newest runs, at most this many per workflow, among the runs the other flags keep. Leaves out the runs of a sent workflow and of a deleted workflow.",

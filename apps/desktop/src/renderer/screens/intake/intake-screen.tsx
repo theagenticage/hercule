@@ -38,7 +38,7 @@ import {
   signalsLaterQuery,
   signalsToDoQuery,
 } from "../../app/queries";
-import { useTrackingSnapshot } from "../../app/tracking";
+import { useTrackingRows } from "../../app/tracking";
 import { createHandoffFlights } from "./handoff-flight";
 import { IntakeDock } from "./intake-dock";
 import { InboxZero } from "./inbox-zero";
@@ -145,9 +145,9 @@ export function IntakeScreen({
   // the Hercule segment, Intake's row and the tabs, and inbox zero. The rows
   // Tracking draws, its head's counts and the keys' walk use the held rows,
   // which lag the read while the pointer is on the list column.
-  const trackingSnapshot = useTrackingSnapshot();
+  const readTrackingRows = useTrackingRows();
   const [pointerOverColumn, setPointerOverColumn] = useState(false);
-  const heldTracking = useHeldTrackingRows(trackingSnapshot, pointerOverColumn);
+  const heldTracking = useHeldTrackingRows(readTrackingRows, pointerOverColumn);
   const trackingRows = heldTracking.shown;
   // A handoff's flight carries a copy of the signal's row from the list to
   // folded Tracking, in a layer over the list column.
@@ -237,7 +237,7 @@ export function IntakeScreen({
 
   const tracking = useTrackingControls({
     open: trackingOpen,
-    readRows: trackingSnapshot.rows,
+    readRows: readTrackingRows,
     shownRows: trackingRows,
     heldTracking,
     tickOff,
@@ -536,7 +536,7 @@ export function IntakeScreen({
   // Inbox zero takes the place of the empty To do list on the All tab, and
   // shows the cleared count itself, so the foot goes with the rows.
   // Rows of Tracking that wait on the user keep To do from being at zero.
-  const waitingTrackingRows = countWaitingTrackingRows(trackingSnapshot.rows);
+  const waitingTrackingRows = countWaitingTrackingRows(readTrackingRows);
   const inboxZero =
     view === "to-do" &&
     pluginId === null &&

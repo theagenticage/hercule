@@ -247,10 +247,6 @@ describe("GET /runs", () => {
         ["status=completed", [third, first]],
         ["status=failed", [second]],
         ["status=running", []],
-        // No run here works on a Task, so a Task filter keeps none, whether it
-        // names one Task or repeats the key for several.
-        [`taskIds=${ABSENT_ID}`, []],
-        [`taskIds=${ABSENT_ID}&taskIds=${oneTask.id}`, []],
         [`since=${middle}`, [third, second]],
         [`until=${middle}`, [second, first]],
         [`since=${middle}&until=${middle}`, [second]],

@@ -42,7 +42,7 @@ import {
   type Live,
   type LiveInvalidatePush,
   type LiveQueryKey,
-  type TrackingSnapshot,
+  type TrackingRow,
 } from "@hercule/client-core";
 import type { MutableLiveTopic } from "@hercule/contract";
 import { ageClock } from "./age-clock";
@@ -50,7 +50,7 @@ import { useWindowVisible } from "./window-visibility";
 
 /**
  * Reads again every query a push on `topic` makes stale: the queries under
- * `keys`, and for a `run` push, Tracking's snapshot when the push can change it
+ * `keys`, and for a `run` push, Tracking when the push can change it
  * (see `isTrackingAffectedByRunPush`). A `run` push is about every run, such as
  * the ones cron fires start, and Tracking holds only the runs of its Tasks, so
  * most of them leave it as it is.
@@ -63,8 +63,8 @@ export const invalidateForPush = (
 ): void => {
   for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
   if (topic !== "run") return;
-  const snapshot = queryClient.getQueryData<TrackingSnapshot>(queryKeys.tracking());
-  if (snapshot === undefined || isTrackingAffectedByRunPush(snapshot, push)) {
+  const rows = queryClient.getQueryData<ReadonlyArray<TrackingRow>>(queryKeys.tracking());
+  if (rows === undefined || isTrackingAffectedByRunPush(rows, push)) {
     invalidateWithoutCancelling(queryClient, queryKeys.tracking());
   }
 };

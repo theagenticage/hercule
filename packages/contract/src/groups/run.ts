@@ -44,7 +44,6 @@ import {
 import { Actor, Id, Timestamp } from "../ids";
 import { MAX_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { atMost } from "../strings";
 import { Event, EventId } from "./event-record";
 import { RunStatus } from "./run-status";
 import { Subscription } from "./subscription";
@@ -442,9 +441,6 @@ export const RunSummary = Schema.Union(
 
 export type RunSummary = Schema.Schema.Type<typeof RunSummary>;
 
-/** The most Task ids one `run.query` takes in `taskIds`. */
-export const MAX_RUN_FILTER_TASK_IDS = 100;
-
 /** Filters for the run list. Every filter given must hold. */
 export const RunFilter = Schema.Struct({
   workflowId: Schema.optionalKey(Id),
@@ -468,13 +464,6 @@ export const RunFilter = Schema.Struct({
   actor: Schema.optionalKey(Actor),
   /** Only the re-runs of this run. */
   originalRunId: Schema.optionalKey(Id),
-  /**
-   * Only the runs that work on one of these Tasks. At most
-   * `MAX_RUN_FILTER_TASK_IDS` ids: the ids travel in the request's address,
-   * and a longer address is refused by the HTTP server. A client with more
-   * Tasks asks in chunks.
-   */
-  taskIds: Schema.optionalKey(atMost(Id, MAX_RUN_FILTER_TASK_IDS)),
   /**
    * Only each workflow's newest runs, at most this many per workflow, among
    * the runs the other filters keep. Newest means the latest `createdAt`,

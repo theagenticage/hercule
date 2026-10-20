@@ -20,9 +20,8 @@ import {
   ApiError,
   collectRunningTurnRows,
   collectSenderSessionIds,
-  buildTrackingSnapshot,
+  buildTrackingRows,
   classifyTranscriptPage,
-  describeRunFailureCause,
   detectLocalRunner,
   findTranscriptAfterPosition,
   type EventListFilter,
@@ -37,7 +36,7 @@ import {
   type MessagePage,
   type MessagePages,
   type ThreadCopy,
-  type TrackingSnapshot,
+  type TrackingRow,
   waitForOptionalReads,
 } from "@hercule/client-core";
 import { WALK_CATCH_UP_SECONDS } from "../office/engine/contracts";
@@ -46,7 +45,6 @@ import {
   DEFAULT_PAGE_LIMIT,
   LIVE_SESSION_STATUSES,
   MAX_PAGE_LIMIT,
-  MAX_RUN_FILTER_TASK_IDS,
   type ConversationMessage,
   type EventHandling,
   type Input,
@@ -630,25 +628,11 @@ export const assistantsQuery = (client: HerculeClient) =>
   });
 
 /**
- * What Tracking lists: the Tasks that have a handoff entry and are still
- * `in-progress`. Ticking a row off sets its Task `done`, which takes it out of
- * this read.
- */
-const TRACKED_TASK_FILTER = { handedOff: true, status: ["in-progress"] } as const;
-
-/**
- * Reads Tracking as one snapshot: every tracked Task, then every run of them,
- * and the rows built from the two (`buildTrackingSnapshot`). The Hercule
- * segment's count and Tracking's rows both come from it, so it is shell data,
- * kept for the life of the window, and every reader shares the one array of
- * rows.
- *
- * - The Tasks are read to the last page.
- * - Their runs are read in chunks of `MAX_RUN_FILTER_TASK_IDS` ids, each to
- *   its last page. The ids travel in the request's address, and one with
- *   hundreds of them is refused by the HTTP server, which as shell data would
- *   fail the whole app's load.
- * - With no Task, no run is read.
+ * Reads Tracking: `task.queryTracking` returns every Task Tracking follows,
+ * with its title, its handoffs, and its newest run and newest live run, and
+ * the rows are built from that (`buildTrackingRows`). The Hercule segment's
+ * count and Tracking's rows both come from it, so it is shell data, kept for
+ * the life of the window, and every reader shares the one array of rows.
  *
  * The key is stable, so the entry is the same whichever Tasks are tracked. A
  * push on the `task` topic reads it again, and one on the `run` topic when
@@ -657,24 +641,8 @@ const TRACKED_TASK_FILTER = { handedOff: true, status: ["in-progress"] } as cons
 export const trackingQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.tracking(),
-    queryFn: async (): Promise<TrackingSnapshot> => {
-      const tasks = await readEveryPage((page) =>
-        client.task.query({ query: { ...TRACKED_TASK_FILTER, ...page } }),
-      );
-      const taskIds = tasks.map((task) => task.id);
-      const chunks: string[][] = [];
-      for (let start = 0; start < taskIds.length; start += MAX_RUN_FILTER_TASK_IDS) {
-        chunks.push(taskIds.slice(start, start + MAX_RUN_FILTER_TASK_IDS));
-      }
-      const runs = (
-        await Promise.all(
-          chunks.map((chunk) =>
-            readEveryPage((page) => client.run.query({ query: { taskIds: chunk, ...page } })),
-          ),
-        )
-      ).flat();
-      return buildTrackingSnapshot(tasks, runs);
-    },
+    queryFn: async (): Promise<ReadonlyArray<TrackingRow>> =>
+      buildTrackingRows((await client.task.queryTracking()).rows),
     ...SHELL_READ_OPTIONS,
   });
 
@@ -973,16 +941,6 @@ export const runQuery = (client: HerculeClient, runId: string) =>
     retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
-
-/**
- * Reads one failed run for why it failed, in a few words (see
- * `describeRunFailureCause`). It is `runQuery`'s read, narrowed to the cause,
- * so it shares the run page's cache entry: a `RunSummary` carries only the
- * failure reason's code, and the cause needs the step records. Tracking reads
- * it for the Failed rows on screen.
- */
-export const runFailureCauseQuery = (client: HerculeClient, runId: string) =>
-  queryOptions({ ...runQuery(client, runId), select: describeRunFailureCause });
 
 /**
  * Reads every session a run's agent steps started, for the run's page: what

@@ -380,7 +380,6 @@ const RESOLVES: Record<string, string> = {
   "run.cancel id": "run.query",
   "run.rerun id": "run.query",
   "run.query originalRunId": "run.query",
-  "run.query taskIds": "task.query",
 
   "runner.read id": "runner.query",
   "runner.update id": "runner.query",
