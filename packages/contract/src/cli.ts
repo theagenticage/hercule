@@ -568,6 +568,12 @@ export const CLI = {
       },
     },
   },
+  "task.queryTracking": {
+    command: "task tracking",
+    help: "Lists the work handed off from Intake that is still followed. It is every in-progress task with a handoff entry. Each row gives the task's handoffs (the signal and the run of each), its newest run, and its newest live run when one is going, with why a failed run failed. Intake's Tracking section draws its rows from this. Needs the run read grant as well as the task read grant.",
+    examples: [{ args: [] }],
+    fields: {},
+  },
   "task.read": {
     command: "task read",
     help: "Reads one task in full, its Provenance included. Provenance is the append-only record of what created or touched it.",

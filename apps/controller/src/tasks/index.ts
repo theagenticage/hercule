@@ -2,9 +2,9 @@
 export {
   TaskService,
   TaskServiceLayer,
-  type CreateInput,
   type QueryInput,
   type TaskPage,
   type UpdateInput,
 } from "./service";
 export { taskRepository } from "./repository";
+export { TaskTracking, TaskTrackingLayer, TaskTrackingRuns, type TrackedRuns } from "./tracking";

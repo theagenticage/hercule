@@ -119,6 +119,12 @@ describe("the HttpApi declaration", () => {
  */
 const NEW_OPERATIONS = [
   { id: "task.query", requires: "task.read", method: "GET", path: "/api/v1/tasks" },
+  {
+    id: "task.queryTracking",
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/tasks/tracking",
+  },
   { id: "task.read", requires: "task.read", method: "GET", path: "/api/v1/tasks/:id" },
   { id: "task.create", requires: "task.create", method: "POST", path: "/api/v1/tasks" },
   { id: "task.update", requires: "task.update", method: "PATCH", path: "/api/v1/tasks/:id" },

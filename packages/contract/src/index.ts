@@ -474,6 +474,10 @@ export {
   TaskUpdateCall,
   TaskUpdateInput,
   TaskUpdatedEventPayload,
+  TaskTracking,
+  TrackingHandoff,
+  TrackingRun,
+  TrackingTask,
   refuseEmptyTaskUpdate,
 } from "./groups/task";
 export {
@@ -807,3 +811,4 @@ export {
   type SessionLiveTopic,
   type SessionTopicKind,
 } from "./groups/live";
+export { describeFailureCause, describeFailureReason } from "./run-failure";

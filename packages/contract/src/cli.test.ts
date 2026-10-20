@@ -91,6 +91,7 @@ const COMMANDS: Record<string, string> = {
   "secret.delete": "secret delete",
 
   "task.query": "task list",
+  "task.queryTracking": "task tracking",
   "task.read": "task read",
   "task.create": "task create",
   "task.update": "task update",

@@ -211,6 +211,11 @@ interface SummaryRow {
   readonly triggers: string | null;
 }
 
+/** The columns of a `SummaryRow`, read from `runs`. */
+const SUMMARY_COLUMNS = `id, workflow_id, json_extract(plan, '$.name') AS workflow_name, origin, task_id,
+  status, failure_reason, failed_step_id, failure_message, created_at, started_at, finished_at,
+  CASE WHEN status = 'running' THEN json_extract(plan, '$.triggers') END AS triggers`;
+
 /** A step record that is running or pending, as the run list reads it for its running runs. */
 interface ActiveStepRow {
   readonly run_id: Uint8Array;
@@ -811,10 +816,7 @@ const make = Effect.gen(function* () {
                   clauses: [keyset],
                 };
           const rows = yield* sql<SummaryRow>`
-          SELECT id, workflow_id, json_extract(plan, '$.name') AS workflow_name, origin, task_id, status,
-                 failure_reason, failed_step_id, failure_message, created_at, started_at,
-                 finished_at,
-                 CASE WHEN status = 'running' THEN json_extract(plan, '$.triggers') END AS triggers
+          SELECT ${sql.literal(SUMMARY_COLUMNS)}
           FROM ${source} WHERE ${sql.and(clauses)} ${order}
           LIMIT ${request.limit + 1}
         `;
@@ -833,6 +835,80 @@ const make = Effect.gen(function* () {
           );
         }),
       ),
+
+    /**
+     * Returns, for the Tasks `taskIds`, each Task's newest run and the newest
+     * pending or running run of each Task that has one, as summaries. Newest
+     * is the latest `created_at`, then the greatest id. A Task with no run
+     * has neither.
+     *
+     * Two statements, whatever the number of Tasks and runs:
+     *
+     * - the newest run: one lookup per Task on `runs_task_id`, which holds the
+     *   runs of a Task newest first, so a Task's history is never read;
+     * - the live runs: the pending and running runs on `runs_unfinished`,
+     *   which are few, kept to these Tasks.
+     *
+     * The ids reach SQLite as one JSON text, so the statement does not grow
+     * with the number of Tasks.
+     */
+    listLatestOfTasks: (
+      taskIds: ReadonlyArray<string>,
+    ): Effect.Effect<
+      { readonly latest: ReadonlyArray<RunSummary>; readonly live: ReadonlyArray<RunSummary> },
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        if (taskIds.length === 0) return { latest: [], live: [] };
+        const hexIds = JSON.stringify(taskIds.map((id) => id.replaceAll("-", "")));
+        const latestRows = yield* sql<SummaryRow>`
+          SELECT ${sql.literal(SUMMARY_COLUMNS)}
+          FROM (SELECT (SELECT id FROM runs WHERE task_id = unhex(value)
+                        ORDER BY created_at DESC, id DESC LIMIT 1) AS latest_id
+                FROM json_each(${hexIds}))
+          CROSS JOIN runs ON runs.id = latest_id`;
+        const liveRows = yield* sql<SummaryRow>`
+          SELECT ${sql.literal(SUMMARY_COLUMNS)} FROM runs
+          WHERE status IN ('pending', 'running')
+            AND task_id IN (SELECT unhex(value) FROM json_each(${hexIds}))
+          ORDER BY created_at DESC, id DESC`;
+        const records = yield* listActiveStepRecords(
+          [...latestRows, ...liveRows]
+            .filter((row) => row.status === "running")
+            .map((row) => row.id),
+        );
+        const parse = (row: SummaryRow): RunSummary =>
+          parseSummaryRow(row, records.get(uuidToString(row.id)) ?? []);
+        return { latest: latestRows.map(parse), live: liveRows.map(parse) };
+      }),
+
+    /**
+     * Returns what went wrong in each failed run of `runIds` that says so, by
+     * run id: the run's failure message (its `failureMessage`, or the message
+     * of the edge it failed at), else the error message of the latest failed
+     * record of the step it failed at. A run that records neither is left out.
+     * One statement, whatever the number of runs.
+     */
+    listFailureMessages: (
+      runIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      runIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly id: Uint8Array; readonly message: string | null }>`
+              SELECT id, COALESCE(failure_message,
+                (SELECT json_extract(s.error, '$.message') FROM run_steps s
+                 WHERE s.run_id = runs.id AND s.step_id = runs.failed_step_id
+                   AND s.status = 'failed'
+                 ORDER BY s.iteration DESC LIMIT 1)) AS message
+              FROM runs WHERE id IN ${sql.in(runIds.map((id) => uuidFromString(id)))}`,
+            (rows) =>
+              new Map(
+                rows.flatMap((row) =>
+                  row.message === null ? [] : [[uuidToString(row.id), row.message] as const],
+                ),
+              ),
+          ),
 
     /** Checks whether a run of the workflow is pending or running. */
     hasUnfinishedRun: (workflowId: string): Effect.Effect<boolean, SqlError> =>

@@ -412,9 +412,9 @@ describe("task.query", () => {
         const { items } = yield* tasks.query({ status: ["in-progress"] });
         const running = items[0];
         if (running === undefined) return yield* Effect.die("the fixture has a task in progress");
-        yield* tasks.update({
-          id: running.id,
-          provenance: [{ signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID }],
+        yield* tasks.recordHandoff({
+          taskId: running.id,
+          entry: { signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID },
         });
         return {
           handedOff: (yield* tasks.query({ handedOff: true })).items,
@@ -523,38 +523,42 @@ describe("provenance", () => {
     expect(onUpdate).toMatchObject({ error: { code: "validation" } });
   });
 
-  it("records the signal and the run of a handoff in an update, and returns them with the entry on read and in the event", async () => {
-    const { read, events } = await run(
+  it("records a handoff on a task that exists in one task.updated, and returns the entry on read", async () => {
+    const { read, updated } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const created = yield* tasks.create({ title: "t", description: "d" });
-        yield* tasks.update({
-          id: created.id,
-          provenance: [{ signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID, ref: ISSUE_REF }],
+        yield* tasks.recordHandoff({
+          taskId: created.id,
+          entry: { signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID, ref: ISSUE_REF },
         });
         return {
           read: yield* tasks.read(created.id),
-          events: yield* readEventsOfKind("task.updated"),
+          updated: yield* readEventsOfKind("task.updated"),
         };
       }),
     );
     const entry = { signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID, ref: ISSUE_REF, actor: "user" };
+    expect(read.status).toBe("in-progress");
     expect(read.provenance).toEqual([expect.objectContaining(entry)]);
-    expect(events[0]?.payload).toMatchObject({
-      changes: { provenance: { added: [expect.objectContaining(entry)] } },
-    });
+    expect(updated.map((event) => event.payload)).toMatchObject([
+      {
+        changes: {
+          status: { old: "open", new: "in-progress" },
+          provenance: { added: [expect.objectContaining(entry)] },
+        },
+      },
+    ]);
   });
 
   it("creates an in-progress task with its handoff entry in one write, and emits one task.created with the entry", async () => {
     const { task, read, created, updated } = await run(
       Effect.gen(function* () {
         const tasks = yield* TaskService;
-        const task = yield* tasks.create({
-          id: HANDOFF_TASK_ID,
-          title: "t",
-          description: "d",
-          status: "in-progress",
-          provenance: [{ signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID, ref: ISSUE_REF }],
+        const task = yield* tasks.recordHandoff({
+          taskId: HANDOFF_TASK_ID,
+          newTask: { title: "t", priority: "high" },
+          entry: { signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID, ref: ISSUE_REF },
         });
         return {
           task,
@@ -565,12 +569,86 @@ describe("provenance", () => {
       }),
     );
     const entry = { signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID, ref: ISSUE_REF, actor: "user" };
-    expect(task).toMatchObject({ id: HANDOFF_TASK_ID, status: "in-progress" });
+    expect(task).toMatchObject({ id: HANDOFF_TASK_ID, status: "in-progress", priority: "high" });
     expect(read.provenance).toEqual([expect.objectContaining(entry)]);
     expect(created.map((event) => event.payload)).toMatchObject([
       { task: { id: HANDOFF_TASK_ID, status: "in-progress", provenance: [entry] } },
     ]);
     expect(updated).toEqual([]);
+  });
+
+  it("refuses to record a handoff for any caller but the user, whatever grants it holds", async () => {
+    const SESSION: Actor = {
+      _tag: "session",
+      sessionId: "0199e0e7-0002-7000-8000-000000000000",
+      profileId: "0199e0e7-0003-7000-8000-000000000000",
+      grants: ["task.create", "task.update", "task.read"],
+      profileGrants: ["task.create", "task.update", "task.read"],
+      assistantId: null,
+      agentId: null,
+    };
+    const entry = { signalId: SIGNAL_ID, runId: HANDOFF_RUN_ID };
+    const { newTask, existing, handedOff } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const created = yield* tasks.create({ title: "t", description: "d" });
+        const asSession = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          Effect.provideService(effect, CurrentActor, SESSION);
+        return {
+          newTask: yield* Effect.flip(
+            asSession(
+              tasks.recordHandoff({
+                taskId: HANDOFF_TASK_ID,
+                newTask: { title: "forged", priority: "normal" },
+                entry,
+              }),
+            ),
+          ),
+          existing: yield* Effect.flip(
+            asSession(tasks.recordHandoff({ taskId: created.id, entry })),
+          ),
+          handedOff: (yield* tasks.query({ handedOff: true })).items,
+        };
+      }),
+    );
+    expect(newTask).toMatchObject({ error: { code: "forbidden" } });
+    expect(existing).toMatchObject({ error: { code: "forbidden" } });
+    expect(handedOff).toEqual([]);
+  });
+
+  it("keeps the ordinary create and update to the ordinary contract: no chosen id or status, no signal in an entry", async () => {
+    const { created, createError, updateError } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const created = yield* tasks.create(
+          castMalformedInput({
+            id: HANDOFF_TASK_ID,
+            title: "t",
+            description: "d",
+            status: "in-progress",
+          }),
+        );
+        const createError = yield* Effect.flip(
+          tasks.create(
+            castMalformedInput({
+              title: "t",
+              description: "d",
+              provenance: [{ ref: ISSUE_REF, signalId: SIGNAL_ID }],
+            }),
+          ),
+        );
+        const updateError = yield* Effect.flip(
+          tasks.update(
+            castMalformedInput({ id: created.id, provenance: [{ signalId: SIGNAL_ID }] }),
+          ),
+        );
+        return { created, createError, updateError };
+      }),
+    );
+    expect(created.id).not.toBe(HANDOFF_TASK_ID);
+    expect(created.status).toBe("open");
+    expect(createError).toMatchObject({ error: { code: "validation" } });
+    expect(updateError).toMatchObject({ error: { code: "validation" } });
   });
 
   it("sets at and actor itself", async () => {

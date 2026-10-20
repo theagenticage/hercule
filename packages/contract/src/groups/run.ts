@@ -46,16 +46,12 @@ import { MAX_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost } from "../strings";
 import { Event, EventId } from "./event-record";
+import { RunStatus } from "./run-status";
 import { Subscription } from "./subscription";
 import { WORKFLOW_CONTENT_FIELDS } from "./workflow";
 import { WorkflowDefinition } from "./workflow-definition";
 
-/** The statuses of a run, in the order a run moves through them. */
-export const RUN_STATUSES = ["pending", "running", "completed", "failed", "cancelled"] as const;
-
-export const RunStatus = Schema.Literals(RUN_STATUSES);
-
-export type RunStatus = Schema.Schema.Type<typeof RunStatus>;
+export { RUN_STATUSES, RunStatus } from "./run-status";
 
 /** The statuses of a step record, in the order a step record moves through them. */
 const STEP_STATUSES = [

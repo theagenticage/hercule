@@ -95,6 +95,20 @@ export interface ProvenanceInput {
   readonly signalId?: string;
 }
 
+/** One handoff of a Task: the provenance entry that names the signal and the run. */
+export interface TrackedHandoff {
+  readonly signalId: string;
+  readonly runId: string;
+  readonly at: string;
+}
+
+/** A Task that Tracking follows, with its handoffs, oldest first. */
+export interface TrackedTask {
+  readonly id: string;
+  readonly title: string;
+  readonly handoffs: ReadonlyArray<TrackedHandoff>;
+}
+
 /** The fields of a new task row, with the defaults already applied. */
 export interface NewTask {
   /** The task's id, when the caller chose it; a new one is made when absent. */
@@ -355,6 +369,64 @@ const make = Effect.gen(function* () {
                    WHERE tasks.id = ${uuidFromString(id)} AND tasks.deleted_at IS NULL`.pipe(
         Effect.flatMap(hydrate),
         Effect.map((tasks) => Option.fromNullishOr(tasks[0])),
+      ),
+
+    /**
+     * Returns every in-progress task that has a handoff entry, with its
+     * handoff entries oldest first, the most recently updated task first.
+     * A deleted task is left out. One statement: it walks the partial index of
+     * entries that name a signal and looks each task up by its key, so it
+     * reads nothing of a task that has no handoff. The unary `+` on the status
+     * keeps SQLite off the status index, which would start from every
+     * in-progress task and read the provenance of each.
+     */
+    listTracked: (): Effect.Effect<ReadonlyArray<TrackedTask>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly task_id: Uint8Array;
+          readonly title: string;
+          readonly updated_at: string;
+          readonly signal_id: Uint8Array;
+          readonly run_id: Uint8Array | null;
+          readonly at: string;
+        }>`
+          SELECT p.task_id, t.title, t.updated_at, p.signal_id, p.run_id, p.at
+          FROM task_provenance p JOIN tasks t ON t.id = p.task_id
+          WHERE p.signal_id IS NOT NULL AND +t.status = 'in-progress' AND t.deleted_at IS NULL`,
+        (rows) => {
+          const byTask = new Map<
+            string,
+            { id: string; title: string; updatedAt: string; handoffs: Array<TrackedHandoff> }
+          >();
+          for (const row of rows) {
+            // A handoff entry always names the run it started.
+            if (row.run_id === null) continue;
+            const id = uuidToString(row.task_id);
+            const task = byTask.get(id);
+            const handoff = {
+              signalId: uuidToString(row.signal_id),
+              runId: uuidToString(row.run_id),
+              at: row.at,
+            };
+            if (task === undefined) {
+              byTask.set(id, {
+                id,
+                title: row.title,
+                updatedAt: row.updated_at,
+                handoffs: [handoff],
+              });
+            } else {
+              task.handoffs.push(handoff);
+            }
+          }
+          return [...byTask.values()]
+            .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
+            .map(({ id, title, handoffs }) => ({
+              id,
+              title,
+              handoffs: handoffs.toSorted((a, b) => a.at.localeCompare(b.at)),
+            }));
+        },
       ),
 
     /** Returns true if a project exists and has not been deleted. */

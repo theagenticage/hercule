@@ -20,6 +20,7 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 import { EventId } from "./event-record";
+import { RunStatus } from "./run-status";
 
 /** The longest title. A title is a line, not a paragraph. */
 export const MAX_TASK_TITLE_LENGTH = 512;
@@ -286,6 +287,65 @@ export const TaskUpdateCall = Schema.Struct({ taskId: Id, ...TASK_UPDATE_FIELDS 
 
 export type TaskUpdateCall = Schema.Schema.Type<typeof TaskUpdateCall>;
 
+/**
+ * One handoff of a signal to the Task's workflow: the signal the user handed
+ * off, the run that started, and when. It is a provenance entry that names a
+ * signal.
+ */
+export const TrackingHandoff = Schema.Struct({ signalId: Id, runId: Id, at: Timestamp });
+
+export type TrackingHandoff = Schema.Schema.Type<typeof TrackingHandoff>;
+
+/**
+ * What a client needs to know about one run of a tracked Task to work out
+ * where the work stands. It holds a run summary's fields plus `failureCause`,
+ * so no row needs a `run.read`.
+ */
+export const TrackingRun = Schema.Struct({
+  id: Id,
+  /** `null` for a run of a workflow that was sent with the run and never stored. */
+  workflowId: Schema.NullOr(Id),
+  /** The workflow's name as it was when the run started. */
+  workflowName: Schema.String,
+  status: RunStatus,
+  createdAt: Timestamp,
+  startedAt: Schema.optionalKey(Timestamp),
+  finishedAt: Schema.optionalKey(Timestamp),
+  /**
+   * The ids of the signal triggers a running run waits on, when it has no
+   * step to run and waits for one of them. Empty for any other run.
+   */
+  awaitedSignalIds: Schema.Array(Schema.String),
+  /**
+   * Why the run failed, in a few words, such as "permission denied on
+   * ops-db": the failure message, the message of the edge it failed at, or the
+   * error of the step that failed, else the failure reason in plain words.
+   * Present only for a failed run.
+   */
+  failureCause: Schema.optionalKey(Schema.String),
+});
+
+export type TrackingRun = Schema.Schema.Type<typeof TrackingRun>;
+
+/** One Task that Tracking follows, with the facts its state is worked out from. */
+export const TrackingTask = Schema.Struct({
+  taskId: Id,
+  title: Schema.String,
+  /** Every handoff the Task holds, oldest first. */
+  handoffs: Schema.Array(TrackingHandoff),
+  /** The Task's newest run, by creation time. */
+  latestRun: TrackingRun,
+  /** The Task's newest run that is pending or running, when one is. */
+  latestLiveRun: Schema.optionalKey(TrackingRun),
+});
+
+export type TrackingTask = Schema.Schema.Type<typeof TrackingTask>;
+
+/** What `task.queryTracking` returns: every Task Tracking follows. */
+export const TaskTracking = Schema.Struct({ rows: Schema.Array(TrackingTask) });
+
+export type TaskTracking = Schema.Schema.Type<typeof TaskTracking>;
+
 export const task = HttpApiGroup.make("task")
   .add(
     HttpApiEndpoint.get("query", "/tasks", {
@@ -295,6 +355,12 @@ export const task = HttpApiGroup.make("task")
       }),
       success: page(Task),
       error: [Unauthenticated, Forbidden, Validation, Internal],
+    }),
+    // A static path beside `/tasks/:id`: the router prefers it, and "tracking"
+    // is not an id.
+    HttpApiEndpoint.get("queryTracking", "/tasks/tracking", {
+      success: TaskTracking,
+      error: [Unauthenticated, Forbidden, Internal],
     }),
     HttpApiEndpoint.get("read", "/tasks/:id", {
       params: { id: Id },

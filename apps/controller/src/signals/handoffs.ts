@@ -21,14 +21,20 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
+  createInvalidStateError,
   createNotFoundError,
   createValidationError,
   ExternalRef,
+  HAND_TO_ACTION_PREFIX,
+  type InvalidState,
+  type NotFound,
   type RunStarted,
+  type Signal,
   type SignalHandOffCall,
   type SignalOrigin,
   type Task,
 } from "@hercule/contract";
+import { requireUserActor } from "../actor";
 import type { BoundOperationError } from "../bound-actions";
 import { mintUuid, uuidToString } from "../db";
 import { RunService } from "../runs";
@@ -36,6 +42,39 @@ import { TaskService, taskRepository } from "../tasks";
 import { workflowRepository } from "../workflows";
 import { findSignalInput } from "./actions";
 import { signalRepository } from "./repository";
+
+/** The refusal of a handoff for a caller who is not the user. */
+export const ONLY_THE_USER_HANDS_OFF =
+  "only the user may hand a signal off: it starts a workflow as the user and takes the signal off the list, so a session or a workflow step may not; ask the user instead";
+
+/** The refusal of an action on a signal that is already resolved. */
+export const ALREADY_RESOLVED =
+  "the signal is already resolved, so its actions can no longer be taken";
+
+/**
+ * Checks that `signal` can be handed to the workflow: it is open, and it
+ * offers a Hand to an agent action for that workflow. Fails with
+ * `InvalidState` when the signal is resolved, and with `NotFound` when it
+ * offers no action for the workflow, saying which workflows it does offer.
+ */
+export const checkOffersHandoff = (
+  signal: Signal,
+  workflowId: string,
+): Effect.Effect<void, InvalidState | NotFound> => {
+  if (signal.status !== "open") return Effect.fail(createInvalidStateError(ALREADY_RESOLVED));
+  const actionId = `${HAND_TO_ACTION_PREFIX}${workflowId}`;
+  if (signal.actions.some((candidate) => candidate.id === actionId)) return Effect.void;
+  const offered = signal.actions
+    .filter((candidate) => candidate.id.startsWith(HAND_TO_ACTION_PREFIX))
+    .map((candidate) => candidate.id.slice(HAND_TO_ACTION_PREFIX.length));
+  return Effect.fail(
+    createNotFoundError(
+      offered.length === 0
+        ? `the signal is not offered to the workflow ${workflowId}; it cannot be handed to any workflow`
+        : `the signal is not offered to the workflow ${workflowId}; it can be handed to the workflows ${offered.join(", ")}`,
+    ),
+  );
+};
 
 type TaskRepository = Effect.Success<typeof taskRepository>;
 
@@ -90,37 +129,63 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Hands a signal to a workflow. It runs in the caller's transaction, the
-     * one that resolves the signal, and in order:
+     * Hands a signal to a workflow, and returns the started run. It runs in
+     * the caller's transaction, the one that resolves the signal, and in
+     * order:
      *
-     * 1. reads the signal and the workflow, and finds the workflow's input for
-     *    signals of the signal's kind;
-     * 2. finds the Task to continue by the signal's thread ref (see
+     * 1. checks the caller is the user, the signal is open, and the signal
+     *    offers a Hand to an agent answer for the workflow that binds
+     *    `signal.handOff` on this signal (see `checkOffersHandoff`). Every
+     *    caller is checked, so a caller inside the controller cannot skip it;
+     * 2. reads the workflow, and finds its input for signals of the signal's
+     *    kind;
+     * 3. finds the Task to continue by the signal's thread ref (see
      *    `findTaskToContinue`), or decides the id of a new Task;
-     * 3. starts the run linked to that Task, with the signal as the
+     * 4. starts the run linked to that Task, with the signal as the
      *    workflow's signal input. Placing the run's first session waits until
      *    the transaction commits;
-     * 4. writes the Task: a continued Task is set `in-progress` when it was
-     *    not, and gets the handoff entry; a new Task is created `in-progress`
-     *    with the signal's title and priority and the handoff entry. Either
-     *    way it is one write, so one `task.created` or `task.updated` event
-     *    carries the entry. The entry names the signal and the run, with the
-     *    thread ref and the signal's event when it has them.
+     * 5. records the handoff on the Task with `TaskService.recordHandoff`:
+     *    a continued Task is set `in-progress` and gets the entry, and a new
+     *    Task is created `in-progress` with the signal's title and priority
+     *    and the entry. Either way it is one write, so one `task.created` or
+     *    `task.updated` event carries the entry. The entry names the signal
+     *    and the run, with the thread ref and the signal's event when it has
+     *    them.
      *
-     * Returns the started run. Fails with `NotFound` when the signal or the
-     * workflow does not exist, with `Validation` when the workflow takes no
-     * signal of the signal's kind, and with whatever starting the run fails
-     * with, such as a workflow that is invalid or has no capable runner. The
-     * caller's transaction then rolls back.
+     * Fails with `Forbidden` for any caller but the user, `NotFound` when the
+     * signal or the workflow does not exist or the signal does not offer the
+     * workflow, `InvalidState` when the signal is resolved, `Validation` when
+     * the answer names another signal or the workflow takes no signal of the
+     * signal's kind, and with whatever starting the run fails with, such as a
+     * workflow that is invalid or has no capable runner. The caller's
+     * transaction then rolls back.
      *
      * The run is started before the Task is written, so a new Task has the id
-     * chosen in step 2: the run names the Task, and the Task's first entry
+     * chosen in step 3: the run names the Task, and the Task's first entry
      * names the run.
      */
     handOff: (input: SignalHandOffCall): Effect.Effect<RunStarted, BoundOperationError> =>
       Effect.gen(function* () {
-        const signal = Option.getOrUndefined(yield* signals.readSummary(input.signalId));
+        yield* requireUserActor("signal.handOff", ONLY_THE_USER_HANDS_OFF);
+        const signal = Option.getOrUndefined(yield* signals.read(input.signalId));
         if (signal === undefined) return yield* Effect.fail(createNotFoundError("no such signal"));
+        yield* checkOffersHandoff(signal, input.workflowId);
+        const offered = signal.actions.find(
+          (candidate) => candidate.id === `${HAND_TO_ACTION_PREFIX}${input.workflowId}`,
+        )?.operation;
+        if (
+          offered?.op !== "signal.handOff" ||
+          (offered.input as { readonly signalId?: unknown }).signalId !== signal.id
+        ) {
+          return yield* Effect.fail(
+            createValidationError([
+              {
+                path: ["workflowId"],
+                message: `The signal's answer for the workflow ${input.workflowId} does not hand this signal off. Take another action.`,
+              },
+            ]),
+          );
+        }
         const definition = Option.getOrUndefined(yield* workflows.readDefinition(input.workflowId));
         if (definition === undefined) {
           return yield* Effect.fail(createNotFoundError("no such workflow"));
@@ -148,28 +213,18 @@ const make = Effect.gen(function* () {
           taskId,
         );
 
-        const entry = {
-          signalId: input.signalId,
-          runId: started.runId,
-          ...(Option.isSome(ref) ? { ref: ref.value } : {}),
-          ...(signal.origin.type === "event" ? { eventId: signal.origin.eventId } : {}),
-        };
-        if (existing === undefined) {
-          yield* tasks.create({
-            id: taskId,
-            title: signal.title,
-            description: "",
-            priority: signal.priority,
-            status: "in-progress",
-            provenance: [entry],
-          });
-        } else {
-          yield* tasks.update({
-            id: taskId,
-            ...(existing.status === "in-progress" ? {} : { status: "in-progress" as const }),
-            provenance: [entry],
-          });
-        }
+        yield* tasks.recordHandoff({
+          taskId,
+          entry: {
+            signalId: input.signalId,
+            runId: started.runId,
+            ...(Option.isSome(ref) ? { ref: ref.value } : {}),
+            ...(signal.origin.type === "event" ? { eventId: signal.origin.eventId } : {}),
+          },
+          ...(existing === undefined
+            ? { newTask: { title: signal.title, priority: signal.priority } }
+            : {}),
+        });
         return started;
       }),
   };

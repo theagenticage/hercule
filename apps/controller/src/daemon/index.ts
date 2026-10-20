@@ -112,7 +112,13 @@ export {
   RetirementLayer,
   sweepUnreachableRunners,
 } from "./runners";
-export { RunExecutorLayer, RunFibers, RunTargetsLayer, WorkspaceStepsLayer } from "./runs";
+export {
+  RunExecutorLayer,
+  RunFibers,
+  RunTargetsLayer,
+  TaskTrackingRunsLayer,
+  WorkspaceStepsLayer,
+} from "./runs";
 export {
   AssistantSessionsLayer,
   DispatchLayer,

@@ -120,6 +120,7 @@ import { SignalClaims } from "./claims";
 import { ignoreRuleOffers } from "./ignore-rule-offers";
 import { ignoreRuleRepository } from "./ignore-rule-repository";
 import { buildIgnoredOutcome } from "./outcome";
+import { ALREADY_RESOLVED, checkOffersHandoff, ONLY_THE_USER_HANDS_OFF } from "./handoffs";
 import { signalRepository } from "./repository";
 
 /** The input of `signal.act`: the signal's id, the action to take and its typed reply. */
@@ -162,10 +163,6 @@ const buildPluginDoneDescribeLine = (pluginDisplayName: string): DescribeLine =>
 const ONLY_THE_USER =
   "only the user may take a signal's action: it runs its operation as the user, so a session or a workflow step may not take one; ask the user instead";
 
-/** The refusal of `handOff` for a caller who is not the user. */
-const ONLY_THE_USER_HANDS_OFF =
-  "only the user may hand a signal off: it starts a workflow as the user and takes the signal off the list, so a session or a workflow step may not; ask the user instead";
-
 /** The refusal of `markDone` for a caller who is not the user. */
 const ONLY_THE_USER_MARKS_DONE =
   "only the user may mark a signal done: Done is the user's answer, so a session or a workflow step may not give it; ask the user instead";
@@ -179,8 +176,6 @@ const ONLY_THE_USER_LOWERS_PRIORITY =
 
 /** The resolution outcome of Done, which sends nothing to the source. */
 const DONE_OUTCOME = "Done, nothing sent";
-
-const ALREADY_RESOLVED = "the signal is already resolved, so its actions can no longer be taken";
 
 /** The refusal of `act` while another `act` or a `withdraw` on the same signal runs. */
 const SIGNAL_BUSY_FOR_ACT =
@@ -705,22 +700,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* requireUserActor("signal.handOff", ONLY_THE_USER_HANDS_OFF);
       const signal = yield* readOrFail(input.id);
-      if (signal.status !== "open") {
-        return yield* Effect.fail(createInvalidStateError(ALREADY_RESOLVED));
-      }
+      yield* checkOffersHandoff(signal, input.workflowId);
       const actionId = `${HAND_TO_ACTION_PREFIX}${input.workflowId}`;
-      if (!signal.actions.some((candidate) => candidate.id === actionId)) {
-        const offered = signal.actions
-          .filter((candidate) => candidate.id.startsWith(HAND_TO_ACTION_PREFIX))
-          .map((candidate) => candidate.id.slice(HAND_TO_ACTION_PREFIX.length));
-        return yield* Effect.fail(
-          createNotFoundError(
-            offered.length === 0
-              ? `the signal is not offered to the workflow ${input.workflowId}; it cannot be handed to any workflow`
-              : `the signal is not offered to the workflow ${input.workflowId}; it can be handed to the workflows ${offered.join(", ")}`,
-          ),
-        );
-      }
       return yield* act({ id: input.id, actionId });
     });
 

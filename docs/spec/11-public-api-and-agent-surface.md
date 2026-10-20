@@ -142,6 +142,7 @@ Semantics: [./09-tasks.md](./09-tasks.md).
 | Operation | Input | Grant | Route |
 |---|---|---|---|
 | `task.query` | `TaskFilter` (below) | `task.read` | `GET /tasks` |
+| `task.queryTracking` (*added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801)*) | none -> `{ rows: TrackingTask[] }`, below | `task.read` and `run.read` | `GET /tasks/tracking` |
 | `task.read` | `{ taskId }` | `task.read` | `GET /tasks/{id}` |
 | `task.create` | `{ title, description, priority?, labels?, projectId?, provenance? }` | `task.create` | `POST /tasks` |
 | `task.update` | `{ taskId, title?, description?, status?, priority?, projectId?, addLabels?, removeLabels?, provenance? }` (`projectId: null` detaches; `provenance` appends) | `task.update` | `PATCH /tasks/{id}` |
@@ -161,6 +162,33 @@ interface TaskFilter {
 Within one field the values are **any-of**; across fields the filter is **and**. No `or` across fields and no negation in v1. `TaskFilter` is defined once in the contract and used by the `task.query` operation and the identically named built-in action; the guard-before-agent pattern in [./07-workflows.md](./07-workflows.md) is `task.query` with `refs` set and `text` absent.
 
 *(Added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* **`handedOff`** keeps the Tasks that have a handoff entry: a provenance entry with a `signalId` ([./09-tasks.md](./09-tasks.md#provenance-and-external-refs)). `handedOff: false` keeps the Tasks that have none. Tracking asks for `handedOff: true` with `status: ["in-progress"]`. Its CLI row gains `--handed-off true|false`, with the line "Only tasks that were handed off from a signal (true), or only tasks that were not (false)."
+
+*(Added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* **`task.queryTracking`** returns the Tasks Intake's Tracking follows, with the facts a client works each Task's state out from, so a client needs no read per Task or per run. It is owned by the tasks domain. Its rows are every in-progress Task that has a handoff entry, never a deleted one, the most recently updated first:
+
+```ts
+interface TrackingTask {
+  taskId: string
+  title: string
+  handoffs: { signalId: string; runId: string; at: string }[]   // every handoff entry, oldest first
+  latestRun: TrackingRun                                         // newest by createdAt, then id
+  latestLiveRun?: TrackingRun                                    // newest pending or running run, when one exists
+}
+interface TrackingRun {
+  id: string; workflowId: string | null; workflowName: string
+  status: "pending" | "running" | "completed" | "failed" | "cancelled"
+  createdAt: string; startedAt?: string; finishedAt?: string
+  awaitedSignalIds: string[]        // as RunSummary: the signal triggers a running run waits on, else empty
+  failureCause?: string             // failed runs only; see below
+}
+```
+
+- **`failureCause`** is the text `describeRunFailureCause` gives for the run: its failure message, else the message of the edge it failed at, else the error of the step that failed, else the failure reason in plain words ("workspace failed"). The words for a reason are one function in the contract, which the controller and `client-core` both import.
+- **Not paged.** Tracking counts and orders every row, as the to-do view of `signal.query` does (section 1.6). A row holds one Task's title and handoffs and two runs, never a Task's history, so the reply grows with the number of Tasks the user has not ticked off.
+- **A Task with no run** is left out. A handoff starts its run in the transaction that tracks the Task, so none occurs.
+- **Grants.** The operation's row names `task.read`, and the service also checks `run.read`, because a row holds what `task.query` and what `run.query` give. Any caller that holds both may read it, a session included: it could read the same facts from those two operations. A caller that lacks one is refused with `forbidden` naming it.
+- **How it reads.** The tasks domain declares a read port for the runs, `TaskTrackingRuns`, and the controller daemon answers it from the runs repository, because the runs domain depends on the tasks domain (ADR 0033). It opens no transaction, so it reads on the read-only connection and never waits for a writer. The newest run of each Task is one lookup per Task on `runs_task_id`, and the live runs come from `runs_unfinished`, so no Task's history is read.
+- Its CLI row is `hercule task tracking`. Purpose: "Lists the work handed off from Intake that is still followed." It takes no field.
+- `task.query`'s `handedOff` filter and `run.query`'s `taskIds` filter stay: they are general reads of those entities that other callers may use.
 
 `task.query` sorts over `updatedAt | createdAt | priority | status`, default `updatedAt desc`, keyset. *(Amended 2026-10-03, [#300](https://github.com/theagenticage/hercule/issues/300).)* `priority` ascends `low, normal, high, urgent`, and `status` ascends `open, in-progress, done, cancelled`. With `text` the order is relevance and the walk pages by offset; `text` together with an explicit `sort` is `validation` naming both ([./09-tasks.md](./09-tasks.md) Search). `task.update` never takes a whole `labels` array: labels move one at a time through `addLabels` and `removeLabels`, so a concurrent edit by the user and a triage agent cannot clobber each other.
 
@@ -522,6 +550,7 @@ Record and router: [./10-triage-intake-and-notifications.md](./10-triage-intake-
   It acts on the signal's own Hand to an agent answer for the workflow. A signal raised before this change has a frozen `run.start` answer instead, and handing it off takes that one: the run starts untracked, with no Task ([./10-triage-intake-and-notifications.md](./10-triage-intake-and-notifications.md#94-actions-done-and-hand-to-an-agent)).
 
   - **One transaction, no waiting.** The transaction creates the run and does not wait on a runner: placing the run's first session happens after the commit, as for `run.start` ([ADR 0004](../adr/0004-controller-state-lives-in-one-sqlite-database.md)). If any step fails, nothing is written and the signal stays open.
+  - **Every caller is checked.** The handoff itself, not its callers, checks that the caller is the user, that the signal is open, and that the signal offers a Hand to an agent answer for the workflow that binds `signal.handOff` on this signal. A caller inside the controller cannot skip these. Writing the Task is a narrow path of the tasks domain, `recordHandoff`, which is also user only; `task.create` and `task.update` keep their ordinary contract (no chosen id, no starting status, no `signalId` in an entry).
   - **Only the core binds it.** `signal.raise` and a plugin's draft refuse an action whose operation is `signal.handOff` with `validation`, as they refuse `ignoreRule.create`, so a raiser cannot make one signal's answer hand off another. For a signal stored with such an answer, `signal.act` refuses it with `validation` when its `signalId` is not the signal it sits on, and writes nothing.
   - **Called through `signal.act`,** the operation's step 5 is the one resolution of the signal. `signal.act` does not write a second.
   - **The describe line** is worked out when it is read, from the signal, the workflow and the open Tasks at that moment: "Starts *Implement* on *PAY-212*, tracked as a new Task", or "Starts *Implement* on *PAY-212*, continues *Retry failed webhooks*". The Task's name is the marked part in the second form.

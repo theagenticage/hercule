@@ -131,6 +131,13 @@ const TABLE = {
   },
 
   "task.query": { requires: "task.read", method: "GET", path: "/api/v1/tasks" },
+  // Reads the Tasks and the runs of the work handed off from Intake, so the
+  // service also needs `run.read`.
+  "task.queryTracking": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/tasks/tracking",
+  },
   "task.read": { requires: "task.read", method: "GET", path: "/api/v1/tasks/:id" },
   "task.create": {
     requires: "task.create",

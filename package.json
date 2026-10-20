@@ -10,7 +10,7 @@
     "lint": "oxlint --type-aware --deny-warnings && eslint . --max-warnings 0 && oxfmt --check",
     "format": "oxfmt",
     "test": "bun --bun run vitest run --project node --project node-isolated && vitest run --project react --project desktop-main --project desktop-renderer",
-    "test:speed": "RUN_SPEED_TESTS=1 bun --bun run vitest run --project node packages/client-core/src/markdown.speed.test.ts",
+    "test:speed": "RUN_SPEED_TESTS=1 bun --bun run vitest run --project node packages/client-core/src/markdown.speed.test.ts apps/controller/src/tasks/tracking.speed.test.ts",
     "test:binary": "bun --bun run vitest run --project binary",
     "dep-lint": "bun run scripts/dep-lint.ts",
     "gen:android-tokens": "bun run scripts/gen-android-tokens.ts",
