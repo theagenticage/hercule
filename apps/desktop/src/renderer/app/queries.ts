@@ -21,6 +21,7 @@ import {
   collectRunningTurnRows,
   collectSenderSessionIds,
   classifyTranscriptPage,
+  describeRunFailureCause,
   detectLocalRunner,
   findTranscriptAfterPosition,
   type EventListFilter,
@@ -625,6 +626,50 @@ export const assistantsQuery = (client: HerculeClient) =>
     ...SHELL_READ_OPTIONS,
   });
 
+/**
+ * What Tracking lists: the Tasks that have a handoff entry and are still
+ * `in-progress`. Ticking a row off sets its Task `done`, which takes it out of
+ * this read.
+ */
+const TRACKED_TASK_FILTER = { handedOff: true, status: ["in-progress"] } as const;
+
+/**
+ * Reads the Tasks Tracking lists, at most one page of them, the largest page
+ * the controller allows: `run.query` takes at most one page of Task ids
+ * (`trackedRunsQuery`). The Hercule segment's count and Tracking's rows both
+ * come from it, so it is shell data, kept for the life of the window. A push
+ * on the `task` topic reads it again.
+ */
+export const trackedTasksQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.tasks(TRACKED_TASK_FILTER),
+    queryFn: async (): Promise<ReadonlyArray<Task>> =>
+      (await client.task.query({ query: { ...TRACKED_TASK_FILTER, limit: MAX_PAGE_LIMIT } })).items,
+    ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads every run of the Tasks `taskIds`, in one `run.query` (more only when
+ * the runs need more than one page). With no Task the read makes no request
+ * and returns an empty list.
+ *
+ * The key holds the sorted ids, so the same Tasks in another order share an
+ * entry, and a Task that joins or leaves Tracking reads under a new key.
+ * Sits under the `runs` prefix, so a push on the `run` topic reads it again.
+ * It is shell data, like `trackedTasksQuery`.
+ */
+export const trackedRunsQuery = (client: HerculeClient, taskIds: ReadonlyArray<string>) => {
+  const sortedIds = taskIds.toSorted();
+  return queryOptions({
+    queryKey: queryKeys.runs({ taskIds: sortedIds }),
+    queryFn: async (): Promise<ReadonlyArray<RunSummary>> =>
+      sortedIds.length === 0
+        ? []
+        : readEveryPage((page) => client.run.query({ query: { taskIds: sortedIds, ...page } })),
+    ...SHELL_READ_OPTIONS,
+  });
+};
+
 /** The key of the soonest `until` on Later, which each read of To do writes. See `snoozeTimerQuery`. */
 const SNOOZE_TIMER_KEY = ["snooze-timer"] as const;
 
@@ -920,6 +965,16 @@ export const runQuery = (client: HerculeClient, runId: string) =>
     retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
+
+/**
+ * Reads one failed run for why it failed, in a few words (see
+ * `describeRunFailureCause`). It is `runQuery`'s read, narrowed to the cause,
+ * so it shares the run page's cache entry: a `RunSummary` carries only the
+ * failure reason's code, and the cause needs the step records. Tracking reads
+ * it for the Failed rows on screen.
+ */
+export const runFailureCauseQuery = (client: HerculeClient, runId: string) =>
+  queryOptions({ ...runQuery(client, runId), select: describeRunFailureCause });
 
 /**
  * Reads every session a run's agent steps started, for the run's page: what
@@ -1729,7 +1784,9 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
  * the live sessions an Agent spawned, for "From runs" in Waiting on you, the
  * assistants and the current session of each one's main conversation, the
  * Connections, the signed-in user, Intake's To do list, whose count the
- * Hercule segment shows, and the plugins that name each signal's source.
+ * Hercule segment shows, the Tasks Tracking lists and their runs (the count
+ * takes in Tracking's waiting rows), and the plugins that name each signal's
+ * source.
  * Resolves once every read is cached,
  * and fails with the first read that fails.
  *
@@ -1763,6 +1820,14 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(userQuery(client)),
     queryClient.ensureQueryData(signalsToDoQuery(client)),
     queryClient.ensureQueryData(snoozeTimerQuery(client)),
+    queryClient.ensureQueryData(trackedTasksQuery(client)).then((tasks) =>
+      queryClient.ensureQueryData(
+        trackedRunsQuery(
+          client,
+          tasks.map((task) => task.id),
+        ),
+      ),
+    ),
     queryClient.ensureQueryData(pluginsQuery(client)),
     queryClient
       .ensureQueryData(assistantsQuery(client))

@@ -685,22 +685,25 @@ describe("the workflow list's live updates", () => {
     expect(listReads(calls.slice(beforeWorkflow), "/api/v1/workflows")).toHaveLength(1);
   });
 
-  it("drop both topics while the window is hidden, and hold them again when it shows", async () => {
+  it("drop both topics while the window is hidden, and hold them again when it shows, with one run subscription", async () => {
     const { live, context } = await openWorkflows();
     await waitForTopics(live, context.queryClient);
+    const countTopic = (topic: string) => live.readTopics().filter((each) => each === topic).length;
+    // The shell holds `run`, for Tracking's count, and the page holds none of its own.
+    expect(countTopic("run")).toBe(1);
+    expect(countTopic("workflow")).toBe(1);
 
     setVisibility("hidden");
 
     // The live connection leaves a topic once its unsubscribe frame is sent,
     // a moment after the page stops holding it.
     await waitFor(() => expect(live.readTopics()).not.toContain("workflow"));
-    expect(live.readTopics()).not.toContain("run");
+    await waitFor(() => expect(live.readTopics()).not.toContain("run"));
 
     setVisibility("visible");
 
-    await waitFor(() =>
-      expect(live.readTopics()).toEqual(expect.arrayContaining(["workflow", "run"])),
-    );
+    await waitFor(() => expect(countTopic("workflow")).toBe(1));
+    await waitFor(() => expect(countTopic("run")).toBe(1));
   });
 });
 

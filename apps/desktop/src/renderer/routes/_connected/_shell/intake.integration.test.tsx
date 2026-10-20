@@ -288,6 +288,12 @@ const openIntake = async (
 };
 
 const getList = () => screen.getByRole("region", { name: "Signals" });
+/** Returns the headings of the list's sections, Now and Signals, and not Tracking's. */
+const readSectionHeadings = () =>
+  within(getList())
+    .getAllByRole("heading")
+    .filter((heading) => heading.closest("[aria-label='Tracking']") === null)
+    .map((heading) => heading.textContent);
 const getRow = (signal: Signal) =>
   getList().querySelector<HTMLElement>(`[data-signal-id="${signal.id}"]`)!;
 const findPane = () => screen.findByRole("region", { name: "The open signal" });
@@ -330,11 +336,7 @@ describe("Intake's list", () => {
   it("draws Now above Signals, each oldest first, and counts each tab", async () => {
     await openIntake();
     const list = getList();
-    expect(
-      within(list)
-        .getAllByRole("heading")
-        .map((heading) => heading.textContent),
-    ).toEqual(["Now", "Signals2"]);
+    expect(readSectionHeadings()).toEqual(["Now", "Signals2"]);
     expect([...list.querySelectorAll(".ask-title")].map((title) => title.textContent)).toEqual([
       "Checks failed on main",
       REVIEW.title,
@@ -973,11 +975,7 @@ describe("Intake's moves", () => {
     });
     expect((await findToast()).textContent).toBe("Moved out of Now");
     await waitFor(() => {
-      expect(
-        within(getList())
-          .getAllByRole("heading")
-          .map((heading) => heading.textContent),
-      ).toEqual(["Signals3"]);
+      expect(readSectionHeadings()).toEqual(["Signals3"]);
     });
     expect(getItem(ALERT).querySelector(".ask-high")).not.toBeNull();
   });

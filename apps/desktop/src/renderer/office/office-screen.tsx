@@ -21,7 +21,6 @@ import {
 } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import type { Session } from "@hercule/contract";
-import { RUN_TOPICS, useScreenTopicsLive } from "../app/live";
 import {
   endedWorkQuery,
   ensureConversationData,
@@ -82,8 +81,8 @@ const NO_SESSIONS: readonly Session[] = [];
  * shows, or null for a closed drawer; `onOpen` is called with what the user
  * opens in the drawer, or with null when the user closes it.
  *
- * While the Office is open and the window shows, it holds the `run` topic,
- * so a run that starts or ends brings its sessions in or takes them out.
+ * The shell's `run` topic, held while the window shows, makes a run that
+ * starts or ends bring its sessions in or take them out.
  */
 export function OfficeScreen({
   open,
@@ -95,7 +94,6 @@ export function OfficeScreen({
   const { bridge, controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const queryClient = useQueryClient();
-  useScreenTopicsLive(controller.live, queryClient, RUN_TOPICS);
   const threads = useSuspenseQuery(threadsQuery(client)).data;
   const liveAgentSessions = useSuspenseQuery(liveAgentSessionsQuery(client)).data;
   const running = useSuspenseQuery(liveRunsQuery(client, "running")).data;

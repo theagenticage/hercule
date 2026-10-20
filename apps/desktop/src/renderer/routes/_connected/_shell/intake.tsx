@@ -35,6 +35,9 @@ const EverythingScreen = lazy(() =>
  *
  * - `view`: the view shown, Later, Done or Everything. With none, Intake shows To do.
  * - `signal`: the selected signal, whose pane is open, on To do, Later and Done.
+ * - `tracking`: set while Tracking is opened over the To do list. It lives in
+ *   the address so that coming back from a run's page, which a Tracking row
+ *   opens, finds Tracking open again.
  * - `event`: the selected event, whose pane is open, on Everything.
  * - `text`, `handling` and `source`: Everything's search, filter and source tab. With none, every event shows.
  *
@@ -43,6 +46,7 @@ const EverythingScreen = lazy(() =>
 export interface IntakeSearch {
   readonly view?: "later" | "done" | "everything" | undefined;
   readonly signal?: string | undefined;
+  readonly tracking?: true | undefined;
   readonly event?: number | undefined;
   readonly text?: string | undefined;
   readonly handling?: EventHandling | undefined;
@@ -59,7 +63,8 @@ const isBoundedText = (value: unknown, maxLength: number): value is string =>
 
 /**
  * Returns Intake's search params from the URL's. A `view` that is not Later,
- * Done or Everything, a `signal` that is not an id, an `event` that is not a
+ * Done or Everything, a `signal` that is not an id, a `tracking` that is not
+ * `true`, an `event` that is not a
  * whole number from 1, a `text` or a `source` that is empty or too long, and a
  * `handling` that is not one the controller filters on are dropped.
  *
@@ -73,6 +78,7 @@ const validateIntakeSearch = (search: Record<string, unknown>): IntakeSearch => 
       ? search.view
       : undefined,
   signal: isId(search.signal) ? search.signal : undefined,
+  tracking: search.tracking === true ? true : undefined,
   event:
     typeof search.event === "number" && Number.isSafeInteger(search.event) && search.event >= 1
       ? search.event
@@ -172,7 +178,7 @@ export const Route = createFileRoute("/_connected/_shell/intake")({
 });
 
 function IntakeRoute(): JSX.Element {
-  const { view, signal, event, text, handling, source } = Route.useSearch();
+  const { view, signal, tracking, event, text, handling, source } = Route.useSearch();
   const { openedAt } = Route.useLoaderData();
   const navigate = Route.useNavigate();
   const [pluginId, setPluginId] = useState<string | null>(null);
@@ -238,6 +244,22 @@ function IntakeRoute(): JSX.Element {
       view={view ?? "to-do"}
       pluginId={pluginId}
       selectedId={signal ?? null}
+      trackingOpen={tracking === true}
+      onTrackingOpenChange={(open) => {
+        // Opening Tracking covers the list, so the selected signal goes with it.
+        // Like the selection, it replaces the history entry.
+        void navigate({
+          search: (previous) => ({
+            ...previous,
+            tracking: open ? true : undefined,
+            signal: open ? undefined : previous.signal,
+          }),
+          replace: true,
+        });
+      }}
+      onOpenRun={(runId) => {
+        void navigate({ to: "/runs/$runId", params: { runId } });
+      }}
       onSelect={(signalId) => {
         // The selection replaces the history entry, so Back leaves Intake
         // rather than stepping through every row `J` passed.

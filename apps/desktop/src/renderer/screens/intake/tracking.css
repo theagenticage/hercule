@@ -1,0 +1,274 @@
+/* Tracking, ported from the Tracking drawing's tracking.css
+   (docs/design/tracking/tracking.css). Its class names are the drawing's with
+   a `tr-` prefix for the `rt-` ones, so each rule maps 1:1 to the drawing's
+   rule. Rows reuse Intake's control classes (`ask-acts`, `ask-act`), and the
+   section heading and count come from the shared controls. The drawing's pane,
+   Done and Needs you rules, and its motion, come with the slices that build
+   them. Each departure from the drawing says why. */
+
+/* ---------- The tray ---------- */
+/* Either Intake or Tracking in the list column, never both. Folded, Tracking
+   sits under the list at the foot of the column, on the page's surface: its
+   head and the two rows that changed last. It is a row of the column's own
+   flex layout, so the list ends above it and keeps room under its last row
+   (intake.css gives the list the drawing's 12px). The drawing lays it over the
+   list and measures its height to leave that room, because its page has no
+   layout to do it; here the layout does it, and a toast or the bulk bar
+   sticks above the tray, never under it. */
+.tr-tray {
+  flex: none;
+  padding: 4px 10px 8px;
+  background: var(--surface);
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+/* Opened, it covers the column from just under the hairline that closes the
+   title bar, so the hairline runs on unbroken. The view switcher is covered:
+   Tracking has no views. */
+.tr-tray.is-open {
+  position: absolute;
+  z-index: 3;
+  inset: 1px 0 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  box-shadow: none;
+}
+.tr-tray:focus-visible {
+  outline: none;
+}
+
+/* The head of folded Tracking, and the foot of opened Tracking: one button
+   across the column, the way in and the way out. */
+.tr-bar {
+  margin: 0;
+}
+.tr-bar--back {
+  flex: none;
+  padding: 4px 10px;
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+.tr-bar-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px 0 4px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+.tr-bar-btn:hover {
+  background: var(--hover);
+}
+.tr-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.tr-label .count {
+  height: 17px;
+  letter-spacing: 0;
+}
+.tr-wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+/* "Show all" and "Back to Intake": the bar says in words that it is the way in
+   and out. */
+.tr-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.tr-bar-btn:hover .tr-all {
+  color: var(--ink);
+}
+/* The icon set has a chevron that points right, which turned a quarter turn
+   points down, as the drawing's chevron does. */
+.tr-chev {
+  display: grid;
+  color: var(--faint);
+  transform: rotate(90deg);
+}
+/* The chevron points up while Tracking is folded: it opens upward. */
+.tr-chev--up {
+  transform: rotate(-90deg);
+}
+.tr-marks {
+  display: inline-flex;
+  gap: 8px;
+  color: var(--ink);
+  opacity: 0.75;
+}
+.tr-empty {
+  margin: 0;
+  padding: 0 10px 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+
+/* Opened Tracking's head: the way back where a Mac puts it, at the left, then
+   the name. */
+.tr-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 12px 20px 0;
+}
+.tr-back {
+  gap: 2px;
+  margin-left: -8px;
+  padding: 0 8px 0 4px;
+  color: var(--muted);
+}
+.tr-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--t-16);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.005em;
+}
+.tr-head .tr-wait {
+  margin-left: auto;
+}
+.tr-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 10px 16px;
+  scrollbar-width: thin;
+}
+/* Each state is a section, as Now and Signals are on To do, led by the state's
+   mark. */
+.tr-sec {
+  padding-left: 10px;
+}
+.tr-sec .mark {
+  margin-right: -2px;
+}
+
+/* ---------- Tracking's rows ---------- */
+.tr-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* A row holds its Mark done beside the row's button, as a signal's row holds
+   its moves, so the row stays one button. --row-fill is the row's background
+   made solid, for the control to fade over. */
+.tr-run-item {
+  --row-fill: var(--surface);
+  position: relative;
+  border-radius: var(--r-md);
+}
+.tr-run-item:hover {
+  --row-fill: color-mix(in srgb, var(--ink) 5%, var(--surface));
+}
+.tr-run-item.is-on {
+  --row-fill: color-mix(in srgb, var(--ink) 7%, var(--surface));
+}
+.tr-run {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 5px 10px 5px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+.tr-run-item:hover > .tr-run {
+  background: var(--hover);
+}
+.tr-run-item.is-on > .tr-run {
+  background: var(--selected);
+}
+.tr-run-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.tr-run-title,
+.tr-run-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tr-run-title {
+  color: var(--ink);
+  font-size: var(--t-13);
+}
+.tr-run-sub {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* The workflow's name keeps its colleague's hue, whatever the line's colour. */
+.tr-run-who {
+  color: var(--who-ink);
+}
+.tr-run-end {
+  align-self: start;
+  padding-top: 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+/* Failed speaks up in marigold, as a row that waits on the user does. */
+.tr-run-item.is-you .tr-run-sub {
+  color: var(--you-ink);
+}
+.tr-run-item.is-you .tr-run-end {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+/* Finished waits on the user too, but it is good news: the agent is done and
+   the work only needs a tick. So it is green, the book's colour for what
+   passed, in a wash: --ok-tint at about half strength, so the row reads green
+   without lifting off the list. */
+.tr-run-item.is-finished .tr-run-sub,
+.tr-run-item.is-finished .tr-run-end {
+  color: var(--ok);
+}
+.tr-run-item.is-finished .tr-run-end {
+  font-weight: var(--w-bold);
+}
+.tr-run-item.is-finished > .tr-run {
+  background: color-mix(in oklab, var(--ok-tint) 55%, transparent);
+}
+.tr-run-item.is-finished:hover > .tr-run,
+.tr-run-item.is-finished.is-on > .tr-run {
+  background: var(--ok-tint);
+}
+.tr-run-item.is-finished {
+  --row-fill: var(--ok-tint);
+}
+/* Mark done shows while the pointer is on the row and while the keyboard's
+   focus is on it, as Intake's row controls do. Selecting the row with J and K
+   focuses the row itself, which shows nothing. */
+.tr-run-item:hover > .ask-acts,
+.tr-run-item:has(> .ask-acts :focus-visible) > .ask-acts {
+  opacity: 1;
+  pointer-events: auto;
+}

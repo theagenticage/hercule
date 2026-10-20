@@ -15,6 +15,7 @@ import { useInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import type { Signal, SignalView } from "@hercule/contract";
 import {
+  countWaitingTrackingRows,
   decideSignalRowControls,
   describeBulkDoneTitle,
   groupSignalsByDay,
@@ -22,6 +23,7 @@ import {
   isMoveLeavingView,
   listBulkMoves,
   moveSignalSelection,
+  parsePluginId,
   planSignalMove,
   resolveDisplayTimezone,
   toggleSignalCheck,
@@ -36,6 +38,7 @@ import {
   signalsLaterQuery,
   signalsToDoQuery,
 } from "../../app/queries";
+import { useTrackingRows } from "../../app/tracking";
 import { IntakeDock } from "./intake-dock";
 import { InboxZero } from "./inbox-zero";
 import { IntakeFoot } from "./intake-foot";
@@ -45,11 +48,15 @@ import { isTextField } from "../../app/text-field";
 import { pickSelectionAfterMove } from "./pick-selection-after-move";
 import { SignalPane, type SignalPaneHandle } from "./signal-pane";
 import { SnoozeMenu } from "./snooze-menu";
+import { TrackingTray } from "./tracking-tray";
+import { canMarkTrackingStateDone } from "./tracking-states";
 import { useIntakeSplit } from "./use-intake-split";
 import { useHeldSignals } from "./use-held-signals";
 import { useIntakeTabs } from "./use-intake-tabs";
+import { useTrackingTickOff } from "./use-tracking-tick-off";
 import {
   IntakeMovesContext,
+  useMoveToast,
   useSignalMoveRunner,
   type IntakeMoves,
   type SnoozeMenuPlace,
@@ -84,6 +91,12 @@ const isCheckable = (signal: Signal | undefined, view: SignalView): signal is Si
  * selected signal unless the user closed it with Esc, which keeps the row
  * selected, or the split is too narrow for it.
  *
+ * On To do, Tracking lies under the list, folded, or opened over the whole
+ * list column (`trackingOpen`, which `onTrackingOpenChange` changes; opening
+ * it clears the selected signal). The rows of Tracking that wait on the user
+ * count in To do, so a list with no signal but such rows is not at inbox
+ * zero. A press on a row of Tracking calls `onOpenRun` with its run's id.
+ *
  * The keys of spec 17 §Keys act while the focus is in the list or the pane
  * and never in a text field:
  *
@@ -95,12 +108,18 @@ const isCheckable = (signal: Signal | undefined, view: SignalView): signal is Si
  * - `↩` on a row opens the pane on the suggested answer, `R` opens the
  *   Reply box, and `O` opens the signal on its source.
  * - Esc clears the checks, and then steps back.
+ * - `T` opens and closes Tracking. While it is open, `J`/`K` and `↓`/`↑` walk
+ *   only its rows, `E` marks the selected row done unless it is Working, and
+ *   Esc clears the selection, then closes Tracking.
  */
 export function IntakeScreen({
   view,
   pluginId,
-  selectedId,
+  selectedId: selectedIdParam,
+  trackingOpen: trackingOpenParam,
   onSelect,
+  onTrackingOpenChange,
+  onOpenRun,
   onViewChange,
   onPluginChange,
 }: {
@@ -108,12 +127,22 @@ export function IntakeScreen({
   /** The pressed source tab, `null` for All. */
   readonly pluginId: string | null;
   readonly selectedId: string | null;
+  /** Whether Tracking is opened over the list. It shows on To do only. */
+  readonly trackingOpen: boolean;
   readonly onSelect: (signalId: string | null) => void;
+  /** Opens or closes Tracking. Opening it also clears the selected signal. */
+  readonly onTrackingOpenChange: (open: boolean) => void;
+  /** Opens the page of a run. */
+  readonly onOpenRun: (runId: string) => void;
   readonly onViewChange: (view: IntakeView) => void;
   readonly onPluginChange: (pluginId: string | null) => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const { tabs, plugins } = useIntakeTabs(pluginId);
+  const trackingRows = useTrackingRows();
+  // Tracking covers the list, so no signal is selected while it is open.
+  const trackingOpen = view === "to-do" && trackingOpenParam;
+  const selectedId = trackingOpen ? null : selectedIdParam;
   const { data: toDo } = useSuspenseQuery(signalsToDoQuery(client));
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const timezone = resolveDisplayTimezone(settings.user.timezone);
@@ -162,7 +191,9 @@ export function IntakeScreen({
     listScope,
     pointerOverList || menu?.place === "row" || menu?.place === "bar",
   );
-  const moves = useSignalMoveRunner(client, timezone, held);
+  const toast = useMoveToast();
+  const moves = useSignalMoveRunner(client, timezone, held, toast);
+  const tickOff = useTrackingTickOff(client, toast);
   const sections: ReadonlyArray<IntakeSection> =
     view === "to-do"
       ? groupSignalsIntoSections(held.shown, pluginId)
@@ -190,6 +221,55 @@ export function IntakeScreen({
   const updateChecks = (ids: ReadonlySet<string>): void => {
     setChecks({ scope, ids });
     if (ids.size === 0) setPreview(null);
+  };
+
+  // The selected row of opened Tracking. A row that left Tracking is not
+  // selected any more.
+  const [trackingSelection, setTrackingSelection] = useState<string | null>(null);
+  const trackingIds = trackingRows.map((row) => row.task.id);
+  const selectedTaskId =
+    trackingOpen && trackingSelection !== null && trackingIds.includes(trackingSelection)
+      ? trackingSelection
+      : null;
+
+  const openTracking = (): void => {
+    updateChecks(new Set());
+    setMenu(null);
+    setTrackingSelection(null);
+    onTrackingOpenChange(true);
+  };
+
+  const closeTracking = (): void => {
+    setTrackingSelection(null);
+    onTrackingOpenChange(false);
+    // The sheet holds the focus and is about to go. The list holds it until the signals are back.
+    listRef.current?.focus({ preventScroll: true });
+  };
+
+  /** Moves the selection of opened Tracking by `step`, and stops at the first and the last row. */
+  const moveTrackingSelection = (step: 1 | -1): void => {
+    if (trackingIds.length === 0) return;
+    const at = selectedTaskId === null ? -1 : trackingIds.indexOf(selectedTaskId);
+    const next = at < 0 ? (step === 1 ? 0 : trackingIds.length - 1) : at + step;
+    setTrackingSelection(trackingIds[Math.min(Math.max(next, 0), trackingIds.length - 1)]!);
+  };
+
+  /**
+   * Marks the row of `taskId` done, unless it is Working. When the row was the
+   * selected one, the selection goes to the next row that stays.
+   */
+  const markTaskDone = (taskId: string): void => {
+    const row = trackingRows.find((each) => each.task.id === taskId);
+    if (row === undefined || !canMarkTrackingStateDone(row.state)) return;
+    const next = pickSelectionAfterMove(trackingIds, taskId, [taskId]);
+    tickOff.run({ taskId, title: row.task.title }, () => {
+      setTrackingSelection((current) => (current === taskId ? next : current));
+    });
+  };
+
+  const openTrackingRow = (taskId: string): void => {
+    const row = trackingRows.find((each) => each.task.id === taskId);
+    if (row !== undefined) onOpenRun(row.run.id);
   };
 
   /** Selects `signalId` and shows the pane, as a click on its row does. */
@@ -341,6 +421,35 @@ export function IntakeScreen({
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
+  /** Runs the keys of opened Tracking, which are few: it has no pane, checks or snooze yet. */
+  const handleTrackingKeys = (
+    event: KeyboardEvent<HTMLDivElement>,
+    key: string,
+    extending: boolean,
+  ): void => {
+    switch (key) {
+      case "j":
+      case "ArrowDown":
+        event.preventDefault();
+        if (!extending) moveTrackingSelection(1);
+        return;
+      case "k":
+      case "ArrowUp":
+        event.preventDefault();
+        if (!extending) moveTrackingSelection(-1);
+        return;
+      case "e":
+        event.preventDefault();
+        if (!extending && selectedTaskId !== null) markTaskDone(selectedTaskId);
+        return;
+      case "Escape":
+        event.preventDefault();
+        if (selectedTaskId !== null) setTrackingSelection(null);
+        else closeTracking();
+        return;
+    }
+  };
+
   const handleKeys = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (isTextField(event.target)) return;
     // A key pressed in a dialog or a menu the pane opened, such as the
@@ -349,6 +458,18 @@ export function IntakeScreen({
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     const extending = event.shiftKey;
+    if (key === "t" && view === "to-do") {
+      event.preventDefault();
+      if (!extending) {
+        if (trackingOpen) closeTracking();
+        else openTracking();
+      }
+      return;
+    }
+    if (trackingOpen) {
+      handleTrackingKeys(event, key, extending);
+      return;
+    }
     // Shift only extends the checks with the keys that move the selection.
     if (extending && !["j", "k", "ArrowDown", "ArrowUp"].includes(key)) return;
     const target = event.target as HTMLElement;
@@ -372,10 +493,14 @@ export function IntakeScreen({
           setMenu(null);
         }
         return;
-      case "e":
+      case "e": {
         event.preventDefault();
-        runKeyMove("done");
+        // On a row of folded Tracking, `E` marks that row done, not the selected signal.
+        const focusedTaskId = target.closest<HTMLElement>("[data-task-id]")?.dataset.taskId;
+        if (focusedTaskId !== undefined) markTaskDone(focusedTaskId);
+        else runKeyMove("done");
         return;
+      }
       case "h":
         event.preventDefault();
         runKeyMove("snooze");
@@ -410,7 +535,7 @@ export function IntakeScreen({
     }
   };
 
-  const canToggle = fits && (paneShown || listedSignals.length > 0);
+  const canToggle = fits && !trackingOpen && (paneShown || listedSignals.length > 0);
   const toggleTitle = !fits
     ? "Widen the window to show the pane"
     : paneShown
@@ -446,7 +571,13 @@ export function IntakeScreen({
   };
   // Inbox zero takes the place of the empty To do list on the All tab, and
   // shows the cleared count itself, so the foot goes with the rows.
-  const inboxZero = view === "to-do" && pluginId === null && listedSignals.length === 0;
+  // Rows of Tracking that wait on the user keep To do from being at zero.
+  const waitingTrackingRows = countWaitingTrackingRows(trackingRows);
+  const inboxZero =
+    view === "to-do" &&
+    pluginId === null &&
+    listedSignals.length === 0 &&
+    waitingTrackingRows === 0;
 
   return (
     <>
@@ -502,7 +633,12 @@ export function IntakeScreen({
                       }}
                     />
                   ) : (
-                    <EmptyView view={view} tabName={tabName} loading={paged.isPending} />
+                    <EmptyView
+                      view={view}
+                      tabName={tabName}
+                      loading={paged.isPending}
+                      trackingWaits={waitingTrackingRows > 0}
+                    />
                   )
                 }
                 foot={
@@ -511,7 +647,8 @@ export function IntakeScreen({
                       <IntakeFoot timezone={timezone} />
                     )}
                     <IntakeDock
-                      toast={moves.toast}
+                      // While opened Tracking covers the list, it shows the toast.
+                      toast={trackingOpen ? null : toast.toast}
                       bulk={
                         bulkMoves.length === 0 || checkedSignals.length === 0
                           ? null
@@ -531,7 +668,7 @@ export function IntakeScreen({
                               },
                             }
                       }
-                      onDismissToast={moves.dismissToast}
+                      onDismissToast={toast.dismiss}
                     />
                   </>
                 }
@@ -548,6 +685,24 @@ export function IntakeScreen({
                   setFocusSelectedRow(false);
                 }}
               />
+              {view === "to-do" && (
+                <TrackingTray
+                  rows={trackingRows}
+                  open={trackingOpen}
+                  selectedTaskId={selectedTaskId}
+                  signalCount={listedSignals.length}
+                  signalSources={[
+                    ...new Set(listedSignals.map((signal) => parsePluginId(signal.kind))),
+                  ]}
+                  dock={
+                    <IntakeDock toast={toast.toast} bulk={null} onDismissToast={toast.dismiss} />
+                  }
+                  onOpen={openTracking}
+                  onClose={closeTracking}
+                  onOpenRow={openTrackingRow}
+                  onMarkDone={markTaskDone}
+                />
+              )}
             </>
           }
           pane={
@@ -589,17 +744,27 @@ export function IntakeScreen({
 /**
  * Renders what a view shows with no rows. `tabName` names the plugin's tab
  * shown, if any. While a paged view's first page is read, it shows nothing.
+ * To do with no signal points to Tracking while rows of it wait on the user.
  */
 function EmptyView({
   view,
   tabName,
   loading,
+  trackingWaits,
 }: {
   readonly view: SignalView;
   readonly tabName: string | undefined;
   readonly loading: boolean;
+  /** Whether rows of Tracking wait on the user, which To do then points to. */
+  readonly trackingWaits: boolean;
 }): JSX.Element | null {
-  if (view === "to-do") return <p className="asks-empty">Nothing on your list.</p>;
+  if (view === "to-do") {
+    return (
+      <p className="asks-empty">
+        {trackingWaits ? "No signals. What waits on you is in Tracking." : "Nothing on your list."}
+      </p>
+    );
+  }
   if (loading) return null;
   if (view === "later") {
     return (

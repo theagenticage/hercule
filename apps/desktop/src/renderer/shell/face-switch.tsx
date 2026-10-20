@@ -1,5 +1,6 @@
 import { useRef, type JSX, type KeyboardEvent } from "react";
 import { describeOrchestrationSegment } from "@hercule/client-core";
+import { useToDoCount } from "../app/tracking";
 import type { SidebarFace } from "./sidebar-face";
 
 /** The switch's segments, in order, with the label each one shows. */
@@ -17,21 +18,21 @@ const SEGMENTS: ReadonlyArray<{ readonly face: SidebarFace; readonly label: stri
  *   with its face.
  * - Only the selected segment is in the tab order. ← and → select the other
  *   segment and move the focus to it, as in any segmented control.
- * - The Hercule segment ends in `toDoCount`, Intake's To do count, in
- *   marigold, and its accessible name carries the count: "Hercule, 8 to do".
- *   The count is hidden at 0.
+ * - The Hercule segment ends in Intake's To do count, in marigold, and its
+ *   accessible name carries the count: "Hercule, 8 to do". The count is the
+ *   open signals and the rows of Tracking that wait on the user. It is hidden
+ *   at 0.
  */
 export function FaceSwitch({
   face,
   onChange,
   listId,
-  toDoCount,
 }: {
   readonly face: SidebarFace;
   readonly onChange: (face: SidebarFace) => void;
   readonly listId: string;
-  readonly toDoCount: number;
 }): JSX.Element {
+  const toDoCount = useToDoCount();
   const listRef = useRef<HTMLDivElement>(null);
 
   const moveSelection = (event: KeyboardEvent): void => {

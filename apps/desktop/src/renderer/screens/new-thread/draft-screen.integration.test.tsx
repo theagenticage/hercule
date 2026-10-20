@@ -381,7 +381,9 @@ describe("the new-thread screen", () => {
     expect(document.activeElement).toBe(field);
     // The cards ask for the project's most urgent open tasks, newest first
     // within one priority.
-    const tasksCall = calls.find((call) => call.path === "/api/v1/tasks");
+    const tasksCall = calls.find(
+      (call) => call.path === "/api/v1/tasks" && new URLSearchParams(call.search).has("projectId"),
+    );
     const params = new URLSearchParams(tasksCall?.search);
     expect(params.get("projectId")).toBe(WEBSHOP.id);
     expect(params.getAll("sort")).toEqual(["priority:desc", "createdAt:desc"]);

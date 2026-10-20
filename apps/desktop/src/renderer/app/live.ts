@@ -12,7 +12,8 @@
  * - `runner`, for the runners, whose connectivity draws a thread as away;
  * - `workspace`, for working files, observations and retained work;
  * - `provider`, for the providers, whose catalogs name each thread's model;
- * - `task`, for the open tasks a Draft Thread offers to start from;
+ * - `task`, for the open tasks a Draft Thread offers to start from, and for
+ *   the Tasks Tracking lists, whose waiting rows the To do count takes in;
  * - `connection`, for the GitHub Connection the New project form clones
  *   through, which may be made in the web app while this app runs;
  * - `assistant`, for the assistants the sidebar's Assistants section lists;
@@ -75,6 +76,9 @@ const SHELL_TOPICS: readonly MutableLiveTopic[] = [
  */
 export const useLiveConnection = (live: Live, queryClient: QueryClient): void => {
   const router = useRouter();
+  // The runs, for Tracking's count, while the window is visible. This is the
+  // only `run` subscription: the screens that read runs rely on it.
+  useScreenTopicsLive(live, queryClient, RUN_TOPICS);
 
   useEffect(() => {
     const unsubscribes = SHELL_TOPICS.map((topic) =>
@@ -132,12 +136,19 @@ export const useSubagentsLive = (
   }, [live, queryClient, sessionId]);
 };
 
-/** The topics the workflow pages hold: the workflows with their triggers, and the runs. */
-export const WORKFLOW_TOPICS: readonly MutableLiveTopic[] = ["workflow", "run"];
+/**
+ * The topic the workflow pages hold: the workflows with their triggers. Not
+ * the runs: the shell holds `run` (see `RUN_TOPICS`), and a push on it reads
+ * every run list and run again, whichever screen shows them.
+ */
+export const WORKFLOW_TOPICS: readonly MutableLiveTopic[] = ["workflow"];
 
 /**
- * The topic the Office holds: the runs, so a run that ends takes its
- * sessions out of the Office.
+ * The topic the shell holds while the window is visible: the runs. Tracking's
+ * count takes in the Tasks' runs on every screen, and the Workflows pages, a
+ * run's page and the Office read the runs too. It is one subscription, so a
+ * push arrives once. It is dropped while the window is hidden and read again
+ * when it shows, as `useScreenTopicsLive` does for every screen's topics.
  */
 export const RUN_TOPICS: readonly MutableLiveTopic[] = ["run"];
 
@@ -155,9 +166,10 @@ export const SKILL_TOPICS: readonly MutableLiveTopic[] = ["skill"];
  * the window is visible, by subscribing to each of `topics`. A push on a
  * topic reads again every query it names.
  *
- * The shell holds none of these topics: the workflow pages' topics are
- * pushed at every cron fire, and the Discussions, Wiki and Skills pages are
- * read only by their own screens. While the window is hidden nobody reads the screen,
+ * The shell holds none of these topics except `run` (see `RUN_TOPICS`, which
+ * `useLiveConnection` holds this way too): the `workflow` topic is pushed at
+ * every cron fire, and the Discussions, Wiki and Skills pages are read only
+ * by their own screens. While the window is hidden nobody reads the screen,
  * so its topics are dropped (spec 17 §Rules, rule 3). When the window shows
  * again, they are subscribed again, and the controller's first push on each
  * reads every query it covers again.

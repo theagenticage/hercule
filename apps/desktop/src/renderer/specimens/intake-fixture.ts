@@ -69,6 +69,16 @@
  * - `everything-ignored-pane`: the event an Ignore Rule caught, with the
  *   link to the rule in the pane;
  * - `everything-ignored-deleted-pane`: the event a since deleted rule caught;
+ * - `tracking-folded`: Marta's review request open, with folded Tracking under
+ *   the list, two rows under its head;
+ * - `tracking-opened`: Tracking opened over the whole list column, a row in
+ *   each state (two are Working);
+ * - `tracking-empty`: the same as folded, with nothing handed off, so folded
+ *   Tracking is its head and the line that says what it is for;
+ * - `tracking-zero`: no signal on To do while two rows only work: inbox zero,
+ *   with folded Tracking under it;
+ * - `tracking-waiting`: no signal on To do while two rows wait on the user:
+ *   the list says what waits is in Tracking, and is not at inbox zero;
  * - `settings-ignore-rules`: Settings > Intake, with the GitHub plugin's
  *   Ignore Rules under its kinds, and below them the section of a removed
  *   plugin, which holds its Ignore Rules only;
@@ -94,6 +104,7 @@ import {
 } from "@hercule/contract";
 import type { FetchLike } from "@hercule/client-core";
 import { stopSpecimenClockAt } from "./fixed-clock";
+import { TRACKING_RECORDS } from "./intake-tracking";
 import { buildPlugin, GITHUB_PLUGIN, SENTRY_MARK } from "./plugins-fixture";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { IntakeRecords, IntakeSettingsRecords, SidebarRecords } from "./shell-page";
@@ -1230,18 +1241,20 @@ const buildScene = (
   url: string,
   {
     read = signal,
+    records = RECORDS,
     intake = {},
     play,
     hover,
   }: {
     read?: Signal;
+    records?: SidebarRecords;
     intake?: Partial<IntakeRecords>;
     play?: () => Promise<void>;
     hover?: Signal;
   } = {},
 ): IntakeScene => ({
   name,
-  records: RECORDS,
+  records,
   intake: { signal: read, event: buildEvent(signal, url), ...intake },
   ...(play !== undefined && { play }),
   ...(hover !== undefined && { hover: selectRow(hover) }),
@@ -1401,6 +1414,29 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
   }),
   buildEverythingScene("everything-ignored-pane", { events: EVENTS, selectedEventId: 40 }),
   buildEverythingScene("everything-ignored-deleted-pane", { events: EVENTS, selectedEventId: 41 }),
+  buildScene("tracking-folded", REVIEW, REVIEW_URL, {
+    records: { ...RECORDS, tracking: TRACKING_RECORDS },
+  }),
+  buildScene("tracking-opened", REVIEW, REVIEW_URL, {
+    records: { ...RECORDS, tracking: TRACKING_RECORDS },
+    intake: { signal: null, event: null, trackingOpen: true },
+  }),
+  buildScene("tracking-empty", REVIEW, REVIEW_URL),
+  buildScene("tracking-zero", REVIEW, REVIEW_URL, {
+    records: {
+      ...RECORDS,
+      signals: [],
+      tracking: {
+        tasks: TRACKING_RECORDS.tasks.filter((task) => ["t-checkout", "t-sku"].includes(task.id)),
+        runs: TRACKING_RECORDS.runs,
+      },
+    },
+    intake: { signal: null, event: null },
+  }),
+  buildScene("tracking-waiting", REVIEW, REVIEW_URL, {
+    records: { ...RECORDS, signals: [], tracking: TRACKING_RECORDS },
+    intake: { signal: null, event: null },
+  }),
   {
     name: "settings-ignore-rules",
     records: RECORDS,
