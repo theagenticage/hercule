@@ -189,6 +189,7 @@ const start = async (
   } = {},
 ) => {
   const repository = options.repository ?? makeRepository();
+  options.prepare?.(repository);
   const editMarksDir = realpathSync(createTemporaryDir("hercule-edit-marks-"));
   const clock = openFileClock(join(editMarksDir, "clock"));
   /**
@@ -200,11 +201,9 @@ const start = async (
     const before = clock.takeMark();
     while (clock.takeMark() <= before);
   };
-  options.prepare?.(repository);
-  // The first state's mark must be strictly later than the files `prepare`
-  // wrote. On Linux the file clock ticks every few milliseconds, so without
-  // this wait a file can share the tick of the mark and look like a write
-  // that the first state missed.
+  // A file written by `prepare` can share a clock tick with the initial mark. The
+  // attribution then treats it as a possible missed write and narrows its window
+  // to that tick, which no later command holds. Waiting first keeps the file older.
   waitForClockTick();
   const initialState =
     options.initialState ??
