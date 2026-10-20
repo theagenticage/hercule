@@ -27,6 +27,7 @@ import {
   type InvalidState,
   type NotFound,
   type RunStarted,
+  type Signal,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
@@ -149,9 +150,14 @@ export class BoundOperations extends Context.Service<
      * record usually name the same task or session, so each entity is read
      * once for the whole list. Reads only; it never fails for a missing
      * entity.
+     *
+     * `sitsOn` is the signals the operations are bound on, when the caller
+     * already holds them. A describe line that needs one of them reads it
+     * from this list instead of from the database.
      */
     readonly describe: (
       operations: ReadonlyArray<CheckedOperation>,
+      sitsOn?: ReadonlyArray<Signal>,
     ) => Effect.Effect<ReadonlyArray<DescribeLine>, SqlError>;
   }
 >()("hercule/controller/bound-actions/BoundOperations") {}

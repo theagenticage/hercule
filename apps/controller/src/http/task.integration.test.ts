@@ -312,3 +312,35 @@ describe("paging a task listing", () => {
     });
   });
 });
+
+describe("what a request cannot choose when it creates a task", () => {
+  it("starts the task open with an id of its own, and refuses a provenance entry that records a handoff", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const chosenId = "0199e0e7-0007-7000-8000-000000000000";
+
+      const created = await post(
+        base,
+        "/api/v1/tasks",
+        { title: "t", description: "", id: chosenId, status: "in-progress" },
+        token,
+      );
+      const refused = await post(
+        base,
+        "/api/v1/tasks",
+        {
+          title: "t",
+          description: "",
+          provenance: [{ signalId: "0199e0e7-0005-7000-8000-000000000000" }],
+        },
+        token,
+      );
+
+      expect(created.status).toBe(200);
+      const task = (await created.json()) as Task;
+      expect(task.id).not.toBe(chosenId);
+      expect(task.status).toBe("open");
+      expect(refused.status).toBe(400);
+    });
+  });
+});

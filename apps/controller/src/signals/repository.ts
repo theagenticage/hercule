@@ -65,8 +65,8 @@ interface SignalRow {
   readonly snoozed_at: string | null;
 }
 
-/** The fields of a signal that a handoff reads; see `readForHandOff`. */
-export interface SignalForHandOff {
+/** A signal without its blocks and actions; see `readSummary`. */
+export interface SignalSummary {
   readonly kind: string;
   readonly title: string;
   readonly place?: string;
@@ -364,12 +364,12 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns what a handoff of the signal with that id reads: its kind, title,
-     * place, priority and origin, or none if it does not exist. It leaves out
-     * the blocks and the actions, which are most of the row, because the
-     * describe line of every Hand to an agent action on To do reads this.
+     * Returns the signal with that id without its blocks and actions, or none
+     * if it does not exist. The blocks and the actions are most of the row, so
+     * a caller that needs only the signal's kind, title, place, priority and
+     * origin does not read them.
      */
-    readForHandOff: (id: string): Effect.Effect<Option.Option<SignalForHandOff>, SqlError> =>
+    readSummary: (id: string): Effect.Effect<Option.Option<SignalSummary>, SqlError> =>
       Effect.map(
         sql<{
           readonly kind: string;

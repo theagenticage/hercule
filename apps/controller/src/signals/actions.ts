@@ -35,11 +35,17 @@ export const DISMISS_ACTION: BoundAction = {
  * raiser that binds it gets. The user's click runs an action as the user, so
  * a raiser that could bind `ignoreRule.create` could hide signals from the
  * user under any label. The core binds it on its own Ignore Rule offer only.
+ * `signal.handOff` is the same: the core binds it on the Hand to an agent
+ * answers of its own signal, and a raiser's answer could name another signal.
  */
 const CORE_ONLY_OPERATIONS: ReadonlyMap<string, string> = new Map([
   [
     "ignoreRule.create" satisfies AnswerOperationId<"signal.answer">,
     "An action cannot run ignoreRule.create: only the core binds it, on the offer it raises after the user marked five signals of one group done in a row. A rule hides signals from the user, and the click would create it as the user. To suggest a rule, describe it in the signal; the user creates it from Intake.",
+  ],
+  [
+    "signal.handOff" satisfies AnswerOperationId<"signal.answer">,
+    "An action cannot run signal.handOff: only the core binds it, on the Hand to an agent action it adds to the signal for each workflow that takes its kind. To offer the user a workflow, create the workflow with an input for this signal's kind; the core then offers it. To start work on another signal, use run.start.",
   ],
 ]);
 

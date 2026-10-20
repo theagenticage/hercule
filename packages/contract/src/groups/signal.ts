@@ -416,7 +416,11 @@ export const SignalResolution = Schema.Struct({
   kind: Schema.Literals(["decided", "withdrawn"]),
   actionId: Schema.optionalKey(Schema.String),
   eventId: Schema.optionalKey(EventId),
-  /** The run the user's Hand to an agent started, when the signal was handed off. */
+  /**
+   * The run the answer started, when taking the answer started one: a Hand to
+   * an agent answer, which binds `signal.handOff` or, on a signal written
+   * before that existed, `run.start`, or any other answer that runs `run.start`.
+   */
   runId: Schema.optionalKey(Id),
   outcome: Schema.String.check(Schema.isMaxLength(MAX_SIGNAL_OUTCOME_LENGTH)),
   actor: Actor,

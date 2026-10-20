@@ -631,6 +631,7 @@ A signal's actions are Bound Actions, with the shape and the rules of Section 7.
   - It continues the open Task that carries the signal's thread ref, or creates one, `in-progress`, with the signal's title and priority. A core signal has no thread ref, so it always gets a new Task.
   - It appends a provenance entry that names the signal and the run ([./09-tasks.md](./09-tasks.md)), and starts the run with that `taskId` ([./07-workflows.md](./07-workflows.md)).
   - It resolves the signal as every answer does, with the outcome "Handed to *workflow name*", and records the run as `resolution.runId`. A `run.start` answer records its run the same way.
+  - Only the core binds `signal.handOff`, and only on the signal it sits on: a raiser's own action may not bind it, and `signal.act` refuses a `signal.handOff` answer whose `signalId` is another signal.
   - Intake then follows the Task in Tracking until the user ticks it off ([./17-desktop-app.md](./17-desktop-app.md#intake)).
   - Signals written before this change keep their frozen `run.start` answers. Handing one of them off still works, but it starts an untracked run: no Task, no Tracking row. This is accepted, because To do drains within days. The release note says so.
 

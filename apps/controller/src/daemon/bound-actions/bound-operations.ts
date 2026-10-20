@@ -44,14 +44,13 @@ import { connectionRepository, ConnectionTypes } from "../../connections";
 import type { PermissionProfiles } from "../../permissions";
 import { executePluginAction, PluginHost, type RegisteredWorkflowAction } from "../../plugins";
 import { RunService } from "../../runs";
-import { IgnoreRuleService, truncateOutcome } from "../../signals";
+import { IgnoreRuleService, SignalHandoffs, truncateOutcome } from "../../signals";
 import type { Settings } from "../../settings";
 import { TaskService } from "../../tasks";
 import { WorkflowService } from "../../workflows";
 import { PermissionRequests } from "../permissions";
 import { Live } from "../sessions";
 import { buildDescribe } from "./describer";
-import { makeHandOff } from "./hand-off";
 
 /**
  * Lists the problems with a typed reply's field on a plugin action. The field
@@ -97,7 +96,7 @@ const make = Effect.gen(function* () {
   const connections = yield* connectionRepository;
   const connectionTypes = yield* ConnectionTypes;
   const workflows = yield* WorkflowService;
-  const handOff = yield* makeHandOff;
+  const handoffs = yield* SignalHandoffs;
 
   // Each runs in the caller's transaction and sends nothing to a runner until
   // it commits: `run.start` and `signal.handOff` place the run's first
@@ -112,7 +111,7 @@ const make = Effect.gen(function* () {
     "task.update": ({ taskId, ...changes }) =>
       Effect.as(tasks.update({ id: taskId, ...changes }), undefined),
     "run.start": (input) => runs.start(input),
-    "signal.handOff": (input) => handOff(input),
+    "signal.handOff": (input) => handoffs.handOff(input),
     "session.input": ({ sessionId, ...input }) =>
       Effect.as(live.queueInput({ id: sessionId, ...input }), undefined),
     "session.respondToApprovalRequest": ({ sessionId, ...decided }) =>
@@ -376,6 +375,7 @@ export const BoundOperationsLayer: Layer.Layer<
   | PermissionRequests
   | PermissionProfiles
   | IgnoreRuleService
+  | SignalHandoffs
   | PluginHost
   | ConnectionTypes
   | WorkflowService

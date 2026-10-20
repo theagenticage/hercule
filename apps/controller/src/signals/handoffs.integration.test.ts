@@ -15,9 +15,16 @@
  * The rules that need no real operation are tested in `service.test.ts`.
  */
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import type { Run, Signal, Task, TaskPriority } from "@hercule/contract";
+import {
+  TaskCreatedEventPayload,
+  TaskUpdatedEventPayload,
+  type Run,
+  type Signal,
+  type Task,
+  type TaskPriority,
+} from "@hercule/contract";
 import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import {
   completeSetup,
@@ -56,6 +63,8 @@ interface PluginSignalFields {
   readonly workflows: ReadonlyArray<WorkflowToOffer>;
   /** What the Hand to an agent answers bind. A signal from before `signal.handOff` binds `run.start`. */
   readonly binds?: Binding;
+  /** The signal the answers hand off, when it is not the signal itself. */
+  readonly handsOffSignalId?: string;
 }
 
 /**
@@ -95,7 +104,13 @@ const insertPluginSignal = async (
                 label: `Hand to ${workflow.name}`,
                 operation:
                   binds === "signal.handOff"
-                    ? { op: "signal.handOff", input: { signalId: id, workflowId: workflow.id } }
+                    ? {
+                        op: "signal.handOff",
+                        input: {
+                          signalId: fields.handsOffSignalId ?? id,
+                          workflowId: workflow.id,
+                        },
+                      }
                     : {
                         op: "run.start",
                         input: { workflowId: workflow.id, inputs: { signal: id } },
@@ -217,6 +232,24 @@ const updateTask = async (base: string, token: string, id: string, body: object)
   expect(response.status, await response.clone().text()).toBe(200);
 };
 
+/** Returns the payload of every `task.created` event of the Task, oldest first. */
+const readCreatedEvents = async (
+  harness: ServerHarness,
+  taskId: string,
+): Promise<ReadonlyArray<TaskCreatedEventPayload>> =>
+  (await harness.platformEvents("task.created"))
+    .map((event) => Schema.decodeUnknownSync(TaskCreatedEventPayload)(event.payload))
+    .filter((payload) => payload.task.id === taskId);
+
+/** Returns the payload of every `task.updated` event of the Task, oldest first. */
+const readUpdatedEvents = async (
+  harness: ServerHarness,
+  taskId: string,
+): Promise<ReadonlyArray<TaskUpdatedEventPayload>> =>
+  (await harness.platformEvents("task.updated"))
+    .map((event) => Schema.decodeUnknownSync(TaskUpdatedEventPayload)(event.payload))
+    .filter((payload) => payload.taskId === taskId);
+
 /** Waits a few milliseconds, so two writes never land on the same instant. */
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 5));
 
@@ -274,6 +307,15 @@ describe.each(["hand-off", "act"] as const)("handing a plugin signal off with %s
         inputs: { signal: signalId },
       });
       expect((await readSignal(base, token, signalId)).status).toBe("resolved");
+      // The new Task is written once: one task.created that carries the
+      // handoff entry, and no task.updated after it.
+      const created = await readCreatedEvents(harness, task!.id);
+      expect(created).toHaveLength(1);
+      expect(created[0]!.task).toMatchObject({
+        status: "in-progress",
+        provenance: [{ signalId, runId, ref: ISSUE_REF, eventId: 41 }],
+      });
+      expect(await readUpdatedEvents(harness, task!.id)).toEqual([]);
     });
   });
 
@@ -320,6 +362,13 @@ describe.each(["hand-off", "act"] as const)("handing a plugin signal off with %s
       expect(await readRun(base, token, resolved.resolution!.runId!)).toMatchObject({
         taskId: tasks[0]!.id,
       });
+      // The continuation is one task.updated that appends the second entry.
+      const updated = await readUpdatedEvents(harness, tasks[0]!.id);
+      expect(updated).toHaveLength(1);
+      expect(updated[0]!.changes).toMatchObject({
+        provenance: { added: [{ signalId: second, eventId: 42 }] },
+      });
+      expect(updated[0]!.changes.status).toBeUndefined();
     });
   });
 
@@ -389,6 +438,11 @@ describe("which Task a handoff continues", () => {
 
       await handOff("hand-off", base, token, signalId, workflow.id);
 
+      const updated = await readUpdatedEvents(harness, older.id);
+      expect(updated.at(-1)!.changes).toMatchObject({
+        status: { old: "open", new: "in-progress" },
+        provenance: { added: [{ signalId }] },
+      });
       expect((await readTask(base, token, older.id)).status).toBe("in-progress");
       expect((await readTask(base, token, older.id)).provenance.at(-1)?.signalId).toBe(signalId);
       expect(await readTask(base, token, newer.id)).toMatchObject({
@@ -560,6 +614,44 @@ describe("a handoff that cannot go through", () => {
         items: ReadonlyArray<Task>;
       };
       expect(tasksAfter.items).toEqual(tasksBefore.items);
+      expect(await countRuns(base, token)).toBe(0);
+    });
+  });
+
+  it("refuses an answer that hands off another signal, and writes nothing", async () => {
+    await withServer(async (harness) => {
+      const { base } = harness;
+      const token = await completeSetup(base);
+      const workflow = await createWorkflowToOffer(base, token, "Implement");
+      const fields = {
+        eventId: 41,
+        place: "acme/api#7",
+        priority: "normal",
+        workflows: [workflow],
+      } as const;
+      const target = await insertPluginSignal(harness, {
+        ...fields,
+        threadRef: OTHER_ISSUE_REF,
+        title: "Another question",
+      });
+      // Its answer names the target, as a signal stored by a raiser that
+      // could bind signal.handOff would.
+      const sitsOn = await insertPluginSignal(harness, {
+        ...fields,
+        threadRef: ISSUE_REF,
+        title: "Retry failed webhooks",
+        handsOffSignalId: target,
+      });
+
+      const response = await requestAct(base, token, sitsOn, `hand-to-${workflow.id}`);
+
+      const refusal = await readErrorBody(response);
+      expect(response.status, refusal.text).toBe(400);
+      expect(refusal.code).toBe("validation");
+      expect(refusal.text).toContain(target);
+      expect((await readSignal(base, token, sitsOn)).status).toBe("open");
+      expect((await readSignal(base, token, target)).status).toBe("open");
+      expect(await listHandedOffTasks(base, token)).toEqual([]);
       expect(await countRuns(base, token)).toBe(0);
     });
   });

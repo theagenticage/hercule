@@ -47,6 +47,7 @@ import {
   type DescribeLine,
   type DescribeLinePart,
   type OpenRequest,
+  type Signal,
   type Trigger,
   type WorkflowDefinition,
 } from "@hercule/contract";
@@ -67,10 +68,14 @@ import { PluginHost } from "../../plugins";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
 import { Settings } from "../../settings";
-import { signalRepository } from "../../signals";
+import {
+  findTaskToContinue,
+  readThreadRef,
+  signalRepository,
+  type SignalSummary,
+} from "../../signals";
 import { taskRepository } from "../../tasks";
 import { readDefaultSpawnBound, workflowRepository } from "../../workflows";
-import { findTaskToContinue, readThreadRef } from "./hand-off";
 
 /** Returns a `text` part: words of the line itself. */
 const buildTextPart = (value: string): DescribeLinePart => ({ kind: "text", text: value });
@@ -321,6 +326,7 @@ const runPluginDescribe = (
 export const buildDescribe: Effect.Effect<
   (
     operations: ReadonlyArray<CheckedOperation>,
+    sitsOn?: ReadonlyArray<Signal>,
   ) => Effect.Effect<ReadonlyArray<DescribeLine>, SqlError>,
   never,
   SqlClient.SqlClient | PluginHost | PermissionProfiles | Settings
@@ -340,7 +346,7 @@ export const buildDescribe: Effect.Effect<
    * Builds the describer for one `describe` call, reading each entity at
    * most once however many answers name it.
    */
-  const buildDescriber = () => {
+  const buildDescriber = (sitsOn: ReadonlyArray<Signal>) => {
     /** Returns a task's title, or its id once it is deleted. */
     const readTaskTitle = readOncePerId((id) =>
       Effect.map(tasks.live(id), Option.match({ onNone: () => id, onSome: (task) => task.title })),
@@ -385,13 +391,17 @@ export const buildDescribe: Effect.Effect<
     );
 
     /**
-     * Returns the fields of a signal that a handoff reads, or nothing when no
-     * signal has this id. The signal's id is the value of a bound input, so
-     * anything that is not an id is not looked up.
+     * Returns a signal without its blocks and actions, or nothing when no
+     * signal has this id. A signal the caller already holds, because the
+     * answer sits on it, is not read again. The signal's id is the value of a
+     * bound input, so anything that is not an id is not looked up.
      */
-    const readSignalForHandOff = readOncePerId((id) =>
-      isId(id) ? signals.readForHandOff(id) : Effect.succeed(Option.none()),
-    );
+    const heldSignals = new Map(sitsOn.map((signal) => [signal.id, signal]));
+    const readSignalSummary = readOncePerId((id) => {
+      const held = heldSignals.get(id);
+      if (held !== undefined) return Effect.succeed(Option.some<SignalSummary>(held));
+      return isId(id) ? signals.readSummary(id) : Effect.succeed(Option.none<SignalSummary>());
+    });
 
     /**
      * Returns the open Task a handoff of a signal on this thread would
@@ -633,7 +643,7 @@ export const buildDescribe: Effect.Effect<
       "signal.handOff": ({ signalId, workflowId }) =>
         Effect.gen(function* () {
           const definition = yield* readWorkflowDefinition(workflowId);
-          const signal = yield* readSignalForHandOff(signalId);
+          const signal = yield* readSignalSummary(signalId);
           const ref = Option.flatMap(signal, (found) => readThreadRef(found.origin));
           const continued = Option.isSome(ref)
             ? yield* readTaskToContinue(ref.value)
@@ -728,6 +738,6 @@ export const buildDescribe: Effect.Effect<
         : dispatchAnswerOperation(contractDescribers, operation);
   };
 
-  return (operations: ReadonlyArray<CheckedOperation>) =>
-    Effect.suspend(() => Effect.forEach(operations, buildDescriber()));
+  return (operations: ReadonlyArray<CheckedOperation>, sitsOn: ReadonlyArray<Signal> = []) =>
+    Effect.suspend(() => Effect.forEach(operations, buildDescriber(sitsOn)));
 });

@@ -97,6 +97,8 @@ export interface ProvenanceInput {
 
 /** The fields of a new task row, with the defaults already applied. */
 export interface NewTask {
+  /** The task's id, when the caller chose it; a new one is made when absent. */
+  readonly id?: string;
   readonly title: string;
   readonly description: string;
   readonly status: TaskStatus;
@@ -231,7 +233,19 @@ const make = Effect.gen(function* () {
 
   const buildConditions = (filter: TaskFilter) => {
     const clauses = [sql`tasks.deleted_at IS NULL`];
-    if (filter.status !== undefined) clauses.push(buildAnyOfClause("tasks.status", filter.status));
+    if (filter.status !== undefined) {
+      // Without statistics, SQLite starts a listing sorted by `updated_at`
+      // from the status index and scans every open task. A listing that names
+      // refs should start from the ref index, whose few rows are the selective
+      // part. The unary `+` makes the status column an expression, so the
+      // planner cannot use an index on it, and the status is only checked.
+      clauses.push(
+        buildAnyOfClause(
+          filter.refs === undefined ? "tasks.status" : "+tasks.status",
+          filter.status,
+        ),
+      );
+    }
     if (filter.projectId !== undefined) {
       clauses.push(sql`tasks.project_id = ${uuidFromString(filter.projectId)}`);
     }
@@ -354,7 +368,7 @@ const make = Effect.gen(function* () {
     /** Writes a new task and its first provenance entries. */
     insert: (task: NewTask): Effect.Effect<Task, SqlError> =>
       Effect.gen(function* () {
-        const id = mintUuid();
+        const id = task.id === undefined ? mintUuid() : uuidFromString(task.id);
         yield* sql`
           INSERT INTO tasks
             (id, title, description, status, priority, labels, project_id,

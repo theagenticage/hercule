@@ -39,6 +39,7 @@ import {
   TASK_SORT_FIELDS,
   TaskCreateInput,
   TaskFilter,
+  TaskStatus,
   TaskUpdateInput,
   refuseEmptyTaskUpdate,
   type Forbidden,
@@ -91,8 +92,27 @@ const UpdateInput = Schema.Struct({
 
 export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 
+/**
+ * The input of `task.create`. Beyond what a request sends, controller code may
+ * choose the task's `id` and its starting `status`, and may record a
+ * `signalId` in its provenance. A handoff uses these to write a new Task that
+ * is already in progress, with its handoff entry, in one write.
+ *
+ * Every request, workflow step and bound answer is decoded with the contract's
+ * `TaskCreateInput` before it reaches this schema, and that one has none of
+ * these fields, so only the controller's own code can set them.
+ */
+const CreateInput = Schema.Struct({
+  ...TaskCreateInput.fields,
+  id: Schema.optionalKey(Id),
+  status: Schema.optionalKey(TaskStatus),
+  provenance: Schema.optionalKey(atMost(CoreProvenanceInput, MAX_PROVENANCE_APPEND)),
+});
+
+export type CreateInput = Schema.Schema.Type<typeof CreateInput>;
+
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
-const decodeCreate = Schema.decodeUnknownEffect(TaskCreateInput);
+const decodeCreate = Schema.decodeUnknownEffect(CreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 
 /** One page of tasks, in the contract's shape. */
@@ -210,9 +230,11 @@ const make = Effect.gen(function* () {
      * already names the run. Provenance records what created the task, and
      * that was the run. The entry is the core's own, so it does not count
      * toward `MAX_PROVENANCE_APPEND`.
+     *
+     * A task starts `open` unless controller code gives another `status`.
      */
     create: (
-      input: TaskCreateInput,
+      input: CreateInput,
     ): Effect.Effect<Task, Unauthenticated | Forbidden | Validation | NotFound | SqlError> =>
       Effect.gen(function* () {
         const caller = yield* requireGrant("task.create");
@@ -233,7 +255,8 @@ const make = Effect.gen(function* () {
             const task = yield* tasks.insert({
               title: decoded.title,
               description: decoded.description,
-              status: "open",
+              ...(decoded.id === undefined ? {} : { id: decoded.id }),
+              status: decoded.status ?? "open",
               priority: decoded.priority ?? "normal",
               labels: removeDuplicates(decoded.labels ?? []),
               projectId: decoded.projectId,

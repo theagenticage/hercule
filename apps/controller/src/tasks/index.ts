@@ -2,6 +2,7 @@
 export {
   TaskService,
   TaskServiceLayer,
+  type CreateInput,
   type QueryInput,
   type TaskPage,
   type UpdateInput,

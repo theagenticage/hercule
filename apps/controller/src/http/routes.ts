@@ -89,6 +89,7 @@ import {
   IgnoreRuleService,
   IgnoreRuleServiceLayer,
   SignalClaimsLayer,
+  SignalHandoffsLayer,
   SignalRaisesLayer,
   SignalService,
   SignalServiceLayer,
@@ -852,6 +853,7 @@ const TextGenerationStatusLayer = Layer.mergeAll(
 const IgnoreRuleDomainLayer = IgnoreRuleServiceLayer.pipe(Layer.provide(SignalClaimsLayer));
 
 const BoundOperationsDomainLayer = BoundOperationsLayer.pipe(
+  Layer.provide(SignalHandoffsLayer.pipe(Layer.provide(RunDomainLayer))),
   Layer.provide(RunDomainLayer),
   Layer.provide(PermissionRequestsDomainLayer),
   Layer.provide(IgnoreRuleDomainLayer),

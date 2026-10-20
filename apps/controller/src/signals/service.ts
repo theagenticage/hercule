@@ -59,6 +59,7 @@ import {
   type Signal,
   Validation,
   hasSameValues,
+  type AnswerOperation,
   type BoundAction,
   type CoreSignalKind,
   type DescribeLine,
@@ -235,6 +236,15 @@ const buildCoreActions = (input: SignalRaiseInput): ReadonlyArray<BoundAction> =
       return [];
   }
 };
+
+/**
+ * Checks whether a checked operation is `signal.handOff`. A plugin action's
+ * id is qualified, so it never equals this id.
+ */
+const isHandOffOperation = (
+  operation: CheckedOperation,
+): operation is Extract<AnswerOperation, { readonly op: "signal.handOff" }> =>
+  operation.op === "signal.handOff";
 
 /**
  * Returns the reply-filled operation of an action for `act`: the stored
@@ -475,6 +485,7 @@ const make = Effect.gen(function* () {
       );
       const lines = yield* operations.describe(
         pending.flat().flatMap((entry) => (entry._tag === "checked" ? [entry.operation] : [])),
+        list,
       );
       // The describer returns the lines in the order of the operations it
       // was given, which is the order this walk visits them in.
@@ -603,7 +614,8 @@ const make = Effect.gen(function* () {
    * - `InvalidState` if the signal is already resolved, or another action
    *   or a withdrawal on it is running;
    * - `Validation` if the typed reply is missing or not wanted, or the
-   *   operation no longer passes the check; the signal stays open;
+   *   operation no longer passes the check, or the action hands off a signal
+   *   other than this one; the signal stays open;
    * - the operation's own error when it fails; the signal stays open.
    */
   const act = (input: ActInput): Effect.Effect<Signal, BoundOperationError> =>
@@ -631,6 +643,20 @@ const make = Effect.gen(function* () {
             operation === null
               ? null
               : yield* operations.check("signal.answer", operation, undefined, []);
+          if (
+            checked !== null &&
+            isHandOffOperation(checked) &&
+            checked.input.signalId !== signal.id
+          ) {
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["actionId"],
+                  message: `The action ${action.id} hands off another signal, ${checked.input.signalId}, not this one. A Hand to an agent action hands off the signal it sits on. Take another action.`,
+                },
+              ]),
+            );
+          }
           if (checked !== null && isPluginAnswerOperation(checked)) {
             const pluginOutcome = yield* operations.runPluginAction(checked);
             const outcome = yield* writeOutcome(signal, action, pluginOutcome);

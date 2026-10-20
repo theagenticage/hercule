@@ -636,9 +636,10 @@ const make = Effect.gen(function* () {
    * the runs `filters` keep are found through the same index: pending and
    * running runs through `runs_unfinished`, the runs live since an instant
    * through the `finished_at` indexes, a run's re-runs through
-   * `runs_original_run_id`, the runs of some Tasks through `runs_task_id`. Only those runs are ranked, by a window function
-   * per workflow. A lookup per workflow on `runs_workflow` would instead read
-   * every run of a workflow whose history holds many runs the filters refuse.
+   * `runs_original_run_id`, the runs of some Tasks through `runs_task_id`.
+   * Only those runs are ranked, by a window function per workflow. A lookup
+   * per workflow on `runs_workflow` would instead read every run of a
+   * workflow whose history holds many runs the filters refuse.
    * Without a narrowing filter, ranking this way would rank every run the
    * controller ever had, which is why that case has a source of its own.
    *

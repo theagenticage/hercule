@@ -418,6 +418,41 @@ describe("signal.raise", () => {
     expect(issues[0]?.path).toEqual(["actions", "0", "operation", "op"]);
   });
 
+  it("refuses an action that runs signal.handOff, because only the core's Hand to an agent answers bind it", async () => {
+    const { error, stored } = await run(
+      Effect.gen(function* () {
+        const signals = yield* service;
+        const other = yield* raiseAndRead(OFFER);
+        const error = yield* Effect.flip(
+          as(TRIAGE)(
+            signals.raise({
+              ...OFFER,
+              actions: [
+                {
+                  id: "custom",
+                  label: "Hand the other one off",
+                  operation: {
+                    op: "signal.handOff",
+                    input: { signalId: other.id, workflowId: UNKNOWN_ID },
+                  },
+                },
+              ],
+            }),
+          ),
+        );
+        return { error, stored: yield* as(USER)(signals.query({})) };
+      }),
+    );
+
+    expect(error).toMatchObject({
+      error: {
+        code: "validation",
+        details: { issues: [{ path: ["actions", "0", "operation", "op"] }] },
+      },
+    });
+    expect(stored.items).toHaveLength(1);
+  });
+
   it("refuses an action that runs ignoreRule.create, because only the core's offer binds it", async () => {
     const { error, stored } = await run(
       Effect.gen(function* () {
