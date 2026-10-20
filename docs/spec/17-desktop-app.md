@@ -527,7 +527,7 @@ Each item below is an acceptance criterion. The end-to-end test checks it where 
   - The window does not bounce as a whole. Scroll areas keep macOS's elastic scrolling.
   - There is no pinch zoom and no page zoom.
   - A focus ring shows only for keyboard focus (`:focus-visible`).
-  - ~~Scroll bars are the system's overlay scroll bars, unstyled, so they follow the System Settings choice.~~ Scroll bars are thin and drawn in the theme's ink, with no track behind them. *(Amended 2026-10-20.)* macOS draws classic scroll bars, 15px wide on a white track, whenever a mouse is attached, and they clash with every theme. `scrollbar-width: thin` and a `scrollbar-color` of the ink at 30% on a transparent track replace them (`styles/base.css`). The thumb darkens to the ink at 50% while the pointer is over the scroll area; CSS cannot target the thumb itself. `scrollbar-color` is declared on every element, so a hover restyles only the hovered elements: 0.1 ms for a 3,900-element list, against 1.6 ms when it is set once on the root and overridden on hover. Both macOS styles keep their behaviour: with a trackpad the bar is an overlay that takes no room and fades out while the list is still, and with a mouse the bar is 11px wide (`--scrollbar-width`). The `::-webkit-scrollbar` pseudo-elements stay unused, because they always take room, even where macOS draws an overlay. The cost is CSS alone: no process, no timer, no work while idle or per streamed token, and about 190 bytes of CSS in the bundle.
+  - ~~Scroll bars are the system's overlay scroll bars, unstyled, so they follow the System Settings choice.~~ Scroll bars are thin and drawn in the theme's ink, with no track behind them. *(Amended 2026-10-20.)* macOS draws classic scroll bars, 15px wide on a white track, whenever a mouse is attached, and they clash with every theme. `scrollbar-width: thin` and a `scrollbar-color` of the ink at 30% on a transparent track replace them (`styles/base.css`). The thumb darkens to the ink at 50% while the pointer is over the scroll area; CSS cannot target the thumb itself. `scrollbar-color` is declared on every element, so a hover restyles only the hovered elements: 0.1 ms for a 3,900-element list, against 1.6 ms when it is set once on the root and overridden on hover. Both macOS styles keep their behaviour: with a trackpad the bar is an overlay that takes no room and fades out while the list is still, and with a mouse the bar is 11px wide (`--scrollbar-width`). The `::-webkit-scrollbar` pseudo-elements stay unused, because they always take room, even where macOS draws an overlay. The cost is CSS alone: no process, no timer and no work while idle, and +206 bytes of CSS in the bundle (+42 gzipped). It does add a small style cost on a theme change and on a pointer move, and nothing is measured yet on a streaming transcript in the packaged app; both are recorded in [Measured](#measured).
   - Right-clicking text opens the native context menu (Copy, Look Up, Search). Right-clicking chrome opens nothing.
 - **The composer draws the ~~`+` attach and~~ voice ~~buttons~~ button, with nothing behind ~~them~~ it yet.** ~~They keep~~ It keeps the composer's full shape, as in the web app ([./14-web-app.md](./14-web-app.md) §App shell). ~~They show their~~ It shows its hover and pressed states, and a click does nothing. *(Amended 2026-10-08, [#465](https://github.com/theagenticage/hercule/issues/465): `+` attach now attaches images; see [Images in prompts](#images-in-prompts).)*
 
@@ -3645,6 +3645,22 @@ After was not profiled. The page's `select` runs only when the transcript is wri
 - **What remains is receiving and decoding the rows, and the `session` nudges.** The nudges do not come from the stream; see [#785](https://github.com/theagenticage/hercule/issues/785).
 - **Showing the window costs the same as before, whatever the number of rows kept aside.** 256 and 1624 rows both take 11 to 25 ms to the last row on screen, with a longest task of 5 ms or less, and the transcript ends at the bottom in both builds. Nothing is subscribed again and nothing is replayed.
 - **The CPU share is one After run, so the trace counters carry the comparison.** The share's Before range (4.6 to 6.2%) is wide, and the After value sits just below it.
+
+**Scroll bars in the theme's ink** (thin, with a hover state, 2026-10-20), measured in scratch Electron 44.4.5 renderers with the app's own stylesheets, `main` against the change. These are scratch pages, not the packaged app: the perf script needs `./hercule` and the packaged test app, which were not built. A review run by another agent measured them independently of the change's author.
+
+| Measure | Budget | Before | After |
+|---|---|---|---|
+| A theme change, 4,005 elements | a frame that restyles the page | 2.9 to 3.1 ms | 3.15 to 3.16 ms |
+| A theme change, 48,005 elements | - | 30.9 ms | 33.1 to 33.7 ms |
+| Blink memory, 48,005 elements | - | 48,437 KiB | 48,440 KiB |
+| Style work over 100 pointer moves, 4,005 elements | - | 0 ms | 5.6 to 7.0 ms |
+| Renderer wakeups while idle | none | 1 to 2 a second | 1 a second |
+| Renderer CSS, raw and gzipped | a guide | 178,393 and 48,921 bytes | 178,599 and 48,963 bytes: +206 and +42 |
+
+- **A pointer move costs about 0.06 ms of style work,** rising to 0.15 ms with 48,005 elements. `*:hover` matches every ancestor of the pointer, so plain transcript text now restyles where only rows and buttons did before. No layout and no content paint followed in any hover sequence.
+- **`scrollbar-color` is declared on every element on purpose.** Set once on the root and overridden on hover, one hover restyles every descendant: 1.6 ms for 3,900 elements, against 0.1 ms declared on each.
+- **Scrolling stays on the compositor.** The scroll bar is a composited layer in the classic and the overlay style, before and after, and wheel scrolling caused no layout or style recalculation in either.
+- **Not measured: a streamed token in the real transcript.** A streaming-shaped text write on a 4,208-element fixture cost 0.10 ms before and 0.10 to 0.11 ms after, which resolves no difference. The packaged app's launch, memory and streaming rows stay unproven until `pnpm test:desktop` and the perf script run on a built app.
 
 ## Slices
 
