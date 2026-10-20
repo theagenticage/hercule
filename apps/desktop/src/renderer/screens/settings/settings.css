@@ -35,8 +35,7 @@
   grid-template-columns: 216px minmax(0, 1fr);
 }
 /* The book also sets `scrollbar-width: thin` here and on .set-body. The app
-   leaves it out: its scroll bars are the system's overlay scroll bars,
-   unstyled, so they follow the System Settings choice (spec 17). */
+   sets it on every element instead (base.css). */
 .set-nav {
   min-height: 0;
   overflow: auto;

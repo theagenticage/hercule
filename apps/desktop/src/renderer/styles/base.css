@@ -73,6 +73,42 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Every scroll bar is drawn by Chromium in the theme's ink: a thin thumb on
+   a transparent track. Left alone, macOS draws classic scroll bars (15px, on
+   a white track) whenever a mouse is attached, which clash with every theme.
+
+   The width a thin classic scroll bar takes is `--scrollbar-width`. An
+   overlay scroll bar, which macOS draws with a trackpad, takes no room and
+   still fades out when the list is not scrolling. Chromium keeps both
+   behaviours when `scrollbar-color` is set, but not when `::-webkit-scrollbar`
+   is, which always takes room.
+
+   The thumb darkens while the pointer is over the scroll area. CSS cannot
+   target the thumb itself, so the whole area counts.
+
+   Two details keep this cheap and correct:
+   - The two thumb colours are custom properties set where the theme is, so
+     that a nested `[data-theme]` preview gets its own ink.
+   - `scrollbar-color` is inherited, but it is declared on every element
+     here. A hover then changes the value of the hovered elements only. Set
+     once on the root and overridden on hover, the change would restyle every
+     descendant: 1.6 ms for 3,900 elements, against 0.1 ms declared on each. */
+:root {
+  --scrollbar-width: 11px;
+}
+:root,
+[data-theme] {
+  --scrollbar-thumb: color-mix(in oklab, var(--ink) 30%, transparent);
+  --scrollbar-thumb-hover: color-mix(in oklab, var(--ink) 50%, transparent);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+*:hover {
+  scrollbar-color: var(--scrollbar-thumb-hover) transparent;
+}
+
 /* Controls take the page's type and ink, not the browser's own. */
 button,
 input,

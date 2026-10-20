@@ -12,8 +12,6 @@
 /* The pane scrolls a graph zoomed wider than itself, and takes the zoom keys
    while it or a card in it has focus. */
 .graph-pane {
-  /* The width of a classic scroll bar on macOS, as the book sets it. */
-  --classic-scrollbar-width: 15px;
   position: relative;
   overflow: auto;
   border-radius: var(--r-lg);
@@ -41,7 +39,7 @@
     linear-gradient(#000 0 0);
   mask-size:
     100% 100%,
-    100% var(--classic-scrollbar-width);
+    100% var(--scrollbar-width);
   mask-position: bottom;
   mask-repeat: no-repeat;
 }
