@@ -26,14 +26,7 @@
    keeps its 14px from the scroll bar instead. The screen marks the view with
    `has-scrollbar`, see `useShowsClassicScrollbar`. */
 .top:has(~ .has-scrollbar) {
-  right: calc(14px + var(--classic-scrollbar-width));
-}
-/* The width of a classic scroll bar on macOS. An overlay scroll bar is drawn
-   inside the same strip. */
-.top,
-.top ~ .transcript,
-.top ~ .hello {
-  --classic-scrollbar-width: 15px;
+  right: calc(14px + var(--scrollbar-width));
 }
 /* What scrolls under the header is hidden across the whole header row and
    fades in below it: text left there, even faint, would show between the
@@ -81,7 +74,7 @@
     linear-gradient(#000 0 0);
   mask-size:
     100% 100%,
-    var(--classic-scrollbar-width) 100%;
+    var(--scrollbar-width) 100%;
   mask-position: right;
   mask-repeat: no-repeat;
 }

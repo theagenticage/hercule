@@ -80,8 +80,9 @@
   height: 30px;
 }
 /* The list scrolls under a fixed top and foot. The book hides the scroll bar
-   (`scrollbar-width: none`). Spec 17 asks for the system's overlay scroll
-   bars, unstyled, which macOS draws only while the list scrolls. */
+   (`scrollbar-width: none`). The app keeps it, drawn as base.css sets every
+   scroll bar: an overlay bar that shows only while the list scrolls, or a
+   thin classic one with a mouse. */
 .side-scroll {
   flex: 1;
   min-height: 0;
