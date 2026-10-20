@@ -66,7 +66,7 @@ const PUSH_COUNT = 20;
 const PUSH_INTERVAL_MS = 1_000;
 
 /** How long after the last push the reading ends, so the last read and render are in it. */
-const PUSH_SETTLE_MS = 2_000;
+export const PUSH_SETTLE_MS = 2_000;
 
 /** How many signals the burst raises at once. */
 const BURST_SIZE = 30;
@@ -78,7 +78,7 @@ const BURST_SIZE = 30;
 const LAUNCH_SETTLE_MS = 5_000;
 
 /** Intake's list of signals, which holds one `.ask-row` for each row it draws. */
-const SIGNALS_LIST = 'section[aria-label="Signals"]';
+export const SIGNALS_LIST = 'section[aria-label="Signals"]';
 
 /** The header's button that opens and closes the split's pane. */
 const PANE_TOGGLE = ".asks-pane-btn";
@@ -131,7 +131,10 @@ export async function raiseSnoozedSignal(fixture: ThreadFixture): Promise<void> 
  * The signal names no event: no plugin in the perf script's controller emits
  * one, and the contract allows an empty list.
  */
-async function raiseSignal(fixture: ThreadFixture, title: string): Promise<SignalRaiseResult> {
+export async function raiseSignal(
+  fixture: ThreadFixture,
+  title: string,
+): Promise<SignalRaiseResult> {
   return await fixture.call<SignalRaiseResult>("POST", "/signals/raise", {
     kind: "fyi",
     title,
@@ -198,7 +201,7 @@ interface SplitCost {
  * What one change to Intake's list cost while it moved on screen, from the
  * change until the last of its animations ended, and in the second after.
  */
-interface MotionCost {
+export interface MotionCost {
   /** How many signals were on screen when the change began, before it. */
   readonly rowsBefore: number;
   /** How long the motion ran, from its first frame to the frame that found no animation left, in milliseconds. */
@@ -241,6 +244,15 @@ interface MotionCost {
   readonly animationsAfter: number;
   /** How many leaving rows' copies the ghost layer still held when the recording ended. */
   readonly ghostsAfter: number;
+  /** The CSS properties the change's animations animated, sorted: `opacity` and `transform` only, by spec 17 §Motion. */
+  readonly properties: readonly string[];
+  /**
+   * What the change's animations were, one entry for each target's first
+   * class and the properties animated, with how many: "3 x .tr-run-item
+   * [opacity]". It tells the sheet's own animations from the ones the change
+   * sets off elsewhere, such as the split's width.
+   */
+  readonly kinds: readonly string[];
 }
 
 /** What the Intake scenario measured. */
@@ -413,7 +425,10 @@ export async function measureIntakeWork(
  * costs the renderer a little time of its own, so the tasks err long. Fails
  * when the trace lost events.
  */
-async function traceRendererTasks(page: Inspector, work: () => Promise<void>): Promise<number[]> {
+export async function traceRendererTasks(
+  page: Inspector,
+  work: () => Promise<void>,
+): Promise<number[]> {
   await page.send("Tracing.start", {
     transferMode: "ReturnAsStream",
     traceConfig: { includedCategories: [TIMELINE_CATEGORY] },
@@ -508,7 +523,7 @@ const ROWS_BEFORE_ARRIVAL = 3;
  * Intake's list. With the pointer over the list, Intake holds changes made
  * elsewhere until it leaves (spec 17 §Motion), so nothing would move.
  */
-const POINTER_OFF_LIST = { x: 100, y: 400 };
+export const POINTER_OFF_LIST = { x: 100, y: 400 };
 
 /**
  * How long a measured change runs before its recording is read, in
@@ -657,7 +672,7 @@ async function measureRowMotion(
 }
 
 /** What `measureListChange` makes and checks. */
-interface ListChange {
+export interface ListChange {
   /** Makes the change, from outside the page. */
   readonly change: () => Promise<void>;
   /** How long the spec gives the motion, in milliseconds. */
@@ -693,7 +708,10 @@ interface ListChange {
  * the motion needed. It stops at the motion's end, so the frames after it
  * are only those something else asked for.
  */
-async function measureListChange(page: Inspector, measured: ListChange): Promise<MotionCost> {
+export async function measureListChange(
+  page: Inspector,
+  measured: ListChange,
+): Promise<MotionCost> {
   const evaluate = (expression: string) =>
     page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
   await page.send("Tracing.start", {
@@ -715,6 +733,8 @@ async function measureListChange(page: Inspector, measured: ListChange): Promise
       last: undefined,
       starts: new Set(),
       animations: new Set(),
+      properties: new Set(),
+      kinds: new Map(),
       sawExpected: false,
     };
     globalThis.motionRecord = record;
@@ -725,7 +745,22 @@ async function measureListChange(page: Inspector, measured: ListChange): Promise
         .getAnimations()
         .filter((animation) => animation.playState === "running" && intake.contains(animation.effect?.target ?? null));
       for (const animation of running) {
+        if (!record.animations.has(animation)) {
+          const names = (animation.effect?.getKeyframes?.() ?? [])
+            .flatMap((keyframe) => Object.keys(keyframe))
+            .filter((property) => !["offset", "easing", "composite", "computedOffset"].includes(property));
+          const target = animation.effect?.target;
+          const kind = (target?.tagName?.toLowerCase() ?? "?") + "." + (target?.classList?.[0] ?? "") + " [" + [...new Set(names)].sort().join(", ") + "]";
+          record.kinds.set(kind, (record.kinds.get(kind) ?? 0) + 1);
+        }
         record.animations.add(animation);
+        for (const keyframe of animation.effect?.getKeyframes?.() ?? []) {
+          for (const property of Object.keys(keyframe)) {
+            if (!["offset", "easing", "composite", "computedOffset"].includes(property)) {
+              record.properties.add(property);
+            }
+          }
+        }
         if (animation.startTime !== null) record.starts.add(Math.round(animation.startTime));
       }
       if (running.length > 0 && record.first === undefined) {
@@ -754,6 +789,8 @@ async function measureListChange(page: Inspector, measured: ListChange): Promise
       frames: record.first === undefined || record.last === undefined ? null : record.frames.slice(record.first, record.last + 1),
       starts: record.starts.size,
       animations: record.animations.size,
+      properties: [...record.properties].sort(),
+      kinds: [...record.kinds].map(([kind, count]) => String(count) + " x " + kind).sort(),
       sawExpected: record.sawExpected,
       animationsAfter: document.getAnimations().length,
       ghostsAfter: document.querySelector(".asks-ghosts")?.childElementCount ?? 0,
@@ -763,6 +800,8 @@ async function measureListChange(page: Inspector, measured: ListChange): Promise
     frames: number[] | null;
     starts: number;
     animations: number;
+    properties: string[];
+    kinds: string[];
     sawExpected: boolean;
     animationsAfter: number;
     ghostsAfter: number;
@@ -827,6 +866,8 @@ async function measureListChange(page: Inspector, measured: ListChange): Promise
     longestTaskAfterMs: longestMs(after),
     animationsAfter: recorded.animationsAfter,
     ghostsAfter: recorded.ghostsAfter,
+    properties: recorded.properties,
+    kinds: recorded.kinds,
   };
 }
 
@@ -851,7 +892,7 @@ const formatSplit = (cost: SplitCost) =>
   `longest gap ${cost.longestFrameGapMs.toFixed(1)} ms against ${cost.frameIntervalMs.toFixed(1)} ms usual`;
 
 /** Whether a motion dropped no frame, by the same rule as the split's (see `droppedNoFrame`). */
-const droppedNoMotionFrame = (cost: MotionCost) =>
+export const droppedNoMotionFrame = (cost: MotionCost) =>
   cost.longestFrameGapMs < 1.5 * cost.frameIntervalMs;
 
 /**
@@ -861,13 +902,13 @@ const droppedNoMotionFrame = (cost: MotionCost) =>
  * one that drops the finished animations, and the page held no animation and
  * no leaving row's copy when the recording ended.
  */
-const isStillAfter = (cost: MotionCost) =>
+export const isStillAfter = (cost: MotionCost) =>
   cost.lastFrameMs <= cost.lengthMs + 3 * cost.frameIntervalMs &&
   cost.animationsAfter === 0 &&
   cost.ghostsAfter === 0;
 
 /** Formats a motion's cost as one table cell. */
-const formatMotion = (cost: MotionCost) =>
+export const formatMotion = (cost: MotionCost) =>
   `${String(cost.animations)} animations, ${String(cost.starts)} start times; ` +
   `${String(cost.frames)} frames over ${cost.motionMs.toFixed(0)} ms, longest gap ` +
   `${cost.longestFrameGapMs.toFixed(1)} ms against ${cost.frameIntervalMs.toFixed(1)} ms usual; ` +

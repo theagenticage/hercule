@@ -65,6 +65,14 @@
  *    signals of this step:
  *
  *        pnpm --filter @hercule/desktop perf -- --intake-only
+ *
+ *    Pass `--tracking-only` to measure Tracking (spec 17 §What Intake
+ *    costs), on 40 threads and the signals of this step: Intake's idle
+ *    launch with nothing tracked, then with 10 Tasks tracked, and a plain
+ *    launch of each that measures the reads, the pushes and the motion (see
+ *    `perf-tracking.ts`):
+ *
+ *        pnpm --filter @hercule/desktop perf -- --tracking-only
  * 6. The last plain launch opens another idle thread, into which the fixture
  *    has played 20 subagents, 4 of them still running, and measures what
  *    spec 17 §What subagents cost asks for: memory with the side pane closed
@@ -271,6 +279,14 @@ import {
   reportIntakeWork,
   seedEvents,
 } from "./perf-intake.ts";
+import {
+  measureTrackingReads,
+  measureTrackingWork,
+  reportTrackingWork,
+  seedMoreTracking,
+  seedTracking,
+  TRACKED_COUNT,
+} from "./perf-tracking.ts";
 import {
   measureDiscussionWork,
   openDiscussionOnce,
@@ -1266,6 +1282,12 @@ const EVERYTHING_ONLY = process.argv.includes("--everything-only");
 const INTAKE_ONLY = process.argv.includes("--intake-only");
 
 /**
+ * Whether the run measures only Tracking (see `perf-tracking.ts`), on 40
+ * threads, and skips every other launch and the workflow list.
+ */
+const TRACKING_ONLY = process.argv.includes("--tracking-only");
+
+/**
  * Whether the run measures only Discussions and Wiki (see
  * `perf-discussions.ts`), on 40 threads, and skips every other launch and
  * the workflow list.
@@ -1311,6 +1333,50 @@ async function measureEverything(fixture: ThreadFixture, userDataDir: string): P
   await openIntakeOnce(userDataDir);
   await warmUpApp(userDataDir);
   reportEverythingWork(await measureEverythingWork(userDataDir));
+}
+
+/**
+ * Measures Tracking: two idle launches on Intake's 200 signals, the first
+ * with nothing tracked and the second with `TRACKED_COUNT` Tasks tracked, so
+ * the pair shows what the rows add; a plain launch of each that measures the
+ * reads, the pushes and the motion; and the two reads on the controller with
+ * the Tasks of the second launch and with `MORE_TRACKED` more.
+ *
+ * The rows are handed off before the second idle launch, and that launch's
+ * `prepareLaunch` moves their runs back three hours, so the rows show hours
+ * and no label changes while the launch is read.
+ */
+async function measureTracking(fixture: ThreadFixture, userDataDir: string): Promise<void> {
+  await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
+  await raiseSnoozedSignal(fixture);
+  const intake = `40 threads, Intake open on ${String(INTAKE_SIGNALS)} signals`;
+  await measureLaunch(fixture, userDataDir, `${intake}, nothing tracked`, 40, false, {
+    opensIntake: true,
+  });
+  const nothingTracked = await measureTrackingWork(userDataDir, fixture, "nothing tracked", null);
+
+  const seeded = await seedTracking(fixture);
+  const reads = [{ cost: await measureTrackingReads(fixture) }];
+  await measureLaunch(
+    fixture,
+    userDataDir,
+    `${intake}, ${String(TRACKED_COUNT)} Tasks tracked`,
+    40,
+    false,
+    { opensIntake: true },
+  );
+  const tracked = await measureTrackingWork(
+    userDataDir,
+    fixture,
+    `${String(TRACKED_COUNT)} Tasks tracked`,
+    seeded,
+  );
+  await seedMoreTracking(fixture, seeded);
+  reads.push({ cost: await measureTrackingReads(fixture) });
+  reportTrackingWork(
+    [nothingTracked, tracked],
+    reads.map(({ cost }) => ({ label: String(cost.taskCount), cost })),
+  );
 }
 
 /**
@@ -1474,6 +1540,10 @@ const launches = await runWithThreadFixture(async (fixture) => {
       await openIntakeOnce(userDataDir);
       await warmUpApp(userDataDir);
       reportIntakeWork(await measureIntakeWork(userDataDir, fixture));
+      return null;
+    }
+    if (TRACKING_ONLY) {
+      await measureTracking(fixture, userDataDir);
       return null;
     }
     if (DISCUSSIONS_ONLY) {

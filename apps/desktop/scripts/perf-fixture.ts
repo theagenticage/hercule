@@ -226,6 +226,8 @@ export interface RunSpread {
 export interface ThreadFixture {
   /** The controller's URL. It stays the same when the controller restarts. */
   readonly url: string;
+  /** The scratch Hercule Home of the controller, for a measurement that reads its database. */
+  readonly home: string;
   /**
    * Spawns threads until the controller holds `count`, spread over the
    * projects and the runners as the top of this file describes, and returns
@@ -449,6 +451,7 @@ export async function runWithThreadFixture<T>(
           [...busyIds.slice(1), ...waitingIds.slice(1)],
         );
         backdateOpenSignals(home);
+        backdateTrackedRuns(home);
         titleEvents(home);
         backdateDiscussions(home);
         if (spread !== undefined) spreadRuns(home, spread);
@@ -549,6 +552,7 @@ export async function runWithThreadFixture<T>(
 
       return await use({
         url,
+        home,
         growTo,
         prepareLaunch,
         nudge,
@@ -605,6 +609,50 @@ function backdateOpenSignals(home: string): void {
       const back = (ids.length - 1 - index) * 1_000;
       update.run(new Date(newest - back).toISOString(), id);
     }
+    database.exec("COMMIT");
+  } finally {
+    database.close();
+  }
+}
+
+/** How far back `backdateTrackedRuns` moves the runs it finds. */
+const TRACKED_RUNS_BACK_MS = 3 * HOUR_MS;
+
+/**
+ * Moves every run that works on a Task, and its steps, written in the last
+ * hour, in the stopped controller's database in the Home `home`, back by
+ * `TRACKED_RUNS_BACK_MS`. A row of Tracking shows how long ago its run ended
+ * or started, so left alone its rows would show minutes and change during a
+ * launch. Each time of a run moves by the same amount, so a run keeps the
+ * times it took. A run already moved is older than an hour, so a second call
+ * leaves it where it is.
+ *
+ * A run that is still live moves too. Its `wait` step counts from its start,
+ * and a day-long wait that started three hours back still has twenty-one
+ * hours to go.
+ */
+function backdateTrackedRuns(home: string): void {
+  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
+  try {
+    const recent = new Date(Date.now() - HOUR_MS).toISOString();
+    const shift = (column: string) =>
+      `strftime('%Y-%m-%dT%H:%M:%fZ', ${column}, '-${String(TRACKED_RUNS_BACK_MS / HOUR_MS)} hours')`;
+    database.exec("BEGIN");
+    // The steps first: they are found through their runs, which still hold their recent times.
+    database
+      .prepare(
+        `UPDATE run_steps SET created_at = ${shift("created_at")}, ` +
+          `started_at = ${shift("started_at")}, finished_at = ${shift("finished_at")} ` +
+          `WHERE run_id IN (SELECT id FROM runs WHERE task_id IS NOT NULL AND created_at > ?)`,
+      )
+      .run(recent);
+    database
+      .prepare(
+        `UPDATE runs SET created_at = ${shift("created_at")}, ` +
+          `started_at = ${shift("started_at")}, finished_at = ${shift("finished_at")} ` +
+          `WHERE task_id IS NOT NULL AND created_at > ?`,
+      )
+      .run(recent);
     database.exec("COMMIT");
   } finally {
     database.close();
