@@ -190,7 +190,59 @@
     );
   }
 
-  // What the agent did: why it failed, its last message, its runs, the PR it opened, and its question.
+  /**
+   * Returns what the run's last agent step put out, drawn by its shape. There is no output
+   * contract: a workflow is the user's own, so the pane draws what the step record holds.
+   *   - A step with no outputSchema puts out `{ text }`, its final message: drawn as text.
+   *   - A step with an outputSchema puts out a JSON value: drawn as its top-level fields, labelled
+   *     with the schema's titles, each value cut to fit, then a link to the whole output.
+   */
+  function buildOutput(task) {
+    var out = task.output || {};
+    var from = out.step ? '<p class="rt-out-from">From the step <b>' + esc(out.step) + "</b></p>" : "";
+    if (!out.value) {
+      return (
+        from +
+        '<div class="rt-text rt-did">' + formatMessage(task.did) + "</div>" +
+        '<a class="rt-more" href="#" data-toast="Opens the thread of ' + esc(task.wf) + '">Read the rest in the thread</a>'
+      );
+    }
+    return (
+      from +
+      '<dl class="rt-out">' +
+      Object.keys(out.value)
+        .map(function (key) {
+          return "<div><dt>" + esc((out.titles || {})[key] || key) + "</dt><dd>" + describeValue(out.value[key]) + "</dd></div>";
+        })
+        .join("") +
+      "</dl>" +
+      '<a class="rt-more" href="#" data-toast="Opens the run, with the whole output of ' + esc(out.step) + '">See the whole output in the run</a>'
+    );
+  }
+
+  /**
+   * Returns one value of a structured output as a line: a string, number or boolean as it is (a
+   * long string cut to two lines), a list as how many items it holds, an object as how many fields.
+   */
+  function describeValue(value) {
+    if (Array.isArray(value)) return '<span class="rt-out-count">' + value.length + (value.length === 1 ? " item" : " items") + "</span>";
+    if (value && typeof value === "object") {
+      var n = Object.keys(value).length;
+      return '<span class="rt-out-count">' + n + (n === 1 ? " field" : " fields") + "</span>";
+    }
+    if (typeof value === "boolean") return value ? "yes" : "no";
+    var text = String(value);
+    return text.length > 60 ? '<span class="rt-out-long">' + esc(text) + "</span>" : esc(text);
+  }
+
+  // The action step the run ended on, after the agent: what the workflow itself did last.
+  function buildEndedOn(task) {
+    if (!task.endedOn) return "";
+    return '<p class="rt-out-action">' + T.icon("bolt", 14) + "<span>" + esc(task.endedOn.step) + ' <span class="rt-out-sep">·</span> ' + esc(task.endedOn.result) + "</span></p>";
+  }
+
+  // What the agent did: why it failed, the output of its last step, its runs, the action the run
+  // ended on, the PR it opened, and its question.
   function buildDid(task) {
     var showDid = task.state !== "working";
     return (
@@ -199,9 +251,9 @@
       '<div class="rt-msg-body">' +
       '<div class="msg-name rt-name" style="--hue:var(--hue-' + window.Crew.lookFor(task.wf).hue + ')">' + task.wf + " <small>" + describeStamp(task) + "</small></div>" +
       (task.state === "failed" && task.failure ? '<p class="rt-text rt-fail">' + formatInline(task.failure) + "</p>" : "") +
-      (showDid ? '<div class="rt-text rt-did">' + formatMessage(task.did) + "</div>" : "") +
-      (showDid ? '<a class="rt-more" href="#" data-toast="Opens the thread of ' + esc(task.wf) + '">Read the rest in the thread</a>' : "") +
+      (showDid ? buildOutput(task) : "") +
       buildSteps(task) +
+      buildEndedOn(task) +
       buildLinked(task) +
       buildQuestion(task) +
       "</div></div>"

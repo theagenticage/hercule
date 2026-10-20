@@ -109,6 +109,9 @@
 
   // One Task per row. The row's second line is the state's word, the workflow, then `line` when
   // there is more to say. A Working Task with `checks` reads "Waiting for checks" instead.
+  // `did` is the text output of the run's last agent step, a step with no outputSchema; `output`
+  // names that step, or holds its structured value when the step declares a schema. `endedOn` is
+  // an action step the run ended on, after the agent.
   // `asked` is the signal of the Task's first handoff, which the pane shows
   // under You asked. `runs` are in order; a run with `again` is a re-run of the one before it.
   // `since` is when the row entered its state: the row's time and the pane's meta read it.
@@ -126,9 +129,12 @@
       asked: { src: "linear", who: "Jonas", kind: "Assigned", where: "PAY-212", at: "08:24", text: "Stripe lets us refund part of a captured payment. Support needs it for damaged items: refund one line, keep the order. The API shape is in PAY-214; build against it." },
       handedAt: "08:31",
       runs: [{ wf: "Implement", state: "finished", start: "08:31", end: "08:52" }],
+      // The run's last step was an action, not the agent: Implement's workflow opens the PR itself.
+      endedOn: { step: "Open a pull request", result: "Opened draft PR #1302" },
+      output: { step: "Write the change" },
       did: [
         "Added `createRefund(orderId, lines)` with a partial amount per line, and a migration for `refund_lines`. Stripe gets one refund per call, with an idempotency key per order and line.",
-        "Opened draft PR #1302. The unit tests pass here; I did not run the Stripe test-mode suite, which needs the team's key.",
+        "Pushed `feat/partial-refunds`. The unit tests pass here; I did not run the Stripe test-mode suite, which needs the team's key.",
       ],
       linked: [{ number: 1302, title: "Refund partial captures", where: "payments-api", state: "Draft", plus: 214, minus: 18, checks: "2 checks failed" }],
     },
@@ -175,11 +181,22 @@
       asked: { src: "github", who: "Marta", kind: "Review requested", where: "payments-api #1296", at: "09:05", text: "A token bucket per API key, 600 requests a minute, in Redis. Over the limit answers 429 with `Retry-After`." },
       handedAt: "09:12",
       runs: [{ wf: "Review PR", state: "finished", start: "09:12", end: "09:20" }],
-      did: [
-        "Approved #1296, with 2 comments:",
-        "- `src/limits/bucket.ts:42`: the refill reads the clock twice, so a burst at the edge of a second can take 601 tokens. Read it once.",
-        "- `src/limits/bucket.test.ts`: no test covers `Retry-After`. Read all 6 files and ran the tests: 31 passed.",
-      ],
+      // The workflow's Review step declares an outputSchema, so its output is this value, not prose.
+      // The schema's titles label it; a property without a title shows its name.
+      output: {
+        step: "Review",
+        titles: { verdict: "Verdict", summary: "Summary", comments: "Comments", confidence: "Confidence", posted: "Posted to GitHub" },
+        value: {
+          verdict: "approve",
+          summary: "Approve, with two comments: the refill reads the clock twice, so a burst at the edge of a second can take 601 tokens, and no test covers Retry-After. Read all 6 files and ran the tests: 31 passed.",
+          comments: [
+            { path: "src/limits/bucket.ts", line: 42, body: "Read the clock once." },
+            { path: "src/limits/bucket.test.ts", body: "Cover Retry-After." },
+          ],
+          confidence: "high",
+          posted: false,
+        },
+      },
     },
     {
       id: "t-checkout",

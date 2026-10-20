@@ -15,9 +15,9 @@ Add `&theme=orient-express` for dark, and `&bar=off` to hide the drawing's bar.
 | URL | Shows |
 |---|---|
 | `index.html` | 09:41, Intake. Tracking is folded at the foot of the list. The checks that failed on #1302 are open: a signal about a tracked Task, so its row wears Implement's face |
-| `?state=finished` | Tracking opened. Rate-limit the public API is open: Review PR finished |
+| `?state=finished` | Tracking opened. Rate-limit the public API is open: Review PR finished, and its Review step's structured output shows as fields |
 | `?state=needs-you` | Upgrade the Stripe SDK: Implement asks to run `git push`, a Request answered in the row or in the pane |
-| `?state=needs-you-signal` | Refunds for partial captures (PAY-212): checks failed on the agent's PR #1302, an open signal that names the Task. The pane shows Linked work |
+| `?state=needs-you-signal` | Refunds for partial captures (PAY-212): checks failed on the agent's PR #1302, an open signal that names the Task. The pane shows a text output, the action step the run ended on, and Linked work |
 | `?state=failed` | Nightly backup: Investigate failed, with permission denied on ops-db |
 | `?state=working` | Lowercase SKUs: Fix bug is working |
 | `?state=stopped` | Move invoices to the new PDF renderer: the user stopped Implement |
@@ -104,9 +104,10 @@ Round Trip's: one trip, top to bottom, joined by a hairline.
 - **You asked:** the signal of the first handoff, with when it was handed to whom.
 - **The agent's message:**
   - for Failed, the reason first, in tomato;
-  - the last message of the last agent step, with "Read the rest in the thread";
-  - for Working, the latest step, live;
+  - **What it did:** the output of the run's last agent step, named ("From the step *Review*"), drawn by its shape (below);
+  - for Working, the latest step, live, in place of What it did;
   - for a Task with more than one run, its runs as steps;
+  - the action step the run ended on, when the workflow did something itself after the agent ("Open a pull request · Opened draft PR #1302");
   - Linked work: the PR and its change line;
   - for a Request, the question and its answers, as Round Trip's run pane has them.
 - **The signal that waits,** for Needs you by a signal: a third message in the trip, from the source, with "Open the signal".
@@ -119,6 +120,15 @@ Round Trip's: one trip, top to bottom, joined by a hairline.
 | Finished | **Mark done**, Try again, Cancel |
 | Failed | **Try again**, Mark done, Cancel |
 | Stopped | Try again, Mark done, Cancel |
+
+**What it did, by the output's shape.** A workflow is the user's own, so there is no output contract: the pane draws what the step record holds ([spec 07 §4.3](../../spec/07-workflows.md)).
+
+| The last agent step | Its output | Drawn as |
+|---|---|---|
+| has no `outputSchema` | `{ text, exitStatus }`, where `text` is the turn's final message | the text, as markdown, cut, with "Read the rest in the thread" (`?state=needs-you-signal`) |
+| has an `outputSchema` | the JSON value the schema declares | its top-level fields, one ruled row each, labelled with the schema's `title` or else the property's name. A string, number or boolean shows as it is, a long string cut to two lines; a list shows how many items it holds, an object how many fields. Then "See the whole output in the run" (`?state=finished`) |
+
+"The last message of the last agent step", as #797 and #803 had it, does not work for a step with a schema: on Codex the final message is the JSON itself, and on Claude and pi the last prose message is often narration before the structured result. A run that ends on an action step has no agent message after it at all.
 
 Open the run is in the head on every state, so the list of answers leaves it out, as Round Trip's did.
 
