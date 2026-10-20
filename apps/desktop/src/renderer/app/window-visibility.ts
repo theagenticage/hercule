@@ -1,6 +1,7 @@
 /**
- * Whether the window can be seen, for the hooks that hold a live topic only
- * while someone can see what it changes (spec 17 §Rules, rule 3).
+ * Whether the window can be seen, for the hooks that hold a live topic, or
+ * draw what it delivers, only while someone can see the window (spec 17
+ * §Rules, rule 3).
  */
 import { useSyncExternalStore } from "react";
 
@@ -17,7 +18,7 @@ const subscribeToVisibility = (onChange: () => void): (() => void) => {
  * while its window is hidden (⌘W hides it) or minimized, and on macOS also
  * while other windows cover it completely.
  */
-const isWindowVisible = (): boolean => document.visibilityState === "visible";
+export const isWindowVisible = (): boolean => document.visibilityState === "visible";
 
 /** Returns whether the window can be seen, and draws the calling component again when that changes. */
 export const useWindowVisible = (): boolean =>

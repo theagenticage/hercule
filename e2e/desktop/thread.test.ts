@@ -20,6 +20,7 @@
  *
  * Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
+import { setTimeout as sleep } from "node:timers/promises";
 import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import { writeSettings } from "../../apps/desktop/scripts/packaged-app";
@@ -27,6 +28,7 @@ import {
   arrangeFleet,
   buildCountedMessage,
   buildLiveCheck,
+  countStoredTextRows,
   createMessagePause,
   createUserDataDirForTest,
   joinShownText,
@@ -387,8 +389,8 @@ describe("the thread view", () => {
     await fleet.waitForTurn(thread.id, 1, "waiting");
 
     // Playwright's focus emulation keeps a hidden page "visible", and the tap
-    // is unsubscribed only on a real hide. This test starts the app as a
-    // plain process instead.
+    // is unsubscribed and the rows are kept aside only on a real hide. This
+    // test starts the app as a plain process instead.
     const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url);
     const readVisibility = () => evaluateInPage("document.visibilityState");
     const readLastSnapshot = () =>
@@ -423,14 +425,25 @@ describe("the thread view", () => {
     await callWindowMethod("hide");
     await expect.poll(readVisibility).toBe("hidden");
     const shownWhenHidden = joinShownText((await readLastSnapshot())!);
-    // The stream topic stays subscribed while the window is hidden, so the
-    // rows keep landing. A hidden page runs its timers at most once a second.
+    const rowsWhenHidden = await countStoredTextRows(client, thread.id);
     message.resumeAfterHide();
+    await expect
+      .poll(() => countStoredTextRows(client, thread.id), { timeout: 10_000 })
+      .toBeGreaterThan(rowsWhenHidden);
+    // The page still receives the stored rows while it is hidden, but keeps
+    // them aside instead of drawing them. A hidden page runs its timers at
+    // most once a second, so a page that drew them anyway would show them
+    // within that time. Wait a little longer before checking that it shows
+    // nothing new.
+    await sleep(2_000);
+    expect(joinShownText((await readLastSnapshot())!)).toBe(shownWhenHidden);
+
+    await callWindowMethod("show");
+    await expect.poll(readVisibility).toBe("visible");
+    // The rows kept aside while the window was hidden are drawn together.
     await expect
       .poll(async () => joinShownText((await readLastSnapshot())!).length, { timeout: 10_000 })
       .toBeGreaterThan(shownWhenHidden.length);
-    await callWindowMethod("show");
-    await expect.poll(readVisibility).toBe("visible");
     // The message is paused, so it is still being written.
     expect((await readLastSnapshot())!.openParagraph).not.toBeNull();
     message.resumeAfterShow();
