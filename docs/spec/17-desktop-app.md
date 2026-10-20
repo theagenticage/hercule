@@ -768,7 +768,7 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
     - **With a copy,** the thread shows at once from it, and the loader waits for nothing on the network.
       - The sender, run-crumb and permission-profile reads start with the loader but do not hold the page back. They fill in when they answer. The Requests dock reads the profiles without suspending.
       - The session, its subagents and its queued inputs are read again in the background, and the screen updates when they answer.
-      - The app reads the rows written after the copy's last row with `transcript.read`'s `after` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)), page by page, and merges them into the cache in one write. The thread is marked "Syncing…" until that read ends. *(Amended 2026-10-19, [#796](https://github.com/theagenticage/hercule/issues/796).)* The read starts from the row before the copy's last row, and checks that the first row it returns is the copy's last row.
+      - The app reads the rows written after the copy's last row with `transcript.read`'s `after` ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)), page by page, and merges them into the cache in one write. The thread is marked "Syncing…" until that read ends. *(Amended 2026-10-19, [#796](https://github.com/theagenticage/hercule/issues/796).)* The read starts from the row before the copy's last row, and checks that the first row it returns is the copy's last row. *(Amended 2026-10-19, [#796](https://github.com/theagenticage/hercule/issues/796).)* A controller that predates `after` ignores it and answers the whole transcript from the start. The app recognises that answer, because its first row is at or before the `after` it sent, and uses it as the full read, without clearing the rows and without reading a second time.
         - When the first row is not the copy's last row, the controller's log was replaced, for example restored from a backup. The app then reads the transcript in full and replaces the copy's rows with it.
       - Only then does the agent's page subscribe to its stream, from the new last row, so the stream's replay is small. The catch-up read is not retried. ~~If the read fails for good, the page subscribes anyway from the copy's last row, and the stream's replay brings the missing rows.~~ *(Amended 2026-10-19, [#796](https://github.com/theagenticage/hercule/issues/796).)* If the read fails, the page subscribes from the copy's last row, and the stream's replay brings the missing rows.
     - **When the stream resets,** the page stops following the stream, reads the rows again in full, and subscribes again from the new last row once that read has ended. The page does not resubscribe at once: a row written between the reset and the end of the read could be lost, and a saved copy would keep the loss.
@@ -2104,10 +2104,10 @@ Settings does not open a live topic the shell does not already need, except whil
 | Time to read a copy back | about 11 ms for a 3.1 MB transcript: 9 ms to read it as objects and 2 ms for the schema check. Benchmarked in Chromium with real transcripts, 5 rounds, medians | the same benchmark, run again on the built store, on the reference machine |
 | The cost of a save | about 18 ms in all and a longest main-thread block of 13 ms, for the same 3.1 MB transcript, run when the renderer is idle. No long task (over 50 ms). *(Amended 2026-10-19, [#796](https://github.com/theagenticage/hercule/issues/796).)* An idle save can still run while another thread streams, because `requestIdleCallback` runs it after a 1 s timeout. Measured longest block, on Linux in Chrome 153: 16 ms at 3 MB and 41 ms at a 9.5 MB copy, both below the 50 ms long-task line | the same benchmark; a Chromium trace of a page closing and of a turn ending |
 | Disk | about 0.38 times the transcript's JSON size, because Chromium compresses IndexedDB values: 2.77 MiB for four transcripts of 7.3 MB of JSON together. For 4 projects of 25 threads of about 1 MB each, about 36 MB. *(Amended 2026-10-19, [#796](https://github.com/theagenticage/hercule/issues/796).)* The bound is per project (25 copies), not in total: the copies of a project the user stops opening are never evicted. When the disk quota is exceeded, a save fails and is logged, and the thread opens from the network | the size of the IndexedDB folder in the user data directory after the reference fleet's threads are opened |
-| Bundle bytes | a few kB gzipped: the store, the format and schema check, and the merge of the newer rows. *(Amended 2026-10-19, [#796](https://github.com/theagenticage/hercule/issues/796).)* Measured on Linux: the first screen grew from 441.6 kB to 444.3 kB gzipped, +2.7 kB. Effect Schema was already in the first screen | `pnpm build:desktop`'s bundle check, before and after. The reference Mac's measurement will be recorded |
+| Bundle bytes | a few kB gzipped: the store, the format and schema check, and the merge of the newer rows. Effect Schema was already in the first screen. Measured: +2.7 kB ([Measured](#measured)) | `pnpm build:desktop`'s bundle check, before and after |
 | Opening a thread | from a copy, close to a cached thread plus the copy's read. A cached 2.4 MB thread opens in about 42 ms. Read from the network over the Mac's model, it took 605 to 619 ms before [#791](https://github.com/theagenticage/hercule/issues/791)'s compression and 266 to 269 ms with it | the same harness as #791, from the click to the first frame of the transcript, from a copy and from the network |
 
-The values are to be recorded in [Measured](#measured).
+The values are recorded in [Measured](#measured). Every expectation held.
 
 ## Performance
 
@@ -3652,7 +3652,55 @@ The microbenchmark runs the real `buildThreadBlocks`, `buildSessionAgentState` a
 - **The previous thread stays mounted, hidden, until the new one renders.** React hides it behind the opening state rather than unmounting it, so its live subscriptions run for the length of the load, as they did before, when it stayed on screen.
 - **Pixels.** In the thread specimen, at 1440 x 900 in both appearances, the opening state's header is the loaded thread's header pixel for pixel; only the transcript area and the composer differ.
 
-**Thread copies, issue [#796](https://github.com/theagenticage/hercule/issues/796),** measured on the reference machine against the plan in [What thread copies cost](#what-thread-copies-cost). The measurement is recorded below once taken on the reference machine.
+**Thread copies, issue [#796](https://github.com/theagenticage/hercule/issues/796),** measured 2026-10-19 on the reference Mac (MacBook Pro Mac16,5, Apple M4 Max, 64 GB, macOS 15.8) against the plan in [What thread copies cost](#what-thread-copies-cost). The Mac was shared with other agents, with a load average of 1.9 to 3.3 during the runs, so the noise is large. The browser is Chrome for Testing 153.0.8010.12, headless (Electron 44 is Chromium 152). The build is the branch at 7824c06b; the review fixes after it do not change the timing of the open or read path. The Mac reached Rogier's controller on the Beelink over Wi-Fi and Tailscale: a tiny GET took 12.9 to 17.0 ms (median about 15.4 ms), with no stall in 10 samples.
+
+The method for opening a thread: the built renderer is served by a local Node server that proxies `GET /api` to the real controller. There is no network model, and writes are refused. The bridge is a fake and the live connection is stubbed. Playwright clicks the thread's sidebar row. The time runs from the click to the second animation frame after the header shows the thread and a transcript row exists. Each thread was opened 7 times. The four threads are real transcripts of 0.54 MB (236 rows), 1.15 MB (209), 2.40 MB (708) and 3.08 MB (1204).
+
+The deployed controller predates `after` and ignores it. So the catch-up was measured two ways:
+
+- **Emulated:** the proxy answered `after` as this branch's controller does, after one real read to the controller for the network cost.
+- **Against the deployed controller.** The app now recognises a controller that ignores `after` and uses its answer as the full read, so this mode is only the version-skew case.
+
+Opening a thread, from the click to the first frame, in ms, median (minimum to maximum):
+
+| Thread | No copy (network) | From copy | Cached in the query cache |
+|---|---|---|---|
+| 0.54 MB | 211 (166 to 305) | 95 (40 to 126) | 58 (29 to 116) |
+| 1.15 MB | 264 (162 to 526) | 145 (71 to 153) | 94 (48 to 110) |
+| 2.40 MB | 325 (314 to 398) | 92 (58 to 168) | 50 (30 to 81) |
+| 3.08 MB | 399 (356 to 552) | 104 (54 to 172) | 70 (26 to 108) |
+
+The from-copy and cached columns use the emulated `after`. Against the deployed controller, the open from a copy took 114, 113, 71 and 97 ms.
+
+- **The open from a copy does not grow with the transcript.** It stays near 0.1 s from 0.54 to 3.08 MB, while the open from the network grows from 0.2 to 0.4 s over this link. A cached thread opens in about 0.05 s.
+- **The open from a copy waits on nothing from the network.** With every read of the thread held for 2 s at the proxy, it still opened in 60 to 152 ms. "Syncing…" showed, at 0.9 s and at 3.4 s.
+- **The catch-up read (`after`) costs 14, 9, 13 and 18 ms** (medians, in the order of the table), in one request. The threads had finished, so it returned no rows and "Syncing…", which shows after 400 ms, never showed.
+- **Network stalls ([#793](https://github.com/theagenticage/hercule/issues/793)) hit a few no-copy runs:** 0.98 s in one, and 1.4 to 2.5 s in a first pass. They only touch the open from the network.
+
+The cost of reading and saving a copy, in ms, medians of 9 (the structured clone is the part of the save that runs inside the `put`):
+
+| Transcript | Read, with the schema check | Longest block during the read | Save, `put` to commit | Structured clone in the `put` | Longest block during the save |
+|---|---|---|---|---|---|
+| 0.54 MB | 5.3 | 1.8 | 4.2 | 1.2 | 2.1 |
+| 1.15 MB | 7.0 | 3.2 | 5.2 | 2.1 | 4.1 |
+| 2.40 MB | 11.1 | 6.1 | 8.9 | 5.2 | 5.3 |
+| 3.08 MB | 13.6 | 7.0 | 9.3 | 5.6 | 5.8 |
+
+- **The first read after a page load, which opens the database, took 1.8 to 16.8 ms.**
+- **No long task (over 50 ms) comes from a read or a save.** The longest block is 7.0 ms at 3.08 MB.
+- **In the app, the longest block around a page close with its save was about 25 ms at every size.** The screen change causes it, not the save.
+
+| Measure | Plan | Measured |
+|---|---|---|
+| Processes | none added | none added |
+| Work while idle | none | none: the save runs only when a page closes and when a turn ends |
+| Work per streamed token | none | none, by the same design |
+| Memory | the same as a network open | JS heap after a forced GC, 2.4 MB thread, 7 runs: 20.3 MB with no thread open, 25.7 MB opened from the network and 25.7 MB opened from its copy, identical in every run |
+| Disk | about 0.38 times the JSON size | 2.48 MB for the four copies (2,456 KB of blobs and 24 KB of LevelDB) against 7.17 MB of transcript JSON, 0.35 times |
+| Bundle bytes | a few kB gzipped | the first screen, gzipped: 441.6 kB at 046f7120, 444.3 kB on the branch, +2.7 kB |
+
+- **Every expectation held.** One number is above its plan: the read of the 3.08 MB copy took 13.6 ms against about 11 ms for 3.1 MB. That is inside a frame and inside the noise of a shared Mac. The save (9.3 ms, longest block 5.8 ms) is under the plan's 18 and 13 ms, and the open from a copy (about 0.1 s) is under the 0.2 to 0.4 s of a network open over this link.
+- **The first screen is over its 250 kB guide by 192 to 194 kB, before and after.** That predates this change; the guide passes.
 
 ## Slices
 
