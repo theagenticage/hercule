@@ -24,28 +24,27 @@
   //     spotlight  the same surface; while Rogier works in Tracking, the list fades back.
   //     drawer     a raised sheet over the list, in three sizes: minimized to one summary row,
   //                open (what waits, at most 40%), and unfolded (every row, at most 62%).
-  //     desk, trays, blotter: drawn in focus-<name>.js; BRIEF.md says what each tries.
+  //     desk, takeover: drawn in focus-<name>.js; BRIEF.md says what each tries.
   //   finished: how a Finished row tells itself apart from the rows that need something.
   //     tint       a green row, its line in green
   //     soft       the same at half strength: a wash, its line in green
-  //     edge       a green edge at the row's left and a faint wash
+  //     edge       a straight, soft green edge at the row's left, over the wash
   //     mark       its line in green, and a green check by its time
   var FOCUS_VARIANTS = [
     ["shelf", "Shelf"],
     ["spotlight", "Spotlight"],
     ["drawer", "Drawer"],
     ["desk", "Desk: a dialog"],
-    ["trays", "In and out trays"],
-    ["blotter", "Blotter: the pane at rest"],
+    ["takeover", "Takeover"],
   ];
   var FINISHED_VARIANTS = [
-    ["tint", "Green row"],
     ["soft", "Green wash"],
+    ["tint", "Green row"],
     ["edge", "Green edge"],
     ["mark", "Green check"],
   ];
   root.dataset.focus = query.get("focus") || "shelf";
-  root.dataset.finished = query.get("finished") || "tint";
+  root.dataset.finished = query.get("finished") || "soft";
 
   // The tray shows at most this many rows before its Working and Stopped rows fold into one row
   // of faces, so Intake's own list keeps the room. Rows that wait on Rogier never fold.
@@ -186,6 +185,8 @@
   /** Returns the ids in the order J and K walk them: Now, Signals, then Tracking's rows. */
   function listOrder() {
     if (view === "done") return T.DONE.map(byId);
+    var own = focusVariant().listOrder ? focusVariant().listOrder(shell) : null;
+    if (own) return own;
     var on = signalsOnTab();
     return on
       .filter(function (s) {
@@ -1001,7 +1002,8 @@
   //   afterRender(shell)    runs after every render;
   //   paneWhenEmpty(shell)  returns what the pane shows on To do while nothing is open;
   //   hidesTray: true       keeps J and K out of the tray, for a variant that draws it elsewhere;
-  //   foldsTray: false      shows every tray row, for a variant with room for them all.
+  //   foldsTray: false      shows every tray row, for a variant with room for them all;
+  //   listOrder(shell)      returns the ids J and K walk, or null for the shell's own order.
   // This is what they may use.
   var shell = {
     T: T,
@@ -1010,6 +1012,8 @@
     splitTray: splitTray,
     waits: waits,
     countWaiting: countWaiting,
+    countTodo: countTodo,
+    signalsOnTab: signalsOnTab,
     findItem: findItem,
     isTask: isTask,
     trayRow: trayRow,

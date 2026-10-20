@@ -1,0 +1,91 @@
+/* DRAWING - Tracking, focus variant: takeover. Either Intake or Tracking in the list column, never
+   both: folded, Tracking is one row at the foot; opened, it covers the whole column. No new
+   tokens. */
+
+/* Folded: one row at the foot of the column, on the page's surface, over the list, which keeps
+   room for it under its last row. */
+html[data-focus="takeover"] .rt-tray {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  max-height: none;
+  padding: 4px 10px;
+  background: var(--surface);
+  box-shadow: inset 0 1px 0 var(--line-soft);
+  overflow: visible;
+}
+html[data-focus="takeover"] .asks-scroll {
+  padding-bottom: 60px;
+}
+html[data-focus="takeover"] .tk-bar {
+  position: static;
+  padding: 0;
+  background: none;
+}
+html[data-focus="takeover"] .tk-chev {
+  display: grid;
+  color: var(--faint);
+}
+/* The chevron points up while the sheet is folded: it opens upward. */
+html[data-focus="takeover"] .tk-chev--up {
+  transform: rotate(180deg);
+}
+
+/* Opened: Tracking covers the column from its top, the view switcher included. */
+html[data-focus="takeover"] .rt-tray.is-takeover {
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  box-shadow: none;
+}
+html[data-focus="takeover"] .tk-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 12px 20px 0;
+}
+html[data-focus="takeover"] .tk-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--t-16);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.005em;
+}
+html[data-focus="takeover"] .tk-head .rt-tray-sum {
+  margin-left: auto;
+}
+html[data-focus="takeover"] .tk-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 10px 16px;
+  scrollbar-width: thin;
+}
+/* Each state is a section, as Now and Signals are on To do, led by the state's mark. */
+html[data-focus="takeover"] .tk-sec {
+  padding-left: 10px;
+}
+html[data-focus="takeover"] .tk-sec .mark {
+  margin-right: -2px;
+}
+/* The way back: the signals summed up, in the same place the Tracking row had. */
+html[data-focus="takeover"] .tk-bar--back {
+  flex: none;
+  padding: 4px 10px;
+  box-shadow: inset 0 1px 0 var(--line-soft);
+}
+html[data-focus="takeover"] .tk-marks {
+  display: inline-flex;
+  gap: 8px;
+  color: var(--ink);
+  opacity: 0.75;
+}
+html[data-focus="takeover"] .tk-bar--back .rt-tray-sum {
+  color: var(--muted);
+}

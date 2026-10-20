@@ -50,7 +50,7 @@ As Round Trip's: the face of the agent that has the work, in its pose (working, 
 
 The workflow's name is in its colleague's hue; the time on the right is how long the row has been in its state, in marigold and bold when the row waits on the user. Mark done shows on hover over Finished, Failed and Stopped rows only: on Working and Needs you it would leave a run going.
 
-**Finished is green.** It waits on the user and counts toward To do, like Needs you and Failed, but it is good news: the agent is done and the work only needs a tick. So it is drawn in the book's green for what passed (`--ok`), where the rows that need something are marigold. Four treatments are drawn, switched with `?finished=`: `tint` (default), a green row (`--ok-tint`); `soft`, the same at about half strength; `edge`, a 2px green rule at the row's left over a faint wash, as the book marks a message that mentions the user; and `mark`, a green check by the time. #800 asked for Finished in marigold; Rogier changed that in the session.
+**Finished is green.** It waits on the user and counts toward To do, like Needs you and Failed, but it is good news: the agent is done and the work only needs a tick. So it is drawn in the book's green for what passed (`--ok`), where the rows that need something are marigold. Four treatments are drawn, switched with `?finished=`: `soft` (default), a green wash, `--ok-tint` at about half strength; `tint`, the full tint; `edge`, the wash with a straight, soft green edge at the row's left, the row square on that side, as the subagent view's brief card draws its edge; and `mark`, a green check by the time. #800 asked for Finished in marigold; Rogier changed that in the session.
 
 **Groups.** The rows that wait on the user come first, Needs you, then Failed, then Finished; a 6px space; then Working and Stopped. Needs you leads because an agent or a source is blocked on the user; Finished comes last of the three because nothing is blocked.
 
@@ -65,7 +65,7 @@ At ten times the load, two lists of the same rows on the same surface are hard t
 - **Calm:** opacity and transform only; nothing jumps under the pointer.
 - **Nothing that counts hides:** what waits on the user stays visible in every variant.
 
-Six variants, switched with `?focus=` or with ← and →:
+The variants, switched with `?focus=` or with ← and →:
 
 | Variant | The idea | Cost |
 |---|---|---|
@@ -73,8 +73,9 @@ Six variants, switched with `?focus=` or with ← and →:
 | `spotlight` | The same surface as the list, with more room above it. While the user works in Tracking (a tracked row is open, or the tray is unfolded), the list fades to 40%; the pointer on the list brings it back | one opacity transition on entering or leaving Tracking |
 | `drawer` | A raised sheet over the bottom of the list, in three sizes: **minimized** to one summary row (the count, the faces of the agents whose work waits, "4 wait on you"; `&drawer=min`), **open** (what waits on the user and one row of faces, at most 40%), and **unfolded** (every row, at most 62%), with the list dimmed behind it. A click on the head minimizes or opens it; the row of faces unfolds it. A handoff into a minimized drawer flies to its head | one transform when the sheet changes size, one opacity transition for the dim |
 | `desk` | Tracking minimized to one summary row; opening it brings up a large dialog over the list and the pane, with its own list and detail, so the two never share the column | one opacity and scale transition on opening and closing |
-| `trays` | The bureau's in-tray and out-tray: Intake becomes two columns side by side, In (the signals) and Out (Tracking), separated by axis, both at full height | none beyond the pane's own |
-| `blotter` | The pane's resting state is Tracking: while nothing is open, the right half of Intake is a board of the work out with agents, grouped by state. The list column is pure Intake | opacity crossfades when a card changes state |
+| `takeover` | Either Intake or Tracking, never both. In Intake, Tracking is one summary row at the foot of the list, as the minimized drawer. Opening it (a click, or `T`) lets Tracking rise over the whole list column, the view switcher included: every row, grouped by state under the state's mark, the open one in the pane. At its foot, a row sums up the signals and goes back. While Tracking is open, J and K walk only its rows; Esc steps back through the pane, the selection, then Tracking (`&takeover=open` opens it at load) | one transform when the sheet rises or sinks |
+
+Two directions were drawn and dropped in the session: **In and out trays** (two columns side by side; too many columns) and **Blotter** (Tracking as the pane's resting state; a detail pane that is not a detail pane, reached only by closing what is open). Takeover keeps Blotter's clean overview as an either-or.
 
 ## The pane## The pane
 

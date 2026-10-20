@@ -242,15 +242,17 @@ html[data-finished="soft"] .rt-run-item.is-finished:hover > .rt-run,
 html[data-finished="soft"] .rt-run-item.is-finished.is-on > .rt-run {
   background: var(--ok-tint);
 }
-/* A green edge: a 2px rule at the row's left, as the book marks the message that mentions you,
-   over a faint wash. */
+/* A green edge, drawn as the subagent view's brief card draws its own: a straight edge at the
+   row's left, the row square on that side and rounded on the other, over the green wash. The
+   edge is the green itself, softened by half, so it guides the eye without cutting the row. */
 html[data-finished="edge"] .rt-run-item.is-finished > .rt-run {
-  background: color-mix(in oklab, var(--ok-tint) 35%, transparent);
-  box-shadow: inset 2px 0 0 var(--ok);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  background: color-mix(in oklab, var(--ok-tint) 55%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--ok) 50%, transparent);
 }
 html[data-finished="edge"] .rt-run-item.is-finished:hover > .rt-run,
 html[data-finished="edge"] .rt-run-item.is-finished.is-on > .rt-run {
-  background: color-mix(in oklab, var(--ok-tint) 70%, transparent);
+  background: var(--ok-tint);
 }
 /* A green check by the time. */
 html[data-finished="mark"] .rt-finished-mark {
