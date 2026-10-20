@@ -920,7 +920,10 @@ describe("the sidebar's faces", () => {
   });
 
   it("keeps the app on screen when the Hercule face opens long after the Connections were last drawn", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // `setImmediate` stays real: fake-indexeddb, which holds the thread
+    // copies, runs its transactions on it, and a faked one runs several
+    // transaction steps in one go, so opening the copies fails.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout", "Date"] });
     let connectionReads = 0;
     // The loader's read answers; any later read hangs, so a screen that waits
     // for one stays hidden.
