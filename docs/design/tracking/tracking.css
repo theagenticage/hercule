@@ -204,6 +204,105 @@ button.rt-run:hover,
   line-height: 1.5;
 }
 
+/* The rows that wait on Rogier, and the rows that do not, are two groups: a little space between
+   them says where the work that needs him ends. */
+.rt-runs-gap {
+  height: 6px;
+}
+
+/* ---------- Finished ---------- */
+/* Finished waits on Rogier too (it counts toward To do), but it is good news: the agent is done
+   and the work only needs his tick. So it is green, the book's colour for what passed, where
+   Needs you and Failed are marigold. Two treatments are drawn; the bar switches between them. */
+.rt-run-item.is-finished .rt-run-sub,
+.rt-run-item.is-finished .rt-run-end {
+  color: var(--ok);
+}
+.rt-finished-mark {
+  display: none;
+}
+/* A green row: the tint sits on the row itself, so hover and selection still darken it. */
+html[data-finished="tint"] .rt-run-item.is-finished > .rt-run {
+  background: var(--ok-tint);
+}
+html[data-finished="tint"] .rt-run-item.is-finished:hover > .rt-run {
+  background: color-mix(in oklab, var(--ok) 14%, var(--ok-tint));
+}
+html[data-finished="tint"] .rt-run-item.is-finished.is-on > .rt-run {
+  background: color-mix(in oklab, var(--ok) 20%, var(--ok-tint));
+}
+html[data-finished="tint"] .rt-run-item.is-finished {
+  --row-fill: color-mix(in oklab, var(--ok) 14%, var(--ok-tint));
+}
+/* A green check by the time. */
+html[data-finished="mark"] .rt-finished-mark {
+  display: inline-grid;
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+
+/* ---------- Focus: how Tracking stands apart from the list ---------- */
+
+/* Shelf: Tracking sits on its own sunken surface, inset from the column with space above it, so
+   the list ends where the surface changes. Nothing moves. */
+html[data-focus="shelf"] .rt-tray {
+  margin: 8px 10px 10px;
+  padding: 0 6px 6px;
+  border-radius: var(--r-lg);
+  background: var(--sunken);
+  box-shadow: none;
+}
+html[data-focus="shelf"] .rt-tray-h {
+  top: 0;
+  background: var(--sunken);
+}
+html[data-focus="shelf"] .rt-run-item {
+  --row-fill: var(--sunken);
+}
+
+/* Spotlight: the same surface, with more room above. While Rogier works in Tracking (a tracked row
+   is open, or the tray is unfolded), the list fades back; the pointer on it brings it back. */
+html[data-focus="spotlight"] .rt-tray {
+  margin-top: 12px;
+  padding-top: 8px;
+}
+html[data-focus="spotlight"] .asks-list.is-tracking .asks-scroll,
+html[data-focus="drawer"] .asks-list.is-tracking .asks-scroll {
+  opacity: 0.4;
+}
+html[data-focus="spotlight"] .asks-scroll,
+html[data-focus="drawer"] .asks-scroll {
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+html[data-focus="spotlight"] .asks-list.is-tracking .asks-scroll:hover,
+html[data-focus="spotlight"] .asks-list.is-tracking .asks-scroll:focus-within {
+  opacity: 1;
+}
+
+/* Drawer: a raised sheet over the list. Folded, it shows what waits on Rogier and one row of faces,
+   and the list keeps room for it under its last row; unfolded, it rises over the list, which dims
+   behind it. */
+html[data-focus="drawer"] .rt-tray {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  max-height: 62%;
+  padding-top: 6px;
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  background: var(--raised);
+  box-shadow:
+    inset 0 1px 0 var(--line-soft),
+    var(--shadow-3);
+}
+html[data-focus="drawer"] .rt-tray-h {
+  background: var(--raised);
+}
+html[data-focus="drawer"] .rt-run-item {
+  --row-fill: var(--raised);
+}
+
 /* ---------- Motion layer ---------- */
 /* Copies of rows fly here from the list into the tray, and rows that left fade out here. */
 .rt-fly {
@@ -225,16 +324,18 @@ button.rt-run:hover,
 }
 
 /* ---------- the drawing's bar: not part of the design ---------- */
-/* It sits in the title bar's empty middle, so it covers neither the list nor the pane. */
+/* It sits over the foot of the sidebar, so it covers neither the list nor the pane. */
 .tr-proto {
   position: fixed;
-  top: 9px;
-  right: 56px;
+  bottom: 12px;
+  left: 12px;
   z-index: 50;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  padding: 3px;
+  gap: 4px;
+  width: 248px;
+  padding: 6px;
   border: 1px dashed var(--line);
   border-radius: var(--r-md);
   background: var(--raised);
@@ -245,7 +346,8 @@ html[data-bar-off] .tr-proto {
   display: none;
 }
 .tr-proto-tag {
-  padding: 0 6px;
+  flex: 1 1 100%;
+  padding: 2px 4px;
   color: var(--faint);
   font-size: var(--t-11);
   font-weight: var(--w-bold);
@@ -253,6 +355,7 @@ html[data-bar-off] .tr-proto {
   text-transform: uppercase;
 }
 .tr-proto-pick {
+  flex: 1 1 100%;
   height: 26px;
   padding: 0 6px;
   border: 1px solid var(--line);
@@ -262,9 +365,8 @@ html[data-bar-off] .tr-proto {
   font: inherit;
 }
 .tr-proto-sep {
-  width: 1px;
-  height: 18px;
-  background: var(--line);
+  flex: 1 1 100%;
+  height: 0;
 }
 .tr-proto-btn {
   height: 26px;

@@ -43,14 +43,28 @@ As Round Trip's: the face of the agent that has the work, in its pose (working, 
 | Needs you, a Request | the question, in marigold: "Run `git push -u origin chore/stripe-sdk-14`?", with Allow once, Always allow and Deny under it in three fixed slots |
 | Needs you, a signal | "Checks failed on #1302", in marigold |
 | Failed | "*Investigate* failed · permission denied on ops-db", in marigold |
-| Finished | "*Review PR* finished", in marigold |
+| Finished | "*Review PR* finished", in green: see Finished, below |
 | Working | "*Fix bug* · Writing a failing test for a lowercase SKU": the agent's latest message |
 | Working, on a subscription | "*Implement* · waiting for checks on #1311" |
 | Stopped | "*Implement* · stopped by you" |
 
 The workflow's name is in its colleague's hue; the time on the right is how long the row has been in its state, in marigold and bold when the row waits on the user. Mark done shows on hover over Finished, Failed and Stopped rows only: on Working and Needs you it would leave a run going.
 
+**Finished is green.** It waits on the user and counts toward To do, like Needs you and Failed, but it is good news: the agent is done and the work only needs a tick. So it is drawn in the book's green for what passed (`--ok`), where the rows that need something are marigold. Two treatments are drawn, switched with `?finished=`: `tint` (default), a green row (`--ok-tint`), and `mark`, a green check by the time. #800 asked for Finished in marigold; Rogier changed that in the session.
+
+**Groups.** The rows that wait on the user come first, Needs you, then Failed, then Finished; a 6px space; then Working and Stopped. Needs you leads because an agent or a source is blocked on the user; Finished comes last of the three because nothing is blocked.
+
 **Faces on signals.** A signal about a tracked Task, such as the checks that failed on the agent's PR, is led by that agent's face in Signals, and its source's mark moves to the start of its second line, as Round Trip drew what came back. A face on a row says at a glance that an agent has worked on it. Done does the same for every handed-off signal.
+
+## Focus: telling the list and Tracking apart
+
+At ten times the load, two lists of the same rows on the same surface are hard to tell apart, and each competes for the eye while the user works in the other. Three variants, switched with `?focus=` or with ← and →:
+
+- **`shelf`** (default): Tracking sits on its own sunken surface (`--sunken`), inset from the column with 8px above it and rounded corners. The list ends where the surface changes. Nothing moves.
+- **`spotlight`**: the same surface as the list, with more room above it. While the user works in Tracking (a tracked row is open, or the tray is unfolded), the list fades to 40% over `--dur-2`; the pointer on the list, or focus in it, brings it back. Opacity only.
+- **`drawer`**: Tracking is a raised sheet (`--raised`, `--shadow-3`, rounded top) lying over the bottom of the list, which keeps room for it under its last row. Unfolding raises the sheet over the list with a transform, and the list dims behind it as in spotlight.
+
+The cost of each: shelf none; spotlight and drawer one opacity transition on the list when the user moves into or out of Tracking; drawer one transform on the sheet when it rises or sinks.
 
 ## The pane
 
@@ -105,7 +119,7 @@ Every motion is `transform` or `opacity` on an HTML element, plays once, only fo
 | A handoff: the signal leaves for Tracking | a lifted copy of its row (`--shadow-2`) flies from Signals to its place in the tray over `--dur-3`; the rows below in Signals close up | one compositor animation for the copy, plus one transform per row that moves on screen, once per handoff |
 | A row changes state (Working → Finished) | its line fades in anew over `--dur-2`; when its place changes, the rows between slide over `--dur-3` | one opacity animation, plus one transform per row that moves, once per change |
 | A row is marked done or cancelled | it fades over `--dur-1`, then the rows below close the gap over `--dur-3` | as Intake's own Done |
-| A Working row's line changes | the new line fades in over `--dur-2` | one opacity animation per new agent message, only for rows on screen. The line is the agent's latest message, which the `session` topic already brings; this is the one per-message cost Tracking adds, and slice 1 measures it |
+| A Working row's line changes | the new line fades in over `--dur-2` | one opacity animation per new agent message, only for rows on screen. The line is the agent's latest message, which the `session` topic already brings; this is the one per-message cost Tracking adds, and slice 1 measures it. Rogier keeps it for now, and is open to dropping it, for the workflow name alone, if it proves complex or costly |
 
 No loop runs, faces in lists are still, and the times read the shared age clock, once a minute.
 

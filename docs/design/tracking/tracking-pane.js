@@ -103,7 +103,7 @@
 
   function buildHead(task) {
     var state = T.STATES[task.state];
-    var tone = task.state === "failed" ? "fail-ink" : state.waits ? "you-ink" : "";
+    var tone = task.state === "failed" ? "fail-ink" : task.state === "finished" ? "ok-ink" : state.waits ? "you-ink" : "";
     return (
       '<header class="ad-head"><div class="ad-kind">' +
       '<span class="src">' + T.face(task.wf, choosePose(task), 18) + task.wf + "</span><span>·</span>" +

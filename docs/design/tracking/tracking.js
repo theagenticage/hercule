@@ -15,7 +15,28 @@
   var T = window.Tracking;
   var root = document.documentElement;
   var STATE = root.dataset.state || "finished";
-  if (new URLSearchParams(location.search).get("bar") === "off") root.dataset.barOff = "";
+  var query = new URLSearchParams(location.search);
+  if (query.get("bar") === "off") root.dataset.barOff = "";
+
+  // Two questions this drawing still explores, each switched from the bar:
+  //   focus: how Tracking sets itself apart from the list, and how focus moves between them.
+  //     shelf      Tracking sits on its own sunken surface, with space around it. Nothing moves.
+  //     spotlight  the same surface; while Rogier works in Tracking, the list fades back.
+  //     drawer     a raised sheet over the list; unfolded, it rises over the list, which dims.
+  //   finished: how a Finished row tells itself apart from the rows that need something.
+  //     tint       a green row, its line in green
+  //     mark       its line in green, and a green check by its time
+  var FOCUS_VARIANTS = [
+    ["shelf", "Shelf"],
+    ["spotlight", "Spotlight"],
+    ["drawer", "Drawer"],
+  ];
+  var FINISHED_VARIANTS = [
+    ["tint", "Green row"],
+    ["mark", "Green check"],
+  ];
+  root.dataset.focus = query.get("focus") || "shelf";
+  root.dataset.finished = query.get("finished") || "tint";
 
   // The tray shows at most this many rows before its Working and Stopped rows fold into one row
   // of faces, so Intake's own list keeps the room. Rows that wait on Rogier never fold.
@@ -310,14 +331,25 @@
       el.innerHTML = head + '<p class="rt-tray-empty">Hand a signal to an agent, and follow it here until you mark it done.</p>';
       return;
     }
-    el.innerHTML = head + '<div class="rt-runs">' + split.shown.map(trayRow).join("") + (split.folded.length ? foldedRow(split.folded) : "") + "</div>";
+    var rows = split.shown.map(function (t, i) {
+      var gap = i > 0 && waits(split.shown[i - 1]) && !waits(t);
+      return (gap ? '<div class="rt-runs-gap" aria-hidden="true"></div>' : "") + trayRow(t);
+    });
+    var lastWaits = split.shown.length && waits(split.shown[split.shown.length - 1]);
+    var folded = split.folded.length ? (lastWaits ? '<div class="rt-runs-gap" aria-hidden="true"></div>' : "") + foldedRow(split.folded) : "";
+    el.innerHTML = head + '<div class="rt-runs">' + rows.join("") + folded + "</div>";
+  }
+
+  /** Checks whether Rogier works in Tracking now: a tracked row is open, or the tray is unfolded. */
+  function isWorkingInTracking() {
+    return view === "todo" && (unfolded || (isTask(findItem(selected)) && paneOpen));
   }
 
   /** Returns the second line of a Tracking row: what waits, what went wrong, or what the agent is doing. */
   function describeTaskRow(t) {
     if (t.state === "needs") return t.question ? t.question.text : t.waitsOn.text;
     if (t.state === "failed") return T.who(t.wf) + " failed · " + t.line;
-    if (t.state === "finished") return T.who(t.wf) + " finished";
+    if (t.state === "finished") return T.who(t.wf) + ' <span class="rt-finished">finished</span>';
     if (t.state === "stopped") return T.who(t.wf) + " · stopped by you";
     return T.who(t.wf) + " · " + (t.narration || "starting");
   }
@@ -330,12 +362,12 @@
     var you = waits(t);
     var key = t.key || t.id;
     return (
-      '<div class="rt-run-item' + (you ? " is-you" : "") + (t.id === selected ? " is-on" : "") + '" data-key="' + key + '" data-state="' + t.state + '">' +
+      '<div class="rt-run-item' + (you ? " is-you" : "") + (t.state === "finished" ? " is-finished" : "") + (t.id === selected ? " is-on" : "") + '" data-key="' + key + '" data-state="' + t.state + '">' +
       '<button class="rt-run" data-id="' + t.id + '">' +
       T.face(t.wf, T.STATES[t.state].pose, 22) +
       '<span class="rt-run-text"><span class="rt-run-title">' + t.title + "</span>" +
       '<span class="rt-run-sub" data-narration>' + describeTaskRow(t) + "</span></span>" +
-      '<span class="rt-run-end" title="' + T.STATES[t.state].word + " since " + t.since + '">' + T.formatAge(t.since) + "</span></button>" +
+      '<span class="rt-run-end" title="' + T.STATES[t.state].word + " since " + t.since + '">' + (t.state === "finished" ? '<span class="rt-finished-mark">' + T.icon("check", 12) + "</span>" : "") + T.formatAge(t.since) + "</span></button>" +
       (t.state === "needs" && t.question
         ? '<div class="rt-run-ans">' +
           t.question.answers
@@ -500,6 +532,8 @@
   /** Draws the whole screen again; unless told to stay still, every row moves from where it was. */
   function render(still) {
     var before = still ? null : snapshot();
+    var tray = document.querySelector("[data-tray]");
+    var trayTop = tray.hidden ? null : tray.getBoundingClientRect().top;
     syncSidebar();
     renderTabs();
     renderHead();
@@ -507,9 +541,22 @@
     list.innerHTML = buildList() + toastHtml();
     window.Crew.drawPlaceholders(list);
     renderTray();
-    window.Crew.drawPlaceholders(document.querySelector("[data-tray]"));
+    window.Crew.drawPlaceholders(tray);
+    document.querySelector(".asks-list").classList.toggle("is-tracking", isWorkingInTracking());
+    if (root.dataset.focus === "drawer") placeDrawer(tray, trayTop);
     renderPane();
     animateFrom(before);
+  }
+
+  // The drawer lies over the list. Folded, the list keeps room under its last row for it, so
+  // nothing hides behind it; unfolded, it rises over the list. It rises and sinks with a transform
+  // from where its top edge was, so the sheet moves and nothing is laid out frame by frame.
+  function placeDrawer(tray, trayTop) {
+    var list = document.querySelector("[data-list]");
+    if (!unfolded || !list.style.paddingBottom) list.style.paddingBottom = tray.hidden ? "" : tray.offsetHeight + 16 + "px";
+    if (trayTop === null || tray.hidden || !motionAllowed()) return;
+    var dy = trayTop - tray.getBoundingClientRect().top;
+    if (Math.abs(dy) > 0.5) tray.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: DUR_3, easing: EASE });
   }
 
   /* ------------------------------------------------------------------ what changes */
@@ -786,17 +833,48 @@
         return '<option value="' + s[0] + '"' + (s[0] === STATE ? " selected" : "") + ">" + s[1] + "</option>";
       }).join("") +
       "</select>" +
+      pickHtml("focus", "Focus (← →)", FOCUS_VARIANTS) +
+      pickHtml("finished", "Finished", FINISHED_VARIANTS) +
       '<span class="tr-proto-sep"></span>' +
-      '<button class="tr-proto-btn" data-play="finish" title="Fix bug finishes Lowercase SKUs. It waits while the pointer is on the list">A run finishes</button>' +
+      '<button class="tr-proto-btn" data-play="finish" title="Fix bug finishes Lowercase SKUs. It waits while the pointer is on the list">Finish</button>' +
       '<button class="tr-proto-btn" data-play="handoff" title="Hand the trailing-space signal to Fix bug">Hand off</button>' +
       '<button class="tr-proto-btn" data-play="tickoff" title="Mark Rate-limit the public API done">Mark done</button>' +
       '<button class="tr-proto-btn" data-play="theme" title="Light or dark">' + (theme === "orient-express" ? "Light" : "Dark") + "</button>";
-    document.querySelector("[data-state-pick]").addEventListener("change", function (e) {
-      var q = new URLSearchParams(location.search);
-      q.set("state", e.target.value);
-      location.search = q.toString();
+    document.querySelectorAll("[data-state-pick], [data-variant-pick]").forEach(function (sel) {
+      sel.addEventListener("change", function (e) {
+        setParam(e.target.dataset.variantPick || "state", e.target.value);
+      });
     });
   }
+
+  function pickHtml(key, label, variants) {
+    return (
+      '<select class="tr-proto-pick" data-variant-pick="' + key + '" aria-label="' + label + '" title="' + label + '">' +
+      variants
+        .map(function (v) {
+          return '<option value="' + v[0] + '"' + (v[0] === root.dataset[key] ? " selected" : "") + ">" + v[1] + "</option>";
+        })
+        .join("") +
+      "</select>"
+    );
+  }
+
+  /** Reloads the drawing with one URL parameter changed, keeping the others. */
+  function setParam(key, value) {
+    var q = new URLSearchParams(location.search);
+    q.set(key, value);
+    location.search = q.toString();
+  }
+
+  // ← and → step through the focus variants, as a prototype's switcher does.
+  document.addEventListener("keydown", function (e) {
+    if (inField(e) || e.metaKey || e.ctrlKey || e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+    var keys = FOCUS_VARIANTS.map(function (v) {
+      return v[0];
+    });
+    var i = keys.indexOf(root.dataset.focus) + (e.key === "ArrowRight" ? 1 : -1);
+    setParam("focus", keys[(i + keys.length) % keys.length]);
+  });
 
   function play(what) {
     if (what === "theme") {

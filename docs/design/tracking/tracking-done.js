@@ -102,8 +102,9 @@
     var steps = item.trip.slice();
     if (!isTaskOpen(item)) return steps.join(" → ");
     var last = steps.pop();
-    var waits = T.STATES[findTask(item.task).state].waits;
-    return steps.join(" → ") + " → " + (waits ? '<span class="you-ink">' + last + "</span>" : last);
+    var state = findTask(item.task).state;
+    var tone = state === "finished" ? "ok-ink" : T.STATES[state].waits ? "you-ink" : "";
+    return steps.join(" → ") + " → " + (tone ? '<span class="' + tone + '">' + last + "</span>" : last);
   }
 
   /* ------------------------------------------------------------------ the pane */
