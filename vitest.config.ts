@@ -92,6 +92,7 @@ const binaryTests = [
   "e2e/workspace-steps.test.ts",
   "e2e/github-push.test.ts",
   "e2e/workflows.test.ts",
+  "e2e/hand-off.test.ts",
   "e2e/text-generation-step.test.ts",
   "e2e/binary-size.test.ts",
   "e2e/logs.test.ts",
