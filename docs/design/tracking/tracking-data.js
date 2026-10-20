@@ -65,6 +65,11 @@
     return window.Crew.face(name, { pose: pose, size: size || 20 });
   }
 
+  /** Returns a workflow's name in its colleague's hue, as Round Trip writes who did something. */
+  function who(name) {
+    return '<span class="who-ink" style="--hue:var(--hue-' + window.Crew.lookFor(name).hue + ')">' + name + "</span>";
+  }
+
   function icon(name, size) {
     return window.Crew.icon(name, size || 16);
   }
@@ -110,6 +115,7 @@
   var TASKS = [
     {
       id: "t-212",
+      worker: "Claude Code · Opus 5.5 · studio-mac",
       src: "linear",
       title: "Refunds for partial captures",
       state: "needs",
@@ -128,6 +134,8 @@
     },
     {
       id: "t-sdk",
+      worker: "Claude Code · Sonnet 5 · build-box-2",
+      question: { text: "Run <code>git push -u origin chore/stripe-sdk-14</code>?", answers: [["Allow once", "Pushes the branch this one time", true], ["Always allow git push", "Adds a Grant for <b>git push</b> in <b>payments-api</b>"], ["Deny", "Tells the agent no; the branch stays local"]] },
       src: "github",
       title: "Upgrade the Stripe SDK to v14",
       state: "needs",
@@ -142,6 +150,7 @@
     },
     {
       id: "t-backup",
+      worker: "Codex · gpt-5.4 · build-box-1",
       src: "github",
       title: "Nightly backup job timing out on ops-db",
       state: "failed",
@@ -156,6 +165,7 @@
     },
     {
       id: "t-1296",
+      worker: "Claude Code · Sonnet 5 · build-box-2",
       src: "github",
       title: "Rate-limit the public API",
       state: "finished",
@@ -173,6 +183,8 @@
     },
     {
       id: "t-checkout",
+      worker: "Claude Code · Opus 5.5 · studio-mac",
+      narration: "waiting for checks on #1311",
       src: "github",
       title: "Split checkout into steps",
       state: "working",
@@ -187,6 +199,8 @@
     },
     {
       id: "t-sku",
+      worker: "Claude Code · Opus 5.5 · studio-mac",
+      narration: "Writing a failing test for a lowercase SKU",
       src: "linear",
       title: "Lowercase SKUs in search",
       state: "working",
@@ -200,6 +214,7 @@
     },
     {
       id: "t-pdf",
+      worker: "Claude Code · Sonnet 5 · build-box-1",
       src: "linear",
       title: "Move invoices to the new PDF renderer",
       state: "stopped",
@@ -269,6 +284,7 @@
     formatSpan: formatSpan,
     sourceMark: sourceMark,
     face: face,
+    who: who,
     icon: icon,
     escapeHtml: escapeHtml,
   };

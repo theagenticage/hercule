@@ -1,64 +1,46 @@
-/* DRAWING - Tracking: the Done view. A handed-off signal's row shows its leg's trip line, and its
-   pane shows the leg step by step under what Rogier did. No new tokens: the trip's hairline is
-   --line, the line every list in the book draws between things that belong together. */
+/* DRAWING - Tracking: the Done view, as Round Trip draws it (round-trip.css, "Done: the trip").
+   No new tokens: Round Trip's --trip-line was --line, and the line is drawn with --line here. */
 
-/* The open end of a trip line, while the Task waits on Rogier: marigold, as its Tracking row. */
-.tr-done-you {
-  color: var(--you-ink);
-  font-weight: var(--w-medium);
+/* ---------- The list ---------- */
+/* A handed-off row leads with the colleague's face; the source's mark starts the second line. */
+.rt-done-rows .rt-lead {
+  opacity: 1;
+}
+.rt-done-rows .rt-lead .cr {
+  display: block;
+}
+.rt-done-rows .rt-sub {
+  display: block;
+}
+.rt-done-rows .rt-src {
+  display: inline-grid;
+  margin-right: 6px;
+  vertical-align: -1px;
+  color: var(--ink);
+  opacity: 0.75;
+}
+/* Done is quiet, but the face still says who had it, so it is not faded with the marks. */
+.rt-done-rows.asks-rows--quiet .rt-lead {
+  opacity: 1;
 }
 
-/* ---------- The pane ---------- */
-
-/* As the app draws the provenance line: the mark beside the name, softened. */
-.tr-done-pane .ad-kind .src {
+/* ---------- The pane: the leg ---------- */
+.rt-done-pane .ad-kind .src {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-.tr-done-pane .ad-kind .src .br {
-  opacity: 0.8;
-}
-
-/* The author's initials in a message's head, as the app draws them when there is no avatar. */
-.tr-done-pane .b-msg-head {
-  align-items: center;
-}
-.tr-done-pane .b-avatar {
-  display: inline-grid;
-  flex: none;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--sunken);
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: var(--w-bold);
-}
-
-/* The face that leads what Rogier did keeps its size beside the text. */
-.tr-done-pane .ad-outcome-top > .cr {
-  flex: none;
-}
-
-/* ---------- The leg: one handoff, step by step ---------- */
-.tr-leg-sec {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 14px;
-}
-.tr-leg-h {
-  margin: 0;
+.rt-done-pane .rt-label {
+  display: block;
+  margin: 0 0 2px;
   color: var(--muted);
   font-size: var(--t-12);
   font-weight: var(--w-bold);
 }
-/* A time column, then who acted, then what happened. One hairline runs through the leads, so the
-   steps read as one leg. Its left edge is the time column (38px) and the gap (10px), plus half
-   of the 20px lead, less half of the line's width. */
-.tr-leg {
+.rt-done-pane .rt-chain-h {
+  margin: 24px 0 10px;
+}
+.rt-done-pane .rt-chain {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -68,7 +50,8 @@
   list-style: none;
   font-size: var(--t-13);
 }
-.tr-leg::before {
+/* The hairline the steps hang on, through the middle of the 20px faces. */
+.rt-done-pane .rt-chain::before {
   content: "";
   position: absolute;
   top: 10px;
@@ -77,30 +60,27 @@
   width: 1px;
   background: var(--line);
 }
-.tr-leg li {
+.rt-done-pane .rt-chain li {
   position: relative;
   display: grid;
   grid-template-columns: 38px 20px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
 }
-.tr-leg time {
+.rt-done-pane .rt-chain time {
   color: var(--faint);
   font-size: var(--t-12);
   font-variant-numeric: tabular-nums;
 }
-.tr-leg b {
-  font-weight: var(--w-medium);
-}
-/* Each lead sits on a ring of the pane's own ground, so the hairline stops short of it. */
-.tr-leg li > svg,
-.tr-leg-src {
+/* Each face sits on a ring of the pane's surface, so the hairline stops short of it. */
+.rt-done-pane .rt-chain li > svg,
+.rt-done-pane .rt-step-src {
   border-radius: 50%;
   background: var(--surface);
   box-shadow: 0 0 0 3px var(--surface);
 }
-/* A source's step, such as the checks that failed on the agent's PR: its mark on a sunken disc. */
-.tr-leg-src {
+/* A step the source made, such as checks failing on the PR: its mark on a sunken disc. */
+.rt-done-pane .rt-step-src {
   display: grid;
   place-items: center;
   width: 20px;
@@ -108,6 +88,13 @@
   background: var(--sunken);
   color: var(--ink);
 }
-.tr-leg-src .br {
-  opacity: 0.8;
+.rt-done-pane .rt-chain code {
+  padding: 0 4px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  font-size: 12px;
+}
+/* The way to the work, under the leg and in line with its text. */
+.rt-done-act {
+  margin: 16px 0 0 68px;
 }

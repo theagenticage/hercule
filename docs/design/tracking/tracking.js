@@ -1,12 +1,14 @@
-// DRAWING - Tracking: the list, the tabs, the keys and the motion of the drawing.
+// DRAWING - Tracking: the list, the tray, the keys and the motion of the drawing.
 //
-// To do lists Now and Signals as the app draws them today, then Tracking: one row per Task Rogier
-// handed off, in one of five states. Finished, Failed and Needs you wait on him, so they are drawn
-// in marigold and count toward To do; Working and Stopped do not. Tracking shows on the All tab
-// only. The pane (tracking-pane.js) and the Done view (tracking-done.js) are drawn apart.
+// Built on Round Trip (prototype/stay-in-the-loop). To do lists Now and Signals as the app draws
+// them today. Under the list, docked like an activity bar, Tracking holds one row per Task Rogier
+// handed off, led by the face of the agent that has it. The model is the plan's (#797), not
+// Round Trip's: finished and failed work stays in Tracking until Rogier marks it done; it never
+// comes back to To do as a new signal. Finished, Failed and Needs you wait on him, so they are
+// marigold and count toward To do; Working and Stopped do not.
 //
-// The bar at the bottom right picks a state and plays the motion: a run that finishes, a handoff
-// that arrives, a row marked done.
+// The pane (tracking-pane.js) and the Done view (tracking-done.js) are drawn apart. The bar in the
+// title bar picks a state and plays the motion.
 (function () {
   "use strict";
 
@@ -15,7 +17,14 @@
   var STATE = root.dataset.state || "finished";
   if (new URLSearchParams(location.search).get("bar") === "off") root.dataset.barOff = "";
 
-  var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  // The tray shows at most this many rows before its Working and Stopped rows fold into one row
+  // of faces, so Intake's own list keeps the room. Rows that wait on Rogier never fold.
+  var TRAY_ROWS = 5;
+
+  var DUR_1 = 120;
+  var DUR_2 = 200;
+  var DUR_3 = 320;
+  var EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
 
   /* ------------------------------------------------------------------ the scene */
 
@@ -25,8 +34,8 @@
     "needs-you": { view: "todo", open: "t-sdk" },
     "needs-you-signal": { view: "todo", open: "t-212" },
     failed: { view: "todo", open: "t-backup" },
-    working: { view: "todo", open: "t-sku" },
-    stopped: { view: "todo", open: "t-pdf" },
+    working: { view: "todo", open: "t-sku", unfolded: true },
+    stopped: { view: "todo", open: "t-pdf", unfolded: true },
     done: { view: "done", open: "d-205b" },
     empty: { view: "todo", open: null, tasks: [] },
     zero: { view: "todo", open: null, signals: [], tasks: ["t-checkout", "t-sku"] },
@@ -42,6 +51,7 @@
   var tab = "all";
   var selected = scene.open;
   var paneOpen = !!selected;
+  var unfolded = !!scene.unfolded;
   var cleared = 7;
 
   function byId(r) {
@@ -68,73 +78,80 @@
     return JSON.parse(JSON.stringify(o));
   }
 
-  // Ten times the load: 60 signals on To do, and 18 Tasks in Tracking, 6 of them waiting on Rogier.
+  // Ten times the load: 60 signals on To do, and 18 Tasks in Tracking, 7 of them waiting on Rogier.
   function addLoad() {
     var titles = ["Bump the Node image to 24", "Flaky test in cart totals", "Translate the refund mail", "Cache the product feed", "Lint the email templates", "Drop the old coupon table", "Log slow Stripe calls", "Index orders by customer", "Retry the invoice export", "Pin the Playwright version", "Trim the session cookie"];
-    var who = ["Sanne", "Marta", "Pieter", "Jonas", "Noor", "GitHub Actions"];
+    var people = ["Sanne", "Marta", "Pieter", "Jonas", "Noor", "GitHub Actions"];
     var kinds = ["review requested", "mentioned", "checks failed", "assigned", "question for you"];
     for (var i = 0; signals.length < 60; i++) {
       var src = ["github", "linear", "slack", "github"][i % 4];
-      signals.push({ id: "s-load-" + i, src: src, title: titles[i % titles.length] + (i >= titles.length ? " (" + (Math.floor(i / titles.length) + 1) + ")" : ""), sub: who[i % who.length] + " · " + kinds[i % kinds.length] + " · " + (src === "linear" ? "PAY-" + (150 + i) : src === "slack" ? "#payments" : "webshop #" + (1240 + i)), at: T.formatClock(T.NOW - (i * 7 + 3) * 60) });
+      signals.push({ id: "s-load-" + i, src: src, title: titles[i % titles.length] + (i >= titles.length ? " (" + (Math.floor(i / titles.length) + 1) + ")" : ""), sub: people[i % people.length] + " · " + kinds[i % kinds.length] + " · " + (src === "linear" ? "PAY-" + (150 + i) : src === "slack" ? "#payments" : "webshop #" + (1240 + i)), at: T.formatClock(T.NOW - (i * 7 + 3) * 60) });
     }
     var extra = [
-      ["Ship the VAT report for Q3", "finished", "Implement", "", "09:02"],
-      ["Rename the payouts table", "finished", "Implement", "", "08:51"],
-      ["Spike: Klarna in checkout", "working", "Investigate", "", "09:31"],
-      ["Mobile menu covers the cart", "working", "Fix bug", "", "09:24"],
-      ["Retry failed payouts", "working", "Implement", "", "09:11", true],
-      ["Update the README for payments", "working", "Implement", "", "09:37"],
-      ["Explain the October refund spike", "working", "Investigate", "", "09:28"],
-      ["Upgrade Redis to 7.4", "working", "Implement", "", "09:16", true],
-      ["Clean up the feature flags", "stopped", "Implement", "", "08:12"],
-      ["Wrong currency on Swiss invoices", "stopped", "Fix bug", "", "08:30"],
-      ["Review: guest checkout", "finished", "Review PR", "", "09:39"],
+      ["Ship the VAT report for Q3", "finished", "Implement", "09:02"],
+      ["Rename the payouts table", "finished", "Implement", "08:51"],
+      ["Spike: Klarna in checkout", "working", "Investigate", "09:31", "Reading Klarna's checkout docs"],
+      ["Mobile menu covers the cart", "working", "Fix bug", "09:24", "Reproducing it at 375px"],
+      ["Retry failed payouts", "working", "Implement", "09:11", "waiting for checks on #1314", true],
+      ["Update the README for payments", "working", "Implement", "09:37", "Writing the setup section"],
+      ["Explain the October refund spike", "working", "Investigate", "09:28", "Querying refunds by day"],
+      ["Upgrade Redis to 7.4", "working", "Implement", "09:16", "waiting for checks on #1309", true],
+      ["Clean up the feature flags", "stopped", "Implement", "08:12"],
+      ["Wrong currency on Swiss invoices", "stopped", "Fix bug", "08:30"],
+      ["Review: guest checkout", "finished", "Review PR", "09:39"],
     ];
     extra.forEach(function (e, i) {
-      tasks.push({ id: "t-load-" + i, src: i % 3 ? "github" : "linear", title: e[0], state: e[1], wf: e[2], line: e[3], since: e[4], checks: !!e[5], handedAt: e[4], asked: tasks[0].asked, runs: [{ wf: e[2], state: e[1], start: e[4] }], did: ["…"] });
+      tasks.push({ id: "t-load-" + i, src: i % 3 ? "github" : "linear", title: e[0], state: e[1], wf: e[2], since: e[3], handedAt: e[3], narration: e[4] || "", checks: !!e[5], line: "", worker: tasks[0].worker, asked: tasks[0].asked, runs: [{ wf: e[2], state: e[1], start: e[3] }], did: ["…"] });
     });
   }
 
-  /* ------------------------------------------------------------------ what the list holds */
-
-  function isOpenSignal(s) {
-    return !s.gone;
-  }
+  /* ------------------------------------------------------------------ what the screen holds */
 
   function signalsOnTab() {
     return signals.filter(function (s) {
-      return isOpenSignal(s) && (tab === "all" || s.src === tab);
+      return !s.gone && (tab === "all" || s.src === tab);
     });
   }
 
-  // Tracking's sort: the rows that wait on Rogier first (Needs you, Failed, Finished), then
-  // Working, then Stopped; inside each state, the oldest handoff first.
-  function sortTasks(list) {
-    return list.slice().sort(function (a, b) {
+  // Tracking's order: the rows that wait on Rogier first (Needs you, Failed, Finished), then
+  // Working, then Stopped; inside each state, the oldest handoff first. The tray is To do's, not
+  // a tab's: it shows the same rows on every tab.
+  function sortedTasks() {
+    return tasks.slice().sort(function (a, b) {
       return T.STATES[a.state].order - T.STATES[b.state].order || T.parseClock(a.handedAt) - T.parseClock(b.handedAt);
     });
   }
 
-  function tasksOnTab() {
-    return tab === "all" ? sortTasks(tasks) : [];
+  function waits(t) {
+    return T.STATES[t.state].waits;
   }
 
   function countWaiting() {
-    return tasks.filter(function (t) {
-      return T.STATES[t.state].waits;
-    }).length;
+    return tasks.filter(waits).length;
   }
 
   // The To do count: every open signal, and every Tracking row that waits on Rogier. A plugin's
-  // tab counts its own signals only, because Tracking shows on All alone.
+  // tab counts its own signals only.
   function countTodo(src) {
     var n = signals.filter(function (s) {
-      return isOpenSignal(s) && (!src || s.src === src);
+      return !s.gone && (!src || s.src === src);
     }).length;
     return src ? n : n + countWaiting();
   }
 
-  /** Returns the ids in the list's order, which J and K walk: Now, Signals, then Tracking. */
+  /** Returns the rows the tray draws one by one, and the rows it folds into one row of faces. */
+  function splitTray() {
+    var all = sortedTasks();
+    if (unfolded || all.length <= TRAY_ROWS) return { shown: all, folded: [] };
+    var waiting = all.filter(waits);
+    var rest = all.filter(function (t) {
+      return !waits(t);
+    });
+    var room = Math.max(0, TRAY_ROWS - 1 - waiting.length);
+    return { shown: waiting.concat(rest.slice(0, room)), folded: rest.slice(room) };
+  }
+
+  /** Returns the ids in the order J and K walk them: Now, Signals, then Tracking's rows. */
   function listOrder() {
     if (view === "done") return T.DONE.map(byId);
     var on = signalsOnTab();
@@ -147,7 +164,7 @@
           return !s.now;
         }),
       )
-      .concat(tasksOnTab())
+      .concat(splitTray().shown)
       .map(byId);
   }
 
@@ -223,36 +240,26 @@
     var rest = on.filter(function (s) {
       return !s.now;
     });
-    var tracked = tasksOnTab();
     var html = "";
-    if (!on.length && !countWaiting()) html += buildZero();
+    if (!on.length && !countWaiting()) return buildZero();
     if (now.length) html += '<h2 class="section-h asks-sec"><span class="dot dot--fail"></span>Now</h2><div class="asks-rows">' + now.map(signalRow).join("") + "</div>";
     if (rest.length) html += '<h2 class="section-h asks-sec">Signals <span class="count">' + rest.length + '</span></h2><div class="asks-rows">' + rest.map(signalRow).join("") + "</div>";
-    if (tracked.length) html += buildTracking(tracked);
-    if (on.length || countWaiting()) html += '<p class="asks-cleared">' + cleared + ' cleared today. <a href="#" data-view-link="done">See Done</a>.</p>';
+    if (!on.length) html += '<p class="asks-empty">No signals. What waits on you is in Tracking.</p>';
+    html += '<p class="asks-cleared">' + cleared + ' cleared today. <a href="#" data-view-link="done">See Done</a>.</p>';
     return html;
   }
 
-  // The section's head: its name, how many rows it holds, and how many of them wait on Rogier,
-  // which is what it adds to the To do count.
-  function buildTracking(tracked) {
-    var waiting = tracked.filter(function (t) {
-      return T.STATES[t.state].waits;
-    }).length;
-    return (
-      '<h2 class="section-h asks-sec tr-head" data-tracking>Tracking <span class="count">' + tracked.length + "</span>" +
-      (waiting ? '<span class="asks-sec-right tr-head-waiting">' + waiting + " wait" + (waiting === 1 ? "s" : "") + " on you</span>" : "") +
-      "</h2>" +
-      '<div class="asks-rows tr-rows">' + tracked.map(taskRow).join("") + "</div>"
-    );
-  }
-
+  // A signal row, as the app draws it. A signal about a Task in Tracking, such as the checks that
+  // failed on the agent's PR, is led by that agent's face instead of the source's mark, and the
+  // mark moves to the start of the second line, as Round Trip drew what came back.
   function signalRow(s) {
-    var sub = (s.back ? '<span class="ask-back">' + T.icon("alarm", 12) + "Back</span> · " : "") + s.sub;
+    var task = s.task && findItem(s.task);
+    var lead = task ? T.face(task.wf, "done", 24) : T.sourceMark(s.src, 16);
+    var sub = (task ? '<span class="rt-src">' + T.sourceMark(s.src, 12) + "</span>" : "") + (s.back ? '<span class="ask-back">' + T.icon("alarm", 12) + "Back</span> · " : "") + s.sub;
     return (
       '<div class="ask-item' + (s.id === selected ? " is-on" : "") + '" data-key="' + s.id + '">' +
       '<button class="ask-row" data-id="' + s.id + '">' +
-      '<span class="ask-mark">' + T.sourceMark(s.src, 16) + "</span>" +
+      '<span class="ask-mark' + (task ? " rt-lead" : "") + '">' + lead + "</span>" +
       '<span class="ask-text"><span class="ask-title">' + s.title + '</span><span class="ask-sub">' + sub + "</span></span>" +
       '<span class="ask-end"><time class="ask-age">' + T.formatAge(s.at) + "</time></span>" +
       "</button>" +
@@ -262,31 +269,8 @@
     );
   }
 
-  /** Returns the second line of a Tracking row: the state's word, the workflow, and what there is to add. */
-  function describeTaskRow(t) {
-    var word = t.state === "working" && t.checks ? "Waiting for checks" : T.STATES[t.state].word;
-    return '<span class="tr-row-state">' + word + "</span> · " + t.wf + (t.line ? " · " + t.line : "");
-  }
-
-  // A Tracking row reads as a signal row does: the mark of the source the work came from, the
-  // Task's title, then its state. The time is how long it has been in that state. Mark done sits
-  // on the row only where the work has stopped: on Working and Needs you it would cut a run short.
-  function taskRow(t) {
-    var waits = T.STATES[t.state].waits;
-    return (
-      '<div class="ask-item tr-item' + (waits ? " is-waiting" : "") + (t.id === selected ? " is-on" : "") + '" data-key="' + t.id + '" data-state="' + t.state + '">' +
-      '<button class="ask-row" data-id="' + t.id + '">' +
-      '<span class="ask-mark">' + T.sourceMark(t.src, 16) + "</span>" +
-      '<span class="ask-text"><span class="ask-title">' + t.title + '</span><span class="ask-sub">' + describeTaskRow(t) + "</span></span>" +
-      '<span class="ask-end"><time class="ask-age" title="' + T.STATES[t.state].word + " since " + t.since + '">' + T.formatAge(t.since) + "</time></span>" +
-      "</button>" +
-      (canMarkDone(t) ? '<span class="ask-acts"><button class="ask-act" title="Mark done · Takes it off Tracking. Nothing is sent" data-task-done="' + t.id + '">' + T.icon("check", 16) + "</button></span>" : "") +
-      "</div>"
-    );
-  }
-
-  // Inbox zero, as the app draws it, with 24 brass rays. Tracking's working rows sit under it:
-  // they do not wait on Rogier, so the list is still at zero.
+  // Inbox zero, as the app draws it, with 24 brass rays. The tray stays under it while work is
+  // still out: its rows do not wait on Rogier, so the list is at zero.
   function buildZero() {
     var rays = "";
     for (var i = 0; i < 24; i++) {
@@ -303,6 +287,104 @@
       '<p class="asks-zero-n"><span class="asks-zero-num">' + cleared + "</span>cleared today</p>" +
       '<div class="asks-zero-tally"><button>' + T.sourceMark("github", 14) + "4</button><button>" + T.sourceMark("linear", 14) + "2</button><button>" + T.sourceMark("slack", 14) + "1</button></div>" +
       "</div>"
+    );
+  }
+
+  /* ------------------------------------------------------------------ the tray */
+
+  function renderTray() {
+    var el = document.querySelector("[data-tray]");
+    el.hidden = view !== "todo";
+    if (view !== "todo") return;
+    var waiting = countWaiting();
+    var split = splitTray();
+    var foldable = tasks.length > TRAY_ROWS;
+    var head =
+      '<h2 class="rt-tray-h">' +
+      (foldable
+        ? '<button class="rt-tray-toggle" data-unfold aria-expanded="' + unfolded + '" title="' + (unfolded ? "Fold Working and Stopped into one row" : "Show every row") + '"><span>Tracking</span><b class="count">' + tasks.length + "</b>" + T.icon(unfolded ? "chev-d" : "chev-r", 12) + "</button>"
+        : '<span class="rt-tray-toggle"><span>Tracking</span>' + (tasks.length ? '<b class="count">' + tasks.length + "</b>" : "") + "</span>") +
+      (waiting ? '<span class="rt-tray-sum you-ink">' + window.Crew.mark("waiting", 12) + waiting + " wait" + (waiting === 1 ? "s" : "") + " on you</span>" : "") +
+      "</h2>";
+    if (!tasks.length) {
+      el.innerHTML = head + '<p class="rt-tray-empty">Hand a signal to an agent, and follow it here until you mark it done.</p>';
+      return;
+    }
+    el.innerHTML = head + '<div class="rt-runs">' + split.shown.map(trayRow).join("") + (split.folded.length ? foldedRow(split.folded) : "") + "</div>";
+  }
+
+  /** Returns the second line of a Tracking row: what waits, what went wrong, or what the agent is doing. */
+  function describeTaskRow(t) {
+    if (t.state === "needs") return t.question ? t.question.text : t.waitsOn.text;
+    if (t.state === "failed") return T.who(t.wf) + " failed · " + t.line;
+    if (t.state === "finished") return T.who(t.wf) + " finished";
+    if (t.state === "stopped") return T.who(t.wf) + " · stopped by you";
+    return T.who(t.wf) + " · " + (t.narration || "starting");
+  }
+
+  // A Tracking row: the agent's face in its pose, the Task's title, and one line. A row that waits
+  // on Rogier is marigold; a Request is answered where it stands, in three fixed slots. Mark done
+  // shows on hover only where the work has stopped, since on Working and Needs you it would leave
+  // a run going.
+  function trayRow(t) {
+    var you = waits(t);
+    var key = t.key || t.id;
+    return (
+      '<div class="rt-run-item' + (you ? " is-you" : "") + (t.id === selected ? " is-on" : "") + '" data-key="' + key + '" data-state="' + t.state + '">' +
+      '<button class="rt-run" data-id="' + t.id + '">' +
+      T.face(t.wf, T.STATES[t.state].pose, 22) +
+      '<span class="rt-run-text"><span class="rt-run-title">' + t.title + "</span>" +
+      '<span class="rt-run-sub" data-narration>' + describeTaskRow(t) + "</span></span>" +
+      '<span class="rt-run-end" title="' + T.STATES[t.state].word + " since " + t.since + '">' + T.formatAge(t.since) + "</span></button>" +
+      (t.state === "needs" && t.question
+        ? '<div class="rt-run-ans">' +
+          t.question.answers
+            .map(function (a, i) {
+              return questionButton(t, a, i);
+            })
+            .join("") +
+          "</div>"
+        : "") +
+      (canMarkDone(t) ? '<span class="ask-acts rt-acts"><button class="ask-act" title="Mark done · Takes it off Tracking. Nothing is sent" data-task-done="' + t.id + '">' + T.icon("check", 16) + "</button></span>" : "") +
+      "</div>"
+    );
+  }
+
+  function questionButton(t, a, i) {
+    var cls = "btn btn--sm" + (a[2] ? " btn--accent" : "") + (i === 2 ? " btn--quiet" : "");
+    return '<button class="' + cls + '" style="grid-column:' + (i + 1) + '" data-question="' + t.id + '" data-q="' + i + '" title="' + a[1].replace(/<[^>]+>/g, "") + '">' + a[0] + "</button>";
+  }
+
+  // Past the cap, Working and Stopped rows fold into one row of their faces; a click opens them.
+  function foldedRow(list) {
+    var working = list.filter(function (t) {
+      return t.state === "working";
+    }).length;
+    var stopped = list.length - working;
+    var words = [];
+    if (working) words.push(working + " working");
+    if (stopped) words.push(stopped + " stopped");
+    var byWf = {};
+    list.forEach(function (t) {
+      byWf[t.wf] = (byWf[t.wf] || 0) + 1;
+    });
+    return (
+      '<div class="rt-run-item" data-key="folded"><button class="rt-run rt-run--stack" data-unfold>' +
+      '<span class="stack">' +
+      Object.keys(byWf)
+        .slice(0, 4)
+        .map(function (wf) {
+          return T.face(wf, "working", 22);
+        })
+        .join("") +
+      '</span><span class="rt-run-text"><span class="rt-run-title">' + words.join(" · ") + '</span><span class="rt-run-sub">' +
+      Object.keys(byWf)
+        .map(function (wf) {
+          return wf + " " + byWf[wf];
+        })
+        .join(" · ") +
+      "</span></span>" +
+      '<span class="rt-run-end">' + T.icon("chev-r", 12) + "</span></button></div>"
     );
   }
 
@@ -326,69 +408,114 @@
 
   /* ------------------------------------------------------------------ render, with motion */
 
-  function render() {
+  function motionAllowed() {
+    return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  /** Records where every row of the list and the tray is now, so the next render can move them from there. */
+  function snapshot() {
+    var map = {};
+    document.querySelectorAll("[data-list] [data-key], [data-tray] [data-key]").forEach(function (el) {
+      map[el.dataset.key] = {
+        rect: el.getBoundingClientRect(),
+        tray: !!el.closest("[data-tray]"),
+        clone: el.cloneNode(true),
+        narration: (el.querySelector("[data-narration]") || {}).innerHTML,
+      };
+    });
+    return map;
+  }
+
+  /**
+   * Moves each row from where it was to where it is now, on transform and opacity only:
+   *   - a row that left fades out where it was, over --dur-1, and the rows below close up after it;
+   *   - a row that moved from the list into the tray flies there as a lifted copy, over --dur-3;
+   *   - a row that is new fades in and drops 6px into place, over --dur-2;
+   *   - a row whose line changed fades the new line in, over --dur-2.
+   */
+  function animateFrom(before) {
+    if (!before || !motionAllowed()) return;
+    var fly = document.querySelector("[data-fly]");
+    var box = fly.getBoundingClientRect();
+    var after = {};
+    document.querySelectorAll("[data-list] [data-key], [data-tray] [data-key]").forEach(function (el) {
+      after[el.dataset.key] = el;
+    });
+    var leaving = Object.keys(before).filter(function (k) {
+      return !after[k];
+    });
+    leaving.forEach(function (k) {
+      var b = before[k];
+      var ghost = placeGhost(fly, box, b.clone, b.rect);
+      ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: DUR_1, easing: "linear", fill: "forwards" }).onfinish = function () {
+        ghost.remove();
+      };
+    });
+    var delay = leaving.length ? DUR_1 : 0;
+    Object.keys(after).forEach(function (k) {
+      var el = after[k];
+      var b = before[k];
+      var a = el.getBoundingClientRect();
+      var inTray = !!el.closest("[data-tray]");
+      if (!b) {
+        el.animate(
+          [
+            { opacity: 0, transform: "translateY(-6px)" },
+            { opacity: 1, transform: "none" },
+          ],
+          { duration: DUR_2, easing: EASE, delay: delay, fill: "backwards" },
+        );
+        return;
+      }
+      if (b.tray !== inTray) {
+        var ghost = placeGhost(fly, box, el.cloneNode(true), b.rect, a.width);
+        ghost.classList.add("rt-ghost--lift");
+        el.animate([{ opacity: 0 }, { opacity: 0 }], { duration: DUR_3 });
+        ghost.animate([{ transform: "none" }, { transform: "translate(" + (a.left - b.rect.left) + "px," + (a.top - b.rect.top) + "px)" }], {
+          duration: DUR_3,
+          easing: EASE,
+          fill: "both",
+        }).onfinish = function () {
+          ghost.remove();
+        };
+        return;
+      }
+      var dy = b.rect.top - a.top;
+      if (Math.abs(dy) > 0.5) el.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: DUR_3, easing: EASE, delay: delay, fill: "backwards" });
+      var nar = el.querySelector("[data-narration]");
+      if (nar && b.narration !== undefined && b.narration !== nar.innerHTML) nar.animate([{ opacity: 0 }, { opacity: 1 }], { duration: DUR_2, easing: "linear" });
+    });
+  }
+
+  function placeGhost(fly, box, node, rect, width) {
+    node.classList.add("rt-ghost");
+    node.removeAttribute("data-key");
+    node.style.left = rect.left - box.left + "px";
+    node.style.top = rect.top - box.top + "px";
+    node.style.width = (width || rect.width) + "px";
+    fly.appendChild(node);
+    return node;
+  }
+
+  /** Draws the whole screen again; unless told to stay still, every row moves from where it was. */
+  function render(still) {
+    var before = still ? null : snapshot();
     syncSidebar();
     renderTabs();
     renderHead();
     var list = document.querySelector("[data-list]");
     list.innerHTML = buildList() + toastHtml();
     window.Crew.drawPlaceholders(list);
+    renderTray();
+    window.Crew.drawPlaceholders(document.querySelector("[data-tray]"));
     renderPane();
-  }
-
-  function motionAllowed() {
-    return !reducedMotion.matches;
-  }
-
-  /** Returns where each row and section head sits now, keyed by its data-key, for a FLIP. */
-  function measureList() {
-    var out = {};
-    document.querySelectorAll("[data-list] [data-key], [data-list] [data-tracking]").forEach(function (el) {
-      out[el.dataset.key || "tracking-head"] = el.getBoundingClientRect().top;
-    });
-    return out;
-  }
-
-  // Rows that stayed slide from where they were to where they are, with a transform only.
-  // Rows that are new fade in and drop 6px, as a new signal does.
-  function slideFrom(before, arrived) {
-    if (!motionAllowed()) return;
-    document.querySelectorAll("[data-list] [data-key], [data-list] [data-tracking]").forEach(function (el) {
-      var key = el.dataset.key || "tracking-head";
-      var top = el.getBoundingClientRect().top;
-      if (key === arrived || !(key in before)) {
-        el.animate(
-          [
-            { opacity: 0, transform: "translateY(-6px)" },
-            { opacity: 1, transform: "none" },
-          ],
-          { duration: 200, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
-        );
-        return;
-      }
-      var dy = before[key] - top;
-      if (Math.abs(dy) < 1) return;
-      el.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: 320, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
-    });
-  }
-
-  /** Fades a row out over --dur-1, then calls done. With Reduce motion it calls done at once. */
-  function fadeOut(key, done) {
-    var el = document.querySelector('[data-list] [data-key="' + key + '"]');
-    if (!el || !motionAllowed()) return done();
-    el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, easing: "linear", fill: "forwards" }).onfinish = done;
-  }
-
-  // The new state's line fades in where the old one was, over --dur-2.
-  function crossfadeState(key) {
-    if (!motionAllowed()) return;
-    var sub = document.querySelector('[data-list] [data-key="' + key + '"] .ask-sub');
-    if (sub) sub.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "linear" });
+    animateFrom(before);
   }
 
   /* ------------------------------------------------------------------ what changes */
 
-  // Changes Rogier did not make wait while the pointer is over the list, so nothing moves under it.
+  // Changes Rogier did not make wait while the pointer is over the list or the tray, so nothing
+  // moves under it.
   var pointerOnList = false;
   var held = [];
 
@@ -397,42 +524,37 @@
     else fn();
   }
 
+  function nextAfter(id) {
+    var order = listOrder();
+    var i = order.indexOf(id);
+    return order[i + 1] || order[i - 1] || null;
+  }
+
   /** Marks a Task done (or cancelled): its row fades, then the rows below close the gap. */
   function tickOff(id, how) {
     var t = findItem(id);
-    var order = listOrder();
-    var next = order[order.indexOf(id) + 1] || order[order.indexOf(id) - 1];
-    fadeOut(id, function () {
-      var before = measureList();
-      tasks = tasks.filter(function (x) {
-        return x.id !== id;
-      });
-      cleared++;
-      if (selected === id) selected = view === "todo" && next && next !== id ? next : null;
-      showToast((how === "cancelled" ? "Cancelled " : "Marked done: ") + t.title);
-      render();
-      slideFrom(before);
+    var next = nextAfter(id);
+    tasks = tasks.filter(function (x) {
+      return x.id !== id;
     });
+    cleared++;
+    if (selected === id) selected = next;
+    showToast((how === "cancelled" ? "Cancelled: " : "Marked done: ") + t.title);
+    render();
   }
 
   function markSignalDone(id) {
     var s = findItem(id);
-    var order = listOrder();
-    var next = order[order.indexOf(id) + 1] || order[order.indexOf(id) - 1];
-    fadeOut(id, function () {
-      var before = measureList();
-      s.gone = true;
-      cleared++;
-      if (selected === id) selected = next;
-      showToast("Done: " + s.title);
-      render();
-      slideFrom(before);
-    });
+    var next = nextAfter(id);
+    s.gone = true;
+    cleared++;
+    if (selected === id) selected = next;
+    showToast("Done: " + s.title);
+    render();
   }
 
-  /** Moves a Task to another state in place: its line crossfades, and it slides when its place changes. */
+  /** Moves a Task to another state in place: its line fades in anew, and it slides when its place changes. */
   function changeState(id, state, patch) {
-    var before = measureList();
     var t = findItem(id);
     t.state = state;
     t.since = T.formatClock(T.NOW);
@@ -440,25 +562,35 @@
       t[k] = patch[k];
     });
     render();
-    slideFrom(before);
-    crossfadeState(id);
   }
 
-  // Hand to Fix bug on the trailing-space signal: the signal leaves Signals and its Task arrives
-  // in Tracking, Working.
+  // Hand to Fix bug on the trailing-space signal: the signal lifts out of Signals and flies into
+  // the tray, where it lands as a Working row. Its row keeps the signal's key, so it can fly.
   function handOff(signalId) {
     var s = findItem(signalId);
-    if (!s || s.gone) return;
-    fadeOut(signalId, function () {
-      var before = measureList();
-      s.gone = true;
-      var id = "t-" + signalId;
-      tasks.push({ id: id, src: s.src, title: s.title, state: "working", since: T.formatClock(T.NOW), handedAt: T.formatClock(T.NOW), wf: "Fix bug", line: "", asked: { src: s.src, who: "Pieter", kind: "Tagged in a thread", where: "#acceptance", at: s.at, text: "Codes with a trailing space are rejected at checkout. Trim them before the lookup?" }, runs: [{ wf: "Fix bug", state: "working", start: T.formatClock(T.NOW) }], did: ["Starting."] });
-      if (selected === signalId) selected = id;
-      showToast("Handed to Fix bug: " + s.title);
-      render();
-      slideFrom(before, id);
+    if (!s || s.gone) return flashToast("Reset the drawing to play this again");
+    s.gone = true;
+    var at = T.formatClock(T.NOW);
+    tasks.push({
+      id: "t-" + signalId,
+      key: signalId,
+      src: s.src,
+      title: s.title,
+      state: "working",
+      since: at,
+      handedAt: at,
+      wf: "Fix bug",
+      line: "",
+      narration: "Reading Pieter's thread",
+      worker: "Claude Code · Opus 5.5 · studio-mac",
+      asked: { src: s.src, who: "Pieter", kind: "Tagged in a thread", where: "#acceptance", at: s.at, text: "Codes with a trailing space are rejected at checkout. Trim them before the lookup?" },
+      runs: [{ wf: "Fix bug", state: "working", start: at }],
+      did: ["Reading Pieter's thread."],
     });
+    unfolded = true;
+    if (selected === signalId) selected = "t-" + signalId;
+    showToast("Handed to Fix bug: " + s.title);
+    render();
   }
 
   /* ------------------------------------------------------------------ the toast */
@@ -494,14 +626,18 @@
 
   /* ------------------------------------------------------------------ selection and keys */
 
+  function rowOf(id) {
+    return document.querySelector('[data-list] [data-id="' + id + '"], [data-tray] [data-id="' + id + '"]');
+  }
+
   function select(id, focusAnswer) {
     selected = id;
     paneOpen = !!id;
-    render();
-    var row = id && document.querySelector('[data-list] [data-key="' + id + '"]');
+    render(true);
+    var row = id && rowOf(id);
     if (row) {
       row.scrollIntoView({ block: "nearest" });
-      if (!focusAnswer) row.querySelector(".ask-row").focus({ preventScroll: true });
+      if (!focusAnswer) row.focus({ preventScroll: true });
     }
     if (focusAnswer) focusSuggested();
   }
@@ -536,7 +672,7 @@
       e.preventDefault();
       move(-1);
     } else if (k === "Enter") {
-      if (e.target.closest && e.target.closest("[data-detail] button, [data-detail] a")) return;
+      if (e.target.closest && e.target.closest("[data-detail] button, [data-detail] a, [data-tray] .rt-run-ans button")) return;
       if (!selected) return;
       e.preventDefault();
       select(selected, true);
@@ -545,21 +681,24 @@
       if (view !== "todo" || !item) return;
       if (isTask(item) && canMarkDone(item)) tickOff(item.id, "done");
       else if (!isTask(item)) markSignalDone(item.id);
+    } else if (k === "o" || k === "O") {
+      var it = findItem(selected);
+      if (isTask(it)) flashToast("Opens the run of " + it.wf + " in Workflows");
     } else if (k === "Escape") {
       if (paneOpen) {
         paneOpen = false;
-        render();
-        var row = document.querySelector('[data-list] [data-key="' + selected + '"] .ask-row');
+        render(true);
+        var row = rowOf(selected);
         if (row) row.focus({ preventScroll: true });
       } else if (selected) {
         selected = null;
-        render();
+        render(true);
       }
     }
   });
 
   document.addEventListener("click", function (e) {
-    var el = e.target.closest("[data-id], [data-tab], [data-view], [data-view-link], [data-task-done], [data-signal-done], [data-answer], [data-select], [data-toast], [data-pane-toggle], [data-play], [data-state-pick]");
+    var el = e.target.closest("[data-id], [data-tab], [data-view], [data-view-link], [data-task-done], [data-signal-done], [data-answer], [data-question], [data-select], [data-toast], [data-unfold], [data-pane-toggle], [data-play]");
     if (!el) return;
     var d = el.dataset;
     if (d.toast !== undefined && !d.answer) {
@@ -567,11 +706,15 @@
       flashToast(d.toast);
     } else if (d.taskDone) tickOff(d.taskDone, "done");
     else if (d.signalDone) markSignalDone(d.signalDone);
-    else if (d.id) select(d.id);
+    else if (d.question) answerQuestion(d.question, Number(d.q));
+    else if (d.unfold !== undefined) {
+      unfolded = !unfolded;
+      render();
+    } else if (d.id) select(d.id);
     else if (d.tab) {
       tab = d.tab;
-      if (selected && !listOrder().includes(selected)) selected = null;
-      render();
+      if (selected && listOrder().indexOf(selected) < 0) selected = null;
+      render(true);
     } else if (d.view || d.viewLink) {
       e.preventDefault();
       var v = d.view || d.viewLink;
@@ -579,16 +722,17 @@
       view = v;
       selected = v === "done" ? "d-205b" : null;
       paneOpen = !!selected;
-      render();
+      render(true);
     } else if (d.select) {
       e.preventDefault();
       view = "todo";
       tab = "all";
+      if (isTask(findItem(d.select)) && listOrder().indexOf(d.select) < 0) unfolded = true;
       select(d.select);
     } else if (d.answer) answer(d.answer, el);
     else if (d.paneToggle !== undefined) {
       paneOpen = !paneOpen && !!selected;
-      render();
+      render(true);
     } else if (d.play) play(d.play);
   });
 
@@ -600,14 +744,22 @@
     else if (kind === "cancel") tickOff(t.id, "cancelled");
     else if (kind === "again") {
       t.runs.push({ wf: t.wf, state: "working", start: T.formatClock(T.NOW), again: true });
-      changeState(t.id, "working", { line: "tried again", checks: false });
       showToast("Tried again: " + t.wf + " runs " + t.title + " from the start");
-      render();
+      changeState(t.id, "working", { narration: "Starting again from the top", checks: false });
     } else if (kind === "stop") {
       t.runs[t.runs.length - 1].state = "stopped";
       t.runs[t.runs.length - 1].end = T.formatClock(T.NOW);
-      changeState(t.id, "stopped", { line: "", checks: false });
+      changeState(t.id, "stopped");
     } else if (kind === "open") flashToast("Opens the run of " + t.wf + " in Workflows");
+  }
+
+  // Answering a Request where it stands: Allow once and Always allow let the run go on, so the
+  // row turns Working; Deny tells the agent no, and it goes on without the push.
+  function answerQuestion(id, i) {
+    var t = findItem(id);
+    var a = t.question.answers[i];
+    showToast(a[0] + ": " + t.question.text.replace(/<[^>]+>/g, ""));
+    changeState(id, "working", { narration: i === 2 ? "Going on without the push" : "Pushing chore/stripe-sdk-14", question: null });
   }
 
   /* ------------------------------------------------------------------ the drawing's bar */
@@ -654,10 +806,9 @@
       location.search = q.toString();
       return;
     }
-    if (view !== "todo" || tab !== "all") {
+    if (view !== "todo") {
       view = "todo";
-      tab = "all";
-      render();
+      render(true);
     }
     if (what === "finish") {
       var sku = findItem("t-sku");
@@ -677,11 +828,11 @@
   /* ------------------------------------------------------------------ start */
 
   function start() {
-    var list = document.querySelector("[data-list]");
-    list.addEventListener("pointerenter", function () {
+    var split = document.querySelector(".asks-list");
+    split.addEventListener("pointerenter", function () {
       pointerOnList = true;
     });
-    list.addEventListener("pointerleave", function () {
+    split.addEventListener("pointerleave", function () {
       pointerOnList = false;
       var due = held;
       held = [];
@@ -690,11 +841,9 @@
       });
     });
     renderProto();
-    render();
-    if (scene.load) {
-      var head = document.querySelector("[data-tracking]");
-      if (head) list.scrollTop = head.offsetTop - 8;
-    }
+    render(true);
+    var row = selected && rowOf(selected);
+    if (row) row.scrollIntoView({ block: "nearest" });
   }
 
   root.dataset.intakeCount = countTodo();

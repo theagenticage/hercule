@@ -1,10 +1,10 @@
 # Tracking: the drawing
 
-The pixel reference for Tracking, the section at the foot of Intake's To do that follows the work the user handed to agents until they mark it done ([spec 17 §Intake](../../spec/17-desktop-app.md#intake), [ADR 0046](../../adr/0046-handing-a-signal-off-tracks-the-work-on-a-task.md), map [#797](https://github.com/theagenticage/hercule/issues/797)). Drawn in the design session [#800](https://github.com/theagenticage/hercule/issues/800), from Round Trip on the branch [`prototype/stay-in-the-loop`](https://github.com/theagenticage/hercule/tree/prototype/stay-in-the-loop/docs/design/stay-in-the-loop).
+The pixel reference for Tracking, the tray docked at the foot of Intake's To do that follows the work the user handed to agents until they mark it done ([spec 17 §Intake](../../spec/17-desktop-app.md#intake), [ADR 0046](../../adr/0046-handing-a-signal-off-tracks-the-work-on-a-task.md), map [#797](https://github.com/theagenticage/hercule/issues/797)). Drawn in the design session [#800](https://github.com/theagenticage/hercule/issues/800) on Round Trip, from the branch [`prototype/stay-in-the-loop`](https://github.com/theagenticage/hercule/tree/prototype/stay-in-the-loop/docs/design/stay-in-the-loop).
 
 Where this drawing and spec 17 disagree, spec 17 decides.
 
-Open `index.html` in a browser. It is drawn on the book's tokens and system (`../crew-bureau-2/`) and on the Intake drawing's stylesheet (`../intake-directions/asks/asks.css`), which the app's Intake is a port of. To do shows what the app draws today (Now, Signals, the foot) with Tracking added.
+Open `index.html` in a browser. It is drawn on the book's tokens and system (`../crew-bureau-2/`) and on the Intake drawing's stylesheet (`../intake-directions/asks/asks.css`), which the app's Intake is a port of. To do shows what the app draws today (Now, Signals, the foot), with Tracking docked under it. Round Trip's look, its tray, its faces, its motion and its pane are kept; what changed is the model, which is the plan's (#797): finished and failed work stays in Tracking until the user marks it done, and never comes back to To do as a new signal.
 
 ## States by URL
 
@@ -12,97 +12,106 @@ Add `&theme=orient-express` for dark, and `&bar=off` to hide the drawing's bar.
 
 | URL | Shows |
 |---|---|
-| `index.html` | 09:41. Tracking holds seven rows in all five states; Rate-limit the public API is open, Finished |
-| `?state=needs-you` | Upgrade the Stripe SDK: Implement asks to run `git push` (a Request) |
-| `?state=needs-you-signal` | Refunds for partial captures (PAY-212): checks failed on its PR #1302, an open signal that names the Task. The pane shows Linked work |
+| `index.html` | 09:41. Tracking holds seven Tasks: four wait on the user, and three fold into one row of faces. Rate-limit the public API is open, Finished |
+| `?state=needs-you` | Upgrade the Stripe SDK: Implement asks to run `git push`, a Request answered in the tray or the pane |
+| `?state=needs-you-signal` | Refunds for partial captures (PAY-212): checks failed on the agent's PR #1302, an open signal that names the Task. The signal's row in Signals wears Implement's face |
 | `?state=failed` | Nightly backup: Investigate failed, permission denied on ops-db |
-| `?state=working` | Lowercase SKUs: Fix bug is working |
+| `?state=working` | Lowercase SKUs: Fix bug is working. The tray is unfolded and scrolls inside its cap |
 | `?state=stopped` | Move invoices to the new PDF renderer: the user stopped Implement |
 | `?state=done` | Done: each handed-off signal shows its own leg. PAY-205 had two handoffs, so two rows, two legs |
-| `?state=empty` | Nothing handed off: To do as it is today, with no Tracking section |
+| `?state=empty` | Nothing handed off: the tray is one line that says what it is for |
 | `?state=zero` | Inbox zero while two rows still work: they do not wait on the user, so To do is at zero |
-| `?state=load` | Ten times the load: 60 signals, 18 Tracking rows, 7 of them waiting, scrolled to Tracking |
+| `?state=load` | Ten times the load: 60 signals and 18 Tracking rows, 7 of them waiting. The tray keeps to its cap and scrolls |
 
-The bar also plays the motion: **A run finishes** (Lowercase SKUs turns Finished; it waits while the pointer is on the list), **Hand off** (the trailing-space signal goes to Fix bug and arrives in Tracking) and **Mark done** (Rate-limit the public API leaves).
+The bar also plays the motion: **A run finishes** (Lowercase SKUs turns Finished; it waits while the pointer is on the list), **Hand off** (the trailing-space signal lifts out of Signals and flies into Tracking) and **Mark done** (Rate-limit the public API leaves).
 
-## The section
+## The tray
 
-- **Where:** the last section of To do, after Signals, in the same scrolling list. Not a tray docked under the list, as Round Trip had: Tracking's waiting rows count toward To do, so they are items to work through like signals, `J` and `K` walk on into them, and one list has one scroll and one virtualizer. A hairline above the head, as the foot's, sets it apart from the signals. The foot ("7 cleared today") stays at the end, under Tracking.
-- **Only while it holds a row,** as Now. Someone who never hands off sees no change. The first handoff shows where it went: the signal leaves, and the row arrives in the new section.
-- **The head:** "Tracking", the number of rows, and on the right "4 wait on you" in marigold. The right-hand number is what Tracking adds to the To do count, so the arithmetic is on screen: 7 signals and 4 waiting rows make 11.
-- **The order:** Needs you, Failed, Finished, then Working, then Stopped; inside a state, the oldest handoff first. The rows that wait on the user come first, as Back rows lead Signals.
+- **Where:** docked under To do's list, like an activity bar: Round Trip's "Out with agents", renamed. It is a separate place from the signals, so the list stays about what sources ask, and the tray about the work out with agents.
+- **The cap:** the tray never takes more than 40% of the list's column. It draws at most five rows; past that, its Working and Stopped rows fold into one row of their faces ("2 working · 1 stopped", with the count per workflow under it). A click on that row, or on the head's chevron, unfolds them, and the tray scrolls inside its cap. The rows that wait on the user never fold.
+- **The head:** "TRACKING" and the number of rows, and on the right "4 wait on you" in marigold. That number is what Tracking adds to the To do count: 7 signals and 4 waiting rows make 11.
+- **The order:** Needs you, Failed, Finished, then Working, then Stopped; inside a state, the oldest handoff first.
+- **Empty:** the head and one line, "Hand a signal to an agent, and follow it here until you mark it done."
+- **Tabs:** the tray is To do's, not a tab's. It shows the same rows on every tab, so it never moves when the user switches. Its waiting rows count in the global To do count and in All's count; a plugin's tab counts its own signals only. A Task can have legs from several sources (PAY-212: Linear, then GitHub), so it has no one tab to count on.
 
 ## The row
 
-A Tracking row is a signal row: 52px, two lines, cut with an ellipsis, so it virtualizes and animates as signal rows do.
+As Round Trip's: the face of the agent that has the work, in its pose (working, waiting, done, failed, idle for stopped), the Task's title, and one line.
 
-- **Mark:** the source the work came from, from the Task's first handoff (`linear:…` gives Linear).
-- **Title:** the Task's title.
-- **Second line:** the state's word, the workflow, then a detail when there is one:
-  - "**Needs you** · Implement · asks to run `git push`"
-  - "**Needs you** · Implement · checks failed on #1302"
-  - "**Failed** · Investigate · permission denied on ops-db"
-  - "**Finished** · Review PR"
-  - "**Waiting for checks** · Implement · #1311"
-  - "**Working** · Fix bug"
-  - "**Stopped** · Implement"
-- **Marigold:** Needs you, Failed and Finished wait on the user and count toward To do, so their word is `--you-ink`, as everything addressed to the user is in the book. Failed is marigold too, not tomato: what matters on the list is that it waits on the user. Working and Stopped do not wait: their word is ink, their title regular weight and their mark faded, as the quiet rows Intake draws for work that is not the user's.
-- **Time:** how long the row has been in its state.
-- **The row's control:** Mark done (the Done check), on hover and focus, on Finished, Failed and Stopped only. On Working and Needs you a tick-off would leave a run going. No Snooze and no checkbox: a Task is not snoozed, and bulk acts on signals.
+| State | Line |
+|---|---|
+| Needs you, a Request | the question, in marigold: "Run `git push -u origin chore/stripe-sdk-14`?", with Allow once, Always allow and Deny under it in three fixed slots |
+| Needs you, a signal | "Checks failed on #1302", in marigold |
+| Failed | "*Investigate* failed · permission denied on ops-db", in marigold |
+| Finished | "*Review PR* finished", in marigold |
+| Working | "*Fix bug* · Writing a failing test for a lowercase SKU": the agent's latest message |
+| Working, on a subscription | "*Implement* · waiting for checks on #1311" |
+| Stopped | "*Implement* · stopped by you" |
 
-## Tabs and counts
+The workflow's name is in its colleague's hue; the time on the right is how long the row has been in its state, in marigold and bold when the row waits on the user. Mark done shows on hover over Finished, Failed and Stopped rows only: on Working and Needs you it would leave a run going.
 
-- **Tracking shows on the All tab only.** A plugin's tab filters signals by source. A Task can have legs from several sources (PAY-212: Linear, then GitHub), so it has no one tab, and showing it on each would count it twice.
-- **What the plugin tabs miss is already there:** the follow-up that makes a row Needs you is an ordinary signal, and it shows on its own tab (checks failed on #1302 is on GitHub's tab).
-- **Counts:** Tracking's waiting rows count in the global To do count (the Hercule segment and Intake's row) and in the All tab's count. A plugin tab counts its own signals only. Example: 7 signals and 4 waiting rows; All shows 11, GitHub 4.
+**Faces on signals.** A signal about a tracked Task, such as the checks that failed on the agent's PR, is led by that agent's face in Signals, and its source's mark moves to the start of its second line, as Round Trip drew what came back. A face on a row says at a glance that an agent has worked on it. Done does the same for every handed-off signal.
 
 ## The pane
 
-Top to bottom: the state and "Tracking"; the title and a sentence about the state; for Needs you, what waits (the Request, or the signal, with the way to it); for Failed, the failure reason; **You asked** (the signal of the first handoff); **Runs**; **What it did** (the last message of the last agent step); **Linked work** (once #807 lands PRs on Tasks); the answers.
+Round Trip's: one trip, top to bottom, joined by a hairline.
+
+- **The head:** the agent's face and name, the state, and "Open the run". The title, then when the state began, how long it ran, and the agent's harness, model and runner.
+- **You asked:** the signal of the first handoff, with when it was handed to whom.
+- **The agent's message:** for Failed, the reason first, in tomato; then the last message of the last agent step, with "Read the rest in the thread"; for Working, the latest step, live; for a Task with more than one run, its runs as steps; Linked work as the PR and its change line; for a Request, the question and its answers, as Round Trip's run pane has them.
+- **The signal that waits,** for Needs you by a signal: a third message in the trip, from the source, with "Open the signal".
+- **The answers:**
 
 | State | Answers (primary first) |
 |---|---|
-| Working, Needs you | Stop the run, Open the run |
-| Finished | **Mark done**, Try again, Cancel, Open the run |
-| Failed | **Try again**, Mark done, Cancel, Open the run |
+| Working, Needs you by a Request | Stop the run |
+| Needs you by a signal | Try again, Mark done, Cancel (none suggested: Open the signal is the move) |
+| Finished | **Mark done**, Try again, Cancel |
+| Failed | **Try again**, Mark done, Cancel |
 | Stopped | Try again, Mark done, Cancel |
+
+Open the run is in the head on every state, so the ledger leaves it out, as Round Trip's did. A Task that waits on a signal has no live run, so Stop the run is not offered there; it gets the answers of its last run's state.
 
 ## Done
 
-Each handed-off signal's Done row shows its own leg as its second line, with no folding:
+Each handed-off signal's Done row is led by the face of the agent it went to, and its second line is its own leg, with no folding:
 
 - "Handed to Implement → finished → continued: Fix bug"
 - "Handed to Fix bug → tried again once → done"
 - "Handed to Review PR → finished", where the Task is still open: the line ends with its Tracking state, in marigold when it waits on the user.
 
-The pane draws the leg as a short trip, one line per step with its time.
+The pane draws the leg as Round Trip's trip: one line per step, with its time and who took it, then "Go to Tracking" while the Task is open, or "Open the run" once it is closed.
 
 ## Keys
 
 | Key | Does |
 |---|---|
-| `J` / `K`, `↓` / `↑` | move down and up, through Now and Signals and on into Tracking |
+| `J` / `K`, `↓` / `↑` | move down and up, through Now and Signals and on into Tracking's rows |
 | `↩` | opens the pane and puts focus on the suggested answer; a second `↩` presses it |
 | `E` | marks a Finished, Failed or Stopped row done; nothing on Working or Needs you |
+| `O` | opens the run |
 | Esc | closes the pane, then clears the selection |
 
 ## New design tokens
 
-None. Marigold (`--you`, `--you-ink`), the state marks and the faces are the book's; the leg's line in Done is `--line`.
+None. Round Trip's `--unseen` went with the unseen dot, and its `--trip-line` was `--line` under another name.
 
 ## Motion, and what it costs
 
-Every motion is `transform` or `opacity` on an HTML element, plays once, only for rows on screen, and stops with Reduce motion. A change the user did not make waits while the pointer is on the list.
+Every motion is `transform` or `opacity` on an HTML element, plays once, only for rows on screen, and stops with Reduce motion. A change the user did not make waits while the pointer is on the list or the tray.
 
 | Motion | How | Cost |
 |---|---|---|
-| A row changes state (Working → Finished) | its second line fades in over `--dur-2`; when its place changes, it and the rows between slide over `--dur-3` | one opacity animation, plus one transform per row that moves on screen, once per change |
+| A handoff: the signal leaves for Tracking | a lifted copy of its row (`--shadow-2`) flies from Signals to its place in the tray over `--dur-3`; the rows below in Signals close up | one compositor animation for the copy, plus one transform per row that moves on screen, once per handoff |
+| A row changes state (Working → Finished) | its line fades in anew over `--dur-2`; when its place changes, the rows between slide over `--dur-3` | one opacity animation, plus one transform per row that moves, once per change |
 | A row is marked done or cancelled | it fades over `--dur-1`, then the rows below close the gap over `--dur-3` | as Intake's own Done |
-| A handoff arrives | the signal leaves as on Done; the new row fades in and drops 6px over `--dur-2`, the rows below make room | as a new signal's arrival |
+| A Working row's line changes | the new line fades in over `--dur-2` | one opacity animation per new agent message, only for rows on screen. The line is the agent's latest message, which the `session` topic already brings; this is the one per-message cost Tracking adds, and slice 1 measures it |
 
-No loop runs, faces in the list are still, and the row's time reads the shared age clock, once a minute.
+No loop runs, faces in lists are still, and the times read the shared age clock, once a minute.
 
-## Left out
+## Left out of Round Trip
 
-- Round Trip's `result` signal, Send back with a note, Take over, Undo, the unseen dot and folding rows at load. [`DECISIONS.md`](https://github.com/theagenticage/hercule/blob/prototype/stay-in-the-loop/docs/design/stay-in-the-loop/DECISIONS.md) says why.
-- Later, Everything and the triage tab are as Intake has them today, and are not drawn.
+- The `result` signal and the row that lifts back into To do; finished and failed work stays in the tray.
+- Send back with a note, Take over, Undo, Edit, confidence and the structured results; the pane shows the agent's last message instead.
+- The unseen dot, and folding results at load. [`DECISIONS.md`](https://github.com/theagenticage/hercule/blob/prototype/stay-in-the-loop/docs/design/stay-in-the-loop/DECISIONS.md) says why.
+- Later, Everything and the Triage tab are as Intake has them today, and are not drawn.

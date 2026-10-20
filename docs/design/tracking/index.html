@@ -1,6 +1,7 @@
 <!doctype html>
-<!-- DRAWING - Tracking: the section at the foot of To do that follows the work Rogier handed to
-     agents, until he marks it done. The pixel reference for spec 17 §Intake, Tracking (#800).
+<!-- DRAWING - Tracking: the tray docked at the foot of To do that follows the work Rogier handed
+     to agents, until he marks it done. Drawn on Round Trip (prototype/stay-in-the-loop). The pixel
+     reference for spec 17 §Intake, Tracking (#800).
      States (?state=): finished (default), needs-you, needs-you-signal, failed, working, stopped,
      done, empty, zero, load. Add &theme=orient-express for dark and &bar=off to hide the bar.
      Keys: J and K move, on into Tracking; Enter opens the pane and puts focus on the suggested
@@ -28,9 +29,11 @@
           <button class="icon-btn asks-pane-btn" data-pane-toggle aria-label="Show the open item" aria-pressed="true"><i data-i="sidebar" data-size="16"></i></button>
         </header>
         <div class="asks" data-split>
-          <section class="asks-list" aria-label="Intake">
+          <section class="asks-list rt-list" aria-label="Intake">
             <div class="asks-head" data-head></div>
             <div class="asks-scroll" data-list></div>
+            <section class="rt-tray" data-tray aria-label="Tracking"></section>
+            <div class="rt-fly" data-fly aria-hidden="true"></div>
           </section>
           <section class="asks-detail" data-detail aria-live="polite"></section>
         </div>

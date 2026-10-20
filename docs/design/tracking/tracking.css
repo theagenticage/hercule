@@ -1,54 +1,230 @@
-/* DRAWING - Tracking: the list, as the app draws Intake today, and the Tracking section.
-   No new design tokens: Tracking is drawn with the book's marigold (--you, --you-ink) for what
-   waits on Rogier, and with the parts Intake already has. */
+/* DRAWING - Tracking: the list and the tray under it, as Round Trip drew them
+   (prototype/stay-in-the-loop, round-trip/round-trip.css), with the parts the plan dropped left out.
 
-/* The app runs rows the list's full width (spec 17, The split and its minimums); the Intake
-   drawing still caps them at 960px. */
-.asks-scroll > * {
+   No new design tokens. Round Trip added two: --unseen, for a dot the plan does not have, and
+   --trip-line, which was --line under another name; the pane and Done use --line itself. What
+   waits on Rogier is the book's marigold (--you, --you-ink). Motion lives in tracking.js, on
+   transform and opacity only. */
+
+/* ---------- Rows ---------- */
+/* Rows run the list's full width with the pane closed, as spec 17 amended the drawing, so the list
+   and the tray under it keep one right edge. */
+.rt-list .asks-scroll > :not(.asks-toast) {
   max-width: none;
+}
+/* Every row gets a 24px lead so a face fits; text still starts 42px in, where the drawing has it. */
+.rt-list .ask-row {
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding-left: 8px;
+}
+/* A face leads at full strength; a source's mark stays at the drawing's 0.8. */
+.rt-lead {
+  opacity: 1;
+}
+.rt-lead .cr {
+  display: block;
+}
+/* The source's mark at the start of the second line, on a row led by a face. */
+.rt-src {
+  display: inline-grid;
+  margin-right: 6px;
+  vertical-align: -1px;
+  color: var(--ink);
+  opacity: 0.75;
 }
 
 /* ---------- Tracking ---------- */
-
-/* The section starts as the others do. A hairline above it says the rows below are the work you
-   handed off, not signals, in the same weight as the foot's rule. */
-.tr-head {
-  margin-top: 8px;
+/* Docked under the list, like an activity bar. It never takes more than 40% of the column, so
+   Intake's own list keeps the room; past five rows its Working and Stopped rows fold into one. */
+.rt-tray {
+  flex: none;
+  max-height: 40%;
+  overflow-y: auto;
+  padding: 4px 10px 10px;
   box-shadow: inset 0 1px 0 var(--line-soft);
+  scrollbar-width: thin;
 }
-.tr-head-waiting {
-  color: var(--you-ink);
+.rt-tray[hidden] {
+  display: none;
 }
-
-/* The state leads the row's second line. Finished, Failed and Needs you wait on you and count
-   toward To do, so they are marigold, as everything addressed to you is in the book. Working and
-   Stopped are ink, a step above the muted line. */
-.tr-row-state {
-  color: var(--ink);
+.rt-tray-h {
+  position: sticky;
+  z-index: 1;
+  top: -4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin: 0;
+  padding: 0 10px 0 4px;
+  background: var(--surface);
+}
+.rt-tray-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  transition:
+    background var(--dur-1),
+    color var(--dur-1);
+}
+button.rt-tray-toggle:hover {
+  background: var(--hover);
+  color: var(--muted);
+}
+.rt-tray-toggle .count {
+  height: 17px;
+  letter-spacing: 0;
+}
+.rt-tray-sum {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: var(--t-12);
   font-weight: var(--w-medium);
 }
-.tr-item.is-waiting .tr-row-state {
+.rt-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* A row holds its controls beside the row's button, as a signal's row does, so the row stays one
+   button. --row-fill is the row's background made solid, for the controls to fade over. */
+.rt-run-item {
+  --row-fill: var(--surface);
+  position: relative;
+  border-radius: var(--r-md);
+}
+.rt-run-item:hover {
+  --row-fill: color-mix(in srgb, var(--ink) 5%, var(--surface));
+}
+.rt-run-item.is-on {
+  --row-fill: color-mix(in srgb, var(--ink) 7%, var(--surface));
+}
+.rt-run {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 5px 10px 5px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+button.rt-run:hover,
+.rt-run-item:hover > .rt-run {
+  background: var(--hover);
+}
+.rt-run-item.is-on > .rt-run {
+  background: var(--selected);
+}
+.rt-run-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.rt-run-title,
+.rt-run-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rt-run-title {
+  color: var(--ink);
+  font-size: var(--t-13);
+}
+.rt-run-sub {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.rt-run-sub code {
+  font-size: 11px;
+}
+.rt-run-end {
+  align-self: start;
+  padding-top: 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+/* A row that waits on you (Needs you, Failed, Finished) speaks up in marigold, and counts toward
+   To do. The agent's name keeps its own hue. */
+.rt-run-item.is-you .rt-run-sub {
   color: var(--you-ink);
 }
-.tr-item .ask-sub code {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
+.rt-run-item.is-you .rt-run-end {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
 }
-/* Working and Stopped rows read quieter, as the rows Intake draws for work that is not yours. */
-.tr-item:not(.is-waiting) .ask-title {
-  font-weight: var(--w-regular);
+/* Mark done, on hover and focus, over the row's right end. */
+.rt-acts {
+  border-radius: 0 var(--r-md) var(--r-md) 0;
 }
-.tr-item:not(.is-waiting) .ask-mark {
-  opacity: 0.55;
+.rt-run-item:hover > .rt-acts,
+.rt-run-item:focus-within > .rt-acts {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* A Request, answered where it stands: three fixed slots, indented to the text. */
+.rt-run-ans {
+  display: grid;
+  grid-template-columns: 92px 148px 60px;
+  gap: 6px;
+  padding: 0 0 8px 42px;
+}
+.rt-run-ans > .btn {
+  grid-row: 1;
+  width: 100%;
+}
+/* Past the cap, Working and Stopped rows fold into one row of their faces. */
+.rt-run.rt-run--stack {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.rt-run--stack .rt-run-end {
+  align-self: center;
+  padding-top: 0;
+}
+.rt-tray-empty {
+  margin: 0;
+  padding: 0 10px 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
 }
 
-/* Inbox zero sits above Tracking when only working rows remain. */
-.asks-zero + .tr-head {
-  box-shadow: none;
+/* ---------- Motion layer ---------- */
+/* Copies of rows fly here from the list into the tray, and rows that left fade out here. */
+.rt-fly {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  overflow: clip;
+  pointer-events: none;
+}
+.rt-ghost {
+  position: absolute !important;
+  margin: 0;
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.rt-ghost--lift {
+  background: var(--raised);
+  box-shadow: var(--shadow-2);
 }
 
 /* ---------- the drawing's bar: not part of the design ---------- */
-
 /* It sits in the title bar's empty middle, so it covers neither the list nor the pane. */
 .tr-proto {
   position: fixed;
