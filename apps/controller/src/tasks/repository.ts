@@ -29,6 +29,7 @@ import type * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { MAX_TRACKING_HANDOFFS } from "@hercule/contract";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type {
   ExternalRef,
@@ -62,6 +63,8 @@ export interface TaskFilter {
   readonly labels?: ReadonlyArray<string>;
   readonly status?: ReadonlyArray<TaskStatus>;
   readonly projectId?: string;
+  /** `true` keeps the tasks with a handoff entry, `false` the tasks without one. */
+  readonly handedOff?: boolean;
 }
 
 /** A field a keyset listing can order by. */
@@ -90,10 +93,27 @@ export interface ProvenanceInput {
   readonly ref?: ExternalRef;
   readonly eventId?: number;
   readonly runId?: string;
+  readonly signalId?: string;
+}
+
+/** One handoff of a Task: the provenance entry that names the signal and the run. */
+export interface TrackedHandoff {
+  readonly signalId: string;
+  readonly runId: string;
+  readonly at: string;
+}
+
+/** A Task that Tracking follows, with its newest handoffs, newest first. */
+export interface TrackedTask {
+  readonly id: string;
+  readonly title: string;
+  readonly handoffs: ReadonlyArray<TrackedHandoff>;
 }
 
 /** The fields of a new task row, with the defaults already applied. */
 export interface NewTask {
+  /** The task's id, when the caller chose it; a new one is made when absent. */
+  readonly id?: string;
   readonly title: string;
   readonly description: string;
   readonly status: TaskStatus;
@@ -134,6 +154,7 @@ interface ProvenanceRow {
   readonly ref: string | null;
   readonly event_id: number | null;
   readonly run_id: Uint8Array | null;
+  readonly signal_id: Uint8Array | null;
   readonly at: string;
   readonly actor: string;
 }
@@ -211,6 +232,7 @@ const buildRelevanceScope = (filter: TaskFilter, match: string): CursorScope => 
         filter.labels ?? null,
         filter.status ?? null,
         filter.projectId ?? null,
+        filter.handedOff ?? null,
       ])}`,
       direction: "asc",
     },
@@ -226,9 +248,31 @@ const make = Effect.gen(function* () {
 
   const buildConditions = (filter: TaskFilter) => {
     const clauses = [sql`tasks.deleted_at IS NULL`];
-    if (filter.status !== undefined) clauses.push(buildAnyOfClause("tasks.status", filter.status));
+    if (filter.status !== undefined) {
+      // Without statistics, SQLite starts a listing sorted by `updated_at`
+      // from the status index and scans every open task. A listing that names
+      // refs should start from the ref index, whose few rows are the selective
+      // part. The unary `+` makes the status column an expression, so the
+      // planner cannot use an index on it, and the status is only checked.
+      clauses.push(
+        buildAnyOfClause(
+          filter.refs === undefined ? "tasks.status" : "+tasks.status",
+          filter.status,
+        ),
+      );
+    }
     if (filter.projectId !== undefined) {
       clauses.push(sql`tasks.project_id = ${uuidFromString(filter.projectId)}`);
+    }
+    if (filter.handedOff !== undefined) {
+      // `task_provenance_handoff` holds exactly the entries that name a
+      // signal, so both forms read that index alone. `task_id` is never NULL,
+      // so NOT IN cannot match nothing by mistake.
+      clauses.push(
+        filter.handedOff
+          ? sql`tasks.id IN (SELECT task_id FROM task_provenance WHERE signal_id IS NOT NULL)`
+          : sql`tasks.id NOT IN (SELECT task_id FROM task_provenance WHERE signal_id IS NOT NULL)`,
+      );
     }
     if (filter.labels !== undefined) {
       clauses.push(
@@ -259,7 +303,7 @@ const make = Effect.gen(function* () {
       ? Effect.succeed([])
       : Effect.map(
           sql<ProvenanceRow>`
-            SELECT task_id, ref, event_id, run_id, at, actor FROM task_provenance
+            SELECT task_id, ref, event_id, run_id, signal_id, at, actor FROM task_provenance
             WHERE ${sql.in(
               "task_id",
               rows.map((row) => row.id),
@@ -275,6 +319,7 @@ const make = Effect.gen(function* () {
                 ...(entry.ref === null ? {} : { ref: entry.ref }),
                 ...(entry.event_id === null ? {} : { eventId: entry.event_id }),
                 ...(entry.run_id === null ? {} : { runId: uuidToString(entry.run_id) }),
+                ...(entry.signal_id === null ? {} : { signalId: uuidToString(entry.signal_id) }),
                 at: entry.at,
                 actor: entry.actor,
               });
@@ -309,9 +354,11 @@ const make = Effect.gen(function* () {
     Effect.forEach(
       entries,
       (entry) => sql`
-        INSERT INTO task_provenance (id, task_id, ref, event_id, run_id, at, actor)
+        INSERT INTO task_provenance (id, task_id, ref, event_id, run_id, signal_id, at, actor)
         VALUES (${mintUuid()}, ${taskId}, ${entry.ref ?? null}, ${entry.eventId ?? null},
-                ${entry.runId === undefined ? null : uuidFromString(entry.runId)}, ${at}, ${actor})
+                ${entry.runId === undefined ? null : uuidFromString(entry.runId)},
+                ${entry.signalId === undefined ? null : uuidFromString(entry.signalId)},
+                ${at}, ${actor})
       `,
       { discard: true },
     );
@@ -325,6 +372,72 @@ const make = Effect.gen(function* () {
         Effect.map((tasks) => Option.fromNullishOr(tasks[0])),
       ),
 
+    /**
+     * Returns every in-progress task that has a handoff entry, the most
+     * recently updated task first. Each task holds its newest handoff entries,
+     * at most `MAX_TRACKING_HANDOFFS`, newest first. A deleted task is left
+     * out.
+     *
+     * One statement, and its work follows the in-progress tasks, not the
+     * handoffs ever made. It walks the in-progress tasks on the status index,
+     * and for each one looks up the end of its range in
+     * `task_provenance_handoff` (task, then time), so a task that has no
+     * handoff costs one probe, and a task with thousands reads ten entries.
+     * The handoffs of tasks that are done are never touched. `CROSS JOIN`
+     * makes SQLite keep that order, because it never reorders one.
+     */
+    listTracked: (): Effect.Effect<ReadonlyArray<TrackedTask>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly task_id: Uint8Array;
+          readonly title: string;
+          readonly updated_at: string;
+          readonly signal_id: Uint8Array;
+          readonly run_id: Uint8Array | null;
+          readonly at: string;
+        }>`
+          SELECT t.id AS task_id, t.title, t.updated_at, p.signal_id, p.run_id, p.at
+          FROM tasks t CROSS JOIN task_provenance p ON p.rowid IN (
+            SELECT rowid FROM task_provenance
+            WHERE task_id = t.id AND signal_id IS NOT NULL
+            ORDER BY at DESC LIMIT ${MAX_TRACKING_HANDOFFS})
+          WHERE t.status = 'in-progress' AND t.deleted_at IS NULL`,
+        (rows) => {
+          const byTask = new Map<
+            string,
+            { id: string; title: string; updatedAt: string; handoffs: Array<TrackedHandoff> }
+          >();
+          for (const row of rows) {
+            // A handoff entry always names the run it started.
+            if (row.run_id === null) continue;
+            const id = uuidToString(row.task_id);
+            const task = byTask.get(id);
+            const handoff = {
+              signalId: uuidToString(row.signal_id),
+              runId: uuidToString(row.run_id),
+              at: row.at,
+            };
+            if (task === undefined) {
+              byTask.set(id, {
+                id,
+                title: row.title,
+                updatedAt: row.updated_at,
+                handoffs: [handoff],
+              });
+            } else {
+              task.handoffs.push(handoff);
+            }
+          }
+          return [...byTask.values()]
+            .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
+            .map(({ id, title, handoffs }) => ({
+              id,
+              title,
+              handoffs: handoffs.toSorted((a, b) => b.at.localeCompare(a.at)),
+            }));
+        },
+      ),
+
     /** Returns true if a project exists and has not been deleted. */
     projectExists: (id: string): Effect.Effect<boolean, SqlError> =>
       Effect.map(
@@ -336,7 +449,7 @@ const make = Effect.gen(function* () {
     /** Writes a new task and its first provenance entries. */
     insert: (task: NewTask): Effect.Effect<Task, SqlError> =>
       Effect.gen(function* () {
-        const id = mintUuid();
+        const id = task.id === undefined ? mintUuid() : uuidFromString(task.id);
         yield* sql`
           INSERT INTO tasks
             (id, title, description, status, priority, labels, project_id,

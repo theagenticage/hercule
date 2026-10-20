@@ -45,16 +45,12 @@ import { Actor, Id, Timestamp } from "../ids";
 import { MAX_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { Event, EventId } from "./event-record";
+import { RunStatus } from "./run-status";
 import { Subscription } from "./subscription";
 import { WORKFLOW_CONTENT_FIELDS } from "./workflow";
 import { WorkflowDefinition } from "./workflow-definition";
 
-/** The statuses of a run, in the order a run moves through them. */
-export const RUN_STATUSES = ["pending", "running", "completed", "failed", "cancelled"] as const;
-
-export const RunStatus = Schema.Literals(RUN_STATUSES);
-
-export type RunStatus = Schema.Schema.Type<typeof RunStatus>;
+export { RUN_STATUSES, RunStatus } from "./run-status";
 
 /** The statuses of a step record, in the order a step record moves through them. */
 const STEP_STATUSES = [
@@ -368,6 +364,12 @@ export const Run = Schema.Union(
       /** The run this run re-runs, when `run.rerun` started it. */
       originalRunId: Schema.optionalKey(Id),
       /**
+       * The Task this run works on, when the user handed a signal to an agent
+       * (`signal.handOff`). A run started any other way has none. A re-run
+       * keeps the `taskId` of the run it re-runs.
+       */
+      taskId: Schema.optionalKey(Id),
+      /**
        * The run's live subscriptions: one for each signal trigger of its plan,
        * held by the run from the moment it is written until it ends. Empty
        * for a run whose plan has no signal trigger, and for a run that has
@@ -413,6 +415,8 @@ export const RunSummary = Schema.Union(
       /** The workflow's name as it was when the run started, from the run's plan. */
       workflowName: Schema.String,
       origin: RunOrigin,
+      /** The Task the run works on, as on the run record. */
+      taskId: Schema.optionalKey(Id),
       createdAt: Timestamp,
     },
     {
@@ -577,6 +581,8 @@ const RUN_EVENT_FIELDS = {
   /** The stored workflow the run was started from, or null for a workflow sent with `run.start`. */
   workflowId: Schema.NullOr(Id),
   origin: RunOrigin,
+  /** The Task the run works on, as on the run record. Absent for a run with none. */
+  taskId: Schema.optionalKey(Id),
   /** The inputs the run started with, with defaults applied. */
   inputs: Schema.Record(Schema.String, Schema.Json),
   /** Absent for a run that ended before it started, such as one cancelled while pending. */

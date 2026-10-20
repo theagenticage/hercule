@@ -35,22 +35,36 @@ export const DISMISS_ACTION: BoundAction = {
  * raiser that binds it gets. The user's click runs an action as the user, so
  * a raiser that could bind `ignoreRule.create` could hide signals from the
  * user under any label. The core binds it on its own Ignore Rule offer only.
+ * `signal.handOff` is the same: the core binds it on the Hand to an agent
+ * answers of its own signal, and a raiser's answer could name another signal.
  */
 const CORE_ONLY_OPERATIONS: ReadonlyMap<string, string> = new Map([
   [
     "ignoreRule.create" satisfies AnswerOperationId<"signal.answer">,
     "An action cannot run ignoreRule.create: only the core binds it, on the offer it raises after the user marked five signals of one group done in a row. A rule hides signals from the user, and the click would create it as the user. To suggest a rule, describe it in the signal; the user creates it from Intake.",
   ],
+  [
+    "signal.handOff" satisfies AnswerOperationId<"signal.answer">,
+    "An action cannot run signal.handOff: only the core binds it, on the Hand to an agent action it adds to the signal for each workflow that takes its kind. To offer the user a workflow, create the workflow with an input for this signal's kind; the core then offers it. To start work on another signal, use run.start.",
+  ],
 ]);
 
 /**
+ * Returns the first input of a workflow that takes signals of `kind`, or
+ * `undefined` when it has none. A Hand to an agent action fills this input
+ * with the signal's id.
+ */
+export const findSignalInput = (definition: WorkflowDefinition, kind: string) =>
+  (definition.inputs ?? []).find((declared) => declared.signal?.kinds.includes(kind));
+
+/**
  * Returns one Hand to an agent action for each workflow that has a signal
- * input accepting `kind`. Each binds `run.start` with the signal's id as the
- * first such input. A proposal gets none: a workflow input cannot accept
- * `proposal`, so work always keeps its Task.
+ * input accepting `kind`. Each binds `signal.handOff`, which fills the first
+ * such input with the signal's id. A proposal gets none: a workflow input
+ * cannot accept `proposal`, so work always keeps its Task.
  *
  * A workflow with another required input that has no default is left out.
- * The action fills only the signal input, so `run.start` would refuse its
+ * The handoff fills only the signal input, so `run.start` would refuse its
  * click.
  */
 export const buildHandToActions = (
@@ -59,9 +73,8 @@ export const buildHandToActions = (
   workflows: ReadonlyArray<{ readonly id: string; readonly definition: WorkflowDefinition }>,
 ): ReadonlyArray<BoundAction> =>
   workflows.flatMap(({ id, definition }) => {
-    const inputs = definition.inputs ?? [];
-    const input = inputs.find((declared) => declared.signal?.kinds.includes(kind));
-    const needsMore = inputs.some(
+    const input = findSignalInput(definition, kind);
+    const needsMore = (definition.inputs ?? []).some(
       (declared) => declared !== input && declared.required && declared.default === undefined,
     );
     return input === undefined || needsMore
@@ -70,10 +83,7 @@ export const buildHandToActions = (
           {
             id: `${HAND_TO_ACTION_PREFIX}${id}`,
             label: `Hand to ${definition.name}`,
-            operation: {
-              op: "run.start",
-              input: { workflowId: id, inputs: { [input.name]: signalId } },
-            },
+            operation: { op: "signal.handOff", input: { signalId, workflowId: id } },
           },
         ];
   });

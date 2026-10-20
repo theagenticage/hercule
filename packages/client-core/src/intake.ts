@@ -232,11 +232,16 @@ export interface IntakeTabPlugin extends PluginName {
  *
  * Core signals have no tab of their own: they show under All only. The
  * Triage tab comes with the triage workflow (#533).
+ *
+ * `waitingTrackingRows` is how many rows of Tracking wait on the user. They
+ * count in All's count and in no plugin's: Tracking belongs to To do, not to
+ * a tab, and a Task can have legs from several sources.
  */
 export const buildIntakeTabs = (
   signals: ReadonlyArray<Signal>,
   plugins: ReadonlyArray<IntakeTabPlugin>,
   pressedPluginId: string | null,
+  waitingTrackingRows: number,
 ): ReadonlyArray<IntakeTab> => {
   const current = signals.map((signal) => parsePluginId(signal.kind)).filter((id) => id !== null);
   const wanted = new Set(current);
@@ -249,7 +254,7 @@ export const buildIntakeTabs = (
     .sort()
     .map((id) => ({ id, displayName: id }));
   return [
-    { pluginId: null, label: "All", count: signals.length },
+    { pluginId: null, label: "All", count: signals.length + waitingTrackingRows },
     ...[...listed, ...unlisted].map((plugin) => ({
       pluginId: plugin.id,
       label: plugin.displayName,
@@ -459,11 +464,15 @@ const chooseAnswerStyle = (action: SignalAction): SignalAnswerStyle => {
 
 /**
  * Returns the workflow a Hand to an agent answer starts: the `workflowId` of
- * the `run.start` the core binds (spec 10 §9.4), or `null` for any other
- * answer, a raiser's own `run.start` included.
+ * the `signal.handOff` the core binds (spec 10 §9.4), or of the `run.start` it
+ * bound on signals written before `signal.handOff` existed. Returns `null`
+ * for any other answer, a raiser's own `run.start` included.
  */
 const readStartedWorkflowId = (action: SignalAction): string | null => {
-  if (!action.id.startsWith(HAND_TO_ACTION_PREFIX) || action.operation?.op !== "run.start") {
+  if (
+    !action.id.startsWith(HAND_TO_ACTION_PREFIX) ||
+    (action.operation?.op !== "signal.handOff" && action.operation?.op !== "run.start")
+  ) {
     return null;
   }
   const input: unknown = action.operation.input;

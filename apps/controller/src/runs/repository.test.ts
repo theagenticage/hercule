@@ -8,6 +8,8 @@
  *   first;
  * - the run a re-run names in `originalRunId`, as it is written, read back
  *   and filtered on;
+ * - the Task a handed-off run works on in `taskId`, as it is written, read
+ *   back and listed on a run summary;
  * - where a running run's summary says the run is: its active steps and the
  *   signals it waits on;
  * - the `activeSince` filter, which keeps the runs that had not ended before
@@ -111,6 +113,29 @@ describe("originalRunId", () => {
 
     expect(listed.items.map((summary) => summary.id)).toEqual(rerunIds);
     expect(listed.nextCursor).toBeUndefined();
+  });
+});
+
+describe("taskId", () => {
+  const TASK = "0190c000-0000-7000-8000-0000000000a1";
+
+  it("reads back the Task a run works on, on the run and on its summary, and leaves the field out for a run with none", async () => {
+    const [onTask, withoutTask, summaries] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const onTaskId = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, AT);
+        const withoutTaskId = yield* runs.insert(NEW_RUN, AT);
+        return [
+          Option.getOrThrow(yield* runs.read(onTaskId)),
+          Option.getOrThrow(yield* runs.read(withoutTaskId)),
+          yield* listRuns({}),
+        ] as const;
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
+    );
+
+    expect(onTask.taskId).toBe(TASK);
+    expect(withoutTask).not.toHaveProperty("taskId");
+    expect(summaries.map((summary) => summary.taskId).sort()).toEqual([TASK, undefined]);
   });
 });
 
@@ -663,5 +688,215 @@ describe("the run list's query plans", () => {
 
     expect(plan).toContain("runs_unfinished (status=?)");
     expect(plan).not.toContain("SCAN runs");
+  });
+});
+
+describe("the newest runs of some Tasks", () => {
+  const TASK = "0190c000-0000-7000-8000-0000000000b1";
+  const OTHER_TASK = "0190c000-0000-7000-8000-0000000000b2";
+  const NO_RUN_TASK = "0190c000-0000-7000-8000-0000000000b3";
+  const minute = (n: number) => `2026-09-24T10:${String(n).padStart(2, "0")}:00.000Z`;
+
+  it("returns a Task's newest run and its newest live run, whatever the Task's history holds", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        // Many ended runs, then a live one that is not the newest, then the
+        // newest run, which ended.
+        const ended: Array<string> = [];
+        for (let n = 1; n <= 20; n++) {
+          const id = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, minute(n));
+          yield* runs.finish(id, { status: "completed" }, minute(n));
+          ended.push(id);
+        }
+        const pending = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, minute(21));
+        const newest = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, minute(22));
+        yield* runs.finish(newest, { status: "cancelled", keepWorkspace: false }, minute(22));
+        const other = yield* runs.insert({ ...NEW_RUN, taskId: OTHER_TASK }, minute(5));
+        // A run of a Task that was not asked for, and a run of no Task.
+        yield* runs.insert(
+          { ...NEW_RUN, taskId: "0190c000-0000-7000-8000-0000000000b4" },
+          minute(30),
+        );
+        yield* runs.insert(NEW_RUN, minute(31));
+        const found = yield* runs.listLatestOfTasks([TASK, OTHER_TASK, NO_RUN_TASK]);
+        return { found, pending, newest, other };
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
+    );
+
+    const byTask = new Map(result.found.latest.map((run) => [run.taskId, run]));
+    expect(byTask.get(TASK)).toMatchObject({ id: result.newest, status: "cancelled" });
+    expect(byTask.get(OTHER_TASK)).toMatchObject({ id: result.other, status: "pending" });
+    expect(byTask.has(NO_RUN_TASK)).toBe(false);
+    expect(result.found.latest).toHaveLength(2);
+    // Newest first, and only the pending and running runs of the asked Tasks.
+    expect(result.found.live.map((run) => run.id)).toEqual([result.pending, result.other]);
+  });
+
+  it("breaks a tie between runs created at the same instant by the greater id", async () => {
+    const found = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const first = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, AT);
+        const second = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, AT);
+        const latest = (yield* runs.listLatestOfTasks([TASK])).latest;
+        return { ids: [first, second].toSorted(), latest };
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
+    );
+
+    expect(found.latest.map((run) => run.id)).toEqual([found.ids[1]]);
+  });
+
+  it("returns nothing for no Tasks", async () => {
+    const found = await Effect.runPromise(
+      Effect.flatMap(runRepository, (runs) => runs.listLatestOfTasks([])).pipe(
+        inTransaction,
+        Effect.provide(TestDatabase),
+      ),
+    );
+
+    expect(found).toEqual({ latest: [], live: [] });
+  });
+
+  it("says where a running run is, as the run list does", async () => {
+    const found = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const id = yield* runs.insert({ ...NEW_RUN, plan: SIGNALLED_PLAN, taskId: TASK }, AT);
+        yield* runs.start(id, AT);
+        yield* runs.startStep(id, { stepId: "create", iteration: 1 }, undefined, AT);
+        yield* runs.finishStep(
+          id,
+          { stepId: "create", iteration: 1 },
+          { status: "completed", output: {} },
+          TIMES,
+        );
+        return (yield* runs.listLatestOfTasks([TASK])).latest;
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
+    );
+
+    expect(found).toMatchObject([
+      { status: "running", activeStepIds: [], awaitedSignalIds: ["approved", "merged"] },
+    ]);
+  });
+
+  it("finds what went wrong in a failed run: its message, else its failed step's error", async () => {
+    const messages = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const validation = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, minute(1));
+        yield* runs.finish(
+          validation,
+          {
+            status: "failed",
+            failureReason: "validation-error",
+            failureMessage: "the inputs do not fit",
+          },
+          minute(1),
+        );
+        const stepFailure = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, minute(2));
+        const step = { stepId: "create", iteration: 1 };
+        yield* runs.startStep(stepFailure, step, undefined, minute(2));
+        yield* runs.finishStep(
+          stepFailure,
+          step,
+          { status: "failed", error: { code: "denied", message: "permission denied on ops-db" } },
+          { startedAt: minute(2), finishedAt: minute(2) },
+        );
+        yield* runs.finish(
+          stepFailure,
+          { status: "failed", failureReason: "step-failed", failedStepId: "create" },
+          minute(2),
+        );
+        const workspace = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, minute(3));
+        yield* runs.finish(
+          workspace,
+          { status: "failed", failureReason: "workspace-failed" },
+          minute(3),
+        );
+        const completed = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, minute(4));
+        yield* runs.finish(completed, { status: "completed" }, minute(4));
+        const found = yield* runs.listFailureMessages([
+          validation,
+          stepFailure,
+          workspace,
+          completed,
+        ]);
+        return { found, validation, stepFailure };
+      }).pipe(inTransaction, Effect.provide(TestDatabase)),
+    );
+
+    // The workspace failure records no message, and the completed run failed at nothing.
+    expect([...messages.found.entries()].toSorted()).toEqual(
+      [
+        [messages.validation, "the inputs do not fit"],
+        [messages.stepFailure, "permission denied on ops-db"],
+      ].toSorted(),
+    );
+  });
+});
+
+/**
+ * Runs `read` against an empty database and returns the plan of the statement
+ * it runs whose text includes `fragment`, as one line per step. An empty
+ * database is enough, as for the run list's plans: without `ANALYZE`, SQLite
+ * chooses the plan without regard to how many rows a table holds.
+ */
+const explainStatement = (
+  fragment: string,
+  read: (runs: Effect.Success<typeof runRepository>) => Effect.Effect<unknown, unknown>,
+) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const runs = yield* runRepository;
+      const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+      yield* read(runs).pipe(
+        Effect.provideService(Statement.CurrentTransformer, (statement) =>
+          Effect.sync(() => {
+            statements.push(statement.compile());
+            return statement;
+          }),
+        ),
+      );
+      const [text, params] = statements.find(([text]) => text.includes(fragment)) ?? ["", []];
+      const plan = yield* sql.unsafe<{ readonly detail: string }>(
+        `EXPLAIN QUERY PLAN ${text}`,
+        params,
+      );
+      return plan.map((row) => row.detail);
+    }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+  );
+
+describe("the query plans of the newest runs of some Tasks", () => {
+  const TASKS = ["0190c000-0000-7000-8000-0000000000b1", "0190c000-0000-7000-8000-0000000000b2"];
+
+  it("looks up each Task's newest run on runs_task_id and reads the run by its key, with no sort and no scan of runs", async () => {
+    const plan = await explainStatement("latest_id", (runs) => runs.listLatestOfTasks(TASKS));
+
+    expect(plan).toContain("SEARCH runs USING COVERING INDEX runs_task_id (task_id=?)");
+    expect(plan).toContain("SEARCH runs USING INDEX sqlite_autoindex_runs_1 (id=?)");
+    expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
+    expect(plan.some((step) => step.startsWith("SCAN runs"))).toBe(false);
+  });
+
+  it("finds the live runs on runs_unfinished, not by a scan of runs", async () => {
+    const plan = await explainStatement("status IN", (runs) => runs.listLatestOfTasks(TASKS));
+
+    expect(plan).toContain("SEARCH runs USING INDEX runs_unfinished (status=?)");
+    expect(plan.some((step) => step.startsWith("SCAN runs"))).toBe(false);
+  });
+
+  it("looks the failed runs up by key, and each failed step's record by its key, with no sort", async () => {
+    const plan = await explainStatement("run_steps", (runs) =>
+      runs.listFailureMessages(["0190c000-0000-7000-8000-0000000000c1"]),
+    );
+
+    expect(plan).toContain("SEARCH runs USING INDEX sqlite_autoindex_runs_1 (id=?)");
+    expect(plan).toContain(
+      "SEARCH s USING INDEX sqlite_autoindex_run_steps_1 (run_id=? AND step_id=?)",
+    );
+    expect(plan.some((step) => step.startsWith("SCAN"))).toBe(false);
+    expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
   });
 });

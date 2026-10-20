@@ -92,6 +92,11 @@
   overflow-y: auto;
   padding: 0 10px 16px;
 }
+/* With folded Tracking under the list, the last row keeps 12px from it, as
+   the drawing leaves. */
+.asks-list:has(> .tr-tray:not(.is-open)) .asks-scroll {
+  padding-bottom: 12px;
+}
 /* Everything's rows fade in under the horizon line instead of being cut by its
    edge. Only this list has the mask, because a mask changes how the browser
    rasterizes the rows, and the To do list must stay pixel-equal to the drawing. */

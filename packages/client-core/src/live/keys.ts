@@ -49,6 +49,13 @@ export const queryKeys = {
   tasks: (filter?: TaskFilter): LiveQueryKey =>
     filter === undefined ? ["tasks"] : ["tasks", filter],
   task: (id?: string): LiveQueryKey => (id === undefined ? ["task"] : ["task", id]),
+  /**
+   * Tracking as one read: the tracked Tasks and their runs. Live topics:
+   * `task` reads it again on every push, and `run` only when the push can
+   * change it (see `isTrackingAffectedByRunPush`), so no key maps it for
+   * `run` here. The key is stable: the Tasks tracked change, the key does not.
+   */
+  tracking: (): LiveQueryKey => ["tracking"],
   projects: (): LiveQueryKey => ["projects"],
   /**
    * No live topic yet: a resource changed elsewhere, such as from the CLI,
@@ -383,8 +390,8 @@ export const buildQueryKeys = (
   // when a screen starts reading a new topic.
   if (topic === "task") {
     return ids.length === 0
-      ? [queryKeys.tasks(), queryKeys.task()]
-      : [queryKeys.tasks(), ...ids.map((id) => queryKeys.task(id))];
+      ? [queryKeys.tasks(), queryKeys.task(), queryKeys.tracking()]
+      : [queryKeys.tasks(), ...ids.map((id) => queryKeys.task(id)), queryKeys.tracking()];
   }
   // Any runner change refetches the list. A runner's own page is refetched
   // only when the push lists its id, or when the push lists no ids.

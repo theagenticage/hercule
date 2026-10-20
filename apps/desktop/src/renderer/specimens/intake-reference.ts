@@ -17,7 +17,10 @@
  * 5. changes the design's words where spec 17 §Intake gives other ones,
  *    listed below;
  * 6. adds the avatar spec 17 draws before a message's author, and the
- *    pane's "More" button, neither of which the design draws.
+ *    pane's "More" button, neither of which the design draws;
+ * 7. adds folded Tracking at the foot of the list, as the Tracking drawing
+ *    (docs/design/tracking) draws it with nothing handed off, because the
+ *    Intake design predates Tracking and the app always draws it.
  *
  * It fails when the design has no review row, because the design has changed
  * and the comparison would no longer compare what it claims to.
@@ -183,5 +186,47 @@ findElement(document, '.ask-row[data-id="review"] .ask-sub').textContent =
   "Marta · review requested · payments-api #1294";
 findElement(document, '.ask-row[data-id="checks"] .ask-sub').textContent =
   "GitHub Actions · checks failed · webshop #1300";
+
+// Spec 17 §Tracking puts folded Tracking at the foot of the list on To do.
+// The Intake design predates it, so the Tracking drawing's own stylesheet and
+// its folded markup with nothing handed off are added (tracking.js,
+// `buildFolded`): the head with the label alone, and the line that says what
+// Tracking is for. The drawing lays the tray over the foot of the list and
+// gives the list room under its last row for it, as tracking.js does. Only
+// the tray's own rules apply: the page does not take the drawing's `rt-list`
+// class, whose row rules are the Tracking drawing's and not Intake's.
+const trackingStyle = document.createElement("link");
+trackingStyle.rel = "stylesheet";
+trackingStyle.href = new URL("../../../tracking/tracking.css", location.href).href;
+const trackingStyleLoaded = new Promise((resolve, reject) => {
+  trackingStyle.addEventListener("load", resolve, { once: true });
+  trackingStyle.addEventListener("error", reject, { once: true });
+});
+document.head.append(trackingStyle);
+await trackingStyleLoaded;
+const tray = document.createElement("section");
+tray.className = "rt-tray";
+tray.setAttribute("data-tray", "");
+tray.setAttribute("aria-label", "Tracking");
+// The same elements, classes and attributes as the drawing's markup.
+const trackingHead = document.createElement("h2");
+trackingHead.className = "tr-bar";
+const trackingButton = document.createElement("button");
+trackingButton.className = "tr-bar-btn";
+trackingButton.setAttribute("data-tracking-toggle", "");
+trackingButton.title = "Show all of Tracking (T)";
+const trackingLabel = document.createElement("span");
+trackingLabel.className = "tr-label";
+trackingLabel.append(document.createElement("span"));
+trackingLabel.firstElementChild!.textContent = "Tracking";
+trackingButton.append(trackingLabel);
+trackingHead.append(trackingButton);
+const trackingEmpty = document.createElement("p");
+trackingEmpty.className = "tr-empty";
+trackingEmpty.textContent = "Hand a signal to an agent, and follow it here until you mark it done.";
+tray.append(trackingHead, trackingEmpty);
+findElement(document, ".asks-list").append(tray);
+const scroll = findElement(document, "[data-asks-list]") as HTMLElement;
+scroll.style.paddingBottom = `${String(tray.offsetHeight + 12)}px`;
 
 await markSheetReady();

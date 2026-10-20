@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useId, useMemo, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { countToDo, DONE_SHELF_LIMIT, DONE_SHELF_STEP } from "@hercule/client-core";
+import { DONE_SHELF_LIMIT, DONE_SHELF_STEP } from "@hercule/client-core";
 import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useAssistantRows } from "../app/assistant-rows";
 import { useDraftThread } from "../app/draft-thread";
@@ -10,7 +10,6 @@ import {
   providersQuery,
   resourcesQuery,
   runnersQuery,
-  signalsToDoQuery,
   threadsQuery,
   userQuery,
   workspacesQuery,
@@ -98,10 +97,6 @@ export const Sidebar = memo(function Sidebar({
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const { username } = useSuspenseQuery(userQuery(client)).data;
-  const toDoCount = useSuspenseQuery({
-    ...signalsToDoQuery(client),
-    select: (signals) => countToDo(signals),
-  }).data;
   const assistantRows = useAssistantRows();
   const waiting = useWaiting();
   const waitingRunSessions = useWaitingRunSessions();
@@ -208,7 +203,7 @@ export const Sidebar = memo(function Sidebar({
           <SidebarIcon />
         </button>
       </div>
-      <FaceSwitch face={face} onChange={setFace} listId={listId} toDoCount={toDoCount} />
+      <FaceSwitch face={face} onChange={setFace} listId={listId} />
       {/* The space between a row's text and its key cap keeps the row's name
           "New thread ⌘N", not "New thread⌘N". A row is a flex box, which
           draws no space between its items, so the layout is the book's. The

@@ -474,6 +474,11 @@ export {
   TaskUpdateCall,
   TaskUpdateInput,
   TaskUpdatedEventPayload,
+  MAX_TRACKING_HANDOFFS,
+  TaskTracking,
+  TrackingHandoff,
+  TrackingRun,
+  TrackingTask,
   refuseEmptyTaskUpdate,
 } from "./groups/task";
 export {
@@ -558,6 +563,8 @@ export {
   SignalAction,
   SignalActInput,
   SignalFilter,
+  SignalHandOffCall,
+  SignalHandOffInput,
   SignalIdsInput,
   SignalKind,
   SignalLowerPriorityResult,
@@ -804,3 +811,4 @@ export {
   type SessionLiveTopic,
   type SessionTopicKind,
 } from "./groups/live";
+export { describeFailureCause, describeFailureReason } from "./run-failure";

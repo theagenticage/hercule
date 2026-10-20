@@ -65,6 +65,15 @@
  *    signals of this step:
  *
  *        pnpm --filter @hercule/desktop perf -- --intake-only
+ *
+ *    Pass `--tracking-only` to measure Tracking (spec 17 §What Intake
+ *    costs), on 40 threads and the signals of this step: Intake's idle
+ *    launch with 10 Tasks tracked and with nothing tracked, then one launch
+ *    that runs every other Tracking scenario in a single app (see
+ *    `perf-tracking.ts`). Pass `--tracking-fast` as well to sample idle once
+ *    the page is quiet (a quick look, never evidence):
+ *
+ *        pnpm --filter @hercule/desktop perf -- --tracking-only
  * 6. The last plain launch opens another idle thread, into which the fixture
  *    has played 20 subagents, 4 of them still running, and measures what
  *    spec 17 §What subagents cost asks for: memory with the side pane closed
@@ -256,6 +265,7 @@ import {
   sampleIdleUse,
   TIMELINE_CATEGORY,
   waitForPageSocketUrl,
+  waitForQuietPage,
   warmUpApp,
   type ProcessMemory,
   type ProcessUse,
@@ -271,6 +281,16 @@ import {
   reportIntakeWork,
   seedEvents,
 } from "./perf-intake.ts";
+import {
+  createTrackingWorkflows,
+  FAST_MODE,
+  logProgress,
+  measureTrackingInteractions,
+  releaseTracking,
+  reportTrackingInteractions,
+  seedTracking,
+  TRACKED_COUNT,
+} from "./perf-tracking.ts";
 import {
   measureDiscussionWork,
   openDiscussionOnce,
@@ -289,6 +309,7 @@ import {
   openWorkflowOnce,
   openWorkflowsOnce,
   pickPushRound,
+  readMainThreadMs,
   reportOpenWorkflowWork,
   reportRunPageWork,
   reportWorkflowWork,
@@ -373,8 +394,25 @@ interface NudgeCost {
   readonly threadListReads: number;
 }
 
+/**
+ * How a plain launch samples the app at rest:
+ *
+ * - `full`: memory 13 s after the page opens, the idle samples from 30 s,
+ *   then the age clock counted for 60 s visible and 60 s hidden and 20 live
+ *   nudges. The reference.
+ * - `lean`: the same times, without the age-clock count and the nudges. For a
+ *   scenario whose rows add no timer and no thread-list read, so Intake's own
+ *   `full` launch covers them.
+ * - `quiescent`: `lean`, but every sample starts once the page has been quiet
+ *   for 2 s instead of at a fixed time, so a launch takes about 30 s less.
+ *   Memory read earlier is not comparable with the reference: it is the
+ *   "early quiescent idle" of the fast mode, never evidence.
+ */
+type IdleSampling = "full" | "lean" | "quiescent";
+
 /** What one plain launch of the app measured. */
 interface PlainLaunch {
+  readonly idle: IdleSampling;
   readonly launch: LaunchTimes;
   /** Each process's memory, 13 s after the page opened. */
   readonly memory: ProcessMemory[];
@@ -384,15 +422,17 @@ interface PlainLaunch {
   readonly visible: ProcessUse[];
   /** Each process's use over 10 s with the window hidden, from 3 s after it was hidden. */
   readonly hidden: ProcessUse[];
-  /** How often the age clock fired in the 60 s from 30 s after the page opened. */
-  readonly firesVisible: number;
-  /** How often the age clock fired in the 60 s after the window was hidden. */
-  readonly firesHidden: number;
-  readonly nudges: NudgeCost;
+  /** How often the age clock fired in the 60 s from 30 s after the page opened, or null when `idle` does not count. */
+  readonly firesVisible: number | null;
+  /** How often the age clock fired in the 60 s after the window was hidden, or null when `idle` does not count. */
+  readonly firesHidden: number | null;
+  /** What 20 live nudges cost, or null when `idle` makes none. */
+  readonly nudges: NudgeCost | null;
 }
 
 /**
- * Starts the test package signed in, as a plain process, and measures it:
+ * Starts the test package signed in, as a plain process, and measures it, as
+ * `idle` says (see `IdleSampling`):
  *
  * - the memory of each of its processes (see `readProcessMemory`);
  * - the age labels on screen;
@@ -429,6 +469,7 @@ async function measurePlainLaunch(
   settingsSection: SettingsSection | null,
   skillName: string | null,
   showsOrchestrationFace: boolean,
+  idle: IdleSampling,
 ): Promise<PlainLaunch> {
   const spawnedAt = Date.now();
   const app = await launchPlainApp(userDataDir);
@@ -454,15 +495,16 @@ async function measurePlainLaunch(
     if (showsOrchestrationFace) {
       await showOrchestrationFace(inspectorUrl, pageSocketUrl, pageOpenedAt + MEMORY_READ_AT_MS);
     }
-    await sleepUntil(MEMORY_READ_AT_MS);
+    if (idle === "quiescent") await waitForQuietPage(pageSocketUrl);
+    else await sleepUntil(MEMORY_READ_AT_MS);
     const memory = await readProcessMemory(app.process.pid!);
     const rendererPid = memory.find((sample) => sample.label === "Tab")?.pid;
     if (rendererPid === undefined) throw new Error("the app has no renderer process");
 
-    await sleepUntil(AGES_READ_AT_MS);
+    if (idle !== "quiescent") await sleepUntil(AGES_READ_AT_MS);
     const agesOnScreen = (await evaluateInPage(pageSocketUrl, READ_AGES_ON_SCREEN)) as string[];
 
-    await sleepUntil(VISIBLE_SAMPLE_AT_MS);
+    if (idle !== "quiescent") await sleepUntil(VISIBLE_SAMPLE_AT_MS);
     const visibleCountFrom = Date.now();
     const visible = await sampleIdleUse(inspectorUrl);
     const shown = await evaluateInMain(
@@ -470,7 +512,7 @@ async function measurePlainLaunch(
       `require("electron").BrowserWindow.getAllWindows()[0]?.isVisible()`,
     );
     if (shown !== true) throw new Error("the window was not visible while sampled");
-    await sleepUntil(VISIBLE_SAMPLE_AT_MS + FIRE_COUNT_MS);
+    if (idle === "full") await sleepUntil(VISIBLE_SAMPLE_AT_MS + FIRE_COUNT_MS);
     await evaluateInMain(
       inspectorUrl,
       `require("electron").BrowserWindow.getAllWindows()[0]?.hide()`,
@@ -478,7 +520,7 @@ async function measurePlainLaunch(
     const hiddenCountFrom = Date.now();
     await sleep(HIDDEN_SETTLE_MS);
     const hidden = await sampleIdleUse(inspectorUrl);
-    await sleep(Math.max(0, hiddenCountFrom + FIRE_COUNT_MS - Date.now()));
+    if (idle === "full") await sleep(Math.max(0, hiddenCountFrom + FIRE_COUNT_MS - Date.now()));
 
     // `showInactive` leaves the focus where it is, so the run does not take
     // the keyboard from whoever is using the machine.
@@ -486,14 +528,19 @@ async function measurePlainLaunch(
       inspectorUrl,
       `require("electron").BrowserWindow.getAllWindows()[0]?.showInactive()`,
     );
-    await sleep(SHOW_SETTLE_MS);
-    const fires = (await evaluateInPage(
-      pageSocketUrl,
-      `performance.getEntriesByName("age-clock-fire").map((entry) => performance.timeOrigin + entry.startTime)`,
-    )) as number[];
-    const countFires = (from: number) =>
-      fires.filter((at) => at >= from && at < from + FIRE_COUNT_MS).length;
-    const nudges = await measureNudges(pageSocketUrl, fixture, rendererPid);
+    let fires: { visible: number; hidden: number } | null = null;
+    let nudges: NudgeCost | null = null;
+    if (idle === "full") {
+      await sleep(SHOW_SETTLE_MS);
+      const fireTimes = (await evaluateInPage(
+        pageSocketUrl,
+        `performance.getEntriesByName("age-clock-fire").map((entry) => performance.timeOrigin + entry.startTime)`,
+      )) as number[];
+      const countFires = (from: number) =>
+        fireTimes.filter((at) => at >= from && at < from + FIRE_COUNT_MS).length;
+      fires = { visible: countFires(visibleCountFrom), hidden: countFires(hiddenCountFrom) };
+      nudges = await measureNudges(pageSocketUrl, fixture, rendererPid);
+    }
 
     const mainSteps = (await evaluateInMain(inspectorUrl, READ_MAIN_LAUNCH_STEPS)) as {
       nodeReady: number;
@@ -539,12 +586,13 @@ async function measurePlainLaunch(
         firstScreenMs: firstScreen.firstScreen - spawnedAt,
         windowShownMs: mainSteps.windowShown - spawnedAt,
       },
+      idle,
       memory,
       agesOnScreen,
       visible,
       hidden,
-      firesVisible: countFires(visibleCountFrom),
-      firesHidden: countFires(hiddenCountFrom),
+      firesVisible: fires?.visible ?? null,
+      firesHidden: fires?.hidden ?? null,
       nudges,
     };
   } finally {
@@ -825,14 +873,6 @@ async function measureNudges(
   const page = await connectInspector(pageSocketUrl);
   try {
     await page.send("Performance.enable");
-    const readMainThreadMs = async () => {
-      const { metrics } = (await page.send("Performance.getMetrics")) as {
-        metrics: { name: string; value: number }[];
-      };
-      const seconds = metrics.find((metric) => metric.name === "TaskDuration")?.value;
-      if (seconds === undefined) throw new Error("the page reports no TaskDuration metric");
-      return seconds * 1_000;
-    };
     const readPageNow = async () =>
       (await page.evaluate("Runtime.evaluate", {
         expression: "performance.now()",
@@ -843,7 +883,7 @@ async function measureNudges(
     const before = {
       controller: await readCpuMs(controllerPid),
       renderer: await readCpuMs(rendererPid),
-      mainThread: await readMainThreadMs(),
+      mainThread: await readMainThreadMs(page),
     };
     for (let nudge = 0; nudge < NUDGE_COUNT; nudge += 1) {
       fixture.nudge();
@@ -853,7 +893,7 @@ async function measureNudges(
     const after = {
       controller: await readCpuMs(controllerPid),
       renderer: await readCpuMs(rendererPid),
-      mainThread: await readMainThreadMs(),
+      mainThread: await readMainThreadMs(page),
     };
     const threadListReads = (await page.evaluate("Runtime.evaluate", {
       expression: `performance.getEntriesByType("resource").filter((entry) => {
@@ -1081,6 +1121,8 @@ function reportLaunch(measured: MeasuredLaunch): void {
   const rendererWakeupsHidden = findProcessUse(hidden, "Tab")?.wakeupsPerSecond ?? 0;
   const rendererLimit = `no wakeups from the app (at most ${BUDGET.rendererWakeups}/s)`;
   const expectedFiresVisible = measured.twoMinuteRow ? 1 : 0;
+  const notCounted =
+    "not counted by this launch (see its idle sampling): Intake's own launch covers it";
   // Spec 17 sets the nudge limit for 500 threads; at 40 the cost is recorded
   // only.
   const checksNudgeLimit = measured.threadCount === 500;
@@ -1141,8 +1183,10 @@ function reportLaunch(measured: MeasuredLaunch): void {
       measured.twoMinuteRow
         ? "1 fire: one row on screen shows minutes"
         : "0 fires: every age on screen is over an hour",
-      `${String(measured.firesVisible)} (${String(measured.agesOnScreen.length)} ages on screen, the youngest ${findYoungestAge(measured.agesOnScreen)})`,
-      measured.firesVisible === expectedFiresVisible,
+      measured.firesVisible === null
+        ? notCounted
+        : `${String(measured.firesVisible)} (${String(measured.agesOnScreen.length)} ages on screen, the youngest ${findYoungestAge(measured.agesOnScreen)})`,
+      measured.firesVisible === null ? null : measured.firesVisible === expectedFiresVisible,
     ],
     [
       "Idle hidden, renderer",
@@ -1153,38 +1197,53 @@ function reportLaunch(measured: MeasuredLaunch): void {
     [
       "Idle hidden, age clock over 60 s",
       "0 fires: the clock is stopped while hidden",
-      String(measured.firesHidden),
-      measured.firesHidden === 0,
+      measured.firesHidden === null ? notCounted : String(measured.firesHidden),
+      measured.firesHidden === null ? null : measured.firesHidden === 0,
     ],
-    [
-      "Nudges, renderer main thread",
-      checksNudgeLimit
-        ? `at most ${BUDGET.rendererMainThreadPerNudgeMs} ms a nudge, one frame at 60 Hz`
-        : "recorded; the limit is for 500 threads",
-      formatPerNudge(nudges.rendererMainThreadMs),
-      checksNudgeLimit
-        ? nudges.rendererMainThreadMs / NUDGE_COUNT <= BUDGET.rendererMainThreadPerNudgeMs
-        : null,
-    ],
-    ["Nudges, renderer CPU", "recorded; not budgeted", formatPerNudge(nudges.rendererCpuMs), null],
-    [
-      "Nudges, controller CPU",
-      "recorded; not budgeted",
-      formatPerNudge(nudges.controllerCpuMs),
-      null,
-    ],
-    [
-      "Nudges, thread list reads",
-      "recorded; not budgeted",
-      `${String(nudges.threadListReads)} for ${String(NUDGE_COUNT)} nudges`,
-      null,
-    ],
+    ...(nudges === null
+      ? []
+      : ([
+          [
+            "Nudges, renderer main thread",
+            checksNudgeLimit
+              ? `at most ${BUDGET.rendererMainThreadPerNudgeMs} ms a nudge, one frame at 60 Hz`
+              : "recorded; the limit is for 500 threads",
+            formatPerNudge(nudges.rendererMainThreadMs),
+            checksNudgeLimit
+              ? nudges.rendererMainThreadMs / NUDGE_COUNT <= BUDGET.rendererMainThreadPerNudgeMs
+              : null,
+          ],
+          [
+            "Nudges, renderer CPU",
+            "recorded; not budgeted",
+            formatPerNudge(nudges.rendererCpuMs),
+            null,
+          ],
+          [
+            "Nudges, controller CPU",
+            "recorded; not budgeted",
+            formatPerNudge(nudges.controllerCpuMs),
+            null,
+          ],
+          [
+            "Nudges, thread list reads",
+            "recorded; not budgeted",
+            `${String(nudges.threadListReads)} for ${String(NUDGE_COUNT)} nudges`,
+            null,
+          ],
+        ] satisfies [string, string, string, boolean | null][])),
   ];
 
   console.log(`## ${measured.name}`);
   console.log();
   console.log(`Load average over the minute before the launch: ${measured.loadAtSpawn.toFixed(2)}`);
   console.log();
+  if (measured.idle === "quiescent") {
+    console.log(
+      "EARLY QUIESCENT IDLE (fast mode): every sample started once the page had been quiet for 2 s. Not comparable with the reference below, and not evidence.",
+    );
+    console.log();
+  }
   console.log(
     `Launch steps, in ms from spawn (first screen: ${measured.reopens === null ? "the new-thread screen" : FIRST_SCREEN_NAMES[measured.reopens]}):`,
   );
@@ -1213,11 +1272,17 @@ function reportLaunch(measured: MeasuredLaunch): void {
     ),
   );
   console.log();
-  console.log("Memory, 13 s after the page opened:");
+  console.log(
+    measured.idle === "quiescent"
+      ? "Memory, once the page was quiet:"
+      : "Memory, 13 s after the page opened:",
+  );
   console.log(formatTable(["Process", "PID", "Working set MB", "Footprint MB"], memoryRows));
   console.log();
   console.log(
-    "CPU and wakeups over 10 s: visible from 30 s after the page opened, hidden from 3 s after hiding:",
+    measured.idle === "quiescent"
+      ? "CPU and wakeups over 10 s: visible from when the page was quiet, hidden from 3 s after hiding:"
+      : "CPU and wakeups over 10 s: visible from 30 s after the page opened, hidden from 3 s after hiding:",
   );
   const useHeader = ["CPU %", "Wakeups/s"];
   console.log(
@@ -1264,6 +1329,12 @@ const EVERYTHING_ONLY = process.argv.includes("--everything-only");
  * 40 threads, and skips every other launch and the workflow list.
  */
 const INTAKE_ONLY = process.argv.includes("--intake-only");
+
+/**
+ * Whether the run measures only Tracking (see `perf-tracking.ts`), on 40
+ * threads, and skips every other launch and the workflow list.
+ */
+const TRACKING_ONLY = process.argv.includes("--tracking-only");
 
 /**
  * Whether the run measures only Discussions and Wiki (see
@@ -1314,6 +1385,55 @@ async function measureEverything(fixture: ThreadFixture, userDataDir: string): P
 }
 
 /**
+ * Measures Tracking (see `perf-tracking.ts`), on 40 threads and Intake's 200
+ * signals: two idle launches, one with `TRACKED_COUNT` Tasks tracked and one
+ * with nothing tracked, so the pair shows what the rows add, then one
+ * interaction launch that runs every other scenario against the same
+ * controller.
+ *
+ * The pair shares one preparation. The 10 Tasks are handed off first, then
+ * `prepareLaunch` restarts the controller and moves their runs three hours
+ * back, so the rows show hours and no label changes while the launch is read;
+ * `openIntakeOnce` stores Intake as the last screen and `warmUpApp` warms the
+ * app up, once for both. The tracked launch follows, then
+ * `releaseTracking` marks the Tasks done, and the nothing-tracked launch
+ * follows it on the same controller, 3 s after the quit as `warmUpApp` waits: its Tasks are done, so Tracking reads no
+ * row. Both launches sample with nothing attached, and the windows are the
+ * canonical ones. `--tracking-fast` samples once the page is quiet (see
+ * `IdleSampling`).
+ */
+async function measureTracking(fixture: ThreadFixture, userDataDir: string): Promise<void> {
+  await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
+  await raiseSnoozedSignal(fixture);
+  const workflows = await createTrackingWorkflows(fixture);
+  await seedTracking(fixture, workflows);
+  await fixture.prepareLaunch({ twoMinuteRow: false });
+  await openIntakeOnce(userDataDir);
+  await warmUpApp(userDataDir);
+  logProgress("signals raised, 10 Tasks handed off, controller prepared, app warmed");
+  const intake = `40 threads, Intake open on ${String(INTAKE_SIGNALS)} signals`;
+  const options: LaunchOptions = {
+    opensIntake: true,
+    isPrepared: true,
+    idle: FAST_MODE ? "quiescent" : "lean",
+  };
+  await measureLaunch(
+    fixture,
+    userDataDir,
+    `${intake}, ${String(TRACKED_COUNT)} Tasks tracked`,
+    40,
+    false,
+    options,
+  );
+  logProgress("idle launch, tracked");
+  await releaseTracking(fixture);
+  await sleep(3_000);
+  await measureLaunch(fixture, userDataDir, `${intake}, nothing tracked`, 40, false, options);
+  logProgress("idle launch, nothing tracked");
+  reportTrackingInteractions(await measureTrackingInteractions(userDataDir, fixture, workflows));
+}
+
+/**
  * Writes the Discussions and the wiki page of `perf-discussions.ts` through
  * the fixture's busy threads, and measures a plain launch that opens the
  * Discussion of 190 Posts again. The fixture sets the Discussions' times
@@ -1334,6 +1454,14 @@ interface LaunchOptions {
   /** The skill whose page opens from Settings › Skills; `settingsSection` must be "Skills". */
   readonly skillName?: string | null;
   readonly showsOrchestrationFace?: boolean;
+  /** How the launch samples the app at rest; `full` unless given. */
+  readonly idle?: IdleSampling;
+  /**
+   * Whether the caller has already prepared the controller, stored the screen
+   * to open and warmed the app up, so the launch only measures. Tracking's two
+   * idle launches share one preparation and the launches that stored the screen.
+   */
+  readonly isPrepared?: boolean;
 }
 
 /**
@@ -1354,12 +1482,16 @@ async function measureLaunch(
     settingsSection = null,
     skillName = null,
     showsOrchestrationFace = false,
+    idle = "full",
+    isPrepared = false,
   }: LaunchOptions = {},
 ): Promise<void> {
-  await fixture.prepareLaunch({ twoMinuteRow, connections: settingsSection === "Connections" });
-  if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
-  if (opensIntake) await openIntakeOnce(userDataDir);
-  await warmUpApp(userDataDir);
+  if (!isPrepared) {
+    await fixture.prepareLaunch({ twoMinuteRow, connections: settingsSection === "Connections" });
+    if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
+    if (opensIntake) await openIntakeOnce(userDataDir);
+    await warmUpApp(userDataDir);
+  }
   const reopens: ReopenedScreen | null =
     openThread !== null ? "thread" : opensIntake ? "intake" : null;
   reportLaunch({
@@ -1375,6 +1507,7 @@ async function measureLaunch(
       settingsSection,
       skillName,
       showsOrchestrationFace,
+      idle,
     )),
   });
 }
@@ -1474,6 +1607,10 @@ const launches = await runWithThreadFixture(async (fixture) => {
       await openIntakeOnce(userDataDir);
       await warmUpApp(userDataDir);
       reportIntakeWork(await measureIntakeWork(userDataDir, fixture));
+      return null;
+    }
+    if (TRACKING_ONLY) {
+      await measureTracking(fixture, userDataDir);
       return null;
     }
     if (DISCUSSIONS_ONLY) {

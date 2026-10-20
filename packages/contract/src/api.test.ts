@@ -119,6 +119,12 @@ describe("the HttpApi declaration", () => {
  */
 const NEW_OPERATIONS = [
   { id: "task.query", requires: "task.read", method: "GET", path: "/api/v1/tasks" },
+  {
+    id: "task.queryTracking",
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/tasks/tracking",
+  },
   { id: "task.read", requires: "task.read", method: "GET", path: "/api/v1/tasks/:id" },
   { id: "task.create", requires: "task.create", method: "POST", path: "/api/v1/tasks" },
   { id: "task.update", requires: "task.update", method: "PATCH", path: "/api/v1/tasks/:id" },
@@ -157,6 +163,13 @@ const NEW_OPERATIONS = [
   { id: "signal.read", requires: "signal.read", method: "GET", path: "/api/v1/signals/:id" },
   { id: "signal.raise", requires: "signal.write", method: "POST", path: "/api/v1/signals/raise" },
   { id: "signal.act", requires: "signal.write", method: "POST", path: "/api/v1/signals/:id/act" },
+  {
+    id: "signal.handOff",
+    requires: "signal.write",
+    method: "POST",
+    path: "/api/v1/signals/:id/hand-off",
+    usableIn: ["signal.answer"],
+  },
   {
     id: "signal.withdraw",
     requires: "signal.write",

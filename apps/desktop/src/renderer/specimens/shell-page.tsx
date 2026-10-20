@@ -82,10 +82,12 @@ import type {
   SignedInUser,
   SkillsPreviewFilter,
   Task,
+  TrackingTask,
   TranscriptRow,
   Workspace,
 } from "@hercule/contract";
 import {
+  buildTrackingRows,
   createClient,
   type FetchLike,
   type HerculeClient,
@@ -139,6 +141,7 @@ import {
   startTasksQuery,
   subagentsQuery,
   threadsQuery,
+  trackingQuery,
   transcriptQuery,
   triggersQuery,
   userQuery,
@@ -226,6 +229,11 @@ export interface SidebarRecords {
    * workflow in Needs you. None when left out.
    */
   readonly agentSessions?: ReadonlyArray<Session>;
+  /**
+   * What `task.queryTracking` returns: the Tasks Tracking follows, which the
+   * Hercule segment's count and Intake's Tracking read. None when left out.
+   */
+  readonly tracking?: ReadonlyArray<TrackingTask>;
 }
 
 /** What the thread screen reads of the one thread it shows, as the thread route's loader reads it. */
@@ -317,6 +325,8 @@ export interface IntakeRecords {
   readonly event: Event | null;
   /** The view Intake opens on. To do when left out. */
   readonly view?: "later" | "done" | "everything";
+  /** Whether Tracking is opened over the To do list. Folded when left out. */
+  readonly trackingOpen?: boolean;
   /**
    * What the Everything view reads: the events its one page holds, newest
    * first, under the search text, the handling filter and the source tab it
@@ -565,6 +575,10 @@ const seedQueryCache = (
     records.later?.[0]?.snooze?.until ?? null,
   );
   queryClient.setQueryData(pluginsQuery(client).queryKey, records.plugins ?? []);
+  queryClient.setQueryData(trackingQuery(client).queryKey, {
+    rows: buildTrackingRows(records.tracking ?? []),
+    readStartedAt: 0,
+  });
   queryClient.setQueryData(liveAgentSessionsQuery(client).queryKey, records.agentSessions ?? []);
   queryClient.setQueryData(
     assistantsQuery(client).queryKey,
@@ -1366,6 +1380,7 @@ export async function mountIntakeSpecimen(
   const search = new URLSearchParams();
   if (intake.view !== undefined) search.set("view", intake.view);
   if (intake.signal !== null) search.set("signal", intake.signal.id);
+  if (intake.trackingOpen === true) search.set("tracking", "true");
   const everything = intake.everything;
   if (everything?.selectedEventId !== undefined) {
     search.set("event", String(everything.selectedEventId));

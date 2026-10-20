@@ -3,7 +3,7 @@
  * pane's toggle, the view switcher, and the split of a list and a pane.
  */
 import type { JSX, KeyboardEvent, ReactNode } from "react";
-import { useInfiniteQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   fitIntakeListWidth,
@@ -13,7 +13,8 @@ import {
   type IntakeView,
   type PluginIdentity,
 } from "@hercule/client-core";
-import { signalsLaterQuery, signalsToDoQuery } from "../../app/queries";
+import { signalsLaterQuery } from "../../app/queries";
+import { useToDoCount } from "../../app/tracking";
 import { SidebarIcon } from "../../icons/sidebar";
 import { SourceMark } from "./source-mark";
 import type { IntakeSplitState } from "./use-intake-split";
@@ -109,7 +110,8 @@ export function IntakeBar({
  * share of the list's width. To do and Later show their counts; the others
  * show none.
  *
- * It reads its counts where it draws them. To do's is the shell's whole list.
+ * It reads its counts where it draws them. To do's is the shell's To do
+ * count: the whole list, and the rows of Tracking that wait on the user.
  * Later's is the whole list of every source, which the shell holds for the
  * snooze timer; while it has more pages than the first, the count is not
  * known, and is left out.
@@ -122,7 +124,7 @@ export function IntakeViewSwitcher({
   readonly onViewChange: (view: IntakeView) => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const { data: toDo } = useSuspenseQuery(signalsToDoQuery(client));
+  const toDoCount = useToDoCount();
   const allLater = useInfiniteQuery(signalsLaterQuery(client));
   const laterPages = allLater.data?.pages ?? [];
   const laterCount =
@@ -132,8 +134,7 @@ export function IntakeViewSwitcher({
   return (
     <div className="seg asks-modes" role="group" aria-label="View">
       {VIEWS.map((each) => {
-        const count =
-          each.view === "to-do" ? toDo.length : each.view === "later" ? laterCount : null;
+        const count = each.view === "to-do" ? toDoCount : each.view === "later" ? laterCount : null;
         return (
           <button
             key={each.view}
@@ -159,7 +160,10 @@ export function IntakeViewSwitcher({
  * caller passes it only while `split.paneDrawn`.
  *
  * `onKeyDown` is the screen's keys, handled here where every key press in
- * the list and the pane arrives, rather than on each row and answer. A
+ * the list and the pane arrives, rather than on each row and answer.
+ * `onListPointerEnter` and `onListPointerLeave`, when given, are called as the
+ * pointer enters and leaves the list's column whole, its view switcher and
+ * the Tracking under it included. A
  * closing pane stays drawn until the list's width transition ends, so it
  * slides out as the list widens over it. The split clips it, and `inert`
  * keeps the focus and screen readers out of it.
@@ -170,6 +174,8 @@ export function IntakeSplit({
   list,
   pane,
   onKeyDown,
+  onListPointerEnter,
+  onListPointerLeave,
 }: {
   readonly split: IntakeSplitState;
   /** The list's accessible name, such as "Signals". */
@@ -177,6 +183,8 @@ export function IntakeSplit({
   readonly list: ReactNode;
   readonly pane: ReactNode;
   readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  readonly onListPointerEnter?: () => void;
+  readonly onListPointerLeave?: () => void;
 }): JSX.Element {
   const { available, width, splitRef, listRef } = split;
   return (
@@ -196,6 +204,8 @@ export function IntakeSplit({
         className="asks-list"
         aria-label={listLabel}
         tabIndex={-1}
+        onPointerEnter={onListPointerEnter}
+        onPointerLeave={onListPointerLeave}
         onTransitionEnd={(event) => {
           // A row's own transitions end here too, so only the list's width counts.
           if (event.target === event.currentTarget && event.propertyName === "width") {

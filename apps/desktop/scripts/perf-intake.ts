@@ -56,6 +56,7 @@ import {
   type TraceEvent,
   waitForPageSocketUrl,
 } from "./perf-measures.ts";
+import { readMainThreadMs } from "./perf-workflows.ts";
 import { pollUntil } from "./poll.ts";
 
 /** How many signals are on To do when Intake is measured. */
@@ -66,7 +67,7 @@ const PUSH_COUNT = 20;
 const PUSH_INTERVAL_MS = 1_000;
 
 /** How long after the last push the reading ends, so the last read and render are in it. */
-const PUSH_SETTLE_MS = 2_000;
+export const PUSH_SETTLE_MS = 2_000;
 
 /** How many signals the burst raises at once. */
 const BURST_SIZE = 30;
@@ -78,7 +79,14 @@ const BURST_SIZE = 30;
 const LAUNCH_SETTLE_MS = 5_000;
 
 /** Intake's list of signals, which holds one `.ask-row` for each row it draws. */
-const SIGNALS_LIST = 'section[aria-label="Signals"]';
+export const SIGNALS_LIST = 'section[aria-label="Signals"]';
+
+/**
+ * Matches the copies of rows that Intake and Tracking draw over a list while
+ * a row leaves or flies, one child of each layer per copy. A measured change
+ * must leave none behind.
+ */
+const COPY_LAYERS = ".asks-ghosts > *, .tr-ghosts > *, .tr-fly > *";
 
 /** The header's button that opens and closes the split's pane. */
 const PANE_TOGGLE = ".asks-pane-btn";
@@ -89,24 +97,31 @@ const PANE_TOGGLE = ".asks-pane-btn";
  * The list is virtualized, so its rows cannot be counted; the segment counts
  * the whole of To do.
  */
-const buildIntakeShown = (count: number) => `(() => {
+export const buildIntakeShown = (count: number) => `(() => {
   const segments = [...document.querySelectorAll('[role="tablist"][aria-label="Sidebar"] [role="tab"]')];
   return document.querySelector(${JSON.stringify(`${SIGNALS_LIST} .ask-row`)}) !== null &&
     segments.some((segment) => segment.getAttribute("aria-label") === "Hercule, ${String(count)} to do");
 })()`;
 
+/** How many signals `raiseSignals` raises at once. */
+const RAISE_BATCH = 25;
+
 /**
- * Raises `count` signals through `signal.raise`, one after another, titled
- * `title` and their number (see `raiseSignal`). Fails when the controller
- * refuses one.
+ * Raises `count` signals through `signal.raise`, titled `title` and their
+ * number (see `raiseSignal`), `RAISE_BATCH` at a time. Fails when the
+ * controller refuses one. The signals' order on To do is the order the
+ * controller stamps them in, which within a batch is not their number.
  */
 export async function raiseSignals(
   fixture: ThreadFixture,
   count: number,
   title: string,
 ): Promise<void> {
-  for (let number = 1; number <= count; number += 1) {
-    await raiseSignal(fixture, `${title} ${String(number)}`);
+  for (let first = 1; first <= count; first += RAISE_BATCH) {
+    const batch = Array.from({ length: Math.min(RAISE_BATCH, count - first + 1) }, (_, index) =>
+      raiseSignal(fixture, `${title} ${String(first + index)}`),
+    );
+    await Promise.all(batch);
   }
 }
 
@@ -131,7 +146,10 @@ export async function raiseSnoozedSignal(fixture: ThreadFixture): Promise<void> 
  * The signal names no event: no plugin in the perf script's controller emits
  * one, and the contract allows an empty list.
  */
-async function raiseSignal(fixture: ThreadFixture, title: string): Promise<SignalRaiseResult> {
+export async function raiseSignal(
+  fixture: ThreadFixture,
+  title: string,
+): Promise<SignalRaiseResult> {
   return await fixture.call<SignalRaiseResult>("POST", "/signals/raise", {
     kind: "fyi",
     title,
@@ -198,7 +216,7 @@ interface SplitCost {
  * What one change to Intake's list cost while it moved on screen, from the
  * change until the last of its animations ended, and in the second after.
  */
-interface MotionCost {
+export interface MotionCost {
   /** How many signals were on screen when the change began, before it. */
   readonly rowsBefore: number;
   /** How long the motion ran, from its first frame to the frame that found no animation left, in milliseconds. */
@@ -241,6 +259,15 @@ interface MotionCost {
   readonly animationsAfter: number;
   /** How many leaving rows' copies the ghost layer still held when the recording ended. */
   readonly ghostsAfter: number;
+  /** The CSS properties the change's animations animated, sorted: `opacity` and `transform` only, by spec 17 §Motion. */
+  readonly properties: readonly string[];
+  /**
+   * What the change's animations were, one entry for each target's first
+   * class and the properties animated, with how many: "3 x .tr-run-item
+   * [opacity]". It tells the sheet's own animations from the ones the change
+   * sets off elsewhere, such as the split's width.
+   */
+  readonly kinds: readonly string[];
 }
 
 /** What the Intake scenario measured. */
@@ -319,14 +346,6 @@ export async function measureIntakeWork(
       if (rendererPid === undefined) throw new Error("the app has no renderer process");
       const controllerPid = fixture.readControllerPid();
       await page.send("Performance.enable");
-      const readMainThreadMs = async () => {
-        const { metrics } = (await page.send("Performance.getMetrics")) as {
-          metrics: { name: string; value: number }[];
-        };
-        const seconds = metrics.find((metric) => metric.name === "TaskDuration")?.value;
-        if (seconds === undefined) throw new Error("the page reports no TaskDuration metric");
-        return seconds * 1_000;
-      };
       const readPageNow = async () => (await evaluate("performance.now()")) as number;
       const countToDoReads = async (from: number) =>
         (await evaluate(`performance.getEntriesByType("resource").filter((entry) => {
@@ -339,7 +358,7 @@ export async function measureIntakeWork(
       const before = {
         controller: await readCpuMs(controllerPid),
         renderer: await readCpuMs(rendererPid),
-        mainThread: await readMainThreadMs(),
+        mainThread: await readMainThreadMs(page),
       };
       for (let push = 1; push <= PUSH_COUNT; push += 1) {
         await raiseSignal(fixture, `Pushed signal ${String(push)}`);
@@ -349,7 +368,7 @@ export async function measureIntakeWork(
       const after = {
         controller: await readCpuMs(controllerPid),
         renderer: await readCpuMs(rendererPid),
-        mainThread: await readMainThreadMs(),
+        mainThread: await readMainThreadMs(page),
       };
       const pushes: PushCost = {
         controllerCpuMs: after.controller - before.controller,
@@ -413,7 +432,10 @@ export async function measureIntakeWork(
  * costs the renderer a little time of its own, so the tasks err long. Fails
  * when the trace lost events.
  */
-async function traceRendererTasks(page: Inspector, work: () => Promise<void>): Promise<number[]> {
+export async function traceRendererTasks(
+  page: Inspector,
+  work: () => Promise<void>,
+): Promise<number[]> {
   await page.send("Tracing.start", {
     transferMode: "ReturnAsStream",
     traceConfig: { includedCategories: [TIMELINE_CATEGORY] },
@@ -508,15 +530,18 @@ const ROWS_BEFORE_ARRIVAL = 3;
  * Intake's list. With the pointer over the list, Intake holds changes made
  * elsewhere until it leaves (spec 17 §Motion), so nothing would move.
  */
-const POINTER_OFF_LIST = { x: 100, y: 400 };
+export const POINTER_OFF_LIST = { x: 100, y: 400 };
 
 /**
- * How long a measured change runs before its recording is read, in
- * milliseconds. It covers the change's request, the read it causes, the
- * longest motion (inbox zero's 1,120 ms) and the second after, so nothing
- * talks to the page while the second after the motion is recorded.
+ * The longest a measured change may take to end its motion, in milliseconds
+ * after the change. It covers the change's request, the read it causes and the
+ * longest motion (inbox zero's 1,120 ms). A motion still running then fails
+ * the measurement.
  */
 const MOTION_RECORD_MS = 3_500;
+
+/** How long a recording runs after the motion ends: the second `MotionCost` reports, with a margin. */
+const SECOND_AFTER_MOTION_MS = 1_050;
 
 /**
  * How long inbox zero's arrival runs here, as spec 17 §Motion sets it, in
@@ -657,7 +682,7 @@ async function measureRowMotion(
 }
 
 /** What `measureListChange` makes and checks. */
-interface ListChange {
+export interface ListChange {
   /** Makes the change, from outside the page. */
   readonly change: () => Promise<void>;
   /** How long the spec gives the motion, in milliseconds. */
@@ -670,6 +695,12 @@ interface ListChange {
   readonly endsWhen: string;
   /** An expression that must evaluate to true, in the page, in at least one frame of the motion. */
   readonly mustSee: string;
+  /**
+   * Whether CSS transitions are left out of the count. A hover or a focus
+   * change starts one, and it may change paint properties (spec 17 §Rules 2),
+   * so it is neither the motion's start nor part of it.
+   */
+  readonly ignoresTransitions?: boolean;
 }
 
 /**
@@ -679,7 +710,7 @@ interface ListChange {
  * - the page's animation frames, from the change until the motion's end,
  *   and the animations it ran on Intake, with their start times;
  * - the renderer main thread's tasks and frames from a Chromium trace,
- *   which runs from the change until `MOTION_RECORD_MS` after it;
+ *   which runs from the change until a second after the motion ends;
  * - the animations and the ghost layer's copies left when the trace ends.
  *
  * Fails when the change moves nothing on Intake, when the motion does not end
@@ -693,7 +724,10 @@ interface ListChange {
  * the motion needed. It stops at the motion's end, so the frames after it
  * are only those something else asked for.
  */
-async function measureListChange(page: Inspector, measured: ListChange): Promise<MotionCost> {
+export async function measureListChange(
+  page: Inspector,
+  measured: ListChange,
+): Promise<MotionCost> {
   const evaluate = (expression: string) =>
     page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
   await page.send("Tracing.start", {
@@ -715,6 +749,8 @@ async function measureListChange(page: Inspector, measured: ListChange): Promise
       last: undefined,
       starts: new Set(),
       animations: new Set(),
+      properties: new Set(),
+      kinds: new Map(),
       sawExpected: false,
     };
     globalThis.motionRecord = record;
@@ -723,9 +759,24 @@ async function measureListChange(page: Inspector, measured: ListChange): Promise
     const step = (at) => {
       const running = document
         .getAnimations()
-        .filter((animation) => animation.playState === "running" && intake.contains(animation.effect?.target ?? null));
+        .filter((animation) => animation.playState === "running" && intake.contains(animation.effect?.target ?? null) && !(${String(measured.ignoresTransitions === true)} && animation instanceof CSSTransition));
       for (const animation of running) {
+        if (!record.animations.has(animation)) {
+          const names = (animation.effect?.getKeyframes?.() ?? [])
+            .flatMap((keyframe) => Object.keys(keyframe))
+            .filter((property) => !["offset", "easing", "composite", "computedOffset"].includes(property));
+          const target = animation.effect?.target;
+          const kind = (target?.tagName?.toLowerCase() ?? "?") + "." + (target?.classList?.[0] ?? "") + " [" + [...new Set(names)].sort().join(", ") + "]";
+          record.kinds.set(kind, (record.kinds.get(kind) ?? 0) + 1);
+        }
         record.animations.add(animation);
+        for (const keyframe of animation.effect?.getKeyframes?.() ?? []) {
+          for (const property of Object.keys(keyframe)) {
+            if (!["offset", "easing", "composite", "computedOffset"].includes(property)) {
+              record.properties.add(property);
+            }
+          }
+        }
         if (animation.startTime !== null) record.starts.add(Math.round(animation.startTime));
       }
       if (running.length > 0 && record.first === undefined) {
@@ -744,7 +795,22 @@ async function measureListChange(page: Inspector, measured: ListChange): Promise
     requestAnimationFrame(step);
   })()`);
   await measured.change();
-  await sleep(MOTION_RECORD_MS);
+  // The recording runs until a second after the motion ends, so the second
+  // after it is in the trace. When the motion never ends, it runs until
+  // `MOTION_RECORD_MS`, and the failure below says so.
+  await page.evaluate("Runtime.evaluate", {
+    expression: `new Promise((resolve) => {
+      const deadline = performance.now() + ${String(MOTION_RECORD_MS)};
+      const check = () =>
+        globalThis.motionRecord.last !== undefined || performance.now() > deadline
+          ? resolve(true)
+          : setTimeout(check, 25);
+      check();
+    })`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  await sleep(SECOND_AFTER_MOTION_MS);
   await page.send("Tracing.end");
   const events = await readTrace(page);
   const recorded = (await evaluate(`(() => {
@@ -754,15 +820,19 @@ async function measureListChange(page: Inspector, measured: ListChange): Promise
       frames: record.first === undefined || record.last === undefined ? null : record.frames.slice(record.first, record.last + 1),
       starts: record.starts.size,
       animations: record.animations.size,
+      properties: [...record.properties].sort(),
+      kinds: [...record.kinds].map(([kind, count]) => String(count) + " x " + kind).sort(),
       sawExpected: record.sawExpected,
       animationsAfter: document.getAnimations().length,
-      ghostsAfter: document.querySelector(".asks-ghosts")?.childElementCount ?? 0,
+      ghostsAfter: document.querySelectorAll(${JSON.stringify(COPY_LAYERS)}).length,
     };
   })()`)) as {
     rowsBefore: number;
     frames: number[] | null;
     starts: number;
     animations: number;
+    properties: string[];
+    kinds: string[];
     sawExpected: boolean;
     animationsAfter: number;
     ghostsAfter: number;
@@ -827,6 +897,8 @@ async function measureListChange(page: Inspector, measured: ListChange): Promise
     longestTaskAfterMs: longestMs(after),
     animationsAfter: recorded.animationsAfter,
     ghostsAfter: recorded.ghostsAfter,
+    properties: recorded.properties,
+    kinds: recorded.kinds,
   };
 }
 
@@ -851,7 +923,7 @@ const formatSplit = (cost: SplitCost) =>
   `longest gap ${cost.longestFrameGapMs.toFixed(1)} ms against ${cost.frameIntervalMs.toFixed(1)} ms usual`;
 
 /** Whether a motion dropped no frame, by the same rule as the split's (see `droppedNoFrame`). */
-const droppedNoMotionFrame = (cost: MotionCost) =>
+export const droppedNoMotionFrame = (cost: MotionCost) =>
   cost.longestFrameGapMs < 1.5 * cost.frameIntervalMs;
 
 /**
@@ -861,13 +933,13 @@ const droppedNoMotionFrame = (cost: MotionCost) =>
  * one that drops the finished animations, and the page held no animation and
  * no leaving row's copy when the recording ended.
  */
-const isStillAfter = (cost: MotionCost) =>
+export const isStillAfter = (cost: MotionCost) =>
   cost.lastFrameMs <= cost.lengthMs + 3 * cost.frameIntervalMs &&
   cost.animationsAfter === 0 &&
   cost.ghostsAfter === 0;
 
 /** Formats a motion's cost as one table cell. */
-const formatMotion = (cost: MotionCost) =>
+export const formatMotion = (cost: MotionCost) =>
   `${String(cost.animations)} animations, ${String(cost.starts)} start times; ` +
   `${String(cost.frames)} frames over ${cost.motionMs.toFixed(0)} ms, longest gap ` +
   `${cost.longestFrameGapMs.toFixed(1)} ms against ${cost.frameIntervalMs.toFixed(1)} ms usual; ` +

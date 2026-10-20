@@ -65,6 +65,15 @@ interface SignalRow {
   readonly snoozed_at: string | null;
 }
 
+/** A signal without its blocks and actions; see `readSummary`. */
+export interface SignalSummary {
+  readonly kind: string;
+  readonly title: string;
+  readonly place?: string;
+  readonly priority: TaskPriority;
+  readonly origin: SignalOrigin;
+}
+
 /** The kind and source filters every view of the signals takes. */
 export interface SignalListFilter {
   readonly kind?: string;
@@ -352,6 +361,33 @@ const make = Effect.gen(function* () {
         sql<{ readonly kind: string; readonly title: string }>`
           SELECT kind, title FROM signals WHERE id = ${uuidFromString(id)}`,
         (rows) => Option.fromNullishOr(rows[0]),
+      ),
+
+    /**
+     * Returns the signal with that id without its blocks and actions, or none
+     * if it does not exist. The blocks and the actions are most of the row, so
+     * a caller that needs only the signal's kind, title, place, priority and
+     * origin does not read them.
+     */
+    readSummary: (id: string): Effect.Effect<Option.Option<SignalSummary>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly kind: string;
+          readonly title: string;
+          readonly place: string | null;
+          readonly priority: string;
+          readonly origin: string;
+        }>`
+          SELECT kind, title, place, priority, origin FROM signals
+          WHERE id = ${uuidFromString(id)}`,
+        (rows) =>
+          Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+            kind: row.kind,
+            title: row.title,
+            ...(row.place === null ? {} : { place: row.place }),
+            priority: row.priority as TaskPriority,
+            origin: JSON.parse(row.origin) as SignalOrigin,
+          })),
       ),
 
     /**

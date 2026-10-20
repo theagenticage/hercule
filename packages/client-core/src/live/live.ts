@@ -87,8 +87,22 @@ export interface LiveOptions {
   readonly webSocket?: LiveWebSocketConstructor;
 }
 
-/** Receives a mutable topic's push as the query keys to invalidate. */
-export type LiveInvalidateHandler = (keys: ReadonlyArray<LiveQueryKey>) => void;
+/**
+ * Receives a mutable topic's push as the query keys to invalidate. `push` is
+ * what the controller sent: the ids of the records that changed, none when
+ * every record may have, and how they changed. A handler that must decide
+ * from the records themselves, which the keys alone do not tell, reads it.
+ */
+export type LiveInvalidateHandler = (
+  keys: ReadonlyArray<LiveQueryKey>,
+  push: LiveInvalidatePush,
+) => void;
+
+/** What a mutable topic's push says: which records changed, and how. */
+export interface LiveInvalidatePush {
+  readonly ids: ReadonlyArray<string>;
+  readonly kind: "created" | "updated" | "deleted";
+}
 
 /**
  * An append-only topic's push.
@@ -299,6 +313,7 @@ export const createLive = (options: LiveOptions): Live => {
           message.ids,
           message.conversationIds,
         ),
+        { ids: message.ids, kind: message.kind },
       );
     });
   };

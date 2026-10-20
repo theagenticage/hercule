@@ -47,6 +47,7 @@ import {
   type DescribeLine,
   type DescribeLinePart,
   type OpenRequest,
+  type Signal,
   type Trigger,
   type WorkflowDefinition,
 } from "@hercule/contract";
@@ -67,7 +68,12 @@ import { PluginHost } from "../../plugins";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
 import { Settings } from "../../settings";
-import { signalRepository } from "../../signals";
+import {
+  findTaskToContinue,
+  readThreadRef,
+  signalRepository,
+  type SignalSummary,
+} from "../../signals";
 import { taskRepository } from "../../tasks";
 import { readDefaultSpawnBound, workflowRepository } from "../../workflows";
 
@@ -320,6 +326,7 @@ const runPluginDescribe = (
 export const buildDescribe: Effect.Effect<
   (
     operations: ReadonlyArray<CheckedOperation>,
+    sitsOn?: ReadonlyArray<Signal>,
   ) => Effect.Effect<ReadonlyArray<DescribeLine>, SqlError>,
   never,
   SqlClient.SqlClient | PluginHost | PermissionProfiles | Settings
@@ -339,7 +346,7 @@ export const buildDescribe: Effect.Effect<
    * Builds the describer for one `describe` call, reading each entity at
    * most once however many answers name it.
    */
-  const buildDescriber = () => {
+  const buildDescriber = (sitsOn: ReadonlyArray<Signal>) => {
     /** Returns a task's title, or its id once it is deleted. */
     const readTaskTitle = readOncePerId((id) =>
       Effect.map(tasks.live(id), Option.match({ onNone: () => id, onSome: (task) => task.title })),
@@ -382,6 +389,26 @@ export const buildDescribe: Effect.Effect<
           )
         : Effect.succeed(Option.none<string>()),
     );
+
+    /**
+     * Returns a signal without its blocks and actions, or nothing when no
+     * signal has this id. A signal the caller already holds, because the
+     * answer sits on it, is not read again. The signal's id is the value of a
+     * bound input, so anything that is not an id is not looked up.
+     */
+    const heldSignals = new Map(sitsOn.map((signal) => [signal.id, signal]));
+    const readSignalSummary = readOncePerId((id) => {
+      const held = heldSignals.get(id);
+      if (held !== undefined) return Effect.succeed(Option.some<SignalSummary>(held));
+      return isId(id) ? signals.readSummary(id) : Effect.succeed(Option.none<SignalSummary>());
+    });
+
+    /**
+     * Returns the open Task a handoff of a signal on this thread would
+     * continue, or nothing. Several handoffs in one describe call usually name
+     * signals of the same thread, so each thread is looked up once.
+     */
+    const readTaskToContinue = readOncePerId((ref) => findTaskToContinue(tasks, ref));
 
     /**
      * Returns a session's name as a `marked` part, and every Request the
@@ -613,6 +640,32 @@ export const buildDescribe: Effect.Effect<
             ...(described.length === 0 ? [] : [buildTextPart(" with "), ...described]),
           ];
         }),
+      "signal.handOff": ({ signalId, workflowId }) =>
+        Effect.gen(function* () {
+          const definition = yield* readWorkflowDefinition(workflowId);
+          const signal = yield* readSignalSummary(signalId);
+          const ref = Option.flatMap(signal, (found) => readThreadRef(found.origin));
+          const continued = Option.isSome(ref)
+            ? yield* readTaskToContinue(ref.value)
+            : Option.none();
+          // The signal is named as the Intake row names where it comes from,
+          // such as "acme/webshop#1296", and by its title when it has no place.
+          const where = Option.match(signal, {
+            onNone: () => signalId,
+            onSome: (found) => found.place ?? found.title,
+          });
+          return [
+            buildTextPart("Starts "),
+            buildMarkedPart(
+              Option.match(definition, { onNone: () => workflowId, onSome: (found) => found.name }),
+            ),
+            buildTextPart(" on "),
+            buildMarkedPart(where),
+            ...(Option.isSome(continued)
+              ? [buildTextPart(", continues "), buildMarkedPart(continued.value.title)]
+              : [buildTextPart(", tracked as a new Task")]),
+          ];
+        }),
       "session.input": ({ sessionId, text, model, options }) =>
         Effect.map(readSessionNameAndRequests(sessionId), (session) => {
           const optionEntries = Object.entries(options ?? {});
@@ -685,6 +738,6 @@ export const buildDescribe: Effect.Effect<
         : dispatchAnswerOperation(contractDescribers, operation);
   };
 
-  return (operations: ReadonlyArray<CheckedOperation>) =>
-    Effect.suspend(() => Effect.forEach(operations, buildDescriber()));
+  return (operations: ReadonlyArray<CheckedOperation>, sitsOn: ReadonlyArray<Signal> = []) =>
+    Effect.suspend(() => Effect.forEach(operations, buildDescriber(sitsOn)));
 });

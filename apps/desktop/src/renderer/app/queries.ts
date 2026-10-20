@@ -20,6 +20,7 @@ import {
   ApiError,
   collectRunningTurnRows,
   collectSenderSessionIds,
+  buildTrackingRows,
   classifyTranscriptPage,
   detectLocalRunner,
   findTranscriptAfterPosition,
@@ -35,6 +36,7 @@ import {
   type MessagePage,
   type MessagePages,
   type ThreadCopy,
+  type TrackingRead,
   waitForOptionalReads,
 } from "@hercule/client-core";
 import { WALK_CATCH_UP_SECONDS } from "../office/engine/contracts";
@@ -622,6 +624,29 @@ export const assistantsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.assistants(),
     queryFn: () => readEveryPage((page) => client.assistant.query({ query: page })),
+    ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads Tracking: `task.queryTracking` returns every Task Tracking follows,
+ * with its title, its handoffs, and its newest run and newest live run, and
+ * the rows are built from that (`buildTrackingRows`), with the time the read
+ * started (`TrackingRead`). The Hercule segment's count and Tracking's rows
+ * both come from it, so it is shell data, kept for the life of the window, and
+ * every reader shares the one array of rows.
+ *
+ * The key is stable, so the entry is the same whichever Tasks are tracked. A
+ * push on the `task` topic reads it again, and one on the `run` topic when
+ * the push can change it (see `isTrackingAffectedByRunPush`).
+ */
+export const trackingQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.tracking(),
+    queryFn: async (): Promise<TrackingRead> => {
+      // Taken before the request, so a read that started after a change committed shows the change.
+      const readStartedAt = performance.now();
+      return { rows: buildTrackingRows((await client.task.queryTracking()).rows), readStartedAt };
+    },
     ...SHELL_READ_OPTIONS,
   });
 
@@ -1729,7 +1754,9 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
  * the live sessions an Agent spawned, for "From runs" in Waiting on you, the
  * assistants and the current session of each one's main conversation, the
  * Connections, the signed-in user, Intake's To do list, whose count the
- * Hercule segment shows, and the plugins that name each signal's source.
+ * Hercule segment shows, the Tasks Tracking lists and their runs (the count
+ * takes in Tracking's waiting rows), and the plugins that name each signal's
+ * source.
  * Resolves once every read is cached,
  * and fails with the first read that fails.
  *
@@ -1763,6 +1790,7 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(userQuery(client)),
     queryClient.ensureQueryData(signalsToDoQuery(client)),
     queryClient.ensureQueryData(snoozeTimerQuery(client)),
+    queryClient.ensureQueryData(trackingQuery(client)),
     queryClient.ensureQueryData(pluginsQuery(client)),
     queryClient
       .ensureQueryData(assistantsQuery(client))

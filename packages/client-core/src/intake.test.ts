@@ -229,6 +229,7 @@ describe("buildIntakeTabs", () => {
       ],
       TAB_PLUGINS,
       null,
+      0,
     );
     expect(tabs).toEqual([
       { pluginId: null, label: "All", count: 4 },
@@ -238,7 +239,7 @@ describe("buildIntakeTabs", () => {
   });
 
   it("keeps a switched-on plugin's tab with no signal, so it survives its last one leaving", () => {
-    expect(buildIntakeTabs([], TAB_PLUGINS, null)).toEqual([
+    expect(buildIntakeTabs([], TAB_PLUGINS, null, 0)).toEqual([
       { pluginId: null, label: "All", count: 0 },
       { pluginId: "github", label: "GitHub", count: 0 },
       { pluginId: "slack", label: "Slack", count: 0 },
@@ -247,7 +248,7 @@ describe("buildIntakeTabs", () => {
 
   it("gives a plugin with every kind switched off a tab only while it has a signal or is pressed", () => {
     const labels = (signals: Signal[], pressed: string | null) =>
-      buildIntakeTabs(signals, TAB_PLUGINS, pressed).map((tab) => tab.label);
+      buildIntakeTabs(signals, TAB_PLUGINS, pressed, 0).map((tab) => tab.label);
     expect(labels([], null)).not.toContain("Linear");
     expect(labels([buildSignal("a", { kind: "linear/assigned" })], null)).toContain("Linear");
     expect(labels([], "linear")).toContain("Linear");
@@ -258,9 +259,19 @@ describe("buildIntakeTabs", () => {
       [buildSignal("a", { kind: "jira/assigned" }), buildSignal("b")],
       TAB_PLUGINS,
       null,
+      0,
     );
     expect(tabs.map((tab) => tab.label)).toEqual(["All", "GitHub", "Slack", "jira"]);
-    expect(buildIntakeTabs([], TAB_PLUGINS, "jira").map((tab) => tab.label)).toContain("jira");
+    expect(buildIntakeTabs([], TAB_PLUGINS, "jira", 0).map((tab) => tab.label)).toContain("jira");
+  });
+
+  it("adds the Tracking rows that wait on the user to All's count and to no plugin's", () => {
+    const tabs = buildIntakeTabs([buildSignal("a"), buildSignal("b")], TAB_PLUGINS, null, 3);
+    expect(tabs).toEqual([
+      { pluginId: null, label: "All", count: 5 },
+      { pluginId: "github", label: "GitHub", count: 2 },
+      { pluginId: "slack", label: "Slack", count: 0 },
+    ]);
   });
 });
 
@@ -498,20 +509,27 @@ describe("buildSignalAnswers", () => {
     ]);
   });
 
-  it("gives a Hand to an agent answer the workflow it starts, and no other answer one", () => {
-    const workflowId = "01a0ec64-6e80-7000-8000-0000000000f8";
-    const [handOff] = buildSignalAnswers(
-      buildSignal("b", {
-        actions: [
-          action(`hand-to-${workflowId}`, {
-            operation: { op: "run.start", input: { workflowId, inputs: { signal: "b" } } },
-          }),
-        ],
-      }),
-    );
-    expect(handOff?.workflowId).toBe(workflowId);
-    expect(answers.every((answer) => answer.workflowId === null)).toBe(true);
-  });
+  // Signals written before `signal.handOff` existed keep their `run.start` answers.
+  it.each([
+    ["signal.handOff", (workflowId: string) => ({ signalId: "b", workflowId })],
+    ["run.start", (workflowId: string) => ({ workflowId, inputs: { signal: "b" } })],
+  ] as const)(
+    "gives a Hand to an agent answer that binds %s the workflow it starts, and no other answer one",
+    (op, buildInput) => {
+      const workflowId = "01a0ec64-6e80-7000-8000-0000000000f8";
+      const [handOff] = buildSignalAnswers(
+        buildSignal("b", {
+          actions: [
+            action(`hand-to-${workflowId}`, {
+              operation: { op, input: buildInput(workflowId) },
+            }),
+          ],
+        }),
+      );
+      expect(handOff?.workflowId).toBe(workflowId);
+      expect(answers.every((answer) => answer.workflowId === null)).toBe(true);
+    },
+  );
 
   it("finds the primary action as the suggested answer, and the first text box", () => {
     expect(findSuggestedAnswer(answers)?.action.id).toBe("approve");

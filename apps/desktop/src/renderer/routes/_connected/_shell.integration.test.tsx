@@ -133,7 +133,7 @@ const startShell = async ({
   return { calls, fake, ...app };
 };
 
-/** Waits until the live connection holds the shell's nine subscriptions and no read is running. */
+/** Waits until the live connection holds the shell's ten subscriptions and no read is running. */
 const waitForShellLive = async (live: LiveStub, queryClient: QueryClient): Promise<void> => {
   await waitFor(() => {
     expect([...live.readTopics()].sort()).toEqual([
@@ -141,6 +141,7 @@ const waitForShellLive = async (live: LiveStub, queryClient: QueryClient): Promi
       "connection",
       "plugin",
       "provider",
+      "run",
       "runner",
       "session",
       "signal",

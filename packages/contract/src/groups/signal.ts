@@ -43,6 +43,7 @@ import {
 } from "../errors";
 import { Actor, Id, isQualifiedId, Timestamp, TimestampWithOffset } from "../ids";
 import { cursorParams, MAX_PAGE_LIMIT, page } from "../pagination";
+import { closedStruct } from "../closed";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 import { EventId } from "./event-record";
@@ -415,6 +416,12 @@ export const SignalResolution = Schema.Struct({
   kind: Schema.Literals(["decided", "withdrawn"]),
   actionId: Schema.optionalKey(Schema.String),
   eventId: Schema.optionalKey(EventId),
+  /**
+   * The run the answer started, when taking the answer started one: a Hand to
+   * an agent answer, which binds `signal.handOff` or, on a signal written
+   * before that existed, `run.start`, or any other answer that runs `run.start`.
+   */
+  runId: Schema.optionalKey(Id),
   outcome: Schema.String.check(Schema.isMaxLength(MAX_SIGNAL_OUTCOME_LENGTH)),
   actor: Actor,
   origin: ResolutionOrigin,
@@ -724,6 +731,23 @@ export const SignalActInput = Schema.Struct({
 
 export type SignalActInput = Schema.Schema.Type<typeof SignalActInput>;
 
+/**
+ * The payload of `signal.handOff`: the workflow to hand the signal to. The
+ * signal is the one in the request path.
+ */
+export const SignalHandOffInput = Schema.Struct({ workflowId: Id });
+
+export type SignalHandOffInput = Schema.Schema.Type<typeof SignalHandOffInput>;
+
+/**
+ * One call of `signal.handOff` as a single object: the signal's id, which an
+ * HTTP request sends in its path, and the workflow. A bound answer has no
+ * path, so the Hand to an agent answers send this shape.
+ */
+export const SignalHandOffCall = closedStruct({ signalId: Id, workflowId: Id });
+
+export type SignalHandOffCall = Schema.Schema.Type<typeof SignalHandOffCall>;
+
 /** The payload of `signal.withdraw`. */
 export const SignalWithdrawInput = Schema.Struct({
   /** One line the user reads in Done: "the build passed on retry". */
@@ -734,7 +758,8 @@ export type SignalWithdrawInput = Schema.Schema.Type<typeof SignalWithdrawInput>
 
 /**
  * The signal operations: list To do, Later or Done, read one signal, raise a
- * signal, take one of its actions as the user, withdraw a signal its raiser
+ * signal, take one of its actions as the user, hand it to a workflow as the
+ * user, withdraw a signal its raiser
  * no longer needs answered, and the moves that send nothing to the source:
  * Done, snooze, unsnooze and Not urgent.
  */
@@ -761,6 +786,23 @@ export const signal = HttpApiGroup.make("signal")
     HttpApiEndpoint.post("act", "/signals/:id/act", {
       params: { id: Id },
       payload: SignalActInput,
+      success: Signal,
+      error: [
+        Unauthenticated,
+        Forbidden,
+        Validation,
+        NotFound,
+        InvalidState,
+        CapExceeded,
+        Conflict,
+        Internal,
+      ],
+    }),
+    // The errors include every error of `run.start` and of the task
+    // operations the handoff runs, because they are returned unchanged.
+    HttpApiEndpoint.post("handOff", "/signals/:id/hand-off", {
+      params: { id: Id },
+      payload: SignalHandOffInput,
       success: Signal,
       error: [
         Unauthenticated,

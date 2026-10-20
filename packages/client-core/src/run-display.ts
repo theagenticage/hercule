@@ -12,7 +12,6 @@
  * edge, because only the page has the run's plan.
  */
 import type {
-  FailureReason,
   RerunMode,
   Run,
   RunOrigin,
@@ -29,6 +28,10 @@ import { describeActor, type ActorReading, type ActorTarget } from "./actor-disp
 import { formatNameList } from "./name-list";
 import { formatDuration } from "./threads/duration";
 import { formatStamp } from "./time-context";
+
+// The words for a failure reason are shared with the controller, which writes
+// them into `task.queryTracking`.
+export { describeFailureReason } from "@hercule/contract";
 
 /**
  * Where a run or one step of its plan is: its status, or for a step with no
@@ -366,40 +369,6 @@ export const describeRunStatus = (run: TimedRun, now: number): string => {
       return `failed after ${duration}`;
     case "cancelled":
       return `cancelled after ${duration}`;
-  }
-};
-
-/**
- * Returns a failure reason in a few plain words: "step failed", "validation
- * error" for a run a trigger could not start because its workflow or the
- * inputs mapped from the event did not validate, "expression error" for a
- * template or a condition that could not be evaluated,
- * "iteration limit" for an edge the run was to follow more often than its
- * `maxTraversals` allows, "controller error" for a run the controller
- * could not carry out, or "workspace failed" for a run whose workspace could
- * not be set up or was lost with its runner. For an agent step it returns
- * "schema failure" for a turn that ended without a value matching the step's
- * output schema, and "session failed" for a turn or session that failed
- * before the turn ended.
- */
-export const describeFailureReason = (reason: FailureReason): string => {
-  switch (reason) {
-    case "validation-error":
-      return "validation error";
-    case "step-failed":
-      return "step failed";
-    case "expression-error":
-      return "expression error";
-    case "iteration-limit":
-      return "iteration limit";
-    case "controller-error":
-      return "controller error";
-    case "workspace-failed":
-      return "workspace failed";
-    case "schema-failure":
-      return "schema failure";
-    case "session-failed":
-      return "session failed";
   }
 };
 

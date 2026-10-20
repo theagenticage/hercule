@@ -17,7 +17,7 @@ import { BoundOperations } from "./index";
  * - `check` checks a contract operation as the real port does, and refuses a
  *   plugin action, a `connectionId` and a typed reply, which only the real
  *   port can check;
- * - `run` succeeds without doing anything;
+ * - `run` succeeds without doing anything, and starts no run;
  * - `runPluginAction` dies, because `check` never lets a plugin action
  *   through;
  * - `describe` writes each operation's id as its describe line, such as
@@ -38,7 +38,7 @@ export const FakeBoundOperationsLayer: Layer.Layer<BoundOperations> = Layer.succ
             ]),
           )
         : decodeAnswerOperation(place, operation, [...path, "operation"]),
-    run: () => Effect.void,
+    run: () => Effect.succeed(undefined),
     runPluginAction: () => Effect.die("the fake BoundOperations port runs no plugin action"),
     describe: (operations) =>
       Effect.succeed(operations.map((operation) => [{ kind: "text", text: operation.op }])),

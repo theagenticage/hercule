@@ -139,11 +139,27 @@ export const decideRunMark = (run: Run, sessions: ReadonlyArray<Session>): RunMa
   decideRunMarkState(readRunPlace(run), findWaitingSession(run, sessions) !== undefined);
 
 /**
+ * Returns what went wrong in a failed run, in a sentence from the run's
+ * records: its `failureMessage`, else the message of the edge it failed at,
+ * else the error of the failed step's latest failed record. Returns
+ * `undefined` for a run that did not fail, or that failed with none of these
+ * (a workspace failure, for instance).
+ */
+const findFailureMessage = (run: Run): string | undefined => {
+  if (run.status !== "failed") return undefined;
+  if ("failureMessage" in run) return run.failureMessage;
+  if ("failedEdge" in run && run.failedEdge !== undefined) return run.failedEdge.message;
+  const stepId = "failedStepId" in run ? run.failedStepId : undefined;
+  return run.steps
+    .filter((record) => record.stepId === stepId)
+    .findLast((record) => record.status === "failed")?.error.message;
+};
+
+/**
  * Describes why a failed run failed, in one line: the reason and the step,
- * then what went wrong, from the run's `failureMessage`, the edge it failed
- * at, or the failed step's error: "Iteration limit at count. The run would
- * follow count → file a fourth time." Returns `undefined` for a run that did
- * not fail.
+ * then what went wrong (`findFailureMessage`): "Iteration limit at count. The
+ * run would follow count → file a fourth time." Returns `undefined` for a run
+ * that did not fail.
  */
 const describeRunFailure = (run: Run): string | undefined => {
   if (run.status !== "failed") return undefined;
@@ -151,14 +167,7 @@ const describeRunFailure = (run: Run): string | undefined => {
   const capitalized = reason.charAt(0).toUpperCase() + reason.slice(1);
   const stepId = "failedStepId" in run ? run.failedStepId : undefined;
   const headline = stepId === undefined ? capitalized : `${capitalized} at ${stepId}`;
-  const message =
-    "failureMessage" in run
-      ? run.failureMessage
-      : "failedEdge" in run && run.failedEdge !== undefined
-        ? run.failedEdge.message
-        : run.steps
-            .filter((record) => record.stepId === stepId)
-            .findLast((record) => record.status === "failed")?.error.message;
+  const message = findFailureMessage(run);
   return message === undefined ? headline : `${headline}. ${message}`;
 };
 

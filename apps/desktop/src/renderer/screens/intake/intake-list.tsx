@@ -4,19 +4,9 @@
  * carries its controls and its checkbox (spec 17 §Row controls and the bulk
  * bar).
  */
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  type JSX,
-  type ReactNode,
-} from "react";
+import { memo, useEffect, useId, useMemo, useRef, type JSX, type ReactNode } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import { DONE_ACTION_ID, type Signal, type SignalView } from "@hercule/contract";
 import {
   decideSignalRowControls,
@@ -37,7 +27,8 @@ import { AgeLabel } from "../age-label";
 import { describeMoveTitle, SIGNAL_MOVE_GLYPHS } from "./move-glyphs";
 import { SNOOZE_ANCHOR } from "./snooze-menu";
 import { SignalMark } from "./source-mark";
-import { useRowMotion } from "./use-row-motion";
+import { useRowMotion, type RowExitHandler } from "./use-row-motion";
+import { useVirtualLines, VIRTUAL_OVERSCAN } from "./use-virtual-lines";
 
 /** What a press on a row's own controls asks for: its checkbox, or one of its moves. */
 export type SignalRowAction = "check" | SignalMove;
@@ -73,9 +64,6 @@ type ListItem =
  */
 const estimateItemHeight = (item: ListItem): number =>
   item.kind === "section" ? 40 : item.lastInSection ? 52 : 54;
-
-/** How many lines past each edge of the visible part stay drawn, so a fast scroll shows no gap. */
-const OVERSCAN = 8;
 
 /** Returns the sections' headings and rows as one list, in the order they are drawn. */
 const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<ListItem> =>
@@ -113,6 +101,8 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
  *   describes; a change of scope draws the new rows at once.
  * - `onPointerEnter` and `onPointerLeave` are called as the pointer enters
  *   and leaves the rows, the foot included.
+ * - `takeLeavingRow`, when given, may take the exit of a row that leaves on
+ *   screen, as `useRowMotion` describes. A handed-off signal's row flies this way.
  *
  * Only the rows in view, and a few past each edge, are drawn, so a list of
  * hundreds of signals costs as little as a short one. The selected row is
@@ -126,6 +116,7 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
  */
 export const IntakeList = memo(function IntakeList({
   view,
+  inert,
   scope,
   sections,
   plugins,
@@ -141,10 +132,13 @@ export const IntakeList = memo(function IntakeList({
   onRowAction,
   onNearEnd,
   onFocusedSelectedRow,
+  takeLeavingRow,
   onPointerEnter,
   onPointerLeave,
 }: {
   readonly view: SignalView;
+  /** Whether the list takes no pointer, focus or screen reader: opened Tracking covers it. */
+  readonly inert: boolean;
   readonly scope: string;
   readonly sections: ReadonlyArray<IntakeSection>;
   readonly plugins: ReadonlyArray<PluginIdentity>;
@@ -162,6 +156,7 @@ export const IntakeList = memo(function IntakeList({
   readonly onNearEnd: () => void;
   /** Called once the list has put the focus on the selected row that `focusSelectedRow` asked for. */
   readonly onFocusedSelectedRow: () => void;
+  readonly takeLeavingRow?: RowExitHandler;
   readonly onPointerEnter: () => void;
   readonly onPointerLeave: () => void;
 }): JSX.Element {
@@ -177,103 +172,79 @@ export const IntakeList = memo(function IntakeList({
     [workflows, assistants],
   );
   const listedItems = useMemo(() => flattenSections(sections), [sections]);
-  const items = useRowMotion(listedItems, scope, scrollRef, ghostsRef);
-  const selectedIndex = useMemo(
-    () => items.findIndex((item) => item.key === selectedId),
-    [items, selectedId],
+  const items = useRowMotion(listedItems, scope, scrollRef, ghostsRef, { takeLeavingRow });
+  const { lines, totalSize, lastDrawnIndex, selectedIndex, scrollToSelected } = useVirtualLines(
+    items,
+    scrollRef,
+    estimateItemHeight,
+    selectedId,
   );
-
-  // The React Compiler leaves this component alone, because it cannot see
-  // into the virtualizer (see below), so these callbacks are memoized by
-  // hand: the virtualizer measures again whenever `getItemKey` changes.
-  const rangeExtractor = useCallback(
-    (range: Range): number[] => {
-      const indexes = defaultRangeExtractor(range);
-      if (selectedIndex < 0 || indexes.includes(selectedIndex)) return indexes;
-      return [...indexes, selectedIndex].sort((a, b) => a - b);
-    },
-    [selectedIndex],
-  );
-  const getItemKey = useCallback((index: number) => items[index]!.key, [items]);
-  const estimateSize = useCallback((index: number) => estimateItemHeight(items[index]!), [items]);
-
-  // eslint-disable-next-line react-hooks/incompatible-library -- The virtualizer returns an object that changes inside while its identity stays the same, which the React Compiler cannot memoize, so the compiler leaves this component alone. The callbacks above and the memoized rows keep the renders cheap instead.
-  const virtualizer = useVirtualizer({
-    count: items.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize,
-    getItemKey,
-    rangeExtractor,
-    overscan: OVERSCAN,
-  });
 
   useEffect(() => {
     if (selectedIndex < 0) return;
     const scroll = scrollRef.current!;
     const focused = document.activeElement;
-    virtualizer.scrollToIndex(selectedIndex, { align: "auto" });
+    scrollToSelected();
     const focusInList = focused instanceof HTMLElement && scroll.contains(focused);
     if (!focusInList && !focusSelectedRow) return;
     scroll.querySelector<HTMLElement>(`[data-signal-id="${CSS.escape(selectedId!)}"]`)?.focus();
     if (focusSelectedRow) onFocusedSelectedRow();
-  }, [virtualizer, selectedIndex, selectedId, focusSelectedRow, onFocusedSelectedRow]);
+  }, [scrollToSelected, selectedIndex, selectedId, focusSelectedRow, onFocusedSelectedRow]);
 
-  const virtualItems = virtualizer.getVirtualItems();
-  const lastDrawn = virtualItems.at(-1)?.index;
   useEffect(() => {
-    if (lastDrawn !== undefined && lastDrawn >= items.length - 1 - OVERSCAN) onNearEnd();
-  }, [lastDrawn, items.length, onNearEnd]);
+    if (lastDrawnIndex !== undefined && lastDrawnIndex >= items.length - 1 - VIRTUAL_OVERSCAN) {
+      onNearEnd();
+    }
+  }, [lastDrawnIndex, items.length, onNearEnd]);
 
   // The drawn lines in list order. Before each run of lines that is not
-  // drawn, an empty spacer takes up the run's height.
-  const drawn: JSX.Element[] = [];
-  const visible = virtualizer.range;
-  let end = 0;
-  for (const { index, key, start, size } of virtualItems) {
-    if (start > end) drawn.push(<div key={`gap:${key}`} style={{ height: start - end }} />);
-    const item = items[index]!;
-    const onScreen = visible !== null && index >= visible.startIndex && index <= visible.endIndex;
-    drawn.push(
-      item.kind === "section" ? (
-        <SectionHeading key={key} itemKey={item.key} section={item.section} />
-      ) : (
-        <SignalRow
-          key={key}
-          view={view}
-          signal={item.signal}
-          lastInSection={item.lastInSection}
-          plugins={plugins}
-          raisers={raisers}
-          selected={item.signal.id === selectedId}
-          checked={checkedIds.has(item.signal.id)}
-          marked={
-            highlight?.actedIds.has(item.signal.id)
-              ? "acted"
-              : highlight?.keptIds.has(item.signal.id)
-                ? "kept"
-                : null
-          }
-          menuOpen={item.signal.id === menuRowId}
-          timezone={timezone}
-          onScreen={onScreen}
-          ageId={`${listId}-${item.signal.id}-age`}
-          onSelect={onSelect}
-          onRowAction={onRowAction}
-        />
-      ),
+  // drawn, the hook has put an empty spacer that takes up the run's height.
+  const drawn = lines.map((line) => {
+    if (line.kind === "gap") return <div key={line.key} style={{ height: line.height }} />;
+    const { item, onScreen } = line;
+    return item.kind === "section" ? (
+      <SectionHeading key={item.key} itemKey={item.key} section={item.section} />
+    ) : (
+      <SignalRow
+        key={item.key}
+        view={view}
+        signal={item.signal}
+        lastInSection={item.lastInSection}
+        plugins={plugins}
+        raisers={raisers}
+        selected={item.signal.id === selectedId}
+        checked={checkedIds.has(item.signal.id)}
+        marked={
+          highlight?.actedIds.has(item.signal.id)
+            ? "acted"
+            : highlight?.keptIds.has(item.signal.id)
+              ? "kept"
+              : null
+        }
+        menuOpen={item.signal.id === menuRowId}
+        timezone={timezone}
+        onScreen={onScreen}
+        ageId={`${listId}-${item.signal.id}-age`}
+        onSelect={onSelect}
+        onRowAction={onRowAction}
+      />
     );
-    end = start + size;
-  }
+  });
 
   return (
-    <div className="asks-frame" onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
+    <div
+      className="asks-frame"
+      inert={inert}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+    >
       <div ref={scrollRef} className="asks-scroll">
         {items.length === 0 ? (
           empty
         ) : (
           <div
             className={view === "done" ? "asks-rows asks-rows--quiet" : "asks-rows"}
-            style={{ minHeight: virtualizer.getTotalSize() }}
+            style={{ minHeight: totalSize }}
           >
             {drawn}
           </div>

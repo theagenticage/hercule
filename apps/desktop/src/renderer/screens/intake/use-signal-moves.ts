@@ -50,19 +50,43 @@ interface MoveInput {
   readonly until: string | undefined;
 }
 
+/** The toast of the last move, and the ways to show and dismiss it. */
+export interface MoveToastState {
+  /** The line in the toast's place, or `null` when none shows. */
+  readonly toast: MoveToast | null;
+  /** Shows `text` in the toast's place, in place of the toast before it. A failed toast wears the failed mark. */
+  readonly show: (text: string, failed: boolean) => void;
+  readonly dismiss: () => void;
+}
+
 /** Intake's moves, as the screen runs them. */
 export interface SignalMoveRunner {
   /** The plan being sent, whose rows hold their highlight until they leave. `null` when none is. */
   readonly acting: SignalMovePlan | null;
-  readonly toast: MoveToast | null;
   /**
    * Sends `plan`, with `until` for Snooze, then calls `onMoved` once the
    * rows have left the lists. Does nothing while another move is being
    * sent, or when the plan applies to no row.
    */
   readonly run: (plan: SignalMovePlan, until?: string, onMoved?: () => void) => void;
-  readonly dismissToast: () => void;
 }
+
+/**
+ * Keeps the toast of Intake's last move. The screen owns it, so every move
+ * on the screen, a signal's or a Tracking row's, shows in the same place.
+ */
+export const useMoveToast = (): MoveToastState => {
+  const [toast, setToast] = useState<MoveToast | null>(null);
+  return {
+    toast,
+    show: (text, failed) => {
+      setToast((shown) => ({ serial: (shown?.serial ?? 0) + 1, text, failed }));
+    },
+    dismiss: () => {
+      setToast(null);
+    },
+  };
+};
 
 /**
  * Sends `move` for `signalIds`, at most `MAX_SIGNAL_IDS` of them, with
@@ -161,8 +185,8 @@ const readSignalsAgain = (queryClient: QueryClient, signalIds: ReadonlyArray<str
  * Runs Intake's moves for the user whose times are in `timezone`.
  *
  * A move holds its rows for one beat while it is sent, then takes them off
- * the lists, reads the lists and each moved signal again, and shows in the
- * toast what the controller did. A failed move shows its error in the
+ * the lists, reads the lists and each moved signal again, and shows in
+ * `toast` what the controller did. A failed move shows its error in the
  * toast's place, and the rows stay where they were.
  *
  * `ownChanges` is told the ids of the signals a move acts on before it is
@@ -174,12 +198,10 @@ export const useSignalMoveRunner = (
   client: HerculeClient,
   timezone: string,
   ownChanges: Pick<IntakeMoves, "registerOwnChanges" | "forgetOwnChanges">,
+  toast: MoveToastState,
 ): SignalMoveRunner => {
   const queryClient = useQueryClient();
-  const [toast, setToast] = useState<MoveToast | null>(null);
-  const showToast = (text: string, failed: boolean): void => {
-    setToast((shown) => ({ serial: (shown?.serial ?? 0) + 1, text, failed }));
-  };
+  const showToast = toast.show;
 
   const move = useMutation({
     mutationFn: async (input: MoveInput): Promise<ReadonlyArray<string>> => {
@@ -221,13 +243,9 @@ export const useSignalMoveRunner = (
 
   return {
     acting: move.isPending ? move.variables.plan : null,
-    toast,
     run: (plan, until, onMoved) => {
       if (move.isPending || plan.acted.length === 0) return;
       move.mutate({ plan, until }, onMoved === undefined ? undefined : { onSuccess: onMoved });
-    },
-    dismissToast: () => {
-      setToast(null);
     },
   };
 };
@@ -267,6 +285,20 @@ export interface IntakeMoves {
   readonly registerOwnChanges: (signalIds: ReadonlyArray<string>) => void;
   /** Forgets the changes to `signalIds` an action did not make after all, such as a failed answer. */
   readonly forgetOwnChanges: (signalIds: ReadonlyArray<string>) => void;
+  /**
+   * Records that the user is handing the signal `signalId` off to an agent
+   * from the pane: its row flies into Tracking, and the Task's row shows at
+   * once, even under the pointer. Call it when the answer starts, before it is
+   * sent. It is a change of the signal too, which `registerOwnChanges` records.
+   */
+  readonly registerHandoff: (signalId: string) => void;
+  /** Forgets the handoff of `signalId`, because its answer failed. */
+  readonly forgetHandoff: (signalId: string) => void;
+  /**
+   * Records that the handoff of `signalId` committed: the controller answered
+   * it. Tracking shows the handoff in the first read that starts after this.
+   */
+  readonly confirmHandoff: (signalId: string) => void;
 }
 
 /** Carries Intake's moves from the screen to the pane. */

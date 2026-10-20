@@ -43,11 +43,13 @@ import {
   type NotFound,
   type ProvenanceEntry,
   type Task,
+  type TaskPriority,
+  type TaskStatus,
   type TaskUpdatedEventPayload,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, requireGrant } from "../actor";
+import { currentStamp, requireGrant, requireUserActor } from "../actor";
 import {
   announce,
   nowIso,
@@ -60,7 +62,14 @@ import {
 } from "../db";
 import { AuditLog, PlatformEvents } from "../events";
 import { Notifier } from "../notifications";
-import { taskRepository, type TaskEdit, type TaskOrder, type TaskSortField } from "./repository";
+import {
+  taskRepository,
+  type NewTask,
+  type ProvenanceInput,
+  type TaskEdit,
+  type TaskOrder,
+  type TaskSortField,
+} from "./repository";
 
 /** The input of `task.query`: the filter, plus the page size, cursor and sort. */
 const QueryInput = Schema.Struct({
@@ -84,6 +93,32 @@ export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(TaskCreateInput);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
+
+/** The fields `updateTask` changes: an update after decoding. */
+interface TaskPatch {
+  readonly title?: string;
+  readonly description?: string;
+  readonly status?: TaskStatus;
+  readonly priority?: TaskPriority;
+  readonly projectId?: string | null;
+  readonly addLabels?: ReadonlyArray<string>;
+  readonly removeLabels?: ReadonlyArray<string>;
+  readonly provenance?: ReadonlyArray<ProvenanceInput>;
+}
+
+/** The provenance entry of a handoff: the signal handed off and the run it started. */
+export interface HandoffEntry {
+  readonly signalId: string;
+  readonly runId: string;
+  /** The signal's thread ref, when it has one. */
+  readonly ref?: string;
+  /** The signal's origin event, when it has one. */
+  readonly eventId?: number;
+}
+
+/** The refusal of `recordHandoff` for a caller who is not the user. */
+const ONLY_THE_USER_RECORDS_HANDOFF =
+  "only the user may record a handoff: handing a signal off is the user's act, so a session or a workflow step may not; ask the user instead";
 
 /** One page of tasks, in the contract's shape. */
 export interface TaskPage {
@@ -162,6 +197,131 @@ const make = Effect.gen(function* () {
           exists ? Effect.void : Effect.fail(createNotFoundError(NO_SUCH_PROJECT)),
         );
 
+  /**
+   * Applies `patch` to the task `id` in the caller's transaction, and returns
+   * the task as stored. The `task.updated` event lists what changed. See
+   * `update` for the rules; the patch is already decoded.
+   */
+  const updateTask = (
+    id: string,
+    patch: TaskPatch,
+  ): Effect.Effect<Task, NotFound | Validation | SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const at = yield* nowIso;
+        const actor = yield* currentStamp;
+        const before = yield* readLiveTaskOrFail(id);
+        yield* ensureProjectExists(patch.projectId);
+
+        // Each field is compared on its own, rather than in a loop over
+        // the field names, so each change keeps the type of its field.
+        const changes: Mutable<TaskUpdatedEventPayload["changes"]> = {};
+        const edit: Mutable<TaskEdit> = {};
+        if (isNewValue(patch.title, before.title)) {
+          changes.title = { old: before.title, new: patch.title };
+          edit.title = patch.title;
+        }
+        if (isNewValue(patch.description, before.description)) {
+          changes.description = { old: before.description, new: patch.description };
+          edit.description = patch.description;
+        }
+        if (isNewValue(patch.status, before.status)) {
+          changes.status = { old: before.status, new: patch.status };
+          edit.status = patch.status;
+        }
+        if (isNewValue(patch.priority, before.priority)) {
+          changes.priority = { old: before.priority, new: patch.priority };
+          edit.priority = patch.priority;
+        }
+        const project = before.projectId ?? null;
+        if (isNewValue(patch.projectId, project)) {
+          changes.projectId = { old: project, new: patch.projectId };
+          edit.projectId = patch.projectId;
+        }
+
+        // A label in both lists is added and removed in one call, so the
+        // task keeps it. Reporting it as removed would trigger every
+        // workflow that watches for that label being removed.
+        const adding = removeDuplicates(patch.addLabels ?? []);
+        const removed = removeDuplicates(patch.removeLabels ?? []).filter(
+          (label) => !adding.includes(label) && before.labels.includes(label),
+        );
+        const kept = before.labels.filter((label) => !removed.includes(label));
+        const added = adding.filter((label) => !kept.includes(label));
+        if (added.length > 0 || removed.length > 0) {
+          // The contract limits the labels in one call; the total is
+          // checked here, because labels are added a few at a time and the
+          // cap applies to the task's final labels, not to one edit.
+          if (kept.length + added.length > MAX_TASK_LABELS) {
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["addLabels"],
+                  message: `A task carries at most ${String(MAX_TASK_LABELS)} labels.`,
+                },
+              ]),
+            );
+          }
+          changes.labels = { added, removed };
+          edit.labels = [...kept, ...added];
+        }
+
+        const appended = patch.provenance ?? [];
+        if (appended.length > 0) {
+          const entries: ReadonlyArray<ProvenanceEntry> = appended.map((entry) => ({
+            ...entry,
+            at,
+            actor,
+          }));
+          changes.provenance = { added: entries, removed: [] };
+        }
+
+        // If nothing changes, the task is returned as it is, with no row
+        // written and no event recorded.
+        if (Object.keys(changes).length === 0) return before;
+
+        yield* tasks.update(id, edit, appended, at, actor);
+        yield* platformEvents.emit({
+          kind: "task.updated",
+          actor,
+          payload: { taskId: id, changes },
+          at,
+        });
+        yield* announce({ _tag: "record", topic: "task", id, kind: "updated" });
+        // Read back rather than merged in memory, so the caller gets the
+        // row that was written, whatever the edit changed.
+        return yield* readLiveTaskOrFail(id);
+      }),
+    );
+
+  /**
+   * Writes a new task, with its first provenance entries and its
+   * `task.created` event, in the caller's transaction, and returns it. The
+   * task gets the `id` the caller chose, or a new one. Fails with `NotFound`
+   * if the project does not exist.
+   */
+  const insertTask = (
+    fields: Pick<
+      NewTask,
+      "id" | "title" | "description" | "status" | "priority" | "labels" | "projectId" | "provenance"
+    >,
+  ): Effect.Effect<Task, NotFound | SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        // One clock read, inside the transaction: the row and the event
+        // that records it carry the same instant.
+        const at = yield* nowIso;
+        const actor = yield* currentStamp;
+        yield* ensureProjectExists(fields.projectId);
+        const task = yield* tasks.insert({ ...fields, at, actor });
+        yield* platformEvents.emit({ kind: "task.created", actor, payload: { task }, at });
+        yield* announce({ _tag: "record", topic: "task", id: task.id, kind: "created" });
+        return task;
+      }),
+    );
+
   return {
     /** Returns one page of the tasks that match a filter. */
     query: (
@@ -212,30 +372,58 @@ const make = Effect.gen(function* () {
           caller._tag === "run" && !given.some((entry) => entry.runId === caller.runId)
             ? [...given, { runId: caller.runId }]
             : given;
-        return yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            // One clock read, inside the transaction: the row and the event
-            // that records it carry the same instant.
-            const at = yield* nowIso;
-            const actor = yield* currentStamp;
-            yield* ensureProjectExists(decoded.projectId);
-            const task = yield* tasks.insert({
-              title: decoded.title,
-              description: decoded.description,
-              status: "open",
-              priority: decoded.priority ?? "normal",
-              labels: removeDuplicates(decoded.labels ?? []),
-              projectId: decoded.projectId,
-              provenance,
-              at,
-              actor,
-            });
-            yield* platformEvents.emit({ kind: "task.created", actor, payload: { task }, at });
-            yield* announce({ _tag: "record", topic: "task", id: task.id, kind: "created" });
-            return task;
-          }),
+        return yield* insertTask({
+          title: decoded.title,
+          description: decoded.description,
+          status: "open",
+          priority: decoded.priority ?? "normal",
+          labels: removeDuplicates(decoded.labels ?? []),
+          projectId: decoded.projectId,
+          provenance,
+        });
+      }),
+
+    /**
+     * Writes the Task of a handoff and the handoff's provenance entry in one
+     * write, and returns the Task. This is the one way to record a handoff:
+     * `create` and `update` refuse an entry that names a signal.
+     *
+     * - With `newTask`, it creates the Task `in-progress`, with the id the
+     *   handoff chose, and the entry. One `task.created` event carries the
+     *   entry, and no `task.updated` follows.
+     * - Without it, it appends the entry to the Task `taskId` and sets the
+     *   Task `in-progress` if it was not. One `task.updated` event.
+     *
+     * It runs in the caller's transaction. Only the user hands work off, so it
+     * fails with `Forbidden` for any other caller, whatever grants they hold.
+     * It fails with `NotFound` if the Task to continue does not exist.
+     */
+    recordHandoff: (handoff: {
+      readonly taskId: string;
+      readonly entry: HandoffEntry;
+      readonly newTask?: { readonly title: string; readonly priority: TaskPriority };
+    }): Effect.Effect<Task, Unauthenticated | Forbidden | NotFound | Validation | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireUserActor(
+          handoff.newTask === undefined ? "task.update" : "task.create",
+          ONLY_THE_USER_RECORDS_HANDOFF,
         );
+        if (handoff.newTask !== undefined) {
+          return yield* insertTask({
+            id: handoff.taskId,
+            title: handoff.newTask.title,
+            description: "",
+            status: "in-progress",
+            priority: handoff.newTask.priority,
+            labels: [],
+            projectId: undefined,
+            provenance: [handoff.entry],
+          });
+        }
+        return yield* updateTask(handoff.taskId, {
+          status: "in-progress",
+          provenance: [handoff.entry],
+        });
       }),
 
     /**
@@ -257,94 +445,7 @@ const make = Effect.gen(function* () {
           decodeUpdate(input),
           createDecodeValidationError,
         );
-        return yield* withTransaction(
-          sql,
-          Effect.gen(function* () {
-            const at = yield* nowIso;
-            const actor = yield* currentStamp;
-            const before = yield* readLiveTaskOrFail(id);
-            yield* ensureProjectExists(patch.projectId);
-
-            // Each field is compared on its own, rather than in a loop over
-            // the field names, so each change keeps the type of its field.
-            const changes: Mutable<TaskUpdatedEventPayload["changes"]> = {};
-            const edit: Mutable<TaskEdit> = {};
-            if (isNewValue(patch.title, before.title)) {
-              changes.title = { old: before.title, new: patch.title };
-              edit.title = patch.title;
-            }
-            if (isNewValue(patch.description, before.description)) {
-              changes.description = { old: before.description, new: patch.description };
-              edit.description = patch.description;
-            }
-            if (isNewValue(patch.status, before.status)) {
-              changes.status = { old: before.status, new: patch.status };
-              edit.status = patch.status;
-            }
-            if (isNewValue(patch.priority, before.priority)) {
-              changes.priority = { old: before.priority, new: patch.priority };
-              edit.priority = patch.priority;
-            }
-            const project = before.projectId ?? null;
-            if (isNewValue(patch.projectId, project)) {
-              changes.projectId = { old: project, new: patch.projectId };
-              edit.projectId = patch.projectId;
-            }
-
-            // A label in both lists is added and removed in one call, so the
-            // task keeps it. Reporting it as removed would trigger every
-            // workflow that watches for that label being removed.
-            const adding = removeDuplicates(patch.addLabels ?? []);
-            const removed = removeDuplicates(patch.removeLabels ?? []).filter(
-              (label) => !adding.includes(label) && before.labels.includes(label),
-            );
-            const kept = before.labels.filter((label) => !removed.includes(label));
-            const added = adding.filter((label) => !kept.includes(label));
-            if (added.length > 0 || removed.length > 0) {
-              // The contract limits the labels in one call; the total is
-              // checked here, because labels are added a few at a time and the
-              // cap applies to the task's final labels, not to one edit.
-              if (kept.length + added.length > MAX_TASK_LABELS) {
-                return yield* Effect.fail(
-                  createValidationError([
-                    {
-                      path: ["addLabels"],
-                      message: `A task carries at most ${String(MAX_TASK_LABELS)} labels.`,
-                    },
-                  ]),
-                );
-              }
-              changes.labels = { added, removed };
-              edit.labels = [...kept, ...added];
-            }
-
-            const appended = patch.provenance ?? [];
-            if (appended.length > 0) {
-              const entries: ReadonlyArray<ProvenanceEntry> = appended.map((entry) => ({
-                ...entry,
-                at,
-                actor,
-              }));
-              changes.provenance = { added: entries, removed: [] };
-            }
-
-            // If nothing changes, the task is returned as it is, with no row
-            // written and no event recorded.
-            if (Object.keys(changes).length === 0) return before;
-
-            yield* tasks.update(id, edit, appended, at, actor);
-            yield* platformEvents.emit({
-              kind: "task.updated",
-              actor,
-              payload: { taskId: id, changes },
-              at,
-            });
-            yield* announce({ _tag: "record", topic: "task", id, kind: "updated" });
-            // Read back rather than merged in memory, so the caller gets the
-            // row that was written, whatever the edit changed.
-            return yield* readLiveTaskOrFail(id);
-          }),
-        );
+        return yield* updateTask(id, patch);
       }),
 
     /**

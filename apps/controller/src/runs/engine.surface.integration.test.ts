@@ -224,7 +224,7 @@ describe("GET /runs", () => {
     });
   });
 
-  it("filters by workflow, status, and creation time, with since and until both inclusive", async () => {
+  it("filters by workflow, status, Task and creation time, with since and until both inclusive", async () => {
     await withSetUpController(async ({ base, token }) => {
       const oneTask = await createWorkflowOrFail(base, token, {
         definition: { name: "One task", steps: [buildCreateStep("create")] },

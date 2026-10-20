@@ -4,7 +4,8 @@
  * A row that arrives fades in and drops into place over `--dur-2`, while the
  * rows below make room. Every row of one change starts at once, so a burst
  * of 30 arrivals moves as one block. Only rows on screen move; a change out
- * of view applies at once.
+ * of view applies at once. Tracking's rows use the same motion, with the gap
+ * closing over `--dur-3` (spec 17 §Tracking).
  *
  * The rows move with `transform` and `opacity` only, through the Web
  * Animations API, so the compositor runs each animation and nothing runs
@@ -13,7 +14,8 @@
  * does a change while the window is hidden, which no one would see.
  */
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { readMotionDuration, readMotionEasing } from "./motion-tokens";
+import { copyElementWithoutIds, isMotionShown, isOnScreen, type RowPlace } from "./motion-helpers";
+import { readMotionDuration, readMotionEasing, type MotionDuration } from "./motion-tokens";
 
 /** The attribute on each drawn item's element that holds its key, so the motion can find it. */
 const ITEM_KEY_ATTRIBUTE = "data-item-key";
@@ -21,21 +23,11 @@ const ITEM_KEY_ATTRIBUTE = "data-item-key";
 /** How far above its place an arriving row starts, in pixels, before it drops in. */
 const ARRIVAL_DROP = 8;
 
-/** The top and bottom edges of a row or of the list's viewport, in pixels from the window's top. */
-export interface RowPlace {
-  readonly top: number;
-  readonly bottom: number;
-}
-
 /** How one row that stays or arrives moves into its place. */
 export type RowMove =
   | { readonly key: string; readonly kind: "arrive" }
   /** `offset` is how far the row starts from its new place, in pixels: below it when positive. */
   | { readonly key: string; readonly kind: "slide"; readonly offset: number };
-
-/** Checks whether any part of `place` shows inside `viewport`. */
-const isOnScreen = (place: RowPlace, viewport: RowPlace): boolean =>
-  place.bottom > viewport.top && place.top < viewport.bottom;
 
 /**
  * Lists the keys of the drawn rows that leave: on screen in `places`, and
@@ -77,8 +69,28 @@ export const planRowMoves = (
 
 /** A copy of a row that leaves, and where the row was on screen. */
 interface LeavingRow {
+  readonly key: string;
   readonly copy: HTMLElement;
   readonly place: DOMRect;
+}
+
+/**
+ * Takes over the exit of a row that leaves on screen, as the caller animates
+ * it in its own way, such as a flight to another list. It is called with the
+ * row's key, a copy of the row, and where the row stood, in pixels from the
+ * window's top left. It returns `true` when it took the row: the copy is
+ * then the caller's to place and remove, and the list plays no fade for the
+ * row and does not make the rows below wait for one. It returns `false` to
+ * leave the row to the fade.
+ */
+export type RowExitHandler = (key: string, copy: HTMLElement, place: DOMRect) => boolean;
+
+/** The options of `useRowMotion`, which change how a list moves from the Intake default. */
+export interface RowMotionOptions {
+  /** The duration token the rows that stay take to slide. `--dur-2` when left out. */
+  readonly slide?: MotionDuration | undefined;
+  /** Takes over the exit of a row that leaves on screen. The list fades such a row when left out. */
+  readonly takeLeavingRow?: RowExitHandler | undefined;
 }
 
 /** The list just before a change: what the motion needs once the change is drawn. */
@@ -91,7 +103,7 @@ interface ListBefore {
   readonly leaving: ReadonlyArray<LeavingRow>;
 }
 
-/** The animations of the last change, and the copies of its rows that leave. */
+/** The animations of the last change, and the copies of its rows that leave and fade here. */
 interface RunningMotion {
   readonly animations: ReadonlyArray<Animation>;
   readonly copies: ReadonlyArray<HTMLElement>;
@@ -111,9 +123,6 @@ const haveSameKeys = <Item extends { readonly key: string }>(
   b: ReadonlyArray<Item>,
 ): boolean => a.length === b.length && a.every((item, index) => item.key === b[index]!.key);
 
-/** Checks whether a change would play: motion is on, and someone can see the window. */
-const isMotionShown = (): boolean => !document.hidden && readMotionDuration("--dur-2") > 0;
-
 /** Returns where each drawn item's element inside `scroll` is on screen, by key, in list order. */
 const readItemPlaces = (scroll: HTMLElement): Map<string, [HTMLElement, DOMRect]> =>
   new Map(
@@ -122,21 +131,6 @@ const readItemPlaces = (scroll: HTMLElement): Map<string, [HTMLElement, DOMRect]
       [element, element.getBoundingClientRect()],
     ]),
   );
-
-/**
- * Returns a copy of `element` to fade out in its place. The copy keeps the
- * row's look, but loses every `id` and `data-*` attribute, so neither the
- * page's ids nor a query for a row's data ever finds it.
- */
-const copyLeavingRow = (element: HTMLElement): HTMLElement => {
-  const copy = element.cloneNode(true) as HTMLElement;
-  for (const each of [copy, ...copy.querySelectorAll<HTMLElement>("*")]) {
-    for (const name of each.getAttributeNames()) {
-      if (name === "id" || name.startsWith("data-")) each.removeAttribute(name);
-    }
-  }
-  return copy;
-};
 
 /**
  * Reads the list in `scroll` before it changes from `before` to `after`:
@@ -156,7 +150,7 @@ const readListBefore = <Item extends { readonly key: string }>(
     scroll.getBoundingClientRect(),
   ).map((key) => {
     const [element, place] = drawn.get(key)!;
-    return { copy: copyLeavingRow(element), place };
+    return { key, copy: copyElementWithoutIds(element), place };
   });
   return { keys: new Set(before.map((item) => item.key)), places, leaving };
 };
@@ -164,16 +158,18 @@ const readListBefore = <Item extends { readonly key: string }>(
 /**
  * Plays the motion from the list `before` to the list now drawn in `scroll`,
  * and returns what runs. The copies of the rows that leave fade in `ghosts`,
- * a layer over the list, and remove themselves when their fade ends.
+ * a layer over the list, and remove themselves when their fade ends. A row
+ * that `takeLeavingRow` takes gets no fade.
  *
- * The rows that stay start where they were and slide to their new places.
- * When rows leave on screen, the slides and the arrivals wait for the fade,
- * so the gap closes only once the row is gone.
+ * The rows that stay start where they were and slide to their new places,
+ * over `options.slide`. When rows fade on screen, the slides and the arrivals
+ * wait for the fade, so the gap closes only once the row is gone.
  */
 const playRowMotion = (
   before: ListBefore,
   scroll: HTMLElement,
   ghosts: HTMLElement,
+  { slide: slideToken = "--dur-2", takeLeavingRow }: RowMotionOptions,
 ): RunningMotion => {
   // Every place is read before anything is written, so the page lays out once.
   const drawn = readItemPlaces(scroll);
@@ -186,11 +182,15 @@ const playRowMotion = (
     viewport,
   );
   const fade = readMotionDuration("--dur-1");
-  const slide = readMotionDuration("--dur-2");
+  const slide = readMotionDuration(slideToken);
+  const arrive = readMotionDuration("--dur-2");
   const easing = readMotionEasing();
 
   const animations: Animation[] = [];
-  for (const { copy, place } of before.leaving) {
+  const fading = before.leaving.filter(
+    ({ key, copy, place }) => takeLeavingRow?.(key, copy, place) !== true,
+  );
+  for (const { copy, place } of fading) {
     Object.assign(copy.style, {
       position: "absolute",
       top: `${String(place.top - layer.top)}px`,
@@ -202,18 +202,18 @@ const playRowMotion = (
     ghosts.append(copy);
     // The fade holds its end until the copy is removed, so the copy never
     // shows again for a frame between the two.
-    const fading = copy.animate({ opacity: [1, 0] }, { duration: fade, easing, fill: "forwards" });
+    const fadeOut = copy.animate({ opacity: [1, 0] }, { duration: fade, easing, fill: "forwards" });
     const removeCopy = (): void => {
       copy.remove();
     };
-    fading.finished.then(removeCopy, removeCopy);
-    animations.push(fading);
+    fadeOut.finished.then(removeCopy, removeCopy);
+    animations.push(fadeOut);
   }
 
-  const delay = before.leaving.length > 0 ? fade : 0;
+  const delay = fading.length > 0 ? fade : 0;
   // `backwards` holds the first frame through the delay, so a row waiting
   // for the fade already stands where it was, and an arrival stays unseen.
-  const timing: KeyframeAnimationOptions = { duration: slide, delay, easing, fill: "backwards" };
+  const timing: KeyframeAnimationOptions = { delay, easing, fill: "backwards" };
   for (const move of planned) {
     const [element] = drawn.get(move.key)!;
     animations.push(
@@ -221,11 +221,11 @@ const playRowMotion = (
         move.kind === "arrive"
           ? { opacity: [0, 1], transform: [`translateY(${String(-ARRIVAL_DROP)}px)`, "none"] }
           : { transform: [`translateY(${String(move.offset)}px)`, "none"] },
-        timing,
+        { ...timing, duration: move.kind === "arrive" ? arrive : slide },
       ),
     );
   }
-  return { animations, copies: before.leaving.map(({ copy }) => copy) };
+  return { animations, copies: fading.map(({ copy }) => copy) };
 };
 
 /** Stops `motion` at once: the rows stand in their places, and the copies of leaving rows go. */
@@ -246,6 +246,9 @@ const stopRowMotion = (motion: RunningMotion): void => {
  * is an empty layer over the scroll element, which clips its content to the
  * list's visible part and takes no pointer.
  *
+ * `options` change how the list moves (see `RowMotionOptions`). They are
+ * read when a change plays, so they may change between renders.
+ *
  * For a change that moves, the hook keeps drawing the old items for one
  * render, which no one sees: it reads where every row is and copies the
  * rows that leave, then draws the new items and starts the motion before
@@ -256,6 +259,7 @@ export const useRowMotion = <Item extends { readonly key: string }>(
   scope: string,
   scrollRef: RefObject<HTMLElement | null>,
   ghostsRef: RefObject<HTMLElement | null>,
+  options: RowMotionOptions = {},
 ): ReadonlyArray<Item> => {
   const [drawn, setDrawn] = useState<DrawnItems<Item>>({ items, scope });
   const before = useRef<ListBefore | null>(null);
@@ -282,7 +286,9 @@ export const useRowMotion = <Item extends { readonly key: string }>(
     // A slide still running would shift the places read next, so it stops
     // first; the new slides start from where the rows showed.
     stopRowMotion(running.current);
-    running.current = playRowMotion(was, scrollRef.current!, ghostsRef.current!);
+    running.current = playRowMotion(was, scrollRef.current!, ghostsRef.current!, options);
+    // The motion plays once for a change; new options alone start none.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawn, scrollRef, ghostsRef]);
 
   // A copy of a leaving row stands where the row was on screen, so it would

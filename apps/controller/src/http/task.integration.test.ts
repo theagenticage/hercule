@@ -1,6 +1,6 @@
 /**
- * Tests `GET /tasks` over a real socket: the order of a listing, and how it
- * pages.
+ * Tests `GET /tasks` over a real socket: the order of a listing, how it
+ * pages, and the boolean `handedOff` filter.
  *
  * Both orders are tested through the API only: a request sets `sort` or
  * `text`, and the tests check only the response.
@@ -132,6 +132,16 @@ describe("the order of a task listing", () => {
         "?status=open&sort=priority:desc&sort=createdAt:desc&limit=3",
       );
       expect(listTitles(page)).toEqual(["B", "A", "C"]);
+    });
+  });
+
+  it("reads handedOff as a boolean: no task here has a handoff entry, so true lists none and false lists all", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      await createTask(base, token, { title: "A" });
+
+      expect(listTitles(await listTasks(base, token, "?handedOff=true"))).toEqual([]);
+      expect(listTitles(await listTasks(base, token, "?handedOff=false"))).toEqual(["A"]);
     });
   });
 
@@ -299,6 +309,38 @@ describe("paging a task listing", () => {
       expect(new Set(seen).size).toBe(seen.length);
       expect(seen).not.toContain(intruder);
       expect(new Set(seen)).toEqual(new Set(created));
+    });
+  });
+});
+
+describe("what a request cannot choose when it creates a task", () => {
+  it("starts the task open with an id of its own, and refuses a provenance entry that records a handoff", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const chosenId = "0199e0e7-0007-7000-8000-000000000000";
+
+      const created = await post(
+        base,
+        "/api/v1/tasks",
+        { title: "t", description: "", id: chosenId, status: "in-progress" },
+        token,
+      );
+      const refused = await post(
+        base,
+        "/api/v1/tasks",
+        {
+          title: "t",
+          description: "",
+          provenance: [{ signalId: "0199e0e7-0005-7000-8000-000000000000" }],
+        },
+        token,
+      );
+
+      expect(created.status).toBe(200);
+      const task = (await created.json()) as Task;
+      expect(task.id).not.toBe(chosenId);
+      expect(task.status).toBe("open");
+      expect(refused.status).toBe(400);
     });
   });
 });

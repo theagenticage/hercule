@@ -344,7 +344,7 @@ export {
   type RunInputIssues,
   type RunInputValue,
 } from "./run-inputs";
-export { createLive, type Live } from "./live/live";
+export { createLive, type Live, type LiveInvalidatePush } from "./live/live";
 export { invalidateWithoutCancelling } from "./live/invalidation";
 export { readEveryPage } from "./read-every-page";
 export { isMutationRunning } from "./mutation-running";
@@ -426,6 +426,20 @@ export {
   type UrgentSignal,
 } from "./intake";
 export {
+  buildTrackingRows,
+  canMarkTrackingStateDone,
+  countWaitingTrackingRows,
+  describeTrackingLine,
+  groupTrackingRows,
+  isTrackingAffectedByRunPush,
+  listRecentTrackingRows,
+  type TrackingGroup,
+  type TrackingLine,
+  type TrackingRead,
+  type TrackingRow,
+  type TrackingState,
+} from "./tracking";
+export {
   decideSidebarDragEnd,
   DEFAULT_SIDEBAR_LAYOUT,
   DEFAULT_SIDEBAR_WIDTH,
@@ -483,6 +497,18 @@ export {
   updateHolding,
   type HeldSignals,
 } from "./held-signals";
+export {
+  dropTrackingHandoff,
+  dropTrackingRowMarkedDone,
+  followListedTrackingRows,
+  followTrackingRead,
+  recordTrackingHandoff,
+  recordTrackingHandoffCommitted,
+  recordTrackingRowMarkedDone,
+  startHeldTrackingRows,
+  updateTrackingRowsHolding,
+  type HeldTrackingRows,
+} from "./held-tracking-rows";
 export { describeInboxZeroLine, type InboxZeroLine } from "./inbox-zero";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";

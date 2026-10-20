@@ -894,6 +894,21 @@ const renderSignalResolved = (signal: ResolvedSignal): ReadonlyArray<string> => 
 ];
 
 /**
+ * Returns the lines printed after `signal hand-off`: the resolved signal's
+ * line, then the run it started and the command that subscribes to it, as
+ * after `run start`. The run's id is on the signal's resolution, where
+ * `signal.handOff` always records it. The type makes it optional because the
+ * resolution of any other answer has none, so a signal without it prints only
+ * its own line.
+ */
+const renderSignalHandedOff = (signal: ResolvedSignal): ReadonlyArray<string> => {
+  const runId = signal.resolution.runId;
+  return runId === undefined
+    ? renderSignalResolved(signal)
+    : [...renderSignalResolved(signal), ...renderRunStarted({ runId })];
+};
+
+/**
  * Returns the lines printed after `signal done`, `signal snooze`, `signal
  * unsnooze` and `signal lower-priority`: one line per signal the command
  * changed, such as "signal 0b1c2d3e snoozed", then one per signal it skipped
@@ -1440,6 +1455,7 @@ const VALUE_RENDERERS: Partial<
   "signal.read": (value) => renderSignal(value as Signal),
   "signal.raise": (value) => renderSignalRaised(value as SignalRaiseResult),
   "signal.act": (value) => renderSignalResolved(value as ResolvedSignal),
+  "signal.handOff": (value) => renderSignalHandedOff(value as ResolvedSignal),
   "signal.withdraw": (value) => renderSignalResolved(value as ResolvedSignal),
   "signal.markDone": (value) => {
     const { done, skipped } = value as SignalMarkDoneResult;

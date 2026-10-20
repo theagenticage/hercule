@@ -1,6 +1,6 @@
 /**
- * The signal operations: `signal.query`, `read`, `raise`, `act` and
- * `withdraw`, and the four moves that send nothing to the source:
+ * The signal operations: `signal.query`, `read`, `raise`, `act`, `handOff`
+ * and `withdraw`, and the four moves that send nothing to the source:
  * `markDone`, `snooze`, `unsnooze` and `lowerPriority`.
  *
  * A signal is what Intake puts in front of the user because a move is asked
@@ -18,7 +18,9 @@
  * five signals of one group done without answering them, `markDone` offers
  * an Ignore Rule for that group, with Ignore and Dismiss.
  *
- * Only the user takes an action, through `act`. Each action's operation is
+ * Only the user takes an action, through `act`, or hands a signal to a
+ * workflow, through `handOff`, which takes that workflow's Hand to an agent
+ * action. Each action's operation is
  * checked, run and described through the `BoundOperations` port, which the
  * controller daemon implements.
  *
@@ -57,6 +59,7 @@ import {
   type Signal,
   Validation,
   hasSameValues,
+  type AnswerOperation,
   type BoundAction,
   type CoreSignalKind,
   type DescribeLine,
@@ -66,8 +69,10 @@ import {
   type InvalidState,
   type Issue,
   type NotFound,
+  type RunStarted,
   type SignalAction,
   type SignalActInput,
+  type SignalHandOffInput,
   type SignalFilter,
   type SignalIdsInput,
   type SignalLowerPriorityResult,
@@ -115,10 +120,16 @@ import { SignalClaims } from "./claims";
 import { ignoreRuleOffers } from "./ignore-rule-offers";
 import { ignoreRuleRepository } from "./ignore-rule-repository";
 import { buildIgnoredOutcome } from "./outcome";
+import { ALREADY_RESOLVED, checkOffersHandoff, ONLY_THE_USER_HANDS_OFF } from "./handoffs";
 import { signalRepository } from "./repository";
 
 /** The input of `signal.act`: the signal's id, the action to take and its typed reply. */
 export interface ActInput extends SignalActInput {
+  readonly id: Id;
+}
+
+/** The input of `signal.handOff`: the signal's id and the workflow to hand it to. */
+export interface HandOffInput extends SignalHandOffInput {
   readonly id: Id;
 }
 
@@ -165,8 +176,6 @@ const ONLY_THE_USER_LOWERS_PRIORITY =
 
 /** The resolution outcome of Done, which sends nothing to the source. */
 const DONE_OUTCOME = "Done, nothing sent";
-
-const ALREADY_RESOLVED = "the signal is already resolved, so its actions can no longer be taken";
 
 /** The refusal of `act` while another `act` or a `withdraw` on the same signal runs. */
 const SIGNAL_BUSY_FOR_ACT =
@@ -222,6 +231,15 @@ const buildCoreActions = (input: SignalRaiseInput): ReadonlyArray<BoundAction> =
       return [];
   }
 };
+
+/**
+ * Checks whether a checked operation is `signal.handOff`. A plugin action's
+ * id is qualified, so it never equals this id.
+ */
+const isHandOffOperation = (
+  operation: CheckedOperation,
+): operation is Extract<AnswerOperation, { readonly op: "signal.handOff" }> =>
+  operation.op === "signal.handOff";
 
 /**
  * Returns the reply-filled operation of an action for `act`: the stored
@@ -462,6 +480,7 @@ const make = Effect.gen(function* () {
       );
       const lines = yield* operations.describe(
         pending.flat().flatMap((entry) => (entry._tag === "checked" ? [entry.operation] : [])),
+        list,
       );
       // The describer returns the lines in the order of the operations it
       // was given, which is the order this walk visits them in.
@@ -522,8 +541,10 @@ const make = Effect.gen(function* () {
 
   /**
    * Resolves the signal as decided with the action the user took, and
-   * records it, in the caller's transaction. Fails with `InvalidState` when
-   * the signal was resolved in the meantime.
+   * records it, in the caller's transaction. `startedRun` is the run the
+   * action's operation started, if it started one, and is kept as
+   * `resolution.runId`. Fails with `InvalidState` when the signal was
+   * resolved in the meantime.
    */
   const decide = (
     caller: UserActor,
@@ -531,6 +552,7 @@ const make = Effect.gen(function* () {
     action: BoundAction,
     checked: CheckedOperation | null,
     outcome: string,
+    startedRun: RunStarted | undefined,
   ): Effect.Effect<void, InvalidState | SqlError> =>
     Effect.gen(function* () {
       const actor = buildActorStamp(caller);
@@ -538,6 +560,7 @@ const make = Effect.gen(function* () {
         kind: "decided",
         actionId: action.id,
         outcome,
+        ...(startedRun === undefined ? {} : { runId: startedRun.runId }),
         actor,
         origin: buildResolutionOrigin(caller),
         at: yield* nowIso,
@@ -556,7 +579,137 @@ const make = Effect.gen(function* () {
       });
     });
 
+  /**
+   * Takes one action of an open signal: runs its operation as the user,
+   * resolves the signal as decided with that action, and returns the signal
+   * as it reads afterwards. An action that runs nothing only resolves the
+   * signal. Done is not taken here; see `SignalActInput`.
+   *
+   * The rules:
+   *
+   * - Only the user may act; the raiser's grants are never checked, because
+   *   the user's click is the authorisation.
+   * - The action's operation is checked again first, with the typed reply
+   *   filled in, because a plugin, a Connection or a schema may have
+   *   changed since the signal was raised.
+   * - A contract operation runs in the transaction that resolves the
+   *   signal, so both commit or neither does. When the operation starts a
+   *   run, the signal's resolution records it as `runId`.
+   * - A plugin action reaches outside the controller, so it runs outside any
+   *   transaction (ADR 0004), and the signal is resolved after it succeeds.
+   * - Every action holds the claim on the signal while it runs, and the
+   *   signal is read only once the claim is held. So a second action, or a
+   *   withdrawal, is refused until the first action ends, and an action
+   *   never runs on a signal that was resolved a moment before.
+   *
+   * Fails with:
+   *
+   * - `Forbidden` for any caller but the user;
+   * - `NotFound` if the signal does not exist or has no such action;
+   * - `InvalidState` if the signal is already resolved, or another action
+   *   or a withdrawal on it is running;
+   * - `Validation` if the typed reply is missing or not wanted, or the
+   *   operation no longer passes the check, or the action hands off a signal
+   *   other than this one; the signal stays open;
+   * - the operation's own error when it fails; the signal stays open.
+   */
+  const act = (input: ActInput): Effect.Effect<Signal, BoundOperationError> =>
+    Effect.gen(function* () {
+      const caller = yield* requireUserActor("signal.act", ONLY_THE_USER);
+      return yield* claims.withSignalsClaimed(
+        [input.id],
+        SIGNAL_BUSY_FOR_ACT,
+        Effect.gen(function* () {
+          const signal = yield* readOrFail(input.id);
+          if (signal.status !== "open") {
+            return yield* Effect.fail(createInvalidStateError(ALREADY_RESOLVED));
+          }
+          const action = signal.actions.find((candidate) => candidate.id === input.actionId);
+          if (action === undefined) {
+            const offered = signal.actions.map((offer) => offer.id).join(", ");
+            return yield* Effect.fail(
+              createNotFoundError(
+                `the signal has no action "${input.actionId}"; its actions are ${offered}`,
+              ),
+            );
+          }
+          const operation = yield* fillTypedReply(action, input.text);
+          const checked =
+            operation === null
+              ? null
+              : yield* operations.check("signal.answer", operation, undefined, []);
+          if (
+            checked !== null &&
+            isHandOffOperation(checked) &&
+            checked.input.signalId !== signal.id
+          ) {
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["actionId"],
+                  message: `The action ${action.id} hands off another signal, ${checked.input.signalId}, not this one. A Hand to an agent action hands off the signal it sits on. Take another action.`,
+                },
+              ]),
+            );
+          }
+          if (checked !== null && isPluginAnswerOperation(checked)) {
+            const pluginOutcome = yield* operations.runPluginAction(checked);
+            const outcome = yield* writeOutcome(signal, action, pluginOutcome);
+            yield* withTransaction(
+              sql,
+              decide(caller, signal, action, checked, outcome, undefined),
+            );
+          } else {
+            yield* withTransaction(
+              sql,
+              Effect.gen(function* () {
+                const startedRun = checked === null ? undefined : yield* operations.run(checked);
+                const outcome = yield* writeOutcome(signal, action, undefined);
+                yield* decide(caller, signal, action, checked, outcome, startedRun);
+              }),
+            );
+          }
+          return yield* readOrFail(input.id);
+        }),
+      );
+    });
+
+  /**
+   * Hands an open signal to a workflow as the user, and returns the signal as
+   * it reads afterwards. It takes the signal's Hand to an agent action for
+   * that workflow, with `act`, so it holds the same claim, runs the action's
+   * `signal.handOff` operation and resolves the signal in one transaction.
+   *
+   * A signal raised before `signal.handOff` existed offers a `run.start` Hand
+   * to an agent action, and this takes that one: it starts an untracked run
+   * (ADR 0046).
+   *
+   * Fails with:
+   *
+   * - `Forbidden` for any caller but the user;
+   * - `NotFound` if the signal does not exist, or does not offer a Hand to an
+   *   agent action for the workflow; the message lists the workflows it
+   *   offers;
+   * - `InvalidState` if the signal is already resolved, or another action or
+   *   a withdrawal on it is running;
+   * - the operation's own error when it fails, such as `Validation` for a
+   *   workflow that cannot start now; the signal stays open and no Task is
+   *   written.
+   */
+  const handOff = (input: HandOffInput): Effect.Effect<Signal, BoundOperationError> =>
+    Effect.gen(function* () {
+      yield* requireUserActor("signal.handOff", ONLY_THE_USER_HANDS_OFF);
+      const signal = yield* readOrFail(input.id);
+      yield* checkOffersHandoff(signal, input.workflowId);
+      const actionId = `${HAND_TO_ACTION_PREFIX}${input.workflowId}`;
+      return yield* act({ id: input.id, actionId });
+    });
+
   return {
+    act,
+
+    handOff,
+
     /**
      * Returns one view of the signals, with the filters applied:
      *
@@ -686,82 +839,6 @@ const make = Effect.gen(function* () {
           }),
         );
         return { signalId: id };
-      }),
-
-    /**
-     * Takes one action of an open signal: runs its operation as the user,
-     * resolves the signal as decided with that action, and returns the signal
-     * as it reads afterwards. An action that runs nothing only resolves the
-     * signal. Done is not taken here; see `SignalActInput`.
-     *
-     * The rules:
-     *
-     * - Only the user may act; the raiser's grants are never checked, because
-     *   the user's click is the authorisation.
-     * - The action's operation is checked again first, with the typed reply
-     *   filled in, because a plugin, a Connection or a schema may have
-     *   changed since the signal was raised.
-     * - A contract operation runs in the transaction that resolves the
-     *   signal, so both commit or neither does.
-     * - A plugin action reaches outside the controller, so it runs outside any
-     *   transaction (ADR 0004), and the signal is resolved after it succeeds.
-     * - Every action holds the claim on the signal while it runs, and the
-     *   signal is read only once the claim is held. So a second action, or a
-     *   withdrawal, is refused until the first action ends, and an action
-     *   never runs on a signal that was resolved a moment before.
-     *
-     * Fails with:
-     *
-     * - `Forbidden` for any caller but the user;
-     * - `NotFound` if the signal does not exist or has no such action;
-     * - `InvalidState` if the signal is already resolved, or another action
-     *   or a withdrawal on it is running;
-     * - `Validation` if the typed reply is missing or not wanted, or the
-     *   operation no longer passes the check; the signal stays open;
-     * - the operation's own error when it fails; the signal stays open.
-     */
-    act: (input: ActInput): Effect.Effect<Signal, BoundOperationError> =>
-      Effect.gen(function* () {
-        const caller = yield* requireUserActor("signal.act", ONLY_THE_USER);
-        return yield* claims.withSignalsClaimed(
-          [input.id],
-          SIGNAL_BUSY_FOR_ACT,
-          Effect.gen(function* () {
-            const signal = yield* readOrFail(input.id);
-            if (signal.status !== "open") {
-              return yield* Effect.fail(createInvalidStateError(ALREADY_RESOLVED));
-            }
-            const action = signal.actions.find((candidate) => candidate.id === input.actionId);
-            if (action === undefined) {
-              const offered = signal.actions.map((offer) => offer.id).join(", ");
-              return yield* Effect.fail(
-                createNotFoundError(
-                  `the signal has no action "${input.actionId}"; its actions are ${offered}`,
-                ),
-              );
-            }
-            const operation = yield* fillTypedReply(action, input.text);
-            const checked =
-              operation === null
-                ? null
-                : yield* operations.check("signal.answer", operation, undefined, []);
-            if (checked !== null && isPluginAnswerOperation(checked)) {
-              const pluginOutcome = yield* operations.runPluginAction(checked);
-              const outcome = yield* writeOutcome(signal, action, pluginOutcome);
-              yield* withTransaction(sql, decide(caller, signal, action, checked, outcome));
-            } else {
-              yield* withTransaction(
-                sql,
-                Effect.gen(function* () {
-                  if (checked !== null) yield* operations.run(checked);
-                  const outcome = yield* writeOutcome(signal, action, undefined);
-                  yield* decide(caller, signal, action, checked, outcome);
-                }),
-              );
-            }
-            return yield* readOrFail(input.id);
-          }),
-        );
       }),
 
     /**

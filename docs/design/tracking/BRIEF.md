@@ -85,6 +85,8 @@ As Round Trip's: the face of the agent that has the work, in its pose (working, 
 | Working, on a subscription | "*Implement* · waiting for checks on #1311" |
 | Stopped | "*Implement* · stopped by you" |
 
+*(Amended 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* Slice 1 does not build three of these lines as drawn. The agent's latest message is not available: no field, read or push carries it, and the `session` topic does not bring it. The Working row reads "*Fix bug* · working" until a follow-up ticket adds a server-kept field for it. A Stopped row reads "*Implement* · stopped", because a run summary does not say who cancelled the run. A Working row that only waits on signal triggers reads "*Implement* · waiting for checks_passed", with the awaited trigger ids, because "waiting for checks on #1311" needs the run's plan and inputs, which the summary does not carry.
+
 - The workflow's name is in its colleague's hue.
 - The time on the right is how long the row has been in its state. It is bold, in marigold or green, when the row waits on the user.
 - Mark done shows on hover over Finished, Failed and Stopped rows only. On Working and Needs you it would leave a run going.
@@ -177,7 +179,7 @@ A change the user did not make waits while the pointer is on the list column.
 | A row is marked done or cancelled | it fades over `--dur-1`, then the rows below close the gap over `--dur-3` | as Intake's own Done |
 | A Working row's line changes | the new line fades in over `--dur-2` | one opacity animation per new agent message, only for rows on screen. See below |
 
-The Working row's line is the agent's latest message, which the `session` topic already brings. It is the one per-message cost Tracking adds, and slice 1 measures it. Rogier keeps it for now. He is open to dropping it, and showing the workflow name alone, if it proves complex or costly.
+The Working row's line is the agent's latest message. *(Amended 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801): the `session` topic does not bring it, as this brief first said, and no field carries it. Slice 1 does not build the line, so it adds no per-message cost; a follow-up ticket adds the field and measures the cost.)* It is the one per-message cost Tracking would add. Rogier keeps it for now. He is open to dropping it, and showing the workflow name alone, if it proves complex or costly.
 
 No loop runs, faces in lists are still, and the times read the shared age clock once a minute.
 

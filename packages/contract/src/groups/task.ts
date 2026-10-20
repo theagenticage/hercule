@@ -20,6 +20,7 @@ import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 import { EventId } from "./event-record";
+import { RunStatus } from "./run-status";
 
 /** The longest title. A title is a line, not a paragraph. */
 export const MAX_TASK_TITLE_LENGTH = 512;
@@ -75,13 +76,19 @@ const TaskDescription = bounded(0, MAX_TASK_DESCRIPTION_LENGTH);
 
 /**
  * One entry in a task's record of what created or touched it: the external
- * thing, the event, the run, or any combination of the three.
+ * thing, the event, the run, the signal, or any combination of the four.
  */
 export const ProvenanceEntry = Schema.Struct({
   ref: Schema.optionalKey(ExternalRef),
   /** An event's id, which is its position in the log, and so an integer. */
   eventId: Schema.optionalKey(EventId),
   runId: Schema.optionalKey(Id),
+  /**
+   * The signal the user handed to an agent, when this entry records that
+   * handoff. Only `signal.handOff` writes it, so a task with such an entry is
+   * work the user handed off from Intake.
+   */
+  signalId: Schema.optionalKey(Id),
   at: Timestamp,
   actor: Actor,
 });
@@ -108,6 +115,7 @@ const ProvenanceInput = Schema.Struct({
   ref: Schema.optionalKey(ExternalRef),
   eventId: Schema.optionalKey(EventId),
   runId: Schema.optionalKey(Id),
+  signalId: Schema.optionalKey(CoreStampedField),
   at: Schema.optionalKey(CoreStampedField),
   actor: Schema.optionalKey(CoreStampedField),
 }).check(
@@ -195,6 +203,12 @@ export const TaskFilter = Schema.Struct({
   labels: Schema.optionalKey(atMost(Label, MAX_FILTER_VALUES)),
   status: Schema.optionalKey(atMost(TaskStatus, MAX_FILTER_VALUES)),
   projectId: Schema.optionalKey(Id),
+  /**
+   * `true` lists only the tasks with a handoff entry in their provenance: an
+   * entry that names a signal the user handed to an agent. `false` lists only
+   * the tasks without one.
+   */
+  handedOff: Schema.optionalKey(Schema.Boolean),
   text: Schema.optionalKey(bounded(1, MAX_SEARCH_TEXT_LENGTH)),
 });
 
@@ -273,6 +287,76 @@ export const TaskUpdateCall = Schema.Struct({ taskId: Id, ...TASK_UPDATE_FIELDS 
 
 export type TaskUpdateCall = Schema.Schema.Type<typeof TaskUpdateCall>;
 
+/**
+ * The most handoffs a Tracking row holds. A Task that was handed more than
+ * this many signals returns its newest ones, so the reply does not grow with a
+ * Task's history.
+ */
+export const MAX_TRACKING_HANDOFFS = 10;
+
+/**
+ * One handoff of a signal to the Task's workflow: the signal the user handed
+ * off, the run that started, and when. It is a provenance entry that names a
+ * signal.
+ */
+export const TrackingHandoff = Schema.Struct({ signalId: Id, runId: Id, at: Timestamp });
+
+export type TrackingHandoff = Schema.Schema.Type<typeof TrackingHandoff>;
+
+/**
+ * What a client needs to know about one run of a tracked Task to work out
+ * where the work stands. It holds a run summary's fields plus `failureCause`,
+ * so no row needs a `run.read`.
+ */
+export const TrackingRun = Schema.Struct({
+  id: Id,
+  /** `null` for a run of a workflow that was sent with the run and never stored. */
+  workflowId: Schema.NullOr(Id),
+  /** The workflow's name as it was when the run started. */
+  workflowName: Schema.String,
+  status: RunStatus,
+  createdAt: Timestamp,
+  startedAt: Schema.optionalKey(Timestamp),
+  finishedAt: Schema.optionalKey(Timestamp),
+  /**
+   * The ids of the signal triggers a running run waits on, when it has no
+   * step to run and waits for one of them. Empty for any other run.
+   */
+  awaitedSignalIds: Schema.Array(Schema.String),
+  /**
+   * Why the run failed, in a few words, such as "permission denied on
+   * ops-db": the failure message, the message of the edge it failed at, or the
+   * error of the step that failed, else the failure reason in plain words.
+   * Present only for a failed run.
+   */
+  failureCause: Schema.optionalKey(Schema.String),
+});
+
+export type TrackingRun = Schema.Schema.Type<typeof TrackingRun>;
+
+/** One Task that Tracking follows, with the facts its state is worked out from. */
+export const TrackingTask = Schema.Struct({
+  taskId: Id,
+  title: Schema.String,
+  /**
+   * The Task's newest handoffs, newest first, at most `MAX_TRACKING_HANDOFFS`.
+   * A client that waits for its own handoff to show looks for the receipt
+   * here; an older handoff has no bearing on where the work stands.
+   */
+  handoffs: atMost(TrackingHandoff, MAX_TRACKING_HANDOFFS),
+  /** The Task's newest run, by creation time. */
+  latestRun: TrackingRun,
+  /** The Task's newest run that is pending or running, when one is. */
+  latestLiveRun: Schema.optionalKey(TrackingRun),
+});
+
+export type TrackingTask = Schema.Schema.Type<typeof TrackingTask>;
+
+/** What `task.queryTracking` returns: every Task Tracking follows. */
+export const TaskTracking = Schema.Struct({ rows: Schema.Array(TrackingTask) });
+
+export type TaskTracking = Schema.Schema.Type<typeof TaskTracking>;
+
 export const task = HttpApiGroup.make("task")
   .add(
     HttpApiEndpoint.get("query", "/tasks", {
@@ -282,6 +366,12 @@ export const task = HttpApiGroup.make("task")
       }),
       success: page(Task),
       error: [Unauthenticated, Forbidden, Validation, Internal],
+    }),
+    // A static path beside `/tasks/:id`: the router prefers it, and "tracking"
+    // is not an id.
+    HttpApiEndpoint.get("queryTracking", "/tasks/tracking", {
+      success: TaskTracking,
+      error: [Unauthenticated, Forbidden, Internal],
     }),
     HttpApiEndpoint.get("read", "/tasks/:id", {
       params: { id: Id },

@@ -79,6 +79,7 @@ import {
   RunExecutorLayer,
   RunServiceReferenceFill,
   RunTargetsLayer,
+  TaskTrackingRunsLayer,
   TriggeredRunsLayer,
   WorkflowRunsLayer,
   WorkflowSignalsLayer,
@@ -89,6 +90,7 @@ import {
   IgnoreRuleService,
   IgnoreRuleServiceLayer,
   SignalClaimsLayer,
+  SignalHandoffsLayer,
   SignalRaisesLayer,
   SignalService,
   SignalServiceLayer,
@@ -107,7 +109,7 @@ import { ProviderService } from "../providers";
 import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
 import { RunService, RunServiceLayer } from "../runs";
 import { Setup, SetupLayer } from "../setup";
-import { TaskService, TaskServiceLayer } from "../tasks";
+import { TaskService, TaskServiceLayer, TaskTracking, TaskTrackingLayer } from "../tasks";
 import { User, UserLayer } from "../users";
 import {
   CronTriggerSchedulerLayer,
@@ -260,8 +262,10 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
 const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
   Effect.gen(function* () {
     const tasks = yield* TaskService;
+    const tracking = yield* TaskTracking;
     return handlers
       .handle("query", ({ query }) => withApiErrors(tasks.query(query)))
+      .handle("queryTracking", () => withApiErrors(tracking.query()))
       .handle("read", ({ params }) => withApiErrors(tasks.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(tasks.create(payload)))
       .handle("update", ({ params, payload }) =>
@@ -296,6 +300,9 @@ const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
       .handle("raise", ({ payload }) => withApiErrors(signals.raise(payload)))
       .handle("act", ({ params, payload }) =>
         withApiErrors(signals.act({ id: params.id, ...payload })),
+      )
+      .handle("handOff", ({ params, payload }) =>
+        withApiErrors(signals.handOff({ id: params.id, ...payload })),
       )
       .handle("withdraw", ({ params, payload }) =>
         withApiErrors(signals.withdraw({ id: params.id, ...payload })),
@@ -849,6 +856,7 @@ const TextGenerationStatusLayer = Layer.mergeAll(
 const IgnoreRuleDomainLayer = IgnoreRuleServiceLayer.pipe(Layer.provide(SignalClaimsLayer));
 
 const BoundOperationsDomainLayer = BoundOperationsLayer.pipe(
+  Layer.provide(SignalHandoffsLayer.pipe(Layer.provide(RunDomainLayer))),
   Layer.provide(RunDomainLayer),
   Layer.provide(PermissionRequestsDomainLayer),
   Layer.provide(IgnoreRuleDomainLayer),
@@ -893,6 +901,9 @@ const operationServices = Layer.mergeAll(
   WikiPageServiceLayer,
   SkillServiceLayer,
   ProjectServiceLayer,
+  // Tracking's read gets each Task's newest runs from the runs repository,
+  // which the controller daemon connects to the tasks domain.
+  TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
   // service is provided to it rather than merged next to it. Retiring a runner

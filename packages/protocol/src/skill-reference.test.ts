@@ -13,12 +13,18 @@ const timeScan = (text: string): number => {
   return performance.now() - startedAt;
 };
 
+/** The largest ratio of scan times that still counts as linear growth. See `measureGrowth`. */
+const maxLinearGrowth = 64;
+
 /**
- * Measures how the scan time of a text grows when the text becomes four times as long. Each
+ * Measures how the scan time of a text grows when the text becomes 16 times as long. Each
  * timing repeats the scan until it has run for a few milliseconds, and the result is the best of
  * many timings, so neither the timer resolution nor a busy machine (a timing that the system
- * paused is simply not the best one) decides the result. A linear scan gives a ratio near 4 and a
- * quadratic one near 16, so a bound of 8 leaves a factor of two of noise on each side.
+ * paused is simply not the best one) decides the result. A linear scan gives a ratio near 16 and a
+ * quadratic one near 256, so a bound of `maxLinearGrowth` leaves a factor of four of noise on
+ * each side. The step is this large because a scan of the smaller text takes well under a
+ * millisecond, and with a step of 4 the noise in that one timing was enough to push a linear scan
+ * past the bound.
  */
 const measureGrowth = (build: (size: number) => string): number => {
   const size = 20_000;
@@ -31,7 +37,7 @@ const measureGrowth = (build: (size: number) => string): number => {
     });
     return Math.min(...timings);
   };
-  return measureBestTime(build(size * 4)) / measureBestTime(build(size));
+  return measureBestTime(build(size * 16)) / measureBestTime(build(size));
 };
 
 /** Measures the time of one scan of `text` as the best of a few, in milliseconds. */
@@ -475,8 +481,9 @@ describe("findSkillReferences", () => {
       expect(timeBestScan(text)).toBeLessThan(50);
     });
 
-    // Quadrupling the text must not much more than quadruple the time. These shapes once made a regular
-    // expression backtrack, so the time grew with the square of the text.
+    // Making the text 16 times as long must not make the scan much more than 16 times as slow.
+    // These shapes once made a regular expression backtrack, so the time grew with the square of
+    // the text.
     it.each([
       ["a name with a dash inside", (size: number) => `$a${"-".repeat(size)}b`],
       ["a name with a colon inside", (size: number) => `$a${":".repeat(size)}b`],
@@ -498,7 +505,7 @@ describe("findSkillReferences", () => {
       ["many lazy continuation lines", (size: number) => `> a\n${"b\n".repeat(size / 2)}> $review`],
       ["runs of rising length", (size: number) => "`a ".repeat(size / 3) + "``".repeat(size / 4)],
     ])("scans %s in time that grows less than quadratically", (_name, build) => {
-      expect(measureGrowth(build)).toBeLessThan(8);
+      expect(measureGrowth(build)).toBeLessThan(maxLinearGrowth);
     });
   });
 });

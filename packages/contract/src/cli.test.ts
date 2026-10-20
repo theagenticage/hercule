@@ -91,6 +91,7 @@ const COMMANDS: Record<string, string> = {
   "secret.delete": "secret delete",
 
   "task.query": "task list",
+  "task.queryTracking": "task tracking",
   "task.read": "task read",
   "task.create": "task create",
   "task.update": "task update",
@@ -107,6 +108,7 @@ const COMMANDS: Record<string, string> = {
   "signal.read": "signal read",
   "signal.raise": "signal raise",
   "signal.act": "signal act",
+  "signal.handOff": "signal hand-off",
   "signal.withdraw": "signal withdraw",
   "signal.markDone": "signal done",
   "signal.snooze": "signal snooze",
@@ -334,6 +336,8 @@ const RESOLVES: Record<string, string> = {
   "notification.act id": "notification.query",
   "signal.read id": "signal.query",
   "signal.act id": "signal.query",
+  "signal.handOff id": "signal.query",
+  "signal.handOff workflowId": "workflow.query",
   "signal.withdraw id": "signal.query",
   "signal.markDone signalIds": "signal.query",
   "signal.snooze signalIds": "signal.query",
@@ -679,6 +683,7 @@ const USER_ONLY = [
   "controller.update",
   "conversation.send",
   "signal.act",
+  "signal.handOff",
   "signal.markDone",
   "signal.lowerPriority",
 ];
