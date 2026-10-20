@@ -1,0 +1,272 @@
+/* DRAWING - Tracking: the pane of a selected row, as Round Trip draws its pane.
+
+   Ported from Round Trip (prototype/stay-in-the-loop, round-trip/round-trip.css) with its class
+   names, so the two match pixel for pixel. Every rule is scoped under .rt-pane. No new design
+   tokens: the hairline that joins the trip is --line, as Round Trip's --trip-line was. */
+
+/* ---------- The head ---------- */
+.rt-pane .ad-kind .src .cr {
+  margin: -2px 0;
+}
+.rt-pane .ad-kind .icon-btn {
+  margin-right: -6px;
+}
+
+/* ---------- The trip: you asked, it did, and what waits ---------- */
+.rt-pane .rt-trip {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  margin-top: 22px;
+}
+.rt-pane .rt-msg {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+/* A hairline from each message's face down to the next one: the trip, out and back. */
+.rt-pane .rt-msg:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  top: 34px;
+  bottom: -16px;
+  left: 13.5px;
+  width: 1px;
+  background: var(--line);
+}
+.rt-pane .rt-av {
+  display: grid;
+  justify-items: center;
+  height: 28px;
+}
+/* A source that speaks in the trip, such as GitHub Actions, wears its mark on a sunken disc. */
+.rt-pane .rt-src-av {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--sunken);
+  color: var(--ink);
+}
+.rt-pane .rt-src-av .br {
+  opacity: 0.8;
+}
+.rt-pane .rt-msg-body {
+  min-width: 0;
+}
+.rt-pane .rt-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 22px;
+  margin: 0;
+  color: var(--who-ink, var(--ink));
+}
+.rt-pane .rt-msg--you .rt-name,
+.rt-pane .rt-msg--src .rt-name {
+  color: var(--ink);
+}
+.rt-pane .rt-name small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+
+/* What you asked: the signal you handed off, in two lines. */
+.rt-pane .rt-orig {
+  margin-top: 4px;
+  padding: 1px 0 1px 12px;
+  box-shadow: inset 2px 0 0 var(--line);
+}
+.rt-pane .rt-orig-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.rt-pane .rt-orig-h b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.rt-pane .rt-orig-src {
+  display: inline-grid;
+  color: var(--ink);
+  opacity: 0.8;
+}
+.rt-pane .rt-orig-q {
+  display: -webkit-box;
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--t-13);
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.rt-pane .rt-orig-q code,
+.rt-pane .rt-text code,
+.rt-pane .rt-steps code,
+.rt-pane .rt-ask code {
+  padding: 0 4px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  font-size: 12px;
+}
+
+/* What it did: the agent's last message, why it failed, and the PR it opened. */
+.rt-pane .rt-text {
+  margin: 8px 0 0;
+  font-size: var(--t-14);
+  line-height: 1.55;
+}
+.rt-pane .rt-did p,
+.rt-pane .rt-did ul {
+  margin: 0;
+}
+.rt-pane .rt-did > * + * {
+  margin-top: 6px;
+}
+.rt-pane .rt-did ul {
+  padding-left: 18px;
+}
+.rt-pane .rt-did li + li {
+  margin-top: 4px;
+}
+.rt-pane .rt-fail {
+  padding-left: 12px;
+  box-shadow: inset 2px 0 0 var(--fail);
+}
+.rt-pane .rt-more {
+  display: inline-block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.rt-pane .rt-more:hover {
+  color: var(--ink);
+}
+.rt-pane .rt-verdict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: var(--t-14);
+}
+.rt-pane .rt-verdict b {
+  font-weight: var(--w-bold);
+}
+.rt-pane .rt-verdict .br {
+  opacity: 0.8;
+}
+.rt-pane .rt-verdict .chip {
+  margin-left: 4px;
+}
+.rt-pane .rt-change {
+  margin-top: 12px;
+  font-size: var(--t-12);
+}
+.rt-pane .rt-change .b-change-checks.fail-ink {
+  color: var(--fail-ink);
+}
+
+/* The runs: when each started and how it ended, and for live work what the agent does now. */
+.rt-pane .rt-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--t-13);
+}
+.rt-pane .rt-steps li {
+  display: grid;
+  grid-template-columns: 38px 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.rt-pane .rt-steps time {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.rt-pane .rt-step-dot {
+  justify-self: center;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--faint);
+  opacity: 0.6;
+}
+.rt-pane .rt-steps li.is-live {
+  color: var(--ink);
+}
+
+/* What waits on you: the question a run asks, or the signal that names the work, in the waiting
+   tint, as the Requests dock draws one. */
+.rt-pane .rt-ask {
+  margin-top: 14px;
+  padding: 10px 8px 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--you-tint);
+}
+.rt-pane .rt-ask-q {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-weight: var(--w-medium);
+}
+.rt-pane .rt-ask .ledger {
+  gap: 2px;
+}
+.rt-pane .rt-ask .ans {
+  min-height: 34px;
+}
+.rt-pane .rt-ask .ans:hover {
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+}
+.rt-pane .rt-ask--signal {
+  margin-top: 4px;
+  padding-bottom: 10px;
+}
+.rt-pane .rt-ask--signal .rt-ask-q {
+  align-items: flex-start;
+  margin-bottom: 10px;
+  font-size: var(--t-13);
+  font-weight: var(--w-regular);
+  line-height: 1.5;
+}
+.rt-pane .rt-ask--signal .rt-ask-q .mark {
+  margin-top: 2px;
+}
+
+/* ---------- The verdict ---------- */
+.rt-pane .ad-answers {
+  margin-top: 26px;
+}
+/* A live name in a describe line never breaks across lines. */
+.rt-pane .ans-desc b {
+  white-space: nowrap;
+}
+
+/* ---------- A signal's pane ---------- */
+.rt-pane .tr-check-more {
+  color: var(--muted);
+}
+.rt-pane .b-work > .cr {
+  flex: none;
+}
+
+/* Inline code is a name: it never breaks at its hyphen, so "Retry-After" stays one piece. */
+.rt-pane .rt-text code,
+.rt-pane .rt-orig-q code {
+  white-space: nowrap;
+}
