@@ -528,3 +528,129 @@ export function buildTopicRows(steps: readonly TopicStep[]): string[][] {
     ];
   });
 }
+
+/** What `drivePage` gives a scenario to drive the page with. */
+export interface PageDriver {
+  /** Evaluates `expression` in the page and returns its value, awaited when it is a promise. */
+  readonly evaluate: <T = unknown>(expression: string) => Promise<T>;
+  /** Waits until `expression` evaluates to true in the page. Fails with `message` after `timeoutMs` (10 s unless given). */
+  readonly waitFor: (expression: string, message: string, timeoutMs?: number) => Promise<void>;
+  /**
+   * Waits until the page runs no animation or transition and has run none for
+   * 200 ms, so a cascade that starts late has started too. Fails after
+   * `timeoutMs` (5 s unless given).
+   */
+  readonly waitForAnimationsToEnd: (timeoutMs?: number) => Promise<void>;
+  /** Presses `key`: down, then up. A single letter is also typed. */
+  readonly pressKey: (key: string) => Promise<void>;
+  /** Clicks at the centre of the element `element`, an expression, evaluates to. Fails when it evaluates to none. */
+  readonly click: (element: string) => Promise<void>;
+  /** Moves the pointer to `point`. */
+  readonly movePointer: (point: { readonly x: number; readonly y: number }) => Promise<void>;
+}
+
+/** Returns the helpers a scenario drives the page of the DevTools connection `page` with. */
+export function drivePage(page: Inspector): PageDriver {
+  const evaluate = async <T>(expression: string): Promise<T> =>
+    (await page.evaluate("Runtime.evaluate", {
+      expression,
+      returnByValue: true,
+      awaitPromise: true,
+    })) as T;
+  const waitFor = (expression: string, message: string, timeoutMs = 10_000) =>
+    pollUntil(async () => ((await evaluate(expression)) === true ? true : undefined), {
+      timeoutMs,
+      intervalMs: 50,
+      timeoutMessage: message,
+    }).then(() => undefined);
+  return {
+    evaluate,
+    waitFor,
+    waitForAnimationsToEnd: async (timeoutMs = 5_000) => {
+      const ended = await evaluate<boolean>(`new Promise((resolve) => {
+        const deadline = performance.now() + ${String(timeoutMs)};
+        let idleSince = null;
+        const check = () => {
+          const now = performance.now();
+          if (document.getAnimations().length === 0) {
+            idleSince ??= now;
+            if (now - idleSince >= 200) return resolve(true);
+          } else idleSince = null;
+          if (now > deadline) return resolve(false);
+          setTimeout(check, 50);
+        };
+        check();
+      })`);
+      if (!ended) throw new Error(`the page still ran animations ${String(timeoutMs)} ms later`);
+    },
+    pressKey: async (key) => {
+      const isLetter = key.length === 1;
+      for (const type of ["keyDown", "keyUp"]) {
+        await page.send("Input.dispatchKeyEvent", {
+          type,
+          key,
+          code: isLetter ? `Key${key.toUpperCase()}` : key,
+          windowsVirtualKeyCode: isLetter ? key.toUpperCase().charCodeAt(0) : 0,
+          ...(type === "keyDown" && isLetter ? { text: key } : {}),
+        });
+      }
+    },
+    click: async (element) => {
+      const box = await evaluate<{ x: number; y: number } | null>(`(() => {
+        const element = ${element};
+        if (!element) return null;
+        const box = element.getBoundingClientRect();
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      })()`);
+      if (box === null) throw new Error(`no element for ${element}`);
+      for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+        await page.send("Input.dispatchMouseEvent", {
+          type,
+          ...box,
+          button: "left",
+          clickCount: 1,
+        });
+      }
+    },
+    movePointer: async (point) => {
+      await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+    },
+  };
+}
+
+/**
+ * Waits until the page has been quiet for `quietMs`: no request of the
+ * page's finished and no long task ended in that time. Fails after
+ * `timeoutMs`.
+ *
+ * It connects for each reading and closes the connection again at once, and
+ * it returns with no connection open, so a memory or idle reading that
+ * follows is taken with nothing attached. The first reading leaves a
+ * `PerformanceObserver` for long tasks in the page, a few bytes.
+ */
+export async function waitForQuietPage(
+  pageSocketUrl: string,
+  quietMs = 2_000,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const readQuietMs = `(() => {
+    globalThis.longTaskEnd ??= (() => {
+      const state = { at: 0 };
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) state.at = Math.max(state.at, entry.startTime + entry.duration);
+      }).observe({ type: "longtask", buffered: true });
+      return state;
+    })();
+    const lastResourceEnd = Math.max(0, ...performance.getEntriesByType("resource").map((entry) => entry.responseEnd));
+    return performance.now() - Math.max(lastResourceEnd, globalThis.longTaskEnd.at);
+  })()`;
+  await pollUntil(
+    async () =>
+      ((await evaluateInPage(pageSocketUrl, readQuietMs)) as number) >= quietMs ? true : undefined,
+    {
+      timeoutMs,
+      intervalMs: 500,
+      timeoutMessage: `the page was not quiet for ${String(quietMs)} ms within ${String(timeoutMs)} ms`,
+    },
+  );
+}

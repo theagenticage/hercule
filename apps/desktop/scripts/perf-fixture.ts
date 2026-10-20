@@ -226,8 +226,6 @@ export interface RunSpread {
 export interface ThreadFixture {
   /** The controller's URL. It stays the same when the controller restarts. */
   readonly url: string;
-  /** The scratch Hercule Home of the controller, for a measurement that reads its database. */
-  readonly home: string;
   /**
    * Spawns threads until the controller holds `count`, spread over the
    * projects and the runners as the top of this file describes, and returns
@@ -552,7 +550,6 @@ export async function runWithThreadFixture<T>(
 
       return await use({
         url,
-        home,
         growTo,
         prepareLaunch,
         nudge,

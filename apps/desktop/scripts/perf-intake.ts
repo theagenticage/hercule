@@ -56,6 +56,7 @@ import {
   type TraceEvent,
   waitForPageSocketUrl,
 } from "./perf-measures.ts";
+import { readMainThreadMs } from "./perf-workflows.ts";
 import { pollUntil } from "./poll.ts";
 
 /** How many signals are on To do when Intake is measured. */
@@ -80,6 +81,13 @@ const LAUNCH_SETTLE_MS = 5_000;
 /** Intake's list of signals, which holds one `.ask-row` for each row it draws. */
 export const SIGNALS_LIST = 'section[aria-label="Signals"]';
 
+/**
+ * Matches the copies of rows that Intake and Tracking draw over a list while
+ * a row leaves or flies, one child of each layer per copy. A measured change
+ * must leave none behind.
+ */
+const COPY_LAYERS = ".asks-ghosts > *, .tr-ghosts > *, .tr-fly > *";
+
 /** The header's button that opens and closes the split's pane. */
 const PANE_TOGGLE = ".asks-pane-btn";
 
@@ -89,24 +97,31 @@ const PANE_TOGGLE = ".asks-pane-btn";
  * The list is virtualized, so its rows cannot be counted; the segment counts
  * the whole of To do.
  */
-const buildIntakeShown = (count: number) => `(() => {
+export const buildIntakeShown = (count: number) => `(() => {
   const segments = [...document.querySelectorAll('[role="tablist"][aria-label="Sidebar"] [role="tab"]')];
   return document.querySelector(${JSON.stringify(`${SIGNALS_LIST} .ask-row`)}) !== null &&
     segments.some((segment) => segment.getAttribute("aria-label") === "Hercule, ${String(count)} to do");
 })()`;
 
+/** How many signals `raiseSignals` raises at once. */
+const RAISE_BATCH = 25;
+
 /**
- * Raises `count` signals through `signal.raise`, one after another, titled
- * `title` and their number (see `raiseSignal`). Fails when the controller
- * refuses one.
+ * Raises `count` signals through `signal.raise`, titled `title` and their
+ * number (see `raiseSignal`), `RAISE_BATCH` at a time. Fails when the
+ * controller refuses one. The signals' order on To do is the order the
+ * controller stamps them in, which within a batch is not their number.
  */
 export async function raiseSignals(
   fixture: ThreadFixture,
   count: number,
   title: string,
 ): Promise<void> {
-  for (let number = 1; number <= count; number += 1) {
-    await raiseSignal(fixture, `${title} ${String(number)}`);
+  for (let first = 1; first <= count; first += RAISE_BATCH) {
+    const batch = Array.from({ length: Math.min(RAISE_BATCH, count - first + 1) }, (_, index) =>
+      raiseSignal(fixture, `${title} ${String(first + index)}`),
+    );
+    await Promise.all(batch);
   }
 }
 
@@ -331,14 +346,6 @@ export async function measureIntakeWork(
       if (rendererPid === undefined) throw new Error("the app has no renderer process");
       const controllerPid = fixture.readControllerPid();
       await page.send("Performance.enable");
-      const readMainThreadMs = async () => {
-        const { metrics } = (await page.send("Performance.getMetrics")) as {
-          metrics: { name: string; value: number }[];
-        };
-        const seconds = metrics.find((metric) => metric.name === "TaskDuration")?.value;
-        if (seconds === undefined) throw new Error("the page reports no TaskDuration metric");
-        return seconds * 1_000;
-      };
       const readPageNow = async () => (await evaluate("performance.now()")) as number;
       const countToDoReads = async (from: number) =>
         (await evaluate(`performance.getEntriesByType("resource").filter((entry) => {
@@ -351,7 +358,7 @@ export async function measureIntakeWork(
       const before = {
         controller: await readCpuMs(controllerPid),
         renderer: await readCpuMs(rendererPid),
-        mainThread: await readMainThreadMs(),
+        mainThread: await readMainThreadMs(page),
       };
       for (let push = 1; push <= PUSH_COUNT; push += 1) {
         await raiseSignal(fixture, `Pushed signal ${String(push)}`);
@@ -361,7 +368,7 @@ export async function measureIntakeWork(
       const after = {
         controller: await readCpuMs(controllerPid),
         renderer: await readCpuMs(rendererPid),
-        mainThread: await readMainThreadMs(),
+        mainThread: await readMainThreadMs(page),
       };
       const pushes: PushCost = {
         controllerCpuMs: after.controller - before.controller,
@@ -526,12 +533,15 @@ const ROWS_BEFORE_ARRIVAL = 3;
 export const POINTER_OFF_LIST = { x: 100, y: 400 };
 
 /**
- * How long a measured change runs before its recording is read, in
- * milliseconds. It covers the change's request, the read it causes, the
- * longest motion (inbox zero's 1,120 ms) and the second after, so nothing
- * talks to the page while the second after the motion is recorded.
+ * The longest a measured change may take to end its motion, in milliseconds
+ * after the change. It covers the change's request, the read it causes and the
+ * longest motion (inbox zero's 1,120 ms). A motion still running then fails
+ * the measurement.
  */
 const MOTION_RECORD_MS = 3_500;
+
+/** How long a recording runs after the motion ends: the second `MotionCost` reports, with a margin. */
+const SECOND_AFTER_MOTION_MS = 1_050;
 
 /**
  * How long inbox zero's arrival runs here, as spec 17 §Motion sets it, in
@@ -685,6 +695,12 @@ export interface ListChange {
   readonly endsWhen: string;
   /** An expression that must evaluate to true, in the page, in at least one frame of the motion. */
   readonly mustSee: string;
+  /**
+   * Whether CSS transitions are left out of the count. A hover or a focus
+   * change starts one, and it may change paint properties (spec 17 §Rules 2),
+   * so it is neither the motion's start nor part of it.
+   */
+  readonly ignoresTransitions?: boolean;
 }
 
 /**
@@ -694,7 +710,7 @@ export interface ListChange {
  * - the page's animation frames, from the change until the motion's end,
  *   and the animations it ran on Intake, with their start times;
  * - the renderer main thread's tasks and frames from a Chromium trace,
- *   which runs from the change until `MOTION_RECORD_MS` after it;
+ *   which runs from the change until a second after the motion ends;
  * - the animations and the ghost layer's copies left when the trace ends.
  *
  * Fails when the change moves nothing on Intake, when the motion does not end
@@ -743,7 +759,7 @@ export async function measureListChange(
     const step = (at) => {
       const running = document
         .getAnimations()
-        .filter((animation) => animation.playState === "running" && intake.contains(animation.effect?.target ?? null));
+        .filter((animation) => animation.playState === "running" && intake.contains(animation.effect?.target ?? null) && !(${String(measured.ignoresTransitions === true)} && animation instanceof CSSTransition));
       for (const animation of running) {
         if (!record.animations.has(animation)) {
           const names = (animation.effect?.getKeyframes?.() ?? [])
@@ -779,7 +795,22 @@ export async function measureListChange(
     requestAnimationFrame(step);
   })()`);
   await measured.change();
-  await sleep(MOTION_RECORD_MS);
+  // The recording runs until a second after the motion ends, so the second
+  // after it is in the trace. When the motion never ends, it runs until
+  // `MOTION_RECORD_MS`, and the failure below says so.
+  await page.evaluate("Runtime.evaluate", {
+    expression: `new Promise((resolve) => {
+      const deadline = performance.now() + ${String(MOTION_RECORD_MS)};
+      const check = () =>
+        globalThis.motionRecord.last !== undefined || performance.now() > deadline
+          ? resolve(true)
+          : setTimeout(check, 25);
+      check();
+    })`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  await sleep(SECOND_AFTER_MOTION_MS);
   await page.send("Tracing.end");
   const events = await readTrace(page);
   const recorded = (await evaluate(`(() => {
@@ -793,7 +824,7 @@ export async function measureListChange(
       kinds: [...record.kinds].map(([kind, count]) => String(count) + " x " + kind).sort(),
       sawExpected: record.sawExpected,
       animationsAfter: document.getAnimations().length,
-      ghostsAfter: document.querySelector(".asks-ghosts")?.childElementCount ?? 0,
+      ghostsAfter: document.querySelectorAll(${JSON.stringify(COPY_LAYERS)}).length,
     };
   })()`)) as {
     rowsBefore: number;

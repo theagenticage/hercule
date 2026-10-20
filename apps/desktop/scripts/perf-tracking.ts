@@ -1,492 +1,694 @@
 /**
  * The desktop perf script's Tracking scenario: it measures the rows of spec 17
  * §What Intake costs that begin "Tracking" (#801). `perf.ts --tracking-only`
- * runs it. The idle rows (processes, memory, wakeups, the age clock) come
- * from two launches `perf.ts` measures as it measures Intake's: one with
- * nothing tracked and one after `seedTracking`, so the pair shows what the
- * rows add. This file measures the rest:
+ * runs it:
  *
- * - `measureTrackingReads`: what the two reads cost on the controller, with
- *   10 tracked Tasks and with 210 (see `seedMoreTracking`), and the query
- *   plan of each, which must name an index;
- * - `measureTrackingWork`, in one plain launch on Intake:
- *   - the requests the shell makes for Tracking while it loads;
- *   - the requests, the pushes and the renderer's main thread for a Task
- *     created and for a run that is not about a Task, which is a push on the
- *     `task` and on the `run` topic;
- *   - the animations of opening and closing Tracking, of a state change, of a
- *     handoff and of a tick-off (see `measureListChange`).
+ * 1. Two idle launches of Intake, one with `TRACKED_COUNT` Tasks tracked
+ *    (`seedTracking`) and one with nothing tracked (`releaseTracking`), which
+ *    `perf.ts` measures with nothing attached. The pair shows what the rows add.
+ * 2. One interaction launch (`measureTrackingInteractions`) of the same app,
+ *    with a collector attached from before the page loads (`perf-collector.ts`).
+ *    It runs every scenario in that one app, against the one controller: the
+ *    reads of the shell's start, pushes with nothing tracked, `TRACKED_COUNT`
+ *    handoffs, the same pushes with Tasks tracked, the hidden window and the
+ *    motion.
  *
- * The scenario runs twice in `--tracking-only`, so a push is measured with
- * nothing tracked too: a push then must make no read of the runs.
+ * What the controller spends on the read is the controller benchmark's to
+ * measure against the real statements, not this script's.
+ *
+ * Every wait is for an event: the state a change must reach, then the reads it
+ * caused, then every animation. Only a case that expects no read keeps a fixed
+ * window, because no event can prove that nothing comes.
  *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
  */
-import { DatabaseSync } from "node:sqlite";
-import { join } from "node:path";
 import { loadavg } from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { RunStarted, Signal, WorkflowSaveResult } from "../../../packages/contract/src/index";
+import type {
+  RunStarted,
+  Signal,
+  TaskTracking,
+  WorkflowSaveResult,
+} from "../../../packages/contract/src/index";
 import {
   assertExitedCleanly,
   connectInspector,
+  evaluateInMain,
   formatTable,
   launchPlainApp,
   stopPlainApp,
   type Inspector,
 } from "./packaged-app.ts";
+import { startCollector, type Collector, type Recording } from "./perf-collector.ts";
 import type { ThreadFixture } from "./perf-fixture.ts";
 import {
+  buildIntakeShown,
   droppedNoMotionFrame,
   formatMotion,
+  INTAKE_SIGNALS,
   isStillAfter,
   measureListChange,
   POINTER_OFF_LIST,
-  PUSH_SETTLE_MS,
   raiseSignal,
   SIGNALS_LIST,
   type MotionCost,
 } from "./perf-intake.ts";
-import { RECORD_FRAMES, waitForPageSocketUrl } from "./perf-measures.ts";
+import { drivePage, waitForPageSocketUrl, type PageDriver } from "./perf-measures.ts";
+import { readMainThreadMs } from "./perf-workflows.ts";
 import { pollUntil } from "./poll.ts";
 
-/** How many Tasks of each state `seedTracking` tracks. */
-export const TRACKED = { finished: 4, failed: 2, working: 3, stopped: 1 } as const;
+/**
+ * Whether the run is the fast mode, `--tracking-fast`: the two idle launches
+ * sample once the page is quiet. The report says so; the canonical idle stays
+ * the reference.
+ */
+export const FAST_MODE = process.argv.includes("--tracking-fast");
 
-/** How many Tasks are tracked after `seedTracking`. */
-export const TRACKED_COUNT = Object.values(TRACKED).reduce((sum, count) => sum + count, 0);
+/**
+ * What the scenarios know about the page. Change a selector here when the
+ * screen changes. Folded and opened Tracking are both a `.tr-tray` in the list
+ * column. A sheet that is closing stays mounted and `inert` for its 180 ms
+ * while the fold is drawn, so the live tray is the one that is not `inert`;
+ * the opened sheet carries `is-open`.
+ */
+const LIVE_TRAY = ".asks-list > section.tr-tray:not([inert])";
+const PAGE = {
+  foldedCount: `${LIVE_TRAY}:not(.is-open) .tr-label .count`,
+  openTray: `${LIVE_TRAY}.is-open`,
+  row: `${LIVE_TRAY} .tr-run-item`,
+  rowTitle: ".tr-run-title",
+  rowButton: ".tr-run",
+  signalRow: `${SIGNALS_LIST} .ask-row`,
+  handToReviewButton: 'button[aria-label="Hand to Review PR"]',
+} as const;
 
-/** How many more Tasks `seedMoreTracking` tracks, for the reads at scale. */
-export const MORE_TRACKED = 200;
+/** The routes of Tracking's reads, by operation. A GET to any other `/tasks` or `/runs` route counts as "other". */
+const SNAPSHOT_ROUTE = "/api/v1/tasks/tracking";
+const RUN_READ_ROUTE = /^\/api\/v1\/runs\/[0-9a-f-]{36}$/;
+const TASKS_OR_RUNS_ROUTE = /^\/api\/v1\/(tasks|runs)(\/|$)/;
 
-/** The most task ids one `run.query` takes (`MAX_RUN_FILTER_TASK_IDS`). */
-const RUN_FILTER_TASK_IDS = 100;
+/** How many Tasks `seedTracking` tracks, and how many changes each series makes. */
+export const TRACKED_COUNT = 10;
+const SERIES_CHANGES = 10;
 
-/** The tray of Tracking in the list column. The sheet's closing copy (`.tr-fly`) is not a child of the list. */
-const TRAY = ".asks-list > section.tr-tray";
+/**
+ * How long nothing may begin, end or arrive before a change counts as read:
+ * the controller's 50 ms window that gathers pushes, the page's wait before it
+ * reads, and the read. A hidden page runs timers once a second, so it waits longer.
+ */
+const QUIET_READS_MS = 400;
+const QUIET_READS_HIDDEN_MS = 1_800;
 
-/** How many times each read is timed on the controller. */
-const READ_SAMPLES = 30;
-
-/** How many Tasks, and how many runs not about a Task, are created one at a time, and how far apart. */
-const PUSH_COUNT = 10;
-const PUSH_INTERVAL_MS = 1_000;
-
-/** How long the launch rests after Intake has shown, before the first step, so the launch's own work is over. */
-const LAUNCH_SETTLE_MS = 5_000;
-
-/** How many signals stay on To do before the handoff, so the signals that offer a handoff land on screen. */
-const SIGNALS_BEFORE_HANDOFF = 2;
+/** The motion tokens `--dur-1`, `--dur-2` and `--dur-3`, in milliseconds. */
+const DUR_1_MS = 120;
+const DUR_2_MS = 200;
+const DUR_3_MS = 320;
 
 /** The Task id the failing workflow's step updates; no Task has it. */
 const MISSING_TASK_ID = "0199c0ff-7777-7000-8000-000000000001";
 
-/** The workflows `seedTracking` makes, by the name the Hand to answers carry. */
-interface TrackingWorkflows {
+let lastProgressAt = Date.now();
+
+/** Prints to stderr how long it has been since the last call, named `step`, so a slow step shows. */
+export function logProgress(step: string): void {
+  const now = Date.now();
+  console.error(`[tracking] ${step}: ${((now - lastProgressAt) / 1_000).toFixed(1)} s`);
+  lastProgressAt = now;
+}
+
+// ---------------------------------------------------------------------------
+// Seeding: workflows, handoffs, and the barriers that wait for their runs.
+
+/** The workflows the handoffs go to, by id. */
+export interface TrackingWorkflows {
   /** Waits a day: its runs stay live until cancelled. */
   readonly implement: string;
-  /** Waits a second, then completes. */
+  /**
+   * Waits 4 s, then completes. A handoff measured for its motion needs the run
+   * to stay Working until the recording ends, a second after the motion.
+   */
   readonly review: string;
   /** Fails at once. */
   readonly investigate: string;
+  /** Takes no signal and waits a second: a run that is not about a Task. */
+  readonly pause: string;
 }
 
-/** Makes an enabled workflow with a signal input for FYIs and one step, and returns its id. */
-async function createHandoffWorkflow(
+/** Makes an enabled workflow of one step, taking a signal when `takesSignal`, and returns its id. */
+async function createWorkflow(
   fixture: ThreadFixture,
   name: string,
-  action: string,
-  params: Readonly<Record<string, string | number>>,
+  takesSignal: boolean,
+  step: { readonly action: string; readonly params: Readonly<Record<string, string | number>> },
 ): Promise<string> {
+  const inputs = takesSignal
+    ? { inputs: [{ name: "signal", signal: { kinds: ["fyi"] }, required: true }] }
+    : {};
   const { workflow } = await fixture.call<WorkflowSaveResult>("POST", "/workflows", {
-    definition: {
-      name,
-      inputs: [{ name: "signal", signal: { kinds: ["fyi"] }, required: true }],
-      steps: [{ id: "work", kind: "action", action, params }],
-    },
+    definition: { name, ...inputs, steps: [{ id: "work", kind: "action", ...step }] },
   });
   await fixture.call("PATCH", `/workflows/${workflow.id}`, { enabled: true });
   return workflow.id;
 }
 
-/** Makes the three workflows the handoffs go to. */
-const createTrackingWorkflows = async (fixture: ThreadFixture): Promise<TrackingWorkflows> => ({
-  implement: await createHandoffWorkflow(fixture, "Implement", "wait", { seconds: 86_400 }),
-  review: await createHandoffWorkflow(fixture, "Review PR", "wait", { seconds: 1 }),
-  investigate: await createHandoffWorkflow(fixture, "Investigate", "task.update", {
-    taskId: MISSING_TASK_ID,
-    title: "Never",
-  }),
-});
+/** Makes the four workflows. Make them before raising the signals to hand off: a signal offers Hand to for the workflows that exist when it is raised. */
+export async function createTrackingWorkflows(fixture: ThreadFixture): Promise<TrackingWorkflows> {
+  const [implement, review, investigate, pause] = await Promise.all([
+    createWorkflow(fixture, "Implement", true, { action: "wait", params: { seconds: 86_400 } }),
+    createWorkflow(fixture, "Review PR", true, { action: "wait", params: { seconds: 4 } }),
+    createWorkflow(fixture, "Investigate", true, {
+      action: "task.update",
+      params: { taskId: MISSING_TASK_ID, title: "Never" },
+    }),
+    createWorkflow(fixture, "A pause", false, { action: "wait", params: { seconds: 1 } }),
+  ]);
+  return { implement, review, investigate, pause };
+}
 
-/**
- * Raises one signal titled `title`, hands it to the workflow `workflowId`
- * through `signal.handOff`, and returns the id of the run it started. The
- * signal is raised after the workflows exist, because a signal offers Hand to
- * an agent for the workflows that exist when it is raised.
- */
+/** The handoffs that track `TRACKED_COUNT` Tasks: 4 Finished, 2 Failed, 3 Working and 1 Stopped (the first Implement, cancelled after). */
+const TRACKED_PLAN = [
+  ...[1, 2, 3, 4].map((n) => ({ workflow: "review", title: `Review PR #${String(1_300 + n)}` })),
+  ...[1, 2].map((n) => ({ workflow: "investigate", title: `Webhook fails ${String(n)}` })),
+  ...[1, 2, 3, 4].map((n) => ({
+    workflow: "implement",
+    title: `Implement PAY-${String(200 + n)}`,
+  })),
+] as const;
+const STOPPED_INDEX = TRACKED_PLAN.findIndex(({ workflow }) => workflow === "implement");
+
+/** The statuses `TRACKED_PLAN` ends in, by the status of each Task's newest run. */
+const TRACKED_STATUSES = { completed: 4, failed: 2, running: 3, cancelled: 1 };
+
+/** Raises a signal titled `title`, hands it to the workflow `workflowId`, and returns the id of the run that started. */
 async function handOffSignal(
   fixture: ThreadFixture,
   title: string,
   workflowId: string,
 ): Promise<string> {
   const { signalId } = await raiseSignal(fixture, title);
-  const resolved = await fixture.call<Signal>("POST", `/signals/${signalId}/hand-off`, {
+  const handed = await fixture.call<Signal>("POST", `/signals/${signalId}/hand-off`, {
     workflowId,
   });
-  const runId = resolved.resolution?.runId;
-  if (runId === undefined) throw new Error(`the handoff of "${title}" resolved with no run`);
-  return runId;
+  if (handed.resolution?.runId === undefined)
+    throw new Error(`the handoff of "${title}" started no run`);
+  return handed.resolution.runId;
 }
 
-/** Waits until the run `runId` has the status `status`. Fails after 30 s. */
-const waitForRunStatus = (fixture: ThreadFixture, runId: string, status: string): Promise<void> =>
-  pollUntil(
-    async () =>
-      (await fixture.call<{ readonly status: string }>("GET", `/runs/${runId}`)).status === status
+/** Reads Tracking's rows from the controller, as `task.queryTracking` returns them. */
+const readTracking = (fixture: ThreadFixture) =>
+  fixture.call<TaskTracking>("GET", "/tasks/tracking");
+
+/**
+ * Waits until Tracking's rows have exactly these newest-run statuses, counted
+ * by status. Fails after 30 s. It makes a seeded state real: a Working row has
+ * a running run, a Finished row a completed one.
+ */
+async function awaitRunStatuses(
+  fixture: ThreadFixture,
+  expected: Readonly<Record<string, number>>,
+) {
+  await pollUntil(
+    async () => {
+      const counts: Record<string, number> = {};
+      for (const { latestRun } of (await readTracking(fixture)).rows) {
+        counts[latestRun.status] = (counts[latestRun.status] ?? 0) + 1;
+      }
+      const statuses = new Set([...Object.keys(counts), ...Object.keys(expected)]);
+      return [...statuses].every((status) => (counts[status] ?? 0) === (expected[status] ?? 0))
         ? true
-        : undefined,
+        : undefined;
+    },
     {
       timeoutMs: 30_000,
       intervalMs: 100,
-      timeoutMessage: `the run ${runId} was not ${status} within 30 s`,
+      timeoutMessage: `the tracked Tasks' runs did not reach ${JSON.stringify(expected)} within 30 s`,
     },
-  ).then(() => undefined);
-
-/** The workflows and the Tasks' runs `seedTracking` made. */
-export interface SeededTracking {
-  readonly workflows: TrackingWorkflows;
-  /** The runs of the Working rows that are still live, oldest first. */
-  readonly liveRunIds: readonly string[];
+  );
 }
 
 /**
- * Hands signals to workflows until `TRACKED` Tasks are tracked: Finished,
- * Failed, Working and Stopped. The Stopped Task is a Working one whose run is
- * cancelled. Returns once each run has the status its row needs.
- *
- * The handed-off signals leave To do, so To do holds the signals it held
- * before. The runs are about a few minutes old; the next `prepareLaunch`
- * moves them back three hours, so the rows show hours and no label changes
- * during a launch.
+ * Hands the signals of `TRACKED_PLAN` off in parallel and returns once each
+ * run has the status its row needs. The next `prepareLaunch` moves the runs
+ * three hours back, so the rows show hours and no label changes during a launch.
  */
-export async function seedTracking(fixture: ThreadFixture): Promise<SeededTracking> {
-  const workflows = await createTrackingWorkflows(fixture);
-  const finished: string[] = [];
-  const failed: string[] = [];
-  const working: string[] = [];
-  for (let number = 1; number <= TRACKED.finished; number += 1) {
-    finished.push(
-      await handOffSignal(fixture, `Review PR #${String(1_300 + number)}`, workflows.review),
-    );
-  }
-  for (let number = 1; number <= TRACKED.failed; number += 1) {
-    failed.push(
-      await handOffSignal(
-        fixture,
-        `Webhook deliveries fail ${String(number)}`,
-        workflows.investigate,
-      ),
-    );
-  }
-  for (let number = 1; number <= TRACKED.working + TRACKED.stopped; number += 1) {
-    working.push(
-      await handOffSignal(fixture, `Implement PAY-${String(200 + number)}`, workflows.implement),
-    );
-  }
-  const stopped = working.splice(0, TRACKED.stopped);
-  for (const runId of stopped) {
-    await fixture.call("POST", `/runs/${runId}/cancel`, {});
-    await waitForRunStatus(fixture, runId, "cancelled");
-  }
-  for (const runId of finished) await waitForRunStatus(fixture, runId, "completed");
-  for (const runId of failed) await waitForRunStatus(fixture, runId, "failed");
-  for (const runId of working) await waitForRunStatus(fixture, runId, "running");
-  return { workflows, liveRunIds: working };
-}
-
-/**
- * Hands `MORE_TRACKED` more signals to the quick workflow, which finishes
- * each at once, for the reads at scale. Returns once every run is completed.
- */
-export async function seedMoreTracking(
+export async function seedTracking(
   fixture: ThreadFixture,
-  { workflows }: SeededTracking,
+  workflows: TrackingWorkflows,
 ): Promise<void> {
-  const runIds: string[] = [];
-  for (let number = 1; number <= MORE_TRACKED; number += 1) {
-    runIds.push(await handOffSignal(fixture, `Scale PR #${String(number)}`, workflows.review));
-  }
-  for (const runId of runIds) await waitForRunStatus(fixture, runId, "completed");
+  const runIds = await Promise.all(
+    TRACKED_PLAN.map(({ workflow, title }) =>
+      handOffSignal(fixture, title, workflows[workflow as keyof TrackingWorkflows]),
+    ),
+  );
+  await awaitRunStatuses(fixture, { completed: 4, failed: 2, running: 4 });
+  await fixture.call("POST", `/runs/${runIds[STOPPED_INDEX]!}/cancel`, {});
+  await awaitRunStatuses(fixture, TRACKED_STATUSES);
 }
 
-/** What the controller spent answering Tracking's two reads. */
-interface ReadCost {
-  /** How many Tasks `task.query` returned. */
-  readonly taskCount: number;
-  /** How many runs `run.query` returned. */
-  readonly runCount: number;
-  /** The median time of `task.query` with `handedOff` and `in-progress`, from the request to the parsed answer, in milliseconds. */
-  readonly tasksMs: number;
-  /** How many `run.query` requests one snapshot makes: one for each 100 Tasks. */
-  readonly runQueries: number;
-  /** The median time of all the `run.query` requests of a snapshot, made at once, in milliseconds. */
-  readonly runsMs: number;
-  /** The query plan of each read: one line per step of SQLite's plan. */
-  readonly plans: { readonly tasks: readonly string[]; readonly runs: readonly string[] };
-}
-
-/** Returns the median of `numbers`. */
-const median = (numbers: readonly number[]): number =>
-  numbers.toSorted((a, b) => a - b)[Math.floor(numbers.length / 2)]!;
-
-/**
- * Returns SQLite's plan for `sql`, one string per step, from a read-only
- * connection to the controller's database. The plan is for the query as
- * written here, which mirrors the repository's: it is what a reader checks
- * for a full scan, not a trace of the controller's own statement.
- */
-function explainQuery(
-  home: string,
-  sql: string,
-  parameters: readonly (string | Uint8Array)[],
-): readonly string[] {
-  const database = new DatabaseSync(join(home, "data", "hercule.db"), { readOnly: true });
-  try {
-    return database
-      .prepare(`EXPLAIN QUERY PLAN ${sql}`)
-      .all(...parameters)
-      .map((row) => String(row["detail"]));
-  } finally {
-    database.close();
-  }
-}
-
-/**
- * Times Tracking's two reads on the controller, as the shell makes them
- * (`task.query` with `handedOff` and `in-progress`, then `run.query` by the
- * Tasks' ids), `READ_SAMPLES` times each, and returns the medians with the
- * query plans. The plans are checked by the caller for a scan of `tasks`,
- * `task_provenance` or `runs`.
- *
- * Fails when no Task is tracked, because the second read then has nothing to
- * measure.
- */
-export async function measureTrackingReads(fixture: ThreadFixture): Promise<ReadCost> {
-  const readTasks = () =>
-    fixture.call<{ readonly items: readonly { readonly id: string }[] }>(
-      "GET",
-      "/tasks?handedOff=true&status=in-progress&limit=500",
-    );
-  const tasks = (await readTasks()).items;
-  if (tasks.length === 0) throw new Error("no Task is tracked, so there are no reads to measure");
-  // run.query takes at most 100 task ids, so the app asks in chunks of 100, all at once.
-  const chunks: string[][] = [];
-  for (let start = 0; start < tasks.length; start += RUN_FILTER_TASK_IDS) {
-    chunks.push(tasks.slice(start, start + RUN_FILTER_TASK_IDS).map((task) => task.id));
-  }
-  const readRuns = async () =>
-    (
-      await Promise.all(
-        chunks.map((chunk) =>
-          fixture.call<{ readonly items: readonly unknown[] }>(
-            "GET",
-            `/runs?${chunk.map((id) => `taskIds=${id}`).join("&")}&limit=500`,
-          ),
-        ),
-      )
-    ).flatMap((page) => page.items);
-  const time = async (read: () => Promise<unknown>) => {
-    const samples: number[] = [];
-    for (let sample = 0; sample < READ_SAMPLES; sample += 1) {
-      const startedAt = performance.now();
-      await read();
-      samples.push(performance.now() - startedAt);
-    }
-    return median(samples);
-  };
-  const ids = chunks[0]!.map((id) => Buffer.from(id.replaceAll("-", ""), "hex"));
-  return {
-    taskCount: tasks.length,
-    runCount: (await readRuns()).length,
-    runQueries: chunks.length,
-    tasksMs: await time(readTasks),
-    runsMs: await time(readRuns),
-    plans: {
-      tasks: explainQuery(
-        fixture.home,
-        `SELECT tasks.id FROM tasks
-         WHERE tasks.status IN ('in-progress')
-           AND tasks.id IN (SELECT task_id FROM task_provenance WHERE signal_id IS NOT NULL)
-         ORDER BY tasks.updated_at DESC, tasks.id DESC LIMIT 500`,
-        [],
-      ),
-      runs: explainQuery(
-        fixture.home,
-        `SELECT id FROM runs WHERE task_id IN (${ids.map(() => "?").join(", ")})
-         ORDER BY created_at DESC, id DESC LIMIT 500`,
-        ids,
-      ),
+/** Cancels the live runs of the tracked Tasks and marks each Task done, so nothing is tracked. Returns once Tracking reads no row. */
+export async function releaseTracking(fixture: ThreadFixture): Promise<void> {
+  const { rows } = await readTracking(fixture);
+  await Promise.all(
+    rows.map(async ({ taskId, latestLiveRun }) => {
+      if (latestLiveRun !== undefined)
+        await fixture.call("POST", `/runs/${latestLiveRun.id}/cancel`, {});
+      await fixture.call("PATCH", `/tasks/${taskId}`, { status: "done" });
+    }),
+  );
+  await pollUntil(
+    async () => ((await readTracking(fixture)).rows.length === 0 ? true : undefined),
+    {
+      timeoutMs: 10_000,
+      intervalMs: 100,
+      timeoutMessage: "Tracking still read rows 10 s after every Task was marked done",
     },
-  };
+  );
 }
 
-/** The requests the page made for Tasks and runs in a stretch of time. */
-interface ReadCount {
-  /** `task.query` with `handedOff`. */
-  readonly trackedTasks: number;
-  /** `run.query` with `taskIds`. */
-  readonly trackedRuns: number;
-  /** `run.read`, one for the reason of a Failed row. */
+// ---------------------------------------------------------------------------
+// What the page did, from the collector, and the series that make it do things.
+
+/** What the page sent and received in one stretch of time. */
+interface Activity {
+  /** Reads of `task.queryTracking`, of `run.read`, and of any other `/tasks` or `/runs` route. */
+  readonly snapshots: number;
   readonly runReads: number;
-  /** Any other request to `/tasks` or `/runs`. */
-  readonly other: number;
+  readonly otherReads: number;
+  /** Pushes on each topic, not counting the first message after subscribing, which are `firstMessages`. */
+  readonly taskPushes: number;
+  readonly runPushes: number;
+  readonly firstMessages: number;
+  /** The `task.queryTracking` reads' median time and time to first byte, and the largest body, from the protocol's timings. */
+  readonly snapshotTiming: string;
 }
 
-/** One read of Tracking, as the page's resource timing recorded it. */
-interface TimedRead {
-  readonly name: "task.query" | "run.query" | "run.read";
-  /** When the request began, in milliseconds after the page opened. */
-  readonly startMs: number;
-  /** From the request to the end of its answer. */
-  readonly durationMs: number;
-  /** From the request being sent to the first byte of the answer. */
-  readonly waitMs: number;
-  /** The size of the answer's body, in bytes. */
-  readonly bytes: number;
-}
+const median = (numbers: readonly number[]): number =>
+  numbers.toSorted((a, b) => a - b)[Math.floor(numbers.length / 2)] ?? 0;
 
-/** What `measureTrackingWork` measured in one launch. */
-export interface TrackingWork {
-  /** The label of the launch: what was tracked. */
-  readonly label: string;
-  /** How many Tasks were tracked when the app launched. */
-  readonly tracked: number;
-  readonly loadAtSpawn: number;
-  /** The reads the shell made for Tracking while it loaded. */
-  readonly loadReads: readonly TimedRead[];
-  /** A Task created, `PUSH_COUNT` times: one push on the `task` topic each. */
-  readonly taskPushes: PushCost;
-  /** A run that is not about a Task, `PUSH_COUNT` times: pushes on the `run` topic. */
-  readonly runPushes: PushCost;
-  /** Present only with Tasks tracked. */
-  readonly motion?: {
-    readonly open: MotionCost;
-    readonly close: MotionCost;
-    readonly stateChange: MotionCost;
-    readonly handoff: MotionCost;
-    readonly tickOff: MotionCost;
+/** Counts the reads and pushes in `recording`. */
+function summarizeActivity({ requests, pushes }: Recording): Activity {
+  const gets = requests.filter(
+    ({ method, url }) => method === "GET" && TASKS_OR_RUNS_ROUTE.test(url.pathname),
+  );
+  const snapshots = gets.filter(({ url }) => url.pathname === SNAPSHOT_ROUTE);
+  const runReads = gets.filter(({ url }) => RUN_READ_ROUTE.test(url.pathname));
+  const changes = pushes.filter(({ initial }) => !initial);
+  return {
+    snapshots: snapshots.length,
+    runReads: runReads.length,
+    otherReads: gets.length - snapshots.length - runReads.length,
+    taskPushes: changes.filter(({ topic }) => topic === "task").length,
+    runPushes: changes.filter(({ topic }) => topic === "run").length,
+    firstMessages: pushes.length - changes.length,
+    snapshotTiming:
+      snapshots.length === 0
+        ? ""
+        : `; task.queryTracking median ${median(snapshots.map((r) => r.durationMs ?? 0)).toFixed(1)} ms ` +
+          `(${median(snapshots.map((r) => r.firstByteMs ?? 0)).toFixed(1)} ms to the first byte), ` +
+          `${String(Math.max(...snapshots.map((r) => r.bodyBytes)))} bytes`,
   };
 }
 
-/** What a series of pushes cost the page. */
-interface PushCost {
-  /** How many pushes the page received. */
-  readonly pushes: number;
-  readonly reads: ReadCount;
-  /** The time the renderer's main thread spent running tasks over the series, in milliseconds. */
+/** Formats an activity as one table cell. */
+const formatActivity = (a: Activity): string =>
+  `${String(a.taskPushes)} task and ${String(a.runPushes)} run pushes` +
+  `${a.firstMessages === 0 ? "" : ` and ${String(a.firstMessages)} first messages`}; ` +
+  `${String(a.snapshots)} task.queryTracking, ${String(a.runReads)} run.read, ${String(a.otherReads)} other reads${a.snapshotTiming}`;
+
+/** What a series of changes did to the page. */
+interface SeriesCost extends Activity {
+  readonly changes: number;
+  /** The time the renderer's main thread spent running tasks over the series, polling included, in milliseconds. */
   readonly mainThreadMs: number;
 }
 
-/** Sends a key to the page, as a press: down, then up. */
-async function pressKey(page: Inspector, key: string): Promise<void> {
-  const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
-  for (const type of ["keyDown", "keyUp"]) {
-    await page.send("Input.dispatchKeyEvent", {
-      type,
-      key,
-      code,
-      windowsVirtualKeyCode: key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0,
-      ...(type === "keyDown" && key.length === 1 ? { text: key } : {}),
-    });
-  }
+/** What the scenarios share: the app's page, driven and recorded. */
+interface Scenario {
+  readonly fixture: ThreadFixture;
+  readonly workflows: TrackingWorkflows;
+  readonly page: Inspector;
+  readonly driver: PageDriver;
+  readonly collector: Collector;
+  readonly inspectorUrl: string;
+}
+
+/** Waits until everything a change set off has finished: the reads it caused, then every animation, a late cascade included. */
+async function settle({ collector, driver }: Scenario): Promise<void> {
+  await collector.waitForQuietReads(QUIET_READS_MS);
+  await driver.waitForAnimationsToEnd();
 }
 
 /**
- * Starts the app on `userDataDir` as a plain process, which opens Intake
- * again, and measures Tracking at work in it (see the top of this file).
- * `label` names the launch in the report. Fails when Intake does not show
- * within 15 s, when a step's change moves nothing (see `measureListChange`),
- * or when the app does not quit cleanly afterwards.
- *
- * With Tasks tracked it also measures the motion, which clears To do down to
- * `SIGNALS_BEFORE_HANDOFF` signals, so it runs last and leaves Tracking
- * closed, as the app stores the last screen it settled on.
- *
- * `seeded` is what `seedTracking` made. With `null`, nothing is tracked, and
- * only the reads and the pushes are measured.
+ * Makes `count` changes one after another and returns what the page did over
+ * them. Each change waits for its own push on `topic`, which fails the series
+ * when none arrives, then for `reachesState` (an expression for the page,
+ * given the change's index) and for the reads to finish. The changes are far
+ * enough apart for the controller to send each as its own push.
  */
-export async function measureTrackingWork(
+async function runSeries(
+  { collector, driver, page }: Scenario,
+  series: {
+    readonly count: number;
+    readonly topic: "task" | "run";
+    readonly change: (index: number) => Promise<void>;
+    readonly reachesState?: (index: number) => string;
+    /** Runs after the last change, before the series is read. */
+    readonly finish?: () => Promise<void>;
+  },
+): Promise<SeriesCost> {
+  const seriesFrom = collector.checkpoint();
+  const threadFrom = await readMainThreadMs(page);
+  for (let index = 0; index < series.count; index += 1) {
+    const from = collector.checkpoint();
+    await series.change(index);
+    await collector.waitForPushes(from, series.topic, 1, `change ${String(index + 1)}`);
+    if (series.reachesState !== undefined) {
+      const message = `the page did not reach the state of change ${String(index + 1)}`;
+      await driver.waitFor(series.reachesState(index), message);
+    }
+    await collector.waitForQuietReads(QUIET_READS_MS);
+  }
+  await series.finish?.();
+  const mainThreadMs = (await readMainThreadMs(page)) - threadFrom;
+  return { changes: series.count, mainThreadMs, ...summarizeActivity(collector.since(seriesFrom)) };
+}
+
+/**
+ * Runs two series of pushes that change nothing Tracking shows: Tasks created,
+ * and runs started that are not about a Task. Tracking should answer them with
+ * few reads.
+ */
+async function runPushSeries(scenario: Scenario): Promise<{ tasks: SeriesCost; runs: SeriesCost }> {
+  const { fixture, workflows, collector } = scenario;
+  const tasks = await runSeries(scenario, {
+    count: SERIES_CHANGES,
+    topic: "task",
+    change: async () => {
+      await fixture.call("POST", "/tasks", { title: "A Task nobody hands off", description: "" });
+    },
+  });
+  let lastRunId = "";
+  const runs = await runSeries(scenario, {
+    count: SERIES_CHANGES,
+    topic: "run",
+    change: async () => {
+      lastRunId = (
+        await fixture.call<RunStarted>("POST", "/runs/start", { workflowId: workflows.pause })
+      ).runId;
+    },
+    // The runs complete a second after they start, and their later pushes must read nothing.
+    finish: async () => {
+      const isCompleted = async () =>
+        (await fixture.call<{ status: string }>("GET", `/runs/${lastRunId}`)).status ===
+        "completed";
+      await pollUntil(async () => ((await isCompleted()) ? true : undefined), {
+        timeoutMs: 10_000,
+        intervalMs: 100,
+        timeoutMessage: "the last run did not complete within 10 s",
+      });
+      await collector.waitForQuietReads(QUIET_READS_MS);
+    },
+  });
+  return { tasks, runs };
+}
+
+// ---------------------------------------------------------------------------
+// The hidden window and the motion.
+
+/** What the page held and did while its window was hidden, and when it showed again. */
+interface HiddenWindowCost {
+  readonly heldHidden: readonly string[];
+  readonly heldShown: readonly string[];
+  /** A Task created while hidden, a run started while hidden, and the window showing again. */
+  readonly task: Activity;
+  readonly run: Activity;
+  readonly shown: Activity;
+}
+
+/** Hides the window, creates a Task and starts a run, shows the window again, and returns what the page held and did at each step. */
+async function measureHiddenWindow(scenario: Scenario): Promise<HiddenWindowCost> {
+  const { collector, driver, fixture, workflows, inspectorUrl } = scenario;
+  const window = (call: string) =>
+    evaluateInMain(inspectorUrl, `require("electron").BrowserWindow.getAllWindows()[0]?.${call}()`);
+
+  await window("hide");
+  await driver.waitFor(
+    `document.visibilityState === "hidden"`,
+    "the page was not hidden after the window hid",
+  );
+  await pollUntil(() => (collector.listHeldTopics().includes("run") ? undefined : true), {
+    timeoutMs: 5_000,
+    intervalMs: 50,
+    timeoutMessage: "the page still held the run topic 5 s after the window hid",
+  });
+  const heldHidden = collector.listHeldTopics();
+
+  const taskFrom = collector.checkpoint();
+  await fixture.call("POST", "/tasks", { title: "A Task made while hidden", description: "" });
+  await collector.waitForPushes(taskFrom, "task", 1, "a Task made while hidden");
+  await collector.waitForQuietReads(QUIET_READS_HIDDEN_MS);
+  const task = summarizeActivity(collector.since(taskFrom));
+
+  const runFrom = collector.checkpoint();
+  await fixture.call("POST", "/runs/start", { workflowId: workflows.pause });
+  await sleep(QUIET_READS_HIDDEN_MS);
+  const run = summarizeActivity(collector.since(runFrom));
+
+  const shownFrom = collector.checkpoint();
+  await window("showInactive");
+  await driver.waitFor(
+    `document.visibilityState === "visible"`,
+    "the page was not visible after the window showed",
+  );
+  // The page subscribes to the run topic again, and the controller's first message says every run may have changed.
+  await collector.waitForPushes(shownFrom, "run", 1, "the window showing again", true);
+  await collector.waitForQuietReads(QUIET_READS_MS);
+  return {
+    heldHidden,
+    heldShown: collector.listHeldTopics(),
+    task,
+    run,
+    shown: summarizeActivity(collector.since(shownFrom)),
+  };
+}
+
+/** The motion of Tracking, one cost for each change. */
+interface TrackingMotion {
+  readonly open: MotionCost;
+  readonly close: MotionCost;
+  readonly stateChange: MotionCost;
+  readonly handoff: MotionCost;
+  readonly tickOff: MotionCost;
+}
+
+/**
+ * Measures the motion of Tracking, with the pointer off the list: opening and
+ * closing it with `T`; a Working row's run cancelled, which makes it Stopped;
+ * a signal handed to Review PR from the pane, whose row flies to folded
+ * Tracking; and `E` on the Finished row that handoff made. Between changes it
+ * waits for the state, the reads and the animations. Fails as `measureListChange` fails.
+ */
+async function measureMotion(scenario: Scenario, liveRunId: string): Promise<TrackingMotion> {
+  const { fixture, driver, page } = scenario;
+  const trayIsOpen = `document.querySelector(${JSON.stringify(PAGE.openTray)}) !== null`;
+  const stoppedRows = `document.querySelectorAll('${PAGE.row}[data-state="stopped"]').length`;
+  const signalRows = JSON.stringify(PAGE.signalRow);
+  const selectedSignal = `document.querySelector(${JSON.stringify(`${PAGE.signalRow}[aria-current="true"]`)})`;
+  const signalTitled = (title: string) =>
+    `[...document.querySelectorAll(${signalRows})].find((row) => row.querySelector(".ask-title")?.textContent === ${JSON.stringify(title)})`;
+  const trackedRowTitled = (title: string) =>
+    `[...document.querySelectorAll(${JSON.stringify(PAGE.row)})].find((row) => row.querySelector(${JSON.stringify(PAGE.rowTitle)})?.textContent === ${JSON.stringify(title)})`;
+  const togglesTracking = (opens: boolean) => ({
+    change: () => driver.pressKey("t"),
+    lengthMs: opens ? 450 : 180,
+    endsWhen: opens ? trayIsOpen : `!(${trayIsOpen})`,
+    mustSee: opens ? trayIsOpen : `!(${trayIsOpen})`,
+    ignoresTransitions: true,
+  });
+
+  await driver.movePointer(POINTER_OFF_LIST);
+  // Clear To do down to two signals, so the signal raised next lands on screen.
+  const { items } = await fixture.call<{ items: { id: string }[] }>("GET", "/signals?view=to-do");
+  await fixture.call("POST", "/signals/mark-done", {
+    signalIds: items.slice(2).map(({ id }) => id),
+  });
+  await driver.waitFor(
+    `document.querySelectorAll(${signalRows}).length === 2`,
+    "To do did not settle on two signals",
+  );
+  await settle(scenario);
+
+  // A click selects a row and gives it the focus the keys need. Esc closes the
+  // pane and a second Esc clears the selection, so neither the split's width
+  // nor the selection moves while Tracking opens.
+  await driver.click(`document.querySelector(${signalRows})`);
+  await driver.waitFor(`${selectedSignal} !== null`, "a click on a signal did not select it");
+  await driver.pressKey("Escape");
+  await driver.waitForAnimationsToEnd();
+  await driver.pressKey("Escape");
+  await driver.waitFor(`${selectedSignal} === null`, "Esc did not clear the selection");
+  await settle(scenario);
+
+  const open = await measureListChange(page, togglesTracking(true));
+  await settle(scenario);
+  const close = await measureListChange(page, togglesTracking(false));
+  await settle(scenario);
+
+  // A change the user did not make waits while the pointer is on the list, and the click above left it there.
+  await driver.movePointer(POINTER_OFF_LIST);
+  const stoppedBefore = await driver.evaluate<number>(stoppedRows);
+  const stoppedMore = `${stoppedRows} > ${String(stoppedBefore)}`;
+  const stateChange = await measureListChange(page, {
+    change: async () => {
+      await fixture.call("POST", `/runs/${liveRunId}/cancel`, {});
+    },
+    // The line fades over --dur-2, then the rows slide over --dur-3.
+    lengthMs: DUR_2_MS + DUR_3_MS,
+    endsWhen: stoppedMore,
+    mustSee: stoppedMore,
+    ignoresTransitions: true,
+  });
+  await settle(scenario);
+
+  const title = "Handed off while measured";
+  await raiseSignal(fixture, title);
+  await driver.waitFor(
+    `(${signalTitled(title)}) !== undefined`,
+    "the signal to hand off did not land on screen",
+  );
+  await driver.click(signalTitled(title));
+  await driver.waitFor(
+    `(${signalTitled(title)})?.getAttribute("aria-current") === "true"`,
+    "a click on the signal to hand off did not select it",
+  );
+  await settle(scenario);
+  const handedOff = `(${trackedRowTitled(title)}) !== undefined`;
+  const handoff = await measureListChange(page, {
+    change: () =>
+      driver.click(`document.querySelector(${JSON.stringify(PAGE.handToReviewButton)})`),
+    // The copy flies over --dur-3, then the new row fades in over --dur-2.
+    lengthMs: DUR_3_MS + DUR_2_MS,
+    endsWhen: handedOff,
+    mustSee: handedOff,
+    ignoresTransitions: true,
+  });
+  await driver.waitFor(
+    `(${trackedRowTitled(title)})?.getAttribute("data-state") === "finished"`,
+    "the handed-off row did not finish",
+  );
+  await settle(scenario);
+
+  await driver.evaluate(
+    `(${trackedRowTitled(title)}).querySelector(${JSON.stringify(PAGE.rowButton)}).focus()`,
+  );
+  const gone = `(${trackedRowTitled(title)}) === undefined`;
+  const tickOff = await measureListChange(page, {
+    change: () => driver.pressKey("e"),
+    // The row fades over --dur-1, then the gap closes over --dur-3.
+    lengthMs: DUR_1_MS + DUR_3_MS,
+    endsWhen: gone,
+    mustSee: gone,
+    ignoresTransitions: true,
+  });
+  await settle(scenario);
+  return { open, close, stateChange, handoff, tickOff };
+}
+
+// ---------------------------------------------------------------------------
+// The interaction launch.
+
+/** What the interaction launch measured. */
+export interface TrackingInteractions {
+  readonly loadAtSpawn: number;
+  /** The shell's reads from the reload until they finished. */
+  readonly load: Activity;
+  readonly nothingTracked: { readonly tasks: SeriesCost; readonly runs: SeriesCost };
+  /** `TRACKED_COUNT` signals handed off, one at a time. */
+  readonly handOffs: SeriesCost;
+  readonly tracked: { readonly tasks: SeriesCost; readonly runs: SeriesCost };
+  readonly hidden: HiddenWindowCost;
+  readonly motion: TrackingMotion;
+}
+
+/**
+ * Starts the app on `userDataDir`, which opens Intake again, attaches a
+ * collector, reloads the page so the collector sees the whole start, and runs
+ * every scenario in that one app (see the top of this file). Nothing may be
+ * tracked when it starts: call `releaseTracking` first. Fails when Intake does
+ * not show, when a step does not reach its state within its time limit (the
+ * message names the step), when a change's push never arrives, or when the app
+ * does not quit cleanly. It leaves more Tasks tracked and the app on Intake,
+ * so run it last.
+ */
+export async function measureTrackingInteractions(
   userDataDir: string,
   fixture: ThreadFixture,
-  label: string,
-  seeded: SeededTracking | null,
-): Promise<TrackingWork> {
+  workflows: TrackingWorkflows,
+): Promise<TrackingInteractions> {
   const loadAtSpawn = loadavg()[0]!;
   const app = await launchPlainApp(userDataDir);
-  let measured: TrackingWork;
+  let measured: TrackingInteractions;
   try {
-    const page = await connectInspector(await waitForPageSocketUrl(app.endpoint));
+    const pageSocketUrl = await waitForPageSocketUrl(app.endpoint);
+    const page = await connectInspector(pageSocketUrl);
+    const collector = await startCollector(pageSocketUrl);
     try {
-      const evaluate = (expression: string) =>
-        page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
-      const waitInPage = (expression: string, timeoutMessage: string) =>
-        pollUntil(async () => ((await evaluate(expression)) === true ? true : undefined), {
-          timeoutMs: 15_000,
-          intervalMs: 50,
-          timeoutMessage,
-        }).then(() => undefined);
-      await waitInPage(
-        `document.querySelector(${JSON.stringify(`${SIGNALS_LIST} .ask-row`)}) !== null`,
-        "the app did not open Intake with its signals",
-      );
-      const loadReads = (await evaluate(READ_TRACKING_REQUESTS)) as TimedRead[];
-      await sleep(LAUNCH_SETTLE_MS);
-
-      await evaluate(RECORD_FRAMES);
+      const driver = drivePage(page);
+      const scenario: Scenario = {
+        fixture,
+        workflows,
+        page,
+        driver,
+        collector,
+        inspectorUrl: app.inspectorUrl,
+      };
       await page.send("Performance.enable");
-      const readMainThreadMs = async () => {
-        const { metrics } = (await page.send("Performance.getMetrics")) as {
-          metrics: { name: string; value: number }[];
-        };
-        return metrics.find((metric) => metric.name === "TaskDuration")!.value * 1_000;
-      };
-      const measurePushes = async (push: () => Promise<void>): Promise<PushCost> => {
-        const from = (await evaluate("performance.now()")) as number;
-        const framesFrom = (await evaluate("globalThis.receivedFrames.length")) as number;
-        const threadFrom = await readMainThreadMs();
-        for (let count = 0; count < PUSH_COUNT; count += 1) {
-          await push();
-          await sleep(PUSH_INTERVAL_MS);
-        }
-        await sleep(PUSH_SETTLE_MS);
-        return {
-          pushes: ((await evaluate("globalThis.receivedFrames.length")) as number) - framesFrom,
-          reads: (await evaluate(`(${COUNT_REQUESTS})(${String(from)})`)) as ReadCount,
-          mainThreadMs: (await readMainThreadMs()) - threadFrom,
-        };
-      };
-      const taskPushes = await measurePushes(async () => {
-        await fixture.call("POST", "/tasks", { title: "A Task nobody hands off", description: "" });
-      });
-      const pause = await createHandoffWorkflowWithoutInput(fixture);
-      const runPushes = await measurePushes(async () => {
-        await fixture.call<RunStarted>("POST", "/runs/start", { workflowId: pause });
-      });
+      await page.send("Page.enable");
+      // The page subscribed and made its first reads before the collector was
+      // on, so it loads again with the collector watching.
+      const loadFrom = collector.checkpoint();
+      await page.send("Page.reload");
+      await page.waitForEvent("Page.loadEventFired");
+      await driver.waitFor(
+        buildIntakeShown(INTAKE_SIGNALS),
+        "Intake did not show after the reload",
+        20_000,
+      );
+      await settle(scenario);
+      const load = summarizeActivity(collector.since(loadFrom));
+      await driver.movePointer(POINTER_OFF_LIST);
+      logProgress("the app started and loaded again");
 
-      measured = {
-        label,
-        tracked: seeded === null ? 0 : TRACKED_COUNT,
-        loadAtSpawn,
-        loadReads,
-        taskPushes,
-        runPushes,
-        ...(seeded === null
-          ? {}
-          : { motion: await measureTrackingMotion(page, fixture, seeded, evaluate, waitInPage) }),
-      };
+      const nothingTracked = await runPushSeries(scenario);
+      logProgress("pushes, nothing tracked");
+      const runIds: string[] = [];
+      const handOffs = await runSeries(scenario, {
+        count: TRACKED_COUNT,
+        topic: "task",
+        change: async (index) => {
+          const { workflow, title } = TRACKED_PLAN[index]!;
+          runIds.push(
+            await handOffSignal(fixture, title, workflows[workflow as keyof TrackingWorkflows]),
+          );
+        },
+        reachesState: (index) =>
+          `document.querySelector(${JSON.stringify(PAGE.foldedCount)})?.textContent === "${String(index + 1)}"`,
+      });
+      await fixture.call("POST", `/runs/${runIds[STOPPED_INDEX]!}/cancel`, {});
+      await awaitRunStatuses(fixture, TRACKED_STATUSES);
+      await settle(scenario);
+      logProgress("handoffs");
+      const tracked = await runPushSeries(scenario);
+      logProgress("pushes, tracked");
+
+      const hidden = await measureHiddenWindow(scenario);
+      logProgress("the hidden window");
+      const motion = await measureMotion(scenario, runIds[STOPPED_INDEX + 1]!);
+      logProgress("motion");
+      measured = { loadAtSpawn, load, nothingTracked, handOffs, tracked, hidden, motion };
     } finally {
+      collector.close();
       page.close();
     }
   } finally {
@@ -496,359 +698,138 @@ export async function measureTrackingWork(
   return measured;
 }
 
-/** Makes an enabled workflow with no input and one step that waits a second, and returns its id. */
-async function createHandoffWorkflowWithoutInput(fixture: ThreadFixture): Promise<string> {
-  const { workflow } = await fixture.call<WorkflowSaveResult>("POST", "/workflows", {
-    definition: {
-      name: `A pause ${String(Date.now())}`,
-      steps: [{ id: "work", kind: "action", action: "wait", params: { seconds: 1 } }],
-    },
-  });
-  return workflow.id;
-}
+// ---------------------------------------------------------------------------
+// The report.
 
-/**
- * An expression that evaluates, in the page, to Tracking's reads so far, from
- * the page's resource timing: the `task.query` with `handedOff`, the
- * `run.query` with `taskIds` and each `run.read`. The page keeps the first
- * 250 resource entries, which the shell's loading stays well under.
- */
-const READ_TRACKING_REQUESTS = `(() => {
-  return performance.getEntriesByType("resource").flatMap((entry) => {
-    const url = new URL(entry.name);
-    const common = {
-      startMs: entry.startTime,
-      durationMs: entry.duration,
-      waitMs: entry.responseStart - entry.requestStart,
-      bytes: entry.decodedBodySize,
-    };
-    if (url.pathname === "/api/v1/tasks" && url.searchParams.get("handedOff") === "true") {
-      return [{ name: "task.query", ...common }];
-    }
-    if (url.pathname === "/api/v1/runs" && url.searchParams.has("taskIds")) {
-      return [{ name: "run.query", ...common }];
-    }
-    if (/^\\/api\\/v1\\/runs\\/[0-9a-f-]{36}$/.test(url.pathname)) {
-      return [{ name: "run.read", ...common }];
-    }
-    return [];
-  });
-})()`;
+/** A row of the report: the row, its limit, what was measured, and whether it is within (null for no limit). */
+type ReportRow = [string, string, string, boolean | null];
 
-/**
- * An expression for a function that counts, in the page, the requests to
- * `/tasks` and `/runs` that began at or after the time it is given, in
- * milliseconds after the page opened.
- */
-const COUNT_REQUESTS = `(from) => {
-  const counts = { trackedTasks: 0, trackedRuns: 0, runReads: 0, other: 0 };
-  for (const entry of performance.getEntriesByType("resource")) {
-    if (entry.startTime < from) continue;
-    const url = new URL(entry.name);
-    if (!/^\\/api\\/v1\\/(tasks|runs)(\\/|$)/.test(url.pathname)) continue;
-    if (url.pathname === "/api/v1/tasks" && url.searchParams.get("handedOff") === "true") counts.trackedTasks += 1;
-    else if (url.pathname === "/api/v1/runs" && url.searchParams.has("taskIds")) counts.trackedRuns += 1;
-    else if (/^\\/api\\/v1\\/runs\\/[0-9a-f-]{36}$/.test(url.pathname)) counts.runReads += 1;
-    else counts.other += 1;
-  }
-  return counts;
-}`;
+const formatSeries = (cost: SeriesCost): string =>
+  `${formatActivity(cost)}; renderer main thread ${(cost.mainThreadMs / cost.changes).toFixed(1)} ms a change`;
 
-/**
- * Clicks, with the mouse, at the centre of the element that `element`, an
- * expression evaluated in the page, evaluates to. A click selects a row and
- * gives it the focus the keys need. Fails when the expression evaluates to no
- * element.
- */
-async function clickElement(
-  page: Inspector,
-  evaluate: (expression: string) => Promise<unknown>,
-  element: string,
-): Promise<void> {
-  const box = (await evaluate(`(() => {
-    const element = ${element};
-    if (!element) return null;
-    const box = element.getBoundingClientRect();
-    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  })()`)) as { x: number; y: number } | null;
-  if (box === null) throw new Error(`no element for ${element}`);
-  for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
-    await page.send("Input.dispatchMouseEvent", { type, ...box, button: "left", clickCount: 1 });
-  }
-}
+const formatMotionCell = (cost: MotionCost): string =>
+  `${formatMotion(cost)}; properties ${cost.properties.join(", ")}; animations: ${cost.kinds.join("; ")}`;
 
-/**
- * Measures the motion of Tracking, with the pointer off the list:
- *
- * - opening it with `T`, and closing it with `T`;
- * - a state change: a Working row's run is cancelled, which makes it Stopped;
- * - a handoff: a signal that offers Review PR is handed to it from the pane,
- *   and its row flies to folded Tracking;
- * - a tick-off: `E` on the Finished row that handoff made once its run ends.
- *
- * Fails when To do does not settle on `SIGNALS_BEFORE_HANDOFF` signals within
- * 10 s, and as `measureListChange` fails.
- */
-async function measureTrackingMotion(
-  page: Inspector,
-  fixture: ThreadFixture,
-  seeded: SeededTracking,
-  evaluate: (expression: string) => Promise<unknown>,
-  waitInPage: (expression: string, timeoutMessage: string) => Promise<void>,
-): Promise<NonNullable<TrackingWork["motion"]>> {
-  const rows = `${SIGNALS_LIST} .ask-row`;
-  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...POINTER_OFF_LIST });
-  // Clear To do down to a few signals, so the signals raised next land on screen.
-  const { items } = await fixture.call<{ readonly items: readonly { readonly id: string }[] }>(
-    "GET",
-    "/signals?view=to-do",
-  );
-  await fixture.call("POST", "/signals/mark-done", {
-    signalIds: items.slice(SIGNALS_BEFORE_HANDOFF).map((signal) => signal.id),
-  });
-  await waitInPage(
-    `document.querySelectorAll(${JSON.stringify(rows)}).length === ${String(SIGNALS_BEFORE_HANDOFF)} &&
-      document.getAnimations().length === 0`,
-    "To do did not settle on the signals left",
-  );
-  const trayIsOpen = `document.querySelector(${JSON.stringify(`${TRAY}.is-open`)}) !== null`;
+/** Whether a series read Tracking once for each push on the task topic, and read no run. */
+const readsOncePerPush = (cost: SeriesCost): boolean =>
+  cost.snapshots >= cost.changes && cost.snapshots <= cost.taskPushes && cost.runReads === 0;
 
-  await clickElement(page, evaluate, `document.querySelector(${JSON.stringify(rows)})`);
-  await waitInPage(
-    `document.querySelector(${JSON.stringify(`${rows}[aria-current="true"]`)}) !== null`,
-    "a click on a signal did not select it",
-  );
-  // Esc closes the pane and a second Esc clears the selection, so neither
-  // the split's width nor the row's selection moves while Tracking opens.
-  await pressKey(page, "Escape");
-  await sleep(PUSH_SETTLE_MS);
-  await pressKey(page, "Escape");
-  await sleep(PUSH_SETTLE_MS);
-  const open = await measureListChange(page, {
-    change: () => pressKey(page, "t"),
-    lengthMs: 450,
-    endsWhen: trayIsOpen,
-    mustSee: trayIsOpen,
-  });
-  await sleep(PUSH_SETTLE_MS);
-  const close = await measureListChange(page, {
-    change: () => pressKey(page, "t"),
-    lengthMs: 180,
-    endsWhen: `!(${trayIsOpen})`,
-    mustSee: `!(${trayIsOpen})`,
-  });
-  await sleep(PUSH_SETTLE_MS);
+/** Whether a series read Tracking at most once for each run it started, and read no run. */
+const readsAtMostOncePerCreation = (cost: SeriesCost): boolean =>
+  cost.snapshots <= cost.changes && cost.runReads === 0;
 
-  // A change the user did not make is held while the pointer is on the list column,
-  // and the clicks above left it there.
-  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...POINTER_OFF_LIST });
-  await sleep(500);
-  const stoppedRows = `document.querySelectorAll('${TRAY} .tr-run-item[data-state="stopped"]').length`;
-  const stoppedBefore = (await evaluate(stoppedRows)) as number;
-  const stateChange = await measureListChange(page, {
-    change: async () => {
-      await fixture.call("POST", `/runs/${seeded.liveRunIds[0]!}/cancel`, {});
-    },
-    lengthMs: 180,
-    endsWhen: `${stoppedRows} > ${String(stoppedBefore)}`,
-    mustSee: `${stoppedRows} > ${String(stoppedBefore)}`,
-  });
-  await sleep(PUSH_SETTLE_MS);
+/** Prints what the interaction launch measured, against the planned costs in spec 17. */
+export function reportTrackingInteractions(result: TrackingInteractions): void {
+  const { load, nothingTracked, handOffs, tracked, hidden, motion } = result;
+  const oncePerPush = "one task.queryTracking for each push, and none more";
+  const oncePerCreation =
+    "at most one task.queryTracking for each run's creation, nothing for its later pushes";
+  const elsewhere = "one opacity animation, plus one transform per row that moves";
+  const motionRows: [string, string, MotionCost, boolean][] = [
+    [
+      "Opening Tracking with T",
+      "one animation for the sheet, at most 13 for the cascade, done within 450 ms; transform and opacity only; hover and focus transitions are not counted",
+      motion.open,
+      motion.open.animations <= 14 && droppedNoMotionFrame(motion.open),
+    ],
+    [
+      "Closing Tracking with T",
+      "one animation, 180 ms",
+      motion.close,
+      motion.close.animations === 1 && droppedNoMotionFrame(motion.close),
+    ],
+    ["A state change: a Working row stops", elsewhere, motion.stateChange, true],
+    [
+      "A handoff from the pane",
+      "one animation for the lifted copy, plus one transform per row that moves on screen",
+      motion.handoff,
+      true,
+    ],
+    ["A tick-off with E on a Finished row", elsewhere, motion.tickOff, true],
+  ];
+  const rows: ReportRow[] = [
+    [
+      "Reads while the shell loads",
+      "one task.queryTracking, and at most one more for the first message of each of the task and run topics; no run.read",
+      formatActivity(load),
+      load.snapshots >= 1 &&
+        load.snapshots <= 1 + load.firstMessages &&
+        load.runReads === 0 &&
+        load.otherReads === 0,
+    ],
+    [
+      "A Task created, nothing tracked",
+      oncePerPush,
+      formatSeries(nothingTracked.tasks),
+      readsOncePerPush(nothingTracked.tasks),
+    ],
+    [
+      "A run that is not about a Task, nothing tracked",
+      oncePerCreation,
+      formatSeries(nothingTracked.runs),
+      readsAtMostOncePerCreation(nothingTracked.runs),
+    ],
+    [
+      `${String(TRACKED_COUNT)} handoffs`,
+      "at least one task.queryTracking for each handoff and at most one for each push; no run.read",
+      formatSeries(handOffs),
+      handOffs.snapshots >= handOffs.changes &&
+        handOffs.snapshots <= handOffs.taskPushes + handOffs.runPushes &&
+        handOffs.runReads === 0,
+    ],
+    [
+      `A Task created, ${String(TRACKED_COUNT)} tracked`,
+      oncePerPush,
+      formatSeries(tracked.tasks),
+      readsOncePerPush(tracked.tasks),
+    ],
+    [
+      `A run that is not about a Task, ${String(TRACKED_COUNT)} tracked`,
+      oncePerCreation,
+      formatSeries(tracked.runs),
+      readsAtMostOncePerCreation(tracked.runs),
+    ],
+    [
+      "The window hidden",
+      "the task topic held and the run topic dropped; a Task made reads once; a run started arrives not at all and reads nothing; showing the window reads again and holds the run topic",
+      `hidden holds ${hidden.heldHidden.join(", ")}; a Task: ${formatActivity(hidden.task)}; a run: ${formatActivity(hidden.run)}; shown holds ${hidden.heldShown.join(", ")}: ${formatActivity(hidden.shown)}`,
+      hidden.heldHidden.includes("task") &&
+        !hidden.heldHidden.includes("run") &&
+        hidden.task.snapshots >= 1 &&
+        hidden.task.snapshots <= hidden.task.taskPushes &&
+        hidden.run.runPushes === 0 &&
+        hidden.run.snapshots === 0 &&
+        hidden.heldShown.includes("run") &&
+        hidden.shown.snapshots >= 1,
+    ],
+    ...motionRows.map(([row, limit, cost, within]): ReportRow => [
+      row,
+      limit,
+      formatMotionCell(cost),
+      within &&
+        cost.properties.every((property) => ["opacity", "transform"].includes(property)) &&
+        isStillAfter(cost),
+    ]),
+  ];
 
-  const handedOffTitle = "Handed off while measured";
-  await raiseSignal(fixture, handedOffTitle);
-  const handedOffRow = `[...document.querySelectorAll(${JSON.stringify(rows)})].find((row) => row.querySelector(".ask-title")?.textContent === ${JSON.stringify(handedOffTitle)})`;
-  await waitInPage(
-    `(${handedOffRow}) !== undefined`,
-    "the signal to hand off did not land on screen",
-  );
-  await clickElement(page, evaluate, handedOffRow);
-  await waitInPage(
-    `(${handedOffRow})?.getAttribute("aria-current") === "true"`,
-    "a click on the signal to hand off did not select it",
-  );
-  await sleep(PUSH_SETTLE_MS);
-  const inTracking = `[...document.querySelectorAll("${TRAY} .tr-run-title")].some((title) => title.textContent === ${JSON.stringify(handedOffTitle)})`;
-  const handoff = await measureListChange(page, {
-    change: () =>
-      clickElement(
-        page,
-        evaluate,
-        `document.querySelector('button[aria-label="Hand to Review PR"]')`,
-      ),
-    lengthMs: 320,
-    endsWhen: inTracking,
-    mustSee: inTracking,
-  });
-  const trackedRow = `[...document.querySelectorAll("${TRAY} .tr-run-item")].find((row) => row.querySelector(".tr-run-title")?.textContent === ${JSON.stringify(handedOffTitle)})`;
-  await waitInPage(
-    `(${trackedRow})?.getAttribute("data-state") === "finished"`,
-    "the handed-off row did not finish",
-  );
-  await sleep(PUSH_SETTLE_MS);
-  await evaluate(`(${trackedRow}).querySelector(".tr-run").focus()`);
-  const tickOff = await measureListChange(page, {
-    change: () => pressKey(page, "e"),
-    lengthMs: 180,
-    endsWhen: `!(${inTracking})`,
-    mustSee: `!(${inTracking})`,
-  });
-  return { open, close, stateChange, handoff, tickOff };
-}
-
-/**
- * Whether no step of a plan is a scan of a whole table. A step that scans an
- * index (`SCAN ... USING ... INDEX`) is allowed: the index here holds only
- * the handoff entries, or only the runs of Tasks.
- */
-const usesIndexOnly = (plan: readonly string[]): boolean =>
-  plan.every((step) => !step.startsWith("SCAN ") || step.includes(" USING "));
-
-/** Formats one read's timing as a table cell. */
-const formatTimedRead = (read: TimedRead): string =>
-  `${read.name} ${read.durationMs.toFixed(1)} ms (${read.waitMs.toFixed(1)} ms to the first byte, ${String(read.bytes)} bytes), started ${read.startMs.toFixed(0)} ms after the page opened`;
-
-/** Formats a series of pushes as a table cell. */
-const formatPushes = ({ pushes, reads, mainThreadMs }: PushCost): string =>
-  `${String(pushes)} pushes received for ${String(PUSH_COUNT)} changes; requests: ` +
-  `${String(reads.trackedTasks)} task.query, ${String(reads.trackedRuns)} run.query, ` +
-  `${String(reads.runReads)} run.read, ${String(reads.other)} other; ` +
-  `renderer main thread ${(mainThreadMs / PUSH_COUNT).toFixed(1)} ms a change`;
-
-/** Prints what the Tracking scenario measured, against the planned costs in spec 17. */
-export function reportTrackingWork(
-  work: readonly TrackingWork[],
-  reads: readonly { readonly label: string; readonly cost: ReadCost }[],
-): void {
-  console.log("## Tracking");
+  console.log("## Tracking, in the app");
   console.log();
-  console.log("### The two reads on the controller");
-  console.log();
+  if (FAST_MODE) {
+    console.log("FAST MODE: the idle launches above sampled once the page was quiet.");
+    console.log();
+  }
   console.log(
-    formatTable(
-      ["Tracked Tasks", "Runs", "task.query, median", "run.query, median", "Plans"],
-      reads.map(({ label, cost }) => [
-        label,
-        String(cost.runCount),
-        `${cost.tasksMs.toFixed(1)} ms`,
-        `${cost.runsMs.toFixed(1)} ms`,
-        usesIndexOnly(cost.plans.tasks) && usesIndexOnly(cost.plans.runs)
-          ? "indexes only"
-          : "A FULL SCAN",
-      ]),
-    ),
+    "A collector is attached for the whole launch (Chrome DevTools Protocol, Network): push and request counts come from the wire, request timings from the protocol, and the motion rows err long by the cost of that attachment. Memory and idle are in the launches above, with nothing attached.",
   );
-  for (const { label, cost } of reads) {
-    console.log();
-    console.log(`Plan of task.query, ${label}:`);
-    for (const step of cost.plans.tasks) console.log(`  ${step}`);
-    console.log(`Plan of run.query, ${label}:`);
-    for (const step of cost.plans.runs) console.log(`  ${step}`);
-  }
-  for (const each of work) {
-    console.log();
-    console.log(`### In the app, ${each.label}`);
-    console.log();
-    console.log(`Load average over the minute before the launch: ${each.loadAtSpawn.toFixed(2)}`);
-    console.log();
-    const motion = each.motion;
-    // Row, limit, measured, and whether the measurement is within the limit,
-    // or null for a measure that is recorded but has no limit.
-    const rows: [string, string, string, boolean | null][] = [
-      [
-        "Reads while the shell loads",
-        each.tracked === 0
-          ? "up to 3 snapshot reads (the first task and run pushes may each re-read), each only a task.query: no Task, so no run.query"
-          : "up to 3 snapshot reads (the first task and run pushes may each re-read), each one task.query and one run.query for each 100 Tasks; one run.read per Failed row once it has been in view",
-        each.loadReads.length === 0 ? "none" : each.loadReads.map(formatTimedRead).join("; "),
-        (() => {
-          const taskQueries = each.loadReads.filter((read) => read.name === "task.query").length;
-          const runQueries = each.loadReads.filter((read) => read.name === "run.query").length;
-          return (
-            taskQueries >= 1 &&
-            taskQueries <= 3 &&
-            runQueries === (each.tracked === 0 ? 0 : taskQueries)
-          );
-        })(),
-      ],
-      [
-        "A Task created: a push on the task topic",
-        each.tracked === 0
-          ? "a task.query once a push, and no run.query while no Task is tracked"
-          : "one snapshot (task.query and run.query) once a push",
-        formatPushes(each.taskPushes),
-        each.tracked === 0
-          ? each.taskPushes.reads.trackedRuns === 0 &&
-            each.taskPushes.reads.trackedTasks <= each.taskPushes.pushes
-          : each.taskPushes.reads.trackedTasks <= each.taskPushes.pushes &&
-            each.taskPushes.reads.trackedRuns === each.taskPushes.reads.trackedTasks,
-      ],
-      [
-        "A run that is not about a Task: pushes on the run topic",
-        each.tracked === 0
-          ? "no run.query while no Task is tracked"
-          : "one snapshot for each run's creation, and nothing for its later pushes",
-        formatPushes(each.runPushes),
-        each.tracked === 0
-          ? each.runPushes.reads.trackedRuns === 0
-          : each.runPushes.reads.trackedTasks <= PUSH_COUNT &&
-            each.runPushes.reads.trackedRuns === each.runPushes.reads.trackedTasks,
-      ],
-      ...(motion === undefined
-        ? []
-        : ([
-            [
-              "Opening Tracking with T",
-              "one animation for the sheet, at most 13 for the cascade, done within 450 ms; transform and opacity only",
-              `${formatMotion(motion.open)}; properties ${motion.open.properties.join(", ")}; animations: ${motion.open.kinds.join("; ")}`,
-              motion.open.animations <= 14 &&
-                motion.open.motionMs <= 450 &&
-                motion.open.properties.every((p) => ["opacity", "transform"].includes(p)) &&
-                droppedNoMotionFrame(motion.open) &&
-                isStillAfter(motion.open),
-            ],
-            [
-              "Closing Tracking with T",
-              "one animation, 180 ms",
-              `${formatMotion(motion.close)}; properties ${motion.close.properties.join(", ")}; animations: ${motion.close.kinds.join("; ")}`,
-              motion.close.animations === 1 &&
-                droppedNoMotionFrame(motion.close) &&
-                isStillAfter(motion.close),
-            ],
-            [
-              "A state change: a Working row stops",
-              "one opacity animation, plus one transform per row that moves",
-              `${formatMotion(motion.stateChange)}; properties ${motion.stateChange.properties.join(", ")}; animations: ${motion.stateChange.kinds.join("; ")}`,
-              motion.stateChange.properties.every((p) => ["opacity", "transform"].includes(p)) &&
-                isStillAfter(motion.stateChange),
-            ],
-            [
-              "A handoff from the pane",
-              "one animation for the lifted copy, plus one transform per row that moves on screen",
-              `${formatMotion(motion.handoff)}; properties ${motion.handoff.properties.join(", ")}; animations: ${motion.handoff.kinds.join("; ")}`,
-              motion.handoff.properties.every((p) => ["opacity", "transform"].includes(p)) &&
-                isStillAfter(motion.handoff),
-            ],
-            [
-              "A tick-off with E on a Finished row",
-              "one opacity animation, plus one transform per row that moves",
-              `${formatMotion(motion.tickOff)}; properties ${motion.tickOff.properties.join(", ")}; animations: ${motion.tickOff.kinds.join("; ")}`,
-              motion.tickOff.properties.every((p) => ["opacity", "transform"].includes(p)) &&
-                isStillAfter(motion.tickOff),
-            ],
-          ] satisfies [string, string, string, boolean | null][])),
-    ];
-    console.log(
-      formatTable(
-        ["Row", "Limit", "Measured", "Within"],
-        rows.map(([row, limit, measuredText, within]) => [
-          row,
-          limit,
-          measuredText,
-          within === null ? "-" : within ? "yes" : "over",
-        ]),
-      ),
-    );
-  }
+  console.log();
+  console.log(`Load average over the minute before the launch: ${result.loadAtSpawn.toFixed(2)}`);
+  console.log();
+  const cells = ([row, limit, measuredText, within]: ReportRow) => [
+    row,
+    limit,
+    measuredText,
+    within === null ? "-" : within ? "yes" : "over",
+  ];
+  console.log(formatTable(["Row", "Limit", "Measured", "Within"], rows.map(cells)));
   console.log();
 }
