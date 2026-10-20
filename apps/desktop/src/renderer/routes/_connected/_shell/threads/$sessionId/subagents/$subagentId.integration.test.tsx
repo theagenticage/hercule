@@ -32,7 +32,10 @@ import {
   stubElementSize,
   THREAD_FIXTURES,
 } from "../../../../../../app/testing";
-import { answerTranscriptRead, readTranscriptReads } from "../../../../../../app/testing-catch-up";
+import {
+  answerTranscriptRead,
+  readTranscriptReads,
+} from "../../../../../../app/testing-transcript";
 import { saveThreadCopy } from "../../../../../../app/testing-thread-copies";
 
 const THREAD = THREAD_FIXTURES.delegating;
@@ -170,14 +173,14 @@ describe("the subagent's page opened from the thread's saved copy", () => {
     const subagentRows = THREAD.subagentTranscripts[SUBAGENT_ID]!;
     const copiedRows = subagentRows.slice(0, -1);
     await saveThreadCopy(THREAD, { subagentTranscripts: { [SUBAGENT_ID]: copiedRows } });
-    const catchUp = holdAnswer();
+    const newerRows = holdAnswer();
     const answerFromThread = answerTranscriptRead(THREAD);
     const calls = stubApi({
       ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
       ...buildThreadHandlers(THREAD),
       [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: (call) =>
         new URLSearchParams(call.search).get("subagentId") === SUBAGENT_ID
-          ? catchUp.handler()
+          ? newerRows.handler()
           : answerFromThread(call),
     });
     const { context, live } = await renderApp(
@@ -197,7 +200,7 @@ describe("the subagent's page opened from the thread's saved copy", () => {
     });
 
     const subscribe = vi.spyOn(context.controller!.live, "subscribe");
-    catchUp.answer({ body: { items: subagentRows.slice(-2) } });
+    newerRows.answer({ body: { items: subagentRows.slice(-2) } });
 
     await waitFor(() => {
       expect(readAgentTopics(live.readTopics())).toEqual([SUBAGENT_STREAM, SUBAGENT_TAP]);

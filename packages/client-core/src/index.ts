@@ -722,8 +722,8 @@ export { createTailBuffer } from "./threads/tail-buffer";
 export { splitStreamingText } from "./threads/streaming-text";
 export { buildStreamCursor, decideStreamDelivery, decideTapDelivery } from "./threads/thread-live";
 export {
-  classifyCatchUpPage,
-  findCatchUpAfterPosition,
+  classifyTranscriptPage,
+  findTranscriptAfterPosition,
   mergeTranscript,
 } from "./threads/transcript";
 export { isThreadCopy, ThreadCopy } from "./threads/thread-copy";

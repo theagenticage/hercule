@@ -110,7 +110,6 @@ import {
   liveAgentSessionsQuery,
   liveRunsQuery,
   localRunnerQuery,
-  markTranscriptCaughtUp,
   memoryDocumentQuery,
   memoryIndexQuery,
   newestRunsQuery,
@@ -140,7 +139,6 @@ import {
   startTasksQuery,
   subagentsQuery,
   threadsQuery,
-  transcriptCatchUpQuery,
   transcriptQuery,
   triggersQuery,
   userQuery,
@@ -766,17 +764,15 @@ const seedQueryCache = (
     } else if (thread.profiles !== undefined) {
       queryClient.setQueryData(profilesQuery(client).queryKey, thread.profiles);
     }
-    if (thread.syncing !== true) {
-      // The page reads the catch-up of a transcript unless it is marked done.
-      markTranscriptCaughtUp(queryClient, sessionId);
-    } else {
-      // A read that never answers: the marker watches the query, which the
-      // thread's page would start.
-      const { queryKey } = transcriptCatchUpQuery(client, sessionId);
+    if (thread.syncing === true) {
+      // A read that never answers, on top of the rows just stored: the
+      // marker watches the transcript's query while it reads.
+      const { queryKey } = transcriptQuery(client, sessionId);
       keptReadingHashes.add(hashKey(queryKey));
       void queryClient.prefetchQuery({
         queryKey,
         queryFn: () => new Promise<never>(() => undefined),
+        staleTime: 0,
       });
     }
     for (const sender of thread.senders ?? []) {

@@ -38,19 +38,19 @@ export const findNewRows = (
  * Returns the `after` position to read the rows written since `held` with:
  * the position of the row before `held`'s last row, or 0 when `held` has one
  * row. The page then starts with the last row held, which
- * `classifyCatchUpPage` compares with the row the controller has at that
+ * `classifyTranscriptPage` compares with the row the controller has at that
  * position. Returns undefined when `held` is empty, because then the whole
  * transcript is read.
  */
-export const findCatchUpAfterPosition = (held: readonly TranscriptRow[]): number | undefined =>
+export const findTranscriptAfterPosition = (held: readonly TranscriptRow[]): number | undefined =>
   held.length === 0 ? undefined : (held.at(-2)?.position ?? 0);
 
-/** What a catch-up page is, compared with the rows held. See `classifyCatchUpPage`. */
-export type CatchUpPageKind = "continuesHeldRows" | "wholeTranscript" | "replacedLog";
+/** What a page of a transcript read is, compared with the rows held. See `classifyTranscriptPage`. */
+export type TranscriptPageKind = "continuesHeldRows" | "wholeTranscript" | "replacedLog";
 
 /**
- * Classifies `page`, read with the `after` position `findCatchUpAfterPosition`
- * returned for `held`. Returns:
+ * Classifies `page`, a transcript read made with the `after` position
+ * `findTranscriptAfterPosition` returned for `held`. Returns:
  * - `wholeTranscript` when `after` is above 0 and the first row is at or below
  *   it. A controller that predates `after` ignores it and answers from the
  *   start of the log, so the page is the whole transcript.
@@ -63,15 +63,15 @@ export type CatchUpPageKind = "continuesHeldRows" | "wholeTranscript" | "replace
  *   shorter. Merging such a page into `held` would store a transcript that
  *   mixes two histories, so the caller reads the whole transcript instead.
  */
-export const classifyCatchUpPage = (
+export const classifyTranscriptPage = (
   held: readonly TranscriptRow[],
   page: readonly TranscriptRow[],
-): CatchUpPageKind => {
+): TranscriptPageKind => {
   const last = held.at(-1);
   if (last === undefined) return "continuesHeldRows";
   const first = page[0];
   if (first === undefined) return "replacedLog";
-  const after = findCatchUpAfterPosition(held) ?? 0;
+  const after = findTranscriptAfterPosition(held) ?? 0;
   if (after > 0 && first.position <= after) return "wholeTranscript";
   return first.position === last.position && first.event.eventId === last.event.eventId
     ? "continuesHeldRows"

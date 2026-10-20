@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { TranscriptRow } from "@hercule/contract";
 import {
-  classifyCatchUpPage,
-  findCatchUpAfterPosition,
+  classifyTranscriptPage,
+  findTranscriptAfterPosition,
   findNewRows,
   mergeTranscript,
 } from "./transcript";
@@ -62,64 +62,64 @@ describe("findNewRows", () => {
   });
 });
 
-describe("findCatchUpAfterPosition", () => {
+describe("findTranscriptAfterPosition", () => {
   it("returns the position of the row before the last row held", () => {
-    expect(findCatchUpAfterPosition([buildRow(2), buildRow(5), buildRow(9)])).toBe(5);
+    expect(findTranscriptAfterPosition([buildRow(2), buildRow(5), buildRow(9)])).toBe(5);
   });
 
   it("returns 0 when one row is held, so the page starts with that row", () => {
-    expect(findCatchUpAfterPosition([buildRow(7)])).toBe(0);
+    expect(findTranscriptAfterPosition([buildRow(7)])).toBe(0);
   });
 
   it("returns undefined when no row is held", () => {
-    expect(findCatchUpAfterPosition([])).toBeUndefined();
+    expect(findTranscriptAfterPosition([])).toBeUndefined();
   });
 });
 
-describe("classifyCatchUpPage", () => {
+describe("classifyTranscriptPage", () => {
   const held = [buildRow(1), buildRow(2), buildRow(3)];
 
   it("accepts a page that starts with the last row held", () => {
-    expect(classifyCatchUpPage(held, [buildRow(3), buildRow(4)])).toBe("continuesHeldRows");
+    expect(classifyTranscriptPage(held, [buildRow(3), buildRow(4)])).toBe("continuesHeldRows");
   });
 
   it("accepts a page that holds only the last row held", () => {
-    expect(classifyCatchUpPage(held, [buildRow(3)])).toBe("continuesHeldRows");
+    expect(classifyTranscriptPage(held, [buildRow(3)])).toBe("continuesHeldRows");
   });
 
   it("accepts any page when no row is held", () => {
-    expect(classifyCatchUpPage([], [buildRow(1), buildRow(2)])).toBe("continuesHeldRows");
-    expect(classifyCatchUpPage([], [])).toBe("continuesHeldRows");
+    expect(classifyTranscriptPage([], [buildRow(1), buildRow(2)])).toBe("continuesHeldRows");
+    expect(classifyTranscriptPage([], [])).toBe("continuesHeldRows");
   });
 
   it("accepts a page that starts at the first row when one row is held, because it was read after 0", () => {
-    expect(classifyCatchUpPage([buildRow(1)], [buildRow(1), buildRow(2)])).toBe(
+    expect(classifyTranscriptPage([buildRow(1)], [buildRow(1), buildRow(2)])).toBe(
       "continuesHeldRows",
     );
   });
 
   it("recognises the whole transcript from a controller that ignored `after`", () => {
     // `after` was 2, yet the page starts at position 1.
-    expect(classifyCatchUpPage(held, [buildRow(1), buildRow(2), buildRow(3), buildRow(4)])).toBe(
+    expect(classifyTranscriptPage(held, [buildRow(1), buildRow(2), buildRow(3), buildRow(4)])).toBe(
       "wholeTranscript",
     );
   });
 
   it("recognises the whole transcript even when its rows differ from the held ones", () => {
-    expect(classifyCatchUpPage(held, [buildRow(1, "other"), buildRow(2, "other")])).toBe(
+    expect(classifyTranscriptPage(held, [buildRow(1, "other"), buildRow(2, "other")])).toBe(
       "wholeTranscript",
     );
   });
 
   it("refuses a page whose first row has the position of the last row held but another event", () => {
-    expect(classifyCatchUpPage(held, [buildRow(3, "other"), buildRow(4)])).toBe("replacedLog");
+    expect(classifyTranscriptPage(held, [buildRow(3, "other"), buildRow(4)])).toBe("replacedLog");
   });
 
   it("refuses a page that starts after the last row held", () => {
-    expect(classifyCatchUpPage(held, [buildRow(4), buildRow(5)])).toBe("replacedLog");
+    expect(classifyTranscriptPage(held, [buildRow(4), buildRow(5)])).toBe("replacedLog");
   });
 
   it("refuses an empty page, because the log no longer holds the last row", () => {
-    expect(classifyCatchUpPage(held, [])).toBe("replacedLog");
+    expect(classifyTranscriptPage(held, [])).toBe("replacedLog");
   });
 });

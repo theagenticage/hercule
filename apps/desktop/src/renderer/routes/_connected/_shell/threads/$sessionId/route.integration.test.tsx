@@ -25,9 +25,8 @@ import {
   stubElementSize,
   THREAD_FIXTURES,
 } from "../../../../../app/testing";
-import { answerTranscriptRead, readTranscriptReads } from "../../../../../app/testing-catch-up";
+import { answerTranscriptRead, readTranscriptReads } from "../../../../../app/testing-transcript";
 import { saveThreadCopy } from "../../../../../app/testing-thread-copies";
-import { transcriptCatchUpQuery } from "../../../../../app/queries";
 
 /** A thread id no controller holds. */
 const GONE_ID = "01a06d02-7400-7000-8000-0000000000ff";
@@ -359,9 +358,9 @@ describe("a thread opened from its saved copy", () => {
 
   it("shows the copy at once, reads only the rows after it, and subscribes the stream from the newest row after that", async () => {
     await saveThreadCopy(thread, { transcript: copiedRows });
-    const catchUp = holdAnswer();
+    const transcriptRead = holdAnswer();
     const { app, calls } = openApp(`/threads/${sessionId}`, {
-      [`GET ${transcriptPath}`]: catchUp.handler,
+      [`GET ${transcriptPath}`]: transcriptRead.handler,
     });
     const { context, live } = await app;
 
@@ -382,7 +381,7 @@ describe("a thread opened from its saved copy", () => {
     });
 
     const subscribe = vi.spyOn(context.controller!.live, "subscribe");
-    catchUp.answer({
+    transcriptRead.answer({
       body: { items: thread.transcript.filter((row) => row.position >= lastCopiedPosition) },
     });
 
@@ -398,7 +397,7 @@ describe("a thread opened from its saved copy", () => {
     expect(readTranscriptReads(calls, sessionId)).toHaveLength(1);
   });
 
-  it("subscribes the stream from the copy's newest row when the catch-up fails, and logs the failure", async () => {
+  it("subscribes the stream from the copy's newest row when the read of the newer rows fails, and logs the failure", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await saveThreadCopy(thread, { transcript: copiedRows });
     const { app } = openApp(`/threads/${sessionId}`, {
@@ -422,7 +421,7 @@ describe("a thread opened from its saved copy", () => {
     expect(logged).toHaveBeenCalledWith(expect.stringContaining("up to date"), expect.anything());
   });
 
-  it("shows that the thread was not found, and deletes the copy, when the catch-up says it is gone", async () => {
+  it("shows that the thread was not found, and deletes the copy, when the read of the newer rows says it is gone", async () => {
     await saveThreadCopy(thread, { transcript: copiedRows });
     const gone = {
       status: 404,
@@ -444,13 +443,13 @@ describe("a thread opened from its saved copy", () => {
     await saveThreadCopy(thread);
     const gone = { status: 404, body: buildErrorBody("not_found", "no such session") };
     let isGone = false;
-    const catchUp = holdAnswer();
+    const transcriptRead = holdAnswer();
     const { app } = openApp(`/threads/${sessionId}`, {
-      [`GET ${transcriptPath}`]: catchUp.handler,
+      [`GET ${transcriptPath}`]: transcriptRead.handler,
       [`GET /api/v1/sessions/${sessionId}`]: () => (isGone ? gone : { body: thread.session }),
     });
     const { context } = await app;
-    // The page subscribes once the catch-up has ended; catch the stream's handler then.
+    // The page subscribes once the read of the newer rows has ended; catch the stream's handler then.
     const { live } = context.controller!;
     const handlers = new Map<string, Parameters<typeof live.subscribe>[1]>();
     const subscribe = live.subscribe.bind(live);
@@ -458,7 +457,7 @@ describe("a thread opened from its saved copy", () => {
       handlers.set(topic, handler);
       return subscribe(topic, handler, cursor);
     });
-    catchUp.answer({ body: { items: thread.transcript.slice(-1) } });
+    transcriptRead.answer({ body: { items: thread.transcript.slice(-1) } });
     await waitFor(() => {
       expect(handlers.has(stream)).toBe(true);
     });
@@ -492,9 +491,9 @@ describe("a thread opened from its saved copy", () => {
     const sessionReleased = new Promise<void>((resolve) => {
       releaseSession = resolve;
     });
-    const catchUp = holdAnswer();
+    const transcriptRead = holdAnswer();
     const { app } = openApp(`/threads/${sessionId}`, {
-      [`GET ${transcriptPath}`]: catchUp.handler,
+      [`GET ${transcriptPath}`]: transcriptRead.handler,
       [`GET /api/v1/sessions/${sessionId}`]: async () => {
         if (!isGone) return { body: thread.session };
         await sessionReleased;
@@ -510,7 +509,7 @@ describe("a thread opened from its saved copy", () => {
       return subscribe(topic, handler, cursor);
     });
     const save = vi.spyOn(threadCopies, "save");
-    catchUp.answer({ body: { items: thread.transcript.slice(-1) } });
+    transcriptRead.answer({ body: { items: thread.transcript.slice(-1) } });
     await waitFor(() => {
       expect(handlers.has(stream)).toBe(true);
     });
@@ -537,17 +536,17 @@ describe("a thread opened from its saved copy", () => {
     expect(await threadCopies.read(sessionId)).toBeUndefined();
   });
 
-  it("shows Syncing… in the header while the catch-up runs past 400 ms, and not after it ends", async () => {
+  it("shows Syncing… in the header while the read of the newer rows runs past 400 ms, and not after it ends", async () => {
     await saveThreadCopy(thread, { transcript: copiedRows });
-    const catchUp = holdAnswer();
+    const transcriptRead = holdAnswer();
     const { app } = openApp(`/threads/${sessionId}`, {
-      [`GET ${transcriptPath}`]: catchUp.handler,
+      [`GET ${transcriptPath}`]: transcriptRead.handler,
     });
     await app;
 
     expect(await screen.findByText("Syncing…", {}, { timeout: 3000 })).toBeTruthy();
 
-    catchUp.answer({
+    transcriptRead.answer({
       body: { items: thread.transcript.filter((row) => row.position >= lastCopiedPosition) },
     });
     await waitFor(() => {
@@ -585,12 +584,8 @@ describe("a thread opened from its saved copy", () => {
     const { context, live } = await app;
 
     expect(readTranscriptReads(calls, sessionId)).toEqual([{ after: null, subagentId: null }]);
-    // The catch-up is already done, so nothing waits to subscribe.
-    expect(
-      context.queryClient.getQueryData(
-        transcriptCatchUpQuery(context.controller!.client, sessionId).queryKey,
-      ),
-    ).toBe(true);
+    // The transcript is not being read, so nothing waits to subscribe.
+    expect(context.queryClient.isFetching({ queryKey: queryKeys.transcript(sessionId) })).toBe(0);
     await waitFor(() => {
       expect(live.readTopics()).toContain(stream);
     });

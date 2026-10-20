@@ -1,18 +1,18 @@
 import type { JSX } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useIsFetching } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { transcriptCatchUpQuery } from "../../app/queries";
+import { transcriptQuery } from "../../app/queries";
 import { SyncMarker } from "./sync-marker";
 
 /**
  * Renders a header's free space, with "Syncing…" in it while the transcript
- * of `sessionId` (or of its subagent `subagentId`) is being brought up to
- * date after the thread opened from its saved copy.
+ * of `sessionId` (or of its subagent `subagentId`) is being read: after the
+ * thread opened from its saved copy, the read brings the copy's rows up to
+ * date.
  *
- * It only watches the catch-up read, which the agent's page starts, so it is
- * disabled here: a thread opened without a saved copy never runs the read
- * and never shows the marker. The read counts as syncing from the first
- * request until it has data.
+ * It only watches the transcript's query, which something else reads, so it
+ * starts no read. A thread read in full from the controller is fetching only
+ * before it opens, so the marker never shows for it.
  */
 export function TranscriptSyncMarker({
   sessionId,
@@ -22,9 +22,9 @@ export function TranscriptSyncMarker({
   readonly subagentId?: string;
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
-  const { isLoading } = useQuery({
-    ...transcriptCatchUpQuery(controller.client, sessionId, subagentId),
-    enabled: false,
+  const fetchingCount = useIsFetching({
+    queryKey: transcriptQuery(controller.client, sessionId, subagentId).queryKey,
+    exact: true,
   });
-  return <SyncMarker syncing={isLoading} />;
+  return <SyncMarker syncing={fetchingCount > 0} />;
 }

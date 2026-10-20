@@ -30,7 +30,6 @@ import {
   runnersQuery,
   sessionQuery,
   subagentsQuery,
-  transcriptCatchUpQuery,
   transcriptQuery,
 } from "../../app/queries";
 import { ThreadComposer } from "./composer";
@@ -91,9 +90,9 @@ export type DrawSubagentParts = (records: {
  * the transcript and the tail current.
  *
  * A thread that opened from its saved copy holds the copy's rows. The page
- * subscribes to the agent's topics only after `transcriptCatchUpQuery` has
- * merged the rows written since, or has failed (the stream then replays
- * them). When the catch-up finds that the thread no longer exists and the
+ * subscribes to the agent's stream only while the transcript's query is not
+ * reading: after it has merged the rows written since, or has failed (the
+ * stream then replays them). When that read finds that the thread no longer exists and the
  * page is in the thread's route (`inThreadRoute`), the page shows the
  * thread's not-found screen, or goes to the new-thread screen when the app
  * opened the thread at launch. Elsewhere, such as in the Office's drawer,
@@ -130,7 +129,8 @@ export function AgentPage({
   // Only the flag is read, so a navigation does not draw the page again.
   const isAtLaunch = useLocation({ select: isOpenedAtLaunch });
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
-  const rows = useSuspenseQuery(transcriptQuery(client, sessionId, subagentId)).data;
+  const transcript = useSuspenseQuery(transcriptQuery(client, sessionId, subagentId));
+  const rows = transcript.data;
   const instances = useSuspenseQuery(providersQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const subagents = useSuspenseQuery(subagentsQuery(client, sessionId)).data;
@@ -177,20 +177,19 @@ export function AgentPage({
     ...queuedInputsQuery(client, sessionId),
     enabled: subagentId === undefined,
   }).data;
-  // A thread opened from its saved copy holds the copy's rows until this read
-  // has merged the newer ones. The stream is subscribed after it, from the
-  // newest row, so its replay stays small. A read that fails is no reason to
-  // stay unsubscribed: the stream's replay then fills the gap from the rows
-  // held. A thread read from the controller has this read done already.
-  const catchUp = useQuery(transcriptCatchUpQuery(client, sessionId, subagentId));
-  const catchUpError = catchUp.error;
+  // A thread opened from its saved copy holds the copy's rows until the
+  // transcript's read has merged the newer ones. The stream is subscribed
+  // after it, from the newest row, so its replay stays small. A read that
+  // fails is no reason to stay unsubscribed: the stream's replay then fills
+  // the gap from the rows held.
+  const transcriptError = transcript.error;
   useEffect(() => {
-    if (catchUpError !== null && !isNotFound(catchUpError)) {
-      console.error("Could not bring the thread's saved transcript up to date:", catchUpError);
+    if (transcriptError !== null && !isNotFound(transcriptError)) {
+      console.error("Could not bring the thread's saved transcript up to date:", transcriptError);
     }
-  }, [catchUpError]);
+  }, [transcriptError]);
   const attachOpenParagraph = useSessionLive({
-    live: catchUp.isPending ? null : live,
+    live: transcript.isFetching ? null : live,
     queryClient,
     sessionId,
     subagentId,
@@ -226,8 +225,8 @@ export function AgentPage({
           ),
         }
       : splitSubagentBrief(threadBlocks);
-  if (inThreadRoute && isNotFound(catchUpError)) {
-    // The catch-up found that the thread no longer exists, which the saved
+  if (inThreadRoute && isNotFound(transcriptError)) {
+    // The transcript read found that the thread no longer exists, which the saved
     // copy could not know. Show what the thread's loader shows for it, see
     // `throwScreenNotFound`. A redirect cannot be thrown from a component.
     if (isAtLaunch) return <Navigate to="/" replace />;
