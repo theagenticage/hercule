@@ -525,6 +525,118 @@ describe("opened Tracking over the list", () => {
   });
 });
 
+describe("a row that moves to another state's heading", () => {
+  /** The failed run of the Working Task, as `run.read` returns it, with its own reason. */
+  const MOVED_RUN = {
+    ...FAILED_RUN,
+    id: getRunId(WORKING_TASK),
+    taskId: WORKING_TASK.id,
+    steps: [
+      {
+        ...FAILED_RUN.steps[0]!,
+        error: { code: "full", message: "disk full on ops-db" },
+      },
+    ],
+  } as Run;
+
+  /** Opens opened Tracking with a Failed and a Working row, and returns how to fail the Working one. */
+  const openWithMovableRow = async () => {
+    let status: RunSummary["status"] = "running";
+    const opened = await openIntake("/intake?tracking=true", {
+      extra: {
+        ...storeTracking([[FAILED_TASK, "failed"]]),
+        "GET /api/v1/tasks": () => ({ body: { items: [FAILED_TASK, WORKING_TASK] } }),
+        "GET /api/v1/runs": () => ({
+          body: {
+            items: [buildRunSummary(FAILED_TASK, "failed"), buildRunSummary(WORKING_TASK, status)],
+          },
+        }),
+        [`GET /api/v1/runs/${MOVED_RUN.id}`]: { body: MOVED_RUN },
+      },
+    });
+    await opened.live.waitForFirstPushes();
+    return {
+      ...opened,
+      failWorkingRow: async () => {
+        status = "failed";
+        act(() => opened.live.pushInvalidation("run", [getRunId(WORKING_TASK)]));
+        await waitFor(() => {
+          expect(
+            getRowButton(WORKING_TASK).closest(".tr-run-item")!.getAttribute("data-state"),
+          ).toBe("failed");
+        });
+      },
+    };
+  };
+
+  it("keeps the focus on the row, so the keys still reach Intake", async () => {
+    const { failWorkingRow } = await openWithMovableRow();
+    await userEvent.keyboard("jj");
+    expect(readSelected()).toEqual([WORKING_TASK.id]);
+    const before = getRowButton(WORKING_TASK);
+    expect(document.activeElement).toBe(before);
+
+    await failWorkingRow();
+
+    // The row is drawn again under the Failed heading, as another element.
+    const after = getRowButton(WORKING_TASK);
+    expect(after).not.toBe(before);
+    expect(document.activeElement).toBe(after);
+    await userEvent.keyboard("k");
+    expect(readSelected()).toEqual([FAILED_TASK.id]);
+  });
+
+  it("reads its reason once the new element comes into view, not before", async () => {
+    // A row is in view only when a test says so, as a scroll would.
+    const watched = new Map<Element, IntersectionObserverCallback>();
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        readonly callback: IntersectionObserverCallback;
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+        observe(element: Element): void {
+          watched.set(element, this.callback);
+        }
+        unobserve(element: Element): void {
+          watched.delete(element);
+        }
+        disconnect(): void {
+          watched.clear();
+        }
+      },
+    );
+    const { calls, failWorkingRow } = await openWithMovableRow();
+    const reasonReads = () => calls.filter((call) => call.path === `/api/v1/runs/${MOVED_RUN.id}`);
+    const showRow = (task: Task) => {
+      const item = getRowButton(task).closest(".tr-run-item")!;
+      expect(watched.has(item)).toBe(true);
+      act(() => {
+        watched.get(item)!(
+          [{ target: item, isIntersecting: true } as IntersectionObserverEntry],
+          {} as IntersectionObserver,
+        );
+      });
+    };
+    const oldItem = getRowButton(WORKING_TASK).closest(".tr-run-item")!;
+
+    await failWorkingRow();
+    const newItem = getRowButton(WORKING_TASK).closest(".tr-run-item")!;
+    expect(newItem).not.toBe(oldItem);
+    expect(watched.has(oldItem)).toBe(false);
+    expect(reasonReads()).toHaveLength(0);
+
+    showRow(WORKING_TASK);
+    await waitFor(() => {
+      expect(getRowButton(WORKING_TASK).textContent).toContain(
+        "Implement failed · disk full on ops-db",
+      );
+    });
+    expect(reasonReads()).toHaveLength(1);
+  });
+});
+
 describe("opening a row", () => {
   it("opens its run's page, folded or opened, by click and by ↩", async () => {
     const { router } = await openIntake();

@@ -3,8 +3,9 @@
  * §Tracking).
  */
 import {
+  useCallback,
   useEffect,
-  useEffectEvent,
+  useLayoutEffect,
   useId,
   useImperativeHandle,
   useRef,
@@ -77,7 +78,9 @@ const regroupItems = (items: ReadonlyArray<SheetItem>): ReadonlyArray<TrackingSh
  * of to the page, where no key would reach Intake.
  *
  * `onRowsSeen` is called with the ids of the Tasks whose rows have come into
- * view in the scrolling rows, which one observer watches. The caller reads
+ * view, which one observer watches, each row from the moment it is drawn.
+ * A row drawn again in another place, such as under another state's heading,
+ * keeps the focus it had. The caller reads
  * for a row only once it is seen.
  *
  * The component takes the place of the list column, so the column must be its
@@ -129,29 +132,51 @@ export function TrackingSheet({
   useEffect(() => {
     sheetRef.current!.focus({ preventScroll: true });
   }, []);
-  // One observer watches every row, and is made again when the rows change.
-  const reportSeen = useEffectEvent((taskIds: ReadonlyArray<string>) => {
-    onRowsSeen?.(taskIds);
+  // One observer watches the rows. Each row's element is watched from the
+  // moment it is drawn to the moment it goes, whatever else changes, so a row
+  // that is drawn again under another heading, as a row that changes state
+  // is, is watched in its new place.
+  const seenObserver = useRef<IntersectionObserver | null>(null);
+  const reportSeen = useRef(onRowsSeen);
+  useLayoutEffect(() => {
+    reportSeen.current = onRowsSeen;
   });
-  const rowKey = drawnGroups.flatMap((group) => group.rows.map((row) => row.taskId)).join(" ");
-  const watching = onRowsSeen !== undefined;
-  useEffect(() => {
-    if (!watching) return;
-    const scroll = scrollRef.current!;
-    const observer = new IntersectionObserver(
-      (entries) => {
+  // The row that had the focus when its element went, to be focused again in its new element.
+  const refocusTaskId = useRef<string | null>(null);
+  const attachRow = useCallback((row: HTMLElement | null) => {
+    if (row === null) return undefined;
+    if (reportSeen.current !== undefined) {
+      seenObserver.current ??= new IntersectionObserver((entries) => {
         const seen = entries
           .filter((entry) => entry.isIntersecting)
           .map((entry) => (entry.target as HTMLElement).dataset.itemKey!);
-        if (seen.length > 0) reportSeen(seen);
-      },
-      { root: scroll },
-    );
-    for (const row of scroll.querySelectorAll(".tr-run-item")) observer.observe(row);
+        if (seen.length > 0) reportSeen.current?.(seen);
+      });
+      seenObserver.current.observe(row);
+    }
     return () => {
-      observer.disconnect();
+      seenObserver.current?.unobserve(row);
+      // The element goes while it holds the focus, and the focus would drop to the page's body.
+      if (row.contains(document.activeElement)) refocusTaskId.current = row.dataset.itemKey!;
     };
-  }, [rowKey, watching]);
+  }, []);
+  useEffect(
+    () => () => {
+      seenObserver.current?.disconnect();
+      seenObserver.current = null;
+    },
+    [],
+  );
+  // After the rows are drawn: the row that lost the focus to a new element of its own gets it back.
+  useLayoutEffect(() => {
+    const taskId = refocusTaskId.current;
+    if (taskId === null) return;
+    refocusTaskId.current = null;
+    if (document.activeElement !== document.body) return;
+    const sheet = sheetRef.current!;
+    const row = sheet.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(taskId)}"]`);
+    (row ?? sheet).focus({ preventScroll: true });
+  });
   useEffect(() => {
     if (selectedTaskId === null) return;
     const sheet = sheetRef.current!;
@@ -219,6 +244,7 @@ export function TrackingSheet({
                     key={facts.taskId}
                     facts={facts}
                     selected={facts.taskId === selectedTaskId}
+                    rowRef={attachRow}
                     onOpen={onOpenRow}
                     onMarkDone={onMarkDone}
                   />

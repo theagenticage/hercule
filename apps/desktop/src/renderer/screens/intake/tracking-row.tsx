@@ -55,11 +55,14 @@ export interface TrackingRowFacts {
 export const TrackingRowItem = memo(function TrackingRowItem({
   facts,
   selected,
+  rowRef,
   onOpen,
   onMarkDone,
 }: {
   readonly facts: TrackingRowFacts;
   readonly selected: boolean;
+  /** A ref for the row's element, which its caller uses to watch the row come into view. */
+  readonly rowRef?: (row: HTMLElement | null) => (() => void) | undefined;
   readonly onOpen: (taskId: string) => void;
   readonly onMarkDone: (taskId: string) => void;
 }): JSX.Element {
@@ -74,6 +77,7 @@ export const TrackingRowItem = memo(function TrackingRowItem({
   ];
   return (
     <div
+      ref={rowRef}
       className={classes.filter((each) => each !== "").join(" ")}
       data-item-key={taskId}
       data-state={state}
