@@ -1,0 +1,684 @@
+/* PROTOTYPE - direction 2, Lineage. Every rule is scoped under .d-lineage.
+
+   Geometry, measured from today's 52px row (spec 17, #626): the row's padding-left is 10px and
+   line 2 starts with the provider's 12px mark, so the mark's centre sits 16px from the row's left
+   edge, 38px from its top. A family's line runs down from under that mark, at x 16, and every
+   partner's face sits on it, centred on the same x. Partner text starts at x 28, where the lead's
+   line 2 text starts, so the family reads as one column. */
+
+.d-lineage {
+  --ln-x: 16px; /* the line's centre, from a row's left edge */
+  --ln-w: 2px;
+  --ln-kid-h: 32px;
+  --ln-knot-h: 24px;
+}
+
+/* ---------- a family ---------- */
+
+.d-lineage .ln-fam {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-2);
+  --ln-line: color-mix(in oklab, var(--who) 84%, var(--bg));
+}
+.d-lineage .ln-fam--alone {
+  --ln-line: transparent;
+}
+/* The open thread's family keeps its line at full strength, so you always see where you are. */
+.d-lineage .ln-fam.is-current,
+.d-lineage .ln-fam.is-lit {
+  --ln-line: var(--who);
+}
+/* A family sits a little apart from its neighbours, so proximity says what belongs together. */
+.d-lineage .ln-fam:not(.ln-fam--alone) + .ln-fam,
+.d-lineage .ln-fam + .ln-fam:not(.ln-fam--alone) {
+  margin-top: 5px;
+}
+/* Hovering a family lights it as one region: the lead, its partners and the line between them. */
+.d-lineage .ln-fam.is-lit:not(.ln-fam--alone):not(.ln-fam--done) {
+  background: color-mix(in oklab, var(--who) 10%, transparent);
+}
+.d-lineage .ln-fam.is-lit .side-row:hover {
+  background: color-mix(in oklab, var(--who) 12%, var(--hover));
+}
+
+.d-lineage .ln-row {
+  position: relative;
+}
+
+/* The stub under a lead's mark, where its family's line starts. It belongs to the family, not
+   to the lead's row, so it does not step back with a working lead's row. */
+.d-lineage .ln-fam:not(.ln-fam--alone)::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--ln-x) - var(--ln-w) / 2);
+  top: 45px;
+  height: 9px;
+  width: var(--ln-w);
+  border-radius: 1px 1px 0 0;
+  background: var(--ln-line);
+  transition: background var(--dur-2);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ---------- a partner's row: its face on the line, its role, its agent, its status ---------- */
+
+.d-lineage .ln-kid {
+  height: var(--ln-kid-h);
+  transition: opacity var(--dur-1);
+}
+/* A working partner's row steps back as a working lead's does, but its piece of the line does not. */
+.d-lineage .ln-kid.is-receded > .side-row {
+  opacity: 0.72;
+  transition: opacity var(--dur-1);
+}
+.d-lineage .ln-kid:hover > .side-row,
+.d-lineage .ln-kid:focus-within > .side-row {
+  opacity: 1;
+}
+.d-lineage .ln-kid-row {
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+  padding: 0 8px 0 8px;
+  box-sizing: border-box;
+  font-size: var(--t-13);
+}
+.d-lineage .ln-kid::before,
+.d-lineage .ln-kid::after,
+.d-lineage .ln-knot::before,
+.d-lineage .ln-knot::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--ln-x) - var(--ln-w) / 2);
+  width: var(--ln-w);
+  background: var(--ln-line);
+  transition: background var(--dur-2);
+  pointer-events: none;
+  z-index: 1;
+}
+/* From the row above down to the face, and from the face down to the next row. */
+/* The face's egg fills its box from 13% to 92% of its height, so the line stops 1px short of it. */
+.d-lineage .ln-kid::before {
+  top: -2px;
+  height: calc(var(--ln-kid-h) / 2 - 7px + 2px);
+}
+.d-lineage .ln-kid::after {
+  top: calc(var(--ln-kid-h) / 2 + 8px);
+  bottom: -2px;
+}
+.d-lineage .ln-knot::before {
+  top: -2px;
+  height: calc(var(--ln-knot-h) / 2 - 5px + 2px);
+}
+.d-lineage .ln-knot::after {
+  top: calc(var(--ln-knot-h) / 2 + 5px);
+  bottom: -2px;
+}
+/* The line ends at its last member. */
+.d-lineage .ln-fam > .ln-row:last-of-type::after {
+  display: none;
+}
+.d-lineage .ln-fam > .ln-row:last-of-type.ln-kid::before,
+.d-lineage .ln-fam > .ln-row:last-of-type.ln-knot::before {
+  border-radius: 0 0 1px 1px;
+}
+
+.d-lineage .ln-node {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0 3px 0 -1px;
+}
+.d-lineage .ln-node .cr {
+  display: block;
+}
+.d-lineage .ln-role {
+  flex: none;
+  max-width: 120px;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.d-lineage .ln-agent {
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  margin-left: 8px;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.d-lineage .ln-agent .st-glyph {
+  margin-right: 4px;
+}
+.d-lineage .ln-kid .side-end {
+  min-width: 48px;
+  font-size: var(--t-12);
+}
+
+/* ---------- the knot: quiet partners, folded on the line ---------- */
+
+.d-lineage .ln-knot {
+  height: var(--ln-knot-h);
+}
+.d-lineage .ln-knot-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0 8px 0 8px;
+  box-sizing: border-box;
+  color: var(--faint);
+  font: inherit;
+  font-size: var(--t-12);
+  text-align: left;
+}
+.d-lineage .ln-ring {
+  position: relative;
+  height: 10px;
+}
+.d-lineage .ln-ring::before {
+  content: "";
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--ln-line);
+  border-radius: 50%;
+  transition: border-color var(--dur-2);
+}
+.d-lineage .ln-knot-faces {
+  display: inline-flex;
+  flex: none;
+  margin-right: 6px;
+}
+.d-lineage .ln-knot-faces .cr {
+  display: block;
+  opacity: 0.85;
+}
+.d-lineage .ln-knot-faces .cr + .cr {
+  margin-left: -4px;
+}
+.d-lineage .ln-knot-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.d-lineage .ln-knot-quiet {
+  color: var(--faint);
+}
+.d-lineage .ln-knot .side-end {
+  min-width: 48px;
+}
+.d-lineage .ln-knot.is-open .ln-knot-text {
+  color: var(--faint);
+}
+
+/* ---------- the Done button, as the app's: it crossfades over the status slot ---------- */
+
+.d-lineage .ln-act {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 48px;
+  height: 18px;
+  padding: 0 6px 0 4px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-1), background var(--dur-1);
+}
+.d-lineage .ln-kid > .ln-act {
+  top: 7px;
+}
+.d-lineage .ln-act:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.d-lineage .ln-row:hover > .ln-act {
+  opacity: 1;
+  pointer-events: auto;
+}
+.d-lineage .ln-row .side-end {
+  transition: opacity var(--dur-1);
+}
+.d-lineage .ln-row:hover > .side-row .side-end {
+  opacity: 0;
+}
+.d-lineage .ln-knot:hover .side-end,
+.d-lineage .ln-apart:hover .side-end {
+  opacity: 1 !important;
+}
+
+/* ---------- a partner joins while the pointer is in the list: it waits as a pip on its lead ---------- */
+
+.d-lineage .ln-pip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  height: 16px;
+  margin-left: auto;
+  padding: 0 6px 0 2px;
+  border-radius: var(--r-pill);
+  background: var(--who-tint);
+  color: var(--who-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--who) 50%, transparent);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.d-lineage .ln-pip .cr {
+  display: block;
+}
+.d-lineage .ln-fam.is-growing::before {
+  animation: ln-grow var(--dur-2) var(--ease-out) both;
+  transform-origin: top;
+}
+@keyframes ln-grow {
+  from {
+    transform: scaleY(0);
+  }
+}
+.d-lineage .ln-fake-hover {
+  background: var(--hover);
+}
+.d-lineage .ln-pointer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 40;
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1.5px oklch(0 0 0 / 0.35));
+  transition: opacity var(--dur-2);
+}
+.d-lineage .ln-pointer.is-shown {
+  opacity: 1;
+}
+.d-lineage .ln-pointer.is-moving {
+  transition: transform 640ms cubic-bezier(0.45, 0, 0.25, 1), opacity var(--dur-2);
+}
+
+/* ---------- the bead: a message runs along the line ---------- */
+
+/* A short capsule, wider than the line, in the lead's ink: a signal travelling down the wire. */
+.d-lineage .ln-bead {
+  position: absolute;
+  left: calc(var(--ln-x) - 2.5px);
+  top: 0;
+  z-index: 3;
+  width: 5px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--who-ink);
+  pointer-events: none;
+}
+
+/* ---------- Waiting on you: a partner is named by its role and its lead ---------- */
+
+.d-lineage .ln-wait-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.d-lineage .ln-wait-role {
+  flex: none;
+}
+.d-lineage .ln-wait .ln-kin {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A kin tag: the lead's hue and the lead's name. Hovering it lights the whole family. */
+.d-lineage .ln-kin {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.d-lineage .ln-kin-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--who);
+  box-shadow: 0 0 0 1px var(--who-shade);
+}
+.d-lineage .ln-kin-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.d-lineage .ln-kin:hover .ln-kin-name {
+  color: var(--ink);
+}
+
+/* ---------- the status lens ---------- */
+
+.d-lineage .ln-lens-btn[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+.d-lineage .ln-lensbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  margin-top: 4px;
+  padding: 0 0 0 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.d-lineage .ln-lensbar button {
+  color: var(--muted);
+  font: inherit;
+  font-weight: var(--w-medium);
+}
+.d-lineage .ln-lensbar button:hover {
+  color: var(--ink);
+}
+.d-lineage .ln-group-h .count {
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 10.5px;
+}
+.d-lineage .ln-apart-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.d-lineage .ln-apart-face {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0 6px 0 -2px;
+}
+.d-lineage .ln-apart-face .cr {
+  display: block;
+}
+.d-lineage .ln-apart .ln-agent {
+  flex: 1;
+}
+.d-lineage .ln-apart .st-detail .ln-kin {
+  flex: 1;
+}
+/* While a family is lit under the lens, every other row steps back. */
+.d-lineage .ln-lensed .has-lit [data-thread]:not(.is-lit) {
+  opacity: 0.36;
+}
+.d-lineage .ln-lensed .has-lit [data-thread].is-lit > .side-row {
+  background: color-mix(in oklab, var(--who) 12%, transparent);
+}
+.d-lineage .ln-lensed .has-lit .ln-fam.is-lit {
+  background: none;
+}
+
+/* ---------- the Done shelf keeps a family together ---------- */
+
+.d-lineage .ln-shelf-h button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.d-lineage .ln-shelf-h .ic {
+  transition: transform var(--dur-1);
+}
+.d-lineage .ln-shelf-h button[aria-expanded="true"] .ic {
+  transform: rotate(90deg);
+}
+.d-lineage .ln-shelf-h b {
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.d-lineage .ln-fam--done {
+  --ln-line: var(--line);
+}
+.d-lineage .ln-done > .side-row,
+.d-lineage .ln-done.ln-kid .ln-kid-row {
+  opacity: 0.6;
+}
+.d-lineage .ln-done:hover > .side-row {
+  opacity: 1;
+}
+.d-lineage .ln-fam--done.is-fresh {
+  animation: ln-arrive var(--dur-3) var(--ease-out) both;
+}
+@keyframes ln-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.d-lineage .ln-act--reopen {
+  min-width: 58px;
+}
+
+.d-lineage .ln-noproj::before {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+
+/* ---------- the hover card ---------- */
+
+.d-lineage .ln-card {
+  position: fixed;
+  left: 280px;
+  z-index: 30;
+  width: 300px;
+  padding: 12px 14px 14px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: 0 0 0 1px var(--glass-rim), var(--shadow-3);
+  font-size: var(--t-12);
+  opacity: 0;
+  transform: translateX(-4px);
+  pointer-events: none;
+  transition: opacity var(--dur-1), transform var(--dur-1);
+}
+.d-lineage .ln-card.is-shown {
+  opacity: 1;
+  transform: none;
+}
+.d-lineage .ln-card-title {
+  color: var(--ink);
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+  line-height: 1.35;
+}
+.d-lineage .ln-card-kin {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  background: var(--who-tint);
+  color: var(--muted);
+  line-height: 1.35;
+}
+.d-lineage .ln-card-kin .cr {
+  flex: none;
+}
+.d-lineage .ln-card-kin b {
+  color: var(--who-ink);
+}
+.d-lineage .ln-card-how {
+  margin-top: 6px;
+  color: var(--faint);
+}
+.d-lineage .ln-card-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 10px 0 0;
+}
+.d-lineage .ln-card-facts dt {
+  color: var(--faint);
+}
+.d-lineage .ln-card-facts dd {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+}
+.d-lineage .ln-card-facts .mono {
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 11.5px;
+}
+.d-lineage .ln-card-brief {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink);
+  line-height: 1.45;
+}
+.d-lineage .ln-card-brief span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--faint);
+}
+
+/* ---------- the header: the family as tabs ---------- */
+
+.d-lineage .ln-tabset {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.d-lineage .ln-tab-agent {
+  margin-left: -2px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.d-lineage .ln-new-x {
+  animation: ln-arrive var(--dur-3) var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .d-lineage .ln-fam--done.is-fresh,
+  .d-lineage .ln-new-x,
+  .d-lineage .ln-fam.is-growing::before {
+    animation: none;
+  }
+}
+
+/* Under a lens, a lead whose partners sit in other groups shows their faces at its row's end. */
+.d-lineage .ln-apart-kin {
+  display: inline-flex;
+  flex: none;
+  margin-left: auto;
+  padding-left: 8px;
+}
+.d-lineage .ln-apart-kin .cr {
+  display: block;
+}
+.d-lineage .ln-apart-kin .cr + .cr {
+  margin-left: -3px;
+}
+.d-lineage .ln-seg {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+  padding: 2px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+}
+.d-lineage .ln-lensbar .ln-seg button {
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 6px;
+}
+.d-lineage .ln-lensbar .ln-seg button[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
+}
+
+/* ---------- the toast: the app's Done toast (apps/desktop/src/renderer/shell/sidebar.css) ---------- */
+
+.d-lineage .side-toast {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 12px;
+  border-radius: var(--r-md);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  box-shadow: var(--shadow-2);
+  animation: ln-toast var(--dur-2) var(--ease-out);
+}
+.d-lineage .side-toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.d-lineage .side-toast button {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: inherit;
+  font: inherit;
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.d-lineage .side-toast button:hover {
+  background: color-mix(in oklab, var(--surface) 14%, transparent);
+}
+@keyframes ln-toast {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}

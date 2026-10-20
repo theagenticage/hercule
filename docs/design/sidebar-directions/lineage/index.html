@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../shared/book.css" />
+    <script src="../shared/book.js"></script>
+    <title>Lineage · The sidebar, regrouped · Hercule</title>
+    <style>
+      /* This page's own pieces, on top of the book's. */
+      .ln-huh-frames {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 28px;
+        align-items: start;
+        margin-top: 36px;
+      }
+      .bk-huh .bk-cap-text,
+      .bk-huh .bk-cap-text b,
+      .bk-huh .bk-cap-acts a,
+      .bk-huh .bk-cap-acts button {
+        color: color-mix(in oklab, var(--surface) 82%, transparent);
+      }
+      .bk-huh .bk-cap-text b {
+        color: var(--surface);
+      }
+      .ln-anatomy {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 48px;
+        align-items: start;
+      }
+      .ln-score td:nth-child(2) {
+        white-space: nowrap;
+      }
+      .ln-score .bk-chip {
+        min-width: 58px;
+        justify-content: center;
+      }
+      .ln-quote {
+        margin: 28px 0 0;
+        padding-left: 18px;
+        border-left: 3px solid var(--line);
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.6;
+      }
+      .ln-quote b {
+        color: var(--ink);
+      }
+      @media (max-width: 900px) {
+        .ln-huh-frames,
+        .ln-anatomy {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="bk-top">
+      <a class="bk-brand" href="../index.html"><i data-face="Hercule" data-pose="idle" data-size="24"></i>The sidebar, regrouped <small>four directions in Crew Bureau</small></a>
+      <nav class="bk-links">
+        <a href="../index.html#team">The team</a>
+        <a href="../index.html#brief">The brief</a>
+        <a href="../case-files/index.html">Case Files</a>
+        <a href="../lineage/index.html" aria-current="page">Lineage</a>
+        <a href="../workbench/index.html">Workbench</a>
+        <a href="../tracks/index.html">Tracks</a>
+        <a href="../index.html#compare">Compare</a>
+      </nav>
+      <div class="bk-themes"><button data-theme-option="whitehaven">Whitehaven</button><button data-theme-option="orient-express">Orient Express</button></div>
+    </header>
+
+    <main class="bk">
+      <!-- ============================================================ hero -->
+      <section class="bk-hero">
+        <div class="bk-eyebrow">Direction 2 of 4 · organizes by who started whom</div>
+        <h1><span class="bk-num">2</span>Lineage</h1>
+        <p class="bk-lever">Every thread keeps its row. Kinship is drawn, not boxed, so it survives any sort.</p>
+        <p class="bk-lede">
+          When a thread starts a partner, Lineage puts the partner right under it and joins the two with a line in
+          the <b>lead's own color</b>. The partner's row says only what it adds: <b>review · Codex · Working</b>.
+          You see which threads belong together before you read a single title, and every thread is still a row
+          you click, as in Claude Code, Codex or T3 Code.
+        </p>
+        <p class="bk-lede">
+          Because the relation lives on each row and not in a box, it survives whatever grouping comes later.
+          <b>Group by status</b> and the families split up, yet every partner still says whose it is, and one
+          hover lights the whole family across the list.
+        </p>
+      </section>
+
+      <figure class="bk-frame bk-wide" data-src="desktop.html?state=everyday" data-caption="A heavy Tuesday morning, 09:41" data-note="Sixteen threads in ten pieces of work. Each family hangs off its lead on one line in the lead's color. The quiet partners fold into a ring on the line. A message just ran down the payout report's line to its checker."></figure>
+
+      <!-- ============================================================ before / after -->
+      <section class="bk-sec" id="before">
+        <div class="bk-eyebrow">Before and after</div>
+        <h2>Same threads, same height. Now you can see the families.</h2>
+        <p class="bk-lede">
+          Today, payments-api lists five rows in the order they started. <b>"Check payout totals against Stripe"</b>
+          sits above the report it checks, and <b>"Adversarial review of the…"</b> reads like a stranger. In Lineage the
+          same five threads read as three pieces of work, in less height.
+        </p>
+        <div class="bk-stats">
+          <div class="bk-stat"><b>16 of 16</b><span>threads in view, in the height today's list needs to show 14</span></div>
+          <div class="bk-stat"><b>32px</b><span>for a partner's row, down from 52. A quiet partner folds to 24</span></div>
+          <div class="bk-stat"><b>Once</b><span>is how often a piece of work's name is said. A partner is named by its role and its agent</span></div>
+          <div class="bk-stat"><b>1:1</b><span>a lone thread is today's row, exactly: no box, no header, no extra level</span></div>
+        </div>
+        <div class="bk-pair">
+          <figure class="bk-frame" data-src="../today/desktop.html?state=everyday" data-crop="0,120,272,600" data-zoom="1.5" data-caption="Today" data-note="Every thread is a stranger. A partner can land anywhere in its project, and its title repeats its lead's."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=everyday" data-crop="0,120,272,600" data-zoom="1.5" data-caption="Lineage" data-note="The checker hangs under its report. The Result review rests in the knot. Waiting on you names the checker by its role and its lead."></figure>
+        </div>
+      </section>
+
+      <!-- ============================================================ anatomy -->
+      <section class="bk-sec" id="anatomy">
+        <div class="bk-eyebrow">Anatomy</div>
+        <h2>One line, one color, no boxes</h2>
+        <p class="bk-lede">The 3-D Secure work, with its review open. Drawn at one and a half times its size.</p>
+        <div class="ln-anatomy">
+          <figure class="bk-frame" data-src="desktop.html?state=partner" data-crop="0,120,272,660" data-zoom="1.5" data-caption="The review is open" data-note="Its row is selected, and its family's line runs through it."></figure>
+          <ol class="bk-steps">
+            <li><h4>The lead keeps today's row</h4><p>Same 52px, same title, same status word, same branch. Nothing about a lead changes when it starts a partner, except that a line now leaves from under its provider's mark.</p></li>
+            <li><h4>The line is the lead's color</h4><p>In Crew Bureau, color is who. The lead is who started the family, so the line wears the lead's signature hue, the same hue its face wears in the Office. Lines of other families are a step quieter than the open one's, so you always see where you are.</p></li>
+            <li><h4>A partner says what it adds</h4><p>Its face sits on the line, then its role, its agent and its status: <b>review · Codex · Working</b>. The role is written once by a Text Generation from the brief the lead gave it, as a title is. Its full title is one hover away.</p></li>
+            <li><h4>Quiet partners fold into the knot</h4><p>A partner with nothing going on folds into a ring on the line: <b>research · quiet · 20m</b>. One click opens the knot. A family of four with two idle partners takes three rows.</p></li>
+            <li><h4>Waiting on you says whose it is</h4><p>A waiting partner is named by its role and its lead, <b>check · Payout report for September</b>, so you know what you are answering for before you open it.</p></li>
+            <li><h4>A lone thread draws nothing</h4><p>No line, no knot, no indent. "Audit checkout for screen readers" shares a main workspace with "Tidy checkout CSS" and they stay strangers, because sharing a workspace is not sharing the work.</p></li>
+            <li><h4>The header follows the family</h4><p>The tabs are the family, not the workspace: the lead by its title, each partner by its role. A checker in a scratch workspace on another machine is still a tab.</p></li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ============================================================ the huh -->
+      <section class="bk-sec" id="huh">
+        <div class="bk-huh">
+          <div class="bk-eyebrow">The huh</div>
+          <h2>Group the list by status. The families split up. The kinship does not.</h2>
+          <p>
+            Every other tool that groups threads puts them in a box: a task, a space, a folder. A box decides the
+            grouping for you, and the day you want to sort by status the box is in the way. Lineage never boxes. The
+            relation is carried by each row: a dot in the lead's color and the lead's name.
+          </p>
+          <p>
+            So the 3-D Secure work can sit in three groups at once (its lead waiting on you, its review working, its
+            research quiet), and one hover on any of them lights all three. The same holds for any lens Hercule adds
+            later: by machine, by provider, flat by last activity.
+          </p>
+          <div class="ln-huh-frames">
+            <figure class="bk-frame" data-src="desktop.html?state=everyday" data-h="1000" data-crop="0,112,272,888" data-zoom="1.3" data-caption="Grouped by project" data-note="Families hang off their leads."></figure>
+            <figure class="bk-frame" data-src="desktop.html?state=lens" data-h="1000" data-crop="0,112,272,888" data-zoom="1.3" data-caption="Grouped by status" data-note="The families split. Every partner carries its lead's color and name."></figure>
+            <figure class="bk-frame" data-src="desktop.html?state=lit" data-h="1000" data-crop="0,112,272,888" data-zoom="1.3" data-caption="One hover reunites them" data-note="Rest on the review's kin tag: its lead under Needs you and its research under Quiet light up."></figure>
+          </div>
+        </div>
+      </section>
+
+      <section class="bk-sec" id="wire">
+        <div class="bk-eyebrow">The line carries the conversation</div>
+        <h2>When one thread messages another, you see it travel</h2>
+        <p class="bk-lede">
+          A lead briefs its partner, the partner reports back. Hercule already stores every one of those messages.
+          Lineage shows each one as a short signal that runs down or up the line, once. No badge, no counter, no
+          sound: just enough to tell you the pair is talking. Under Reduce Motion it does not run.
+        </p>
+        <div class="bk-pair">
+          <figure class="bk-frame" data-src="desktop.html?state=beads" data-crop="0,240,272,420" data-zoom="1.5" data-replay data-caption="Messages along the lines" data-note="This state plays the morning's messages one family after another, so you can watch them."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=card" data-crop="0,0,700,900" data-zoom="0.86" data-caption="The hover card" data-note="Rest on a partner and the card says whose it is, how it joined, and the brief its lead gave it. The family lights as one region."></figure>
+        </div>
+      </section>
+
+      <!-- ============================================================ states -->
+      <section class="bk-sec" id="states">
+        <div class="bk-eyebrow">The states</div>
+        <h2>The moments that matter</h2>
+        <p class="bk-lede">Each frame is the live page. Open one to click around: rows open threads, the funnel switches the grouping, a knot opens, and Done on a lead finishes its family.</p>
+        <div class="bk-frames">
+          <figure class="bk-frame" data-src="desktop.html?state=spawn" data-replay data-caption="A partner joins, and nothing moves under your pointer" data-note="Rotate staging secrets starts its first partner while the pointer rests in the list. The partner waits as a +1 on its lead. When the pointer leaves, the row grows out of a new line and the brief runs down it. The header shows the new tab at once."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=done" data-replay data-caption="Finishing the work, all of it at once" data-note="Done on the lead marks its two partners done too, with one Undo. The family leaves together and lands on the Done shelf together, still on its line."></figure>
+          <div class="bk-pair">
+            <figure class="bk-frame" data-src="desktop.html?state=partner" data-caption="In a partner" data-note="The review is open. Its row is selected, its family's line is at full strength, and the tabs name the lead and the other partner."></figure>
+            <figure class="bk-frame" data-src="desktop.html?state=knot" data-caption="A knot, opened" data-note="The Result types review comes out of the knot as a full row. Fold puts it back."></figure>
+          </div>
+          <div class="bk-pair">
+            <figure class="bk-frame" data-src="desktop.html?state=swarm" data-caption="The swarm" data-note="35 threads in view, 21 pieces of work. Waiting on you names three partners by role and lead. Five families per project, then a more row."></figure>
+            <figure class="bk-frame" data-src="desktop.html?state=lens" data-caption="Grouped by status" data-note="Partners apart from their lead carry a kin tag. Where a lead and its partner land in the same group, the line still joins them: see Refactor cart totals."></figure>
+          </div>
+          <div class="bk-pair">
+            <figure class="bk-frame" data-src="desktop.html?state=everyday&amp;theme=orient-express" data-caption="Orient Express" data-note="The lines take each lead's hue at the dark theme's character lightness, so they read on wood-black."></figure>
+            <figure class="bk-frame" data-src="desktop.html?state=lit&amp;theme=orient-express" data-caption="Orient Express, grouped by status" data-note="The lit family reads the same in the dark."></figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ needs and costs -->
+      <section class="bk-sec" id="needs">
+        <div class="bk-eyebrow">What it takes</div>
+        <h2>What it needs, and what it costs</h2>
+        <div class="bk-grid">
+          <div class="bk-card">
+            <h3>What it needs</h3>
+            <ul class="bk-list">
+              <li><b>A thread's lead.</b> Expose <code>sessions.created_by</code> on Session as <code>startedBy</code>: the controller already stores who started each session. A thread a session started is a partner of that session's lead.</li>
+              <li><b>The + in the header records a lead.</b> A thread Rogier starts from a thread's header stores that thread's lead (<code>leadSessionId</code>), because a shared workspace is not proof.</li>
+              <li><b>A role.</b> One or two words from a Text Generation over the brief (<code>sessions/thread.role</code>), written once, like a title.</li>
+              <li><b>Exchanges for the signal.</b> Inputs whose actor is <code>session:&lt;id&gt;</code>, already stored. The list needs only to hear that one arrived.</li>
+              <li><b>Spec 17 changes.</b> Partners sort under their lead. Projects sort by their newest <i>lead</i>, so a partner never reorders the list. The five-per-project cap counts families. Done on a lead marks the family done.</li>
+            </ul>
+          </div>
+          <div class="bk-card">
+            <h3>What it costs (ADR 0037)</h3>
+            <ul class="bk-list">
+              <li><b>Processes:</b> none.</li>
+              <li><b>Memory:</b> a role string per partner, and one short row instead of a tall one. The list mounts about the same number of rows: partner rows are 32px, knots 24px.</li>
+              <li><b>Idle:</b> nothing. No timer, no polling. The line is CSS on the rows, drawn with them.</li>
+              <li><b>Per streamed token:</b> nothing. A signal runs only when an exchange is stored: one transform animation on one element, none under Reduce Motion.</li>
+              <li><b>Bundle bytes:</b> small. The family sort and the knot rule are pure functions in <code>@hercule/client-core</code>; the rows add a few CSS rules.</li>
+              <li><b>To measure:</b> the perf script's sidebar scenario with 500 threads in 200 families, to check that sorting partners under leads stays inside a frame.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ risks -->
+      <section class="bk-sec" id="risks">
+        <div class="bk-eyebrow">Critique</div>
+        <h2>What the team pushed back on</h2>
+        <div class="bk-grid">
+          <div class="bk-card bk-card--quiet"><h4>"A tree in a sidebar looks busy."</h4><p class="bk-body">That is why there is one line per family, one hue, no boxes, no chevrons and no headers. A lone thread draws nothing, so the tree only appears where there is a family.</p></div>
+          <div class="bk-card bk-card--quiet"><h4>"Two leads can share a hue."</h4><p class="bk-body">Eight hues will collide: the payout report and the Result migration are both peach. The hue is a hint, not an id. Position carries the family in the project view, and the kin tag always says the lead's name.</p></div>
+          <div class="bk-card bk-card--quiet"><h4>"Partners still cost height."</h4><p class="bk-body">A partner is 32px, not 52, and a quiet one folds into the knot at 24. In this morning's world Lineage shows all 16 threads in the height today's list needs for 14.</p></div>
+          <div class="bk-card bk-card--quiet"><h4>"Why not fold the whole family into one row?"</h4><p class="bk-body">Because then the partners are a click away, and the lens has nothing to move. Case Files makes that bet. Lineage bets you want every thread one click away, and only the quiet ones folded.</p></div>
+          <div class="bk-card bk-card--quiet"><h4>"A partner joining moves the list."</h4><p class="bk-body">Only when your pointer is not in it. While you are in the list, a new partner waits as a +1 on its lead and slides in when you leave. Projects never reorder for a partner.</p></div>
+          <div class="bk-card bk-card--quiet"><h4>"What if a partner starts its own partner?"</h4><p class="bk-body">It joins the same lead. A family is always one level deep, so the line never forks twice and the indent never grows.</p></div>
+        </div>
+      </section>
+
+      <!-- ============================================================ scorecard -->
+      <section class="bk-sec" id="score">
+        <div class="bk-eyebrow">Scorecard</div>
+        <h2>Against the job stories</h2>
+        <div class="bk-scroll">
+          <table class="bk-table ln-score">
+            <thead><tr><th>Job</th><th>Score</th><th>Why</th></tr></thead>
+            <tbody>
+              <tr><td>Find a piece of work</td><td><span class="bk-chip bk-chip--accent">Strong</span></td><td>The lead's title names it, and its partners hang off it in one color. "The review of the cart work" is the row under Refactor cart totals.</td></tr>
+              <tr><td>Attend to what needs you</td><td><span class="bk-chip bk-chip--accent">Strong</span></td><td>A waiting partner is never folded: it keeps a full row with its raised hand, and Waiting on you names it by role and lead.</td></tr>
+              <tr><td>Oversee at a glance</td><td><span class="bk-chip">Good</span></td><td>Each row keeps its own status word, so you read state thread by thread. There is no one word for the whole family; the line shows that they belong together, not how they are doing.</td></tr>
+              <tr><td>Switch lead and partner</td><td><span class="bk-chip bk-chip--accent">Strong</span></td><td>One click in the list, or one tab in the header. Both name partners by role.</td></tr>
+              <tr><td>Finish the work</td><td><span class="bk-chip bk-chip--accent">Strong</span></td><td>Done on the lead finishes the family, one Undo. The shelf keeps it on its line.</td></tr>
+              <tr><td>A lone thread</td><td><span class="bk-chip bk-chip--accent">Strong</span></td><td>Exactly today's row. No line, no indent, no extra word.</td></tr>
+              <tr><td>Calm</td><td><span class="bk-chip bk-chip--accent">Strong</span></td><td>A partner joining waits while the pointer is in the list. Projects sort by leads only.</td></tr>
+              <tr><td>Another lens</td><td><span class="bk-chip bk-chip--accent">Strong, by design</span></td><td>The point of the direction: kin tags carry the family through any grouping or sort, and hover reunites it.</td></tr>
+              <tr><td>Scale</td><td><span class="bk-chip">Good</span></td><td>Knots keep big families short, but a swarm of busy partners is still a long list. The cap counts families, so a project can run taller than today.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="ln-quote"><b>The bet:</b> you think in threads and you want every one of them one click away. You just need to see whose each one is. Lineage changes the least, and it is the only direction where adding grouping and sorting later costs nothing.</p>
+      </section>
+
+      <!-- ============================================================ next -->
+      <section class="bk-sec" id="next">
+        <div class="bk-eyebrow">The four directions</div>
+        <h2>Compare</h2>
+        <nav class="bk-next">
+          <a href="../case-files/index.html"><i>1</i><b>Case Files</b><span>One piece of work, one row. The crew rides on it as faces.</span></a>
+          <a href="../lineage/index.html" aria-current="page"><i>2</i><b>Lineage</b><span>Every thread keeps its row. Kinship is drawn, not boxed.</span></a>
+          <a href="../workbench/index.html"><i>3</i><b>Workbench</b><span>The sidebar lists the work. The window seats the crew.</span></a>
+          <a href="../tracks/index.html"><i>4</i><b>Tracks</b><span>Every piece of work is a lane in time.</span></a>
+        </nav>
+        <p class="bk-body" style="margin-top: 24px"><a href="../index.html">Back to the book: the team, the brief and the comparison</a></p>
+      </section>
+    </main>
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+  </body>
+</html>
