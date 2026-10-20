@@ -1,0 +1,588 @@
+/* PROTOTYPE - the book's pages: the index (the team, the brief, the comparison) and each
+   direction's story page. One stylesheet, so the five pages read as one book. Load after
+   ../../crew-bureau-2/tokens.css and system.css.
+
+   Building blocks:
+     .bk-top        the sticky toolbar: brand, links, theme switch
+     .bk            the page column
+     .bk-hero       eyebrow, h1, lede and the direction's one-line lever
+     .bk-sec        a section: .bk-eyebrow, h2, .bk-lede, then content
+     .bk-grid       2 or 3 columns of text blocks (.bk-grid--3)
+     .bk-card       a raised card; .bk-card--quiet is sunken
+     .bk-stat       a big Deco numeral with a line under it
+     .bk-frame      a live frame of a screen page (see book.js)
+     .bk-steps      a numbered list of anatomy callouts
+     .bk-table      a comparison table
+     .bk-chip       a small label
+     .bk-next       the links to the other directions at the foot of a page */
+
+html,
+body {
+  height: auto;
+  overflow: visible;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--t-14);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.bk p {
+  margin: 0;
+}
+.bk a {
+  color: inherit;
+}
+
+/* ---------- toolbar ---------- */
+.bk-top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 56px;
+  padding: 0 24px;
+  background: color-mix(in oklab, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  backdrop-filter: blur(18px) saturate(1.5);
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+}
+.bk-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  font-weight: var(--w-bold);
+  text-decoration: none;
+  color: var(--ink);
+}
+.bk-brand small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.bk-links {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  margin-left: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.bk-links a {
+  flex: none;
+  padding: 5px 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-13);
+  font-weight: var(--w-medium);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.bk-links a:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.bk-links a[aria-current="page"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+.bk-themes {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  padding: 3px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  flex: none;
+}
+.bk-themes button {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.bk-themes button[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
+}
+
+/* ---------- page column ---------- */
+.bk {
+  width: min(1240px, 100% - 64px);
+  margin: 0 auto;
+  padding-bottom: 140px;
+}
+.bk-wide {
+  width: min(1440px, 100vw - 48px);
+  margin-left: 50%;
+  transform: translateX(-50%);
+}
+
+/* ---------- hero ---------- */
+.bk-hero {
+  padding: 88px 0 40px;
+  max-width: 900px;
+}
+.bk-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.bk-hero h1 {
+  margin: 0 0 18px;
+  font-size: clamp(40px, 6vw, 68px);
+  font-weight: 720;
+  font-stretch: 88%;
+  letter-spacing: -0.035em;
+  line-height: 1;
+}
+.bk-hero h1 .bk-num {
+  display: inline-block;
+  margin-right: 0.18em;
+  color: var(--faint);
+  font-family: var(--font-deco);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.bk-lever {
+  margin: 0 0 22px !important;
+  font-size: clamp(19px, 2.2vw, 24px);
+  font-weight: var(--w-medium);
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+.bk-lede {
+  max-width: 720px;
+  color: var(--muted);
+  font-size: 16.5px;
+  line-height: 1.65;
+}
+.bk-lede + .bk-lede {
+  margin-top: 14px !important;
+}
+.bk-lede b,
+.bk-lede strong {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+
+/* ---------- sections ---------- */
+.bk-sec {
+  padding-top: 96px;
+}
+.bk-sec > h2 {
+  margin: 0 0 14px;
+  max-width: 900px;
+  font-size: clamp(28px, 3.4vw, 38px);
+  font-weight: 700;
+  font-stretch: 90%;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+.bk-sec > .bk-lede {
+  margin-bottom: 36px !important;
+}
+.bk h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.bk h4 {
+  margin: 0 0 6px;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.bk-body {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.65;
+}
+.bk-body b,
+.bk-body strong {
+  color: var(--ink);
+}
+.bk-body + .bk-body {
+  margin-top: 10px !important;
+}
+.bk ul.bk-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+}
+.bk ul.bk-list li + li {
+  margin-top: 6px;
+}
+.bk ul.bk-list b {
+  color: var(--ink);
+}
+.bk code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 0.88em;
+}
+
+/* ---------- grids and cards ---------- */
+.bk-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+.bk-grid--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.bk-grid--4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.bk-card {
+  padding: 24px 24px 26px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+}
+.bk-card--quiet {
+  background: var(--sunken);
+  box-shadow: none;
+}
+.bk-card > .bk-eyebrow {
+  margin-bottom: 10px;
+}
+
+/* ---------- stats ---------- */
+.bk-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  margin: 8px 0 40px;
+}
+.bk-stat {
+  padding: 4px 24px 4px 0;
+  border-left: 1px solid var(--line-soft);
+  padding-left: 24px;
+}
+.bk-stat:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+.bk-stat b {
+  display: block;
+  font-family: var(--font-deco);
+  font-size: 44px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+.bk-stat span {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.45;
+}
+
+/* ---------- frames ---------- */
+.bk-frame {
+  margin: 0;
+  min-width: 0;
+}
+.bk-device {
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ink) 9%, transparent), 0 2px 4px oklch(0.2 0.02 165 / 0.06), 0 30px 70px -24px oklch(0.2 0.02 165 / 0.38);
+}
+.bk-device--crop {
+  border-radius: 14px;
+}
+.bk-viewport {
+  position: relative;
+  overflow: hidden;
+}
+.bk-viewport iframe {
+  display: block;
+  border: 0;
+  transform-origin: 0 0;
+  background: var(--bg);
+}
+.bk-cap {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 14px;
+}
+.bk-cap-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.bk-cap-text b {
+  display: block;
+  color: var(--ink);
+  font-size: var(--t-14);
+}
+.bk-cap-acts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  font-size: var(--t-13);
+}
+.bk-cap-acts a,
+.bk-cap-acts button {
+  color: var(--muted);
+  font: inherit;
+  font-weight: var(--w-medium);
+  text-decoration: none;
+}
+.bk-cap-acts a:hover,
+.bk-cap-acts button:hover {
+  color: var(--ink);
+}
+.bk-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+/* A full window beside a 1:1 crop of its sidebar. */
+.bk-duo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 32px;
+  align-items: start;
+}
+.bk-frames {
+  display: flex;
+  flex-direction: column;
+  gap: 56px;
+}
+
+/* ---------- callouts ---------- */
+.bk-steps {
+  display: grid;
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: bk-step;
+}
+.bk-steps > li {
+  position: relative;
+  padding-left: 40px;
+  counter-increment: bk-step;
+}
+.bk-steps > li::before {
+  content: counter(bk-step);
+  position: absolute;
+  left: 0;
+  top: 1px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.bk-steps h4 {
+  margin-bottom: 3px;
+}
+.bk-steps p {
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+/* ---------- the "huh" moment ---------- */
+.bk-huh {
+  position: relative;
+  padding: 40px 44px 44px;
+  border-radius: var(--r-xl);
+  background: var(--ink);
+  color: var(--surface);
+  overflow: hidden;
+}
+.bk-huh .bk-eyebrow {
+  color: color-mix(in oklab, var(--surface) 60%, transparent);
+}
+.bk-huh h2 {
+  margin: 0 0 14px;
+  max-width: 780px;
+  font-size: clamp(26px, 3vw, 34px);
+  font-weight: 700;
+  font-stretch: 90%;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.bk-huh p {
+  max-width: 760px;
+  color: color-mix(in oklab, var(--surface) 78%, transparent);
+  font-size: 16px;
+  line-height: 1.6;
+}
+.bk-huh p + p {
+  margin-top: 12px;
+}
+
+/* ---------- tables ---------- */
+.bk-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-13);
+}
+.bk-table th,
+.bk-table td {
+  padding: 12px 14px 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  vertical-align: top;
+}
+.bk-table th {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.bk-table td:first-child {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.bk-table td {
+  color: var(--muted);
+}
+.bk-scroll {
+  overflow-x: auto;
+}
+
+/* ---------- chips ---------- */
+.bk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.bk-chip--you {
+  background: var(--you-tint);
+  color: var(--you-ink);
+}
+.bk-chip--accent {
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  color: var(--accent-ink);
+}
+
+/* ---------- next / other directions ---------- */
+.bk-next {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 28px;
+}
+.bk-next a {
+  display: block;
+  padding: 18px 20px 20px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--line-soft);
+  text-decoration: none;
+  transition: box-shadow var(--dur-1), transform var(--dur-1);
+}
+.bk-next a:hover {
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-2);
+  transform: translateY(-1px);
+}
+.bk-next a[aria-current="page"] {
+  background: var(--sunken);
+  box-shadow: none;
+  pointer-events: none;
+}
+.bk-next b {
+  display: block;
+  font-size: 15px;
+}
+.bk-next span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: var(--t-13);
+  line-height: 1.45;
+}
+.bk-next i {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--faint);
+  font-family: var(--font-deco);
+  font-size: 22px;
+  font-style: normal;
+}
+
+/* ---------- narrow screens: the book reads on a phone, the frames shrink ---------- */
+@media (max-width: 900px) {
+  .bk {
+    width: calc(100% - 36px);
+  }
+  .bk-hero {
+    padding-top: 48px;
+  }
+  .bk-sec {
+    padding-top: 64px;
+  }
+  .bk-grid,
+  .bk-grid--3,
+  .bk-grid--4,
+  .bk-pair,
+  .bk-duo,
+  .bk-next {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .bk-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 24px;
+  }
+  .bk-stat:nth-child(3) {
+    border-left: 0;
+    padding-left: 0;
+  }
+  .bk-huh {
+    padding: 28px 24px 30px;
+  }
+  .bk-top {
+    padding: 0 14px;
+  }
+  .bk-brand small {
+    display: none;
+  }
+}
