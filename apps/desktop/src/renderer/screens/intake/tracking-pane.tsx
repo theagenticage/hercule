@@ -34,6 +34,7 @@ import "./tracking.css";
 /** The words of each answer's button. */
 const ANSWER_LABELS: Readonly<Record<TrackingAnswer["kind"], string>> = {
   "stop-run": "Stop the run",
+  "try-again": "Try again",
   "mark-done": "Mark done",
   cancel: "Cancel",
 };
@@ -99,11 +100,17 @@ export function TrackingPane({
 /**
  * Renders the pane of `row`: its head, its trip, its answers and its keys.
  *
- * Stop the run is sent from here, since no other part of the screen stops a
- * run. It sends `keepWorkspace: true`, so the run's workspace is kept: the
- * pane asks for no confirmation, and the drawing's foot says that stopping
- * leaves the agent's work where it is. A refusal shows under the button, never
- * in a toast.
+ * Stop the run and Try again are sent from here, since no other part of the
+ * screen stops or re-runs a run.
+ *
+ * - Stop the run sends `keepWorkspace: true`, so the run's workspace is kept:
+ *   the pane asks for no confirmation, and the drawing's foot says that
+ *   stopping leaves the agent's work where it is.
+ * - Try again re-runs the Task's newest run with no `mode`, so the workflow runs
+ *   as it is stored now and a fix made after the failure is picked up. The new
+ *   run keeps the Task, so the row turns Working on the same Task.
+ *
+ * A refusal of either shows under its button, never in a toast.
  */
 function TrackingRowDetail({
   row,
@@ -138,6 +145,25 @@ function TrackingRowDetail({
       invalidateWithoutCancelling(queryClient, queryKeys.tracking());
     },
   });
+
+  const tryAgain = useMutation({
+    mutationFn: (runId: string) => client.run.rerun({ params: { id: runId }, payload: {} }),
+    onSuccess: () => {
+      invalidateWithoutCancelling(queryClient, queryKeys.runs());
+      invalidateWithoutCancelling(queryClient, queryKeys.tracking());
+    },
+  });
+  // The re-run is accepted before the next read of Tracking shows its new run.
+  // Until the row names a run other than the one re-run, Try again would still
+  // be on screen and a second press would start a second run, so every answer
+  // waits.
+  const awaitingRowOfNewRun = tryAgain.isSuccess && tryAgain.variables === row.task.latestRun.id;
+  const answersLocked = stop.isPending || tryAgain.isPending || awaitingRowOfNewRun;
+  // The refusal of an answer's own mutation, which shows under its button.
+  const readRefusal = (kind: TrackingAnswer["kind"]): string | null => {
+    const mutation = kind === "stop-run" ? stop : kind === "try-again" ? tryAgain : undefined;
+    return mutation?.isError === true ? readErrorMessage(mutation.error) : null;
+  };
 
   // The standing line of a Working row counts "8m so far", so it follows the
   // shared age clock, which keeps one timer for every label on screen. The
@@ -218,6 +244,9 @@ function TrackingRowDetail({
       case "stop-run":
         stop.mutate(answer.run.id);
         return;
+      case "try-again":
+        tryAgain.mutate(answer.run.id);
+        return;
       case "mark-done":
         onTakeOff(taskId, "done");
         return;
@@ -264,10 +293,9 @@ function TrackingRowDetail({
               <AnswerRow
                 key={answer.kind}
                 answer={answer}
-                locked={stop.isPending}
-                error={
-                  answer.kind === "stop-run" && stop.isError ? readErrorMessage(stop.error) : null
-                }
+                taskTitle={title}
+                locked={answersLocked}
+                error={readRefusal(answer.kind)}
                 idPrefix={idPrefix}
                 onPress={pressAnswer}
               />
@@ -306,12 +334,14 @@ function TrackingRowDetail({
  */
 function AnswerRow({
   answer,
+  taskTitle,
   locked,
   error,
   idPrefix,
   onPress,
 }: {
   readonly answer: TrackingAnswer;
+  readonly taskTitle: string;
   readonly locked: boolean;
   readonly error: string | null;
   readonly idPrefix: string;
@@ -324,7 +354,7 @@ function AnswerRow({
       buttonClass={
         answer.suggested ? "btn btn--accent" : answer.kind === "cancel" ? "btn btn--quiet" : "btn"
       }
-      describe={describeAnswer(answer)}
+      describe={describeAnswer(answer, taskTitle)}
       shortcut={answer.suggested ? "↩" : answer.kind === "mark-done" ? "E" : null}
       error={error}
       locked={locked}
@@ -336,14 +366,20 @@ function AnswerRow({
   );
 }
 
-/** Returns what pressing `answer` does, for the line beside its button. */
-const describeAnswer = (answer: TrackingAnswer): JSX.Element | string => {
+/** Returns what pressing `answer` does, for the line beside its button. `taskTitle` is the title of the row's Task. */
+const describeAnswer = (answer: TrackingAnswer, taskTitle: string): JSX.Element | string => {
   switch (answer.kind) {
     case "stop-run":
       return (
         <>
           Stops <b>{answer.run.workflowName}</b>. The row stays in Tracking
           {answer.leavesRowStopped ? ", as Stopped" : ""}
+        </>
+      );
+    case "try-again":
+      return (
+        <>
+          Re-runs <b>{answer.run.workflowName}</b> on <b>{taskTitle}</b> from the start
         </>
       );
     case "mark-done":
