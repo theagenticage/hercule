@@ -1,21 +1,27 @@
 /**
- * Tests `GET /tasks/tracking` over a real socket, against the real
- * `TaskTrackingRuns` port: what a row holds for Tasks whose runs are in each
- * state, how a Task with a long history reads, and which Tasks are left out.
- * The Tasks and runs are written through their repositories, as a handoff
- * leaves them.
+ * Tests `GET /tasks/tracking` and `GET /tasks/:id/tracking` over a real
+ * socket, against the real `TaskTrackingRuns` port: what a row holds for
+ * Tasks whose runs are in each state, how a Task with a long history reads,
+ * which Tasks are left out, and what the pane of one Task draws: its runs,
+ * what the newest run's agent step produced, and the action step the run
+ * ended on. The Tasks and runs are written through their repositories, as a
+ * handoff leaves them.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import {
+  MAX_TRACKING_DETAIL_RUNS,
+  MAX_TRACKING_OUTPUT_TEXT,
   TaskTracking,
+  TrackingDetail,
   type TaskPriority,
   type TrackingRun,
   type WorkflowDefinition,
 } from "@hercule/contract";
 import { inTransaction } from "../db/testing";
-import { completeSetup, get, withServer, type ServerHarness } from "../http/testing";
+import { completeSetup, get, readErrorBody, withServer, type ServerHarness } from "../http/testing";
+import { spawnThreadWithGrants, withAgentFleet } from "../sessions/testing";
 import { runRepository, type NewRun, type RunOutcome } from "../runs/repository";
 import { taskRepository } from "./repository";
 
@@ -286,6 +292,437 @@ describe("task.queryTracking", () => {
       const { rows } = await readTracking(harness.base, token);
 
       expect(rows.map((row) => row.title)).toEqual(["kept"]);
+    });
+  });
+});
+
+const SESSION_A = "0199e0e7-0007-7000-8000-00000000000a";
+const SESSION_B = "0199e0e7-0007-7000-8000-00000000000b";
+const ABSENT_ID = "0199e0e7-0004-7000-8000-0000000000ff";
+
+/** A step of a run `insertRunWithSteps` writes, with the plan's definition of it and how it ended. */
+interface StepToWrite {
+  readonly id: string;
+  readonly kind: "agent" | "action" | "text-generation";
+  readonly name?: string;
+  readonly action?: string;
+  readonly outputSchema?: Record<string, unknown>;
+  /** The session an agent step ran in. */
+  readonly sessionId?: string;
+  readonly output: Schema.Json;
+  readonly finishedAt: string;
+}
+
+/**
+ * Writes a run of the Task whose plan holds `steps`, completes each step in
+ * the order given, and ends the run as `ending` says. Returns the run's id.
+ */
+const insertRunWithSteps = async (
+  { sql }: ServerHarness,
+  taskId: string,
+  run: {
+    readonly at: string;
+    readonly steps: ReadonlyArray<StepToWrite>;
+    readonly ending?: RunOutcome;
+  },
+) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const runs = yield* runRepository;
+      const plan = {
+        name: "Implement",
+        steps: run.steps.map((step) => ({
+          id: step.id,
+          kind: step.kind,
+          ...(step.name === undefined ? {} : { name: step.name }),
+          ...(step.action === undefined ? {} : { action: step.action }),
+          ...(step.outputSchema === undefined ? {} : { outputSchema: step.outputSchema }),
+        })),
+      } as unknown as WorkflowDefinition;
+      const id = yield* runs.insert(
+        {
+          workflowId: null,
+          plan,
+          inputs: {},
+          origin: { kind: "manual", actor: "user" },
+          entryStepIds: [run.steps[0]!.id],
+          taskId,
+        },
+        run.at,
+      );
+      yield* runs.start(id, run.at);
+      for (const [index, step] of run.steps.entries()) {
+        if (index > 0) yield* runs.insertSteps(id, [step.id], run.at);
+        const record = { stepId: step.id, iteration: 1 };
+        yield* runs.startStep(
+          id,
+          record,
+          step.sessionId !== undefined
+            ? { sessionId: step.sessionId }
+            : step.kind === "action"
+              ? { input: {}, checkoutBranch: undefined }
+              : undefined,
+          run.at,
+        );
+        yield* runs.finishStep(
+          id,
+          record,
+          { status: "completed", output: step.output },
+          { startedAt: run.at, finishedAt: step.finishedAt },
+        );
+      }
+      if (run.ending !== undefined) yield* runs.finish(id, run.ending, run.at);
+      return id;
+    }).pipe(inTransaction, Effect.provideService(SqlClient.SqlClient, sql), Effect.orDie),
+  );
+
+const readDetail = async (base: string, token: string, taskId: string) => {
+  const response = await get(base, `/api/v1/tasks/${taskId}/tracking`, token);
+  expect(response.status, await response.clone().text()).toBe(200);
+  return Schema.decodeUnknownSync(TrackingDetail)(await response.json());
+};
+
+const REVIEW_SCHEMA = {
+  type: "object",
+  properties: {
+    verdict: { type: "string", title: "Verdict" },
+    blocking: { type: "boolean" },
+    notes: { type: "array" },
+  },
+};
+
+describe("task.readTracking", () => {
+  it("lists a re-run Task's runs oldest first, each with its last agent session, and shapes the newest run's structured output", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const taskId = await insertTrackedTask(harness, "Review the PR");
+      const first = await insertRunWithSteps(harness, taskId, {
+        at: minute(1),
+        steps: [
+          {
+            id: "review",
+            kind: "agent",
+            sessionId: SESSION_A,
+            output: { text: "Needs work", exitStatus: "completed" },
+            finishedAt: minute(2),
+          },
+        ],
+        ending: COMPLETED,
+      });
+      const second = await insertRunWithSteps(harness, taskId, {
+        at: minute(10),
+        steps: [
+          {
+            id: "review",
+            kind: "agent",
+            name: "Review",
+            sessionId: SESSION_B,
+            outputSchema: REVIEW_SCHEMA,
+            output: { notes: ["a", "b"], blocking: true, verdict: "Request changes" },
+            finishedAt: minute(12),
+          },
+        ],
+        ending: COMPLETED,
+      });
+
+      const detail = await readDetail(harness.base, token, taskId);
+
+      expect(detail.taskId).toBe(taskId);
+      expect(detail.firstHandoff).toEqual({
+        signalId: SIGNAL,
+        runId: "0199e0e7-0006-7000-8000-000000000001",
+        at: AT,
+      });
+      expect(detail.runs.map((run) => [run.id, run.sessionId])).toEqual([
+        [first, SESSION_A],
+        [second, SESSION_B],
+      ]);
+      expect(detail.runs[1]).toMatchObject({ status: "completed", workflowName: "Implement" });
+      expect(detail.outcome).toEqual({
+        kind: "fields",
+        stepName: "Review",
+        sessionId: SESSION_B,
+        fields: [
+          { label: "Verdict", value: "Request changes" },
+          { label: "blocking", value: true },
+          { label: "notes", value: { items: 2 } },
+        ],
+      });
+      expect(detail).not.toHaveProperty("endingActionStepName");
+    });
+  });
+
+  it("gives a step with no output schema as text, cut when it is long, named by its id when it has no name", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const taskId = await insertTrackedTask(harness, "Write the notes");
+      await insertRunWithSteps(harness, taskId, {
+        at: minute(1),
+        steps: [
+          {
+            id: "write-notes",
+            kind: "agent",
+            sessionId: SESSION_A,
+            output: { text: "A sentence that goes on. ".repeat(500), exitStatus: "completed" },
+            finishedAt: minute(2),
+          },
+        ],
+        ending: COMPLETED,
+      });
+
+      const detail = await readDetail(harness.base, token, taskId);
+
+      expect(detail.outcome).toMatchObject({
+        kind: "text",
+        stepName: "write-notes",
+        sessionId: SESSION_A,
+      });
+      const text = (detail.outcome as { text: string }).text;
+      expect(text.length).toBeLessThanOrEqual(MAX_TRACKING_OUTPUT_TEXT + 1);
+      expect(text.endsWith("goes on.…")).toBe(true);
+    });
+  });
+
+  it("names the action step a run ended on, by its name or else its action, beside the agent step's outcome", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const named = await insertTrackedTask(harness, "named");
+      await insertRunWithSteps(harness, named, {
+        at: minute(1),
+        steps: [
+          {
+            id: "work",
+            kind: "agent",
+            sessionId: SESSION_A,
+            output: { text: "Done" },
+            finishedAt: minute(2),
+          },
+          {
+            id: "open",
+            kind: "action",
+            name: "Open the pull request",
+            action: "github/open-pr",
+            output: {},
+            finishedAt: minute(3),
+          },
+        ],
+        ending: COMPLETED,
+      });
+      const unnamed = await insertTrackedTask(harness, "unnamed");
+      await insertRunWithSteps(harness, unnamed, {
+        at: minute(1),
+        steps: [
+          {
+            id: "work",
+            kind: "agent",
+            sessionId: SESSION_A,
+            output: { text: "Done" },
+            finishedAt: minute(2),
+          },
+          {
+            id: "open",
+            kind: "action",
+            action: "github/open-pr",
+            output: {},
+            finishedAt: minute(3),
+          },
+        ],
+        ending: COMPLETED,
+      });
+      const agentLast = await insertTrackedTask(harness, "agent last");
+      await insertRunWithSteps(harness, agentLast, {
+        at: minute(1),
+        steps: [
+          {
+            id: "open",
+            kind: "action",
+            action: "github/open-pr",
+            output: {},
+            finishedAt: minute(2),
+          },
+          {
+            id: "work",
+            kind: "agent",
+            sessionId: SESSION_A,
+            output: { text: "Done" },
+            finishedAt: minute(3),
+          },
+        ],
+        ending: COMPLETED,
+      });
+
+      expect(await readDetail(harness.base, token, named)).toMatchObject({
+        outcome: { kind: "text", text: "Done" },
+        endingActionStepName: "Open the pull request",
+      });
+      expect(await readDetail(harness.base, token, unnamed)).toMatchObject({
+        endingActionStepName: "github/open-pr",
+      });
+      expect(await readDetail(harness.base, token, agentLast)).not.toHaveProperty(
+        "endingActionStepName",
+      );
+    });
+  });
+
+  it("does not take a text generation step for an agent step", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const taskId = await insertTrackedTask(harness, "screened");
+      await insertRunWithSteps(harness, taskId, {
+        at: minute(1),
+        steps: [
+          {
+            id: "screen",
+            kind: "text-generation",
+            output: { text: "Not an agent" },
+            finishedAt: minute(2),
+          },
+        ],
+        ending: COMPLETED,
+      });
+
+      const detail = await readDetail(harness.base, token, taskId);
+
+      expect(detail).not.toHaveProperty("outcome");
+      expect(detail).not.toHaveProperty("endingActionStepName");
+    });
+  });
+
+  it("gives a failed run's cause, and keeps the outcome of the agent step that completed before the failure", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const failedFirst = await insertTrackedTask(harness, "fails at once");
+      await insertRun(harness, failedFirst, {
+        at: minute(1),
+        stepError: "permission denied on ops-db",
+        ending: { status: "failed", failureReason: "step-failed", failedStepId: "work" },
+      });
+      const failedLater = await insertTrackedTask(harness, "fails later");
+      const run = await insertRunWithSteps(harness, failedLater, {
+        at: minute(1),
+        steps: [
+          {
+            id: "work",
+            kind: "agent",
+            sessionId: SESSION_A,
+            output: { text: "Half done" },
+            finishedAt: minute(2),
+          },
+        ],
+        ending: { status: "failed", failureReason: "controller-error" },
+      });
+
+      const first = await readDetail(harness.base, token, failedFirst);
+      const later = await readDetail(harness.base, token, failedLater);
+
+      expect(first.runs).toHaveLength(1);
+      expect(first.runs[0]).toMatchObject({
+        status: "failed",
+        failureCause: "permission denied on ops-db",
+      });
+      expect(first.runs[0]).not.toHaveProperty("sessionId");
+      expect(first).not.toHaveProperty("outcome");
+      expect(later.runs[0]).toMatchObject({ id: run, status: "failed", sessionId: SESSION_A });
+      expect(later.outcome).toMatchObject({ kind: "text", text: "Half done" });
+    });
+  });
+
+  it("lists only the newest runs of a Task with a long history, oldest first", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const taskId = await insertTrackedTask(harness, "Retry failed webhooks");
+      const ids: Array<string> = [];
+      for (let n = 1; n <= MAX_TRACKING_DETAIL_RUNS + 5; n++) {
+        ids.push(await insertRun(harness, taskId, { at: minute(n), ending: COMPLETED }));
+      }
+
+      const detail = await readDetail(harness.base, token, taskId);
+
+      expect(detail.runs.map((run) => run.id)).toEqual(ids.slice(-MAX_TRACKING_DETAIL_RUNS));
+    });
+  });
+
+  it("fails with not_found for a Task that does not exist, one that was never handed off, and one that was deleted", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const plain = await Effect.runPromise(
+        Effect.flatMap(taskRepository, (tasks) =>
+          tasks.insert({
+            title: "no handoff",
+            description: "",
+            status: "in-progress",
+            priority: "normal",
+            labels: [],
+            projectId: undefined,
+            provenance: [],
+            at: AT,
+            actor: "user",
+          }),
+        ).pipe(
+          inTransaction,
+          Effect.provideService(SqlClient.SqlClient, harness.sql),
+          Effect.orDie,
+        ),
+      );
+      const deleted = await insertTrackedTask(harness, "deleted");
+      await Effect.runPromise(
+        Effect.flatMap(taskRepository, (tasks) => tasks.softDelete(deleted, AT)).pipe(
+          inTransaction,
+          Effect.provideService(SqlClient.SqlClient, harness.sql),
+          Effect.orDie,
+        ),
+      );
+
+      for (const id of [ABSENT_ID, plain.id, deleted]) {
+        const response = await get(harness.base, `/api/v1/tasks/${id}/tracking`, token);
+        const refused = await readErrorBody(response);
+        expect(response.status, refused.text).toBe(404);
+        expect(refused.code).toBe("not_found");
+      }
+    });
+  });
+
+  it("refuses a caller with no token", async () => {
+    await withServer(async (harness) => {
+      await completeSetup(harness.base);
+      const response = await get(harness.base, `/api/v1/tasks/${ABSENT_ID}/tracking`);
+
+      expect(response.status).toBe(401);
+    });
+  });
+
+  it("refuses a session that holds the task read grant but not the run read grant, and names the grant", async () => {
+    await withAgentFleet(async (arranged) => {
+      const taskId = await insertTrackedTask(arranged.harness, "Review the PR");
+      const agent = await spawnThreadWithGrants(arranged, "task-readers", ["task.read"]);
+
+      const response = await get(
+        arranged.harness.base,
+        `/api/v1/tasks/${taskId}/tracking`,
+        agent.token,
+      );
+
+      const refused = await readErrorBody(response);
+      expect(response.status, refused.text).toBe(403);
+      expect(refused.code).toBe("forbidden");
+      expect(refused.grant).toBe("run.read");
+    });
+  });
+
+  it("refuses a session with no task read grant, and names the grant", async () => {
+    await withAgentFleet(async (arranged) => {
+      const taskId = await insertTrackedTask(arranged.harness, "Review the PR");
+      const agent = await spawnThreadWithGrants(arranged, "run-readers", ["run.read"]);
+
+      const response = await get(
+        arranged.harness.base,
+        `/api/v1/tasks/${taskId}/tracking`,
+        agent.token,
+      );
+
+      const refused = await readErrorBody(response);
+      expect(response.status, refused.text).toBe(403);
+      expect(refused.grant).toBe("task.read");
     });
   });
 });

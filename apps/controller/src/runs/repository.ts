@@ -111,6 +111,30 @@ export type RunOutcome =
       readonly failedStepId?: string;
     };
 
+/**
+ * The newest completed step record of a run, with what the run's plan says of
+ * its step. `name` and `action` are absent when the step does not set them
+ * (`action` is only an action step's).
+ */
+export interface LastCompletedStep {
+  readonly kind: "action" | "agent" | "text-generation";
+  readonly name: string | undefined;
+  readonly action: string | undefined;
+}
+
+/**
+ * The newest completed record of an agent step of a run, with its output and
+ * the `outputSchema` its step declares in the run's plan.
+ */
+export interface LastCompletedAgentStep {
+  readonly stepId: string;
+  readonly name: string | undefined;
+  /** The session that ran the step, or undefined when the record has none. */
+  readonly sessionId: string | undefined;
+  readonly output: Schema.Json;
+  readonly outputSchema: { readonly [name: string]: Schema.Json } | undefined;
+}
+
 /** One step record of a run: its step and its iteration. */
 export interface StepRecordId {
   readonly stepId: string;
@@ -901,6 +925,138 @@ const make = Effect.gen(function* () {
                 ),
               ),
           ),
+
+    /**
+     * Returns the newest `limit` runs of the Task as summaries, newest first
+     * (latest `created_at`, then greatest id). A Task with no run has none.
+     * One lookup on `runs_task_id`, which holds a Task's runs newest first,
+     * so it reads `limit` runs and never the Task's whole history.
+     */
+    listNewestOfTask: (
+      taskId: string,
+      limit: number,
+    ): Effect.Effect<ReadonlyArray<RunSummary>, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<SummaryRow>`
+          SELECT ${sql.literal(SUMMARY_COLUMNS)} FROM runs
+          WHERE task_id = ${uuidFromString(taskId)}
+          ORDER BY created_at DESC, id DESC LIMIT ${limit}`;
+        const records = yield* listActiveStepRecords(
+          rows.filter((row) => row.status === "running").map((row) => row.id),
+        );
+        return rows.map((row) => parseSummaryRow(row, records.get(uuidToString(row.id)) ?? []));
+      }),
+
+    /**
+     * Returns the session of each run's newest step record that has one, by
+     * run id. Only agent steps have sessions, so it is the session of the
+     * run's last agent step. A run with none is left out. One statement,
+     * whatever the number of runs, and one probe of the step records of each
+     * run on their primary key.
+     */
+    listLastSessions: (
+      runIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      runIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly run_id: Uint8Array; readonly session_id: Uint8Array | null }>`
+              SELECT runs.id AS run_id,
+                     (SELECT s.session_id FROM run_steps s
+                      WHERE s.run_id = runs.id AND s.session_id IS NOT NULL
+                      ORDER BY s.rowid DESC LIMIT 1) AS session_id
+              FROM runs WHERE runs.id IN ${sql.in(runIds.map((id) => uuidFromString(id)))}`,
+            (rows) =>
+              new Map(
+                rows.flatMap((row) =>
+                  row.session_id === null
+                    ? []
+                    : [[uuidToString(row.run_id), uuidToString(row.session_id)] as const],
+                ),
+              ),
+          ),
+
+    /**
+     * Returns what a run's step records say about how it ended: its newest
+     * completed step record of any kind, and its newest completed record of
+     * an agent step with that record's output. "Newest" is the latest
+     * `finished_at`, then the latest record. Either is absent when the run
+     * has no such record.
+     *
+     * Two statements that each return one record. They walk the steps of the
+     * run's plan and look up each step's records on the primary key of
+     * `run_steps`, so the plan is read once whatever the number of records,
+     * and no output is read but the one.
+     */
+    readLastCompletedSteps: (
+      runId: string,
+    ): Effect.Effect<
+      {
+        readonly last: LastCompletedStep | undefined;
+        readonly agent: LastCompletedAgentStep | undefined;
+      },
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const id = uuidFromString(runId);
+        // `CROSS JOIN` keeps SQLite on the run, then its plan's steps, then each step's records,
+        // so the plan is read once, however many records the run has.
+        const lastRows = yield* sql<{
+          readonly kind: LastCompletedStep["kind"];
+          readonly name: string | null;
+          readonly action: string | null;
+        }>`
+          SELECT json_extract(step.value, '$.kind') AS kind,
+                 json_extract(step.value, '$.name') AS name,
+                 json_extract(step.value, '$.action') AS action
+          FROM runs
+          CROSS JOIN json_each(runs.plan, '$.steps') AS step
+          CROSS JOIN run_steps s
+            ON s.run_id = runs.id AND s.step_id = json_extract(step.value, '$.id')
+          WHERE runs.id = ${id} AND s.status = 'completed'
+          ORDER BY s.finished_at DESC, s.rowid DESC LIMIT 1`;
+        const agentRows = yield* sql<{
+          readonly step_id: string;
+          readonly name: string | null;
+          readonly session_id: Uint8Array | null;
+          readonly output: string | null;
+          readonly output_schema: string | null;
+        }>`
+          SELECT s.step_id, json_extract(step.value, '$.name') AS name, s.session_id, s.output,
+                 json_extract(step.value, '$.outputSchema') AS output_schema
+          FROM runs
+          CROSS JOIN json_each(runs.plan, '$.steps') AS step
+          CROSS JOIN run_steps s
+            ON s.run_id = runs.id AND s.step_id = json_extract(step.value, '$.id')
+          WHERE runs.id = ${id} AND s.status = 'completed'
+            AND json_extract(step.value, '$.kind') = 'agent'
+          ORDER BY s.finished_at DESC, s.rowid DESC LIMIT 1`;
+        const last = lastRows[0];
+        const agent = agentRows[0];
+        return {
+          last:
+            last === undefined
+              ? undefined
+              : {
+                  kind: last.kind,
+                  name: last.name ?? undefined,
+                  action: last.action ?? undefined,
+                },
+          agent:
+            agent === undefined
+              ? undefined
+              : {
+                  stepId: agent.step_id,
+                  name: agent.name ?? undefined,
+                  sessionId: agent.session_id === null ? undefined : uuidToString(agent.session_id),
+                  output: agent.output === null ? null : (JSON.parse(agent.output) as Schema.Json),
+                  outputSchema:
+                    agent.output_schema === null
+                      ? undefined
+                      : (JSON.parse(agent.output_schema) as { [name: string]: Schema.Json }),
+                },
+        };
+      }),
 
     /** Checks whether a run of the workflow is pending or running. */
     hasUnfinishedRun: (workflowId: string): Effect.Effect<boolean, SqlError> =>

@@ -382,6 +382,39 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the oldest handoff entry of a Task: the provenance entry that
+     * names a signal, earliest `at` first. It is none when the Task does not
+     * exist, is deleted, or has no handoff entry. One lookup on
+     * `task_provenance_handoff` that reads one entry, however many the Task
+     * has, and none of the Task's other provenance.
+     */
+    readFirstHandoff: (id: string): Effect.Effect<Option.Option<TrackedHandoff>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly signal_id: Uint8Array;
+          readonly run_id: Uint8Array | null;
+          readonly at: string;
+        }>`
+          SELECT p.signal_id, p.run_id, p.at
+          FROM tasks t CROSS JOIN task_provenance p ON p.rowid = (
+            SELECT rowid FROM task_provenance
+            WHERE task_id = t.id AND signal_id IS NOT NULL
+            ORDER BY at, rowid LIMIT 1)
+          WHERE t.id = ${uuidFromString(id)} AND t.deleted_at IS NULL`,
+        (rows) => {
+          const row = rows[0];
+          // A handoff entry always names the run it started.
+          return row === undefined || row.run_id === null
+            ? Option.none()
+            : Option.some({
+                signalId: uuidToString(row.signal_id),
+                runId: uuidToString(row.run_id),
+                at: row.at,
+              });
+        },
+      ),
+
+    /**
      * Returns every in-progress task that has a handoff entry, the most
      * recently updated task first. Each task holds its newest handoff entries,
      * at most `MAX_TRACKING_HANDOFFS`, newest first. A deleted task is left

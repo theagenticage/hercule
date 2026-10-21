@@ -143,6 +143,7 @@ Semantics: [./09-tasks.md](./09-tasks.md).
 |---|---|---|---|
 | `task.query` | `TaskFilter` (below) | `task.read` | `GET /tasks` |
 | `task.queryTracking` (*added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801)*) | none -> `{ rows: TrackingTask[] }`, below | `task.read` and `run.read` | `GET /tasks/tracking` |
+| `task.readTracking` (*added 2026-10-21, [#803](https://github.com/theagenticage/hercule/issues/803)*) | `{ taskId }` -> `TrackingDetail`, below | `task.read` and `run.read` | `GET /tasks/{id}/tracking` |
 | `task.read` | `{ taskId }` | `task.read` | `GET /tasks/{id}` |
 | `task.create` | `{ title, description, priority?, labels?, projectId?, provenance? }` | `task.create` | `POST /tasks` |
 | `task.update` | `{ taskId, title?, description?, status?, priority?, projectId?, addLabels?, removeLabels?, provenance? }` (`projectId: null` detaches; `provenance` appends) | `task.update` | `PATCH /tasks/{id}` |
@@ -191,6 +192,35 @@ interface TrackingRun {
 - **How it reads.** The tasks domain declares a read port for the runs, `TaskTrackingRuns`, and the controller daemon answers it from the runs repository, because the runs domain depends on the tasks domain (ADR 0033). It opens no transaction, so it reads on the read-only connection and never waits for a writer. The newest run of each Task is one lookup per Task on `runs_task_id`, and the live runs come from `runs_unfinished`, so no Task's history is read. The Tasks are the in-progress Tasks on the status index, each probed once for its newest handoffs on `task_provenance_handoff`, so the read does not touch the handoffs of Tasks that are done.
 - Its CLI row is `hercule task tracking`. Purpose: "Lists the work handed off from Intake that is still followed." It takes no field. *(Amended 2026-10-21, [#802](https://github.com/theagenticage/hercule/issues/802).)* Its help text also names the ids of all the Task's live runs.
 - `task.query`'s `handedOff` filter stays: it is a general read of Tasks that other callers may use. `run.query` has no Task filter: Tracking is the only reader that asks for runs by Task, and `task.queryTracking` answers it.
+
+*(Added 2026-10-21, [#803](https://github.com/theagenticage/hercule/issues/803).)* **`task.readTracking`** returns what the Tracking pane of one Task draws, in one read, so the pane needs no read per run and no read of a session's transcript. It is owned by the tasks domain, like `task.queryTracking`:
+
+```ts
+interface TrackingDetail {
+  taskId: string
+  firstHandoff: { signalId: string; runId: string; at: string }   // the Task's oldest handoff: the signal "You asked" shows
+  runs: TrackingDetailRun[]                                       // the Task's newest runs, at most 20, oldest first
+  outcome?: TrackingOutcome                                       // what the newest run's last completed agent step produced
+  endingActionStepName?: string                                   // the action step the newest run ended on
+}
+interface TrackingDetailRun extends TrackingRun {                 // the same facts as a Tracking row's run
+  sessionId?: string                                              // the session of the run's last agent step: its thread
+}
+type TrackingOutcome =
+  | { kind: "text";   stepName: string; sessionId?: string; text: string }
+  | { kind: "fields"; stepName: string; sessionId?: string; fields: { label: string; value: TrackingOutputValue }[] }
+type TrackingOutputValue = string | number | boolean | null | { items: number } | { fields: number }
+```
+
+- **The runs.** The Task's newest `MAX_TRACKING_DETAIL_RUNS` (20) runs by creation time, then id, listed oldest first. A run's `sessionId` is the session of its newest step record that has one. Only agent steps have sessions, so it is the session of the run's last agent step, and the run's thread. A run that never started an agent step has none.
+- **The outcome.** It comes from the newest run's last completed agent step: the step record with the latest `finishedAt`, then the latest record, among the records of steps whose kind in the run's plan is `agent`. A text generation step is not an agent step. `stepName` is the step's `name`, else its id. The outcome is absent when the run completed no agent step, or the step left nothing to draw.
+  - A step with **no `outputSchema`** gives `kind: "text"`: the output's `text`, trimmed. It is absent when `text` is missing, not a string, or blank. A text longer than `MAX_TRACKING_OUTPUT_TEXT` (1000 characters) is cut at the last paragraph break within the limit, else the last line break, else the last space, else at the limit, and ends with "…".
+  - A step with an **`outputSchema`** gives `kind: "fields"`: the output's top-level fields, in the order of the schema's `properties` (the output's own order when the schema lists none), at most `MAX_TRACKING_OUTPUT_FIELDS` (12). A property the output does not hold is skipped. A field's `label` is its property's `title` in the schema, else the property's name. A string value longer than `MAX_TRACKING_OUTPUT_VALUE` (300 characters) is cut as the text is. An array is sent as its length, `{ items }`, and an object as its field count, `{ fields }`, so the reply never grows with the output. The outcome is absent when the output is not an object or holds none of the schema's properties.
+- **The ending action step.** `endingActionStepName` is set when the newest run's last completed step, of any kind, is an action step: its `name`, else its action's id. It is absent when that last step is an agent step, so a run that ended on its agent step has an outcome and no ending action step. No record keeps a summary of what an action step did, so none is sent.
+- **First handoff.** The oldest provenance entry of the Task that names a signal. A Task that does not exist, is deleted, or has no such entry fails with `not_found`: the pane follows handed-off work only. The Task need not be in progress.
+- **Grants.** As `task.queryTracking`: the operation's row names `task.read`, the service also checks `run.read`, and a caller that lacks one is refused with `forbidden` naming it.
+- **How it reads.** The same port, `TaskTrackingRuns`, with one more method that the controller daemon answers from the runs repository. It opens no transaction. The first handoff is one lookup on `task_provenance_handoff`. The runs are one lookup of the Task's newest runs on `runs_task_id`, one probe of each run's step records for its session, and for the newest run two statements that each return one step record (the last completed record, and the last completed agent record with its output and its step's `outputSchema`). They walk the run's plan once and probe the records on the primary key of `run_steps`. Nothing reads a transcript, a Task's other runs, or any output but the one. The reply is bounded by the limits above whatever the Task's history, the plan or the output, and `tracking.speed.test.ts` measures it.
+- Its CLI row is `hercule task read-tracking <id>`, with the id or an id tail resolved through `task.query`, as `task read`. Purpose: "Shows what Intake's Tracking pane draws for one handed-off task." The spelling is a verb and its object, as `connection list-choices`, and `hercule task tracking` stays the list of every followed task.
 
 `task.query` sorts over `updatedAt | createdAt | priority | status`, default `updatedAt desc`, keyset. *(Amended 2026-10-03, [#300](https://github.com/theagenticage/hercule/issues/300).)* `priority` ascends `low, normal, high, urgent`, and `status` ascends `open, in-progress, done, cancelled`. With `text` the order is relevance and the walk pages by offset; `text` together with an explicit `sort` is `validation` naming both ([./09-tasks.md](./09-tasks.md) Search). `task.update` never takes a whole `labels` array: labels move one at a time through `addLabels` and `removeLabels`, so a concurrent edit by the user and a triage agent cannot clobber each other.
 

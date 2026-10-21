@@ -7,4 +7,11 @@ export {
   type UpdateInput,
 } from "./service";
 export { taskRepository, type NewTask } from "./repository";
-export { TaskTracking, TaskTrackingLayer, TaskTrackingRuns, type TrackedRuns } from "./tracking";
+export {
+  TaskTracking,
+  TaskTrackingLayer,
+  TaskTrackingRuns,
+  type TrackedRunHistory,
+  type TrackedRuns,
+} from "./tracking";
+export type { AgentStepResult } from "./tracking-outcome";

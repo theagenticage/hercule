@@ -138,6 +138,13 @@ const TABLE = {
     method: "GET",
     path: "/api/v1/tasks/tracking",
   },
+  // Reads the runs of one Task as well as the Task, so the service also needs
+  // `run.read`.
+  "task.readTracking": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/tasks/:id/tracking",
+  },
   "task.read": { requires: "task.read", method: "GET", path: "/api/v1/tasks/:id" },
   "task.create": {
     requires: "task.create",

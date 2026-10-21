@@ -366,6 +366,106 @@ export const TaskTracking = Schema.Struct({ rows: Schema.Array(TrackingTask) });
 
 export type TaskTracking = Schema.Schema.Type<typeof TaskTracking>;
 
+/** The most runs `task.readTracking` lists: the Task's newest ones. */
+export const MAX_TRACKING_DETAIL_RUNS = 20;
+
+/** The most characters of a text outcome. A longer text is cut and ends with "…". */
+export const MAX_TRACKING_OUTPUT_TEXT = 1000;
+
+/** The most fields of a fields outcome. The schema's later properties are left out. */
+export const MAX_TRACKING_OUTPUT_FIELDS = 12;
+
+/** The most characters of one string value of a fields outcome. A longer one is cut and ends with "…". */
+export const MAX_TRACKING_OUTPUT_VALUE = 300;
+
+/**
+ * One run of a Task as the Tracking pane lists it: the facts of a Tracking
+ * row's run, and the session of the run's last agent step, which holds the
+ * run's thread.
+ */
+export const TrackingDetailRun = Schema.Struct({
+  ...TrackingRun.fields,
+  /** The session of the run's last agent step. Absent for a run that never started one. */
+  sessionId: Schema.optionalKey(Id),
+});
+
+export type TrackingDetailRun = Schema.Schema.Type<typeof TrackingDetailRun>;
+
+/**
+ * The value of one field of a fields outcome. A string longer than
+ * `MAX_TRACKING_OUTPUT_VALUE` is cut. An array and an object are not sent,
+ * only how many items or fields they hold, so a reply never grows with the
+ * output.
+ */
+export const TrackingOutputValue = Schema.Union([
+  Schema.String,
+  Schema.Number,
+  Schema.Boolean,
+  Schema.Null,
+  Schema.Struct({ items: Schema.Int }),
+  Schema.Struct({ fields: Schema.Int }),
+]);
+
+export type TrackingOutputValue = Schema.Schema.Type<typeof TrackingOutputValue>;
+
+/** One top-level field of a structured output, with the label a person reads. */
+export const TrackingOutputField = Schema.Struct({
+  /** The `title` of the field's property in the step's output schema, else the property's name. */
+  label: Schema.String,
+  value: TrackingOutputValue,
+});
+
+export type TrackingOutputField = Schema.Schema.Type<typeof TrackingOutputField>;
+
+/**
+ * What a run's last agent step produced, shaped to be drawn: free text for a
+ * step with no output schema, fields for a step with one. The text and every
+ * value are cut, so the reply does not grow with the output.
+ */
+export const TrackingOutcome = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("text"),
+    /** The step's `name`, else its id. */
+    stepName: Schema.String,
+    /** The session that ran the step: its thread. */
+    sessionId: Schema.optionalKey(Id),
+    /** The `text` of the step's output, at most `MAX_TRACKING_OUTPUT_TEXT` characters. */
+    text: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("fields"),
+    stepName: Schema.String,
+    sessionId: Schema.optionalKey(Id),
+    /** The output's top-level fields in the output schema's property order, at most `MAX_TRACKING_OUTPUT_FIELDS`. */
+    fields: atMost(TrackingOutputField, MAX_TRACKING_OUTPUT_FIELDS),
+  }),
+]);
+
+export type TrackingOutcome = Schema.Schema.Type<typeof TrackingOutcome>;
+
+/** What `task.readTracking` returns: what the Tracking pane of one Task draws. */
+export const TrackingDetail = Schema.Struct({
+  taskId: Id,
+  /** The Task's oldest handoff: the signal the user first handed to an agent. */
+  firstHandoff: TrackingHandoff,
+  /** The Task's newest runs, at most `MAX_TRACKING_DETAIL_RUNS`, oldest first. */
+  runs: atMost(TrackingDetailRun, MAX_TRACKING_DETAIL_RUNS),
+  /**
+   * What the newest run's last completed agent step (by `finishedAt`)
+   * produced. Absent when the run has completed no agent step, or the step
+   * left nothing to show.
+   */
+  outcome: Schema.optionalKey(TrackingOutcome),
+  /**
+   * The name of the action step the newest run ended on: its `name`, else its
+   * action's id. Present only when the run's last completed step is an action
+   * step, and so finished after the agent step `outcome` comes from.
+   */
+  endingActionStepName: Schema.optionalKey(Schema.String),
+});
+
+export type TrackingDetail = Schema.Schema.Type<typeof TrackingDetail>;
+
 export const task = HttpApiGroup.make("task")
   .add(
     HttpApiEndpoint.get("query", "/tasks", {
@@ -381,6 +481,13 @@ export const task = HttpApiGroup.make("task")
     HttpApiEndpoint.get("queryTracking", "/tasks/tracking", {
       success: TaskTracking,
       error: [Unauthenticated, Forbidden, Internal],
+    }),
+    // `/tasks/:id/tracking` has one more segment than `/tasks/:id`, so the
+    // router never takes it for that route.
+    HttpApiEndpoint.get("readTracking", "/tasks/:id/tracking", {
+      params: { id: Id },
+      success: TrackingDetail,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     HttpApiEndpoint.get("read", "/tasks/:id", {
       params: { id: Id },

@@ -14,7 +14,10 @@
  *   on every push of the `task` and `run` topics;
  * - its two halves, the tracked Tasks and the newest runs of those Tasks;
  * - the Task lookup of a handoff, and so of the describe line of every Hand to
- *   an agent answer on To do.
+ *   an agent answer on To do;
+ * - `task.readTracking`, which the desktop app sends when a row's pane opens:
+ *   on one Task with a long history, a plan of many steps and a 1 MB output
+ *   (the last case below).
  *
  * Each case seeds 10 or 1,000 tracked Tasks. A Task has between 1 and 50 runs,
  * so a case holds about 25 runs for every Task, and the newest run of a Task
@@ -34,7 +37,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MAX_TRACKING_HANDOFFS } from "@hercule/contract";
+import { MAX_TRACKING_DETAIL_RUNS, MAX_TRACKING_HANDOFFS } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { TaskTrackingRunsLayer } from "../daemon/runs";
 import { inTransaction, TestDatabase } from "../db/testing";
@@ -228,5 +231,103 @@ describe.runIf(SPEED_TESTS_ENABLED)("Tracking's reads", () => {
     expect(medians.rows).toBe(count);
     expect(medians.mostHandoffs).toBeLessThanOrEqual(MAX_TRACKING_HANDOFFS);
     if (count === 1000) expect(medians.queryTracking).toBeLessThan(CEILING_MS);
+  });
+});
+
+/** The runs `seedPaneHistory` adds to the first tracked Task. */
+const PANE_RUNS = 1000;
+
+/** The steps of the plan of each of those runs. */
+const PANE_PLAN_STEPS = 50;
+
+/** The most time the pane's read may take, in milliseconds. */
+const PANE_CEILING_MS = 50;
+
+/** The most bytes the pane's reply may hold. A pane's text and fields are cut well below it. */
+const PANE_REPLY_CEILING_BYTES = 20_000;
+
+/**
+ * Adds `PANE_RUNS` completed runs to the first tracked Task, each with a plan
+ * of `PANE_PLAN_STEPS` steps and an agent step that completed with a session
+ * and a small output, then an action step that finished later. The newest
+ * run's agent step has a 1 MB text output. They are newer than the runs
+ * `seed` wrote. Written in SQL, in one transaction.
+ */
+const seedPaneHistory = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const plan = `(SELECT json_object('name', 'Implement', 'steps', json_group_array(json_object(
+                   'id', 's' || j, 'kind', CASE WHEN j = 1 THEN 'agent' ELSE 'action' END,
+                   'action', 'github/open-pr', 'prompt', 'Do the work and report what you did')))
+                 FROM (WITH RECURSIVE m(j) AS (SELECT 1 UNION ALL SELECT j + 1 FROM m
+                                                WHERE j < ${PANE_PLAN_STEPS})
+                       SELECT j FROM m))`;
+  yield* sql`
+    WITH RECURSIVE m(k) AS (SELECT 101 UNION ALL SELECT k + 1 FROM m WHERE k < ${100 + PANE_RUNS})
+    INSERT INTO runs (id, plan, inputs, origin, task_id, status, created_at, started_at, finished_at)
+    SELECT ${sql.literal(`unhex(printf('%08x000070008001%012x', 1, k))`)}, ${sql.literal(plan)}, '{}',
+           '{"kind":"manual","actor":"user"}', unhex(printf('%08x000070008000%012x', 1, 0)),
+           'completed', strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-21', '+' || k || ' seconds'),
+           strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-21', '+' || k || ' seconds'),
+           strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-21', '+' || k || ' seconds')
+    FROM m`;
+  yield* sql`
+    WITH RECURSIVE m(k) AS (SELECT 101 UNION ALL SELECT k + 1 FROM m WHERE k < ${100 + PANE_RUNS})
+    INSERT INTO run_steps (run_id, step_id, iteration, status, output, session_id, created_at,
+                           started_at, finished_at)
+    SELECT unhex(printf('%08x000070008001%012x', 1, k)), 's1', 1, 'completed',
+           CASE WHEN k = ${100 + PANE_RUNS}
+                THEN json_object('text', replace(hex(zeroblob(200000)), '00', 'word '),
+                                 'exitStatus', 'completed')
+                ELSE '{"text":"Done","exitStatus":"completed"}' END,
+           randomblob(16), '2026-10-21T00:00:00.000Z', '2026-10-21T00:00:00.000Z',
+           '2026-10-21T00:00:01.000Z'
+    FROM m`;
+  yield* sql`
+    WITH RECURSIVE m(k) AS (SELECT 101 UNION ALL SELECT k + 1 FROM m WHERE k < ${100 + PANE_RUNS})
+    INSERT INTO run_steps (run_id, step_id, iteration, status, output, created_at, started_at,
+                           finished_at)
+    SELECT unhex(printf('%08x000070008001%012x', 1, k)), 's2', 1, 'completed', '{}',
+           '2026-10-21T00:00:01.000Z', '2026-10-21T00:00:01.000Z', '2026-10-21T00:00:02.000Z'
+    FROM m`;
+}).pipe(inTransaction);
+
+describe.runIf(SPEED_TESTS_ENABLED)("the Tracking pane's read", () => {
+  it("with a Task of 1,000 runs, a 50-step plan and a 1 MB output, reads in bounded time and replies in bounded size", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seed(1);
+        yield* seedPaneHistory;
+        const tasks = yield* taskRepository;
+        const tracking = yield* TaskTracking;
+        const taskId = (yield* tasks.listTracked())[0]!.id;
+        const detail = yield* tracking.read(taskId);
+        return {
+          detail,
+          replyBytes: JSON.stringify(detail).length,
+          readTracking: yield* measureMedian(tracking.read(taskId)),
+        };
+      }).pipe(
+        Effect.provideService(CurrentActor, USER),
+        Effect.provide(
+          TaskTrackingLayer.pipe(
+            Layer.provideMerge(TaskTrackingRunsLayer),
+            Layer.provideMerge(TestDatabase),
+          ),
+        ),
+      ),
+    );
+
+    process.stderr.write(
+      `task.readTracking with ${String(PANE_RUNS)} runs and a 1 MB output, ` +
+        `${String(result.replyBytes)} bytes, median of ${String(RUNS)}: ` +
+        `${result.readTracking.toFixed(2)} ms\n`,
+    );
+    expect(result.detail.runs).toHaveLength(MAX_TRACKING_DETAIL_RUNS);
+    // The newest run's 1 MB text, cut to the limit.
+    expect(result.detail.outcome).toMatchObject({ kind: "text" });
+    expect((result.detail.outcome as { text: string }).text.length).toBeGreaterThan(900);
+    expect(result.detail.endingActionStepName).toBe("github/open-pr");
+    expect(result.replyBytes).toBeLessThan(PANE_REPLY_CEILING_BYTES);
+    expect(result.readTracking).toBeLessThan(PANE_CEILING_MS);
   });
 });

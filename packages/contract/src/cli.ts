@@ -586,6 +586,18 @@ export const CLI = {
       },
     },
   },
+  "task.readTracking": {
+    command: "task read-tracking",
+    help: "Shows what Intake's Tracking pane draws for one handed-off task. It gives the first handoff (the signal, the run it started and when), the newest runs oldest first with the session of each run's last agent step, what the newest run's last agent step produced, and the action step the run ended on when it ended on one. The output is cut to a short text, or to the top-level fields of a structured output with their labels; arrays and objects are counted, not shown. Fails with not_found for a task that was never handed off. Needs the run read grant as well as the task read grant.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        help: "The task's id, or a tail of eight or more characters.",
+        resolves: "task.query",
+      },
+    },
+  },
   "task.create": {
     command: "task create",
     help: "Creates a Task: a unit of human intent, never an execution. The description is markdown. Returns the task's id, which `hercule task update` and `hercule task read` take.",
