@@ -14,13 +14,19 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   describeFailureCause,
   MAX_TRACKING_DETAIL_RUNS,
+  MAX_TRACKING_FAILURE_CAUSE,
   type RunSummary,
   type TrackingRun,
 } from "@hercule/contract";
 import { runRepository } from "../../runs";
-import { TaskTrackingRuns, type TrackedRunHistory, type TrackedRuns } from "../../tasks";
+import { cutText, TaskTrackingRuns, type TrackedRunHistory, type TrackedRuns } from "../../tasks";
 
-/** Converts a run summary into the run facts Tracking reads, with `failureMessage` for a failed run. */
+/**
+ * Converts a run summary into the run facts Tracking reads, with
+ * `failureMessage` for a failed run. The failure cause is cut to
+ * `MAX_TRACKING_FAILURE_CAUSE` characters, because an error message has no
+ * length of its own.
+ */
 const buildTrackingRun = (run: RunSummary, failureMessage: string | undefined): TrackingRun => ({
   id: run.id,
   workflowId: run.workflowId,
@@ -31,7 +37,12 @@ const buildTrackingRun = (run: RunSummary, failureMessage: string | undefined): 
   ...("finishedAt" in run ? { finishedAt: run.finishedAt } : {}),
   awaitedSignalIds: "awaitedSignalIds" in run ? run.awaitedSignalIds : [],
   ...(run.status === "failed"
-    ? { failureCause: describeFailureCause({ reason: run.failureReason, message: failureMessage }) }
+    ? {
+        failureCause: cutText(
+          describeFailureCause({ reason: run.failureReason, message: failureMessage }),
+          MAX_TRACKING_FAILURE_CAUSE,
+        ),
+      }
     : {}),
 });
 

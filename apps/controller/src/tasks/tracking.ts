@@ -18,6 +18,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   createNotFoundError,
   type Forbidden,
+  MAX_TRACKING_STEP_NAME,
   type NotFound,
   type TaskTracking as TaskTrackingReading,
   type TrackingDetail,
@@ -27,7 +28,7 @@ import {
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
 import { taskRepository } from "./repository";
-import { shapeTrackingOutput, type CompletedAgentStep } from "./tracking-output";
+import { cutText, shapeTrackingOutput, type CompletedAgentStep } from "./tracking-output";
 
 /**
  * The runs Tracking reads of a Task: its newest run, its newest live run when
@@ -159,7 +160,7 @@ const make = Effect.gen(function* () {
      *
      * Its size does not follow the Task's history or its output: it holds at
      * most `MAX_TRACKING_DETAIL_RUNS` runs, and the text and values of the
-     * output are cut.
+     * output, the step names and the failure causes are cut.
      */
     read: (
       taskId: string,
@@ -184,7 +185,9 @@ const make = Effect.gen(function* () {
           ...(output === undefined ? {} : { output }),
           ...(history.endingActionStepName === undefined
             ? {}
-            : { endingActionStepName: history.endingActionStepName }),
+            : {
+                endingActionStepName: cutText(history.endingActionStepName, MAX_TRACKING_STEP_NAME),
+              }),
         };
       }),
   };

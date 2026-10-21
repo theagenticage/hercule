@@ -9,6 +9,7 @@ import {
   MAX_TRACKING_OUTPUT_LABEL,
   MAX_TRACKING_OUTPUT_TEXT,
   MAX_TRACKING_OUTPUT_VALUE,
+  MAX_TRACKING_STEP_NAME,
 } from "@hercule/contract";
 import { cutText, shapeTrackingOutput, type CompletedAgentStep } from "./tracking-output";
 
@@ -41,6 +42,31 @@ describe("shapeTrackingOutput for a step with no output schema", () => {
     const output = shapeTrackingOutput({ ...buildStep({ text: "Hi" }), sessionId: undefined });
 
     expect(output).toEqual({ kind: "text", stepName: "Review", text: "Hi" });
+  });
+
+  it.each([
+    ["text", undefined],
+    ["fields", { properties: { verdict: {} } }],
+  ])("cuts a step name that is too long, for a %s output", (_, outputSchema) => {
+    const stepName = "Review the change ".repeat(5000);
+
+    const output = shapeTrackingOutput({
+      ...buildStep({ text: "Done", verdict: "Approve" }, outputSchema),
+      stepName,
+    });
+
+    const cutName = output!.stepName;
+    expect(cutName.length).toBeLessThanOrEqual(MAX_TRACKING_STEP_NAME);
+    expect(cutName.startsWith("Review the change")).toBe(true);
+    expect(cutName.endsWith("…")).toBe(true);
+  });
+
+  it("keeps a step name that fits", () => {
+    const stepName = "x".repeat(MAX_TRACKING_STEP_NAME);
+
+    expect(shapeTrackingOutput({ ...buildStep({ text: "Hi" }), stepName })).toMatchObject({
+      stepName,
+    });
   });
 
   it("trims the text", () => {

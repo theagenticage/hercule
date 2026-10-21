@@ -5,8 +5,9 @@
  * A step with no output schema ends with `{ text, exitStatus }`, and its
  * `text` is the agent's last message. A step with an output schema ends with
  * an object that fits the schema. The pane draws the first as text and the
- * second as a list of labelled fields. Both are cut, so a reply stays small
- * whatever the agent wrote.
+ * second as a list of labelled fields. Both are cut, and so is the step's
+ * name, so a reply stays small whatever the agent or the workflow's author
+ * wrote.
  */
 import type * as Schema from "effect/Schema";
 import {
@@ -14,6 +15,7 @@ import {
   MAX_TRACKING_OUTPUT_LABEL,
   MAX_TRACKING_OUTPUT_TEXT,
   MAX_TRACKING_OUTPUT_VALUE,
+  MAX_TRACKING_STEP_NAME,
   type TrackingOutput,
   type TrackingOutputField,
   type TrackingOutputValue,
@@ -21,7 +23,7 @@ import {
 
 /** What the shaping reads of a completed agent step. */
 export interface CompletedAgentStep {
-  /** The step's `name`, else its id. */
+  /** The step's `name`, else its id. Any length: `shapeTrackingOutput` cuts it. */
   readonly stepName: string;
   /** The session that ran the step. Absent when the step has none. */
   readonly sessionId: string | undefined;
@@ -124,7 +126,7 @@ const shapeFields = (
  */
 export const shapeTrackingOutput = (step: CompletedAgentStep): TrackingOutput | undefined => {
   const identity = {
-    stepName: step.stepName,
+    stepName: cutText(step.stepName, MAX_TRACKING_STEP_NAME),
     ...(step.sessionId === undefined ? {} : { sessionId: step.sessionId }),
   };
   if (!isJsonObject(step.output)) return undefined;

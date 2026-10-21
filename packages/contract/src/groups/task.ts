@@ -304,6 +304,13 @@ export const TrackingHandoff = Schema.Struct({ signalId: Id, runId: Id, at: Time
 export type TrackingHandoff = Schema.Schema.Type<typeof TrackingHandoff>;
 
 /**
+ * The most characters of why a run failed (`TrackingRun.failureCause`). A
+ * longer cause is cut to this many, "…" included. The cause is an error
+ * message, which is as long as whatever produced it.
+ */
+export const MAX_TRACKING_FAILURE_CAUSE = 300;
+
+/**
  * What a client needs to know about one run of a tracked Task to work out
  * where the work stands. It holds a run summary's fields plus `failureCause`,
  * so no row needs a `run.read`.
@@ -329,7 +336,7 @@ export const TrackingRun = Schema.Struct({
    * error of the step that failed, else the failure reason in plain words.
    * Present only for a failed run.
    */
-  failureCause: Schema.optionalKey(Schema.String),
+  failureCause: Schema.optionalKey(bounded(0, MAX_TRACKING_FAILURE_CAUSE)),
 });
 
 export type TrackingRun = Schema.Schema.Type<typeof TrackingRun>;
@@ -382,6 +389,14 @@ export const MAX_TRACKING_OUTPUT_VALUE = 300;
 export const MAX_TRACKING_OUTPUT_LABEL = 80;
 
 /**
+ * The most characters of the name of a step, as the pane shows it: the step
+ * that produced the output, and the action step the newest run ended on. A
+ * longer name is cut to this many, "…" included. A workflow may give a step a
+ * name of any length, and so a step's own id.
+ */
+export const MAX_TRACKING_STEP_NAME = 80;
+
+/**
  * One run of a Task as the Tracking pane lists it: the facts of a Tracking
  * row's run, and the session of the run's last agent step, which holds the
  * run's thread.
@@ -431,8 +446,8 @@ export type TrackingOutputField = Schema.Schema.Type<typeof TrackingOutputField>
 export const TrackingOutput = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("text"),
-    /** The step's `name`, else its id. */
-    stepName: Schema.String,
+    /** The step's `name`, else its id, at most `MAX_TRACKING_STEP_NAME` characters. */
+    stepName: bounded(0, MAX_TRACKING_STEP_NAME),
     /** The session that ran the step: its thread. */
     sessionId: Schema.optionalKey(Id),
     /** The `text` of the step's output, at most `MAX_TRACKING_OUTPUT_TEXT` characters. */
@@ -440,7 +455,7 @@ export const TrackingOutput = Schema.Union([
   }),
   Schema.Struct({
     kind: Schema.Literal("fields"),
-    stepName: Schema.String,
+    stepName: bounded(0, MAX_TRACKING_STEP_NAME),
     sessionId: Schema.optionalKey(Id),
     /** The output's top-level fields in the output schema's property order, at most `MAX_TRACKING_OUTPUT_FIELDS`. */
     fields: atMost(TrackingOutputField, MAX_TRACKING_OUTPUT_FIELDS),
@@ -479,9 +494,9 @@ export const TrackingDetail = Schema.Struct({
    * action's id. Present only when the newest run completed and its last
    * completed step is an action step, so it finished after the agent step
    * `output` comes from. A run that is live or failed has not ended on a
-   * step, so it has none.
+   * step, so it has none. At most `MAX_TRACKING_STEP_NAME` characters.
    */
-  endingActionStepName: Schema.optionalKey(Schema.String),
+  endingActionStepName: Schema.optionalKey(bounded(0, MAX_TRACKING_STEP_NAME)),
 });
 
 export type TrackingDetail = Schema.Schema.Type<typeof TrackingDetail>;

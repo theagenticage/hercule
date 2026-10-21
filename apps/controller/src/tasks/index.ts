@@ -14,3 +14,4 @@ export {
   type TrackedRunHistory,
   type TrackedRuns,
 } from "./tracking";
+export { cutText } from "./tracking-output";

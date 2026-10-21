@@ -43,6 +43,7 @@ import {
   MAX_TRACKING_HANDOFFS,
   MAX_TRACKING_OUTPUT_FIELDS,
   MAX_TRACKING_OUTPUT_LABEL,
+  MAX_TRACKING_STEP_NAME,
 } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { TaskTrackingRunsLayer } from "../daemon/runs";
@@ -330,13 +331,18 @@ const LONG_KEY_LENGTH = 100_000;
  * Gives the newest run `seedPaneHistory` wrote an output schema with no
  * `properties`, and an output of `LONG_KEYS` keys of `LONG_KEY_LENGTH`
  * characters each: the labels of its fields then come from the agent's own
- * keys.
+ * keys. It also gives its agent step and its ending action step names of
+ * `LONG_KEY_LENGTH` characters.
  */
 const seedLongKeyOutput = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const newestRun = `unhex(printf('%08x000070008001%012x', 1, ${100 + PANE_RUNS}))`;
   yield* sql`
-    UPDATE runs SET plan = json_set(plan, '$.steps[0].outputSchema', json('{"type":"object"}'))
+    UPDATE runs SET plan = json_set(
+      plan,
+      '$.steps[0].outputSchema', json('{"type":"object"}'),
+      '$.steps[0].name', replace(hex(zeroblob(${LONG_KEY_LENGTH})), '00', 'n'),
+      '$.steps[1].name', replace(hex(zeroblob(${LONG_KEY_LENGTH})), '00', 'a'))
     WHERE id = ${sql.literal(newestRun)}`;
   yield* sql`
     UPDATE run_steps SET output = (
@@ -389,7 +395,7 @@ describe.runIf(SPEED_TESTS_ENABLED)("the Tracking pane's read", () => {
     expect(result.readTracking).toBeLessThan(PANE_CEILING_MS);
   });
 
-  it("with a newest output of 12 keys of 100,000 characters each, cuts the labels and replies in bounded size", async () => {
+  it("with a newest output of 12 keys of 100,000 characters each, cuts the labels and step names and replies in bounded size", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* seed(1);
@@ -427,6 +433,8 @@ describe.runIf(SPEED_TESTS_ENABLED)("the Tracking pane's read", () => {
     for (const field of fields) {
       expect(field.label.length).toBeLessThanOrEqual(MAX_TRACKING_OUTPUT_LABEL);
     }
+    expect(output?.stepName).toHaveLength(MAX_TRACKING_STEP_NAME);
+    expect(result.detail.endingActionStepName).toHaveLength(MAX_TRACKING_STEP_NAME);
     expect(result.replyBytes).toBeLessThan(PANE_REPLY_CEILING_BYTES);
     expect(result.readTracking).toBeLessThan(PANE_CEILING_MS);
   });

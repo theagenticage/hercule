@@ -12,7 +12,9 @@ import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import {
   MAX_TRACKING_DETAIL_RUNS,
+  MAX_TRACKING_FAILURE_CAUSE,
   MAX_TRACKING_OUTPUT_TEXT,
+  MAX_TRACKING_STEP_NAME,
   TaskTracking,
   TrackingDetail,
   type TaskPriority,
@@ -686,6 +688,59 @@ describe("task.readTracking", () => {
       expect(first).not.toHaveProperty("output");
       expect(later.runs[0]).toMatchObject({ id: run, status: "failed", sessionId: SESSION_A });
       expect(later.output).toMatchObject({ kind: "text", text: "Half done" });
+    });
+  });
+
+  it("cuts the names of the agent step and the ending action step, and the cause of a failed run, to their limits", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const completed = await insertTrackedTask(harness, "long names");
+      await insertRunWithSteps(harness, completed, {
+        at: minute(1),
+        steps: [
+          {
+            id: "work",
+            kind: "agent",
+            name: "Review the change ".repeat(5000),
+            sessionId: SESSION_A,
+            output: { text: "Done" },
+            finishedAt: minute(2),
+          },
+          {
+            id: "open",
+            kind: "action",
+            name: "Open the pull request ".repeat(5000),
+            action: "github/open-pr",
+            output: {},
+            finishedAt: minute(3),
+          },
+        ],
+        ending: COMPLETED,
+      });
+      const failed = await insertTrackedTask(harness, "long cause");
+      await insertRun(harness, failed, {
+        at: minute(1),
+        stepError: "permission denied on ops-db ".repeat(5000),
+        ending: { status: "failed", failureReason: "step-failed", failedStepId: "work" },
+      });
+
+      const detail = await readDetail(harness.base, token, completed);
+      const failedDetail = await readDetail(harness.base, token, failed);
+      const { rows } = await readTracking(harness.base, token);
+
+      const stepName = (detail.output as { stepName: string }).stepName;
+      expect(stepName.length).toBeLessThanOrEqual(MAX_TRACKING_STEP_NAME);
+      expect(stepName.startsWith("Review the change")).toBe(true);
+      expect(stepName.endsWith("…")).toBe(true);
+      const ending = detail.endingActionStepName!;
+      expect(ending.length).toBeLessThanOrEqual(MAX_TRACKING_STEP_NAME);
+      expect(ending.startsWith("Open the pull request")).toBe(true);
+      expect(ending.endsWith("…")).toBe(true);
+      const cause = failedDetail.runs[0]!.failureCause!;
+      expect(cause.length).toBeLessThanOrEqual(MAX_TRACKING_FAILURE_CAUSE);
+      expect(cause.endsWith("…")).toBe(true);
+      const rowCause = rows.find((row) => row.title === "long cause")!.latestRun.failureCause!;
+      expect(rowCause).toBe(cause);
     });
   });
 
