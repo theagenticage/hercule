@@ -483,6 +483,7 @@ export {
   TaskTracking,
   TrackingDetail,
   TrackingDetailRun,
+  TrackingFirstHandoff,
   TrackingHandoff,
   TrackingOutput,
   TrackingOutputField,

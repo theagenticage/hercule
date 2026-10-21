@@ -14,7 +14,7 @@
  * `tracking.integration.test.ts`.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Statement from "effect/unstable/sql/Statement";
 import { MAX_TRACKING_HANDOFFS, type Grant, type TrackingRun } from "@hercule/contract";
@@ -34,6 +34,12 @@ const SIGNAL_B = "0199e0e7-0005-7000-8000-00000000000b";
 const RUN_A = "0199e0e7-0006-7000-8000-00000000000a";
 const RUN_B = "0199e0e7-0006-7000-8000-00000000000b";
 const AT = "2026-10-20T10:00:00.000Z";
+
+/** The workflow name the port gives for each run id it knows. */
+const WORKFLOW_NAMES: ReadonlyMap<string, string> = new Map([
+  [RUN_A, "Implement"],
+  [RUN_B, "Review"],
+]);
 const LATER = "2026-10-20T11:00:00.000Z";
 
 const USER: Actor = {
@@ -101,6 +107,8 @@ const runTracking = <A, E>(
           Layer.provide(
             Layer.succeed(TaskTrackingRuns)({
               readRunHistory: () => Effect.succeed(history),
+              readWorkflowName: (runId) =>
+                Effect.succeed(Option.fromNullishOr(WORKFLOW_NAMES.get(runId))),
               readLatestRuns: (taskIds) =>
                 Effect.sync(() => {
                   asked.push(taskIds);
@@ -293,6 +301,7 @@ describe("task.queryTracking", () => {
               Layer.succeed(TaskTrackingRuns)({
                 readLatestRuns: () => Effect.succeed([]),
                 readRunHistory: () => Effect.succeed(NO_HISTORY),
+                readWorkflowName: () => Effect.succeed(Option.none()),
               }),
             ),
             Layer.provideMerge(TestDatabase),
@@ -370,7 +379,12 @@ describe("task.readTracking", () => {
       { runs: [{ ...buildRun(RUN_A) }], agentStep: undefined, endingActionStepName: undefined },
     );
 
-    expect(detail.firstHandoff).toEqual({ signalId: SIGNAL_A, runId: RUN_A, at: AT });
+    expect(detail.firstHandoff).toEqual({
+      signalId: SIGNAL_A,
+      runId: RUN_A,
+      at: AT,
+      workflowName: "Implement",
+    });
     expect(detail.runs.map((run) => run.id)).toEqual([RUN_A]);
     expect(detail).not.toHaveProperty("output");
     expect(detail).not.toHaveProperty("endingActionStepName");
@@ -414,6 +428,50 @@ describe("task.readTracking", () => {
           provenance === undefined
             ? "0199e0e7-0004-7000-8000-0000000000ff"
             : yield* insertTask({ provenance });
+        return yield* Effect.flip(
+          Effect.flatMap(TaskTracking, (tracking) => tracking.read(taskId)),
+        );
+      }),
+    );
+
+    expect(error).toMatchObject({ error: { code: "not_found" } });
+  });
+
+  it("names the workflow of the first handoff's run, which the run history need not hold", async () => {
+    const detail = await runTracking(
+      USER,
+      [],
+      Effect.gen(function* () {
+        const repository = yield* taskRepository;
+        const taskId = yield* insertTask({
+          provenance: [{ signalId: SIGNAL_A, runId: RUN_B }],
+        });
+        yield* inTransaction(
+          repository.update(
+            taskId,
+            {},
+            [{ signalId: SIGNAL_B, runId: RUN_A }],
+            "2026-10-20T12:00:00.000Z",
+            "user",
+          ),
+        );
+        return yield* Effect.flatMap(TaskTracking, (tracking) => tracking.read(taskId));
+      }),
+      [],
+      { runs: [buildRun(RUN_A)], agentStep: undefined, endingActionStepName: undefined },
+    );
+
+    expect(detail.firstHandoff).toMatchObject({ runId: RUN_B, workflowName: "Review" });
+  });
+
+  it("fails with not_found when the run of the first handoff does not exist", async () => {
+    const error = await runTracking(
+      USER,
+      [],
+      Effect.gen(function* () {
+        const taskId = yield* insertTask({
+          provenance: [{ signalId: SIGNAL_A, runId: "0199e0e7-0006-7000-8000-0000000000ff" }],
+        });
         return yield* Effect.flip(
           Effect.flatMap(TaskTracking, (tracking) => tracking.read(taskId)),
         );

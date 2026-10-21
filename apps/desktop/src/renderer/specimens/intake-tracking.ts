@@ -275,7 +275,10 @@ const buildDetail = (
 ): readonly [string, TrackingDetail] => [
   task.taskId,
   {
-    firstHandoff: task.handoffs[task.handoffs.length - 1]!,
+    firstHandoff: {
+      ...task.handoffs[task.handoffs.length - 1]!,
+      workflowName: task.latestRun.workflowName,
+    },
     runs: [{ ...task.latestRun, sessionId }],
     ...rest,
   },

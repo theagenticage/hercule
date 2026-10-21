@@ -968,6 +968,22 @@ describe("the runs the Tracking pane reads", () => {
     expect(listed).toEqual(listedLimit);
   });
 
+  it("returns the workflow name of a run as its plan holds it, and none for a run that does not exist", async () => {
+    const [named, missing] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const id = yield* runs.insert({ ...NEW_RUN, plan: PLAN, taskId: TASK }, minute(1));
+        return [
+          yield* runs.readWorkflowName(id),
+          yield* runs.readWorkflowName("0190c000-0000-7000-8000-0000000000ff"),
+        ] as const;
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(named).toEqual(Option.some("Implement"));
+    expect(missing).toEqual(Option.none());
+  });
+
   it("returns the session of a run's newest step record that has one, and leaves out a run with none", async () => {
     const sessions = await Effect.runPromise(
       Effect.gen(function* () {
@@ -1028,6 +1044,12 @@ describe("the runs the Tracking pane reads", () => {
 describe("the query plans of the Tracking pane's run reads", () => {
   const TASK = "0190c000-0000-7000-8000-0000000000b1";
   const RUN = "0190c000-0000-7000-8000-0000000000c1";
+
+  it("looks a run's workflow name up by the run's key", async () => {
+    const plan = await explainStatement("json_extract(plan", (runs) => runs.readWorkflowName(RUN));
+
+    expect(plan).toEqual(["SEARCH runs USING INDEX sqlite_autoindex_runs_1 (id=?)"]);
+  });
 
   it("looks a Task's newest runs up on runs_task_id, already in order", async () => {
     const plan = await explainStatement("ORDER BY created_at DESC", (runs) =>

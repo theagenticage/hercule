@@ -449,10 +449,23 @@ export const TrackingOutput = Schema.Union([
 
 export type TrackingOutput = Schema.Schema.Type<typeof TrackingOutput>;
 
+/**
+ * The Task's oldest handoff, as the Tracking pane draws it: the handoff, and
+ * the name of the workflow it handed the signal to, which a client cannot
+ * read from the pane's runs when that run is older than the newest ones.
+ */
+export const TrackingFirstHandoff = Schema.Struct({
+  ...TrackingHandoff.fields,
+  /** The name of the workflow of the handoff's run, as it was when that run started. */
+  workflowName: Schema.String,
+});
+
+export type TrackingFirstHandoff = Schema.Schema.Type<typeof TrackingFirstHandoff>;
+
 /** What `task.readTracking` returns: what the Tracking pane of one Task draws. */
 export const TrackingDetail = Schema.Struct({
   /** The Task's oldest handoff: the signal the user first handed to an agent. */
-  firstHandoff: TrackingHandoff,
+  firstHandoff: TrackingFirstHandoff,
   /** The Task's newest runs, at most `MAX_TRACKING_DETAIL_RUNS`, oldest first. */
   runs: atMost(TrackingDetailRun, MAX_TRACKING_DETAIL_RUNS),
   /**

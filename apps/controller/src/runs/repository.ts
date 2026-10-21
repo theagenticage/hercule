@@ -948,6 +948,19 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Returns the name of the workflow of a run, as it was when the run
+     * started, or none when no run has the id. One lookup of the run by its
+     * id.
+     */
+    readWorkflowName: (runId: string): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly workflow_name: string }>`
+          SELECT json_extract(plan, '$.name') AS workflow_name
+          FROM runs WHERE id = ${uuidFromString(runId)}`,
+        (rows) => Option.fromNullishOr(rows[0]?.workflow_name),
+      ),
+
+    /**
      * Returns the session of each run's newest step record that has one, by
      * run id. Only agent steps have sessions, so it is the session of the
      * run's last agent step. A run with none is left out. One statement,

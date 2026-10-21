@@ -19,6 +19,7 @@ import {
   type TrackingRun,
   type WorkflowDefinition,
 } from "@hercule/contract";
+import { uuidFromString } from "../db";
 import { inTransaction } from "../db/testing";
 import { completeSetup, get, readErrorBody, withServer, type ServerHarness } from "../http/testing";
 import { spawnThreadWithGrants, withAgentFleet } from "../sessions/testing";
@@ -26,6 +27,13 @@ import { runRepository, type NewRun, type RunOutcome } from "../runs/repository"
 import { taskRepository } from "./repository";
 
 const SIGNAL = "0199e0e7-0005-7000-8000-000000000001";
+
+/**
+ * The run a Task's handoff entry names until the Task's first run is written.
+ * A real handoff starts the run in the same transaction, which these helpers
+ * cannot, because they write the Task first.
+ */
+const HANDOFF_PLACEHOLDER_RUN = "0199e0e7-0006-7000-8000-000000000001";
 const AT = "2026-10-20T10:00:00.000Z";
 const minute = (n: number) => `2026-10-20T11:${String(n).padStart(2, "0")}:00.000Z`;
 
@@ -62,13 +70,27 @@ const insertTrackedTask = async (
         priority: fields.priority ?? "normal",
         labels: [],
         projectId: undefined,
-        provenance: [{ signalId: SIGNAL, runId: "0199e0e7-0006-7000-8000-000000000001" }],
+        provenance: [{ signalId: SIGNAL, runId: HANDOFF_PLACEHOLDER_RUN }],
         at: AT,
         actor: "user",
       });
       return task.id;
     }).pipe(inTransaction, Effect.provideService(SqlClient.SqlClient, sql), Effect.orDie),
   );
+
+/**
+ * Makes `runId` the run of the Task's handoff entry when the entry still names
+ * the placeholder, so the first run a test writes for a Task is the run its
+ * handoff started.
+ */
+const adoptHandoffRun = (taskId: string, runId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      UPDATE task_provenance SET run_id = ${uuidFromString(runId)}
+      WHERE task_id = ${uuidFromString(taskId)}
+        AND run_id = ${uuidFromString(HANDOFF_PLACEHOLDER_RUN)}`;
+  });
 
 interface RunToWrite {
   readonly plan?: WorkflowDefinition;
@@ -94,6 +116,7 @@ const insertRun = async ({ sql }: ServerHarness, taskId: string, run: RunToWrite
         taskId,
       };
       const id = yield* runs.insert(newRun, run.at);
+      yield* adoptHandoffRun(taskId, id);
       const step = { stepId: "work", iteration: 1 };
       // Every run but one that was cancelled, or failed to validate, had started.
       const neverStarted =
@@ -155,7 +178,7 @@ describe("task.queryTracking", () => {
       expect(rows[0]).toMatchObject({
         taskId,
         title: "Retry failed webhooks",
-        handoffs: [{ signalId: SIGNAL, runId: "0199e0e7-0006-7000-8000-000000000001", at: AT }],
+        handoffs: [{ signalId: SIGNAL, runId: expect.any(String), at: AT }],
         latestRun: {
           id: failed,
           workflowName: "Implement",
@@ -350,6 +373,7 @@ const insertRunWithSteps = async (
         },
         run.at,
       );
+      yield* adoptHandoffRun(taskId, id);
       yield* runs.start(id, run.at);
       for (const [index, step] of run.steps.entries()) {
         if (index > 0) yield* runs.insertSteps(id, [step.id], run.at);
@@ -429,8 +453,9 @@ describe("task.readTracking", () => {
 
       expect(detail.firstHandoff).toEqual({
         signalId: SIGNAL,
-        runId: "0199e0e7-0006-7000-8000-000000000001",
+        runId: first,
         at: AT,
+        workflowName: "Implement",
       });
       expect(detail.runs.map((run) => [run.id, run.sessionId])).toEqual([
         [first, SESSION_A],

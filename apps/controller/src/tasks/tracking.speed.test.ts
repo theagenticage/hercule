@@ -78,8 +78,9 @@ const RUN_ID = "printf('%08x000070008001%012x', i, k)";
 const NEWEST_RUN_ID = "printf('%08x000070008001%012x', i, 1 + (i % 50))";
 
 /**
- * Writes `count` in-progress Tasks, each with a handoff entry and a ref, and
- * for Task `i` between 1 and 50 runs, in one transaction. Generated in SQL, so
+ * Writes `count` in-progress Tasks, each with a handoff entry that names the
+ * Task's first run and a ref, and for Task `i` between 1 and 50 runs, in one
+ * transaction. Generated in SQL, so
  * seeding 25,000 runs takes a moment. The ids are UUIDs made of `i` and `k`.
  */
 const seed = (count: number) =>
@@ -96,7 +97,8 @@ const seed = (count: number) =>
       WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${count})
       INSERT INTO task_provenance (id, task_id, ref, event_id, run_id, signal_id, at, actor)
       SELECT randomblob(16), ${sql.literal(`unhex(${TASK_ID})`)}, 'github:issue:acme/api#' || i, 1,
-             randomblob(16), randomblob(16), '2026-10-20T10:00:00.000Z', 'user'
+             ${sql.literal(`unhex(printf('%08x000070008001%012x', i, 1))`)}, randomblob(16),
+             '2026-10-20T10:00:00.000Z', 'user'
       FROM n`;
     // The k-th run of Task i is k minutes after 10:00; the last one is the newest.
     yield* sql`
@@ -353,6 +355,9 @@ describe.runIf(SPEED_TESTS_ENABLED)("the Tracking pane's read", () => {
         `${result.readTracking.toFixed(2)} ms\n`,
     );
     expect(result.detail.runs).toHaveLength(MAX_TRACKING_DETAIL_RUNS);
+    // The first handoff's run is the Task's oldest, far older than the 20 newest.
+    expect(result.detail.runs.map((run) => run.id)).not.toContain(result.detail.firstHandoff.runId);
+    expect(result.detail.firstHandoff.workflowName).toBe("Implement");
     // The newest run's 1 MB text, cut to the limit.
     expect(result.detail.output).toMatchObject({ kind: "text" });
     expect((result.detail.output as { text: string }).text.length).toBeGreaterThan(900);

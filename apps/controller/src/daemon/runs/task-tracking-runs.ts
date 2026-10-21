@@ -84,6 +84,7 @@ export const TaskTrackingRunsLayer: Layer.Layer<TaskTrackingRuns, never, SqlClie
                 : undefined,
           };
         }),
+      readWorkflowName: runs.readWorkflowName,
       readLatestRuns: (taskIds: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           const { latest, live } = yield* runs.listLatestOfTasks(taskIds);

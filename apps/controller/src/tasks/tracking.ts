@@ -82,6 +82,13 @@ export class TaskTrackingRuns extends Context.Service<
      * of the one agent step the `TrackingOutput` comes from.
      */
     readonly readRunHistory: (taskId: string) => Effect.Effect<TrackedRunHistory, SqlError>;
+
+    /**
+     * Returns the name of the workflow of the run `runId`, as it was when the
+     * run started, or none when there is no such run. One lookup of the run
+     * by its id, whatever the run's age.
+     */
+    readonly readWorkflowName: (runId: string) => Effect.Effect<Option.Option<string>, SqlError>;
   }
 >()("hercule/controller/tasks/TaskTrackingRuns") {}
 
@@ -140,10 +147,12 @@ const make = Effect.gen(function* () {
 
     /**
      * Returns what the Tracking pane of one Task draws: the Task's first
-     * handoff, its newest runs, what the newest run's last agent step
+     * handoff with the name of its workflow, its newest runs, what the newest run's last agent step
      * produced (cut to fit a pane), and the action step that run ended on.
      * Fails with `NotFound` when the Task does not exist, is deleted, or was
-     * never handed off, because the pane follows handed-off work only.
+     * never handed off, because the pane follows handed-off work only. The
+     * handoff's run always exists, so a missing one is read as a Task that was
+     * never handed off.
      *
      * The caller needs `task.read` and `run.read`, as for `query`. It opens
      * no transaction, so it reads on the read-only connection.
@@ -158,15 +167,19 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("task.readTracking");
         yield* requireGrant("run.query");
-        const firstHandoff = Option.getOrUndefined(yield* tasks.readFirstHandoff(taskId));
-        if (firstHandoff === undefined) {
+        const handoff = Option.getOrUndefined(yield* tasks.readFirstHandoff(taskId));
+        const workflowName =
+          handoff === undefined
+            ? undefined
+            : Option.getOrUndefined(yield* runs.readWorkflowName(handoff.runId));
+        if (handoff === undefined || workflowName === undefined) {
           return yield* Effect.fail(createNotFoundError("no such handed-off task"));
         }
         const history = yield* runs.readRunHistory(taskId);
         const output =
           history.agentStep === undefined ? undefined : shapeTrackingOutput(history.agentStep);
         return {
-          firstHandoff,
+          firstHandoff: { ...handoff, workflowName },
           runs: history.runs,
           ...(output === undefined ? {} : { output }),
           ...(history.endingActionStepName === undefined

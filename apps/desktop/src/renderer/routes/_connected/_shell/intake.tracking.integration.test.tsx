@@ -242,9 +242,11 @@ const buildHandoffSignal = (task: Task): Signal => ({
 const buildTrackingDetail = (
   task: Task,
   run: RunSummary,
-  extra: Partial<Pick<TrackingDetail, "output" | "endingActionStepName" | "runs">> = {},
+  extra: Partial<
+    Pick<TrackingDetail, "firstHandoff" | "output" | "endingActionStepName" | "runs">
+  > = {},
 ): TrackingDetail => ({
-  firstHandoff: buildTrackingTask(task, run).handoffs[0]!,
+  firstHandoff: { ...buildTrackingTask(task, run).handoffs[0]!, workflowName: run.workflowName },
   runs: [{ ...buildTrackingRun(run), sessionId: getSessionId(task) }],
   ...extra,
 });
@@ -270,7 +272,7 @@ const storeTracking = (
     buildExtra?: (
       task: Task,
       run: RunSummary,
-    ) => Partial<Pick<TrackingDetail, "output" | "endingActionStepName" | "runs">>;
+    ) => Partial<Pick<TrackingDetail, "firstHandoff" | "output" | "endingActionStepName" | "runs">>;
   } = {},
 ) => {
   const done = new Set<string>();
@@ -1904,6 +1906,23 @@ describe("the pane's trip", () => {
     );
     await waitFor(() => {
       expect(router.latestLocation.pathname).toBe(`/runs/${getRunId(FINISHED_TASK)}`);
+    });
+  });
+
+  it("names the workflow the first handoff went to, not the newest run's", async () => {
+    await openIntake("/intake?tracking=true", {
+      extra: storeTracking(ROWS, {
+        buildExtra: (task, run) => ({
+          firstHandoff: { ...buildTrackingTask(task, run).handoffs[0]!, workflowName: "Triage" },
+        }),
+      }),
+    });
+    await userEvent.click(getRowButton(FINISHED_TASK));
+
+    await waitFor(() => {
+      expect(getPane()!.querySelector(".tr-msg--you small")?.textContent).toMatch(
+        /handed to Triage$/,
+      );
     });
   });
 

@@ -147,10 +147,7 @@ function Trip({
   };
 
   const handedAt = formatMessageTime(new Date(detail.firstHandoff.at), timezone, now);
-  const handedTo =
-    detail.runs.find((run) => run.id === detail.firstHandoff.runId)?.workflowName ??
-    row.run.workflowName;
-  const handed = `handed to ${handedTo}`;
+  const handed = `handed to ${detail.firstHandoff.workflowName}`;
   const quote: AskedQuote =
     asked.data !== undefined
       ? {
