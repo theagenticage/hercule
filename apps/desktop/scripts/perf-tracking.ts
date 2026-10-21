@@ -1,6 +1,6 @@
 /**
  * The desktop perf script's Tracking scenario: it measures the rows of spec 17
- * §What Intake costs that begin "Tracking" (#801). `perf.ts --tracking-only`
+ * §What Intake costs that begin "Tracking". `perf.ts --tracking-only`
  * runs it:
  *
  * 1. Two idle launches of Intake, one with `TRACKED_COUNT` Tasks tracked
@@ -13,7 +13,7 @@
  *    handoffs, the same pushes with Tasks tracked, the hidden window and the
  *    motion.
  *
- * Your work (#802) is measured in the same launch. The fixture makes
+ * Your work is measured in the same launch. The fixture makes
  * `THREAD_SIGNALS` of the To do signals signals about a thread
  * (`makeSignalsAboutThreads`), and `seedYourWork` makes `YOUR_WORK_TASKS` open
  * Tasks that carry those threads' refs, so the app's batched `task.query` has
@@ -53,7 +53,7 @@ import {
   type RecordedRequest,
   type Recording,
 } from "./perf-collector.ts";
-import { readSignalThreadRef, type ThreadFixture } from "./perf-fixture.ts";
+import { buildSignalThreadRef, type ThreadFixture } from "./perf-fixture.ts";
 import {
   buildIntakeShown,
   droppedNoMotionFrame,
@@ -118,7 +118,7 @@ export const THREAD_SIGNALS = Number(
     ?.split("=")[1] ?? 60,
 );
 
-/** How many `task.query` reads cover the refs of `THREAD_SIGNALS` signals: a read takes at most 64 refs (`MAX_FILTER_VALUES`). */
+/** How many `task.query` reads cover the refs of `THREAD_SIGNALS` signals: a read takes at most 64 refs (`MAX_FILTER_VALUES`), and these refs are far under the byte limit the app also batches by. */
 const YOUR_WORK_BATCHES = Math.ceil(THREAD_SIGNALS / 64);
 
 /** How many open Tasks `seedYourWork` makes, and how many threads' refs each carries. */
@@ -321,7 +321,7 @@ export async function seedYourWork(fixture: ThreadFixture): Promise<void> {
       const first = Math.floor((index * THREAD_SIGNALS) / YOUR_WORK_TASKS);
       const refs = [
         ...Array.from({ length: REFS_PER_YOUR_WORK_TASK }, (__, offset) =>
-          readSignalThreadRef(first + offset),
+          buildSignalThreadRef(first + offset),
         ),
         `github:issue:acme/payments-api#${String(80 + index)}`,
         `linear:issue:PAY-${String(300 + index)}`,
@@ -629,13 +629,16 @@ interface TrackingMotion {
 async function measureMotion(scenario: Scenario, liveRunId: string): Promise<TrackingMotion> {
   const { fixture, driver, page } = scenario;
   const trayIsOpen = `document.querySelector(${JSON.stringify(PAGE.openTray)}) !== null`;
-  const stoppedRows = `document.querySelectorAll('${PAGE.row}[data-state="stopped"]').length`;
   const signalRows = JSON.stringify(PAGE.signalRow);
   const selectedSignal = `document.querySelector(${JSON.stringify(`${PAGE.signalRow}[aria-current="true"]`)})`;
   const signalTitled = (title: string) =>
     `[...document.querySelectorAll(${signalRows})].find((row) => row.querySelector(".ask-title")?.textContent === ${JSON.stringify(title)})`;
   const trackedRowTitled = (title: string) =>
     `[...document.querySelectorAll(${JSON.stringify(PAGE.row)})].find((row) => row.querySelector(${JSON.stringify(PAGE.rowTitle)})?.textContent === ${JSON.stringify(title)})`;
+  // Folded Tracking shows the two rows that changed state last, so counting Stopped rows is not
+  // enough: the Stopped row of the handoffs can leave the fold just as this one enters it. The
+  // row of the cancelled run is found by its title instead.
+  const cancelledRowStopped = `(${trackedRowTitled(TRACKED_PLAN[STOPPED_INDEX + 1]!.title)})?.getAttribute("data-state") === "stopped"`;
   const togglesTracking = (opens: boolean) => ({
     change: () => driver.pressKey("t"),
     lengthMs: opens ? 450 : 180,
@@ -674,16 +677,14 @@ async function measureMotion(scenario: Scenario, liveRunId: string): Promise<Tra
 
   // A change the user did not make waits while the pointer is on the list, and the click above left it there.
   await driver.movePointer(POINTER_OFF_LIST);
-  const stoppedBefore = await driver.evaluate<number>(stoppedRows);
-  const stoppedMore = `${stoppedRows} > ${String(stoppedBefore)}`;
   const stateChange = await measureListChange(page, {
     change: async () => {
       await fixture.call("POST", `/runs/${liveRunId}/cancel`, {});
     },
     // The line fades over --dur-2, then the rows slide over --dur-3.
     lengthMs: DUR_2_MS + DUR_3_MS,
-    endsWhen: stoppedMore,
-    mustSee: stoppedMore,
+    endsWhen: cancelledRowStopped,
+    mustSee: cancelledRowStopped,
     ignoresTransitions: true,
   });
   await settle(scenario);
@@ -852,25 +853,25 @@ const formatMotionCell = (cost: MotionCost): string =>
   `${formatMotion(cost)}; properties ${cost.properties.join(", ")}; animations: ${cost.kinds.join("; ")}`;
 
 /**
- * Whether the reads of the shell's start are within the bound the spec sets:
+ * Checks whether the reads of the shell's start are within the bound the spec sets:
  * one `task.queryTracking`, and at most one more for the first message of each
  * of the task and run topics (the other topics' first messages read nothing of
  * Tracking's), no `run.read` and no other read of `/tasks` or `/runs`.
  */
-export const loadWithinBound = (load: Activity): boolean =>
+export const isLoadWithinBound = (load: Activity): boolean =>
   load.snapshots >= 1 &&
   load.snapshots <= 1 + load.firstTaskAndRunMessages &&
   load.runReads === 0 &&
   load.otherReads === 0;
 
 /**
- * Whether Your work's reads at the shell's start are within the bound the spec
+ * Checks whether Your work's reads at the shell's start are within the bound the spec
  * sets: at least one `task.query { refs }`, because To do holds signals about
  * threads, and at most one more for the first message of the task topic, the
  * only first message that reads it again. One read covers 64 refs, so `batches`
  * reads make one pass, and a repeated pass is the second.
  */
-export const yourWorkLoadWithinBound = (load: Activity, batches: number): boolean =>
+export const isYourWorkLoadWithinBound = (load: Activity, batches: number): boolean =>
   load.yourWorkReads >= batches && load.yourWorkReads <= 2 * batches;
 
 /** Whether a series read Tracking once for each push on the task topic, and read no run. */
@@ -919,13 +920,13 @@ export function reportTrackingInteractions(result: TrackingInteractions): void {
       "Reads while the shell loads",
       "one task.queryTracking, and at most one more for the first message of each of the task and run topics; no run.read",
       formatActivity(load),
-      loadWithinBound(load),
+      isLoadWithinBound(load),
     ],
     [
       "Reads of Your work while the shell loads",
       `${String(YOUR_WORK_BATCHES)} task.query for ${String(THREAD_SIGNALS)} refs (one for each 64), and at most as many again for the first message of the task topic`,
       formatActivity(load),
-      yourWorkLoadWithinBound(load, YOUR_WORK_BATCHES),
+      isYourWorkLoadWithinBound(load, YOUR_WORK_BATCHES),
     ],
     [
       "A Task created, nothing tracked",

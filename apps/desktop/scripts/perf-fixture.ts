@@ -627,17 +627,17 @@ function backdateOpenSignals(home: string): void {
 const THREAD_SIGNALS_CONNECTION_ID = "0199c0ff-8888-7000-8000-000000000001";
 
 /**
- * Returns the External Ref of the thread the `index`th signal made by
+ * Builds the External Ref of the thread the `index`th signal made by
  * `makeSignalsAboutThreads` is about, counting from the oldest. A Task that
  * carries this ref in its provenance is Your work for that signal.
  */
-export const readSignalThreadRef = (index: number): string =>
+export const buildSignalThreadRef = (index: number): string =>
   `github:pull-request:acme/payments-api#${String(1_000 + index)}`;
 
 /**
  * Turns the `count` oldest open signals in the stopped controller's database
  * in the Home `home` into signals of a plugin's event, each about its own
- * thread (`readSignalThreadRef`). `signal.raise` can only make signals of the
+ * thread (`buildSignalThreadRef`). `signal.raise` can only make signals of the
  * core, which are about no thread, and a plugin's event needs a Connection the
  * fixture does not run; but only a signal about a thread can be matched to
  * Tasks as Your work. The signal's kind and text stay as they were.
@@ -657,7 +657,7 @@ function makeSignalsAboutThreads(home: string, count: number): void {
     );
     database.exec("BEGIN");
     for (const [index, id] of ids.entries()) {
-      const threadRef = readSignalThreadRef(index);
+      const threadRef = buildSignalThreadRef(index);
       const origin = {
         type: "event",
         eventId: index + 1,
