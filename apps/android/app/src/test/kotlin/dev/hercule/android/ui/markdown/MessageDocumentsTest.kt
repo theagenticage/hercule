@@ -12,9 +12,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.job
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -205,22 +205,30 @@ class MessageDocumentsTest {
     }
 
     @Test
-    fun `stops parsing and storing once its screen closes`() {
+    fun `stops parsing and storing once its screen closes`() = runTest(dispatcher) {
         val cache = DocumentCache()
-        val scope = CoroutineScope(Job())
-        val documents = MessageDocuments(cache, scope, Dispatchers.Default)
-        // Large enough that each parse takes milliseconds, and that the first fills the pass's
-        // budget, so the rest go to the worker.
-        val texts = (1..4).associate { "m$it" to "Paragraph $it with **bold** text. ".repeat(12_000) }
+        val screen = CoroutineScope(Job())
+        val documents = MessageDocuments(cache, screen, dispatcher)
+        // Each text is more than a pass parses at once, so the first message is parsed in the
+        // pass and the other three are left to the worker.
+        val texts = (1..4).associate { "m$it" to "Paragraph $it with **bold** text. ".repeat(300) }
         documents.startPass()
         texts.forEach { (id, text) -> documents.read("s1", id, MessageAuthor.Agent, text, writing = false) }
         documents.finishPass("s1", texts.keys.map { buildDocumentKey("s1", it, MessageAuthor.Agent) }.toSet())
 
-        val deadline = System.nanoTime() + 10_000_000_000
-        while (documents.parsed.value < 1L) check(System.nanoTime() < deadline) { "The first background parse never finished" }
-        runBlocking { scope.coroutineContext.job.cancelAndJoin() }
+        // The screen closes at the moment the worker finishes its first parse: an unconfined
+        // collector resumes inside the worker's own update of `parsed`, before the worker goes on.
+        launch(Dispatchers.Unconfined) {
+            documents.parsed.first { it >= 1L }
+            screen.cancel()
+        }
+        runCurrent()
+        val parsedWhenClosed = documents.parsed.value
+        runCurrent()
 
-        assertEquals(1L, documents.parsed.value)
+        assertEquals(1L, parsedWhenClosed, "The screen closed after the first background parse")
+        assertEquals(parsedWhenClosed, documents.parsed.value, "No parse finished after the screen closed")
+        // The message parsed in the pass, and the one parsed before the screen closed.
         assertEquals(2, texts.count { (id, text) -> cache.read(buildDocumentKey("s1", id, MessageAuthor.Agent), text) != null })
     }
 

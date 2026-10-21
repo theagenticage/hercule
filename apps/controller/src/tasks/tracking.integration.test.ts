@@ -158,7 +158,29 @@ describe("task.queryTracking", () => {
           awaitedSignalIds: [],
         },
         latestLiveRun: { id: live, status: "pending" },
+        liveRunIds: [live],
       });
+    });
+  });
+
+  it("gives the ids of all a Task's live runs, newest first, when a second handoff started a run while the first still goes on", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const taskId = await insertTrackedTask(harness, "Two handoffs");
+      const first = await insertRun(harness, taskId, { at: minute(1), waiting: true });
+      await insertRun(harness, taskId, { at: minute(2), ending: COMPLETED });
+      const second = await insertRun(harness, taskId, { at: minute(3) });
+      const other = await insertTrackedTask(harness, "No live run");
+      await insertRun(harness, other, { at: minute(1), ending: COMPLETED });
+
+      const { rows } = await readTracking(harness.base, token);
+
+      const byTitle = new Map(rows.map((row) => [row.title, row]));
+      expect(byTitle.get("Two handoffs")).toMatchObject({
+        latestLiveRun: { id: second },
+        liveRunIds: [second, first],
+      });
+      expect(byTitle.get("No live run")?.liveRunIds).toEqual([]);
     });
   });
 

@@ -180,6 +180,12 @@ const TABLE = {
   },
 
   "signal.query": { requires: "signal.read", method: "GET", path: "/api/v1/signals" },
+  // Reads Task titles, so the service also needs `task.read`.
+  "signal.queryYourWork": {
+    requires: "signal.read",
+    method: "GET",
+    path: "/api/v1/signals/your-work",
+  },
   "signal.read": { requires: "signal.read", method: "GET", path: "/api/v1/signals/:id" },
   // Raising is a verb on signals with no signal to act on yet, so its path is
   // the collection's plus the verb, as `run.start`'s is.

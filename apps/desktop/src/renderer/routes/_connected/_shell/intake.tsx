@@ -36,8 +36,8 @@ const EverythingScreen = lazy(() =>
  * - `view`: the view shown, Later, Done or Everything. With none, Intake shows To do.
  * - `signal`: the selected signal, whose pane is open, on To do, Later and Done.
  * - `tracking`: set while Tracking is opened over the To do list. It lives in
- *   the address so that coming back from a run's page, which a Tracking row
- *   opens, finds Tracking open again.
+ *   the address so that coming back from a run's page or a thread, which a
+ *   Tracking row opens, finds Tracking open again.
  * - `event`: the selected event, whose pane is open, on Everything.
  * - `text`, `handling` and `source`: Everything's search, filter and source tab. With none, every event shows.
  *
@@ -257,8 +257,32 @@ function IntakeRoute(): JSX.Element {
           replace: true,
         });
       }}
-      onOpenRun={(runId) => {
-        void navigate({ to: "/runs/$runId", params: { runId } });
+      onOpenTrackingRow={(destination) => {
+        switch (destination.kind) {
+          case "run":
+            void navigate({ to: "/runs/$runId", params: { runId: destination.runId } });
+            return;
+          case "thread":
+            void navigate({
+              to: "/threads/$sessionId",
+              params: { sessionId: destination.sessionId },
+            });
+            return;
+          case "signal":
+            // The signal may be on a tab other than the one pressed, so the tab goes back to All,
+            // where every signal of To do is listed. Closing Tracking and selecting the signal are
+            // one step, replacing the history entry as a selection does.
+            setPluginId(null);
+            void navigate({
+              search: (previous) => ({
+                ...previous,
+                tracking: undefined,
+                signal: destination.signalId,
+              }),
+              replace: true,
+            });
+            return;
+        }
       }}
       onSelect={(signalId) => {
         // The selection replaces the history entry, so Back leaves Intake

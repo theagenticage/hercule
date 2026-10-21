@@ -387,8 +387,20 @@ export const describeSignalRow = (
   const asker =
     signal.asker ??
     (isCoreSignalKind(signal.kind) ? nameSignalSource(signal, plugins, raisers) : undefined);
+  return [asker, describeSignalKindAndPlace(signal)]
+    .filter((part) => part !== undefined && part !== "")
+    .join(" · ");
+};
+
+/**
+ * Returns the kind in lower case and the place of a signal, such as "checks
+ * failed · payments-api #1302". It leaves out what the signal lacks: an
+ * `unsure` signal has no kind to show, because its row labels it "Unsure"
+ * already. Returns an empty string when neither remains.
+ */
+export const describeSignalKindAndPlace = (signal: Signal): string => {
   const kind = signal.kind === "unsure" ? undefined : lowerFirst(nameSignalKind(signal.kind));
-  return [asker, kind, signal.place].filter((part) => part !== undefined).join(" · ");
+  return [kind, signal.place].filter((part) => part !== undefined).join(" · ");
 };
 
 /**

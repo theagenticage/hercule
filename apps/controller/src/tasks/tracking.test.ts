@@ -68,12 +68,15 @@ const NEW_TASK: NewTask = {
 /**
  * Builds the Tracking read over a fresh database and a port that returns a
  * completed run for every Task it is asked about, and runs `body` as `actor`.
- * `asked` collects the ids the port was asked about.
+ * `asked` collects the ids the port was asked about. When `liveRunIds` is
+ * given, the port also reports those live runs for every Task, the first being
+ * the newest and `latestLiveRun`.
  */
 const runTracking = <A, E>(
   actor: Actor,
   asked: Array<ReadonlyArray<string>>,
   body: Effect.Effect<A, E, SqlClient.SqlClient | TaskTracking>,
+  liveRunIds: ReadonlyArray<string> = [],
 ) =>
   Effect.runPromise(
     body.pipe(
@@ -88,6 +91,10 @@ const runTracking = <A, E>(
                   return taskIds.map((taskId): TrackedRuns => ({
                     taskId,
                     latestRun: buildRun(RUN_A),
+                    ...(liveRunIds[0] === undefined
+                      ? {}
+                      : { latestLiveRun: { ...buildRun(liveRunIds[0]), status: "running" } }),
+                    liveRunIds,
                   }));
                 }),
             }),
@@ -188,6 +195,32 @@ describe("task.queryTracking", () => {
     ]);
     expect(rows[0]).toMatchObject({ latestRun: buildRun(RUN_A) });
     expect(rows[0]).not.toHaveProperty("latestLiveRun");
+    expect(rows[0]!.liveRunIds).toEqual([]);
+  });
+
+  it("gives each row the ids of all the Task's live runs, newest first, beside the newest live run", async () => {
+    const rows = await runTracking(
+      USER,
+      [],
+      Effect.gen(function* () {
+        const repository = yield* taskRepository;
+        yield* inTransaction(
+          repository.insert({
+            ...NEW_TASK,
+            title: "two live runs",
+            provenance: [{ signalId: SIGNAL_A, runId: RUN_A }],
+          }),
+        );
+        const tracking = yield* TaskTracking;
+        return (yield* tracking.query()).rows;
+      }),
+      [RUN_B, RUN_A],
+    );
+
+    expect(rows[0]).toMatchObject({
+      latestLiveRun: { id: RUN_B },
+      liveRunIds: [RUN_B, RUN_A],
+    });
   });
 
   it("returns only the newest handoffs of a Task that was handed many, newest first", async () => {

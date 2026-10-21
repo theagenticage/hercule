@@ -1,22 +1,13 @@
-import type { Pose, TrackingState } from "@hercule/client-core";
+import type { TrackingState } from "@hercule/client-core";
 import type { MarkState } from "../../marks";
 
-/** How Tracking draws one state: its word, the pose of the face on its rows, and its state mark. */
-export interface TrackingStateLook {
-  /** The word on the state's heading, such as "Finished". */
-  readonly word: string;
-  /** The pose of the face that leads a row in this state. Faces in a list never move. */
-  readonly pose: Pose;
-  /** The mark before the state's word on its heading. */
-  readonly mark: MarkState;
-}
-
-/** The look of each Tracking state, as the Tracking drawing gives it. */
-export const TRACKING_STATE_LOOKS: Readonly<Record<TrackingState, TrackingStateLook>> = {
-  failed: { word: "Failed", pose: "failed", mark: "failed" },
-  finished: { word: "Finished", pose: "done", mark: "done" },
-  working: { word: "Working", pose: "working", mark: "working" },
-  stopped: { word: "Stopped", pose: "idle", mark: "paused" },
+/** The mark before the state's word on its heading, as the Tracking drawing gives it. */
+export const TRACKING_STATE_MARKS: Readonly<Record<TrackingState, MarkState>> = {
+  "needs-you": "waiting",
+  failed: "failed",
+  finished: "done",
+  working: "working",
+  stopped: "paused",
 };
 
 /**

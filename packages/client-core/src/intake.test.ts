@@ -35,6 +35,7 @@ import {
   describeSignalOutcomeMoment,
   describeSignalProvenance,
   describeSignalRow,
+  describeSignalKindAndPlace,
   findReplyAnswer,
   findSuggestedAnswer,
   fitIntakeListWidth,
@@ -409,6 +410,16 @@ describe("describeSignalRow", () => {
     ).toBe("You · proposal");
   });
 
+  it("joins nothing in place of an asker a plugin signal does not have", () => {
+    expect(
+      describeSignalRow(
+        buildSignal("a", { kind: "github/checks-failed", place: "payments-api #1302" }),
+        PLUGINS,
+        RAISERS,
+      ),
+    ).toBe("checks failed · payments-api #1302");
+  });
+
   it("keeps an acronym kind in capitals", () => {
     expect(
       describeSignalRow(buildSignal("a", { kind: "fyi", origin: fromUser() }), PLUGINS, RAISERS),
@@ -423,6 +434,22 @@ describe("describeSignalRow", () => {
         RAISERS,
       ),
     ).toBe("You · #ops");
+  });
+});
+
+describe("describeSignalKindAndPlace", () => {
+  it("joins the kind in lower case and where, and leaves out who asks", () => {
+    expect(
+      describeSignalKindAndPlace(
+        buildSignal("a", { kind: "sentry/alert-for-you", asker: "Sentry", place: "webshop-prod" }),
+      ),
+    ).toBe("alert for you · webshop-prod");
+  });
+
+  it("leaves the kind of an unsure signal out, and is empty with no place", () => {
+    expect(
+      describeSignalKindAndPlace(buildSignal("a", { kind: "unsure", origin: fromUser() })),
+    ).toBe("");
   });
 });
 

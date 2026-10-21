@@ -13,12 +13,12 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import type { TrackingState } from "@hercule/client-core";
+import { nameTrackingState, type TrackingState } from "@hercule/client-core";
 import { ChevronLeftIcon } from "../../icons/chevron-left";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { Mark } from "../../marks";
 import { TrackingRowItem, type TrackingRowFacts } from "./tracking-row";
-import { describeWaitingOnYou, TRACKING_STATE_LOOKS } from "./tracking-states";
+import { describeWaitingOnYou, TRACKING_STATE_MARKS } from "./tracking-states";
 import { useLineFade } from "./use-line-fade";
 import { useRowMotion } from "./use-row-motion";
 import { useVirtualLines } from "./use-virtual-lines";
@@ -232,14 +232,14 @@ export function TrackingSheet({
               const { item, onScreen } = line;
               return item.kind === "heading" ? (
                 <h3 key={item.key} className="section-h asks-sec tr-sec" data-item-key={item.key}>
-                  <Mark state={TRACKING_STATE_LOOKS[item.state].mark} size={14} />
-                  {TRACKING_STATE_LOOKS[item.state].word}
+                  <Mark state={TRACKING_STATE_MARKS[item.state]} size={14} />
+                  {nameTrackingState(item.state)}
                   <span className="count">{item.count}</span>
                 </h3>
               ) : (
                 <TrackingRowItem
                   key={item.key}
-                  facts={item.facts}
+                  {...item.facts}
                   selected={item.key === selectedTaskId}
                   onScreen={onScreen}
                   lastInGroup={item.lastInGroup}

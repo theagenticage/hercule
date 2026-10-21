@@ -56,6 +56,15 @@ export const queryKeys = {
    * `run` here. The key is stable: the Tasks tracked change, the key does not.
    */
   tracking: (): LiveQueryKey => ["tracking"],
+  /**
+   * Your work as one read (`signal.queryYourWork`): the open Tasks that
+   * belong to an open signal, snoozed or not. Live topics: `task` and
+   * `signal` read it again on every push, because a Task's provenance and the
+   * set of open signals both decide it. It is kept out of the `signals` prefix on purpose: that prefix
+   * is also read again by every `workflow`, `connection` and `plugin` push,
+   * which cannot change Your work.
+   */
+  yourWork: (): LiveQueryKey => ["your-work"],
   projects: (): LiveQueryKey => ["projects"],
   /**
    * No live topic yet: a resource changed elsewhere, such as from the CLI,
@@ -390,8 +399,13 @@ export const buildQueryKeys = (
   // when a screen starts reading a new topic.
   if (topic === "task") {
     return ids.length === 0
-      ? [queryKeys.tasks(), queryKeys.task(), queryKeys.tracking()]
-      : [queryKeys.tasks(), ...ids.map((id) => queryKeys.task(id)), queryKeys.tracking()];
+      ? [queryKeys.tasks(), queryKeys.task(), queryKeys.tracking(), queryKeys.yourWork()]
+      : [
+          queryKeys.tasks(),
+          ...ids.map((id) => queryKeys.task(id)),
+          queryKeys.tracking(),
+          queryKeys.yourWork(),
+        ];
   }
   // Any runner change refetches the list. A runner's own page is refetched
   // only when the push lists its id, or when the push lists no ids.
@@ -507,10 +521,11 @@ export const buildQueryKeys = (
   // Any signal change refetches every list, whatever its filter, because a
   // raised or resolved signal moves in or out of them. A signal's own read is
   // refetched only when the push lists its id, or when the push lists no ids.
+  // Your work is read again too, because it follows the To do list.
   if (topic === "signal") {
     return ids.length === 0
-      ? [queryKeys.signals(), queryKeys.signal()]
-      : [queryKeys.signals(), ...ids.map((id) => queryKeys.signal(id))];
+      ? [queryKeys.signals(), queryKeys.signal(), queryKeys.yourWork()]
+      : [queryKeys.signals(), ...ids.map((id) => queryKeys.signal(id)), queryKeys.yourWork()];
   }
   // Any Discussion change refetches every page of the listing. A
   // Discussion's own page is refetched only when the push lists its id, or

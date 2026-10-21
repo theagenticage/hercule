@@ -28,7 +28,8 @@
  * labels, the title, author and arrival time of every event, for
  * Everything's rows, the time of each Discussion and Post, for the Discussion
  * list's age labels, and on request spreads one workflow's finished runs over
- * a day, for the Runs tab's timeline. Those are the only things written to
+ * a day, for the Runs tab's timeline, and makes some open signals signals
+ * about a thread, for Your work. Those are the only things written to
  * the database directly: the threads, and every state they are in, come from
  * the fleet, the signals from `signal.raise`, the events from `event.emit`,
  * and the runs from `run.start`.
@@ -244,13 +245,16 @@ export interface ThreadFixture {
    * `backdateOpenSignals`). With `spreadRuns`, the runs of one workflow are
    * spread over a span of time too (see `spreadRuns`). With `connections`,
    * the controller holds the fixture's Connections for the launch, and
-   * without it none (see `FIXTURE_CONNECTIONS`). Fails when a thread is not in
-   * its expected state afterwards.
+   * without it none (see `FIXTURE_CONNECTIONS`). With `signalsAboutThreads`,
+   * that many of the oldest open signals become signals of a plugin's event,
+   * each about a thread (see `makeSignalsAboutThreads`). Fails when a thread
+   * is not in its expected state afterwards.
    */
   readonly prepareLaunch: (options: {
     readonly twoMinuteRow: boolean;
     readonly spreadRuns?: RunSpread;
     readonly connections?: boolean;
+    readonly signalsAboutThreads?: number;
   }) => Promise<void>;
   /**
    * Moves the first project's busy thread to idle, or back to busy, which
@@ -406,10 +410,12 @@ export async function runWithThreadFixture<T>(
         twoMinuteRow,
         spreadRuns: spread,
         connections = false,
+        signalsAboutThreads = 0,
       }: {
         readonly twoMinuteRow: boolean;
         readonly spreadRuns?: RunSpread;
         readonly connections?: boolean;
+        readonly signalsAboutThreads?: number;
       }) => {
         // A Request is answered before the restart and opened again after it,
         // so the restart never has to decide what happens to one.
@@ -449,6 +455,7 @@ export async function runWithThreadFixture<T>(
           [...busyIds.slice(1), ...waitingIds.slice(1)],
         );
         backdateOpenSignals(home);
+        if (signalsAboutThreads > 0) makeSignalsAboutThreads(home, signalsAboutThreads);
         backdateTrackedRuns(home);
         titleEvents(home);
         backdateDiscussions(home);
@@ -605,6 +612,64 @@ function backdateOpenSignals(home: string): void {
     for (const [index, id] of ids.entries()) {
       const back = (ids.length - 1 - index) * 1_000;
       update.run(new Date(newest - back).toISOString(), id);
+    }
+    database.exec("COMMIT");
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * The id of the Connection the signals made by `makeSignalsAboutThreads` name.
+ * No such Connection exists, and reading the signals does not need one. The id
+ * has the form of a UUID version 7, because the contract refuses any other.
+ */
+const THREAD_SIGNALS_CONNECTION_ID = "0199c0ff-8888-7000-8000-000000000001";
+
+/**
+ * Builds the External Ref of the thread the `index`th signal made by
+ * `makeSignalsAboutThreads` is about, counting from the oldest. A Task that
+ * carries this ref in its provenance is Your work for that signal.
+ */
+export const buildSignalThreadRef = (index: number): string =>
+  `github:pull-request:acme/payments-api#${String(1_000 + index)}`;
+
+/**
+ * Turns the `count` oldest open signals in the stopped controller's database
+ * in the Home `home` into signals of a plugin's event, each about its own
+ * thread (`buildSignalThreadRef`). `signal.raise` can only make signals of the
+ * core, which are about no thread, and a plugin's event needs a Connection the
+ * fixture does not run; but only a signal about a thread can be matched to
+ * Tasks as Your work. The signal's kind and text stay as they were.
+ */
+function makeSignalsAboutThreads(home: string, count: number): void {
+  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
+  try {
+    const ids = database
+      .prepare("SELECT id FROM signals WHERE status = 'open' ORDER BY created_at, id LIMIT ?")
+      .all(count)
+      .map((row) => row["id"] as Uint8Array);
+    if (ids.length < count) {
+      throw new Error(`the fixture has ${String(ids.length)} open signals, not ${String(count)}`);
+    }
+    const update = database.prepare(
+      "UPDATE signals SET origin = ?, connection_id = ?, thread_ref = ? WHERE id = ?",
+    );
+    database.exec("BEGIN");
+    for (const [index, id] of ids.entries()) {
+      const threadRef = buildSignalThreadRef(index);
+      const origin = {
+        type: "event",
+        eventId: index + 1,
+        connectionId: THREAD_SIGNALS_CONNECTION_ID,
+        threadRef,
+      };
+      update.run(
+        JSON.stringify(origin),
+        Buffer.from(THREAD_SIGNALS_CONNECTION_ID.replaceAll("-", ""), "hex"),
+        threadRef,
+        id,
+      );
     }
     database.exec("COMMIT");
   } finally {

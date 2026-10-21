@@ -3,8 +3,8 @@
  * has a handoff entry, with the facts a client works the Task's state out
  * from (spec 11, `task`; ADR 0046).
  *
- * The Task rows are this domain's. The newest run of each Task and its newest
- * live run belong to the runs domain, which depends on this one, so this
+ * The Task rows are this domain's. The newest run of each Task and its live
+ * runs belong to the runs domain, which depends on this one, so this
  * domain declares what it needs as the `TaskTrackingRuns` port and the
  * controller daemon implements it from the runs repository (ADR 0033).
  */
@@ -22,11 +22,15 @@ import type {
 import { requireGrant } from "../actor";
 import { taskRepository } from "./repository";
 
-/** The newest run of a Task, and its newest live run when it has one. */
+/**
+ * The runs Tracking reads of a Task: its newest run, its newest live run when
+ * it has one, and the ids of all its live runs, newest first.
+ */
 export interface TrackedRuns {
   readonly taskId: string;
   readonly latestRun: TrackingRun;
   readonly latestLiveRun?: TrackingRun;
+  readonly liveRunIds: ReadonlyArray<string>;
 }
 
 export class TaskTrackingRuns extends Context.Service<
@@ -34,8 +38,9 @@ export class TaskTrackingRuns extends Context.Service<
   {
     /**
      * Returns, for each Task in `taskIds` that has a run, its newest run
-     * (newest by creation time, then id) and its newest run that is pending or
-     * running. A Task with no run is left out. The runs are the Task's runs by
+     * (newest by creation time, then id), its newest run that is pending or
+     * running, and the ids of all its pending or running runs, newest first.
+     * A Task with no run is left out. The runs are the Task's runs by
      * `taskId`, and the read looks up the newest of each Task rather than
      * reading its history.
      */
@@ -52,8 +57,8 @@ const make = Effect.gen(function* () {
   return {
     /**
      * Returns the Tasks Tracking follows: every in-progress Task with a handoff
-     * entry. Each row holds the Task's title, its handoffs, its newest run and
-     * its newest live run. A Task with no run is left out: a handoff starts its
+     * entry. Each row holds the Task's title, its handoffs, its newest run,
+     * its newest live run and the ids of all its live runs. A Task with no run is left out: a handoff starts its
      * run in the transaction that tracks the Task, so such a Task does not
      * occur, and it would have no state.
      *
@@ -67,7 +72,7 @@ const make = Effect.gen(function* () {
      * statements, and the push that change makes brings the next read.
      *
      * The reply is not paged: Tracking counts every row, and a row holds one
-     * Task's newest handoffs (at most `MAX_TRACKING_HANDOFFS`) and two runs, so
+     * Task's newest handoffs (at most `MAX_TRACKING_HANDOFFS`) and two runs with the ids of the live ones, so
      * its size follows the Tasks in progress, not the work handed off before.
      */
     query: (): Effect.Effect<TaskTrackingReading, Unauthenticated | Forbidden | SqlError> =>
@@ -91,6 +96,7 @@ const make = Effect.gen(function* () {
                     ...(found.latestLiveRun === undefined
                       ? {}
                       : { latestLiveRun: found.latestLiveRun }),
+                    liveRunIds: found.liveRunIds,
                   },
                 ];
           }),

@@ -12,6 +12,13 @@ import { useLineFade } from "./use-line-fade";
 import { useRowMotion } from "./use-row-motion";
 import "./tracking.css";
 
+/** One row of folded Tracking: what it draws, and the signals its Task was handed off from. */
+export interface TrackingFoldRow {
+  readonly facts: TrackingRowFacts;
+  /** The ids of the signals the Task was handed off from. A handoff's flight lands on the row of the Task that names its signal. */
+  readonly handoffSignalIds: ReadonlyArray<string>;
+}
+
 /**
  * Renders folded Tracking: its head, which reads "Tracking 7", how many rows
  * wait on the user, and "Show all", over the rows that changed state last.
@@ -45,7 +52,7 @@ export function TrackingFold({
 }: {
   readonly total: number;
   readonly waitingCount: number;
-  readonly rows: ReadonlyArray<TrackingRowFacts>;
+  readonly rows: ReadonlyArray<TrackingFoldRow>;
   readonly selectedTaskId: string | null;
   readonly flights?: HandoffFlights;
   readonly ref?: Ref<HTMLElement>;
@@ -56,17 +63,19 @@ export function TrackingFold({
   const runsRef = useRef<HTMLDivElement>(null);
   const ghostsRef = useRef<HTMLDivElement>(null);
   const drawn = useRowMotion(
-    rows.map((facts) => ({ key: facts.taskId, facts })),
+    rows.map((row) => ({ key: row.facts.taskId, ...row })),
     "folded",
     runsRef,
     ghostsRef,
     { slide: "--dur-3" },
   );
-  const drawnRows = drawn.map((item) => item.facts);
-  useLineFade(drawnRows, runsRef);
+  useLineFade(
+    drawn.map((item) => item.facts),
+    runsRef,
+  );
   // A handoff's flight lands on the first row, which names the signal it came from.
   useLayoutEffect(() => {
-    flights?.land(drawnRows[0]?.handoffSignalIds ?? [], runsRef.current);
+    flights?.land(drawn[0]?.handoffSignalIds ?? [], runsRef.current);
   });
   const waiting = describeWaitingOnYou(waitingCount);
   return (
@@ -105,10 +114,10 @@ export function TrackingFold({
       )}
       {/* Drawn even with no row, so the motion has a place to bring the first one into. */}
       <div ref={runsRef} className="tr-runs">
-        {drawnRows.map((facts) => (
+        {drawn.map(({ facts }) => (
           <TrackingRowItem
             key={facts.taskId}
-            facts={facts}
+            {...facts}
             selected={facts.taskId === selectedTaskId}
             onScreen
             onOpen={onOpenRow}

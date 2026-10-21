@@ -4,6 +4,7 @@ import {
   dropTrackingHandoff,
   dropTrackingRowMarkedDone,
   followTrackingRead,
+  isTrackingHandoffAcknowledged,
   queryKeys,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
@@ -36,12 +37,20 @@ export interface HeldTrackingRowsState {
 
 /**
  * Returns the rows Tracking shows, as `held-tracking-rows` in client-core
- * describes. `listed` is the last read of Tracking's rows, and keeps its identity
- * until the read changes; the time that read started is the one in the cached
- * `TrackingRead`. The hook also follows the cache for a read that changes no row,
- * which can still be the first that started after the user's handoff, without
- * drawing the screen again for it. `holding` is set while the changes the user did not
- * make wait: while the pointer is on the list column.
+ * describes. `listed` is the rows as last built: from the last read of
+ * Tracking's Tasks and from what waits on the user, so it also changes when a
+ * Request opens or a signal arrives. It keeps its identity until a row can
+ * have changed. `holding` is set while the changes the user did not make
+ * wait: while the pointer is on the list column.
+ *
+ * The record follows `listed` on every render. A read of the Tasks that
+ * changes no row leaves `listed` as it was, so nothing draws the screen again
+ * for it. It can still be the first read that started after the user's own
+ * handoff committed. So the hook follows the cache for that: when a read
+ * succeeds and acknowledges a handoff (`isTrackingHandoffAcknowledged`), it
+ * draws the screen again. The record then follows `listed` in that draw, which
+ * holds the rows of the read, so a Task the read adds shows. A read that
+ * acknowledges nothing draws nothing.
  */
 export const useHeldTrackingRows = (
   listed: ReadonlyArray<TrackingRow>,
@@ -50,14 +59,13 @@ export const useHeldTrackingRows = (
   const queryClient = useQueryClient();
   const readStartedAt = (): number =>
     queryClient.getQueryData<TrackingRead>(queryKeys.tracking())?.readStartedAt ?? 0;
-  const [held, setHeld] = useState(() => startHeldTrackingRows(listed, readStartedAt()));
-  let next = held;
-  if (next.listed !== listed) next = followTrackingRead(next, listed, readStartedAt());
-  next = updateTrackingRowsHolding(next, holding);
+  const [held, setHeld] = useState(() => startHeldTrackingRows(listed));
+  const next = updateTrackingRowsHolding(
+    followTrackingRead(held, listed, readStartedAt()),
+    holding,
+  );
   if (next !== held) setHeld(next);
 
-  // A read that changes no row leaves the rows array as it was, so the screen is not told of it.
-  // The record follows the cache itself, and changes only when the read acknowledges a handoff.
   useEffect(() => {
     const trackingHash = hashKey(queryKeys.tracking());
     return queryClient.getQueryCache().subscribe((event) => {
@@ -65,7 +73,12 @@ export const useHeldTrackingRows = (
       if (event.query.queryHash !== trackingHash) return;
       const read = event.query.state.data as TrackingRead | undefined;
       if (read === undefined) return;
-      setHeld((current) => followTrackingRead(current, read.rows, read.readStartedAt));
+      // The check runs on the newest record, which only an updater sees: a
+      // handoff confirmed in the same batch is not in `held` yet. A copy makes
+      // React draw again, and the same record makes it skip the draw.
+      setHeld((current) =>
+        isTrackingHandoffAcknowledged(current, read.readStartedAt) ? { ...current } : current,
+      );
     });
   }, [queryClient]);
   return {

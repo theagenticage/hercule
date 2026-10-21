@@ -9,6 +9,7 @@ import {
   dropTrackingRowMarkedDone,
   followListedTrackingRows,
   followTrackingRead,
+  isTrackingHandoffAcknowledged,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
   recordTrackingRowMarkedDone,
@@ -41,8 +42,10 @@ const buildRow = (id: string, status: TrackingRun["status"] = "running"): Tracki
     title: `Task ${id}`,
     handoffs: [{ signalId: `signal-${id}`, runId: latestRun.id, at: AT }],
     latestRun,
+    ...(status === "running" ? { latestLiveRun: latestRun } : {}),
+    liveRunIds: status === "running" ? [latestRun.id] : [],
   };
-  return buildTrackingRows([task])[0]!;
+  return buildTrackingRows([task], [], new Map())[0]!;
 };
 
 const A = buildRow("a");
@@ -108,29 +111,39 @@ describe("a handoff that later handoffs have pushed out of the read", () => {
   /** Builds a finished Task `t`, and the same Task Working with only the newest `count` handoffs listed. */
   const buildWorking = (count: number): TrackingRow => {
     const latest = buildRun("t-latest", "running");
-    return buildTrackingRows([
+    return buildTrackingRows(
+      [
+        {
+          taskId: "t",
+          title: "Task t",
+          // The read lists the newest handoffs first, at most ten of them.
+          handoffs: Array.from({ length: count }, (_, index) => ({
+            signalId: `signal-later-${String(index)}`,
+            runId: `run-later-${String(index)}`,
+            at: AT,
+          })),
+          latestRun: latest,
+          latestLiveRun: latest,
+          liveRunIds: [latest.id],
+        },
+      ],
+      [],
+      new Map(),
+    )[0]!;
+  };
+  const finished = buildTrackingRows(
+    [
       {
         taskId: "t",
         title: "Task t",
-        // The read lists the newest handoffs first, at most ten of them.
-        handoffs: Array.from({ length: count }, (_, index) => ({
-          signalId: `signal-later-${String(index)}`,
-          runId: `run-later-${String(index)}`,
-          at: AT,
-        })),
-        latestRun: latest,
-        latestLiveRun: latest,
+        handoffs: [{ signalId: "signal-t0", runId: "run-t0", at: AT }],
+        latestRun: buildRun("t0", "completed"),
+        liveRunIds: [],
       },
-    ])[0]!;
-  };
-  const finished = buildTrackingRows([
-    {
-      taskId: "t",
-      title: "Task t",
-      handoffs: [{ signalId: "signal-t0", runId: "run-t0", at: AT }],
-      latestRun: buildRun("t0", "completed"),
-    },
-  ])[0]!;
+    ],
+    [],
+    new Map(),
+  )[0]!;
 
   it.each([1, 10])(
     "applies the user's handoff when a read after its commit lists %s later handoffs and not its own",
@@ -176,7 +189,7 @@ describe("dropping the user's own changes", () => {
 
 describe("followTrackingRead", () => {
   const holdingWithConfirmedHandoff = (committedAt: number | null) => {
-    let held = updateTrackingRowsHolding(startHeldTrackingRows([A], 10), true);
+    let held = updateTrackingRowsHolding(startHeldTrackingRows([A]), true);
     held = recordTrackingHandoff(held, "signal-c");
     return committedAt === null
       ? held
@@ -186,7 +199,6 @@ describe("followTrackingRead", () => {
   it("leaves the record as it is for a read that changes no row and acknowledges nothing", () => {
     const held = holdingWithConfirmedHandoff(100);
     expect(followTrackingRead(held, held.listed, 50)).toBe(held);
-    expect(followTrackingRead(holdingWithConfirmedHandoff(null), A ? [A] : [], 500)).not.toBe(held);
   });
 
   it("acknowledges the handoff on a read that changes no row but started after it committed", () => {
@@ -210,5 +222,37 @@ describe("followTrackingRead", () => {
   it("waits for a handoff that is still being sent, whatever the read", () => {
     const held = holdingWithConfirmedHandoff(null);
     expect(followTrackingRead(held, held.listed, 1_000)).toBe(held);
+  });
+
+  it("shows the row a handoff adds when the read that acknowledges it also lists that row", () => {
+    const held = followTrackingRead(holdingWithConfirmedHandoff(100), [A, B], 120);
+    expect(readIds(held.shown)).toEqual(["a", "b"]);
+    expect(held.handoffs.size).toBe(0);
+  });
+});
+
+describe("isTrackingHandoffAcknowledged", () => {
+  const holdingWithHandoffCommittedAt = (committedAt: number) => {
+    let held = updateTrackingRowsHolding(startHeldTrackingRows([A]), true);
+    held = recordTrackingHandoff(held, "signal-b");
+    return recordTrackingHandoffCommitted(held, "signal-b", committedAt);
+  };
+
+  it("is false for a read that started before the handoff committed, or while none waits", () => {
+    expect(isTrackingHandoffAcknowledged(holdingWithHandoffCommittedAt(100), 99)).toBe(false);
+    expect(isTrackingHandoffAcknowledged(startHeldTrackingRows([A]), 1_000)).toBe(false);
+  });
+
+  it("is true for a read that started at or after the commit, whether or not it changed a row", () => {
+    expect(isTrackingHandoffAcknowledged(holdingWithHandoffCommittedAt(100), 100)).toBe(true);
+    expect(isTrackingHandoffAcknowledged(holdingWithHandoffCommittedAt(100), 120)).toBe(true);
+  });
+
+  it("is false for a handoff still being sent, whatever the read", () => {
+    const held = recordTrackingHandoff(
+      updateTrackingRowsHolding(startHeldTrackingRows([A]), true),
+      "signal-b",
+    );
+    expect(isTrackingHandoffAcknowledged(held, 1_000)).toBe(false);
   });
 });

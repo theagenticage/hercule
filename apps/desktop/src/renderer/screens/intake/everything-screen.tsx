@@ -17,6 +17,7 @@ import { useRouteContext, useRouterState } from "@tanstack/react-router";
 import { MAX_SEARCH_TEXT_LENGTH, type EventHandling } from "@hercule/contract";
 import {
   computeEventHorizonStart,
+  countWaitingTrackingRows,
   describeEventHorizon,
   describeEventListEnd,
   EVENT_HANDLING_OPTIONS,
@@ -27,6 +28,7 @@ import {
   type IntakeView,
 } from "@hercule/client-core";
 import { eventsEverythingQuery, settingsQuery } from "../../app/queries";
+import { useTrackingRows } from "../../app/tracking";
 import { SearchIcon } from "../../icons/search";
 import { EventPane, type EventPaneHandle } from "./event-pane";
 import { EverythingList } from "./everything-list";
@@ -120,7 +122,8 @@ export function EverythingScreen({
   readonly onPluginChange: (pluginId: string | null) => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const { tabs, plugins } = useIntakeTabs(pluginId);
+  const waitingTrackingRows = countWaitingTrackingRows(useTrackingRows());
+  const { tabs, plugins } = useIntakeTabs(pluginId, waitingTrackingRows);
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const timezone = resolveDisplayTimezone(settings.user.timezone);
   const retentionDays = settings.controller?.["retention.events"];

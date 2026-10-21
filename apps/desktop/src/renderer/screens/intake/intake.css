@@ -200,6 +200,26 @@
 .ask-mark:has(> .signal-face) {
   opacity: 1;
 }
+/* The face of the agent on a signal's Task leads the row at full strength, as
+   Hercule's face does; only a source's mark is softened. The face is 24px and
+   the lead column 20px. The negative margin lets it overflow by 2px on each
+   side, so its centre stays 20px from the row's left and the text still starts
+   42px in, as in the drawings. */
+.ask-mark--face {
+  margin-inline: -2px;
+  opacity: 1;
+}
+.ask-mark--face .cr {
+  display: block;
+}
+/* The source's mark at the start of the second line, on a row led by a face. */
+.ask-src {
+  display: inline-grid;
+  margin-right: 6px;
+  vertical-align: -1px;
+  color: var(--ink);
+  opacity: 0.75;
+}
 .ask-text {
   display: flex;
   flex-direction: column;
@@ -230,6 +250,11 @@
   color: var(--faint);
   font-size: var(--t-11);
   font-variant-numeric: tabular-nums;
+}
+/* What a row leads its second line with instead of who asks: a Now row's Your work. */
+.ask-state {
+  color: var(--ink);
+  font-weight: var(--w-medium);
 }
 /* Back from a snooze: it leads the row in your colour. */
 .ask-back {
@@ -1213,6 +1238,19 @@
     inset 0 0 0 1px var(--line-soft),
     var(--shadow-1);
 }
+/* The lead of a block of Your work whose Task has no face: the Tasks icon in a
+   28px round slot, the size of the face that leads a tracked Task, so the text
+   of every block of Your work starts in one column. */
+.b-work-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--sunken);
+  color: var(--muted);
+}
 /* An Ignore Rule's text may hold a long value with no space, so the text
    wraps anywhere rather than overflow the block. */
 .b-work-text {
@@ -1233,6 +1271,15 @@
 }
 .b-work-text span:last-child {
   color: var(--muted);
+}
+/* Your work under the signal's blocks keeps the blocks' distance from them. */
+.ad-blocks + .ad-blocks--work {
+  margin-top: 18px;
+}
+/* Your work on a Task whose row waits on the user: its state word, in your colour. */
+.b-work-text span:last-child b {
+  color: var(--you-ink);
+  font-size: inherit;
 }
 
 /* Everything's pane: what came of the event, one block per handling, under a

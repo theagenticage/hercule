@@ -2,9 +2,10 @@
    (docs/design/tracking/tracking.css). Its class names are the drawing's with
    a `tr-` prefix for the `rt-` ones, so each rule maps 1:1 to the drawing's
    rule. Rows reuse Intake's control classes (`ask-acts`, `ask-act`), and the
-   section heading and count come from the shared controls. The drawing's pane,
-   Done and Needs you rules, and its motion, come with the slices that build
-   them. Each departure from the drawing says why. */
+   section heading and count come from the shared controls. The drawing's own
+   pane and the answer buttons on its Needs you rows (`rt-run-ans`) are not
+   ported: a press on a Needs you row opens the thread or the signal that
+   waits. Each departure from the drawing says why. */
 
 /* ---------- The tray ---------- */
 /* Either Intake or Tracking in the list column, never both. Folded, Tracking

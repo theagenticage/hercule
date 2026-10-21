@@ -11,7 +11,9 @@ import { DONE_ACTION_ID, type Signal, type SignalView } from "@hercule/contract"
 import {
   decideSignalRowControls,
   describeDoneRowOutcome,
+  describeSignalKindAndPlace,
   describeSignalRow,
+  describeYourWorkOnRow,
   formatClock,
   isBackFromSnooze,
   SIGNAL_MOVE_LABELS,
@@ -21,6 +23,8 @@ import {
   type SignalRaiserNames,
 } from "@hercule/client-core";
 import { assistantsQuery, workflowsQuery } from "../../app/queries";
+import { useTrackingRows, useYourWork } from "../../app/tracking";
+import { buildLook, Face } from "../../faces";
 import { AlarmIcon } from "../../icons/alarm";
 import { CheckIcon } from "../../icons/check";
 import { AgeLabel } from "../age-label";
@@ -50,6 +54,8 @@ type ListItem =
       readonly signal: Signal;
       /** Whether the row ends its section, so no gap follows it. */
       readonly lastInSection: boolean;
+      /** Whether the row is in the Now section, whose rows lead their second line with Your work. */
+      readonly inNow: boolean;
     };
 
 /**
@@ -74,6 +80,7 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
       key: signal.id,
       signal,
       lastInSection: index === section.signals.length - 1,
+      inNow: section.key === "now",
     })),
   ]);
 
@@ -113,6 +120,13 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
  * row had the focus, as when `J` and `K` move the selection, or when
  * `focusSelectedRow` asks for it, the focus moves to the new row, so the
  * next key acts from there.
+ *
+ * The list also reads Your work and Tracking's rows, for the rows that have
+ * Your work: a signal about a tracked Task is led by the agent's face, and a
+ * Now row leads its second line with the Task. Your work is read for the
+ * signals on To do only, so the other views have none. Each row is given the
+ * plain values it draws, so a change to one signal's Your work draws only
+ * that signal's row again.
  */
 export const IntakeList = memo(function IntakeList({
   view,
@@ -171,6 +185,8 @@ export const IntakeList = memo(function IntakeList({
     () => ({ workflows, assistants }),
     [workflows, assistants],
   );
+  const yourWork = useYourWork();
+  const trackingRows = useTrackingRows();
   const listedItems = useMemo(() => flattenSections(sections), [sections]);
   const items = useRowMotion(listedItems, scope, scrollRef, ghostsRef, { takeLeavingRow });
   const { lines, totalSize, lastDrawnIndex, selectedIndex, scrollToSelected } = useVirtualLines(
@@ -202,14 +218,18 @@ export const IntakeList = memo(function IntakeList({
   const drawn = lines.map((line) => {
     if (line.kind === "gap") return <div key={line.key} style={{ height: line.height }} />;
     const { item, onScreen } = line;
-    return item.kind === "section" ? (
-      <SectionHeading key={item.key} itemKey={item.key} section={item.section} />
-    ) : (
+    if (item.kind === "section") {
+      return <SectionHeading key={item.key} itemKey={item.key} section={item.section} />;
+    }
+    const work = describeYourWorkOnRow(yourWork.get(item.signal.id)?.tasks ?? [], trackingRows);
+    return (
       <SignalRow
         key={item.key}
         view={view}
         signal={item.signal}
         lastInSection={item.lastInSection}
+        faceSeed={work.faceSeed}
+        yourWorkTitle={item.inNow ? work.leadTaskTitle : null}
         plugins={plugins}
         raisers={raisers}
         selected={item.signal.id === selectedId}
@@ -294,7 +314,12 @@ const readDoneLineText = (signal: Signal): string | undefined =>
 
 /**
  * Renders one signal's row: its source's mark, its title, the line under
- * it, and at its end what the view shows of it:
+ * it, and at its end what the view shows of it. A signal about a tracked Task
+ * is led by that agent's face, `faceSeed`, and its source's mark moves to the
+ * start of the second line. A Now row with Your work (`yourWorkTitle`) leads
+ * the second line with the Task in place of who asks.
+ *
+ * At its end, the view shows:
  *
  * - To do: "Back" leads the line when its snooze ran out; the end holds the
  *   age and the marigold mark of a `high` signal.
@@ -311,6 +336,8 @@ const SignalRow = memo(function SignalRow({
   view,
   signal,
   lastInSection,
+  faceSeed,
+  yourWorkTitle,
   plugins,
   raisers,
   selected,
@@ -326,6 +353,10 @@ const SignalRow = memo(function SignalRow({
   readonly view: SignalView;
   readonly signal: Signal;
   readonly lastInSection: boolean;
+  /** The text the face of the agent on the signal's tracked Task is drawn from, or `null` when no tracked Task is Your work. */
+  readonly faceSeed: string | null;
+  /** The title of the first Task of Your work, on a Now row that has Your work, else `null`. */
+  readonly yourWorkTitle: string | null;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly raisers: SignalRaiserNames;
   readonly selected: boolean;
@@ -340,7 +371,16 @@ const SignalRow = memo(function SignalRow({
   readonly onRowAction: (signalId: string, action: SignalRowAction) => void;
 }): JSX.Element {
   const controls = decideSignalRowControls(signal, view);
-  const line = describeSignalRow(signal, plugins, raisers);
+  const kindAndPlace = describeSignalKindAndPlace(signal);
+  const line =
+    yourWorkTitle === null ? (
+      describeSignalRow(signal, plugins, raisers)
+    ) : (
+      <>
+        Your work: <b className="ask-state">{yourWorkTitle}</b>
+        {kindAndPlace !== "" && ` · ${kindAndPlace}`}
+      </>
+    );
   const classes = [
     "ask-item",
     lastInSection ? "ask-item--last" : "",
@@ -377,14 +417,26 @@ const SignalRow = memo(function SignalRow({
           onSelect(signal.id);
         }}
       >
-        <span className="ask-mark">
-          <SignalMark signal={signal} plugins={plugins} size={16} />
-        </span>
+        {faceSeed === null ? (
+          <span className="ask-mark">
+            <SignalMark signal={signal} plugins={plugins} size={16} />
+          </span>
+        ) : (
+          <span className="ask-mark ask-mark--face">
+            <Face look={buildLook(faceSeed)} pose="done" size={24} />
+          </span>
+        )}
         <span className="ask-text">
           <span className="ask-title">{signal.title}</span>
-          {/* The separator after "Back" and the row's line are one string, so
-              the line is shaped as one run of text, as the drawing's is. */}
+          {/* The separator after "Back" and the row's line are one string when
+              the line is text, so the browser shapes them as one run, as the
+              drawing's is. Two text nodes would shift the glyphs by a pixel. */}
           <span className="ask-sub">
+            {faceSeed !== null && (
+              <span className="ask-src">
+                <SignalMark signal={signal} plugins={plugins} size={12} />
+              </span>
+            )}
             {view === "done" ? (
               describeDoneRowOutcome(signal)
             ) : view === "to-do" && isBackFromSnooze(signal) ? (
@@ -393,7 +445,14 @@ const SignalRow = memo(function SignalRow({
                   <AlarmIcon size={12} />
                   Back
                 </span>
-                {` · ${line}`}
+                {typeof line === "string" ? (
+                  ` · ${line}`
+                ) : (
+                  <>
+                    {" · "}
+                    {line}
+                  </>
+                )}
               </>
             ) : (
               line

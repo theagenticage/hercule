@@ -9,3 +9,4 @@ export { IgnoreRuleService, IgnoreRuleServiceLayer } from "./ignore-rules";
 export { SignalRaises, SignalRaisesLayer } from "./raises";
 export { signalRepository, type PendingRaise, type SignalSummary } from "./repository";
 export { SignalService, SignalServiceLayer } from "./service";
+export { YourWork, YourWorkLayer } from "./your-work";

@@ -64,7 +64,7 @@ export const invalidateForPush = (
   for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
   if (topic !== "run") return;
   const read = queryClient.getQueryData<TrackingRead>(queryKeys.tracking());
-  if (read === undefined || isTrackingAffectedByRunPush(read.rows, push)) {
+  if (read === undefined || isTrackingAffectedByRunPush(read.tasks, push)) {
     invalidateWithoutCancelling(queryClient, queryKeys.tracking());
   }
 };

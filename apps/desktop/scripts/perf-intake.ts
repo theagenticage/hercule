@@ -815,6 +815,7 @@ export async function measureListChange(
   const events = await readTrace(page);
   const recorded = (await evaluate(`(() => {
     const record = globalThis.motionRecord;
+    const intake = document.querySelector(".asks");
     return {
       rowsBefore: record.rowsBefore,
       frames: record.first === undefined || record.last === undefined ? null : record.frames.slice(record.first, record.last + 1),
@@ -825,6 +826,11 @@ export async function measureListChange(
       sawExpected: record.sawExpected,
       animationsAfter: document.getAnimations().length,
       ghostsAfter: document.querySelectorAll(${JSON.stringify(COPY_LAYERS)}).length,
+      endState: Boolean(${measured.endsWhen}),
+      stillRunning: document
+        .getAnimations()
+        .filter((animation) => animation.playState === "running" && intake.contains(animation.effect?.target ?? null))
+        .map((animation) => (animation instanceof CSSTransition ? "transition " : "animation ") + (animation.effect?.target?.tagName?.toLowerCase() ?? "?") + "." + (animation.effect?.target?.classList?.[0] ?? "")),
     };
   })()`)) as {
     rowsBefore: number;
@@ -836,12 +842,15 @@ export async function measureListChange(
     sawExpected: boolean;
     animationsAfter: number;
     ghostsAfter: number;
+    endState: boolean;
+    stillRunning: string[];
   };
   if (recorded.frames === null) {
     throw new Error(
       recorded.animations === 0
         ? "the change moved nothing on Intake"
-        : `the change was still moving ${String(MOTION_RECORD_MS)} ms after it was made`,
+        : `the change was still moving ${String(MOTION_RECORD_MS)} ms after it was made ` +
+            `(the end state ${recorded.endState ? "was" : "was not"} drawn; running: ${recorded.stillRunning.join(", ") || "nothing"})`,
     );
   }
   if (!recorded.sawExpected) {

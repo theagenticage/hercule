@@ -274,6 +274,16 @@ const make = Effect.gen(function* () {
       );
     });
 
+  /**
+   * Builds the conditions of To do at `now` over `SIGNALS_WITH_SNOOZES`: the
+   * signal is open, and it has no snooze or its snooze ran out at or before
+   * `now`.
+   */
+  const buildToDoConditions = (now: string) => [
+    sql`s.status = 'open'`,
+    sql`(z.until IS NULL OR z.until <= ${now})`,
+  ];
+
   /** Builds the condition that a signal's id is one of `ids`, which may be empty. */
   const buildIdIn = (column: string, ids: ReadonlyArray<string>) =>
     ids.length === 0
@@ -405,14 +415,31 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<SignalRow>`
           SELECT ${sql.literal(COLUMNS)} FROM ${sql.literal(SIGNALS_WITH_SNOOZES)}
-          WHERE ${sql.and([
-            sql`s.status = 'open'`,
-            sql`(z.until IS NULL OR z.until <= ${now})`,
-            ...buildFilterClauses(filter),
-          ])}
+          WHERE ${sql.and([...buildToDoConditions(now), ...buildFilterClauses(filter)])}
           ORDER BY z.until IS NULL, z.until, s.created_at, s.id
         `,
         (rows) => rows.map(parseRow),
+      ),
+
+    /**
+     * Returns the id and thread ref of every open signal, snoozed or not.
+     * Only a signal that came from an event has a thread ref, so a core
+     * signal is left out. It reads two narrow columns, never a signal's
+     * blocks or actions, and it scans one of the partial indexes that hold
+     * the open signals only, so the resolved signals, which are most of the
+     * table, are never read.
+     */
+    listOpenThreads: (): Effect.Effect<
+      ReadonlyArray<{ readonly signalId: string; readonly threadRef: string }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array; readonly thread_ref: string }>`
+          SELECT id, thread_ref FROM signals
+          WHERE status = 'open' AND thread_ref IS NOT NULL
+        `,
+        (rows) =>
+          rows.map((row) => ({ signalId: uuidToString(row.id), threadRef: row.thread_ref })),
       ),
 
     /**

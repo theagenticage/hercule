@@ -390,6 +390,7 @@ export {
   describeSignalAsker,
   describeSignalOutcome,
   describeSignalOutcomeMoment,
+  describeSignalKindAndPlace,
   describeSignalProvenance,
   describeSignalRow,
   EVENT_HANDLING_OPTIONS,
@@ -429,14 +430,19 @@ export {
   buildTrackingRows,
   canMarkTrackingStateDone,
   countWaitingTrackingRows,
+  decideTrackingRowDestination,
+  decideTrackingStatePose,
   describeTrackingLine,
   groupTrackingRows,
   isTrackingAffectedByRunPush,
   listRecentTrackingRows,
+  nameTrackingState,
+  readTrackingFaceSeed,
   type TrackingGroup,
   type TrackingLine,
   type TrackingRead,
   type TrackingRow,
+  type TrackingRowDestination,
   type TrackingState,
 } from "./tracking";
 export {
@@ -502,6 +508,7 @@ export {
   dropTrackingRowMarkedDone,
   followListedTrackingRows,
   followTrackingRead,
+  isTrackingHandoffAcknowledged,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
   recordTrackingRowMarkedDone,
@@ -510,6 +517,8 @@ export {
   type HeldTrackingRows,
 } from "./held-tracking-rows";
 export { describeInboxZeroLine, type InboxZeroLine } from "./inbox-zero";
+export { matchYourWork, type YourWork } from "./your-work";
+export { describeYourWork, describeYourWorkOnRow, type YourWorkItem } from "./your-work-display";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";

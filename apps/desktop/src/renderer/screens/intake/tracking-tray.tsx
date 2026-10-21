@@ -9,21 +9,20 @@ import {
   describeTrackingLine,
   groupTrackingRows,
   listRecentTrackingRows,
+  readTrackingFaceSeed,
   type TrackingRow,
 } from "@hercule/client-core";
 import { pluginsQuery } from "../../app/queries";
 import type { HandoffFlights } from "./handoff-flight";
 import { SourceMark } from "./source-mark";
-import { TrackingFold } from "./tracking-fold";
+import { TrackingFold, type TrackingFoldRow } from "./tracking-fold";
 import type { TrackingRowFacts } from "./tracking-row";
 import { TrackingSheet } from "./tracking-sheet";
 import { useTrackingSheetMotion } from "./tracking-sheet-motion";
 
 /**
  * Returns what a row draws. A Failed row says why its run failed when the run
- * carries a `failureCause`, and "failed" alone when it has none. A run of a
- * workflow that was sent with the request has no workflow id, so its face is
- * drawn from the workflow's name: every run of that name wears the same face.
+ * carries a `failureCause`, and "failed" alone when it has none.
  */
 const buildRowFacts = (row: TrackingRow): TrackingRowFacts => {
   const line = describeTrackingLine(row);
@@ -31,13 +30,18 @@ const buildRowFacts = (row: TrackingRow): TrackingRowFacts => {
     taskId: row.task.taskId,
     title: row.task.title,
     state: row.state,
-    faceSeed: row.run.workflowId ?? row.run.workflowName,
+    faceSeed: readTrackingFaceSeed(row),
     workflowName: line.workflowName,
     lineText: line.text,
     since: row.since,
-    handoffSignalIds: row.task.handoffs.map((handoff) => handoff.signalId),
   };
 };
+
+/** Returns a row of folded Tracking: what it draws, and the signals its Task was handed off from. */
+const buildFoldRow = (row: TrackingRow): TrackingFoldRow => ({
+  facts: buildRowFacts(row),
+  handoffSignalIds: row.task.handoffs.map((handoff) => handoff.signalId),
+});
 
 /**
  * Renders Tracking over the foot of Intake's list, or opened over the whole
@@ -116,7 +120,7 @@ export function TrackingTray({
           ref={setFoldElement}
           total={rows.length}
           waitingCount={waitingCount}
-          rows={shown.map(buildRowFacts)}
+          rows={shown.map(buildFoldRow)}
           selectedTaskId={selectedTaskId}
           flights={flights}
           onOpen={onOpen}

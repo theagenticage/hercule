@@ -570,7 +570,7 @@ export const CLI = {
   },
   "task.queryTracking": {
     command: "task tracking",
-    help: "Lists the work handed off from Intake that is still followed. It is every in-progress task with a handoff entry. Each row gives the task's handoffs (the signal and the run of each), its newest run, and its newest live run when one is going, with why a failed run failed. Intake's Tracking section draws its rows from this. Needs the run read grant as well as the task read grant.",
+    help: "Lists the work handed off from Intake that is still followed. It is every in-progress task with a handoff entry. Each row gives the task's handoffs (the signal and the run of each), its newest run, its newest live run when one is going, the ids of all its live runs, with why a failed run failed. Intake's Tracking section draws its rows from this. Needs the run read grant as well as the task read grant.",
     examples: [{ args: [] }],
     fields: {},
   },
@@ -808,6 +808,12 @@ export const CLI = {
         help: "Only signals whose kind belongs to this plugin, such as github.",
       },
     },
+  },
+  "signal.queryYourWork": {
+    command: "signal your-work",
+    help: "Lists Your work: the open and in-progress tasks that belong to an open signal, snoozed or not. A task appears once, with the ids of the open signals it belongs to, newest update first. Snoozes are not judged here: the app matches the rows against its own To do list, so a snooze that runs out never leaves the two out of step. It is worked out when you ask and never stored. Needs the task read grant as well as the signal read grant.",
+    examples: [{ args: [] }],
+    fields: {},
   },
   "signal.read": {
     command: "signal read",

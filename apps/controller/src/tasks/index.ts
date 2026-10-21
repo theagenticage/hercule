@@ -6,5 +6,5 @@ export {
   type TaskPage,
   type UpdateInput,
 } from "./service";
-export { taskRepository } from "./repository";
+export { taskRepository, type NewTask } from "./repository";
 export { TaskTracking, TaskTrackingLayer, TaskTrackingRuns, type TrackedRuns } from "./tracking";

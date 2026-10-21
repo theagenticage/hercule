@@ -73,6 +73,18 @@
  *   the list, two rows under its head;
  * - `tracking-opened`: Tracking opened over the whole list column, a row in
  *   each state (two are Working);
+ * - `tracking-needs-you`: Tracking opened with the drawing's seven rows, two of
+ *   them Needs you: one by a Request (Upgrade the Stripe SDK asks to run
+ *   `git push`), one by a signal (checks failed on the agent's pull request,
+ *   which is also on To do);
+ * - `tracking-needs-you-folded`: the same, folded under the list;
+ * - `your-work-pane`: the pane of the checks that failed on the agent's pull
+ *   request, with its Task as Your work, tracked and Needs you. Its row is led
+ *   by the agent's face;
+ * - `your-work-now`: Sentry's alert under Now, with Your work on its thread: its
+ *   Task, which an agent is working on, in place of who asks. Its pane is open;
+ * - `your-work-untracked`: the same pane with an open Task nobody was handed;
+ * - `your-work-both`: the same pane with both Tasks, the tracked one first;
  * - `tracking-empty`: the same as folded, with nothing handed off, so folded
  *   Tracking is its head and the line that says what it is for;
  * - `tracking-zero`: no signal on To do while two rows only work: inbox zero,
@@ -104,7 +116,16 @@ import {
 } from "@hercule/contract";
 import type { FetchLike } from "@hercule/client-core";
 import { stopSpecimenClockAt } from "./fixed-clock";
-import { TRACKING_RECORDS } from "./intake-tracking";
+import {
+  AGENT_CHECKS_SIGNAL_ID,
+  ALERT_SIGNAL_ID,
+  FIX_CHECKOUT_REF,
+  NEEDS_YOU_RECORDS,
+  REFUNDS_PULL_REQUEST_REF,
+  TRACKING_RECORDS,
+  UNTRACKED_WORK_TASK,
+  YOUR_WORK_RECORDS,
+} from "./intake-tracking";
 import { buildPlugin, GITHUB_PLUGIN, SENTRY_MARK } from "./plugins-fixture";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { IntakeRecords, IntakeSettingsRecords, SidebarRecords } from "./shell-page";
@@ -318,6 +339,7 @@ const SANNE = { name: "Sanne" };
 
 /** Sentry's alert on checkout: urgent, so it heads the list under Now. */
 const ALERT = buildSignal(1, 169, {
+  id: ALERT_SIGNAL_ID,
   kind: "sentry/alert-for-you",
   title: "Checkout fails for EU cards with 3-D Secure",
   priority: "urgent",
@@ -602,6 +624,56 @@ const HTML_COMMENT = buildSignal(10, 5, {
 
 /** The signals on To do, in the order the controller lists them: oldest first. */
 const TO_DO: ReadonlyArray<Signal> = [ALERT, CHANGES, REVIEW, CHECKS, MENTION, SLACK];
+
+/**
+ * The checks that failed on the agent's own pull request, 8 minutes ago. Its
+ * thread is that pull request, which names the Task Refunds for partial
+ * captures as Your work, so the Task's Tracking row is Needs you.
+ */
+const AGENT_CHECKS = buildSignal(40, 8, {
+  id: AGENT_CHECKS_SIGNAL_ID,
+  kind: "github/checks-failed",
+  title: "Refund partial captures",
+  asker: "GitHub Actions",
+  place: "payments-api #1302",
+  origin: {
+    type: "event",
+    eventId: 40,
+    connectionId: findConnectionId("github/checks-failed"),
+    threadRef: REFUNDS_PULL_REQUEST_REF,
+  },
+  blocks: [
+    {
+      type: "checks",
+      rows: [
+        {
+          name: "test / refunds",
+          state: "failed",
+          log: "refunds.test.ts:88  expected 2 refunds, got 1\n  createRefund groups lines by payment, not by line",
+        },
+        { name: "test / migrations", state: "failed" },
+      ],
+      passed: 9,
+      omitted: 0,
+    },
+  ],
+});
+
+/**
+ * Sentry's alert on checkout with a thread Your work can be found by, and the
+ * Task "Fix 3-D Secure checkout for EU cards" (in `YOUR_WORK_RECORDS`) on that
+ * thread. It is urgent, so it leads the list under Now with its Task in place
+ * of who asks.
+ */
+const ALERT_WITH_WORK: Signal = {
+  ...ALERT,
+  origin: {
+    type: "event",
+    eventId: 1,
+    connectionId: findConnectionId(ALERT.kind),
+    threadRef: FIX_CHECKOUT_REF,
+  },
+};
 
 /** What the core offers to ignore: Dependabot's review requests on the webshop. */
 const DEPENDABOT_RULE = {
@@ -1420,6 +1492,38 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
   buildScene("tracking-opened", REVIEW, REVIEW_URL, {
     records: { ...RECORDS, tracking: TRACKING_RECORDS },
     intake: { signal: null, event: null, trackingOpen: true },
+  }),
+  buildScene("tracking-needs-you", REVIEW, REVIEW_URL, {
+    records: { ...RECORDS, ...NEEDS_YOU_RECORDS, signals: [...TO_DO, AGENT_CHECKS] },
+    intake: { signal: null, event: null, trackingOpen: true },
+  }),
+  buildScene("tracking-needs-you-folded", REVIEW, REVIEW_URL, {
+    records: { ...RECORDS, ...NEEDS_YOU_RECORDS, signals: [...TO_DO, AGENT_CHECKS] },
+  }),
+  buildScene("your-work-pane", AGENT_CHECKS, REVIEW_URL, {
+    records: { ...RECORDS, ...NEEDS_YOU_RECORDS, signals: [...TO_DO, AGENT_CHECKS] },
+  }),
+  buildScene("your-work-now", ALERT_WITH_WORK, REVIEW_URL, {
+    records: {
+      ...RECORDS,
+      ...YOUR_WORK_RECORDS,
+      signals: [ALERT_WITH_WORK, ...TO_DO.filter((signal) => signal !== ALERT), AGENT_CHECKS],
+    },
+  }),
+  buildScene("your-work-untracked", AGENT_CHECKS, REVIEW_URL, {
+    records: {
+      ...RECORDS,
+      signals: [...TO_DO, AGENT_CHECKS],
+      yourWorkTasks: [UNTRACKED_WORK_TASK],
+    },
+  }),
+  buildScene("your-work-both", AGENT_CHECKS, REVIEW_URL, {
+    records: {
+      ...RECORDS,
+      ...NEEDS_YOU_RECORDS,
+      signals: [...TO_DO, AGENT_CHECKS],
+      yourWorkTasks: [...(NEEDS_YOU_RECORDS.yourWorkTasks ?? []), UNTRACKED_WORK_TASK],
+    },
   }),
   buildScene("tracking-empty", REVIEW, REVIEW_URL),
   buildScene("tracking-zero", REVIEW, REVIEW_URL, {

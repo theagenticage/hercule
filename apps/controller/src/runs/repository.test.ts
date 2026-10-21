@@ -697,7 +697,7 @@ describe("the newest runs of some Tasks", () => {
   const NO_RUN_TASK = "0190c000-0000-7000-8000-0000000000b3";
   const minute = (n: number) => `2026-09-24T10:${String(n).padStart(2, "0")}:00.000Z`;
 
-  it("returns a Task's newest run and its newest live run, whatever the Task's history holds", async () => {
+  it("returns a Task's newest run and all its live runs, whatever the Task's history holds", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const runs = yield* runRepository;
@@ -710,6 +710,12 @@ describe("the newest runs of some Tasks", () => {
           ended.push(id);
         }
         const pending = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, minute(21));
+        // A second live run of the same Task, older than the first.
+        const running = yield* runs.insert(
+          { ...NEW_RUN, taskId: TASK },
+          "2026-09-24T09:00:00.000Z",
+        );
+        yield* runs.start(running, "2026-09-24T09:00:00.000Z");
         const newest = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, minute(22));
         yield* runs.finish(newest, { status: "cancelled", keepWorkspace: false }, minute(22));
         const other = yield* runs.insert({ ...NEW_RUN, taskId: OTHER_TASK }, minute(5));
@@ -720,7 +726,7 @@ describe("the newest runs of some Tasks", () => {
         );
         yield* runs.insert(NEW_RUN, minute(31));
         const found = yield* runs.listLatestOfTasks([TASK, OTHER_TASK, NO_RUN_TASK]);
-        return { found, pending, newest, other };
+        return { found, pending, running, newest, other };
       }).pipe(inTransaction, Effect.provide(TestDatabase)),
     );
 
@@ -729,8 +735,13 @@ describe("the newest runs of some Tasks", () => {
     expect(byTask.get(OTHER_TASK)).toMatchObject({ id: result.other, status: "pending" });
     expect(byTask.has(NO_RUN_TASK)).toBe(false);
     expect(result.found.latest).toHaveLength(2);
-    // Newest first, and only the pending and running runs of the asked Tasks.
-    expect(result.found.live.map((run) => run.id)).toEqual([result.pending, result.other]);
+    // Newest first, every pending and running run of the asked Tasks (two of
+    // the first Task's), and no other.
+    expect(result.found.live.map((run) => run.id)).toEqual([
+      result.pending,
+      result.other,
+      result.running,
+    ]);
   });
 
   it("breaks a tie between runs created at the same instant by the greater id", async () => {

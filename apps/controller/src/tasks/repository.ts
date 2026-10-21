@@ -103,6 +103,15 @@ export interface TrackedHandoff {
   readonly at: string;
 }
 
+/** An open Task and one External Ref its provenance carries. */
+export interface OpenTaskOnRef {
+  readonly ref: ExternalRef;
+  readonly id: string;
+  readonly title: string;
+  readonly status: TaskStatus;
+  readonly updatedAt: string;
+}
+
 /** A Task that Tracking follows, with its newest handoffs, newest first. */
 export interface TrackedTask {
   readonly id: string;
@@ -437,6 +446,44 @@ const make = Effect.gen(function* () {
             }));
         },
       ),
+
+    /**
+     * Returns, for each open task (status `open` or `in-progress`, not
+     * deleted) whose provenance carries one of `refs`, one row per ref it
+     * carries. It reads only the columns of the row, never the description or
+     * the provenance.
+     *
+     * One statement that starts from the ref index `task_provenance_ref`, so
+     * its work follows the tasks that carry the refs, not the tasks or the
+     * provenance entries there are. The unary `+` on the status keeps SQLite
+     * from starting at the status index and scanning every open task.
+     */
+    listOpenOnRefs: (
+      refs: ReadonlyArray<ExternalRef>,
+    ): Effect.Effect<ReadonlyArray<OpenTaskOnRef>, SqlError> =>
+      refs.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{
+              readonly ref: string;
+              readonly id: Uint8Array;
+              readonly title: string;
+              readonly status: string;
+              readonly updated_at: string;
+            }>`
+              SELECT DISTINCT p.ref, t.id, t.title, t.status, t.updated_at
+              FROM task_provenance p JOIN tasks t ON t.id = p.task_id
+              WHERE p.ref IN ${sql.in(refs)}
+                AND +t.status IN ('open', 'in-progress') AND t.deleted_at IS NULL`,
+            (rows) =>
+              rows.map((row) => ({
+                ref: row.ref,
+                id: uuidToString(row.id),
+                title: row.title,
+                status: row.status as TaskStatus,
+                updatedAt: row.updated_at,
+              })),
+          ),
 
     /** Returns true if a project exists and has not been deleted. */
     projectExists: (id: string): Effect.Effect<boolean, SqlError> =>
