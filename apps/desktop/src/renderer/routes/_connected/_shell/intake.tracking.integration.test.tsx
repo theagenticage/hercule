@@ -2013,7 +2013,7 @@ describe("the pane's Try again", () => {
   const openRerunnable = async (
     task: Task,
     status: RunSummary["status"],
-    rerunAnswer: Answer = { body: { runId: NEW_RUN_ID } },
+    rerunAnswer: Handler = { body: { runId: NEW_RUN_ID } },
     others: ReadonlyArray<readonly [Task, RunSummary["status"]]> = [],
   ) => {
     let newRunStatus: RunSummary["status"] | null = null;
@@ -2141,6 +2141,68 @@ describe("the pane's Try again", () => {
     await waitFor(() => {
       expect(findReruns(calls)).toHaveLength(1);
     });
+  });
+
+  it("keeps Try again locked when the user leaves Intake and comes back before the request settles", async () => {
+    const releases: Array<() => void> = [];
+    const { calls, router } = await openRerunnable(
+      FAILED_TASK,
+      "failed",
+      () =>
+        new Promise((resolve) => {
+          releases.push(() => resolve({ body: { runId: NEW_RUN_ID } }));
+        }),
+    );
+    await userEvent.click(getRowButton(FAILED_TASK));
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Try again" }));
+    await waitFor(() => {
+      expect(findReruns(calls)).toHaveLength(1);
+    });
+
+    // The Office is another route, so Intake's screen is gone and built anew on the way back.
+    act(() => {
+      void router.navigate({ to: "/office" });
+    });
+    await screen.findByText("The Office");
+    act(() => {
+      void router.navigate({ to: "/intake", search: { tracking: true, task: FAILED_TASK.id } });
+    });
+    await screen.findByRole("heading", { level: 1, name: "Intake" });
+    await waitFor(() => {
+      expect(findAnswer("try-again")).not.toBeNull();
+    });
+    expect(findAnswer("try-again")!.getAttribute("aria-disabled")).toBe("true");
+    await userEvent.click(findAnswer("try-again")!);
+    expect(findReruns(calls)).toHaveLength(1);
+
+    releases.forEach((release) => {
+      release();
+    });
+  });
+
+  it("keeps Try again locked when the user leaves Intake and comes back after the request was accepted but before the read shows the new run", async () => {
+    const { calls, router } = await openRerunnable(FAILED_TASK, "failed");
+    await userEvent.click(getRowButton(FAILED_TASK));
+    const readsBefore = findTrackingReads(calls).length;
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Try again" }));
+    await waitFor(() => {
+      expect(findTrackingReads(calls).length).toBeGreaterThan(readsBefore);
+    });
+
+    act(() => {
+      void router.navigate({ to: "/office" });
+    });
+    await screen.findByText("The Office");
+    act(() => {
+      void router.navigate({ to: "/intake", search: { tracking: true, task: FAILED_TASK.id } });
+    });
+    await screen.findByRole("heading", { level: 1, name: "Intake" });
+    await waitFor(() => {
+      expect(findAnswer("try-again")).not.toBeNull();
+    });
+    expect(findAnswer("try-again")!.getAttribute("aria-disabled")).toBe("true");
+    await userEvent.click(findAnswer("try-again")!);
+    expect(findReruns(calls)).toHaveLength(1);
   });
 
   it("keeps the row on Tracking when E is pressed while the re-run is starting", async () => {
