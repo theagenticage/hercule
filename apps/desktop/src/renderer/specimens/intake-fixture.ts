@@ -78,6 +78,12 @@
  *   `git push`), one by a signal (checks failed on the agent's pull request,
  *   which is also on To do);
  * - `tracking-needs-you-folded`: the same, folded under the list;
+ * - `tracking-pane-finished`, `-needs-you`, `-needs-you-signal`, `-failed`,
+ *   `-working` and `-stopped`: Tracking opened with the drawing's seven rows
+ *   and the pane of one row open, as the drawing's `?state=` URLs show it:
+ *   Rate-limit the public API, Upgrade the Stripe SDK, Refunds for partial
+ *   captures, Nightly backup, Lowercase SKUs and Move invoices to the new
+ *   PDF renderer;
  * - `your-work-pane`: the pane of the checks that failed on the agent's pull
  *   request, with its Task as Your work, tracked and Needs you. Its row is led
  *   by the agent's face;
@@ -122,11 +128,13 @@ import {
   FIX_CHECKOUT_REF,
   NEEDS_YOU_RECORDS,
   REFUNDS_PULL_REQUEST_REF,
+  TASK_IDS,
   TRACKING_RECORDS,
   UNTRACKED_WORK_TASK,
   YOUR_WORK_RECORDS,
 } from "./intake-tracking";
 import { buildPlugin, GITHUB_PLUGIN, SENTRY_MARK } from "./plugins-fixture";
+import { buildSignal, CONNECTION_IDS, findConnectionId, minutesAgo } from "./intake-signal-builder";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { IntakeRecords, IntakeSettingsRecords, SidebarRecords } from "./shell-page";
 
@@ -215,14 +223,6 @@ const INTAKE_PLUGINS: ReadonlyArray<PluginDetail> = [
   buildPlugin("slack", "Slack", SLACK_MARK),
 ];
 
-/** The Connection each plugin's signals come through. */
-const CONNECTION_IDS: Readonly<Record<string, string>> = {
-  sentry: "01a0ec64-6e80-7000-8000-0000000000c1",
-  github: "01a0ec64-6e80-7000-8000-0000000000c2",
-  linear: "01a0ec64-6e80-7000-8000-0000000000c3",
-  slack: "01a0ec64-6e80-7000-8000-0000000000c4",
-};
-
 /** Builds the connected Connection of plugin `pluginId`, named `label`, made a day before the specimen's clock. */
 const buildConnection = (pluginId: string, label: string): Connection => ({
   id: CONNECTION_IDS[pluginId]!,
@@ -245,39 +245,6 @@ const INTAKE_CONNECTIONS: ReadonlyArray<Connection> = [
   buildConnection("linear", "acme"),
   buildConnection("slack", "acme"),
 ];
-
-/** Returns the moment `minutes` before the specimen's clock, as a timestamp. */
-const minutesAgo = (minutes: number): string =>
-  new Date(SPECIMEN_NOW - minutes * 60_000).toISOString();
-
-/** Returns the Connection of the plugin that raises signals of `kind`. */
-const findConnectionId = (kind: string): string => {
-  const connectionId = CONNECTION_IDS[kind.slice(0, kind.indexOf("/"))];
-  if (connectionId === undefined) throw new Error(`The fixture has no Connection for ${kind}.`);
-  return connectionId;
-};
-
-/** Builds a signal numbered `number`, raised from event `number` `minutes` ago. */
-const buildSignal = (
-  number: number,
-  minutes: number,
-  signal: Pick<Signal, "kind" | "title"> & Partial<Signal>,
-): Signal => ({
-  id: `01a0ec64-7a00-7000-8000-${String(number).padStart(12, "0")}`,
-  origin: {
-    type: "event",
-    eventId: number,
-    connectionId: findConnectionId(signal.kind),
-    threadRef: `thread-${String(number)}`,
-  },
-  priority: "normal",
-  blocks: [],
-  actions: [],
-  match: {},
-  status: "open",
-  createdAt: minutesAgo(minutes),
-  ...signal,
-});
 
 /**
  * Builds an answer that runs the plugin operation `op` through its plugin's
@@ -1344,6 +1311,19 @@ const selectRow = (signal: Signal): string => `.ask-row[data-signal-id="${signal
 const REVIEW_URL = "https://github.com/rogier/payments-api/pull/1294";
 const HTML_URL = "https://github.com/rogier/webshop/pull/1298#issuecomment-2150";
 
+/**
+ * Returns a scene that opens Tracking with the drawing's seven rows and the
+ * pane of the Task `taskId` open, as the drawing's `?state=` URL does.
+ */
+const buildTrackingPaneScene = (name: string, taskId: string): IntakeScene => ({
+  name: `tracking-pane-${name}`,
+  records: { ...RECORDS, ...NEEDS_YOU_RECORDS, signals: [...TO_DO, AGENT_CHECKS] },
+  intake: { signal: null, event: null, trackingOpen: true, trackingTaskId: taskId },
+  play: async () => {
+    await waitForElement(".tr-pane .ad-answers .ans");
+  },
+});
+
 /** Every scene, in the order they are captured. The first is the one `pnpm compare:bureau` compares. */
 export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
   buildScene("review", REVIEW, REVIEW_URL),
@@ -1500,6 +1480,12 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
   buildScene("tracking-needs-you-folded", REVIEW, REVIEW_URL, {
     records: { ...RECORDS, ...NEEDS_YOU_RECORDS, signals: [...TO_DO, AGENT_CHECKS] },
   }),
+  buildTrackingPaneScene("finished", TASK_IDS.rateLimit),
+  buildTrackingPaneScene("needs-you", TASK_IDS.sdk),
+  buildTrackingPaneScene("needs-you-signal", TASK_IDS.refunds),
+  buildTrackingPaneScene("failed", TASK_IDS.backup),
+  buildTrackingPaneScene("working", TASK_IDS.sku),
+  buildTrackingPaneScene("stopped", TASK_IDS.pdf),
   buildScene("your-work-pane", AGENT_CHECKS, REVIEW_URL, {
     records: { ...RECORDS, ...NEEDS_YOU_RECORDS, signals: [...TO_DO, AGENT_CHECKS] },
   }),
@@ -1530,7 +1516,9 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
     records: {
       ...RECORDS,
       signals: [],
-      tracking: TRACKING_RECORDS.filter((task) => ["t-checkout", "t-sku"].includes(task.taskId)),
+      tracking: TRACKING_RECORDS.filter((task) =>
+        [TASK_IDS.checkout, TASK_IDS.sku].some((id) => id === task.taskId),
+      ),
     },
     intake: { signal: null, event: null },
   }),
