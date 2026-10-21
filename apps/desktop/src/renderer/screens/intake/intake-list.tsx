@@ -428,9 +428,9 @@ const SignalRow = memo(function SignalRow({
         )}
         <span className="ask-text">
           <span className="ask-title">{signal.title}</span>
-          {/* The separator after "Back" and the row's line sit in one inline box
-              with no element between them, so the browser shapes them as one
-              run of text, as the drawing's is. */}
+          {/* The separator after "Back" and the row's line are one string when
+              the line is text, so the browser shapes them as one run, as the
+              drawing's is. Two text nodes would shift the glyphs by a pixel. */}
           <span className="ask-sub">
             {faceSeed !== null && (
               <span className="ask-src">
@@ -445,8 +445,14 @@ const SignalRow = memo(function SignalRow({
                   <AlarmIcon size={12} />
                   Back
                 </span>
-                {" · "}
-                {line}
+                {typeof line === "string" ? (
+                  ` · ${line}`
+                ) : (
+                  <>
+                    {" · "}
+                    {line}
+                  </>
+                )}
               </>
             ) : (
               line

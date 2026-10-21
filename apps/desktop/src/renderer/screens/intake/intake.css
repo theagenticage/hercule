@@ -161,16 +161,14 @@
 .ask-item.is-checked {
   --row-fill: color-mix(in srgb, var(--ink) 7%, var(--surface));
 }
-/* The lead column is 24px so a face fits, as the Tracking drawing has it. The
-   text still starts 42px in, where Intake's drawing has it. */
 .ask-row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   min-height: 52px;
-  padding: 7px 10px 7px 8px;
+  padding: 7px 10px;
   border-radius: var(--r-md);
   text-align: left;
   transition: background var(--dur-1);
@@ -203,8 +201,12 @@
   opacity: 1;
 }
 /* The face of the agent on a signal's Task leads the row at full strength, as
-   Hercule's face does; only a source's mark is softened. */
+   Hercule's face does; only a source's mark is softened. The face is 24px and
+   the lead column 20px. The negative margin lets it overflow by 2px on each
+   side, so its centre stays 20px from the row's left and the text still starts
+   42px in, as in the drawings. */
 .ask-mark--face {
+  margin-inline: -2px;
   opacity: 1;
 }
 .ask-mark--face .cr {
