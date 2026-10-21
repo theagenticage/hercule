@@ -4,10 +4,10 @@ import {
   dropTrackingHandoff,
   dropTrackingRowMarkedDone,
   followTrackingRead,
+  isTrackingHandoffAcknowledged,
   queryKeys,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
-  recordTrackingRead,
   recordTrackingRowMarkedDone,
   startHeldTrackingRows,
   updateTrackingRowsHolding,
@@ -46,10 +46,11 @@ export interface HeldTrackingRowsState {
  * The record follows `listed` on every render. A read of the Tasks that
  * changes no row leaves `listed` as it was, so nothing draws the screen again
  * for it. It can still be the first read that started after the user's own
- * handoff committed, so the hook follows the cache for that: it tells the
- * record about each successful read, and the record asks for a new draw only
- * when that read acknowledges a handoff. The record then follows `listed` in
- * that draw, which holds the rows of the read, so a Task the read adds shows.
+ * handoff committed. So the hook follows the cache for that: when a read
+ * succeeds and acknowledges a handoff (`isTrackingHandoffAcknowledged`), it
+ * draws the screen again. The record then follows `listed` in that draw, which
+ * holds the rows of the read, so a Task the read adds shows. A read that
+ * acknowledges nothing draws nothing.
  */
 export const useHeldTrackingRows = (
   listed: ReadonlyArray<TrackingRow>,
@@ -58,7 +59,7 @@ export const useHeldTrackingRows = (
   const queryClient = useQueryClient();
   const readStartedAt = (): number =>
     queryClient.getQueryData<TrackingRead>(queryKeys.tracking())?.readStartedAt ?? 0;
-  const [held, setHeld] = useState(() => startHeldTrackingRows(listed, readStartedAt()));
+  const [held, setHeld] = useState(() => startHeldTrackingRows(listed));
   const next = updateTrackingRowsHolding(
     followTrackingRead(held, listed, readStartedAt()),
     holding,
@@ -72,7 +73,12 @@ export const useHeldTrackingRows = (
       if (event.query.queryHash !== trackingHash) return;
       const read = event.query.state.data as TrackingRead | undefined;
       if (read === undefined) return;
-      setHeld((current) => recordTrackingRead(current, read.readStartedAt));
+      // The check runs on the newest record, which only an updater sees: a
+      // handoff confirmed in the same batch is not in `held` yet. A copy makes
+      // React draw again, and the same record makes it skip the draw.
+      setHeld((current) =>
+        isTrackingHandoffAcknowledged(current, read.readStartedAt) ? { ...current } : current,
+      );
     });
   }, [queryClient]);
   return {

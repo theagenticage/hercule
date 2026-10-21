@@ -18,7 +18,6 @@ import {
   formatMessageTime,
   isKnownBlock,
   UNKNOWN_BLOCK_TEXT,
-  type YourWorkItem,
 } from "@hercule/client-core";
 import { ArrowIcon } from "../../icons/arrow";
 import { BranchIcon } from "../../icons/branch";
@@ -26,7 +25,6 @@ import { DiffIcon } from "../../icons/diff";
 import { Mark } from "../../marks";
 import { TasksIcon } from "../../icons/tasks";
 import { Markdown } from "../session/markdown";
-import { YourWorkBlock } from "./your-work-block";
 
 /** Returns `count` and the noun, made plural when the count is not one: "1 file", "3 files". */
 const formatCount = (count: number, noun: string): string =>
@@ -34,24 +32,18 @@ const formatCount = (count: number, noun: string): string =>
 
 /**
  * Renders a signal's blocks in order, and, on a proposal, the Task that
- * Accept creates. Under them, in their fixed place, come the Tasks of the
- * signal's Your work, `yourWork`, each calling `onShowInTracking` with its id
- * when the user asks to see its row. Times are shown in `timezone`.
+ * Accept creates. Times are shown in `timezone`.
  */
 export function SignalBlocks({
   blocks,
   task,
-  yourWork,
   timezone,
-  onShowInTracking,
 }: {
   readonly blocks: ReadonlyArray<Block>;
   readonly task: TaskCreateInput | undefined;
-  readonly yourWork: ReadonlyArray<YourWorkItem>;
   readonly timezone: string;
-  readonly onShowInTracking: (taskId: string) => void;
 }): JSX.Element | null {
-  if (blocks.length === 0 && task === undefined && yourWork.length === 0) return null;
+  if (blocks.length === 0 && task === undefined) return null;
   return (
     <div className="ad-blocks">
       {blocks.map((block, index) => (
@@ -60,9 +52,6 @@ export function SignalBlocks({
         <SignalBlock key={index} block={block} timezone={timezone} />
       ))}
       {task !== undefined && <TaskPreview task={task} />}
-      {yourWork.map((item) => (
-        <YourWorkBlock key={item.taskId} item={item} onShowInTracking={onShowInTracking} />
-      ))}
     </div>
   );
 }

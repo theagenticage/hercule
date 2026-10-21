@@ -89,6 +89,7 @@ import type {
 import {
   createClient,
   listYourWorkRefs,
+  buildYourWorkTask,
   type FetchLike,
   type HerculeClient,
   type Live,
@@ -587,7 +588,7 @@ const seedQueryCache = (
     readStartedAt: 0,
   });
   queryClient.setQueryData(yourWorkQuery(client).queryKey, {
-    tasks: records.yourWorkTasks ?? [],
+    tasks: (records.yourWorkTasks ?? []).map(buildYourWorkTask),
     refs: listYourWorkRefs(records.signals ?? []),
   });
   queryClient.setQueryData(liveAgentSessionsQuery(client).queryKey, records.agentSessions ?? []);

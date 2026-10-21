@@ -390,9 +390,9 @@ export {
   describeSignalAsker,
   describeSignalOutcome,
   describeSignalOutcomeMoment,
+  describeSignalKindAndPlace,
   describeSignalProvenance,
   describeSignalRow,
-  describeYourWorkRowLine,
   EVENT_HANDLING_OPTIONS,
   findReplyAnswer,
   findSuggestedAnswer,
@@ -425,12 +425,13 @@ export {
   type SignalOutcome,
   type SignalRaiserNames,
   type UrgentSignal,
-  type YourWorkRowLine,
 } from "./intake";
 export {
   buildTrackingRows,
   canMarkTrackingStateDone,
   countWaitingTrackingRows,
+  decideTrackingRowDestination,
+  decideTrackingStatePose,
   describeTrackingLine,
   groupTrackingRows,
   isTrackingAffectedByRunPush,
@@ -441,11 +442,9 @@ export {
   type TrackingLine,
   type TrackingRead,
   type TrackingRow,
+  type TrackingRowDestination,
   type TrackingState,
-  type TrackingWait,
-  type TrackingWaits,
 } from "./tracking";
-export { decideTrackingRowDestination, type TrackingRowDestination } from "./tracking-destination";
 export {
   decideSidebarDragEnd,
   DEFAULT_SIDEBAR_LAYOUT,
@@ -509,7 +508,7 @@ export {
   dropTrackingRowMarkedDone,
   followListedTrackingRows,
   followTrackingRead,
-  recordTrackingRead,
+  isTrackingHandoffAcknowledged,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
   recordTrackingRowMarkedDone,
@@ -520,6 +519,7 @@ export {
 export { describeInboxZeroLine, type InboxZeroLine } from "./inbox-zero";
 export {
   batchYourWorkRefs,
+  buildYourWorkTask,
   isYourWorkReadOutdated,
   listSignalsWithThreadRef,
   listYourWorkRefs,
@@ -527,14 +527,7 @@ export {
   type YourWork,
   type YourWorkRead,
 } from "./your-work";
-export {
-  describeYourWork,
-  describeYourWorkOnRow,
-  type TrackedWork,
-  type UntrackedWork,
-  type YourWorkItem,
-  type YourWorkOnRow,
-} from "./your-work-display";
+export { describeYourWork, describeYourWorkOnRow, type YourWorkItem } from "./your-work-display";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";

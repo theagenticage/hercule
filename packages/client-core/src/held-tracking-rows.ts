@@ -29,12 +29,6 @@ export interface HeldTrackingRows {
   /** The Tasks the user marked done, until `listed` has no row of them. */
   readonly markedDoneTaskIds: ReadonlySet<string>;
   /**
-   * When the newest read of Tracking's Tasks that the record has followed
-   * started, on the clock `TrackingRead` names. The Tasks in `listed` are as
-   * the controller held them from that moment on.
-   */
-  readonly readStartedAt: number;
-  /**
    * The signals the user is handing off, each with when its handoff
    * committed, or `null` while it is still being sent. A handoff stays until a
    * read that started after it committed gives `listed`, or the holding stops.
@@ -43,15 +37,11 @@ export interface HeldTrackingRows {
 }
 
 /** Returns the record for rows that open on `listed`: nothing held. */
-export const startHeldTrackingRows = (
-  listed: ReadonlyArray<TrackingRow>,
-  readStartedAt = 0,
-): HeldTrackingRows => ({
+export const startHeldTrackingRows = (listed: ReadonlyArray<TrackingRow>): HeldTrackingRows => ({
   listed,
   shown: listed,
   holding: false,
   markedDoneTaskIds: new Set(),
-  readStartedAt,
   handoffs: new Map(),
 });
 
@@ -80,7 +70,6 @@ export const followListedTrackingRows = (
     ...held,
     listed,
     shown,
-    readStartedAt,
     markedDoneTaskIds: new Set(
       [...held.markedDoneTaskIds].filter((id) => !markedDone.includes(id)),
     ),
@@ -101,35 +90,31 @@ export const followTrackingRead = (
   rows: ReadonlyArray<TrackingRow>,
   readStartedAt: number,
 ): HeldTrackingRows =>
-  rows === held.listed && !isHandoffCommittedBefore(held, readStartedAt)
+  rows === held.listed && !isTrackingHandoffAcknowledged(held, readStartedAt)
     ? held
     : followListedTrackingRows(held, rows, readStartedAt);
 
-/** Checks whether a handoff of `held` committed before a read that started at `readStartedAt`. */
-const isHandoffCommittedBefore = (held: HeldTrackingRows, readStartedAt: number): boolean =>
+/**
+ * Checks whether a read of Tracking's Tasks that started at `readStartedAt`
+ * acknowledges a handoff of `held`: a handoff committed before the read
+ * started, so the read shows it.
+ *
+ * The screen asks this when a read lands, to know whether to draw again. Such
+ * a read can leave every row as it was, so nothing else would draw the screen.
+ * The screen then follows the rows (`followTrackingRead`) with the rows built
+ * from that read. The rows are not followed here, because they are built from
+ * more than the Tasks. If the handoff were applied to the rows listed so far,
+ * a read that also changed the Tasks, such as the one that adds the handed-off
+ * Task's row, would acknowledge the handoff before that row was listed, and a
+ * record holding back changes would never show it.
+ */
+export const isTrackingHandoffAcknowledged = (
+  held: HeldTrackingRows,
+  readStartedAt: number,
+): boolean =>
   [...held.handoffs.values()].some(
     (committedAt) => committedAt !== null && committedAt <= readStartedAt,
   );
-
-/**
- * Records that a read of Tracking's Tasks, which started at `readStartedAt`,
- * has succeeded. Returns `held` itself unless that read is the first that
- * started after a handoff committed. Then it returns a new record, so the
- * screen draws again and follows the rows (`followTrackingRead`) with the
- * rows built from the read.
- *
- * It does not follow the rows itself, because it does not have them: they are
- * built from the Tasks and from what waits on the user. If it applied the
- * handoff to the rows listed so far, a read that also changed the Tasks, such
- * as the one that adds the handed-off Task's row, would acknowledge the
- * handoff before that row was listed, and a record holding back changes would
- * never show it.
- */
-export const recordTrackingRead = (
-  held: HeldTrackingRows,
-  readStartedAt: number,
-): HeldTrackingRows =>
-  isHandoffCommittedBefore(held, readStartedAt) ? { ...held, readStartedAt } : held;
 
 /**
  * Records that the user is marking the Task `taskId` done. Call it when the

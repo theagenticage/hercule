@@ -11,9 +11,9 @@ import { DONE_ACTION_ID, type Signal, type SignalView } from "@hercule/contract"
 import {
   decideSignalRowControls,
   describeDoneRowOutcome,
+  describeSignalKindAndPlace,
   describeSignalRow,
   describeYourWorkOnRow,
-  describeYourWorkRowLine,
   formatClock,
   isBackFromSnooze,
   SIGNAL_MOVE_LABELS,
@@ -221,15 +221,15 @@ export const IntakeList = memo(function IntakeList({
     if (item.kind === "section") {
       return <SectionHeading key={item.key} itemKey={item.key} section={item.section} />;
     }
-    const work = describeYourWorkOnRow(yourWork.get(item.signal.id) ?? [], trackingRows);
+    const work = describeYourWorkOnRow(yourWork.get(item.signal.id)?.tasks ?? [], trackingRows);
     return (
       <SignalRow
         key={item.key}
         view={view}
         signal={item.signal}
         lastInSection={item.lastInSection}
-        faceSeed={work?.faceSeed ?? null}
-        yourWorkTitle={item.inNow ? (work?.firstTaskTitle ?? null) : null}
+        faceSeed={work.faceSeed}
+        yourWorkTitle={item.inNow ? work.firstTaskTitle : null}
         plugins={plugins}
         raisers={raisers}
         selected={item.signal.id === selectedId}
@@ -371,15 +371,14 @@ const SignalRow = memo(function SignalRow({
   readonly onRowAction: (signalId: string, action: SignalRowAction) => void;
 }): JSX.Element {
   const controls = decideSignalRowControls(signal, view);
-  const yourWorkLine =
-    yourWorkTitle === null ? null : describeYourWorkRowLine(signal, yourWorkTitle);
+  const kindAndPlace = describeSignalKindAndPlace(signal);
   const line =
-    yourWorkLine === null ? (
+    yourWorkTitle === null ? (
       describeSignalRow(signal, plugins, raisers)
     ) : (
       <>
-        Your work: <b className="ask-state">{yourWorkLine.taskTitle}</b>
-        {yourWorkLine.rest}
+        Your work: <b className="ask-state">{yourWorkTitle}</b>
+        {kindAndPlace !== "" && ` · ${kindAndPlace}`}
       </>
     );
   const classes = [

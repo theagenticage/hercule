@@ -387,40 +387,21 @@ export const describeSignalRow = (
   const asker =
     signal.asker ??
     (isCoreSignalKind(signal.kind) ? nameSignalSource(signal, plugins, raisers) : undefined);
-  return [asker, ...listKindAndPlace(signal)].join(" · ");
+  return [asker, describeSignalKindAndPlace(signal)]
+    .filter((part) => part !== undefined && part !== "")
+    .join(" · ");
 };
 
 /**
- * Returns the kind in lower case and the place of a signal, whichever it has.
- * An `unsure` signal leaves its kind out, because its row labels it "Unsure"
- * already.
+ * Returns the kind in lower case and the place of a signal, such as "checks
+ * failed · payments-api #1302". It leaves out what the signal lacks: an
+ * `unsure` signal has no kind to show, because its row labels it "Unsure"
+ * already. Returns an empty string when neither remains.
  */
-const listKindAndPlace = (signal: Signal): ReadonlyArray<string> => {
+export const describeSignalKindAndPlace = (signal: Signal): string => {
   const kind = signal.kind === "unsure" ? undefined : lowerFirst(nameSignalKind(signal.kind));
-  return [kind, signal.place].filter((part) => part !== undefined);
+  return [kind, signal.place].filter((part) => part !== undefined).join(" · ");
 };
-
-/** The second line of a Now row that has Your work: "Your work: <title> · kind · where". */
-export interface YourWorkRowLine {
-  /** The title of the Task, which the row draws in bold after "Your work: ". */
-  readonly taskTitle: string;
-  /** What follows the title, with its own separators: " · review requested · acme/webshop#1296". Empty when the signal has neither a kind to show nor a place. */
-  readonly rest: string;
-}
-
-/**
- * Returns the second line of a Now row that has Your work, in place of who
- * asks: the first Task's title, then the kind and where, such as "Your work:
- * Fix 3-D Secure checkout · alert for you · webshop-prod". A Now row leads
- * with its state this way because the one who asks is often the alerting
- * system itself, as the Intake drawing has it.
- */
-export const describeYourWorkRowLine = (signal: Signal, taskTitle: string): YourWorkRowLine => ({
-  taskTitle,
-  rest: listKindAndPlace(signal)
-    .map((part) => ` · ${part}`)
-    .join(""),
-});
 
 /**
  * Returns the line under the pane's title: who asks and where, such as

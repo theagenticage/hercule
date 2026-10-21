@@ -1236,6 +1236,19 @@
     inset 0 0 0 1px var(--line-soft),
     var(--shadow-1);
 }
+/* The lead of a block of Your work whose Task has no face: the Tasks icon in a
+   28px round slot, the size of the face that leads a tracked Task, so the text
+   of every block of Your work starts in one column. */
+.b-work-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--sunken);
+  color: var(--muted);
+}
 /* An Ignore Rule's text may hold a long value with no space, so the text
    wraps anywhere rather than overflow the block. */
 .b-work-text {
@@ -1256,6 +1269,10 @@
 }
 .b-work-text span:last-child {
   color: var(--muted);
+}
+/* Your work under the signal's blocks keeps the blocks' distance from them. */
+.ad-blocks + .ad-blocks--work {
+  margin-top: 18px;
 }
 /* Your work on a Task whose row waits on the user: its state word, in your colour. */
 .b-work-text span:last-child b {

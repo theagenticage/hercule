@@ -24,8 +24,6 @@ import {
   classifyTranscriptPage,
   detectLocalRunner,
   findTranscriptAfterPosition,
-  invalidateWithoutCancelling,
-  isYourWorkReadOutdated,
   listYourWorkRefs,
   type EventListFilter,
   isNotFound,
@@ -35,6 +33,7 @@ import {
   queryKeys,
   readEveryPage,
   readSenderSession,
+  buildYourWorkTask,
   type HerculeClient,
   type MessagePage,
   type MessagePages,
@@ -672,36 +671,35 @@ export const trackingQuery = (client: HerculeClient) =>
  *
  * - A push on the `task` topic, like Tracking, because a Task's status or
  *   provenance may have changed.
- * - A read of To do whose thread refs differ from the ones this read was made
- *   for (see `signalsToDoQuery`). A signal that arrives or goes without
- *   changing the refs costs no request.
+ * - A change of the thread refs of the To do signals, from a read of To do or
+ *   from a write to its cached list. `startYourWorkRefresh` sees both. A
+ *   signal that arrives or goes without changing the refs costs no request.
  *
- * It reads To do first, so it reads for the newest signals. It reads To do
- * again after the Tasks, and when its refs changed meanwhile, reads the Tasks
- * once more. That covers a To do read that finished while this read had no
- * answer yet, which the check in `signalsToDoQuery` cannot compare with.
+ * It reads To do first, so it reads for the newest signals, and it records
+ * the refs it read for. `startYourWorkRefresh` compares those refs with the
+ * ones To do has when the read settles.
  */
 export const yourWorkQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.yourWork(),
     queryFn: async ({ client: queryClient }): Promise<YourWorkRead> => {
-      let signals = await queryClient.fetchQuery(signalsToDoQuery(client));
-      for (;;) {
-        const batches = await Promise.all(
-          batchYourWorkRefs(signals).map((refs) =>
-            readEveryPage((page) =>
-              client.task.query({ query: { refs, status: ["open", "in-progress"], ...page } }),
-            ),
+      const refs = listYourWorkRefs(await queryClient.fetchQuery(signalsToDoQuery(client)));
+      const batches = await Promise.all(
+        batchYourWorkRefs(refs).map((batch) =>
+          readEveryPage((page) =>
+            client.task.query({
+              query: { refs: batch, status: ["open", "in-progress"], ...page },
+            }),
           ),
-        );
-        const read = { tasks: batches.flat(), refs: listYourWorkRefs(signals) };
-        const latest = await queryClient.fetchQuery(signalsToDoQuery(client));
-        if (!isYourWorkReadOutdated(read, latest)) return read;
-        signals = latest;
-      }
+        ),
+      );
+      return { tasks: batches.flat().map(buildYourWorkTask), refs };
     },
     ...SHELL_READ_OPTIONS,
   });
+
+/** The key of To do's list (`signalsToDoQuery`). */
+export const TO_DO_SIGNALS_KEY = queryKeys.signals({ view: "to-do" });
 
 /** The key of the soonest `until` on Later, which each read of To do writes. See `snoozeTimerQuery`. */
 const SNOOZE_TIMER_KEY = ["snooze-timer"] as const;
@@ -717,26 +715,14 @@ const SNOOZE_TIMER_KEY = ["snooze-timer"] as const;
  * reads is missing from To do but still sets the timer, which reads To do
  * again once it has run out. Read in the other order, or apart, that snooze
  * could be missing from both, and To do would stay without it.
- *
- * Each read also checks Your work (`yourWorkQuery`): when the thread refs of
- * the signals just read differ from the ones Your work was last read for, Your
- * work is read again. It is checked here, as the snooze timer is written here,
- * because this is the one place that sees every list of signals before anyone
- * uses it: Your work needs no subscription of its own, and a signal that
- * leaves the refs alone costs no request. The check runs before this read
- * returns, and Your work reads To do first, so that read joins this one and
- * gets the new signals.
  */
 export const signalsToDoQuery = (client: HerculeClient) =>
   queryOptions({
-    queryKey: queryKeys.signals({ view: "to-do" }),
+    queryKey: TO_DO_SIGNALS_KEY,
     queryFn: async ({ client: queryClient }) => {
       const soonest = await client.signal.query({ query: { view: "later", limit: 1 } });
       queryClient.setQueryData(SNOOZE_TIMER_KEY, soonest.items[0]?.snooze?.until ?? null);
       const { items } = await client.signal.query({ query: { view: "to-do" } });
-      if (isYourWorkReadOutdated(queryClient.getQueryData(queryKeys.yourWork()), items)) {
-        invalidateWithoutCancelling(queryClient, queryKeys.yourWork());
-      }
       return items;
     },
     ...SHELL_READ_OPTIONS,

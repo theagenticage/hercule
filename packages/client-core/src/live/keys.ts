@@ -60,8 +60,8 @@ export const queryKeys = {
    * Your work as one read: the open Tasks that the thread refs of the To do
    * signals name. Live topics: `task` reads it again on every push. A change
    * to the signals reads it again only when their thread refs change, so no
-   * key maps it for `signal` here (see `signalsToDoQuery`). The key is stable:
-   * the refs read change, the key does not.
+   * key maps it for `signal` here; the app watches the refs itself. The key
+   * is stable: the refs read change, the key does not.
    */
   yourWork: (): LiveQueryKey => ["your-work"],
   projects: (): LiveQueryKey => ["projects"],

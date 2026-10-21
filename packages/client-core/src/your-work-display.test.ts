@@ -1,8 +1,9 @@
 /** Tests how Your work is described for the pane and for a signal's row. */
-import type { Signal, Task, TrackingRun, TrackingTask } from "@hercule/contract";
+import type { Signal, TrackingRun, TrackingTask } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { buildTrackingRows, type TrackingRow } from "./tracking";
 import { describeYourWork, describeYourWorkOnRow } from "./your-work-display";
+import type { YourWorkTask } from "./your-work";
 
 const AT = "2026-10-20T09:00:00.000Z";
 
@@ -19,17 +20,12 @@ const SIGNAL: Signal = {
   createdAt: AT,
 };
 
-const buildTask = (id: string, overrides: Partial<Task> = {}): Task => ({
+const buildTask = (id: string, overrides: Partial<YourWorkTask> = {}): YourWorkTask => ({
   id,
   title: `Task ${id}`,
-  description: "",
   status: "open",
-  priority: "normal",
-  labels: [],
-  provenance: [],
-  createdAt: AT,
   updatedAt: AT,
-  statusChangedAt: AT,
+  provenanceRefs: [],
   ...overrides,
 });
 
@@ -53,8 +49,9 @@ const buildRow = (
     handoffs: [{ signalId: "s", runId: latestRun.id, at: AT }],
     latestRun,
     ...(status === "running" ? { latestLiveRun: latestRun } : {}),
+    liveRunIds: status === "running" ? [latestRun.id] : [],
   };
-  return buildTrackingRows([tracked], { requests: [], signals: [], yourWork: new Map() })[0]!;
+  return buildTrackingRows([tracked], [], new Map())[0]!;
 };
 
 describe("describeYourWork", () => {
@@ -65,8 +62,7 @@ describe("describeYourWork", () => {
         taskId: "a",
         title: "Task a",
         faceSeed: "wf-1",
-        state: "failed",
-        settledPose: null,
+        pose: "failed",
         stateWord: "failed",
         waitsOnYou: true,
       },
@@ -75,7 +71,12 @@ describe("describeYourWork", () => {
 
   it("says a row that does not wait on the user does not", () => {
     const [item] = describeYourWork([buildTask("a")], [buildRow("a", "running")]);
-    expect(item).toMatchObject({ kind: "tracked", stateWord: "working", waitsOnYou: false });
+    expect(item).toMatchObject({
+      kind: "tracked",
+      pose: "working",
+      stateWord: "working",
+      waitsOnYou: false,
+    });
   });
 
   it("shows the agent as its last run left it when the row waits on a signal, not waiting", () => {
@@ -86,12 +87,12 @@ describe("describeYourWork", () => {
       waitsOn: { kind: "signal", signal: SIGNAL },
     });
     expect(describeYourWork(tasks, [waitsOnSignal("failed")])[0]).toMatchObject({
-      settledPose: "failed",
+      pose: "failed",
       stateWord: "needs you",
       waitsOnYou: true,
     });
     expect(describeYourWork(tasks, [waitsOnSignal("completed")])[0]).toMatchObject({
-      settledPose: "done",
+      pose: "done",
     });
   });
 
@@ -117,8 +118,11 @@ describe("describeYourWork", () => {
 });
 
 describe("describeYourWorkOnRow", () => {
-  it("returns null for a signal with no Your work", () => {
-    expect(describeYourWorkOnRow([], [buildRow("a", "failed")])).toBeNull();
+  it("has neither a face nor a title for a signal with no Your work", () => {
+    expect(describeYourWorkOnRow([], [buildRow("a", "failed")])).toEqual({
+      faceSeed: null,
+      firstTaskTitle: null,
+    });
   });
 
   it("leads with the face of the first tracked Task, and the title of the first Task whichever it is", () => {

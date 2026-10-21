@@ -1,6 +1,7 @@
 import type { Signal, TrackingRun, TrackingTask } from "@hercule/contract";
 import { nameSignalKind } from "./intake";
 import { isRunLive } from "./run-display";
+import type { Pose } from "./threads/pose";
 import type { WaitingRunSession } from "./waiting";
 import type { YourWork } from "./your-work";
 
@@ -50,6 +51,18 @@ export const nameTrackingState = (state: TrackingState): string => TRACKING_STAT
 export const readTrackingFaceSeed = (row: TrackingRow): string =>
   row.run.workflowId ?? row.run.workflowName;
 
+/** The pose of the face that leads a row in each state. Faces in a list never move. */
+const TRACKING_STATE_POSES: Readonly<Record<TrackingState, Pose>> = {
+  "needs-you": "waiting",
+  failed: "failed",
+  finished: "done",
+  working: "working",
+  stopped: "idle",
+};
+
+/** Returns the pose of the face that leads a row in `state`, such as `waiting` for Needs you. */
+export const decideTrackingStatePose = (state: TrackingState): Pose => TRACKING_STATE_POSES[state];
+
 /** How many rows folded Tracking shows: the ones that changed state last. */
 const TRACKING_PEEK_ROWS = 2;
 
@@ -67,32 +80,19 @@ export interface TrackingRead {
 }
 
 /** What a Needs you row waits on: an open Request of a run's session, or an open signal. */
-export type TrackingWait =
+type TrackingWait =
   | { readonly kind: "request"; readonly session: WaitingRunSession }
   | { readonly kind: "signal"; readonly signal: Signal };
-
-/**
- * What, besides its runs, can make a Task wait on the user. The app reads
- * each part from the place it already holds it.
- */
-export interface TrackingWaits {
-  /** The sessions of runs that have an open Request (see `listWaitingRunSessions`). */
-  readonly requests: ReadonlyArray<WaitingRunSession>;
-  /** The open signals on To do. */
-  readonly signals: ReadonlyArray<Signal>;
-  /** The Tasks each of `signals` is about, keyed by signal id. */
-  readonly yourWork: YourWork;
-}
 
 /** The fields every row of Tracking has. */
 interface TrackingRowBase {
   /** The Task as `task.queryTracking` returns it: its title, its handoffs and its newest runs. */
   readonly task: TrackingTask;
   /**
-   * The run the row's runs-state is read from. It is the Task's newest run.
-   * When that run did not fail, but another is still live, it is the newest
-   * live run instead, because the row is Working. A Needs you row keeps this
-   * run too, so opening the row can open the run.
+   * The run the row shows: its face, its line and its time are read from it.
+   * It is the Task's newest run. When that run did not fail, but another is
+   * still live, it is the newest live run instead, because the row is Working.
+   * A Needs you row keeps this run too.
    */
   readonly run: TrackingRun;
   /**
@@ -150,15 +150,15 @@ const readLatestHandoffAt = (task: TrackingTask): string =>
  * it (by `createdAt`, then id). Picking the oldest keeps a row's signal the
  * same when a newer signal about the Task arrives.
  */
-const indexOldestSignalByTask = (
-  signals: ReadonlyArray<Signal>,
-  yourWork: YourWork,
-): ReadonlyMap<string, Signal> => {
+const indexOldestSignalByTask = (yourWork: YourWork): ReadonlyMap<string, Signal> => {
   const oldestByTask = new Map<string, Signal>();
-  for (const signal of signals.toSorted(
-    (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
-  )) {
-    for (const task of yourWork.get(signal.id) ?? []) {
+  const entries = [...yourWork.values()].toSorted(
+    (a, b) =>
+      a.signal.createdAt.localeCompare(b.signal.createdAt) ||
+      a.signal.id.localeCompare(b.signal.id),
+  );
+  for (const { signal, tasks } of entries) {
+    for (const task of tasks) {
       if (!oldestByTask.has(task.id)) oldestByTask.set(task.id, signal);
     }
   }
@@ -172,20 +172,16 @@ const indexOldestSignalByTask = (
  * picked (a Request by when its session was last active, a signal by when it
  * was raised), so the row does not change when a newer one arrives.
  *
- * A row holds only `latestRun` and `latestLiveRun`, so a Request is found only
- * when its session belongs to one of those two runs, when they are live. A
- * session of an older live run is not found.
+ * A Request counts when its session belongs to any live run of the Task, not
+ * only the newest one.
  */
 const findTrackingWait = (
   task: TrackingTask,
   requests: ReadonlyArray<WaitingRunSession>,
   oldestSignalByTask: ReadonlyMap<string, Signal>,
 ): TrackingWait | undefined => {
-  const liveRunIds = [task.latestRun, task.latestLiveRun].flatMap((run) =>
-    run !== undefined && isRunLive(run.status) ? [run.id] : [],
-  );
   const session = requests
-    .filter((request) => liveRunIds.includes(request.runId))
+    .filter((request) => task.liveRunIds.includes(request.runId))
     .toSorted(
       (a, b) => a.activityAt.localeCompare(b.activityAt) || a.sessionId.localeCompare(b.sessionId),
     )[0];
@@ -195,15 +191,16 @@ const findTrackingWait = (
 };
 
 /**
- * Builds Tracking's rows from the Tasks `task.queryTracking` returns and what
- * waits on the user (`waits`), in Tracking's order: Needs you, Failed,
+ * Builds Tracking's rows from the Tasks `task.queryTracking` returns, the
+ * sessions of runs that have an open Request (`requests`, see
+ * `listWaitingRunSessions`) and Your work, in Tracking's order: Needs you, Failed,
  * Finished, Working, Stopped, and inside a state the oldest handoff first (see
  * `readLatestHandoffAt`).
  *
  * A Task's state, highest first:
  *
- * - Needs you: a session of its live run has an open Request, or an open
- *   signal names it as Your work. It wins over what the runs say. See
+ * - Needs you: a session of any of its live runs has an open Request, or an
+ *   open signal names it as Your work. It wins over what the runs say. See
  *   `findTrackingWait` for which wait a row shows.
  * - Failed: the newest run failed.
  * - Working: a run is live (pending or running), so the row reads the newest
@@ -215,16 +212,17 @@ const findTrackingWait = (
  */
 export const buildTrackingRows = (
   tasks: ReadonlyArray<TrackingTask>,
-  waits: TrackingWaits,
+  requests: ReadonlyArray<WaitingRunSession>,
+  yourWork: YourWork,
 ): ReadonlyArray<TrackingRow> => {
-  const oldestSignalByTask = indexOldestSignalByTask(waits.signals, waits.yourWork);
+  const oldestSignalByTask = indexOldestSignalByTask(yourWork);
   return tasks
     .map((task): TrackingRow => {
       const run =
         task.latestRun.status !== "failed" && task.latestLiveRun !== undefined
           ? task.latestLiveRun
           : task.latestRun;
-      const waitsOn = findTrackingWait(task, waits.requests, oldestSignalByTask);
+      const waitsOn = findTrackingWait(task, requests, oldestSignalByTask);
       if (waitsOn !== undefined) {
         const since =
           waitsOn.kind === "request" ? waitsOn.session.activityAt : waitsOn.signal.createdAt;
@@ -299,6 +297,18 @@ export const isTrackingAffectedByRunPush = (
       push.ids.includes(task.latestRun.id) ||
       (task.latestLiveRun !== undefined && push.ids.includes(task.latestLiveRun.id)),
   );
+
+/**
+ * Returns the pose of the face that stands for `row` in the pane: the pose of
+ * its state, except that a row waiting on a signal shows the agent as its last
+ * run left it, `failed` or `done`, because the agent itself asks nothing.
+ */
+export const decideTrackingRowPose = (row: TrackingRow): Pose => {
+  if (row.state === "needs-you" && row.waitsOn.kind === "signal") {
+    return row.run.status === "failed" ? "failed" : "done";
+  }
+  return decideTrackingStatePose(row.state);
+};
 
 /**
  * The line under a row's title. The renderer draws `workflowName` in the
@@ -383,3 +393,25 @@ export const groupTrackingRows = (rows: ReadonlyArray<TrackingRow>): ReadonlyArr
     const inState = rows.filter((row) => row.state === state);
     return inState.length === 0 ? [] : [{ state, rows: inState }];
   });
+
+/** Where opening a row of Tracking goes. */
+export type TrackingRowDestination =
+  | { readonly kind: "run"; readonly runId: string }
+  | { readonly kind: "thread"; readonly sessionId: string }
+  | { readonly kind: "signal"; readonly signalId: string };
+
+/**
+ * Decides where opening `row` goes. A Needs you row goes to what waits on the
+ * user, because that is what the user came to answer:
+ *
+ * - by a Request, the thread of the session that asks;
+ * - by a signal, that signal in Intake's To do.
+ *
+ * A row in any other state goes to the page of its run.
+ */
+export const decideTrackingRowDestination = (row: TrackingRow): TrackingRowDestination => {
+  if (row.state !== "needs-you") return { kind: "run", runId: row.run.id };
+  return row.waitsOn.kind === "request"
+    ? { kind: "thread", sessionId: row.waitsOn.session.sessionId }
+    : { kind: "signal", signalId: row.waitsOn.signal.id };
+};

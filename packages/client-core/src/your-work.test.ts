@@ -5,7 +5,10 @@ import {
   batchYourWorkRefs,
   isYourWorkReadOutdated,
   listSignalsWithThreadRef,
+  listYourWorkRefs,
   matchYourWork,
+  buildYourWorkTask,
+  type YourWorkTask,
 } from "./your-work";
 
 const buildPluginSignal = (id: string, threadRef: string): Signal => ({
@@ -26,55 +29,104 @@ const buildCoreSignal = (id: string): Signal => ({
   origin: { type: "api", actor: "user", eventIds: [], reason: "Test" },
 });
 
-/** Builds a Task whose provenance names each of `refs`, last updated at `updatedAt`. */
+/** Builds the slim Task whose provenance names each of `refs`, last updated at `updatedAt`. */
 const buildTask = (
   id: string,
   refs: ReadonlyArray<string>,
   { status = "open", updatedAt = "2026-10-10T09:00:00.000Z" }: Partial<Task> = {},
-): Task => ({
-  id,
-  title: `Task ${id}`,
-  description: "",
-  status,
-  priority: "normal",
-  labels: [],
-  provenance: refs.map((ref) => ({
-    ref,
-    at: "2026-10-10T09:00:00.000Z",
-    actor: "user",
-  })),
-  createdAt: "2026-10-10T09:00:00.000Z",
-  updatedAt,
-  statusChangedAt: "2026-10-10T09:00:00.000Z",
-});
+): YourWorkTask =>
+  buildYourWorkTask({
+    id,
+    title: `Task ${id}`,
+    description: "",
+    status,
+    priority: "normal",
+    labels: [],
+    provenance: refs.map((ref) => ({
+      ref,
+      at: "2026-10-10T09:00:00.000Z",
+      actor: "user",
+    })),
+    createdAt: "2026-10-10T09:00:00.000Z",
+    updatedAt,
+    statusChangedAt: "2026-10-10T09:00:00.000Z",
+  });
 
 const PR_1 = "github:pr:acme/shop#1";
 const PR_2 = "github:pr:acme/shop#2";
 
-describe("batchYourWorkRefs", () => {
+describe("listYourWorkRefs", () => {
   it("lists each thread ref once, sorted, and skips signals without a usable ref", () => {
-    const batches = batchYourWorkRefs([
-      buildPluginSignal("a", PR_2),
-      buildPluginSignal("b", PR_1),
-      buildPluginSignal("c", PR_2),
-      buildPluginSignal("d", "not an external ref"),
-      buildCoreSignal("e"),
-    ]);
-    expect(batches).toEqual([[PR_1, PR_2]]);
+    expect(
+      listYourWorkRefs([
+        buildPluginSignal("a", PR_2),
+        buildPluginSignal("b", PR_1),
+        buildPluginSignal("c", PR_2),
+        buildPluginSignal("d", "not an external ref"),
+        buildCoreSignal("e"),
+      ]),
+    ).toEqual([PR_1, PR_2]);
   });
+});
 
-  it("returns no batches when no signal has a thread ref", () => {
+describe("buildYourWorkTask", () => {
+  it("keeps what Your work uses, and only the provenance entries that have a ref", () => {
+    const slim = buildYourWorkTask({
+      id: "t1",
+      title: "Fix it",
+      description: "x".repeat(1000),
+      status: "in-progress",
+      priority: "normal",
+      labels: [],
+      provenance: [
+        { ref: PR_1, at: "2026-10-10T09:00:00.000Z", actor: "user" },
+        { runId: "run-1", at: "2026-10-10T09:00:00.000Z", actor: "user" },
+      ],
+      createdAt: "2026-10-10T08:00:00.000Z",
+      updatedAt: "2026-10-10T09:00:00.000Z",
+      statusChangedAt: "2026-10-10T08:00:00.000Z",
+    });
+    expect(slim).toEqual({
+      id: "t1",
+      title: "Fix it",
+      status: "in-progress",
+      updatedAt: "2026-10-10T09:00:00.000Z",
+      provenanceRefs: [PR_1],
+    });
+  });
+});
+
+describe("batchYourWorkRefs", () => {
+  it("returns no batches for no refs", () => {
     expect(batchYourWorkRefs([])).toEqual([]);
-    expect(batchYourWorkRefs([buildCoreSignal("a")])).toEqual([]);
   });
 
-  it("splits the refs into batches the refs filter accepts, whatever order the signals come in", () => {
-    const signals = Array.from({ length: MAX_FILTER_VALUES + 1 }, (_, index) =>
-      buildPluginSignal(`s${index}`, `github:pr:acme/shop#${String(index).padStart(3, "0")}`),
+  it("keeps short refs in order, and splits them at the refs filter's limit", () => {
+    const refs = Array.from(
+      { length: MAX_FILTER_VALUES + 1 },
+      (_, index) => `github:pr:acme/shop#${String(index).padStart(3, "0")}`,
     );
-    const batches = batchYourWorkRefs(signals);
-    expect(batches.map((batch) => batch.length)).toEqual([MAX_FILTER_VALUES, 1]);
-    expect(batchYourWorkRefs(signals.toReversed())).toEqual(batches);
+    expect(batchYourWorkRefs(refs).map((batch) => batch.length)).toEqual([MAX_FILTER_VALUES, 1]);
+    expect(batchYourWorkRefs(refs).flat()).toEqual(refs);
+  });
+
+  it("splits long refs so a request's query string stays small", () => {
+    const refs = Array.from(
+      { length: MAX_FILTER_VALUES },
+      (_, index) => `github:pr:acme/${String(index).padStart(3, "0")}${"x".repeat(500)}#1`,
+    );
+    const batches = batchYourWorkRefs(refs);
+    expect(batches.length).toBeGreaterThan(1);
+    expect(batches.flat()).toEqual(refs);
+    for (const batch of batches) {
+      const query = batch.map((ref) => `refs=${encodeURIComponent(ref)}`).join("&");
+      expect(query.length).toBeLessThanOrEqual(8 * 1024);
+    }
+  });
+
+  it("sends a ref that is over the limit by itself in a batch of its own", () => {
+    const huge = `github:pr:acme/${"y".repeat(9000)}#1`;
+    expect(batchYourWorkRefs([PR_1, huge, PR_2])).toEqual([[PR_1], [huge], [PR_2]]);
   });
 });
 
@@ -114,38 +166,28 @@ describe("isYourWorkReadOutdated", () => {
       ]),
     ).toBe(true);
   });
-
-  it("is false when there is no read yet, because that read will find the signals itself", () => {
-    expect(isYourWorkReadOutdated(undefined, [buildPluginSignal("a", PR_1)])).toBe(false);
-  });
 });
 
 describe("matchYourWork", () => {
-  it("gives a signal the open Tasks whose provenance names its thread ref", () => {
+  const taskIds = (yourWork: ReturnType<typeof matchYourWork>, signalId: string) =>
+    yourWork.get(signalId)?.tasks.map((task) => task.id);
+
+  it("gives a signal the Tasks whose provenance names its thread ref, with the signal", () => {
+    const signal = buildPluginSignal("a", PR_1);
     const yourWork = matchYourWork(
-      [buildPluginSignal("a", PR_1), buildPluginSignal("b", PR_2)],
+      [signal, buildPluginSignal("b", PR_2)],
       [buildTask("t1", [PR_1]), buildTask("t2", ["github:issue:acme/shop#9", PR_1])],
     );
-    expect(yourWork.get("a")?.map((task) => task.id)).toEqual(["t1", "t2"]);
+    expect(taskIds(yourWork, "a")).toEqual(["t1", "t2"]);
+    expect(yourWork.get("a")?.signal).toBe(signal);
     expect(yourWork.has("b")).toBe(false);
   });
 
   it("counts a Task once when two batches both returned it", () => {
     const task = buildTask("t1", [PR_1, PR_2]);
-    const yourWork = matchYourWork([buildPluginSignal("a", PR_1)], [task, task]);
-    expect(yourWork.get("a")).toEqual([task]);
-  });
-
-  it("never matches a done or cancelled Task, and counts in-progress as open", () => {
-    const yourWork = matchYourWork(
-      [buildPluginSignal("a", PR_1)],
-      [
-        buildTask("done", [PR_1], { status: "done" }),
-        buildTask("cancelled", [PR_1], { status: "cancelled" }),
-        buildTask("working", [PR_1], { status: "in-progress" }),
-      ],
-    );
-    expect(yourWork.get("a")?.map((task) => task.id)).toEqual(["working"]);
+    expect(taskIds(matchYourWork([buildPluginSignal("a", PR_1)], [task, task]), "a")).toEqual([
+      "t1",
+    ]);
   });
 
   it("orders a signal's Tasks by most recent update, then id", () => {
@@ -157,7 +199,7 @@ describe("matchYourWork", () => {
         buildTask("a", [PR_1], { updatedAt: "2026-10-10T10:00:00.000Z" }),
       ],
     );
-    expect(yourWork.get("a")?.map((task) => task.id)).toEqual(["new", "a", "b"]);
+    expect(taskIds(yourWork, "a")).toEqual(["new", "a", "b"]);
   });
 
   it("gives one Task to every signal on its thread, and nothing to a core signal", () => {
@@ -167,6 +209,6 @@ describe("matchYourWork", () => {
       [task],
     );
     expect([...yourWork.keys()]).toEqual(["a", "b"]);
-    expect(yourWork.get("b")).toEqual([task]);
+    expect(yourWork.get("b")?.tasks).toEqual([task]);
   });
 });

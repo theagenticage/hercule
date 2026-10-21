@@ -84,6 +84,7 @@
  * - `your-work-now`: Sentry's alert under Now, with Your work on its thread: its
  *   Task, which an agent is working on, in place of who asks. Its pane is open;
  * - `your-work-untracked`: the same pane with an open Task nobody was handed;
+ * - `your-work-both`: the same pane with both Tasks, the tracked one first;
  * - `tracking-empty`: the same as folded, with nothing handed off, so folded
  *   Tracking is its head and the line that says what it is for;
  * - `tracking-zero`: no signal on To do while two rows only work: inbox zero,
@@ -655,9 +656,10 @@ const AGENT_CHECKS = buildSignal(40, 8, {
 });
 
 /**
- * Sentry's alert on checkout with a thread Your work can be found by, and
- * `FIX_CHECKOUT_TASK` (in intake-tracking.ts) on that thread. It is urgent, so
- * it leads the list under Now with its Task in place of who asks.
+ * Sentry's alert on checkout with a thread Your work can be found by, and the
+ * Task "Fix 3-D Secure checkout for EU cards" (in `YOUR_WORK_RECORDS`) on that
+ * thread. It is urgent, so it leads the list under Now with its Task in place
+ * of who asks.
  */
 const ALERT_WITH_WORK: Signal = {
   ...ALERT,
@@ -1509,6 +1511,14 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
       ...RECORDS,
       signals: [...TO_DO, AGENT_CHECKS],
       yourWorkTasks: [UNTRACKED_WORK_TASK],
+    },
+  }),
+  buildScene("your-work-both", AGENT_CHECKS, REVIEW_URL, {
+    records: {
+      ...RECORDS,
+      ...NEEDS_YOU_RECORDS,
+      signals: [...TO_DO, AGENT_CHECKS],
+      yourWorkTasks: [...(NEEDS_YOU_RECORDS.yourWorkTasks ?? []), UNTRACKED_WORK_TASK],
     },
   }),
   buildScene("tracking-empty", REVIEW, REVIEW_URL),

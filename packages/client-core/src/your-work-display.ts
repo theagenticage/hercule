@@ -3,30 +3,25 @@
  * the face on a signal's row, and a Now row's line (spec 17 §Intake rows, §The
  * pane). `matchYourWork` finds the Tasks; this file decides what they say.
  */
-import type { Task } from "@hercule/contract";
 import {
+  decideTrackingRowPose,
   isTrackingStateWaitingOnUser,
   nameTrackingState,
   readTrackingFaceSeed,
   type TrackingRow,
-  type TrackingState,
 } from "./tracking";
+import type { Pose } from "./threads/pose";
+import type { YourWorkTask } from "./your-work";
 
 /** A Task of Your work that is a row of Tracking. */
-export interface TrackedWork {
+interface TrackedWork {
   readonly kind: "tracked";
   readonly taskId: string;
   readonly title: string;
   /** The text the face of the agent on the Task is drawn from (see `readTrackingFaceSeed`). */
   readonly faceSeed: string;
-  /** The state of the Task's row, which gives the face its pose unless `settledPose` does. */
-  readonly state: TrackingState;
-  /**
-   * The pose of the face when the row waits on a signal: the agent as its
-   * last run left it, "failed" or "done", because the agent itself asks
-   * nothing. `null` for any other row, whose face takes its state's pose.
-   */
-  readonly settledPose: "failed" | "done" | null;
+  /** The pose of the face (see `decideTrackingRowPose`). */
+  readonly pose: Pose;
   /** The state's word in lower case, such as "needs you". */
   readonly stateWord: string;
   /** Whether the row waits on the user, so the pane draws its state word in bold. */
@@ -34,7 +29,7 @@ export interface TrackedWork {
 }
 
 /** A Task of Your work that no row of Tracking follows, because nothing was handed off to an agent on it. */
-export interface UntrackedWork {
+interface UntrackedWork {
   readonly kind: "untracked";
   readonly taskId: string;
   readonly title: string;
@@ -46,16 +41,16 @@ export interface UntrackedWork {
 export type YourWorkItem = TrackedWork | UntrackedWork;
 
 /** Returns the word for the status of an open Task. */
-const nameOpenStatus = (status: Task["status"]): string =>
+const nameOpenStatus = (status: YourWorkTask["status"]): string =>
   status === "in-progress" ? "In progress" : "Open";
 
 /**
  * Describes each of `tasks`, a signal's Your work, in the order given. A Task
- * with a row in `rows` is tracked: it carries its agent's face seed and its
- * row's state. Any other Task is untracked and carries its status.
+ * with a row in `rows` is tracked: it carries its agent's face seed, its
+ * face's pose and its row's state. Any other Task is untracked and carries its status.
  */
 export const describeYourWork = (
-  tasks: ReadonlyArray<Task>,
+  tasks: ReadonlyArray<YourWorkTask>,
   rows: ReadonlyArray<TrackingRow>,
 ): ReadonlyArray<YourWorkItem> =>
   tasks.map((task): YourWorkItem => {
@@ -73,42 +68,34 @@ export const describeYourWork = (
       taskId: task.id,
       title: task.title,
       faceSeed: readTrackingFaceSeed(row),
-      state: row.state,
-      settledPose:
-        row.state === "needs-you" && row.waitsOn.kind === "signal"
-          ? row.run.status === "failed"
-            ? "failed"
-            : "done"
-          : null,
+      pose: decideTrackingRowPose(row),
       stateWord: nameTrackingState(row.state).toLowerCase(),
       waitsOnYou: isTrackingStateWaitingOnUser(row.state),
     };
   });
 
 /** What a signal's row draws of its Your work. */
-export interface YourWorkOnRow {
+interface YourWorkOnRow {
   /**
    * The text the face that leads the row is drawn from: the agent on the
    * first tracked Task of Your work. `null` when no Task is tracked, and the
    * row is led by its source's mark.
    */
   readonly faceSeed: string | null;
-  /** The title of the first Task of Your work, which a Now row leads its second line with. */
-  readonly firstTaskTitle: string;
+  /** The title of the first Task of Your work, which a Now row leads its second line with. `null` when the signal has no Your work. */
+  readonly firstTaskTitle: string | null;
 }
 
 /**
  * Describes what a signal's row draws of its Your work `tasks`: the face of
- * the first tracked Task, and the title of the first Task. Returns `null`
- * when the signal has no Your work. `rows` are Tracking's rows.
+ * the first tracked Task, and the title of the first Task. `rows` are
+ * Tracking's rows.
  */
 export const describeYourWorkOnRow = (
-  tasks: ReadonlyArray<Task>,
+  tasks: ReadonlyArray<YourWorkTask>,
   rows: ReadonlyArray<TrackingRow>,
-): YourWorkOnRow | null => {
+): YourWorkOnRow => {
   const items = describeYourWork(tasks, rows);
-  const first = items[0];
-  if (first === undefined) return null;
   const tracked = items.find((item): item is TrackedWork => item.kind === "tracked");
-  return { faceSeed: tracked?.faceSeed ?? null, firstTaskTitle: first.title };
+  return { faceSeed: tracked?.faceSeed ?? null, firstTaskTitle: items[0]?.title ?? null };
 };

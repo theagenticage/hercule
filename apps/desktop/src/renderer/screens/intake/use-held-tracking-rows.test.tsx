@@ -42,6 +42,7 @@ const buildTask = (
     handoffs: [{ signalId, runId: run.id, at: AT }],
     latestRun: run,
     ...(status === "running" ? { latestLiveRun: run } : {}),
+    liveRunIds: status === "running" ? [run.id] : [],
   };
 };
 
@@ -73,7 +74,7 @@ const renderHeldRows = async (initialTasks: ReadonlyArray<TrackingTask>) => {
       draws.count += 1;
       const read = useQuery({ ...options, select: (each) => each.tasks });
       const listed = useMemo(
-        () => buildTrackingRows(read.data!, { requests, signals: [], yourWork: new Map() }),
+        () => buildTrackingRows(read.data!, requests, new Map()),
         [read.data, requests],
       );
       return useHeldTrackingRows(listed, true);

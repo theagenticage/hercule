@@ -3,16 +3,21 @@
  * they handed to agents (spec 17 §Tracking).
  */
 import { memo, useId, useLayoutEffect, useRef, type JSX } from "react";
-import { canMarkTrackingStateDone, type TrackingState } from "@hercule/client-core";
+import {
+  canMarkTrackingStateDone,
+  decideTrackingStatePose,
+  type TrackingState,
+} from "@hercule/client-core";
 import { buildHueStyle, buildLook, Face } from "../../faces";
 import { CheckIcon } from "../../icons/check";
 import { AgeLabel } from "../age-label";
-import { TRACKING_STATE_LOOKS } from "./tracking-states";
 import "./tracking.css";
 
 /**
  * What a row of Tracking draws, as plain values: the Task's title, the state
- * of its work, and the line under the title.
+ * of its work, and the line under the title. Every field is a string, so a row
+ * given the same facts again can be told from one given changed facts by
+ * comparing its props one by one.
  */
 export interface TrackingRowFacts {
   /** The Task's id. The row is found by it, and it is what a press on the row or on Mark done passes on. */
@@ -31,8 +36,6 @@ export interface TrackingRowFacts {
   readonly lineText: string;
   /** When the row entered its state, as an ISO time. The time at the row's end shows how long ago that was. */
   readonly since: string;
-  /** The ids of the signals the Task was handed off from. A handoff's flight lands on the row of the Task that names its signal. */
-  readonly handoffSignalIds: ReadonlyArray<string>;
 }
 
 /**
@@ -41,9 +44,10 @@ export interface TrackingRowFacts {
  * colleague's hue and `lineText`. At the end is how long the row has been in
  * its state.
  *
- * - Needs you, Failed and Finished rows wait on the user, so their line and time
- *   are marigold, marigold and green, and a Finished row sits on a green wash.
- *   A Needs you row's line says what waits and has no workflow name.
+ * - Needs you, Failed and Finished rows wait on the user. A Needs you or Failed
+ *   row draws its line and time in marigold. A Finished row draws them in green
+ *   and sits on a green wash. A Needs you row's line says what waits and has no
+ *   workflow name.
  * - `selected` marks the open row. A press on the row calls `onOpen`.
  * - `onScreen` is whether the row is in view, which keeps its time current.
  * - `lastInGroup` marks the row that ends its group, which has no gap under it.
@@ -55,7 +59,9 @@ export interface TrackingRowFacts {
  *   and a Needs you row have none, because marking them done could leave a run going.
  *
  * The row is one button, with its control beside it, so a screen reader reads
- * the title, the line and the time as one name.
+ * the title, the line and the time as one name. The props are the row's facts,
+ * spread, and the row is memoized, so a list that is built again redraws only
+ * the rows whose facts changed.
  *
  * When the element that holds the focus is removed from the row while the row
  * stays, as Mark done is when a re-run turns the row Working, the row's button
@@ -64,21 +70,25 @@ export interface TrackingRowFacts {
  * holds the rows, and one that only moves keeps it.
  */
 export const TrackingRowItem = memo(function TrackingRowItem({
-  facts,
+  taskId,
+  title,
+  state,
+  faceSeed,
+  workflowName,
+  lineText,
+  since,
   selected,
   onScreen,
   lastInGroup = false,
   onOpen,
   onMarkDone,
-}: {
-  readonly facts: TrackingRowFacts;
+}: TrackingRowFacts & {
   readonly selected: boolean;
   readonly onScreen: boolean;
   readonly lastInGroup?: boolean;
   readonly onOpen: (taskId: string) => void;
   readonly onMarkDone: (taskId: string) => void;
 }): JSX.Element {
-  const { taskId, title, state, faceSeed, workflowName, lineText, since } = facts;
   const ageId = useId();
   const rowRef = useRef<HTMLDivElement>(null);
   // The element of the row that has the focus, until it loses it to something else.
@@ -139,7 +149,7 @@ export const TrackingRowItem = memo(function TrackingRowItem({
           onOpen(taskId);
         }}
       >
-        <Face look={look} pose={TRACKING_STATE_LOOKS[state].pose} size={22} />
+        <Face look={look} pose={decideTrackingStatePose(state)} size={22} />
         <span className="tr-run-text">
           <span className="tr-run-title">{title}</span>
           {/* The separator and the line are one string, so the line is shaped as one run of text, as the drawing's is. */}

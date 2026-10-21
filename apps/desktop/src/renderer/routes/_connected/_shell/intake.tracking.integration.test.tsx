@@ -206,6 +206,7 @@ const buildTrackingTask = (task: Task, run: RunSummary): TrackingTask => ({
   ...(run.status === "pending" || run.status === "running"
     ? { latestLiveRun: buildTrackingRun(run) }
     : {}),
+  liveRunIds: run.status === "pending" || run.status === "running" ? [run.id] : [],
 });
 
 /** The four rows Tracking shows by default: one in each state. */
@@ -917,32 +918,49 @@ const buildRequestingSession = (task: Task): Session => ({
   lastActivityAt: at(30),
 });
 
-describe("a row that needs you", () => {
-  const REQUESTING_SESSION = buildRequestingSession(WORKING_TASK);
+/** The Finished Task that the checks failing on its pull request make Needs you. */
+const CHECKED_TASK: Task = {
+  ...FINISHED_TASK,
+  provenance: [...FINISHED_TASK.provenance, { ref: PULL_REQUEST_REF, at: at(5), actor: "user" }],
+};
 
-  /** The Finished Task, which the checks that failed on its pull request make Needs you. */
-  const CHECKED_TASK: Task = {
-    ...FINISHED_TASK,
-    provenance: [...FINISHED_TASK.provenance, { ref: PULL_REQUEST_REF, at: at(5), actor: "user" }],
-  };
-  const openWithFailedChecks = (
-    path: string,
-    { signals = [CHECKS_SIGNAL, SECOND_SIGNAL], plugins = [GITHUB] } = {},
-  ) =>
-    openIntake(path, {
-      signals,
-      plugins,
-      extra: {
-        ...storeTracking([
-          [CHECKED_TASK, "completed"],
-          [WORKING_TASK, "running"],
-        ]),
-        "GET /api/v1/tasks": { body: { items: [CHECKED_TASK] } },
+/**
+ * Opens the app at `path` on the failed checks of the pull request: the open
+ * signal `signals` lists, and `tasks`, the open Tasks that name its thread.
+ * Tracking holds `rows`, the Finished `CHECKED_TASK` and the Working one unless
+ * the test says otherwise, and `agentSessions` are the live sessions of runs.
+ */
+const openWithChecks = (
+  path: string,
+  {
+    signals = [CHECKS_SIGNAL, SECOND_SIGNAL],
+    plugins = [GITHUB],
+    tasks = [CHECKED_TASK] as ReadonlyArray<Task>,
+    rows = [
+      [CHECKED_TASK, "completed"],
+      [WORKING_TASK, "running"],
+    ] as ReadonlyArray<readonly [Task, RunSummary["status"]]>,
+    agentSessions = [] as ReadonlyArray<Session>,
+  } = {},
+) =>
+  openIntake(path, {
+    signals,
+    plugins,
+    agentSessions,
+    extra: {
+      ...storeTracking(rows),
+      "GET /api/v1/tasks": { body: { items: tasks } },
+      [`GET /api/v1/signals/${CHECKS_SIGNAL.id}`]: {
+        body: signals.find((signal) => signal.id === CHECKS_SIGNAL.id) ?? CHECKS_SIGNAL,
       },
-    });
+    },
+  });
 
-  it("leads Tracking, says what waits, and offers no Mark done", async () => {
-    await openWithFailedChecks("/intake?tracking=true");
+describe("a row that needs you", () => {
+  it("leads Tracking, says what waits, counts in To do, offers no Mark done, and goes back when the signal is resolved", async () => {
+    const signals = [CHECKS_SIGNAL];
+    const { live } = await openWithChecks("/intake?tracking=true", { signals });
+    await live.waitForFirstPushes();
     expect(readRowIds()).toEqual([CHECKED_TASK.id, WORKING_TASK.id]);
     expect(getRowButton(CHECKED_TASK).textContent).toContain("Checks failed on payments-api #1302");
     expect(getTray().querySelector("h3")?.textContent).toBe("Needs you1");
@@ -952,10 +970,21 @@ describe("a row that needs you", () => {
         { name: "Mark done" },
       ),
     ).toBeNull();
+    // The signal itself and the row it makes Needs you.
+    expect(screen.getByRole("tab", { name: "Hercule, 2 to do" })).toBeTruthy();
+
+    signals.length = 0;
+    act(() => live.pushInvalidation("signal"));
+    await waitFor(() => {
+      expect(getRowButton(CHECKED_TASK).textContent).not.toContain("Checks failed");
+    });
+    expect(getRowButton(CHECKED_TASK).textContent).toContain("finished");
+    // The row still waits on the user as a Finished one, so only the signal drops out of the count.
+    expect(screen.getByRole("tab", { name: "Hercule, 1 to do" })).toBeTruthy();
   });
 
   it("does nothing on E, folded or opened", async () => {
-    const { calls } = await openWithFailedChecks("/intake?tracking=true");
+    const { calls } = await openWithChecks("/intake?tracking=true");
     await userEvent.keyboard("j");
     expect(readSelected()).toEqual([CHECKED_TASK.id]);
     await userEvent.keyboard("e");
@@ -965,21 +994,47 @@ describe("a row that needs you", () => {
     expect(findMarkDone(calls)).toEqual([]);
   });
 
-  it("opens the thread of the session whose Request waits", async () => {
-    const { router } = await openIntake("/intake?tracking=true", {
-      agentSessions: [REQUESTING_SESSION],
+  describe("on a session whose Request waits", () => {
+    const agentSessions = [buildRequestingSession(WORKING_TASK)];
+
+    it("says what the Request asks, counts in To do, and opens the session's thread on a press", async () => {
+      const { router } = await openWithChecks("/intake?tracking=true", {
+        signals: [],
+        rows: [[WORKING_TASK, "running"]],
+        agentSessions,
+      });
+      expect(getRowButton(WORKING_TASK).textContent).toContain(
+        "Run git push -u origin chore/stripe-sdk-14?",
+      );
+      expect(screen.getByRole("tab", { name: "Hercule, 1 to do" })).toBeTruthy();
+      await userEvent.click(getRowButton(WORKING_TASK));
+      await waitFor(() => {
+        expect(router.latestLocation.pathname).toBe(`/threads/${agentSessions[0]!.id}`);
+      });
     });
-    expect(getRowButton(WORKING_TASK).textContent).toContain(
-      "Run git push -u origin chore/stripe-sdk-14?",
-    );
-    await userEvent.click(getRowButton(WORKING_TASK));
-    await waitFor(() => {
-      expect(router.latestLocation.pathname).toBe(`/threads/${REQUESTING_SESSION.id}`);
+
+    it("turns the row Working again once the Request is answered", async () => {
+      const answering = [...agentSessions];
+      const { live } = await openWithChecks("/intake?tracking=true", {
+        signals: [],
+        rows: [[WORKING_TASK, "running"]],
+        agentSessions: answering,
+      });
+      await live.waitForFirstPushes();
+      expect(getRowButton(WORKING_TASK).textContent).toContain("Run git push");
+
+      answering[0] = { ...answering[0]!, openRequests: [] };
+      act(() => live.pushInvalidation("session", [answering[0]!.id]));
+      await waitFor(() => {
+        expect(getRowButton(WORKING_TASK).textContent).not.toContain("Run git push");
+      });
+      expect(getRowButton(WORKING_TASK).textContent).toContain("working");
+      expect(screen.queryByRole("tab", { name: /^Hercule, \d+ to do$/ })).toBeNull();
     });
   });
 
   it("opens the signal in To do with Tracking closed, from a tab the signal is not on", async () => {
-    const { router } = await openWithFailedChecks("/intake", {
+    const { router } = await openWithChecks("/intake", {
       signals: [CHECKS_SIGNAL, SLACK_SIGNAL],
       plugins: [GITHUB, SLACK],
     });
@@ -999,36 +1054,24 @@ describe("a row that needs you", () => {
   });
 });
 
+/** Waits for the first block of Your work in the open signal's pane, and returns it. */
+const findYourWorkBlock = () =>
+  waitFor(() => {
+    const found = document.querySelector<HTMLElement>(".ad-blocks--work .b-work");
+    expect(found).not.toBeNull();
+    return found!;
+  });
+
 describe("Your work on a signal", () => {
-  /** The Finished Task, named by the pull request whose checks failed. */
-  const CHECKED_TASK: Task = {
-    ...FINISHED_TASK,
-    provenance: [...FINISHED_TASK.provenance, { ref: PULL_REQUEST_REF, at: at(5), actor: "user" }],
-  };
   /** An open Task on the same pull request that no agent was handed. */
   const UNTRACKED_TASK: Task = {
     ...buildTask("01a06d02-7b00-7000-8000-0000000000f1", "Document the refund flow", 40),
     status: "open",
     provenance: [{ ref: PULL_REQUEST_REF, at: at(5), actor: "user" }],
   };
-  const openWithYourWork = (
-    path: string,
-    { signal = CHECKS_SIGNAL, tasks = [CHECKED_TASK] as ReadonlyArray<Task> } = {},
-  ) =>
-    openIntake(path, {
-      signals: [signal, SECOND_SIGNAL],
-      extra: {
-        ...storeTracking([
-          [CHECKED_TASK, "completed"],
-          [WORKING_TASK, "running"],
-        ]),
-        "GET /api/v1/tasks": { body: { items: tasks } },
-        [`GET /api/v1/signals/${signal.id}`]: { body: signal },
-      },
-    });
 
   it("leads a signal's row with the agent's face, and moves the source's mark to its second line", async () => {
-    await openWithYourWork("/intake");
+    await openWithChecks("/intake");
     const withWork = getSignalRow(CHECKS_SIGNAL);
     expect(withWork.querySelector(".ask-mark--face .cr")).not.toBeNull();
     expect(withWork.querySelector(".ask-sub .ask-src svg")).not.toBeNull();
@@ -1038,20 +1081,18 @@ describe("Your work on a signal", () => {
   });
 
   it("shows a Now row's Task in place of who asks", async () => {
-    await openWithYourWork("/intake", { signal: { ...CHECKS_SIGNAL, priority: "urgent" } });
+    await openWithChecks("/intake", {
+      signals: [{ ...CHECKS_SIGNAL, priority: "urgent" }, SECOND_SIGNAL],
+    });
     expect(getSignalRow(CHECKS_SIGNAL).querySelector(".ask-sub")?.textContent).toBe(
       `Your work: ${CHECKED_TASK.title} · checks failed · payments-api #1302`,
     );
   });
 
   it("draws a tracked Task in the pane with its state, and Show in Tracking opens Tracking on its row", async () => {
-    const { router } = await openWithYourWork("/intake");
+    const { router } = await openWithChecks("/intake");
     await userEvent.click(getSignalRow(CHECKS_SIGNAL));
-    const block = await waitFor(() => {
-      const found = document.querySelector<HTMLElement>(".ad-blocks .b-work");
-      expect(found).not.toBeNull();
-      return found!;
-    });
+    const block = await findYourWorkBlock();
     expect(block.textContent).toContain("Your work");
     expect(block.textContent).toContain(CHECKED_TASK.title);
     expect(block.textContent).toContain("In Tracking · needs you");
@@ -1065,17 +1106,79 @@ describe("Your work on a signal", () => {
   });
 
   it("draws an open Task nobody was handed with its status and no way into Tracking", async () => {
-    await openWithYourWork("/intake", { tasks: [UNTRACKED_TASK] });
+    await openWithChecks("/intake", { tasks: [UNTRACKED_TASK] });
     await userEvent.click(getSignalRow(CHECKS_SIGNAL));
-    const block = await waitFor(() => {
-      const found = document.querySelector<HTMLElement>(".ad-blocks .b-work");
-      expect(found).not.toBeNull();
-      return found!;
-    });
+    const block = await findYourWorkBlock();
     expect(block.textContent).toBe("Your workDocument the refund flowOpen");
     expect(within(block).queryByRole("button")).toBeNull();
     // Nobody was handed the Task, so the signal's row keeps its source's mark.
     expect(getSignalRow(CHECKS_SIGNAL).querySelector(".cr")).toBeNull();
+  });
+
+  /** Builds the in-progress Task `id` whose provenance names `ref`, a pull request. */
+  const buildTaskOnPullRequest = (id: string, ref: string): Task => ({
+    ...buildTask(id, `Task ${id.slice(-2)}`, 3),
+    provenance: [{ ref, at: at(3), actor: "user" }],
+  });
+  const buildChecksSignal = (id: string, ref: string): Signal => ({
+    ...CHECKS_SIGNAL,
+    id,
+    title: `Checks on ${ref}`,
+    origin: { ...CHECKS_SIGNAL.origin, threadRef: ref } as Signal["origin"],
+  });
+  const findTaskReads = (calls: ReadonlyArray<Call>) =>
+    calls.filter((call) => call.method === "GET" && call.path === "/api/v1/tasks");
+  /** Returns the thread refs a read of Tasks asked for. */
+  const readAskedRefs = (call: Call) => new URLSearchParams(call.search).getAll("refs");
+
+  it("reads the Tasks of all the signals' threads in one request, and reads again only when the threads or the Tasks change", async () => {
+    const refs = ["github:pull:payments-api#1", "github:pull:payments-api#2", "github:pull:shop#3"];
+    const tasks = refs.map((ref, index) =>
+      buildTaskOnPullRequest(`01a06d02-7b00-7000-8000-0000000000b${String(index)}`, ref),
+    );
+    const signals = refs.map((ref, index) =>
+      buildChecksSignal(`01a06d02-7a00-7000-8000-0000000000b${String(index)}`, ref),
+    );
+    const { calls, live } = await openIntake("/intake?tracking=true", {
+      signals,
+      extra: {
+        ...storeTracking(tasks.map((task) => [task, "running"] as const)),
+        "GET /api/v1/tasks": { body: { items: tasks } },
+      },
+    });
+    await live.waitForFirstPushes();
+    await waitFor(() => {
+      expect(readRowIds()).toHaveLength(3);
+    });
+
+    // One request for three Tasks, asking for the open ones on the three threads.
+    const [firstRead] = findTaskReads(calls);
+    expect(readAskedRefs(firstRead!).toSorted()).toEqual(refs);
+    expect(new URLSearchParams(firstRead!.search).getAll("status").toSorted()).toEqual([
+      "in-progress",
+      "open",
+    ]);
+
+    // A signal on no thread changes To do and not the threads: no read of Tasks.
+    const before = findTaskReads(calls).length;
+    signals.push(SLACK_SIGNAL);
+    act(() => live.pushInvalidation("signal"));
+    // Three signals and the three rows they make Needs you, and the new signal.
+    await screen.findByRole("tab", { name: "Hercule, 7 to do" });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(findTaskReads(calls)).toHaveLength(before);
+
+    // A signal on a new thread is read once, and a push on a Task reads once more.
+    signals.push(buildChecksSignal("01a06d02-7a00-7000-8000-0000000000b9", "github:pull:shop#9"));
+    act(() => live.pushInvalidation("signal"));
+    await waitFor(() => {
+      expect(findTaskReads(calls)).toHaveLength(before + 1);
+    });
+    expect(readAskedRefs(findTaskReads(calls).at(-1)!)).toContain("github:pull:shop#9");
+    act(() => live.pushInvalidation("task", [tasks[0]!.id]));
+    await waitFor(() => {
+      expect(findTaskReads(calls)).toHaveLength(before + 2);
+    });
   });
 });
 
@@ -1628,116 +1731,5 @@ describe("a face for a run of a workflow sent with the request", () => {
       }),
     });
     expect(getRowButton(FINISHED_TASK).textContent).toContain("Sent finished");
-  });
-});
-
-describe("Your work and Needs you", () => {
-  /** Builds the in-progress Task `id` whose provenance names `ref`, a pull request. */
-  const buildTaskOnPullRequest = (id: string, ref: string): Task => ({
-    ...buildTask(id, `Task ${id.slice(-2)}`, 3),
-    provenance: [{ ref, at: at(3), actor: "user" }],
-  });
-  const buildChecksSignal = (id: string, ref: string): Signal => ({
-    ...CHECKS_SIGNAL,
-    id,
-    title: `Checks on ${ref}`,
-    origin: { ...CHECKS_SIGNAL.origin, threadRef: ref } as Signal["origin"],
-  });
-  const findTaskReads = (calls: ReadonlyArray<Call>) =>
-    calls.filter((call) => call.method === "GET" && call.path === "/api/v1/tasks");
-  /** Returns the thread refs a read of Tasks asked for. */
-  const readAskedRefs = (call: Call) => new URLSearchParams(call.search).getAll("refs");
-
-  it("turns a Working row Needs you while an open signal is about its Task, and counts it", async () => {
-    const task = buildTaskOnPullRequest("01a06d02-7b00-7000-8000-0000000000a1", PULL_REQUEST_REF);
-    const signals = [CHECKS_SIGNAL];
-    const { live } = await openIntake("/intake?tracking=true", {
-      signals,
-      extra: {
-        ...storeTracking([[task, "running"]]),
-        "GET /api/v1/tasks": { body: { items: [task] } },
-      },
-    });
-    await live.waitForFirstPushes();
-    expect(getRowButton(task).textContent).toContain("Checks failed on payments-api #1302");
-    expect(screen.getByRole("tab", { name: "Hercule, 2 to do" })).toBeTruthy();
-
-    // The signal is resolved: the row works again, and nothing waits any more.
-    signals.length = 0;
-    act(() => live.pushInvalidation("signal"));
-    await waitFor(() => {
-      expect(getRowButton(task).textContent).not.toContain("Checks failed");
-    });
-    expect(getRowButton(task).textContent).toContain("working");
-  });
-
-  it("turns a row Needs you while a session of its run has an open Request, and Working again once it is answered", async () => {
-    const agentSessions = [buildRequestingSession(WORKING_TASK)];
-    const { live } = await openIntake("/intake?tracking=true", {
-      signals: [],
-      agentSessions,
-      extra: storeTracking([[WORKING_TASK, "running"]]),
-    });
-    await live.waitForFirstPushes();
-    expect(getRowButton(WORKING_TASK).textContent).toContain("Run git push");
-    expect(screen.getByRole("tab", { name: "Hercule, 1 to do" })).toBeTruthy();
-
-    agentSessions[0] = { ...agentSessions[0]!, openRequests: [] };
-    act(() => live.pushInvalidation("session", [agentSessions[0]!.id]));
-    await waitFor(() => {
-      expect(getRowButton(WORKING_TASK).textContent).not.toContain("Run git push");
-    });
-    expect(getRowButton(WORKING_TASK).textContent).toContain("working");
-    expect(screen.queryByRole("tab", { name: /^Hercule, \d+ to do$/ })).toBeNull();
-  });
-
-  it("reads the Tasks of all the signals' threads in one request, and reads again only when the threads or the Tasks change", async () => {
-    const refs = ["github:pull:payments-api#1", "github:pull:payments-api#2", "github:pull:shop#3"];
-    const tasks = refs.map((ref, index) =>
-      buildTaskOnPullRequest(`01a06d02-7b00-7000-8000-0000000000b${String(index)}`, ref),
-    );
-    const signals = refs.map((ref, index) =>
-      buildChecksSignal(`01a06d02-7a00-7000-8000-0000000000b${String(index)}`, ref),
-    );
-    const { calls, live } = await openIntake("/intake?tracking=true", {
-      signals,
-      extra: {
-        ...storeTracking(tasks.map((task) => [task, "running"] as const)),
-        "GET /api/v1/tasks": { body: { items: tasks } },
-      },
-    });
-    await live.waitForFirstPushes();
-    await waitFor(() => {
-      expect(readRowIds()).toHaveLength(3);
-    });
-
-    // One request for three Tasks, asking for the open ones on the three threads.
-    const [firstRead] = findTaskReads(calls);
-    expect(readAskedRefs(firstRead!).toSorted()).toEqual(refs);
-    expect(new URLSearchParams(firstRead!.search).getAll("status").toSorted()).toEqual([
-      "in-progress",
-      "open",
-    ]);
-
-    // A signal on no thread changes To do and not the threads: no read of Tasks.
-    const before = findTaskReads(calls).length;
-    signals.push(SLACK_SIGNAL);
-    act(() => live.pushInvalidation("signal"));
-    // Three signals and the three rows they make Needs you, and the new signal.
-    await screen.findByRole("tab", { name: "Hercule, 7 to do" });
-    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
-    expect(findTaskReads(calls)).toHaveLength(before);
-
-    // A signal on a new thread is read once, and a push on a Task reads once more.
-    signals.push(buildChecksSignal("01a06d02-7a00-7000-8000-0000000000b9", "github:pull:shop#9"));
-    act(() => live.pushInvalidation("signal"));
-    await waitFor(() => {
-      expect(findTaskReads(calls)).toHaveLength(before + 1);
-    });
-    expect(readAskedRefs(findTaskReads(calls).at(-1)!)).toContain("github:pull:shop#9");
-    act(() => live.pushInvalidation("task", [tasks[0]!.id]));
-    await waitFor(() => {
-      expect(findTaskReads(calls)).toHaveLength(before + 2);
-    });
   });
 });

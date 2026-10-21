@@ -23,6 +23,7 @@
  */
 import type { Session, Task, TrackingRun, TrackingTask } from "@hercule/contract";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
+import type { SidebarRecords } from "./shell-page";
 
 /** The ids that give a workflow the face the book casts for it, where its name would hash to another. */
 const WORKFLOW_SEEDS: Readonly<Record<string, string>> = { "Fix bug": "Fix bug 160" };
@@ -62,6 +63,8 @@ const buildTask = (
   ...(latestRun.status === "pending" || latestRun.status === "running"
     ? { latestLiveRun: latestRun }
     : {}),
+  liveRunIds:
+    latestRun.status === "pending" || latestRun.status === "running" ? [latestRun.id] : [],
 });
 
 const BACKUP = buildTask(
@@ -137,42 +140,6 @@ const SDK = buildTask(
   buildRun("run-t-sdk", "Implement", 19, { status: "running", startedAt: minutesAgo(19) }),
 );
 
-/**
- * The Task Refunds for partial captures as `task.query` returns it, with the
- * pull request's ref in its provenance. A signal whose thread is that pull
- * request is about this Task (Your work).
- */
-const REFUNDS_TASK: Task = {
-  id: REFUNDS.taskId,
-  title: REFUNDS.title,
-  description: "",
-  status: "in-progress",
-  priority: "normal",
-  labels: [],
-  provenance: [
-    {
-      signalId: REFUNDS.handoffs[0]!.signalId,
-      runId: REFUNDS.latestRun.id,
-      ref: REFUNDS_PULL_REQUEST_REF,
-      at: minutesAgo(70),
-      actor: "user",
-    },
-  ],
-  createdAt: minutesAgo(70),
-  updatedAt: minutesAgo(49),
-  statusChangedAt: minutesAgo(70),
-};
-
-/** The Sentry issue behind the alert on checkout, as a signal's thread names it. */
-export const FIX_CHECKOUT_REF = "sentry:issue:WEBSHOP-3DS";
-
-const FIX_CHECKOUT = buildTask(
-  "t-3ds",
-  "Fix 3-D Secure checkout for EU cards",
-  40,
-  buildRun("run-t-3ds", "Fix bug", 40, { status: "running", startedAt: minutesAgo(39) }),
-);
-
 /** Builds an open Task as `task.query` returns it, with the thread ref `ref` in its provenance. */
 const buildWorkTask = (
   id: string,
@@ -197,11 +164,35 @@ const buildWorkTask = (
 });
 
 /**
+ * The Task Refunds for partial captures as `task.query` returns it, with the
+ * pull request's ref in its provenance. A signal whose thread is that pull
+ * request is about this Task (Your work).
+ */
+const REFUNDS_TASK: Task = buildWorkTask(
+  REFUNDS.taskId,
+  REFUNDS.title,
+  "in-progress",
+  REFUNDS_PULL_REQUEST_REF,
+  REFUNDS.handoffs[0]!.signalId,
+  REFUNDS.latestRun.id,
+);
+
+/** The Sentry issue behind the alert on checkout, as a signal's thread names it. */
+export const FIX_CHECKOUT_REF = "sentry:issue:WEBSHOP-3DS";
+
+const FIX_CHECKOUT = buildTask(
+  "t-3ds",
+  "Fix 3-D Secure checkout for EU cards",
+  40,
+  buildRun("run-t-3ds", "Fix bug", 40, { status: "running", startedAt: minutesAgo(39) }),
+);
+
+/**
  * What a scene with Your work on a Now signal holds: the Task that fixes the
  * alert on checkout, which an agent works on, besides the Tracking rows of
  * the drawing.
  */
-export const YOUR_WORK_RECORDS = {
+export const YOUR_WORK_RECORDS: Partial<SidebarRecords> = {
   tracking: [FIX_CHECKOUT, ...TRACKING_RECORDS],
   yourWorkTasks: [
     buildWorkTask(
@@ -254,7 +245,7 @@ const SDK_SESSION: Session = {
  * - `agentSessions`: the session whose Request makes Upgrade the Stripe SDK Needs you;
  * - `yourWorkTasks`: the Task the failed checks are about, which makes Refunds for partial captures Needs you.
  */
-export const NEEDS_YOU_RECORDS = {
+export const NEEDS_YOU_RECORDS: Partial<SidebarRecords> = {
   tracking: [REFUNDS, SDK, ...TRACKING_RECORDS],
   agentSessions: [SDK_SESSION],
   yourWorkTasks: [REFUNDS_TASK],

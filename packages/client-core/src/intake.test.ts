@@ -35,7 +35,7 @@ import {
   describeSignalOutcomeMoment,
   describeSignalProvenance,
   describeSignalRow,
-  describeYourWorkRowLine,
+  describeSignalKindAndPlace,
   findReplyAnswer,
   findSuggestedAnswer,
   fitIntakeListWidth,
@@ -410,6 +410,16 @@ describe("describeSignalRow", () => {
     ).toBe("You · proposal");
   });
 
+  it("joins nothing in place of an asker a plugin signal does not have", () => {
+    expect(
+      describeSignalRow(
+        buildSignal("a", { kind: "github/checks-failed", place: "payments-api #1302" }),
+        PLUGINS,
+        RAISERS,
+      ),
+    ).toBe("checks failed · payments-api #1302");
+  });
+
   it("keeps an acronym kind in capitals", () => {
     expect(
       describeSignalRow(buildSignal("a", { kind: "fyi", origin: fromUser() }), PLUGINS, RAISERS),
@@ -427,27 +437,19 @@ describe("describeSignalRow", () => {
   });
 });
 
-describe("describeYourWorkRowLine", () => {
-  it("leads with the Task, then the kind in lower case and where, and leaves out who asks", () => {
+describe("describeSignalKindAndPlace", () => {
+  it("joins the kind in lower case and where, and leaves out who asks", () => {
     expect(
-      describeYourWorkRowLine(
-        buildSignal("a", {
-          kind: "sentry/alert-for-you",
-          asker: "Sentry",
-          place: "webshop-prod",
-        }),
-        "Fix 3-D Secure checkout",
+      describeSignalKindAndPlace(
+        buildSignal("a", { kind: "sentry/alert-for-you", asker: "Sentry", place: "webshop-prod" }),
       ),
-    ).toEqual({
-      taskTitle: "Fix 3-D Secure checkout",
-      rest: " · alert for you · webshop-prod",
-    });
+    ).toBe("alert for you · webshop-prod");
   });
 
-  it("leaves the kind of an unsure signal out, and has nothing after the Task with no place", () => {
+  it("leaves the kind of an unsure signal out, and is empty with no place", () => {
     expect(
-      describeYourWorkRowLine(buildSignal("a", { kind: "unsure", origin: fromUser() }), "Task"),
-    ).toEqual({ taskTitle: "Task", rest: "" });
+      describeSignalKindAndPlace(buildSignal("a", { kind: "unsure", origin: fromUser() })),
+    ).toBe("");
   });
 });
 

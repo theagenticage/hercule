@@ -146,12 +146,14 @@ export function IntakeScreen({
   readonly onPluginChange: (pluginId: string | null) => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const { tabs, plugins } = useIntakeTabs(pluginId);
   // Tracking as last read gives what follows each read at once: the counts of
   // the Hercule segment, Intake's row and the tabs, and inbox zero. The rows
   // Tracking draws, its head's counts and the keys' walk use the held rows,
   // which lag the read while the pointer is on the list column.
   const readTrackingRows = useTrackingRows();
+  // Rows of Tracking that wait on the user keep To do from being at zero.
+  const waitingTrackingRows = countWaitingTrackingRows(readTrackingRows);
+  const { tabs, plugins } = useIntakeTabs(pluginId, waitingTrackingRows);
   const [pointerOverColumn, setPointerOverColumn] = useState(false);
   const heldTracking = useHeldTrackingRows(readTrackingRows, pointerOverColumn);
   const trackingRows = heldTracking.shown;
@@ -550,8 +552,6 @@ export function IntakeScreen({
   };
   // Inbox zero takes the place of the empty To do list on the All tab, and
   // shows the cleared count itself, so the foot goes with the rows.
-  // Rows of Tracking that wait on the user keep To do from being at zero.
-  const waitingTrackingRows = countWaitingTrackingRows(readTrackingRows);
   const inboxZero =
     view === "to-do" &&
     pluginId === null &&

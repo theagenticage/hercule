@@ -8,6 +8,15 @@ import { userEvent } from "@testing-library/user-event";
 import type { TrackingState } from "@hercule/client-core";
 import { TrackingRowItem, type TrackingRowFacts } from "./tracking-row";
 
+// The row draws its time through `AgeLabel`, which draws once each time the row does.
+const { ageLabelDrawn } = vi.hoisted(() => ({ ageLabelDrawn: vi.fn() }));
+vi.mock("../age-label", () => ({
+  AgeLabel: () => {
+    ageLabelDrawn();
+    return null;
+  },
+}));
+
 /** Builds the facts of a row of Tracking in `state`. */
 const buildFacts = (state: TrackingState): TrackingRowFacts => ({
   taskId: "task-1",
@@ -17,7 +26,6 @@ const buildFacts = (state: TrackingState): TrackingRowFacts => ({
   workflowName: "Review PR",
   lineText: "finished",
   since: "2026-09-29T09:20:00.000Z",
-  handoffSignalIds: [],
 });
 
 const renderRow = (state: TrackingState) => {
@@ -25,7 +33,7 @@ const renderRow = (state: TrackingState) => {
   const onMarkDone = vi.fn();
   render(
     <TrackingRowItem
-      facts={buildFacts(state)}
+      {...buildFacts(state)}
       selected={false}
       onScreen
       onOpen={onOpen}
@@ -52,5 +60,18 @@ describe("TrackingRowItem", () => {
     await userEvent.click(screen.getByRole("button", { name: "Mark done" }));
     expect(onOpen).toHaveBeenCalledExactlyOnceWith("task-1");
     expect(onMarkDone).toHaveBeenCalledExactlyOnceWith("task-1");
+  });
+
+  it("is not drawn again when its list is built again with the same facts", () => {
+    const props = { selected: false, onScreen: true, onOpen: vi.fn(), onMarkDone: vi.fn() };
+    const drawRow = (title: string) => (
+      <TrackingRowItem {...buildFacts("finished")} title={title} {...props} />
+    );
+    ageLabelDrawn.mockClear();
+    const { rerender } = render(drawRow("Rate-limit the public API"));
+    rerender(drawRow("Rate-limit the public API"));
+    expect(ageLabelDrawn).toHaveBeenCalledTimes(1);
+    rerender(drawRow("Rate-limit the admin API"));
+    expect(ageLabelDrawn).toHaveBeenCalledTimes(2);
   });
 });
