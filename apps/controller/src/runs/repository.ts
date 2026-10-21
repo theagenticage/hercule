@@ -961,11 +961,12 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the session of each run's newest step record that has one, by
-     * run id. Only agent steps have sessions, so it is the session of the
-     * run's last agent step. A run with none is left out. One statement,
-     * whatever the number of runs, and one probe of the step records of each
-     * run on their primary key.
+     * Returns the session of each run's step record that started last and has
+     * a session, by run id. Only agent steps have sessions, so it is the
+     * session of the run's last agent step to start. A run with none is left
+     * out. One statement, whatever the number of runs, and one probe of
+     * `run_steps_session` for each run, which holds the session itself, so no
+     * step record is opened and no output is read.
      */
     listLastSessions: (
       runIds: ReadonlyArray<string>,
@@ -977,7 +978,7 @@ const make = Effect.gen(function* () {
               SELECT runs.id AS run_id,
                      (SELECT s.session_id FROM run_steps s
                       WHERE s.run_id = runs.id AND s.session_id IS NOT NULL
-                      ORDER BY s.rowid DESC LIMIT 1) AS session_id
+                      ORDER BY s.started_at DESC LIMIT 1) AS session_id
               FROM runs WHERE runs.id IN ${sql.in(runIds.map((id) => uuidFromString(id)))}`,
             (rows) =>
               new Map(

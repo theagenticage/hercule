@@ -1059,12 +1059,14 @@ describe("the query plans of the Tracking pane's run reads", () => {
     expect(plan).toEqual(["SEARCH runs USING INDEX runs_task_id (task_id=?)"]);
   });
 
-  it("probes each run by key and its step records on the primary key of run_steps, never scanning either table", async () => {
+  it("probes each run by key and its last session on run_steps_session alone, with no sort and no step record opened", async () => {
     const plan = await explainStatement("s.session_id", (runs) => runs.listLastSessions([RUN]));
 
     expect(plan).toContain("SEARCH runs USING COVERING INDEX sqlite_autoindex_runs_1 (id=?)");
-    expect(plan).toContain("SEARCH s USING INDEX sqlite_autoindex_run_steps_1 (run_id=?)");
+    // Covering: the index holds `session_id`, so the table is never read, and with it no output.
+    expect(plan).toContain("SEARCH s USING COVERING INDEX run_steps_session (run_id=?)");
     expect(plan.some((step) => step.startsWith("SCAN"))).toBe(false);
+    expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
   });
 
   it("reads one run by key, walks its plan's steps and probes each step's records by key", async () => {

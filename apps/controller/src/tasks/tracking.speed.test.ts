@@ -248,6 +248,16 @@ const PANE_RUNS = 1000;
 /** The steps of the plan of each of those runs. */
 const PANE_PLAN_STEPS = 50;
 
+/**
+ * The runs before the newest that `seedPaneHistory` gives loop iterations, and
+ * how many extra iterations of its agent step each one has. Each iteration
+ * has a session and a `LOOP_OUTPUT_CHARACTERS` characters output, so a read
+ * that walks past the outputs of the pane's runs shows up here.
+ */
+const LOOP_RUNS = MAX_TRACKING_DETAIL_RUNS - 1;
+const LOOP_ITERATIONS = 20;
+const LOOP_OUTPUT_CHARACTERS = 50_000;
+
 /** The most time the pane's read may take, in milliseconds. */
 const PANE_CEILING_MS = 50;
 
@@ -259,7 +269,9 @@ const PANE_REPLY_CEILING_BYTES = 20_000;
  * of `PANE_PLAN_STEPS` steps and an agent step that completed with a session
  * and a small output, then an action step that finished later. The newest
  * run's agent step has a 1 MB text output. They are newer than the runs
- * `seed` wrote. Written in SQL, in one transaction.
+ * `seed` wrote. The `LOOP_RUNS` runs before the newest also ran their agent
+ * step `LOOP_ITERATIONS` more times, as a loop does, each with a session and a
+ * large output. Written in SQL, in one transaction.
  */
 const seedPaneHistory = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -297,6 +309,17 @@ const seedPaneHistory = Effect.gen(function* () {
     SELECT unhex(printf('%08x000070008001%012x', 1, k)), 's2', 1, 'completed', '{}',
            '2026-10-21T00:00:01.000Z', '2026-10-21T00:00:01.000Z', '2026-10-21T00:00:02.000Z'
     FROM m`;
+  yield* sql`
+    WITH RECURSIVE m(k) AS (SELECT ${100 + PANE_RUNS - LOOP_RUNS} UNION ALL SELECT k + 1 FROM m
+                            WHERE k < ${100 + PANE_RUNS - 1}),
+         it(n) AS (SELECT 2 UNION ALL SELECT n + 1 FROM it WHERE n < ${LOOP_ITERATIONS + 1})
+    INSERT INTO run_steps (run_id, step_id, iteration, status, output, session_id, created_at,
+                           started_at, finished_at)
+    SELECT unhex(printf('%08x000070008001%012x', 1, k)), 's1', n, 'completed',
+           json_object('text', replace(hex(zeroblob(${LOOP_OUTPUT_CHARACTERS / 5})), '00', 'word ')),
+           randomblob(16), '2026-10-21T00:00:00.000Z', printf('2026-10-21T00:00:%02d.000Z', n),
+           printf('2026-10-21T00:00:%02d.500Z', n)
+    FROM m CROSS JOIN it`;
 }).pipe(inTransaction);
 
 /** The output keys `seedLongKeyOutput` writes, and the length of each key. */
