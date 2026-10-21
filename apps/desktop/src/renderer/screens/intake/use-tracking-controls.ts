@@ -5,7 +5,7 @@
  */
 import { useState, type KeyboardEvent, type RefObject } from "react";
 import {
-  canMarkTrackingStateDone,
+  canMarkTrackingRowDone,
   decideTrackingRowDestination,
   type TrackingRow,
   type TrackingRowDestination,
@@ -132,7 +132,7 @@ export const useTrackingControls = ({
 
   const markTaskDone = (taskId: string): void => {
     const row = readRows.find((each) => each.task.taskId === taskId);
-    if (row === undefined || !canMarkTrackingStateDone(row.state)) return;
+    if (row === undefined || !canMarkTrackingRowDone(row)) return;
     const next = pickSelectionAfterMove(shownIds, taskId, [taskId]);
     heldTracking.registerMarkedDone(taskId);
     moveFocusOffRow(taskId);

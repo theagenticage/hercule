@@ -17,23 +17,24 @@ vi.mock("../age-label", () => ({
   },
 }));
 
-/** Builds the facts of a row of Tracking in `state`. */
-const buildFacts = (state: TrackingState): TrackingRowFacts => ({
+/** Builds the facts of a row of Tracking in `state`, with a Mark done control when `canMarkDone`. */
+const buildFacts = (state: TrackingState, canMarkDone: boolean): TrackingRowFacts => ({
   taskId: "task-1",
   title: "Rate-limit the public API",
   state,
+  canMarkDone,
   faceSeed: "workflow-1",
   workflowName: "Review PR",
   lineText: "finished",
   since: "2026-09-29T09:20:00.000Z",
 });
 
-const renderRow = (state: TrackingState) => {
+const renderRow = (state: TrackingState, canMarkDone: boolean) => {
   const onOpen = vi.fn();
   const onMarkDone = vi.fn();
   render(
     <TrackingRowItem
-      {...buildFacts(state)}
+      {...buildFacts(state, canMarkDone)}
       selected={false}
       onScreen
       onOpen={onOpen}
@@ -48,14 +49,19 @@ describe("TrackingRowItem", () => {
     ["failed", true],
     ["finished", true],
     ["stopped", true],
+    ["needs-you", true],
     ["working", false],
-  ])("%s: Mark done is drawn: %s", (state, drawn) => {
-    renderRow(state);
-    expect(screen.queryByRole("button", { name: "Mark done" }) !== null).toBe(drawn);
-  });
+    ["needs-you", false],
+  ])(
+    "%s with canMarkDone %s: Mark done is drawn only when it can be marked done",
+    (state, canMarkDone) => {
+      renderRow(state, canMarkDone);
+      expect(screen.queryByRole("button", { name: "Mark done" }) !== null).toBe(canMarkDone);
+    },
+  );
 
   it("hands the Task's id back on a press on the row and on Mark done", async () => {
-    const { onOpen, onMarkDone } = renderRow("finished");
+    const { onOpen, onMarkDone } = renderRow("finished", true);
     await userEvent.click(screen.getByRole("button", { name: /Rate-limit the public API/ }));
     await userEvent.click(screen.getByRole("button", { name: "Mark done" }));
     expect(onOpen).toHaveBeenCalledExactlyOnceWith("task-1");
@@ -65,7 +71,7 @@ describe("TrackingRowItem", () => {
   it("is not drawn again when its list is built again with the same facts", () => {
     const props = { selected: false, onScreen: true, onOpen: vi.fn(), onMarkDone: vi.fn() };
     const drawRow = (title: string) => (
-      <TrackingRowItem {...buildFacts("finished")} title={title} {...props} />
+      <TrackingRowItem {...buildFacts("finished", true)} title={title} {...props} />
     );
     ageLabelDrawn.mockClear();
     const { rerender } = render(drawRow("Rate-limit the public API"));

@@ -263,13 +263,17 @@ export const countWaitingTrackingRows = (rows: ReadonlyArray<TrackingRow>): numb
   rows.filter((row) => isTrackingStateWaitingOnUser(row.state)).length;
 
 /**
- * Checks whether a row in `state` can be marked done: the work has stopped, so
- * ticking it off leaves no run going. A Working row cannot, because marking it
- * done would leave its run running. A Needs you row cannot either: it may be
- * waiting on a Request of a live run.
+ * Checks whether `row` can be marked done: no run of its Task is live, and the
+ * row does not wait on a Request. Marking a Task done while a run still goes
+ * would leave that run working on finished work, and a Request blocks its agent
+ * until it is answered. So Finished, Failed and Stopped rows can be marked
+ * done, and so can a Needs you row that waits on a signal while no run is live
+ * (its agent finished, and the signal is what remains). A Working row cannot,
+ * and neither can a row that waits on a Request, because its run is live.
  */
-export const canMarkTrackingStateDone = (state: TrackingState): boolean =>
-  state !== "working" && state !== "needs-you";
+export const canMarkTrackingRowDone = (row: TrackingRow): boolean =>
+  row.task.liveRunIds.length === 0 &&
+  !(row.state === "needs-you" && row.waitsOn.kind === "request");
 
 /**
  * Checks whether a push on the `run` topic can change the `task.queryTracking`

@@ -984,19 +984,20 @@ const openWithChecks = (
   });
 
 describe("a row that needs you", () => {
-  it("leads Tracking, says what waits, counts in To do, offers no Mark done, and goes back when the signal is resolved", async () => {
+  it("leads Tracking, says what waits, counts in To do, offers Mark done while no run is live, and goes back when the signal is resolved", async () => {
     const signals = [CHECKS_SIGNAL];
     const { live } = await openWithChecks("/intake?tracking=true", { signals });
     await live.waitForFirstPushes();
     expect(readRowIds()).toEqual([CHECKED_TASK.id, WORKING_TASK.id]);
     expect(getRowButton(CHECKED_TASK).textContent).toContain("Checks failed on payments-api #1302");
     expect(getTray().querySelector("h3")?.textContent).toBe("Needs you1");
+    // Its agent finished, so the row can be marked done even though the signal waits.
     expect(
       within(getRowButton(CHECKED_TASK).closest<HTMLElement>(".tr-run-item")!).queryByRole(
         "button",
         { name: "Mark done" },
       ),
-    ).toBeNull();
+    ).not.toBeNull();
     // The signal itself and the row it makes Needs you.
     expect(screen.getByRole("tab", { name: "Hercule, 2 to do" })).toBeTruthy();
 
@@ -1010,15 +1011,16 @@ describe("a row that needs you", () => {
     expect(screen.getByRole("tab", { name: "Hercule, 1 to do" })).toBeTruthy();
   });
 
-  it("does nothing on E, folded or opened", async () => {
+  it("marks the row done on E when no run of its Task is live", async () => {
     const { calls } = await openWithChecks("/intake?tracking=true");
     await userEvent.keyboard("j");
     expect(readSelected()).toEqual([CHECKED_TASK.id]);
     await userEvent.keyboard("e");
-    await userEvent.keyboard("{Escape}{Escape}");
-    getRowButton(CHECKED_TASK).focus();
-    await userEvent.keyboard("e");
-    expect(findMarkDone(calls)).toEqual([]);
+    await waitFor(() => {
+      expect(findMarkDone(calls).map((call) => [call.path, call.body])).toEqual([
+        [`/api/v1/tasks/${CHECKED_TASK.id}`, { status: "done" }],
+      ]);
+    });
   });
 
   describe("on a session whose Request waits", () => {
@@ -1038,6 +1040,21 @@ describe("a row that needs you", () => {
       await waitFor(() => {
         expect(router.latestLocation.pathname).toBe(`/threads/${agentSessions[0]!.id}`);
       });
+    });
+
+    it("does nothing on E, because the run of the Request is live", async () => {
+      const { calls } = await openWithChecks("/intake?tracking=true", {
+        signals: [],
+        rows: [[WORKING_TASK, "running"]],
+        agentSessions,
+      });
+      await userEvent.keyboard("j");
+      expect(readSelected()).toEqual([WORKING_TASK.id]);
+      await userEvent.keyboard("e");
+      await userEvent.keyboard("{Escape}{Escape}");
+      getRowButton(WORKING_TASK).focus();
+      await userEvent.keyboard("e");
+      expect(findMarkDone(calls)).toEqual([]);
     });
 
     it("turns the row Working again once the Request is answered", async () => {

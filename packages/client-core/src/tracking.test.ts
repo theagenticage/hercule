@@ -2,7 +2,7 @@ import type { Signal, TrackingRun, TrackingTask } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   buildTrackingRows,
-  canMarkTrackingStateDone,
+  canMarkTrackingRowDone,
   countWaitingTrackingRows,
   decideTrackingRowDestination,
   describeTrackingLine,
@@ -328,14 +328,33 @@ describe("a Task that needs you", () => {
     ]);
   });
 
-  it("counts toward To do but cannot be marked done", () => {
+  it("counts toward To do, and cannot be marked done while it waits on a Request", () => {
     const rows = buildTrackingRows(
       [working, buildTask("b", buildRun("r2", 0, "running"))],
       [],
       buildYourWork([[buildSignal("sig", 1), ["a"]]]),
     );
     expect(countWaitingTrackingRows(rows)).toBe(1);
-    expect(canMarkTrackingStateDone("needs-you")).toBe(false);
+    const asked = buildTrackingRows(
+      [working],
+      [buildWaitingSession("s1", "r1", 7)],
+      NO_YOUR_WORK,
+    )[0]!;
+    expect(canMarkTrackingRowDone(asked)).toBe(false);
+  });
+
+  it("can be marked done while it waits on a signal and no run is live, and not while one is", () => {
+    const yourWork = buildYourWork([[buildSignal("sig", 1), ["a", "b"]]]);
+    const [finished, going] = buildTrackingRows(
+      [
+        buildTask("a", buildRun("r1", 0, "completed")),
+        buildTask("b", buildRun("r2", 0, "running")),
+      ],
+      [],
+      yourWork,
+    );
+    expect(canMarkTrackingRowDone(finished!)).toBe(true);
+    expect(canMarkTrackingRowDone(going!)).toBe(false);
   });
 });
 
@@ -375,10 +394,19 @@ describe("waiting on the user", () => {
   });
 
   it("lets Finished, Failed and Stopped rows be marked done, and never a Working one", () => {
-    expect(canMarkTrackingStateDone("finished")).toBe(true);
-    expect(canMarkTrackingStateDone("failed")).toBe(true);
-    expect(canMarkTrackingStateDone("stopped")).toBe(true);
-    expect(canMarkTrackingStateDone("working")).toBe(false);
+    const canMark = (run: TrackingRun) =>
+      canMarkTrackingRowDone(buildTrackingRows([buildTask("a", run)], [], NO_YOUR_WORK)[0]!);
+    expect(canMark(buildRun("r", 0, "completed"))).toBe(true);
+    expect(canMark(buildRun("r", 0, "failed"))).toBe(true);
+    expect(canMark(buildRun("r", 0, "cancelled"))).toBe(true);
+    expect(canMark(buildRun("r", 0, "running"))).toBe(false);
+  });
+
+  it("does not let a Failed row be marked done while an older run of its Task is live", () => {
+    const failed = buildTask("a", buildRun("r2", 5, "failed"), {
+      latestLiveRun: buildRun("r1", 0, "running"),
+    });
+    expect(canMarkTrackingRowDone(buildTrackingRows([failed], [], NO_YOUR_WORK)[0]!)).toBe(false);
   });
 });
 

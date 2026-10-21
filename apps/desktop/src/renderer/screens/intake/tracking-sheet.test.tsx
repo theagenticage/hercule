@@ -13,6 +13,7 @@ const ROW: TrackingRowFacts = {
   taskId: "task-1",
   title: "Rate-limit the public API",
   state: "finished",
+  canMarkDone: true,
   faceSeed: "workflow-1",
   workflowName: "Review PR",
   lineText: "finished",

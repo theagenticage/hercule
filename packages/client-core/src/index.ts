@@ -428,7 +428,7 @@ export {
 } from "./intake";
 export {
   buildTrackingRows,
-  canMarkTrackingStateDone,
+  canMarkTrackingRowDone,
   countWaitingTrackingRows,
   decideTrackingRowDestination,
   decideTrackingStatePose,
@@ -445,6 +445,13 @@ export {
   type TrackingRowDestination,
   type TrackingState,
 } from "./tracking";
+export {
+  describeTrackingRunLine,
+  describeTrackingStamp,
+  describeTrackingStanding,
+  listTrackingAnswers,
+  type TrackingAnswer,
+} from "./tracking-pane";
 export {
   decideSidebarDragEnd,
   DEFAULT_SIDEBAR_LAYOUT,
