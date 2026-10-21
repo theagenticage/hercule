@@ -87,9 +87,14 @@ export const listYourWorkRefs = (signals: ReadonlyArray<Signal>): ReadonlyArray<
  */
 const MAX_REFS_QUERY_BYTES = 8 * 1024;
 
-/** Returns how many bytes `ref` takes in a query string: `refs=`, the encoded ref and the `&` after it. */
+/**
+ * Returns how many bytes `ref` takes in a query string: `refs=`, the encoded
+ * ref and the `&` after it. The client writes its query with `URLSearchParams`,
+ * which escapes more characters than `encodeURIComponent` (such as `~` and
+ * `'`), so the size is measured with it too.
+ */
 const measureRefParameter = (ref: ExternalRef): number =>
-  "refs=".length + encodeURIComponent(ref).length + 1;
+  new URLSearchParams([["refs", ref]]).toString().length + 1;
 
 /**
  * Splits `refs` into batches for `task.query { refs }`, in the order given. A
@@ -124,11 +129,11 @@ export const batchYourWorkRefs = (
 /**
  * Checks whether `read` was made for other thread refs than those of
  * `signals`, so the Tasks it holds may not be the ones these signals are
- * about. A signal that arrives or goes without changing the set of refs
+ * about. A read that failed has no Tasks, only the refs it was made for. A signal that arrives or goes without changing the set of refs
  * leaves the read current.
  */
 export const isYourWorkReadOutdated = (
-  read: YourWorkRead,
+  read: Pick<YourWorkRead, "refs">,
   signals: ReadonlyArray<Signal>,
 ): boolean => {
   const refs = listYourWorkRefs(signals);

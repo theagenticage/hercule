@@ -279,8 +279,9 @@ export const canMarkTrackingStateDone = (state: TrackingState): boolean =>
  * `kind`. It can when:
  *
  * - it lists no ids, which means every run may have changed;
- * - it names the newest run, or the newest live run, of one of `tasks`,
- *   whatever happened to it;
+ * - it names the newest run, or any live run, of one of `tasks`, whatever
+ *   happened to it. An older live run counts because its end changes which
+ *   Requests the row waits on;
  * - it is the creation of a run, because a re-run keeps its Task's id and
  *   starts a run no row holds yet, and a re-run makes no `task` push.
  *
@@ -295,7 +296,8 @@ export const isTrackingAffectedByRunPush = (
   tasks.some(
     (task) =>
       push.ids.includes(task.latestRun.id) ||
-      (task.latestLiveRun !== undefined && push.ids.includes(task.latestLiveRun.id)),
+      (task.latestLiveRun !== undefined && push.ids.includes(task.latestLiveRun.id)) ||
+      task.liveRunIds.some((runId) => push.ids.includes(runId)),
   );
 
 /**

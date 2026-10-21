@@ -1,7 +1,7 @@
 /**
- * Tests the hooks that read Your work and Tracking's rows: every component
- * that reads them gets the same objects, a row that did not change keeps its
- * identity when another row changes, and a change to To do that touches no
+ * Tests the hooks that read Your work and Tracking's rows: they match the
+ * signals to their Tasks and build the rows, keep their identity while
+ * nothing they are built from changes, and a change to To do that touches no
  * signal with a thread ref draws nothing again.
  */
 import type { ReactNode } from "react";
@@ -118,37 +118,32 @@ afterEach(() => {
 });
 
 describe("useYourWork and useTrackingRows", () => {
-  it("give every component the same Your work and the same rows", async () => {
+  it("match each signal to its Tasks and build the rows from them", async () => {
     const { wrapper } = await setUp(
       [buildSignal("s1", THREAD_REF)],
       [buildTrackingTask("t1"), buildTrackingTask("t2")],
     );
 
-    const first = renderHook(() => [useYourWork(), useTrackingRows()] as const, { wrapper });
-    const second = renderHook(() => [useYourWork(), useTrackingRows()] as const, { wrapper });
+    const { result } = renderHook(() => [useYourWork(), useTrackingRows()] as const, { wrapper });
 
-    expect(first.result.current[0]).toBe(second.result.current[0]);
-    expect(first.result.current[1]).toBe(second.result.current[1]);
-    expect(first.result.current[0].get("s1")?.tasks.map((task) => task.id)).toEqual(["t1"]);
-    expect(first.result.current[1].map((row) => `${row.task.taskId}:${row.state}`)).toEqual([
+    expect(result.current[0].get("s1")?.tasks.map((task) => task.id)).toEqual(["t1"]);
+    expect(result.current[1].map((row) => `${row.task.taskId}:${row.state}`)).toEqual([
       "t1:needs-you",
       "t2:finished",
     ]);
   });
 
-  it("keep a row as it was when another row changes", async () => {
-    const { wrapper, writeTracking } = await setUp(
-      [],
-      [buildTrackingTask("t1"), buildTrackingTask("t2")],
-    );
-    const { result } = renderHook(() => useTrackingRows(), { wrapper });
-    const [firstRow, secondRow] = result.current;
+  it("keep the same Your work and rows when drawn again with nothing changed", async () => {
+    const { wrapper } = await setUp([buildSignal("s1", THREAD_REF)], [buildTrackingTask("t1")]);
+    const { result, rerender } = renderHook(() => [useYourWork(), useTrackingRows()] as const, {
+      wrapper,
+    });
+    const [yourWork, rows] = result.current;
 
-    await writeTracking([buildTrackingTask("t1"), buildTrackingTask("t2", "A new title")]);
+    rerender();
 
-    expect(result.current[0]).toBe(firstRow);
-    expect(result.current[1]).not.toBe(secondRow);
-    expect(result.current[1]?.task.title).toBe("A new title");
+    expect(result.current[0]).toBe(yourWork);
+    expect(result.current[1]).toBe(rows);
   });
 
   it("draw nothing again for a change to To do that touches no signal with a thread ref", async () => {

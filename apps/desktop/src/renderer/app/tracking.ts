@@ -2,7 +2,8 @@
  * Reads Tracking's rows, Your work, and the To do count that takes them in.
  * Every place that shows any of them reads it here, so they always agree.
  */
-import { replaceEqualDeep, useSuspenseQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   buildTrackingRows,
@@ -18,48 +19,6 @@ import {
 import { signalsToDoQuery, trackingQuery, yourWorkQuery } from "./queries";
 import { useWaitingRunSessions } from "./waiting";
 
-/**
- * Wraps `build` so it runs again only when one of its arguments is not the
- * same object as in the last call, and otherwise returns the last result.
- * Every component that reads the same data then gets one result, built once.
- * It remembers a single call, which is enough because all components read
- * the same current data.
- */
-function rememberLastBuild<Args extends ReadonlyArray<unknown>, Result>(
-  build: (...args: Args) => Result,
-): (...args: Args) => Result {
-  let last: { readonly args: Args; readonly result: Result } | undefined;
-  return (...args) => {
-    if (last !== undefined && last.args.every((arg, index) => arg === args[index])) {
-      return last.result;
-    }
-    const result = build(...args);
-    last = { args, result };
-    return result;
-  };
-}
-
-// Several components read Your work and Tracking's rows, each through its own
-// observers of the queries. The three builds below are shared, so a change to
-// the data builds each result once and every component gets that one.
-const pickSignalsWithThreadRef = rememberLastBuild(listSignalsWithThreadRef);
-const buildSharedYourWork = rememberLastBuild(matchYourWork);
-
-/** The rows as last built, which `buildSharedTrackingRows` keeps unchanged rows from. */
-let lastTrackingRows: ReadonlyArray<TrackingRow> = [];
-
-/**
- * Builds Tracking's rows as `buildTrackingRows` does. A row equal to the same
- * Task's row in the last build is that very row, so a component that holds
- * one row (`TrackingRowItem`) is not drawn again when another row changes.
- */
-const buildSharedTrackingRows = rememberLastBuild(
-  (...args: Parameters<typeof buildTrackingRows>) => {
-    lastTrackingRows = replaceEqualDeep(lastTrackingRows, buildTrackingRows(...args));
-    return lastTrackingRows;
-  },
-);
-
 // The selects below capture nothing and live at module level. Query keeps a
 // selection only while the select function is the same one, so a function
 // made in render would run again on every render. What a select returns is
@@ -69,51 +28,37 @@ const selectTrackingTasks = (read: TrackingRead) => read.tasks;
 const selectYourWorkTasks = (read: YourWorkRead) => read.tasks;
 
 /**
- * Returns the Tasks Tracking follows, as the last read gives them. The array
- * keeps its identity until a read changes a Task.
- */
-function useTrackingTasks() {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  return useSuspenseQuery({ ...trackingQuery(client), select: selectTrackingTasks }).data;
-}
-
-/**
- * Returns the To do signals that have a thread ref, which are the only ones
- * that can be Your work. It keeps its identity until one of them changes, so
- * a signal without a thread ref changes nothing that reads it.
- */
-function useSignalsWithThreadRef() {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  return useSuspenseQuery({ ...signalsToDoQuery(client), select: pickSignalsWithThreadRef }).data;
-}
-
-/**
  * Returns Your work: for each To do signal, the open Tasks it is about, as
- * `matchYourWork` works them out from the signals and the Tasks the last read
- * of Your work holds. The shell's loader reads both, so it never waits in
- * practice. Every caller gets the same map, which keeps its identity until a
- * signal or a Task it is built from changes.
+ * `matchYourWork` works them out from the signals with a thread ref and the
+ * Tasks the last read of Your work holds. The shell's loader reads both, so it
+ * never waits in practice. Each caller builds its own map, which costs well
+ * under a millisecond at the largest sizes (200 signals, 50 Tasks of 200
+ * provenance entries each). The map keeps its identity until a signal with a
+ * thread ref or a Task changes.
  */
 export function useYourWork(): YourWork {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const signals = useSignalsWithThreadRef();
+  const signals = useSuspenseQuery({
+    ...signalsToDoQuery(client),
+    select: listSignalsWithThreadRef,
+  }).data;
   const tasks = useSuspenseQuery({ ...yourWorkQuery(client), select: selectYourWorkTasks }).data;
-  return buildSharedYourWork(signals, tasks);
+  return useMemo(() => matchYourWork(signals, tasks), [signals, tasks]);
 }
 
 /**
  * Returns Tracking's rows, in Tracking's order, built from the Tasks of the
  * last read, the Requests of the live runs' sessions and the signals Your work
  * names (`buildTrackingRows`). The shell's loader reads all of them, so they
- * never wait in practice. Every caller gets the same array, which keeps its
- * identity until a row changes, and a row that did not change keeps its
- * identity too.
+ * never wait in practice. Each caller builds its own rows. The array keeps its
+ * identity until the Tasks, the Requests or Your work change.
  */
 export function useTrackingRows(): ReadonlyArray<TrackingRow> {
-  const tasks = useTrackingTasks();
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const tasks = useSuspenseQuery({ ...trackingQuery(client), select: selectTrackingTasks }).data;
   const requests = useWaitingRunSessions();
   const yourWork = useYourWork();
-  return buildSharedTrackingRows(tasks, requests, yourWork);
+  return useMemo(() => buildTrackingRows(tasks, requests, yourWork), [tasks, requests, yourWork]);
 }
 
 /**

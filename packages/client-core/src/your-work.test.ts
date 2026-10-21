@@ -1,6 +1,7 @@
 /** Tests how Your work is read for the signals on screen and matched back to them. */
 import { MAX_FILTER_VALUES, type Signal, type Task } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
+import { createClient } from "./client";
 import {
   batchYourWorkRefs,
   isYourWorkReadOutdated,
@@ -121,6 +122,41 @@ describe("batchYourWorkRefs", () => {
     for (const batch of batches) {
       const query = batch.map((ref) => `refs=${encodeURIComponent(ref)}`).join("&");
       expect(query.length).toBeLessThanOrEqual(8 * 1024);
+    }
+  });
+
+  it("measures refs as the client writes them, so characters it escapes still fit in the request", async () => {
+    // The client writes the query with URLSearchParams, which escapes "~" and "'" where
+    // encodeURIComponent leaves them as they are.
+    const refs = Array.from(
+      { length: MAX_FILTER_VALUES },
+      (_, index) => `external:thread:${"~'".repeat(240)}${String(index).padStart(3, "0")}`,
+    );
+    const batches = batchYourWorkRefs(refs);
+    expect(batches.flat()).toEqual(refs);
+
+    const requests: Array<string> = [];
+    const client = createClient({
+      baseUrl: "http://controller.test",
+      fetch: (url) => {
+        requests.push(String(url));
+        return Promise.resolve(
+          new Response(JSON.stringify({ items: [] }), {
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      },
+    });
+    for (const batch of batches) await client.task.query({ query: { refs: batch } });
+
+    expect(requests).toHaveLength(batches.length);
+    for (const request of requests) {
+      const refsQuery = new URL(request).search
+        .slice(1)
+        .split("&")
+        .filter((parameter) => parameter.startsWith("refs="))
+        .join("&");
+      expect(refsQuery.length).toBeLessThanOrEqual(8 * 1024);
     }
   });
 

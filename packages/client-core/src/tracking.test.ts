@@ -392,6 +392,15 @@ describe("isTrackingAffectedByRunPush", () => {
     expect(isTrackingAffectedByRunPush(tasks, { ids: ["x", "r2"], kind: "deleted" })).toBe(true);
   });
 
+  it("is affected by a push that names an older live run, whose end changes which Requests the row waits on", () => {
+    const withOlderLiveRun = [
+      buildTask("a", buildRun("r3", 8, "running"), { liveRunIds: ["r3", "r-older"] }),
+    ];
+    expect(
+      isTrackingAffectedByRunPush(withOlderLiveRun, { ids: ["r-older"], kind: "updated" }),
+    ).toBe(true);
+  });
+
   it("is affected by a push that lists no ids, and by the creation of a run, which may be a re-run", () => {
     expect(isTrackingAffectedByRunPush(tasks, { ids: [], kind: "updated" })).toBe(true);
     expect(isTrackingAffectedByRunPush(tasks, { ids: ["new"], kind: "created" })).toBe(true);

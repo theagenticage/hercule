@@ -3,7 +3,8 @@
  * again when the thread refs of the To do list stop matching the ones it was
  * read for, from a read of To do or from a write to its cached list, never two
  * reads at once, never throwing a finished read away, and with no request for a
- * change that keeps the refs.
+ * change that keeps the refs. A read that fails is followed by one for the
+ * newest refs if To do moved on while it ran, and by none if it did not.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
@@ -47,7 +48,11 @@ afterEach(() => {
  */
 const buildShell = (initialSignals: ReadonlyArray<Signal>) => {
   let signals = initialSignals;
-  const taskReads: Array<{ refs: ReadonlyArray<string>; answer: () => void }> = [];
+  const taskReads: Array<{
+    refs: ReadonlyArray<string>;
+    answer: () => void;
+    fail: () => void;
+  }> = [];
   let readsRunning = 0;
   let mostReadsRunning = 0;
   const client = {
@@ -57,7 +62,7 @@ const buildShell = (initialSignals: ReadonlyArray<Signal>) => {
     },
     task: {
       query: ({ query }: { query: { refs: ReadonlyArray<string> } }) =>
-        new Promise((resolve) => {
+        new Promise((resolve, reject) => {
           readsRunning += 1;
           mostReadsRunning = Math.max(mostReadsRunning, readsRunning);
           taskReads.push({
@@ -65,6 +70,10 @@ const buildShell = (initialSignals: ReadonlyArray<Signal>) => {
             answer: () => {
               readsRunning -= 1;
               resolve({ items: [] });
+            },
+            fail: () => {
+              readsRunning -= 1;
+              reject(new Error("The controller cannot be reached"));
             },
           });
         }),
@@ -95,6 +104,18 @@ const buildShell = (initialSignals: ReadonlyArray<Signal>) => {
         expect(taskReads.length).toBeGreaterThan(0);
       });
       taskReads.shift()!.answer();
+      await vi.waitFor(() => {
+        expect(queryClient.isFetching({ queryKey: queryKeys.yourWork() })).toBe(
+          taskReads.length > 0 ? 1 : 0,
+        );
+      });
+    },
+    /** Fails the oldest Task read that waits, and lets the cache react. */
+    failNextTaskRead: async () => {
+      await vi.waitFor(() => {
+        expect(taskReads.length).toBeGreaterThan(0);
+      });
+      taskReads.shift()!.fail();
       await vi.waitFor(() => {
         expect(queryClient.isFetching({ queryKey: queryKeys.yourWork() })).toBe(
           taskReads.length > 0 ? 1 : 0,
@@ -223,6 +244,56 @@ describe("startYourWorkRefresh", () => {
 
     expect(shell.readYourWork()?.refs).toHaveLength(2);
     expect(shell.taskReads).toHaveLength(0);
+  });
+
+  it("reads for the newest refs when the read that a change overtook fails", async () => {
+    const shell = buildShell([buildSignal(1)]);
+    cleanups.push(startYourWorkRefresh(shell.queryClient));
+    shell.observe();
+    await shell.answerNextTaskRead();
+
+    // A new ref starts a read ...
+    shell.queryClient.setQueryData(shell.toDoOptions.queryKey, [buildSignal(1), buildSignal(2)]);
+    await vi.waitFor(() => {
+      expect(shell.taskReads).toHaveLength(1);
+    });
+    // ... and another one arrives while it runs, which cannot start a read on top of it.
+    shell.queryClient.setQueryData(shell.toDoOptions.queryKey, [
+      buildSignal(1),
+      buildSignal(2),
+      buildSignal(3),
+    ]);
+    await shell.failNextTaskRead();
+
+    await vi.waitFor(() => {
+      expect(shell.taskReads).toHaveLength(1);
+    });
+    expect(shell.taskReads[0]!.refs).toHaveLength(3);
+    expect(shell.mostReadsRunning()).toBe(1);
+  });
+
+  it("does not read again after a failed read whose refs To do still has, until To do is written", async () => {
+    const shell = buildShell([buildSignal(1)]);
+    cleanups.push(startYourWorkRefresh(shell.queryClient));
+    shell.observe();
+    await shell.answerNextTaskRead();
+
+    shell.queryClient.setQueryData(shell.toDoOptions.queryKey, [buildSignal(1), buildSignal(2)]);
+    await vi.waitFor(() => {
+      expect(shell.taskReads).toHaveLength(1);
+    });
+    await shell.failNextTaskRead();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // Reading again with the same refs would fail the same way, forever.
+    expect(shell.taskReads).toHaveLength(0);
+
+    // The next write to To do tries again.
+    shell.queryClient.setQueryData(shell.toDoOptions.queryKey, [buildSignal(1), buildSignal(2)]);
+    await vi.waitFor(() => {
+      expect(shell.taskReads).toHaveLength(1);
+    });
+    expect(shell.taskReads[0]!.refs).toHaveLength(2);
   });
 
   it("reads at once for a change that came before it started, as the shell mounts", async () => {
