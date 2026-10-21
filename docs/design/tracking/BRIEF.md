@@ -112,8 +112,8 @@ Round Trip's: one trip, top to bottom, joined by a hairline.
   - for Failed, the reason first, in tomato;
   - **What it did:** the output of the run's last agent step, named ("From the step *Review*"), drawn by its shape (below);
   - for Working, the latest step, live, in place of What it did;
-  - for a Task with more than one run, its runs as steps;
-  - the action step the run ended on, when the workflow did something itself after the agent ("Open a pull request · Opened draft PR #1302");
+  - for a Task with more than one run, or whose newest run is live, its runs as steps (a single run that has ended draws none);
+  - the action step the run ended on, when the workflow did something itself after the agent ("Open a pull request · Opened draft PR #1302"), only for a newest run that completed;
   - Linked work: the PR and its change line;
   - for a Request, the question and its answers, as Round Trip's run pane has them.
 - **The signal that waits,** for Needs you by a signal: a third message in the trip, from the source, with "Open the signal".
@@ -145,7 +145,6 @@ A Task that is Needs you by a signal has no live run: its agent finished, and a 
 - A Stopped row never says "by you". No field says who stopped the run.
 - The action step the run ended on shows the step's name only. No record keeps a summary of what an action step did, so there is no "Opened draft PR #1302".
 - A Request's Allow once, Always allow and Deny are not in the pane. The card has "Open the thread", where the thread's own answers are.
-- The runs are drawn for every row, not only for a Task with two runs or a Working row, because a single run still carries its two links, the run's page and its thread.
 - There is no foot line ("Leaves Tracking when...") and no fine print under the answers, as Intake's own pane has none.
 - A missing value in a field of the output reads "none".
 - Try again is not an answer until [#804](https://github.com/theagenticage/hercule/issues/804), and Linked work is not drawn until [#807](https://github.com/theagenticage/hercule/issues/807). The pane draws no placeholder for either.
