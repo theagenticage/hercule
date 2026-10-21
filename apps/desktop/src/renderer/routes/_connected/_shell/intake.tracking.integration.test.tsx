@@ -2129,6 +2129,51 @@ describe("Tracking's reads", () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
     expect(findTrackingReads(calls)).toHaveLength(before);
   });
+
+  it("reads a pane's Task and handoff signal once when it opens, and again only for a push that can change it", async () => {
+    const { calls, live } = await openIntake("/intake?tracking=true");
+    await live.waitForFirstPushes();
+    const countReads = (path: string) =>
+      calls.filter((call) => call.method === "GET" && call.path === path).length;
+    const countDetailReads = (task: Task) => countReads(`/api/v1/tasks/${task.id}/tracking`);
+    const countSignalReads = (task: Task) =>
+      countReads(`/api/v1/signals/${getHandoffSignalId(task)}`);
+    // The quote of the handoff is drawn once the pane has read its signal.
+    const waitForQuote = () =>
+      waitFor(() => {
+        expect(getPane()!.querySelector(".tr-orig-q")).not.toBeNull();
+      });
+    const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+
+    await userEvent.click(getRowButton(FINISHED_TASK));
+    await waitForQuote();
+    await settle();
+    expect([countDetailReads(FINISHED_TASK), countSignalReads(FINISHED_TASK)]).toEqual([1, 1]);
+
+    await userEvent.keyboard("j");
+    await waitFor(() => {
+      expect(readSelected()).toEqual([WORKING_TASK.id]);
+      expect(countSignalReads(WORKING_TASK)).toBe(1);
+    });
+    await waitForQuote();
+    await settle();
+    expect([countDetailReads(WORKING_TASK), countSignalReads(WORKING_TASK)]).toEqual([1, 1]);
+    expect([countDetailReads(FINISHED_TASK), countSignalReads(FINISHED_TASK)]).toEqual([1, 1]);
+
+    // A push that names the open row's newest run reads its detail again, and nothing else of it.
+    act(() => live.pushInvalidation("run", [getRunId(WORKING_TASK)]));
+    await waitFor(() => {
+      expect(countDetailReads(WORKING_TASK)).toBe(2);
+    });
+    await settle();
+    expect([countDetailReads(WORKING_TASK), countSignalReads(WORKING_TASK)]).toEqual([2, 1]);
+
+    // A push for a run no row holds reads nothing.
+    const callsBefore = calls.length;
+    act(() => live.pushInvalidation("run", ["01a06d02-7c00-7000-8000-0000000000fe"]));
+    await settle();
+    expect(calls).toHaveLength(callsBefore);
+  });
 });
 
 describe("To do with Tracking", () => {
