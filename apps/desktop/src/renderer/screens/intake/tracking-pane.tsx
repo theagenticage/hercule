@@ -3,19 +3,20 @@
  * bottom as the Tracking drawing draws it, with its answers and the keys at
  * its foot (spec 17 §Tracking).
  */
-import { useEffect, useId, useLayoutEffect, useRef, type JSX } from "react";
+import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   decideTrackingRowPose,
   describeTrackingStanding,
-  findNextAgeChange,
+  findNextTrackingElapsedChange,
   invalidateWithoutCancelling,
   listTrackingAnswers,
   nameTrackingState,
   queryKeys,
   readErrorMessage,
   readTrackingFaceSeed,
+  readTrackingRunStart,
   type TrackingAnswer,
   type TrackingDestination,
   type TrackingRow,
@@ -38,12 +39,12 @@ const ANSWER_LABELS: Readonly<Record<TrackingAnswer["kind"], string>> = {
 };
 
 /** The tone of the state's word in the pane's head: Failed and Finished are drawn in their own colours, Needs you in marigold. */
-const STATE_TONES: Readonly<Record<TrackingState, string>> = {
+const STATE_TONES: Readonly<Record<TrackingState, string | undefined>> = {
   "needs-you": "tr-tone--you",
   failed: "tr-tone--fail",
   finished: "tr-tone--ok",
-  working: "",
-  stopped: "",
+  working: undefined,
+  stopped: undefined,
 };
 
 /**
@@ -143,14 +144,15 @@ function TrackingRowDetail({
   // other lines hold times that do not move.
   const working = row.state === "working";
   const standing = useClockValue(
-    row.run.startedAt ?? row.run.createdAt,
+    readTrackingRunStart(row.run),
     working,
-    findNextAgeChange,
+    findNextTrackingElapsedChange,
     (now) => describeTrackingStanding(row, timezone, now),
   );
 
-  useEffect(() => {
-    if (!focusAnswerOnOpen) return;
+  // The effect below runs when the screen asks for the focus, not each time
+  // the row or its answers change, so what it reads is an effect event.
+  const focusSuggestedAnswer = useEffectEvent(() => {
     const button =
       suggested === undefined
         ? null
@@ -158,8 +160,9 @@ function TrackingRowDetail({
     (button ?? rootRef.current)?.focus();
     button?.scrollIntoView({ block: "nearest" });
     onFocusedAnswer();
-    // Runs when the screen asks for the focus, not each time the row changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+  useEffect(() => {
+    if (focusAnswerOnOpen) focusSuggestedAnswer();
   }, [focusAnswerOnOpen]);
 
   // When the answers change while the pane shows the row, such as Stop the
@@ -178,7 +181,7 @@ function TrackingRowDetail({
   const pressAnswer = (answer: TrackingAnswer): void => {
     switch (answer.kind) {
       case "stop-run":
-        stop.mutate(answer.runId);
+        stop.mutate(answer.run.id);
         return;
       case "mark-done":
         onTakeOff(taskId, "done");
@@ -226,7 +229,6 @@ function TrackingRowDetail({
               <AnswerRow
                 key={answer.kind}
                 answer={answer}
-                workflowName={row.run.workflowName}
                 locked={stop.isPending}
                 error={
                   answer.kind === "stop-run" && stop.isError ? readErrorMessage(stop.error) : null
@@ -269,14 +271,12 @@ function TrackingRowDetail({
  */
 function AnswerRow({
   answer,
-  workflowName,
   locked,
   error,
   idPrefix,
   onPress,
 }: {
   readonly answer: TrackingAnswer;
-  readonly workflowName: string;
   readonly locked: boolean;
   readonly error: string | null;
   readonly idPrefix: string;
@@ -289,7 +289,7 @@ function AnswerRow({
       buttonClass={
         answer.suggested ? "btn btn--accent" : answer.kind === "cancel" ? "btn btn--quiet" : "btn"
       }
-      describe={describeAnswer(answer, workflowName)}
+      describe={describeAnswer(answer)}
       shortcut={answer.suggested ? "↩" : answer.kind === "mark-done" ? "E" : null}
       error={error}
       locked={locked}
@@ -301,13 +301,14 @@ function AnswerRow({
   );
 }
 
-/** Returns what pressing `answer` does, for the line beside its button. `workflowName` is the agent's workflow. */
-const describeAnswer = (answer: TrackingAnswer, workflowName: string): JSX.Element | string => {
+/** Returns what pressing `answer` does, for the line beside its button. */
+const describeAnswer = (answer: TrackingAnswer): JSX.Element | string => {
   switch (answer.kind) {
     case "stop-run":
       return (
         <>
-          Stops <b>{workflowName}</b>. The row stays in Tracking, as Stopped
+          Stops <b>{answer.run.workflowName}</b>. The row stays in Tracking
+          {answer.leavesRowStopped ? ", as Stopped" : ""}
         </>
       );
     case "mark-done":

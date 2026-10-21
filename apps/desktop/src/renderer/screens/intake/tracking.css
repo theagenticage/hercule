@@ -662,8 +662,8 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
-/* A long string is cut to two lines; the whole value is in the run. */
-.tr-pane .tr-out-long {
+/* A value is cut to two lines; the whole value is in the run. */
+.tr-pane .tr-out-value {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;

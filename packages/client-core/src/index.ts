@@ -447,14 +447,17 @@ export {
   type TrackingState,
 } from "./tracking";
 export {
-  decideTrackingRunPose,
   describeTrackingOutputValue,
-  describeTrackingRunLine,
+  describeTrackingRun,
   describeTrackingStamp,
   describeTrackingStanding,
+  describeTrackingTrip,
+  findNextTrackingElapsedChange,
   listTrackingAnswers,
-  shouldListTrackingRuns,
+  readTrackingRunStart,
   type TrackingAnswer,
+  type TrackingTrip,
+  type TrackingTripRun,
 } from "./tracking-pane";
 export {
   decideSidebarDragEnd,

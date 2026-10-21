@@ -8,23 +8,19 @@
 import type { JSX, ReactNode } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import type { Signal, TrackingDetail, TrackingDetailRun } from "@hercule/contract";
+import type { Signal, TrackingDetail } from "@hercule/contract";
 import {
   decideTrackingRowPose,
-  decideTrackingRunPose,
   describeSignalKindAndPlace,
   describeTrackingLine,
-  describeTrackingRunLine,
-  describeTrackingStamp,
+  describeTrackingTrip,
   formatBlocksAsText,
   formatMessageTime,
   isKnownBlock,
-  isRunLive,
   lowerFirst,
   nameSignalSource,
   readErrorMessage,
   readTrackingFaceSeed,
-  shouldListTrackingRuns,
   type TrackingDestination,
   type TrackingRow,
 } from "@hercule/client-core";
@@ -44,12 +40,11 @@ import {
   AskedMessage,
   EndedOnAction,
   FailureReason,
-  StepOutput,
   QuestionCard,
   RunList,
   SignalMessage,
+  StepOutput,
   type AskedQuote,
-  type RunLine,
 } from "./tracking-messages";
 import "./tracking.css";
 
@@ -57,7 +52,8 @@ import "./tracking.css";
  * Renders the trip of `row`: what the user asked, what the agent did, and
  * when the work waits on a signal, that signal. Nothing is drawn until the
  * Task's read answers, so the pane's head and answers show at once. A read
- * that fails shows its error where the trip would be.
+ * that fails shows its error where the trip would be, also when an earlier
+ * read of the trip succeeded: the trip it drew may no longer be true.
  *
  * `onOpenDestination` is called with the run, thread or signal a link opens.
  */
@@ -72,21 +68,16 @@ export function TrackingTrip({
 }): JSX.Element | null {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const read = useQuery(trackingDetailQuery(client, row.task.taskId));
-  if (read.data !== undefined) {
+  if (read.isError) {
     return (
-      <Trip
-        row={row}
-        detail={read.data}
-        timezone={timezone}
-        onOpenDestination={onOpenDestination}
-      />
+      <p className="ad-flag" role="alert">
+        {readErrorMessage(read.error)}
+      </p>
     );
   }
-  return read.isError ? (
-    <p className="ad-flag" role="alert">
-      {readErrorMessage(read.error)}
-    </p>
-  ) : null;
+  return read.data === undefined ? null : (
+    <Trip row={row} detail={read.data} timezone={timezone} onOpenDestination={onOpenDestination} />
+  );
 }
 
 /**
@@ -99,23 +90,6 @@ const buildQuoteText = (signal: Signal): ReactNode => {
   if (first === undefined) return signal.title;
   if (isKnownBlock(first) && first.type === "text") return <Markdown text={first.markdown} />;
   return formatBlocksAsText([first]);
-};
-
-/** Builds the line of `run` in the list of runs, with times in `timezone` as seen from `now`. */
-const buildRunLine = (run: TrackingDetailRun, timezone: string, now: Date): RunLine => {
-  // A run that has not ended is led by when it started.
-  const timeAt = run.finishedAt ?? run.startedAt ?? run.createdAt;
-  return {
-    runId: run.id,
-    time: formatMessageTime(new Date(timeAt), timezone, now) ?? "",
-    timeAt,
-    mark: decideTrackingRunPose(run),
-    live: isRunLive(run.status),
-    workflowName: run.workflowName,
-    hue: buildHueStyle(buildLook(run.workflowId ?? run.workflowName).hue),
-    outcome: describeTrackingRunLine(run),
-    sessionId: run.sessionId,
-  };
 };
 
 /** Renders the trip once the Task's read has answered. */
@@ -146,10 +120,11 @@ function Trip({
     onOpenDestination({ kind: "thread", sessionId });
   };
 
-  const handedAt = formatMessageTime(new Date(detail.firstHandoff.at), timezone, now);
-  const handed = `handed to ${detail.firstHandoff.workflowName}`;
-  const quote: AskedQuote =
-    asked.data !== undefined
+  const trip = describeTrackingTrip(row, detail, timezone, now);
+  // A failed read shows its error even when an earlier read left data behind.
+  const quote: AskedQuote = asked.isError
+    ? { kind: "failed", message: readErrorMessage(asked.error) }
+    : asked.data !== undefined
       ? {
           kind: "ready",
           mark: <SignalMark signal={asked.data} plugins={plugins} size={13} />,
@@ -157,48 +132,37 @@ function Trip({
           kindAndPlace: describeSignalKindAndPlace(asked.data),
           text: buildQuoteText(asked.data),
         }
-      : asked.isError
-        ? { kind: "failed", message: readErrorMessage(asked.error) }
-        : { kind: "loading" };
+      : { kind: "loading" };
 
-  const { output } = detail;
-  // The output is the newest run's, so its page is the newest run's.
-  const outputRunId = detail.runs.at(-1)?.id ?? row.run.id;
   const waitsOn = row.state === "needs-you" ? row.waitsOn : undefined;
   return (
     <div className="tr-trip">
       <AskedMessage
         avatar={<UserAvatar name={username} size={28} />}
-        small={handedAt === undefined ? handed : `${handedAt} · ${handed}`}
+        small={trip.askedSmall}
         quote={quote}
       />
       <AgentMessage
         face={<Face look={look} pose={decideTrackingRowPose(row)} size={28} />}
         name={row.run.workflowName}
         hue={buildHueStyle(look.hue)}
-        stamp={describeTrackingStamp(row, timezone, now)}
+        stamp={trip.stamp}
       >
-        {row.state === "failed" && row.run.failureCause !== undefined && (
-          <FailureReason cause={row.run.failureCause} />
-        )}
-        {row.state !== "working" && output !== undefined && (
+        {trip.failureCause !== undefined && <FailureReason cause={trip.failureCause} />}
+        {trip.output !== undefined && (
           <StepOutput
-            output={output}
+            output={trip.output}
             onOpenRun={() => {
-              openRun(outputRunId);
+              openRun(trip.outputRunId);
             }}
             onOpenThread={openThread}
           />
         )}
-        {shouldListTrackingRuns(detail.runs) && (
-          <RunList
-            lines={detail.runs.map((run) => buildRunLine(run, timezone, now))}
-            onOpenRun={openRun}
-            onOpenThread={openThread}
-          />
+        {trip.runs.length > 0 && (
+          <RunList lines={trip.runs} onOpenRun={openRun} onOpenThread={openThread} />
         )}
-        {detail.endingActionStepName !== undefined && (
-          <EndedOnAction stepName={detail.endingActionStepName} />
+        {trip.endingActionStepName !== undefined && (
+          <EndedOnAction stepName={trip.endingActionStepName} />
         )}
         {waitsOn?.kind === "request" && (
           <QuestionCard

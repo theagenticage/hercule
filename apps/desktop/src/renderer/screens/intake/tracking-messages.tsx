@@ -6,14 +6,12 @@
  */
 import type { CSSProperties, JSX, ReactNode } from "react";
 import type { TrackingOutput } from "@hercule/contract";
-import { describeTrackingOutputValue } from "@hercule/client-core";
-import { Mark, type MarkState } from "../../marks";
+import { describeTrackingOutputValue, type TrackingTripRun } from "@hercule/client-core";
+import { buildHueStyle, buildLook } from "../../faces";
+import { Mark } from "../../marks";
 import { BoltIcon } from "../../icons/bolt";
 import { Markdown } from "../session/markdown";
 import "./tracking.css";
-
-/** A string of a structured output longer than this is cut to two lines in its row. */
-const LONG_VALUE_LENGTH = 60;
 
 /** What the quote of the signal the user handed off shows. */
 export type AskedQuote =
@@ -137,13 +135,9 @@ export function StepOutput({
                 <div key={index}>
                   <dt>{field.label}</dt>
                   <dd>
-                    {value.muted ? (
-                      <span className="tr-out-count">{value.text}</span>
-                    ) : value.text.length > LONG_VALUE_LENGTH ? (
-                      <span className="tr-out-long">{value.text}</span>
-                    ) : (
-                      value.text
-                    )}
+                    <span className={value.muted ? "tr-out-value tr-out-count" : "tr-out-value"}>
+                      {value.text}
+                    </span>
                   </dd>
                 </div>
               );
@@ -175,23 +169,6 @@ export function StepOutput({
   );
 }
 
-/** One run of the list of runs, with what it draws worked out. */
-export interface RunLine {
-  readonly runId: string;
-  /** When the run ended, or when it started if it is live, as a time. Empty when it cannot be formatted. */
-  readonly time: string;
-  /** The ISO time `time` is of. */
-  readonly timeAt: string;
-  readonly mark: MarkState;
-  readonly live: boolean;
-  readonly workflowName: string;
-  readonly hue: CSSProperties;
-  /** How the run went: "finished", "failed: reason", "working". */
-  readonly outcome: string;
-  /** The session of the run's last agent step, when it has one. */
-  readonly sessionId: string | undefined;
-}
-
 /**
  * Renders the runs of the Task, oldest first, one line each: the time, the
  * run's mark, the workflow's name, which opens the run, how the run went, and
@@ -202,7 +179,7 @@ export function RunList({
   onOpenRun,
   onOpenThread,
 }: {
-  readonly lines: ReadonlyArray<RunLine>;
+  readonly lines: ReadonlyArray<TrackingTripRun>;
   readonly onOpenRun: (runId: string) => void;
   readonly onOpenThread: (sessionId: string) => void;
 }): JSX.Element {
@@ -211,20 +188,20 @@ export function RunList({
       {lines.map((line) => (
         <li key={line.runId} className={line.live ? "is-live" : undefined}>
           <time dateTime={line.timeAt}>{line.time}</time>
-          <Mark state={line.mark} />
+          <Mark state={line.pose} />
           <span className="tr-step-text">
             <span className="tr-step-line">
               <button
                 type="button"
                 className="tr-step-who"
-                style={line.hue}
+                style={buildHueStyle(buildLook(line.faceSeed).hue)}
                 onClick={() => {
                   onOpenRun(line.runId);
                 }}
               >
                 {line.workflowName}
               </button>
-              {` ${line.outcome}`}
+              {` ${line.text}`}
             </span>
             {line.sessionId !== undefined && (
               <button

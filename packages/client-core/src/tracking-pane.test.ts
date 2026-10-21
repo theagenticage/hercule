@@ -1,14 +1,14 @@
-import type { Signal, TrackingRun, TrackingTask } from "@hercule/contract";
+import type { Signal, TrackingDetail, TrackingRun, TrackingTask } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import type { TrackingRow } from "./tracking";
 import {
-  decideTrackingRunPose,
   describeTrackingOutputValue,
-  describeTrackingRunLine,
+  describeTrackingRun,
   describeTrackingStamp,
   describeTrackingStanding,
+  describeTrackingTrip,
+  findNextTrackingElapsedChange,
   listTrackingAnswers,
-  shouldListTrackingRuns,
 } from "./tracking-pane";
 
 const START = "2026-10-20T09:00:00.000Z";
@@ -103,22 +103,62 @@ const buildSignalRow = (run: TrackingRun, liveRunIds: ReadonlyArray<string> = []
 
 describe("listTrackingAnswers", () => {
   it("offers only Stop the run, never suggested, while a run is going", () => {
-    const stopOnly = [{ kind: "stop-run", runId: "run-1", suggested: false }];
-    expect(listTrackingAnswers(buildRow(buildRun("running")))).toEqual(stopOnly);
-    expect(listTrackingAnswers(buildRow(buildRun("pending")))).toEqual(stopOnly);
-    expect(listTrackingAnswers(buildRequestRow(buildRun("running")))).toEqual(stopOnly);
+    const run = buildRun("running");
+    const stopOnly = [{ kind: "stop-run", run, leavesRowStopped: true, suggested: false }];
+    expect(listTrackingAnswers(buildRow(run))).toEqual(stopOnly);
+    expect(listTrackingAnswers(buildRow(buildRun("pending", { id: "run-1" })))).toMatchObject([
+      { kind: "stop-run", run: { id: "run-1" }, suggested: false },
+    ]);
+    expect(listTrackingAnswers(buildRequestRow(run))).toEqual(stopOnly);
   });
 
-  it("stops the Task's newest live run, not the row's run, when the row's run failed and an older run is live", () => {
+  describe("when the row's run failed and an older run is live", () => {
     const row = buildRow(buildRun("failed"));
-    const older = buildRun("running", { id: "run-older" });
+    const older = buildRun("running", { id: "run-older", workflowName: "Review PR" });
     const failedWithLiveRun: TrackingRow = {
       ...row,
       task: { ...row.task, latestLiveRun: older, liveRunIds: ["run-older"] },
     };
-    expect(listTrackingAnswers(failedWithLiveRun)).toEqual([
-      { kind: "stop-run", runId: "run-older", suggested: false },
-    ]);
+
+    it("stops the Task's newest live run, not the row's run, and the row does not become Stopped", () => {
+      expect(listTrackingAnswers(failedWithLiveRun)).toEqual([
+        { kind: "stop-run", run: older, leavesRowStopped: false, suggested: false },
+      ]);
+    });
+  });
+
+  it("leaves the row Stopped only when the stopped run is the Task's newest and no other run is live", () => {
+    const newest = buildRun("running", { id: "run-2" });
+    const older = buildRun("running", { id: "run-1" });
+    const task = (liveRunIds: ReadonlyArray<string>): TrackingTask => ({
+      ...buildTask(newest, liveRunIds),
+      latestLiveRun: newest,
+    });
+    const stopOf = (row: TrackingRow) => {
+      const [answer] = listTrackingAnswers(row);
+      return answer?.kind === "stop-run" ? answer.leavesRowStopped : undefined;
+    };
+    expect(stopOf({ task: task(["run-2"]), run: newest, state: "working", since: at(20) })).toBe(
+      true,
+    );
+    // Another run stays live, so the row stays Working.
+    expect(
+      stopOf({ task: task(["run-2", "run-1"]), run: newest, state: "working", since: at(20) }),
+    ).toBe(false);
+    // The newest live run is older than the Task's newest run, whose state the row shows once it stops.
+    const completed = buildRun("completed", { id: "run-3" });
+    const overtaken: TrackingTask = {
+      ...buildTask(completed, ["run-1"]),
+      latestLiveRun: older,
+    };
+    expect(stopOf({ task: overtaken, run: older, state: "working", since: at(20) })).toBe(false);
+    // A signal that waits keeps the row on Needs you.
+    expect(
+      stopOf({
+        ...buildSignalRow(newest, ["run-2"]),
+        task: task(["run-2"]),
+      }),
+    ).toBe(false);
   });
 
   it("suggests Mark done on a Finished row, then Cancel", () => {
@@ -173,6 +213,14 @@ describe("describeTrackingStanding", () => {
     );
   });
 
+  it("counts a Working run in the same minutes and hours as a finished one", () => {
+    const working = (startedAt: string) =>
+      describe_(buildRow(buildRun("running", { startedAt }))).split(" · ")[1];
+    expect(working(at(-19))).toBe("1h 4m so far");
+    expect(working(at(-15))).toBe("1h so far");
+    expect(working(at(44.5))).toBe("just now");
+  });
+
   it("dates a Pending run from its creation", () => {
     expect(describe_(buildRow(buildRun("pending")))).toBe("Started at 09:20 · 25m so far");
   });
@@ -199,60 +247,174 @@ describe("describeTrackingStanding", () => {
   });
 });
 
-describe("describeTrackingRunLine", () => {
-  it("names how a run that ended ended", () => {
-    expect(describeTrackingRunLine(buildRun("completed"))).toBe("finished");
-    expect(describeTrackingRunLine(buildRun("cancelled"))).toBe("stopped");
+describe("describeTrackingRun", () => {
+  it("names how a run that ended ended, and marks it", () => {
+    expect(describeTrackingRun(buildRun("completed"))).toEqual({
+      pose: "done",
+      word: "finished",
+      text: "finished",
+    });
+    expect(describeTrackingRun(buildRun("cancelled"))).toEqual({
+      pose: "idle",
+      word: "stopped",
+      text: "stopped",
+    });
   });
 
   it("gives the reason a run failed, when it carries one", () => {
-    expect(describeTrackingRunLine(buildRun("failed"))).toBe("failed");
+    expect(describeTrackingRun(buildRun("failed"))).toEqual({
+      pose: "failed",
+      word: "failed",
+      text: "failed",
+    });
     expect(
-      describeTrackingRunLine(buildRun("failed", { failureCause: "permission denied on ops-db" })),
-    ).toBe("failed: permission denied on ops-db");
+      describeTrackingRun(buildRun("failed", { failureCause: "permission denied on ops-db" })),
+    ).toEqual({ pose: "failed", word: "failed", text: "failed: permission denied on ops-db" });
   });
 
   it("says a live run is working, or names the signals it only waits on", () => {
-    expect(describeTrackingRunLine(buildRun("running"))).toBe("working");
-    expect(describeTrackingRunLine(buildRun("pending"))).toBe("working");
+    const working = { pose: "working", word: "working", text: "working" };
+    expect(describeTrackingRun(buildRun("running"))).toEqual(working);
+    expect(describeTrackingRun(buildRun("pending"))).toEqual(working);
     expect(
-      describeTrackingRunLine(
-        buildRun("running", { awaitedSignalIds: ["checks_passed", "merged"] }),
-      ),
-    ).toBe("waiting for checks_passed, merged");
+      describeTrackingRun(buildRun("running", { awaitedSignalIds: ["checks_passed", "merged"] })),
+    ).toEqual({ ...working, text: "waiting for checks_passed, merged" });
   });
 });
 
-describe("decideTrackingRunPose", () => {
-  it("marks a run by how it ended, and a live run as working", () => {
-    expect(decideTrackingRunPose(buildRun("completed"))).toBe("done");
-    expect(decideTrackingRunPose(buildRun("failed"))).toBe("failed");
-    expect(decideTrackingRunPose(buildRun("cancelled"))).toBe("idle");
-    expect(decideTrackingRunPose(buildRun("running"))).toBe("working");
-    expect(decideTrackingRunPose(buildRun("pending"))).toBe("working");
+describe("findNextTrackingElapsedChange", () => {
+  it("is the next whole minute since the start, in the first minute, under an hour and past it", () => {
+    const next = (since: string, now: Date) =>
+      findNextTrackingElapsedChange(since, now).toISOString();
+    expect(next(START, new Date(at(0.5)))).toBe(at(1));
+    expect(next(START, new Date(at(1)))).toBe(at(2));
+    expect(next(START, new Date(at(64.5)))).toBe(at(65));
+    expect(next(START, new Date(at(120)))).toBe(at(121));
+  });
+
+  it("changes a minute after a start that lies in the future", () => {
+    expect(findNextTrackingElapsedChange(at(10), new Date(at(0))).toISOString()).toBe(at(11));
   });
 });
 
-describe("shouldListTrackingRuns", () => {
-  it("leaves out the list for a single run that has ended", () => {
-    expect(shouldListTrackingRuns([buildRun("completed")])).toBe(false);
-    expect(shouldListTrackingRuns([buildRun("failed")])).toBe(false);
-    expect(shouldListTrackingRuns([buildRun("cancelled")])).toBe(false);
+describe("describeTrackingTrip", () => {
+  const OUTPUT: TrackingDetail["output"] = { kind: "text", stepName: "Code", text: "Done." };
+  const HANDOFF: TrackingDetail["firstHandoff"] = {
+    signalId: "signal-1",
+    runId: "run-0",
+    at: at(19),
+    workflowName: "Review PR",
+  };
+  const buildDetail = (
+    runs: ReadonlyArray<TrackingDetail["runs"][number]>,
+    overrides: Partial<TrackingDetail> = {},
+  ): TrackingDetail => ({ firstHandoff: HANDOFF, runs, ...overrides });
+  const trip = (row: TrackingRow, detail: TrackingDetail) =>
+    describeTrackingTrip(row, detail, TIMEZONE, NOW);
+
+  it("names when and to which workflow the Task was handed off, with no fallback to the row's run", () => {
+    const run = buildRun("completed");
+    expect(trip(buildRow(run), buildDetail([run])).askedSmall).toBe("09:19 · handed to Review PR");
+    expect(
+      describeTrackingTrip(buildRow(run), buildDetail([run]), "Not/AZone", NOW).askedSmall,
+    ).toBe("handed to Review PR");
   });
 
-  it("lists a single run that is live", () => {
-    expect(shouldListTrackingRuns([buildRun("running")])).toBe(true);
-    expect(shouldListTrackingRuns([buildRun("pending")])).toBe(true);
+  it("carries the stamp of the row", () => {
+    const run = buildRun("failed");
+    expect(trip(buildRow(run), buildDetail([run])).stamp).toBe("failed 09:29");
   });
 
-  it("lists two or more runs, whether or not the newest is live", () => {
+  it("gives the failure reason on a Failed row only", () => {
+    const failed = buildRun("failed", { failureCause: "permission denied on ops-db" });
+    expect(trip(buildRow(failed), buildDetail([failed])).failureCause).toBe(
+      "permission denied on ops-db",
+    );
+    const stopped = buildRun("cancelled", { failureCause: "left over" });
+    expect(trip(buildRow(stopped), buildDetail([stopped])).failureCause).toBeUndefined();
+    expect(trip(buildRow(buildRun("failed")), buildDetail([])).failureCause).toBeUndefined();
+  });
+
+  it("gives the output and the ending action step on every state but Working", () => {
+    const detail = (run: TrackingRun) =>
+      buildDetail([run], { output: OUTPUT, endingActionStepName: "Post the review" });
+    for (const status of ["completed", "failed", "cancelled"] as const) {
+      const run = buildRun(status);
+      const drawn = trip(buildRow(run), detail(run));
+      expect(drawn.output).toBe(OUTPUT);
+      expect(drawn.endingActionStepName).toBe("Post the review");
+    }
+    const completed = buildRun("completed");
+    const waiting = trip(buildSignalRow(completed), detail(completed));
+    expect(waiting.output).toBe(OUTPUT);
+    expect(waiting.endingActionStepName).toBe("Post the review");
+  });
+
+  it("leaves the output and the ending action step out of a Working row, even when the newest run ended", () => {
+    const live = buildRun("running", { id: "run-live" });
+    const newest = buildRun("completed", { id: "run-newest" });
+    const row: TrackingRow = {
+      task: { ...buildTask(newest, ["run-live"]), latestLiveRun: live },
+      run: live,
+      state: "working",
+      since: live.createdAt,
+    };
+    const drawn = trip(
+      row,
+      buildDetail([live, newest], { output: OUTPUT, endingActionStepName: "Post the review" }),
+    );
+    expect(drawn.output).toBeUndefined();
+    expect(drawn.endingActionStepName).toBeUndefined();
+  });
+
+  it("opens the newest run's page for the whole output, and the row's run when the read lists none", () => {
     const first = buildRun("failed", { id: "run-1" });
-    expect(shouldListTrackingRuns([first, buildRun("completed", { id: "run-2" })])).toBe(true);
-    expect(shouldListTrackingRuns([first, buildRun("running", { id: "run-2" })])).toBe(true);
+    const second = buildRun("completed", { id: "run-2" });
+    expect(trip(buildRow(second), buildDetail([first, second])).outputRunId).toBe("run-2");
+    expect(trip(buildRow(second), buildDetail([])).outputRunId).toBe("run-2");
   });
 
-  it("lists nothing when there are no runs", () => {
-    expect(shouldListTrackingRuns([])).toBe(false);
+  it("lists no runs for a single run that has ended, and each run of a longer history", () => {
+    const only = buildRun("completed");
+    expect(trip(buildRow(only), buildDetail([only])).runs).toEqual([]);
+    const first = {
+      ...buildRun("failed", {
+        id: "run-1",
+        failureCause: "step failed",
+        workflowId: "workflow-1",
+      }),
+      sessionId: "session-1",
+    };
+    const second = buildRun("running", { id: "run-2", startedAt: at(40) });
+    expect(trip(buildRow(second), buildDetail([first, second])).runs).toEqual([
+      {
+        runId: "run-1",
+        time: "09:29",
+        timeAt: at(29),
+        pose: "failed",
+        live: false,
+        workflowName: "Implement",
+        faceSeed: "workflow-1",
+        text: "failed: step failed",
+        sessionId: "session-1",
+      },
+      {
+        runId: "run-2",
+        time: "09:40",
+        timeAt: at(40),
+        pose: "working",
+        live: true,
+        workflowName: "Implement",
+        faceSeed: "Implement",
+        text: "working",
+        sessionId: undefined,
+      },
+    ]);
+  });
+
+  it("lists a single run that is live, led by when it started", () => {
+    const live = buildRun("running");
+    expect(trip(buildRow(live), buildDetail([live])).runs).toHaveLength(1);
   });
 });
 
