@@ -1,13 +1,14 @@
 /**
  * Tests Tracking in Intake: the rows folded under the list and opened over
- * it, the keys that walk and tick them off, opening a row's run, and the
- * To do count that takes in the rows that wait on the user.
+ * it, the keys that walk and tick them off, the pane a selected row opens, its
+ * answers, and the To do count that takes in the rows that wait on the user.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
   PluginDetail,
+  Run,
   RunSummary,
   Session,
   Signal,
@@ -327,6 +328,12 @@ const findTrackingReads = (calls: ReadonlyArray<Call>) =>
   calls.filter((call) => call.method === "GET" && call.path === "/api/v1/tasks/tracking");
 const findMarkDone = (calls: ReadonlyArray<Call>) =>
   calls.filter((call) => call.method === "PATCH" && call.path.startsWith("/api/v1/tasks/"));
+/** Returns the pane of the selected row of Tracking, which is drawn while it shows and while it slides out. */
+const getPane = () => document.querySelector<HTMLElement>(".asks-detail");
+const isPaneShown = () => {
+  const pane = getPane();
+  return pane !== null && !pane.hasAttribute("inert");
+};
 const findToast = () =>
   waitFor(() => {
     const toast = document.querySelector<HTMLElement>(".asks-toast:not(.asks-bulk)");
@@ -528,8 +535,8 @@ describe("opened Tracking", () => {
     expect(getTray().contains(document.activeElement)).toBe(true);
     await userEvent.keyboard("k");
     expect(readSelected()).toHaveLength(1);
-    await userEvent.keyboard("{Escape}");
-    await userEvent.keyboard("{Escape}");
+    // The pane, the selection, then Tracking.
+    await userEvent.keyboard("{Escape}{Escape}{Escape}");
     await waitFor(() => {
       expect(isOpen()).toBe(false);
     });
@@ -571,15 +578,24 @@ describe("opened Tracking", () => {
     expect(router.latestLocation.search).not.toHaveProperty("signal");
   });
 
-  it("steps back with Esc: the selection, then Tracking", async () => {
+  it("steps back with Esc: the pane, the selection, then Tracking", async () => {
     const { router } = await openIntake();
     getSignalRow(FIRST_SIGNAL).focus();
     await userEvent.keyboard("t");
     await userEvent.keyboard("j");
     expect(readSelected()).toHaveLength(1);
+    await waitFor(() => {
+      expect(isPaneShown()).toBe(true);
+    });
+
+    await userEvent.keyboard("{Escape}");
+    expect(isPaneShown()).toBe(false);
+    expect(readSelected()).toHaveLength(1);
+    expect(isOpen()).toBe(true);
 
     await userEvent.keyboard("{Escape}");
     expect(readSelected()).toEqual([]);
+    expect(router.latestLocation.search).not.toHaveProperty("task");
     expect(isOpen()).toBe(true);
 
     await userEvent.keyboard("{Escape}");
@@ -587,9 +603,10 @@ describe("opened Tracking", () => {
     expect(router.latestLocation.search).not.toHaveProperty("tracking");
   });
 
-  it("finds Tracking open again on coming back from a row's run", async () => {
+  it("finds Tracking open on the same row on coming back from the row's run", async () => {
     const { router } = await openIntake("/intake?tracking=true");
     await userEvent.click(getRowButton(FINISHED_TASK));
+    await userEvent.click(await screen.findByRole("button", { name: "Open the run" }));
     await waitFor(() => {
       expect(router.latestLocation.pathname).toBe(`/runs/${getRunId(FINISHED_TASK)}`);
     });
@@ -601,6 +618,8 @@ describe("opened Tracking", () => {
     });
     await screen.findByRole("heading", { level: 1, name: "Intake" });
     expect(isOpen()).toBe(true);
+    expect(readSelected()).toEqual([FINISHED_TASK.id]);
+    expect(isPaneShown()).toBe(true);
   });
 });
 
@@ -871,23 +890,91 @@ describe("handing a signal off while the pointer is on the list", () => {
   });
 });
 
-describe("opening a row", () => {
-  it("opens its run's page, folded or opened, by click and by ↩", async () => {
-    const { router } = await openIntake();
-    const [row] = getRowButtons();
-    await userEvent.click(row!);
-    await waitFor(() => {
-      expect(router.latestLocation.pathname).toBe(
-        `/runs/${row!.dataset.taskId!.replace("-7b00-", "-7c00-")}`,
-      );
-    });
+describe("selecting a row", () => {
+  it("shows the pane of a row on a click, with the row in the address", async () => {
+    const { router } = await openIntake("/intake?tracking=true");
+    await userEvent.click(getRowButton(FINISHED_TASK));
 
-    await router.navigate({ to: "/intake", search: { tracking: true } });
-    await screen.findByRole("heading", { level: 1, name: "Intake" });
-    getRowButton(STOPPED_TASK).focus();
+    expect(readSelected()).toEqual([FINISHED_TASK.id]);
+    expect(router.latestLocation.search).toMatchObject({ tracking: true, task: FINISHED_TASK.id });
+    const pane = getPane()!;
+    expect(isPaneShown()).toBe(true);
+    expect(within(pane).getByRole("heading", { level: 2 }).textContent).toBe(FINISHED_TASK.title);
+    expect(within(pane).getByText("Finished")).toBeTruthy();
+    expect(pane.textContent).toContain("Implement");
+    expect(pane.textContent).toMatch(/Finished at .*\d\d:\d\d after 10m/);
+    expect(screen.getByRole("button", { name: "Tracking pane" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+  });
+
+  it("opens Tracking on the row when a row of folded Tracking is clicked", async () => {
+    const { router } = await openIntake();
+    await userEvent.click(getRowButton(STOPPED_TASK));
+
+    expect(isOpen()).toBe(true);
+    expect(router.latestLocation.pathname).toBe("/intake");
+    expect(router.latestLocation.search).toMatchObject({ tracking: true, task: STOPPED_TASK.id });
+    await waitFor(() => {
+      expect(readSelected()).toEqual([STOPPED_TASK.id]);
+    });
+    expect(isPaneShown()).toBe(true);
+  });
+
+  it("takes the pane's toggle: it hides the pane and shows it again", async () => {
+    await openIntake("/intake?tracking=true");
+    await userEvent.click(getRowButton(FAILED_TASK));
+    const toggle = screen.getByRole("button", { name: "Tracking pane" });
+    await userEvent.click(toggle);
+    expect(isPaneShown()).toBe(false);
+    expect(readSelected()).toEqual([FAILED_TASK.id]);
+    await userEvent.click(toggle);
+    expect(isPaneShown()).toBe(true);
+  });
+
+  it("moves the focus to the suggested answer on ↩, and presses it on the second ↩", async () => {
+    const { calls } = await openIntake("/intake?tracking=true");
+    getRowButton(FINISHED_TASK).focus();
     await userEvent.keyboard("{Enter}");
     await waitFor(() => {
+      expect(document.activeElement).toBe(
+        within(getPane()!).getByRole("button", { name: "Mark done" }),
+      );
+    });
+    expect(findMarkDone(calls)).toEqual([]);
+
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(findMarkDone(calls).map((call) => [call.path, call.body])).toEqual([
+        [`/api/v1/tasks/${FINISHED_TASK.id}`, { status: "done" }],
+      ]);
+    });
+  });
+
+  it("moves the focus to the pane on ↩ when no answer is suggested", async () => {
+    await openIntake("/intake?tracking=true");
+    getRowButton(FAILED_TASK).focus();
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(document.activeElement).toBe(getPane()!.querySelector("article"));
+    });
+    expect(readSelected()).toEqual([FAILED_TASK.id]);
+  });
+
+  it("opens the selected row's run page from Open the run and from O", async () => {
+    const { router } = await openIntake("/intake?tracking=true");
+    await userEvent.click(getRowButton(STOPPED_TASK));
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Open the run" }));
+    await waitFor(() => {
       expect(router.latestLocation.pathname).toBe(`/runs/${getRunId(STOPPED_TASK)}`);
+    });
+
+    await router.navigate({ to: "/intake", search: { tracking: true, task: FAILED_TASK.id } });
+    await screen.findByRole("heading", { level: 1, name: "Intake" });
+    getRowButton(FAILED_TASK).focus();
+    await userEvent.keyboard("o");
+    await waitFor(() => {
+      expect(router.latestLocation.pathname).toBe(`/runs/${getRunId(FAILED_TASK)}`);
     });
   });
 });
@@ -906,12 +993,6 @@ const CHECKS_SIGNAL: Signal = {
     connectionId: "01a06d02-7e00-7000-8000-000000000001",
     threadRef: PULL_REQUEST_REF,
   },
-};
-
-const SLACK: PluginDetail = { ...GITHUB, id: "slack", displayName: "Slack" };
-const SLACK_SIGNAL: Signal = {
-  ...buildSignal("01a06d02-7a00-7000-8000-000000000008", "Is the deploy blocked?"),
-  kind: "slack/tagged-in-a-thread",
 };
 
 /** Builds the live session of the run of `task` that asks to run `git push`. */
@@ -1026,8 +1107,8 @@ describe("a row that needs you", () => {
   describe("on a session whose Request waits", () => {
     const agentSessions = [buildRequestingSession(WORKING_TASK)];
 
-    it("says what the Request asks, counts in To do, and opens the session's thread on a press", async () => {
-      const { router } = await openWithChecks("/intake?tracking=true", {
+    it("says what the Request asks, counts in To do, and offers only Stop the run in its pane", async () => {
+      await openWithChecks("/intake?tracking=true", {
         signals: [],
         rows: [[WORKING_TASK, "running"]],
         agentSessions,
@@ -1037,9 +1118,11 @@ describe("a row that needs you", () => {
       );
       expect(screen.getByRole("tab", { name: "Hercule, 1 to do" })).toBeTruthy();
       await userEvent.click(getRowButton(WORKING_TASK));
-      await waitFor(() => {
-        expect(router.latestLocation.pathname).toBe(`/threads/${agentSessions[0]!.id}`);
-      });
+      expect(
+        within(getPane()!)
+          .getAllByRole("button")
+          .map((button) => button.getAttribute("aria-label") ?? button.textContent),
+      ).toEqual(["Open the run", "Stop the run"]);
     });
 
     it("does nothing on E, because the run of the Request is live", async () => {
@@ -1077,25 +1160,10 @@ describe("a row that needs you", () => {
     });
   });
 
-  it("opens the signal in To do with Tracking closed, from a tab the signal is not on", async () => {
-    const { router } = await openWithChecks("/intake", {
-      signals: [CHECKS_SIGNAL, SLACK_SIGNAL],
-      plugins: [GITHUB, SLACK],
-    });
-    await userEvent.click(screen.getByRole("button", { name: /^Slack/ }));
-    expect(screen.getByRole("button", { name: /^Slack/ }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    await userEvent.click(getRowButton(CHECKED_TASK));
-    await waitFor(() => {
-      expect(router.latestLocation.search).toMatchObject({ signal: CHECKS_SIGNAL.id });
-    });
-    expect(router.latestLocation.pathname).toBe("/intake");
-    expect(router.latestLocation.search).not.toHaveProperty("tracking");
-    // The list is back on All, where the signal is listed and selected.
-    expect(screen.getByRole("button", { name: /^All/ }).getAttribute("aria-pressed")).toBe("true");
-    expect(getSignalRow(CHECKS_SIGNAL).getAttribute("aria-current")).toBe("true");
-  });
+  // The pane's "Open the signal" and "Open the thread" come with the pane's body. They go through the
+  // route's `thread` and `signal` destinations, which no control reaches until then.
+  it.todo("opens the signal in To do with Tracking closed, from a tab the signal is not on");
+  it.todo("opens the thread of the session whose Request waits");
 });
 
 /** Waits for the first block of Your work in the open signal's pane, and returns it. */
@@ -1548,14 +1616,12 @@ describe("marking a row done", () => {
       const selected = getRowButtons().find((row) => row.getAttribute("aria-current") === "true");
       expect(selected).toBeDefined();
       expect(document.activeElement).toBe(selected);
-      const selectedTask = ROWS.map(([task]) => task).find(
-        (task) => task.id === selected!.dataset.taskId,
-      )!;
       await userEvent.keyboard("{Enter}");
-      // Enter on the focused row presses it, which opens the run's page.
+      // Enter on the focused row selects it and takes the focus into its pane.
       await waitFor(() => {
-        expect(router.latestLocation.pathname).toBe(`/runs/${getRunId(selectedTask)}`);
+        expect(getPane()!.contains(document.activeElement)).toBe(true);
       });
+      expect(router.latestLocation.search).toMatchObject({ task: selected!.dataset.taskId });
     });
 
     it("keeps the focus in the list when the last row of folded Tracking is marked done", async () => {
@@ -1588,6 +1654,98 @@ describe("marking a row done", () => {
       "Couldn't mark Nightly backup job timing out done: The database is busy.",
     );
     expect(getRowButton(FAILED_TASK)).not.toBeNull();
+  });
+});
+
+describe("the pane's answers", () => {
+  /** The run `run.cancel` returns for the Working row's run, as the controller returns it once cancelled. */
+  const CANCELLED_RUN: Run = {
+    id: getRunId(WORKING_TASK),
+    workflowId: WORKFLOW_ID,
+    plan: { name: "Implement", inputs: [], triggers: [], steps: [], edges: [] },
+    inputs: {},
+    origin: { kind: "manual", actor: "user" },
+    runnerId: "01a06d02-7f00-7000-8000-000000000001",
+    workspaceId: "01a06d02-7f00-7000-8000-000000000002",
+    subscriptions: [],
+    createdAt: at(10),
+    status: "cancelled",
+    finishedAt: at(25),
+    steps: [],
+    edgeTraversals: [],
+  };
+  const stopPath = `/api/v1/runs/${getRunId(WORKING_TASK)}/cancel`;
+  const findStops = (calls: ReadonlyArray<Call>) =>
+    calls.filter((call) => call.method === "POST" && call.path === stopPath);
+
+  it("marks the row done from Mark done, shows the toast, and selects the next row", async () => {
+    const { calls } = await openIntake("/intake?tracking=true");
+    await userEvent.click(getRowButton(FINISHED_TASK));
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Mark done" }));
+
+    await waitFor(() => {
+      expect(findMarkDone(calls).map((call) => [call.path, call.body])).toEqual([
+        [`/api/v1/tasks/${FINISHED_TASK.id}`, { status: "done" }],
+      ]);
+    });
+    expect((await findToast()).textContent).toBe("Marked done: Rate-limit the public API");
+    await waitFor(() => {
+      expect(readSelected()).toEqual([WORKING_TASK.id]);
+    });
+    expect(within(getPane()!).getByRole("heading", { level: 2 }).textContent).toBe(
+      WORKING_TASK.title,
+    );
+    // The keys still reach Intake: the focus did not fall to the page's body.
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("cancels the row from Cancel, and says so", async () => {
+    const { calls } = await openIntake("/intake?tracking=true");
+    await userEvent.click(getRowButton(FAILED_TASK));
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(findMarkDone(calls).map((call) => [call.path, call.body])).toEqual([
+        [`/api/v1/tasks/${FAILED_TASK.id}`, { status: "cancelled" }],
+      ]);
+    });
+    expect((await findToast()).textContent).toBe("Cancelled: Nightly backup job timing out");
+    await waitFor(() => {
+      expect(getRowButton(FAILED_TASK)).toBeNull();
+    });
+  });
+
+  it("stops the run from Stop the run, with no confirmation and no toast", async () => {
+    const { calls } = await openIntake("/intake?tracking=true", {
+      extra: { ...storeTracking(), [`POST ${stopPath}`]: { body: CANCELLED_RUN } },
+    });
+    await userEvent.click(getRowButton(WORKING_TASK));
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Stop the run" }));
+
+    await waitFor(() => {
+      expect(findStops(calls).map((call) => call.body)).toEqual([{ keepWorkspace: false }]);
+    });
+    expect(document.querySelector(".asks-toast")).toBeNull();
+    expect(document.querySelector("dialog[open]")).toBeNull();
+  });
+
+  it("shows a refused stop under its button, and leaves the row as it was", async () => {
+    await openIntake("/intake?tracking=true", {
+      extra: {
+        ...storeTracking(),
+        [`POST ${stopPath}`]: {
+          status: 409,
+          body: buildErrorBody("invalid_state", "The run has already ended."),
+        },
+      },
+    });
+    await userEvent.click(getRowButton(WORKING_TASK));
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Stop the run" }));
+
+    const failure = await within(getPane()!).findByRole("alert");
+    expect(failure.textContent).toBe("The run has already ended.");
+    expect(failure.previousElementSibling?.getAttribute("data-answer")).toBe("stop-run");
+    expect(document.querySelector(".asks-toast")).toBeNull();
   });
 });
 

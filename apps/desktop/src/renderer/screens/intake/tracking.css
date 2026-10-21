@@ -2,10 +2,11 @@
    (docs/design/tracking/tracking.css). Its class names are the drawing's with
    a `tr-` prefix for the `rt-` ones, so each rule maps 1:1 to the drawing's
    rule. Rows reuse Intake's control classes (`ask-acts`, `ask-act`), and the
-   section heading and count come from the shared controls. The drawing's own
-   pane and the answer buttons on its Needs you rows (`rt-run-ans`) are not
-   ported: a press on a Needs you row opens the thread or the signal that
-   waits. Each departure from the drawing says why. */
+   section heading and count come from the shared controls. The answer buttons
+   on the drawing's Needs you rows (`rt-run-ans`) are not ported: the pane
+   holds what waits. The drawing's pane (tracking-pane.css, scoped under
+   `.rt-pane`) is ported under `.tr-pane`, rule by rule, as the pane's parts
+   are built. Each departure from the drawing says why. */
 
 /* ---------- The tray ---------- */
 /* Either Intake or Tracking in the list column, never both. Folded, Tracking
@@ -313,4 +314,33 @@
   border-radius: var(--r-md);
   background: var(--raised);
   box-shadow: var(--shadow-2);
+}
+
+/* ---------- The pane ---------- */
+/* Ported from the drawing's tracking-pane.css, which scopes every rule under
+   `.rt-pane`; here the scope is `.tr-pane`. Only the rules the pane's frame
+   uses are here. */
+/* The head: the face beside the workflow's name is 18px, 2px taller than the
+   line, so it hangs past it without growing the line. */
+.tr-pane .ad-kind .src .cr {
+  margin: -2px 0;
+}
+/* The state's word in the head, in the colour its row's line wears. The
+   drawing's system.css names these `you-ink`, `ok-ink` and `fail-ink`. */
+.tr-pane .tr-tone--you {
+  color: var(--you-ink);
+}
+.tr-pane .tr-tone--ok {
+  color: var(--ok);
+}
+.tr-pane .tr-tone--fail {
+  color: var(--fail-ink);
+}
+/* The verdict: 26px under the trip, 2px more than a signal's answers. */
+.tr-pane .ad-answers {
+  margin-top: 26px;
+}
+/* A live name in a describe line never breaks across lines. */
+.tr-pane .ans-desc b {
+  white-space: nowrap;
 }
