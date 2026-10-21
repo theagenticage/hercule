@@ -218,7 +218,7 @@ describe("shapeTrackingOutput for a step with an output schema", () => {
     );
     const named = readFields(shapeTrackingOutput(buildStep({ [key]: 1 }, { type: "object" })));
 
-    for (const [{ label }] of [titled, named]) {
+    for (const label of [titled[0]!.label, named[0]!.label]) {
       expect(label.length).toBeLessThanOrEqual(MAX_TRACKING_OUTPUT_LABEL);
       expect(label.endsWith("…")).toBe(true);
     }
