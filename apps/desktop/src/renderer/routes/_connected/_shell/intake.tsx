@@ -17,7 +17,6 @@ import {
   signalsClearedTodayQuery,
   signalsLaterQuery,
   signalsToDoQuery,
-  trackingDetailQuery,
   workflowsQuery,
 } from "../../../app/queries";
 import { IntakeScreen } from "../../../screens/intake/intake-screen";
@@ -116,9 +115,10 @@ const validateIntakeSearch = (search: Record<string, unknown>): IntakeSearch => 
  *   for the read, so the pane opens on the signal and not on nothing. A
  *   failed read shows in the pane.
  *
- * When a row of Tracking is selected, the loader also reads its Task's trip in
- * the background, never waiting for it: the pane's head and answers need no
- * read, so the pane opens at once and the trip draws when the read arrives.
+ * The loader reads nothing for the selected row of Tracking. Its pane's head
+ * and answers need no read, and the pane reads the Task's trip itself when it
+ * mounts, so the trip draws when that read arrives. Stepping through the rows
+ * with `J` while the pane is hidden therefore sends no request.
  *
  * On Everything, the loader reads the first page of events for the search,
  * the filter and the source tab in the URL, back to the horizon the
@@ -140,7 +140,6 @@ export const Route = createFileRoute("/_connected/_shell/intake")({
   loaderDeps: ({ search }) => ({
     view: search.view,
     signal: search.signal,
-    task: search.task,
     text: search.text,
     handling: search.handling,
     source: search.source,
@@ -149,10 +148,6 @@ export const Route = createFileRoute("/_connected/_shell/intake")({
     const { client } = controller;
     const openedAt = Date.now();
     const settings = await queryClient.ensureQueryData(settingsQuery(client));
-    // The pane of the selected row of Tracking reads the Task's trip. Its head and answers need
-    // no read, so the pane opens at once and the trip arrives when the read does.
-    if (deps.task !== undefined)
-      void queryClient.prefetchQuery(trackingDetailQuery(client, deps.task));
     const opening = Promise.all([
       cause === "stay"
         ? queryClient.ensureQueryData(workflowsQuery(client))
