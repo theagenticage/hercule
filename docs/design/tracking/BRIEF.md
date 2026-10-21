@@ -87,6 +87,10 @@ As Round Trip's: the face of the agent that has the work, in its pose (working, 
 
 *(Amended 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801).)* Slice 1 does not build three of these lines as drawn. The agent's latest message is not available: no field, read or push carries it, and the `session` topic does not bring it. The Working row reads "*Fix bug* · working" until a follow-up ticket adds a server-kept field for it. A Stopped row reads "*Implement* · stopped", because a run summary does not say who cancelled the run. A Working row that only waits on signal triggers reads "*Implement* · waiting for checks_passed", with the awaited trigger ids, because "waiting for checks on #1311" needs the run's plan and inputs, which the summary does not carry.
 
+*(Amended 2026-10-21, [#802](https://github.com/theagenticage/hercule/issues/802).)* Slice 2 builds Needs you, and the app knowingly differs from the drawing in two places:
+- A Needs you row by a Request shows the question in plain text ("Run git push?"), not the command in monospace, and has no Allow once, Always allow or Deny under it. Those answers wait for the pane ticket [#803](https://github.com/theagenticage/hercule/issues/803) or a follow-up. The user opens the thread to answer.
+- A Needs you row by a signal reads "*Kind* on *place*", with the signal's own place: "Checks failed on payments-api #1302", not "Checks failed on #1302". The place is the one the signal carries, and the app does not shorten it.
+
 - The workflow's name is in its colleague's hue.
 - The time on the right is how long the row has been in its state. It is bold, in marigold or green, when the row waits on the user.
 - Mark done shows on hover over Finished, Failed and Stopped rows only. On Working and Needs you it would leave a run going.
