@@ -319,8 +319,7 @@ export const TRACKING_DETAILS: ReadonlyArray<TrackingDetail> = [
   }),
   buildDetail(REFUNDS, buildSessionId(6), {
     outcome: buildTextOutcome("Write the change", buildSessionId(6), [
-      "Added `createRefund(orderId, lines)` with a partial amount per line, and a migration for `refund_lines`. Stripe gets one refund per call, with an idempotency key per order and line.",
-      "Pushed `feat/partial-refunds`. The unit tests pass here; I did not run the Stripe test-mode suite, which needs the team's key.",
+      "Added `createRefund(orderId, lines)` with a partial amount per line, and a migration for `refund_lines`. Stripe gets one refund per call, with an idempotency key per order and line. Pushed `feat/partial-refunds`. The unit tests pass here; I did not run the Stripe test-mode suite, which needs the team's key.",
     ]),
     endingActionStepName: "Open a pull request",
   }),
