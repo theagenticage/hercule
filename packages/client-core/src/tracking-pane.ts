@@ -21,7 +21,8 @@ import { canMarkTrackingRowDone, nameTrackingState, type TrackingRow } from "./t
  *   goes. `leavesRowStopped` is true when cancelling `run` leaves the row
  *   Stopped. It is false when the row stays in another state: another run is
  *   still live, `run` is not the Task's newest run so an earlier run's state
- *   shows, or the row waits on a signal.
+ *   shows, or an open signal keeps the row on Needs you (whether the row
+ *   waits on the signal or on a Request beside it).
  * - `mark-done`: takes the row off Tracking and sets its Task `done`.
  * - `cancel`: takes the row off Tracking and sets its Task `cancelled`.
  *
@@ -57,7 +58,10 @@ export const listTrackingAnswers = (row: TrackingRow): ReadonlyArray<TrackingAns
     const leavesRowStopped =
       run.id === row.task.latestRun.id &&
       row.task.liveRunIds.every((runId) => runId === run.id) &&
-      !(row.state === "needs-you" && row.waitsOn.kind === "signal");
+      !(
+        row.state === "needs-you" &&
+        (row.waitsOn.kind === "signal" || row.waitsOn.signalAlsoWaits)
+      );
     return [{ kind: "stop-run", run, leavesRowStopped, suggested: false }];
   }
   return [
@@ -245,11 +249,11 @@ export interface TrackingTrip {
   readonly stamp: string;
   /** Why the run failed. Set on a Failed row only, and only when the run carries a cause. */
   readonly failureCause: string | undefined;
-  /** What the newest run's last agent step put out. Absent unless the row's run is the newest and not live, and when the run has none. */
+  /** What the newest run's last completed agent step put out. Absent unless the row is not Working and its run is the newest, and when the run has none. */
   readonly output: TrackingOutput | undefined;
   /** The run "See the whole output" opens: the newest run, whose output it is. */
   readonly outputRunId: string;
-  /** The action step the newest run ended on. Absent unless the row's run is the newest and not live, and when the run did not end on one. */
+  /** The action step the newest run ended on. Absent unless the row is not Working and its run is the newest, and when the run did not end on one (a live run never has). */
   readonly endingActionStepName: string | undefined;
   /** The runs, oldest first. Empty when the list adds nothing to the agent's name line (see `shouldListTrackingRuns`). */
   readonly runs: ReadonlyArray<TrackingTripRun>;
@@ -260,11 +264,20 @@ export interface TrackingTrip {
  * `timezone` as seen from `now`.
  *
  * The output and the ending action step belong to the newest run. The pane
- * shows them under the name of the row's run, so it shows them only when that
- * run is the newest and has ended:
+ * shows them under the name of the row's run, so it shows them only when the
+ * row is not Working and that run is the newest run. The run need not have
+ * ended:
+ *
+ * - A Needs you row that waits on a Request of the newest run, while that run
+ *   still goes, shows the output of the run's last completed agent step. It is
+ *   the context for the question the agent asks, as the drawing shows it.
+ * - The ending action step is set by the controller only for a completed run,
+ *   so a live run shows no ending action step.
+ *
+ * Two kinds of row show neither, because they name another run than the newest:
  *
  * - A Working row names its newest live run, which can be an older run than
- *   the newest, and a run that goes on has not ended on anything.
+ *   the newest.
  * - A Needs you row that waits on a Request names the run of that Request,
  *   which can also be an older live run while the newest run has completed.
  */

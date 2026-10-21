@@ -73,13 +73,14 @@ const buildRow = (run: TrackingRun): TrackingRow => {
   }
 };
 
-/** Builds a Needs you row that waits on a Request of the live run `run`. */
-const buildRequestRow = (run: TrackingRun): TrackingRow => ({
+/** Builds a Needs you row that waits on a Request of the live run `run`, with an open signal beside it when `signalAlsoWaits`. */
+const buildRequestRow = (run: TrackingRun, signalAlsoWaits = false): TrackingRow => ({
   task: buildTask(run, [run.id]),
   run,
   state: "needs-you",
   waitsOn: {
     kind: "request",
+    signalAlsoWaits,
     session: {
       sessionId: "session-1",
       runId: run.id,
@@ -159,6 +160,9 @@ describe("listTrackingAnswers", () => {
         task: task(["run-2"]),
       }),
     ).toBe(false);
+    // A Request alone: stopping the run leaves the row Stopped. With an open signal beside it, the signal keeps the row on Needs you.
+    expect(stopOf(buildRequestRow(newest))).toBe(true);
+    expect(stopOf(buildRequestRow(newest, true))).toBe(false);
   });
 
   it("suggests Mark done on a Finished row, then Cancel", () => {
@@ -348,6 +352,13 @@ describe("describeTrackingTrip", () => {
     const waiting = trip(buildSignalRow(completed), detail(completed));
     expect(waiting.output).toBe(OUTPUT);
     expect(waiting.endingActionStepName).toBe("Post the review");
+  });
+
+  it("gives the output of the last completed step, and no ending action step, on a Needs you row whose Request waits in a live newest run", () => {
+    const live = buildRun("running");
+    const drawn = trip(buildRequestRow(live), buildDetail([live], { output: OUTPUT }));
+    expect(drawn.output).toBe(OUTPUT);
+    expect(drawn.endingActionStepName).toBeUndefined();
   });
 
   it("leaves the output and the ending action step out of a Working row, even when the newest run ended", () => {

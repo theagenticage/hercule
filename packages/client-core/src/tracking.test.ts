@@ -222,7 +222,7 @@ describe("a Task that needs you", () => {
     const [asked] = buildTrackingRows([working], [request], NO_YOUR_WORK);
     expect(asked).toMatchObject({
       state: "needs-you",
-      waitsOn: { kind: "request", session: request },
+      waitsOn: { kind: "request", session: request, signalAlsoWaits: false },
       since: at(7),
     });
     // The row still reads its run, so the run can be opened.
@@ -290,7 +290,7 @@ describe("a Task that needs you", () => {
     // The newest run failed, but the older live run asks, so the row waits on the Request.
     expect(buildTrackingRows([failed], [request], yourWork)[0]).toMatchObject({
       state: "needs-you",
-      waitsOn: { kind: "request", session: request },
+      waitsOn: { kind: "request", session: request, signalAlsoWaits: true },
     });
     expect(buildTrackingRows([failed], [], yourWork)[0]?.state).toBe("needs-you");
   });

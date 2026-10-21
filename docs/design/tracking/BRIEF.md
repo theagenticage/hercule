@@ -143,6 +143,7 @@ A Task that is Needs you by a signal has no live run: its agent finished, and a 
 *(Amended 2026-10-21, [#803](https://github.com/theagenticage/hercule/issues/803).)* Slice 3 builds the pane, and the app knowingly differs from the drawing in these places:
 - The head's standing line has no harness, model or runner. No read carries them. The line is "Finished at 09:20 after 8m", "Failed at 09:26 after 6m", "Stopped at 08:47", "Started at 09:33 · 8m so far" or "Waiting on you since 09:33".
 - A Stopped row never says "by you". No field says who stopped the run.
+- What it did shows on every row that is not Working, when its run is the Task's newest run, whether or not that run has ended: a Needs you row that waits on a Request of a live newest run shows the output of the run's last completed agent step, as the `?state=needs-you` drawing does, as context for the question. The action step the run ended on never shows for a live run, because the controller sets it for a completed run only. A row that names an older run shows neither.
 - The action step the run ended on shows the step's name only. No record keeps a summary of what an action step did, so there is no "Opened draft PR #1302".
 - A Request's Allow once, Always allow and Deny are not in the pane. The card has "Open the thread", where the thread's own answers are.
 - There is no foot line ("Leaves Tracking when...") and no fine print under the answers, as Intake's own pane has none.

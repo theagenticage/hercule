@@ -79,9 +79,18 @@ export interface TrackingRead {
   readonly readStartedAt: number;
 }
 
-/** What a Needs you row waits on: an open Request of a run's session, or an open signal. */
+/**
+ * What a Needs you row waits on: an open Request of a run's session, or an open
+ * signal. A Request wins over a signal. `signalAlsoWaits` is true when an open
+ * signal names the Task too, so answering the Request would not take the row
+ * off Needs you.
+ */
 type TrackingWait =
-  | { readonly kind: "request"; readonly session: WaitingRunSession }
+  | {
+      readonly kind: "request";
+      readonly session: WaitingRunSession;
+      readonly signalAlsoWaits: boolean;
+    }
   | { readonly kind: "signal"; readonly signal: Signal };
 
 /** The fields every row of Tracking has. */
@@ -185,8 +194,9 @@ const findTrackingWait = (
     .toSorted(
       (a, b) => a.activityAt.localeCompare(b.activityAt) || a.sessionId.localeCompare(b.sessionId),
     )[0];
-  if (session !== undefined) return { kind: "request", session };
   const signal = oldestSignalByTask.get(task.taskId);
+  if (session !== undefined)
+    return { kind: "request", session, signalAlsoWaits: signal !== undefined };
   return signal === undefined ? undefined : { kind: "signal", signal };
 };
 
