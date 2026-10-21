@@ -1999,6 +1999,7 @@ describe("the pane's answers", () => {
 
 describe("the pane's Try again", () => {
   const NEW_RUN_ID = "01a06d02-7c00-7000-8000-0000000000f2";
+  const OTHER_RUN_ID = "01a06d02-7c00-7000-8000-0000000000f3";
   const rerunPath = (task: Task) => `/api/v1/runs/${getRunId(task)}/rerun`;
   const findReruns = (calls: ReadonlyArray<Call>) =>
     calls.filter((call) => call.method === "POST" && call.path.endsWith("/rerun"));
@@ -2026,6 +2027,9 @@ describe("the pane's Try again", () => {
       extra: {
         ...storeTracking(rows(), { readRows: rows, buildRun }),
         [`POST ${rerunPath(task)}`]: rerunAnswer,
+        ...Object.fromEntries(
+          others.map(([other]) => [`POST ${rerunPath(other)}`, { body: { runId: OTHER_RUN_ID } }]),
+        ),
       },
     });
     await opened.live.waitForFirstPushes();
@@ -2203,6 +2207,53 @@ describe("the pane's Try again", () => {
     expect(findAnswer("try-again")!.getAttribute("aria-disabled")).toBe("true");
     await userEvent.click(findAnswer("try-again")!);
     expect(findReruns(calls)).toHaveLength(1);
+  });
+
+  it("keeps Try again locked for as long as the read shows the old run, however long that takes and whatever re-runs happen beside it", async () => {
+    const { calls } = await openRerunnable(FAILED_TASK, "failed", undefined, [
+      [STOPPED_TASK, "cancelled"],
+    ]);
+    const selectRow = async (task: Task) => {
+      act(() => {
+        getRowButton(task).click();
+      });
+      await waitFor(() => {
+        expect(findAnswer("try-again")).not.toBeNull();
+      });
+    };
+    await selectRow(FAILED_TASK);
+    act(() => {
+      findAnswer("try-again")!.click();
+    });
+    await waitFor(() => {
+      expect(findReruns(calls)).toHaveLength(1);
+    });
+
+    // A re-run of another Task moves the screen's own request on to that
+    // Task, and a cache that drops finished requests by time would drop the first
+    // Task's request. Time is faked only across the press and the wait.
+    await selectRow(STOPPED_TASK);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      act(() => {
+        findAnswer("try-again")!.click();
+      });
+      act(() => {
+        vi.advanceTimersByTime(10 * 60 * 1000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() => {
+      expect(findReruns(calls)).toHaveLength(2);
+    });
+
+    await selectRow(FAILED_TASK);
+    expect(findAnswer("try-again")!.getAttribute("aria-disabled")).toBe("true");
+    act(() => {
+      findAnswer("try-again")!.click();
+    });
+    expect(findReruns(calls)).toHaveLength(2);
   });
 
   it("keeps the row on Tracking when E is pressed while the re-run is starting", async () => {
