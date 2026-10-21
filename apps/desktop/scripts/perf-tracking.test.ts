@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RecordedRequest, RecordedPush } from "./perf-collector.ts";
-import { loadWithinBound, summarizeActivity } from "./perf-tracking.ts";
+import { loadWithinBound, summarizeActivity, yourWorkLoadWithinBound } from "./perf-tracking.ts";
 
 const TOPICS = [
   "task",
@@ -15,14 +15,18 @@ const TOPICS = [
   "plugin",
 ];
 const baselines: RecordedPush[] = TOPICS.map((topic) => ({ topic, initial: true }));
-const snapshotRead = (): RecordedRequest => ({
+const readOf = (url: string): RecordedRequest => ({
   method: "GET",
-  url: new URL("http://127.0.0.1/api/v1/tasks/tracking"),
+  url: new URL(url),
   startedAtMs: 0,
   durationMs: 1,
   firstByteMs: 1,
   bodyBytes: 10,
 });
+const snapshotRead = (): RecordedRequest => readOf("http://127.0.0.1/api/v1/tasks/tracking");
+const yourWorkRead = (): RecordedRequest =>
+  readOf("http://127.0.0.1/api/v1/tasks?refs=github%3Apull-request%3Aacme%2Fa%231&status=open");
+const toDoRead = (): RecordedRequest => readOf("http://127.0.0.1/api/v1/signals?view=to-do");
 
 describe("loadWithinBound", () => {
   it("refuses ten reads when ten topics sent a baseline but only task and run may re-read", () => {
@@ -44,5 +48,56 @@ describe("loadWithinBound", () => {
 
   it("refuses a start that read nothing", () => {
     expect(loadWithinBound(summarizeActivity({ requests: [], pushes: baselines }))).toBe(false);
+  });
+});
+
+describe("summarizeActivity", () => {
+  it("counts Your work's task.query and To do apart from Tracking's read and the other reads", () => {
+    const load = summarizeActivity({
+      requests: [
+        snapshotRead(),
+        yourWorkRead(),
+        yourWorkRead(),
+        toDoRead(),
+        readOf("http://127.0.0.1/api/v1/tasks?status=open"),
+        readOf("http://127.0.0.1/api/v1/signals?view=later&limit=1"),
+      ],
+      pushes: [],
+    });
+    expect(load).toMatchObject({
+      snapshots: 1,
+      yourWorkReads: 2,
+      toDoReads: 1,
+      otherReads: 1,
+    });
+    expect(load.yourWorkTiming).toContain("task.query for Your work median");
+  });
+
+  it("does not let Your work's reads count as other reads at the start", () => {
+    const load = summarizeActivity({
+      requests: [snapshotRead(), yourWorkRead()],
+      pushes: baselines,
+    });
+    expect(loadWithinBound(load)).toBe(true);
+  });
+});
+
+describe("yourWorkLoadWithinBound", () => {
+  const loadWith = (yourWorkReads: number) =>
+    summarizeActivity({
+      requests: Array.from({ length: yourWorkReads }, yourWorkRead),
+      pushes: [],
+    });
+
+  it("accepts one pass of the batches, and one more for the task topic's first message", () => {
+    expect(yourWorkLoadWithinBound(loadWith(1), 1)).toBe(true);
+    expect(yourWorkLoadWithinBound(loadWith(2), 1)).toBe(true);
+    expect(yourWorkLoadWithinBound(loadWith(4), 2)).toBe(true);
+  });
+
+  it("refuses a start that read Your work too few or too many times", () => {
+    expect(yourWorkLoadWithinBound(loadWith(0), 1)).toBe(false);
+    expect(yourWorkLoadWithinBound(loadWith(3), 1)).toBe(false);
+    expect(yourWorkLoadWithinBound(loadWith(1), 2)).toBe(false);
   });
 });

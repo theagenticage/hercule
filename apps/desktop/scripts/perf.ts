@@ -70,7 +70,9 @@
  *    costs), on 40 threads and the signals of this step: Intake's idle
  *    launch with 10 Tasks tracked and with nothing tracked, then one launch
  *    that runs every other Tracking scenario in a single app (see
- *    `perf-tracking.ts`). Pass `--tracking-fast` as well to sample idle once
+ *    `perf-tracking.ts`). Your work is in it: 60 of the signals are about a
+ *    thread (`--tracking-thread-signals=N` sets another number) and 10 open
+ *    Tasks carry their refs. Pass `--tracking-fast` as well to sample idle once
  *    the page is quiet (a quick look, never evidence):
  *
  *        pnpm --filter @hercule/desktop perf -- --tracking-only
@@ -289,6 +291,8 @@ import {
   releaseTracking,
   reportTrackingInteractions,
   seedTracking,
+  seedYourWork,
+  THREAD_SIGNALS,
   TRACKED_COUNT,
 } from "./perf-tracking.ts";
 import {
@@ -1391,8 +1395,10 @@ async function measureEverything(fixture: ThreadFixture, userDataDir: string): P
  * interaction launch that runs every other scenario against the same
  * controller.
  *
- * The pair shares one preparation. The 10 Tasks are handed off first, then
- * `prepareLaunch` restarts the controller and moves their runs three hours
+ * The pair shares one preparation. The 10 Tasks are handed off first, 10 more
+ * open Tasks are made for Your work (`seedYourWork`), then `prepareLaunch`
+ * restarts the controller, makes `THREAD_SIGNALS` of the 200 signals signals
+ * about a thread, and moves the runs three hours
  * back, so the rows show hours and no label changes while the launch is read;
  * `openIntakeOnce` stores Intake as the last screen and `warmUpApp` warms the
  * app up, once for both. The tracked launch follows, then
@@ -1407,7 +1413,8 @@ async function measureTracking(fixture: ThreadFixture, userDataDir: string): Pro
   await raiseSnoozedSignal(fixture);
   const workflows = await createTrackingWorkflows(fixture);
   await seedTracking(fixture, workflows);
-  await fixture.prepareLaunch({ twoMinuteRow: false });
+  await seedYourWork(fixture);
+  await fixture.prepareLaunch({ twoMinuteRow: false, signalsAboutThreads: THREAD_SIGNALS });
   await openIntakeOnce(userDataDir);
   await warmUpApp(userDataDir);
   logProgress("signals raised, 10 Tasks handed off, controller prepared, app warmed");
