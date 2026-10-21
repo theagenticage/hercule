@@ -419,6 +419,8 @@ export function IntakeScreen({
 
   // A press on a row's checkbox or move. The list's rows are memoized, so the
   // list gets one function that keeps its identity and runs the latest one.
+  // State keeps the function, not `useCallback`: the React Compiler cannot
+  // keep a `useCallback` that reads a ref, and skips the whole component.
   const runRowActionRef = useRef<(signalId: string, action: SignalRowAction) => void>(null);
   useLayoutEffect(() => {
     runRowActionRef.current = (signalId, action) => {
@@ -434,9 +436,9 @@ export function IntakeScreen({
       }
     };
   });
-  const runRowAction = useCallback((signalId: string, action: SignalRowAction): void => {
+  const [runRowAction] = useState(() => (signalId: string, action: SignalRowAction): void => {
     runRowActionRef.current?.(signalId, action);
-  }, []);
+  });
 
   const hasNextPage = paged.hasNextPage;
   const isFetchingNextPage = paged.isFetchingNextPage;
