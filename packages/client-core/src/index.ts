@@ -430,7 +430,7 @@ export {
   buildTrackingRows,
   canMarkTrackingRowDone,
   countWaitingTrackingRows,
-  decideTrackingRowDestination,
+  decideTrackingRowPose,
   decideTrackingStatePose,
   describeTrackingLine,
   groupTrackingRows,
@@ -438,11 +438,11 @@ export {
   listRecentTrackingRows,
   nameTrackingState,
   readTrackingFaceSeed,
+  type TrackingDestination,
   type TrackingGroup,
   type TrackingLine,
   type TrackingRead,
   type TrackingRow,
-  type TrackingRowDestination,
   type TrackingState,
 } from "./tracking";
 export {

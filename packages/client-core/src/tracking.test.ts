@@ -4,7 +4,6 @@ import {
   buildTrackingRows,
   canMarkTrackingRowDone,
   countWaitingTrackingRows,
-  decideTrackingRowDestination,
   describeTrackingLine,
   groupTrackingRows,
   isTrackingAffectedByRunPush,
@@ -527,29 +526,5 @@ describe("groupTrackingRows", () => {
 
   it("returns no group for no row", () => {
     expect(groupTrackingRows([])).toEqual([]);
-  });
-});
-
-describe("decideTrackingRowDestination", () => {
-  const working = buildTask("a", buildRun("r1", 0, "running"));
-
-  it("opens the run's page for a row that waits on nothing", () => {
-    const row = buildTrackingRows([working], [], NO_YOUR_WORK)[0]!;
-    expect(decideTrackingRowDestination(row)).toEqual({ kind: "run", runId: "r1" });
-  });
-
-  it("opens the thread of the session whose Request waits", () => {
-    const row = buildTrackingRows(
-      [working],
-      [buildWaitingSession("s1", "r1", 7)],
-      NO_YOUR_WORK,
-    )[0]!;
-    expect(decideTrackingRowDestination(row)).toEqual({ kind: "thread", sessionId: "s1" });
-  });
-
-  it("opens the signal that names the Task as Your work", () => {
-    const yourWork = buildYourWork([[buildSignal("sig", 1), ["a"]]]);
-    const row = buildTrackingRows([working], [], yourWork)[0]!;
-    expect(decideTrackingRowDestination(row)).toEqual({ kind: "signal", signalId: "sig" });
   });
 });
