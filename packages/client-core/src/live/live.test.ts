@@ -819,12 +819,14 @@ describe("createLive", () => {
 });
 
 describe("buildQueryKeys", () => {
-  it("maps a task push to the list prefix, one detail key per id, Tracking's snapshot and Your work", () => {
+  it("maps a task push to the list prefix, one detail key per id, Tracking's snapshot, each Tracking pane's read and Your work", () => {
     assert.deepStrictEqual(buildQueryKeys("task", ["a", "b"]), [
       ["tasks"],
       ["task", "a"],
       ["task", "b"],
       ["tracking"],
+      ["trackingDetail", "a"],
+      ["trackingDetail", "b"],
       ["your-work"],
     ]);
 
@@ -833,6 +835,7 @@ describe("buildQueryKeys", () => {
       queryKeys.tasks(),
       queryKeys.task("a"),
       queryKeys.tracking(),
+      queryKeys.trackingDetail("a"),
       queryKeys.yourWork(),
     ]);
   });
@@ -842,6 +845,7 @@ describe("buildQueryKeys", () => {
       ["tasks"],
       ["task"],
       ["tracking"],
+      ["trackingDetail"],
       ["your-work"],
     ]);
   });

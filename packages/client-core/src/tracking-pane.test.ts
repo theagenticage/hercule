@@ -2,6 +2,7 @@ import type { Signal, TrackingRun, TrackingTask } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import type { TrackingRow } from "./tracking";
 import {
+  decideTrackingRunPose,
   describeTrackingOutputValue,
   describeTrackingRunLine,
   describeTrackingStamp,
@@ -218,6 +219,16 @@ describe("describeTrackingRunLine", () => {
         buildRun("running", { awaitedSignalIds: ["checks_passed", "merged"] }),
       ),
     ).toBe("waiting for checks_passed, merged");
+  });
+});
+
+describe("decideTrackingRunPose", () => {
+  it("marks a run by how it ended, and a live run as working", () => {
+    expect(decideTrackingRunPose(buildRun("completed"))).toBe("done");
+    expect(decideTrackingRunPose(buildRun("failed"))).toBe("failed");
+    expect(decideTrackingRunPose(buildRun("cancelled"))).toBe("idle");
+    expect(decideTrackingRunPose(buildRun("running"))).toBe("working");
+    expect(decideTrackingRunPose(buildRun("pending"))).toBe("working");
   });
 });
 

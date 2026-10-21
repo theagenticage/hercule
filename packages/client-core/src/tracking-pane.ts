@@ -150,6 +150,26 @@ export const describeTrackingRunLine = (run: TrackingRun): string => {
 };
 
 /**
+ * Returns the pose of the mark that leads a run in the pane's list of runs:
+ * `working` for a live run, `done` for a completed one, `failed` for a failed
+ * one and `idle` for a cancelled one, as the rows of Tracking mark the same
+ * states.
+ */
+export const decideTrackingRunPose = (run: TrackingRun): "working" | "done" | "failed" | "idle" => {
+  switch (run.status) {
+    case "completed":
+      return "done";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "idle";
+    case "pending":
+    case "running":
+      return "working";
+  }
+};
+
+/**
  * Describes the small stamp beside the agent's name in the pane, with times in
  * `timezone` as seen from `now`:
  *

@@ -403,6 +403,7 @@ export {
   groupSignalsIntoSections,
   isBackFromSnooze,
   listUrgentSignals,
+  lowerFirst,
   MIN_INTAKE_LIST_WIDTH,
   MIN_INTAKE_PANE_WIDTH,
   moveEventSelection,
@@ -446,6 +447,7 @@ export {
   type TrackingState,
 } from "./tracking";
 export {
+  decideTrackingRunPose,
   describeTrackingOutputValue,
   describeTrackingRunLine,
   describeTrackingStamp,
