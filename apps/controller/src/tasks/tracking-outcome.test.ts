@@ -83,7 +83,7 @@ describe("cutText", () => {
   });
 
   it("cuts at the last line break when there is no paragraph break", () => {
-    expect(cutText("- one\n- two\n- three four five six", 25)).toBe("- one\n- two…");
+    expect(cutText("- one\n- two\n- three\n- four five six", 25)).toBe("- one\n- two\n- three…");
   });
 
   it("cuts at the last word when there is no break", () => {
@@ -92,6 +92,22 @@ describe("cutText", () => {
 
   it("cuts at the limit when there is nothing to break on", () => {
     expect(cutText("x".repeat(30), 10)).toBe("x".repeat(10) + "…");
+  });
+
+  it("accepts a break exactly at half the limit", () => {
+    expect(cutText("abcde\nfghijklmnop", 10)).toBe("abcde…");
+  });
+
+  it("ignores a paragraph break in the first half and falls back to a later line break", () => {
+    expect(cutText("ab\n\ncdef\nghi jklmnop", 12)).toBe("ab\n\ncdef…");
+  });
+
+  it("ignores breaks in the first half and cuts at a space in the second half", () => {
+    expect(cutText("ab\n\ncd\nefghi jklm nopq", 16)).toBe("ab\n\ncd\nefghi…");
+  });
+
+  it("cuts at the limit when every break is in the first half", () => {
+    expect(cutText("ab\n\nc defghijklmnopqrstuvwxyz", 12)).toBe("ab\n\nc defghi…");
   });
 
   it("does not split a surrogate pair", () => {

@@ -42,14 +42,18 @@ const isJsonObject = (value: Schema.Json | undefined): value is { [name: string]
  *
  * The cut falls at the last paragraph break within the limit, else the last
  * line break, else the last space, else at the limit. Ending on a break keeps
- * a sentence or a list item from being torn in half. The cut never splits a
+ * a sentence or a list item from being torn in half. A break only counts in
+ * the second half of the limit: a paragraph break at character 5 of 1000
+ * would throw away almost the whole text to save one word, so such a text is
+ * cut at a later line break or space, or at the limit. The cut never splits a
  * surrogate pair, which would leave half an emoji.
  */
 export const cutText = (text: string, limit: number): string => {
   if (text.length <= limit) return text;
   const head = text.slice(0, limit);
+  const earliestBreak = limit / 2;
   const breaks = [head.lastIndexOf("\n\n"), head.lastIndexOf("\n"), head.search(/\s\S*$/)];
-  const at = breaks.find((index) => index > 0);
+  const at = breaks.find((index) => index >= earliestBreak);
   if (at !== undefined) return head.slice(0, at).trimEnd() + ELLIPSIS;
   const lastCode = head.charCodeAt(head.length - 1);
   const isHighSurrogate = lastCode >= 0xd800 && lastCode <= 0xdbff;
@@ -68,10 +72,13 @@ const shapeValue = (value: Schema.Json): TrackingOutputValue => {
  * Returns the label of a field: the `title` of its property in the output
  * schema, else the property's name.
  */
-const readFieldLabel = (properties: { [name: string]: Schema.Json } | undefined, name: string) => {
-  const title = properties?.[name];
-  return isJsonObject(title) && typeof title["title"] === "string" && title["title"] !== ""
-    ? title["title"]
+const readFieldLabel = (
+  properties: { [name: string]: Schema.Json } | undefined,
+  name: string,
+): string => {
+  const property = properties?.[name];
+  return isJsonObject(property) && typeof property["title"] === "string" && property["title"] !== ""
+    ? property["title"]
     : name;
 };
 
