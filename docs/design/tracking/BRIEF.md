@@ -140,6 +140,20 @@ Open the run is in the head on every state, so the list of answers leaves it out
 
 A Task that is Needs you by a signal has no live run: its agent finished, and a source has since raised a signal about the work, such as checks failing on its PR. So Stop the run, decision 9's answer for Needs you, would stop nothing. The Task gets the answers of its last run's state instead.
 
+*(Amended 2026-10-21, [#803](https://github.com/theagenticage/hercule/issues/803).)* Slice 3 builds the pane, and the app knowingly differs from the drawing in these places:
+- The head's standing line has no harness, model or runner. No read carries them. The line is "Finished at 09:20 after 8m", "Failed at 09:26 after 6m", "Stopped at 08:47", "Started at 09:33 · 8m so far" or "Waiting on you since 09:33".
+- A Stopped row never says "by you". No field says who stopped the run.
+- The action step the run ended on shows the step's name only. No record keeps a summary of what an action step did, so there is no "Opened draft PR #1302".
+- A Request's Allow once, Always allow and Deny are not in the pane. The card has "Open the thread", where the thread's own answers are.
+- The runs are drawn for every row, not only for a Task with two runs or a Working row, because a single run still carries its two links, the run's page and its thread.
+- There is no foot line ("Leaves Tracking when...") and no fine print under the answers, as Intake's own pane has none.
+- A missing value in a field of the output reads "none".
+- Try again is not an answer until [#804](https://github.com/theagenticage/hercule/issues/804), and Linked work is not drawn until [#807](https://github.com/theagenticage/hercule/issues/807). The pane draws no placeholder for either.
+- Mark done follows one rule: it is an answer, and `E` presses it, when no run of the Task is live and the row does not wait on a Request. So a Needs you row that waits on a signal has Mark done and Cancel while its agent has finished, with none suggested, as the table above has it. A Failed and a Stopped row suggest nothing, so `↩` never marks a failure done. The row's own Mark done control on hover follows the same rule.
+- Cancel sets the Task `cancelled`, which takes the row off Tracking as Mark done does.
+- Stop the run keeps the run's workspace, and the pane asks nothing. The row stays in Tracking as Stopped.
+- A failed Stop shows its error under its button, and a failed Mark done or Cancel shows it in the toast's place.
+
 ## Done
 
 Each handed-off signal's Done row is led by the face of the agent it went to. Its second line is its own leg, with no folding:
