@@ -13,6 +13,7 @@ import type {
   Session,
   Signal,
   Task,
+  TrackingDetail,
   TrackingRun,
   TrackingTask,
   YourWorkTask,
@@ -219,21 +220,58 @@ const ROWS = [
   [STOPPED_TASK, "cancelled"],
 ] as const;
 
+/** Returns the id of the signal `task` was handed off: the one its first provenance entry names. */
+const getHandoffSignalId = (task: Task): string => task.id.replace("-7b00-", "-7a00-");
+
+/** Returns the id of the session of the run of `task`, which holds its thread. */
+const getSessionId = (task: Task): string => task.id.replace("-7b00-", "-7400-");
+
+/** Builds the signal `task` was handed off: Marta's request for a review, which the pane quotes. */
+const buildHandoffSignal = (task: Task): Signal => ({
+  ...buildSignal(getHandoffSignalId(task), "Review the rate limiter"),
+  asker: "Marta",
+  place: "acme/webshop#1296",
+  blocks: [{ type: "text", markdown: "Could you review the `RateLimiter` before Friday?" }],
+});
+
+/**
+ * Builds what `task.readTracking` returns for `task`, whose one run is `run`:
+ * the handoff, the run with its session, and the `outcome` and
+ * `endingActionStepName` the test gives.
+ */
+const buildTrackingDetail = (
+  task: Task,
+  run: RunSummary,
+  extra: Partial<Pick<TrackingDetail, "outcome" | "endingActionStepName">> = {},
+): TrackingDetail => ({
+  taskId: task.id,
+  firstHandoff: buildTrackingTask(task, run).handoffs[0]!,
+  runs: [{ ...buildTrackingRun(run), sessionId: getSessionId(task) }],
+  ...extra,
+});
+
 /**
  * Returns handlers that play the controller's Tracking: `task.queryTracking`
- * lists the rows, minus the Tasks the user marked done, and `task.update`
- * marks a Task done. `readRows` gives the rows at the time of each read, so a
- * test can change a run's status between two reads; `buildRun` builds the run
- * of a row.
+ * lists the rows, minus the Tasks the user marked done, `task.readTracking`
+ * reads one Task's trip, `signal.read` reads the signal each Task was handed
+ * off, and `task.update` marks a Task done. `readRows` gives the rows at the
+ * time of each read, so a test can change a run's status between two reads;
+ * `buildRun` builds the run of a row; `buildExtra` gives the outcome of a
+ * Task's trip.
  */
 const storeTracking = (
   rows: ReadonlyArray<readonly [Task, RunSummary["status"]]> = ROWS,
   {
     readRows = () => rows,
     buildRun = buildRunSummary,
+    buildExtra = () => ({}),
   }: {
     readRows?: () => ReadonlyArray<readonly [Task, RunSummary["status"]]>;
     buildRun?: (task: Task, status: RunSummary["status"]) => RunSummary;
+    buildExtra?: (
+      task: Task,
+      run: RunSummary,
+    ) => Partial<Pick<TrackingDetail, "outcome" | "endingActionStepName">>;
   } = {},
 ) => {
   const done = new Set<string>();
@@ -251,6 +289,14 @@ const storeTracking = (
       done.add(task.id);
       return { body: { ...task, status: "done" } };
     };
+    handlers[`GET /api/v1/tasks/${task.id}/tracking`] = () => {
+      const status = readRows().find(([each]) => each.id === task.id)?.[1] ?? "completed";
+      const run = buildRun(task, status);
+      return { body: buildTrackingDetail(task, run, buildExtra(task, run)) };
+    };
+    handlers[`GET /api/v1/signals/${getHandoffSignalId(task)}`] = () => ({
+      body: buildHandoffSignal(task),
+    });
   }
   return handlers;
 };
@@ -995,6 +1041,19 @@ const CHECKS_SIGNAL: Signal = {
   },
 };
 
+const LINEAR: PluginDetail = {
+  ...GITHUB,
+  id: "linear",
+  displayName: "Linear",
+  mark: { paths: ["M2 2h12v12H2z"] },
+};
+
+/** An open signal raised by Linear, so that GitHub's checks signal is not on Linear's tab. */
+const LINEAR_SIGNAL: Signal = {
+  ...buildSignal("01a06d02-7a00-7000-8000-00000000000a", "PAY-212 assigned to you"),
+  kind: "linear/assigned",
+};
+
 /** Builds the live session of the run of `task` that asks to run `git push`. */
 const buildRequestingSession = (task: Task): Session => ({
   ...SIDEBAR_FIXTURE.threads[0]!,
@@ -1119,10 +1178,10 @@ describe("a row that needs you", () => {
       expect(screen.getByRole("tab", { name: "Hercule, 1 to do" })).toBeTruthy();
       await userEvent.click(getRowButton(WORKING_TASK));
       expect(
-        within(getPane()!)
-          .getAllByRole("button")
-          .map((button) => button.getAttribute("aria-label") ?? button.textContent),
-      ).toEqual(["Open the run", "Stop the run"]);
+        [...getPane()!.querySelectorAll<HTMLElement>("[data-answer]")].map(
+          (button) => button.dataset.answer,
+        ),
+      ).toEqual(["stop-run"]);
     });
 
     it("does nothing on E, because the run of the Request is live", async () => {
@@ -1160,10 +1219,44 @@ describe("a row that needs you", () => {
     });
   });
 
-  // The pane's "Open the signal" and "Open the thread" come with the pane's body. They go through the
-  // route's `thread` and `signal` destinations, which no control reaches until then.
-  it.todo("opens the signal in To do with Tracking closed, from a tab the signal is not on");
-  it.todo("opens the thread of the session whose Request waits");
+  it("opens the signal in To do with Tracking closed, from a tab the signal is not on", async () => {
+    const { router } = await openWithChecks("/intake", {
+      signals: [CHECKS_SIGNAL, LINEAR_SIGNAL],
+      plugins: [GITHUB, LINEAR],
+    });
+    await userEvent.click(screen.getByRole("button", { name: /^Linear/ }));
+    // The checks signal is raised by GitHub, so it is not listed on Linear's tab.
+    expect(getSignalRow(CHECKS_SIGNAL)).toBeNull();
+    await userEvent.click(getRowButton(CHECKED_TASK));
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Open the signal" }));
+
+    await waitFor(() => {
+      expect(router.latestLocation.search).toMatchObject({ signal: CHECKS_SIGNAL.id });
+    });
+    expect(router.latestLocation.search).not.toHaveProperty("tracking", true);
+    expect(router.latestLocation.search).not.toHaveProperty("task");
+    expect(isOpen()).toBe(false);
+    expect(screen.getByRole("button", { name: /^All/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(getSignalRow(CHECKS_SIGNAL).getAttribute("aria-current")).toBe("true");
+  });
+
+  it("opens the thread of the session whose Request waits", async () => {
+    const { router } = await openWithChecks("/intake?tracking=true", {
+      signals: [],
+      rows: [[WORKING_TASK, "running"]],
+      agentSessions: [buildRequestingSession(WORKING_TASK)],
+    });
+    await userEvent.click(getRowButton(WORKING_TASK));
+    const question = await within(getPane()!).findByText(
+      "Run git push -u origin chore/stripe-sdk-14?",
+    );
+    expect(question.closest(".tr-ask")).not.toBeNull();
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Open the thread" }));
+
+    await waitFor(() => {
+      expect(router.latestLocation.pathname).toBe("/threads/01a06d02-7400-7000-8000-0000000000aa");
+    });
+  });
 });
 
 /** Waits for the first block of Your work in the open signal's pane, and returns it. */
@@ -1715,7 +1808,7 @@ describe("the pane's answers", () => {
     });
   });
 
-  it("stops the run from Stop the run, with no confirmation and no toast", async () => {
+  it("stops the run from Stop the run, keeping its workspace, with no confirmation and no toast", async () => {
     const { calls } = await openIntake("/intake?tracking=true", {
       extra: { ...storeTracking(), [`POST ${stopPath}`]: { body: CANCELLED_RUN } },
     });
@@ -1723,7 +1816,7 @@ describe("the pane's answers", () => {
     await userEvent.click(within(getPane()!).getByRole("button", { name: "Stop the run" }));
 
     await waitFor(() => {
-      expect(findStops(calls).map((call) => call.body)).toEqual([{ keepWorkspace: false }]);
+      expect(findStops(calls).map((call) => call.body)).toEqual([{ keepWorkspace: true }]);
     });
     expect(document.querySelector(".asks-toast")).toBeNull();
     expect(document.querySelector("dialog[open]")).toBeNull();
@@ -1746,6 +1839,138 @@ describe("the pane's answers", () => {
     expect(failure.textContent).toBe("The run has already ended.");
     expect(failure.previousElementSibling?.getAttribute("data-answer")).toBe("stop-run");
     expect(document.querySelector(".asks-toast")).toBeNull();
+  });
+});
+
+describe("the pane's trip", () => {
+  /** What a Review PR run put out: a verdict, a count of findings and a flag, as its output schema titles them. */
+  const REVIEW_OUTCOME: TrackingDetail["outcome"] = {
+    kind: "fields",
+    stepName: "Review",
+    sessionId: getSessionId(FINISHED_TASK),
+    fields: [
+      { label: "Verdict", value: "Approve with comments" },
+      { label: "Findings", value: { items: 3 } },
+      { label: "Ready to merge", value: true },
+    ],
+  };
+
+  it("shows a Finished review: the request under You asked, the run, and the output as fields", async () => {
+    const { router } = await openIntake("/intake?tracking=true", {
+      extra: storeTracking(ROWS, {
+        buildRun: (task, status) => buildRunSummary(task, status, "Review PR"),
+        buildExtra: (task) =>
+          task.id === FINISHED_TASK.id
+            ? { outcome: REVIEW_OUTCOME, endingActionStepName: "Post the review" }
+            : {},
+      }),
+    });
+    await userEvent.click(getRowButton(FINISHED_TASK));
+
+    const pane = getPane()!;
+    const asked = await waitFor(() => {
+      const found = pane.querySelector<HTMLElement>(".tr-msg--you");
+      expect(found?.querySelector(".tr-orig-q")).not.toBeNull();
+      return found!;
+    });
+    expect(within(asked).getByText("You asked")).toBeTruthy();
+    expect(asked.querySelector(".tr-orig-h")?.textContent).toBe(
+      "Marta· review requested · acme/webshop#1296",
+    );
+    expect(asked.querySelector(".tr-orig-q")?.textContent).toBe(
+      "Could you review the RateLimiter before Friday?",
+    );
+
+    const did = pane.querySelector<HTMLElement>(".tr-msg--did")!;
+    expect(did.querySelector(".tr-name")?.textContent).toMatch(
+      /^Review PR finished (\d+ \w+ )?\d\d:\d\d$/,
+    );
+    expect(did.querySelector(".tr-out-from")?.textContent).toBe("From the step Review");
+    expect(
+      [...did.querySelectorAll(".tr-out > div")].map((field) => [
+        field.querySelector("dt")?.textContent,
+        field.querySelector("dd")?.textContent,
+      ]),
+    ).toEqual([
+      ["Verdict", "Approve with comments"],
+      ["Findings", "3 items"],
+      ["Ready to merge", "yes"],
+    ]);
+    const runs = [...did.querySelectorAll(".tr-steps li")];
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.textContent).toMatch(/^(\d+ \w+ )?\d\d:\d\dReview PR finishedThread$/);
+    expect(did.querySelector(".tr-out-action")?.textContent).toBe("Post the review");
+
+    await userEvent.click(
+      within(did).getByRole("button", { name: "See the whole output in the run" }),
+    );
+    await waitFor(() => {
+      expect(router.latestLocation.pathname).toBe(`/runs/${getRunId(FINISHED_TASK)}`);
+    });
+  });
+
+  it("leads a Failed row with why it failed, and marks it done", async () => {
+    const { calls } = await openIntake("/intake?tracking=true");
+    await userEvent.click(getRowButton(FAILED_TASK));
+
+    const reason = await waitFor(() => {
+      const found = getPane()!.querySelector<HTMLElement>(".tr-msg--did .tr-fail");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(reason.textContent).toBe("permission denied on ops-db");
+    // The reason is the first thing the agent says.
+    expect(reason.previousElementSibling?.classList.contains("tr-name")).toBe(true);
+    expect(getPane()!.querySelector(".tr-steps li")?.textContent).toContain(
+      "Implement failed: permission denied on ops-db",
+    );
+
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Mark done" }));
+    await waitFor(() => {
+      expect(findMarkDone(calls).map((call) => [call.path, call.body])).toEqual([
+        [`/api/v1/tasks/${FAILED_TASK.id}`, { status: "done" }],
+      ]);
+    });
+  });
+
+  it("follows the run live: its end draws the outcome in the open pane", async () => {
+    let status: RunSummary["status"] = "running";
+    const rows = () => [[WORKING_TASK, status] as const];
+    const { live } = await openIntake("/intake?tracking=true", {
+      extra: storeTracking(rows(), {
+        readRows: rows,
+        buildExtra: (task, run) =>
+          run.status === "completed"
+            ? {
+                outcome: {
+                  kind: "text",
+                  stepName: "Code",
+                  sessionId: getSessionId(task),
+                  text: "Lowercased the SKUs in the search index.",
+                },
+              }
+            : {},
+      }),
+    });
+    await live.waitForFirstPushes();
+    await userEvent.click(getRowButton(WORKING_TASK));
+    await waitFor(() => {
+      expect(getPane()!.querySelector(".tr-steps li")?.textContent).toContain("Implement working");
+    });
+    // A Working row has done nothing yet.
+    expect(getPane()!.querySelector(".tr-out-from")).toBeNull();
+
+    status = "completed";
+    act(() => live.pushInvalidation("run", [getRunId(WORKING_TASK)]));
+
+    await waitFor(() => {
+      expect(getPane()!.querySelector(".tr-out-from")?.textContent).toBe("From the step Code");
+    });
+    expect(getPane()!.querySelector(".tr-did")?.textContent).toBe(
+      "Lowercased the SKUs in the search index.",
+    );
+    expect(getPane()!.querySelector(".ad-kind")?.textContent).toContain("Finished");
+    expect(getPane()!.querySelector(".tr-steps li")?.textContent).toContain("Implement finished");
   });
 });
 

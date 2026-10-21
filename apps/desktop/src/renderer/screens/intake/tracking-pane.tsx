@@ -25,6 +25,7 @@ import { useClockValue } from "../../app/age-clock";
 import { useTrackingRows } from "../../app/tracking";
 import { buildLook, Face } from "../../faces";
 import { ExternalIcon } from "../../icons/external";
+import { TrackingTrip } from "./tracking-trip";
 import type { TakeOffStatus } from "./use-take-off-tracking";
 import "./tracking.css";
 
@@ -94,13 +95,13 @@ export function TrackingPane({
 }
 
 /**
- * Renders the pane of `row`: its head, its answers and its keys.
+ * Renders the pane of `row`: its head, its trip, its answers and its keys.
  *
  * Stop the run is sent from here, since no other part of the screen stops a
- * run. It sends `keepWorkspace: false`, which is what the run page's Cancel
- * run sends unless the user unchecks "Delete workspace", so the run's
- * automatic workspace is deleted. A refusal shows under the button, never in
- * a toast.
+ * run. It sends `keepWorkspace: true`, so the run's workspace is kept: the
+ * pane asks for no confirmation, and the drawing's foot says that stopping
+ * leaves the agent's work where it is. A refusal shows under the button, never
+ * in a toast.
  */
 function TrackingRowDetail({
   row,
@@ -128,7 +129,7 @@ function TrackingRowDetail({
 
   const stop = useMutation({
     mutationFn: (runId: string) =>
-      client.run.cancel({ params: { id: runId }, payload: { keepWorkspace: false } }),
+      client.run.cancel({ params: { id: runId }, payload: { keepWorkspace: true } }),
     onSuccess: (cancelled, runId) => {
       queryClient.setQueryData(queryKeys.run(runId), cancelled);
       invalidateWithoutCancelling(queryClient, queryKeys.runs());
@@ -217,7 +218,7 @@ function TrackingRowDetail({
           <h2 className="ad-title">{title}</h2>
           <p className="ad-asked">{standing}</p>
         </header>
-        {/* The body of the pane goes here, between the head and the answers: the trip. */}
+        <TrackingTrip row={row} timezone={timezone} onOpenDestination={onOpenDestination} />
         <div className="ad-answers">
           <div className="ledger">
             {answers.map((answer) => (
