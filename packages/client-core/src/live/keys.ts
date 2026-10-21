@@ -58,9 +58,9 @@ export const queryKeys = {
   tracking: (): LiveQueryKey => ["tracking"],
   /**
    * Your work as one read (`signal.queryYourWork`): the open Tasks that
-   * belong to a signal on To do. Live topics: `task` and `signal` read it
-   * again on every push, because a Task's provenance and the To do list both
-   * decide it. It is kept out of the `signals` prefix on purpose: that prefix
+   * belong to an open signal, snoozed or not. Live topics: `task` and
+   * `signal` read it again on every push, because a Task's provenance and the
+   * set of open signals both decide it. It is kept out of the `signals` prefix on purpose: that prefix
    * is also read again by every `workflow`, `connection` and `plugin` push,
    * which cannot change Your work.
    */

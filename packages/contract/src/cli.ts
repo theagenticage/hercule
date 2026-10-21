@@ -811,7 +811,7 @@ export const CLI = {
   },
   "signal.queryYourWork": {
     command: "signal your-work",
-    help: "Lists Your work: the open and in-progress tasks that belong to a signal on your To do list. A task appears once, with the ids of the To do signals it belongs to, newest update first. It is worked out when you ask and never stored. Needs the task read grant as well as the signal read grant.",
+    help: "Lists Your work: the open and in-progress tasks that belong to an open signal, snoozed or not. A task appears once, with the ids of the open signals it belongs to, newest update first. Snoozes are not judged here: the app matches the rows against its own To do list, so a snooze that runs out never leaves the two out of step. It is worked out when you ask and never stored. Needs the task read grant as well as the signal read grant.",
     examples: [{ args: [] }],
     fields: {},
   },

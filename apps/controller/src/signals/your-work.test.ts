@@ -1,8 +1,8 @@
 /**
  * Tests the Your work read against a migrated test database:
  *
- * - which Tasks it lists: open Tasks that carry the thread ref of a signal on
- *   To do, and no other;
+ * - which Tasks it lists: open Tasks that carry the thread ref of an open
+ *   signal, snoozed or not, and no other;
  * - what a row holds, and the order of the rows;
  * - who may read it;
  * - the query plan of its two statements.
@@ -99,7 +99,7 @@ const readRows = (
   );
 
 describe("signal.queryYourWork", () => {
-  it("lists an open Task that carries the thread ref of a signal on To do, with that signal's id", async () => {
+  it("lists an open Task that carries the thread ref of an open signal, with that signal's id", async () => {
     const rows = await runYourWork(
       USER,
       Effect.gen(function* () {
@@ -122,7 +122,7 @@ describe("signal.queryYourWork", () => {
     ]);
   });
 
-  it("lists a Task once, with the ids of every To do signal it belongs to, however many refs and signals match", async () => {
+  it("lists a Task once, with the ids of every open signal it belongs to, however many refs and signals match", async () => {
     const rows = await readRows(
       Effect.gen(function* () {
         const signals = yield* signalRepository;
@@ -142,7 +142,7 @@ describe("signal.queryYourWork", () => {
     expect(rows).toEqual([`two threads: ${SIGNAL_1} ${SIGNAL_2} ${SIGNAL_3}`]);
   });
 
-  it("leaves out a Task whose only signal is snoozed, resolved, or has no thread ref, and reads a snooze that ran out as on To do", async () => {
+  it("lists the Task of a snoozed signal and of one whose snooze ran out alike, so a snooze running out between this read and To do's changes nothing, and leaves out resolved and core signals", async () => {
     const rows = await readRows(
       Effect.gen(function* () {
         const signals = yield* signalRepository;
@@ -153,7 +153,8 @@ describe("signal.queryYourWork", () => {
         yield* signals.insert(buildEventSignal(snoozed, "github:pr:acme/api#10"), []);
         yield* signals.insert(buildEventSignal(ranOut, "github:pr:acme/api#11"), []);
         yield* signals.insert(buildEventSignal(resolved, "github:pr:acme/api#12"), []);
-        // A core signal, raised through the API, has no thread ref.
+        // A core signal, raised through the API, has no thread ref, so no
+        // Task belongs to it even when a Task carries the ref "unused".
         yield* signals.insert(
           {
             ...buildEventSignal("0199e0e7-0005-7000-8000-0000000000a4", "unused"),
@@ -176,13 +177,17 @@ describe("signal.queryYourWork", () => {
           ["snoozed", "github:pr:acme/api#10"],
           ["ran out", "github:pr:acme/api#11"],
           ["resolved", "github:pr:acme/api#12"],
+          ["core", "unused"],
         ] as const) {
           yield* tasks.insert({ ...NEW_TASK, title, provenance: [{ ref }] });
         }
       }),
     );
 
-    expect(rows).toEqual(["ran out: 0199e0e7-0005-7000-8000-0000000000a2"]);
+    expect(rows.toSorted()).toEqual([
+      "ran out: 0199e0e7-0005-7000-8000-0000000000a2",
+      "snoozed: 0199e0e7-0005-7000-8000-0000000000a1",
+    ]);
   });
 
   it("leaves out Tasks that are done, cancelled or deleted, and Tasks with no matching ref", async () => {
@@ -205,7 +210,7 @@ describe("signal.queryYourWork", () => {
     expect(rows).toEqual([`kept: ${SIGNAL_1}`]);
   });
 
-  it("returns nothing when no signal is on To do", async () => {
+  it("returns nothing when no signal is open", async () => {
     const rows = await readRows(
       taskRepository.pipe(Effect.flatMap((tasks) => tasks.insert(NEW_TASK))),
     );
@@ -283,7 +288,7 @@ describe("signal.queryYourWork", () => {
 describe("the query plan of Your work's statements", () => {
   /**
    * Returns the plan SQLite chooses for the statement of Your work whose text
-   * contains `fragment`. One signal is on To do, because the Task statement
+   * contains `fragment`. One signal is open, because the Task statement
    * only runs when a signal gives it a ref.
    */
   const planOf = (fragment: string) =>
@@ -315,13 +320,13 @@ describe("the query plan of Your work's statements", () => {
       ),
     );
 
-  it("reads the To do signals from an index that holds only the open signals, never the resolved ones", async () => {
+  it("reads the open signals from an index that holds only the open signals, never the resolved ones", async () => {
     const plan = await planOf("FROM signals");
 
     // Each of these indexes holds the open signals only, so the scan never
     // reads the resolved ones, which are the vast majority.
-    expect(plan.filter((step) => step.startsWith("SCAN s"))).toEqual([
-      expect.stringMatching(/^SCAN s USING (COVERING )?INDEX signals_open/),
+    expect(plan.filter((step) => step.startsWith("SCAN signals"))).toEqual([
+      expect.stringMatching(/^SCAN signals USING (COVERING )?INDEX signals_open/),
     ]);
     expect(plan.some((step) => step.includes("sqlite_autoindex_signals"))).toBe(false);
   });

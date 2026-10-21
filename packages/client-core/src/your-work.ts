@@ -1,7 +1,8 @@
 /**
  * Works out Your work: for each signal on To do, the open Tasks it is about.
- * The controller finds the Tasks (`signal.queryYourWork`, spec 10 §9.5); this
- * file matches them to the signals a client holds.
+ * The controller finds the Tasks of the open signals (`signal.queryYourWork`,
+ * spec 10 §9.5); this file keeps those of the signals on the To do list a
+ * client holds.
  */
 import type { Signal, YourWorkTask } from "@hercule/contract";
 
@@ -20,9 +21,10 @@ export type YourWork = ReadonlyMap<
  * `signalIds` include the signal, in the order of `tasks`. A signal with no
  * Task has no entry, and one Task can belong to several signals.
  *
- * `signals` is the To do list the client holds now, not the one the
- * controller worked from. A signal the user just moved off To do is missing
- * from it, so it stops being Your work at once, before `tasks` is read again.
+ * `signals` is the To do list the client holds now. `tasks` also names open
+ * signals that are snoozed, or that the user just moved off To do. Neither is
+ * in `signals`, so neither shows Your work. A signal on To do shows the Tasks
+ * the controller named for it, whichever read came first.
  */
 export const matchYourWork = (
   signals: ReadonlyArray<Signal>,

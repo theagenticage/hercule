@@ -19,7 +19,7 @@ const REF = "github:pr:acme/api#1";
 const AT = "2026-10-20T10:00:00.000Z";
 
 describe("signal.queryYourWork", () => {
-  it("returns the open Tasks of the signals on To do, reached beside /signals/:id", async () => {
+  it("returns the open Tasks of the open signals, reached beside /signals/:id", async () => {
     await withServer(async ({ base, sql }) => {
       const token = await completeSetup(base);
       const taskId = await Effect.runPromise(
@@ -83,7 +83,7 @@ describe("signal.queryYourWork", () => {
     });
   });
 
-  it("returns no Tasks when nothing is on To do", async () => {
+  it("returns no Tasks when no signal is open", async () => {
     await withServer(async ({ base }) => {
       const token = await completeSetup(base);
 

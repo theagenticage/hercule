@@ -422,23 +422,21 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the id and thread ref of every signal on To do at `now`, with
-     * the same rule as `listToDo`. Only a signal that came from an event has
-     * a thread ref, so a core signal is left out. It reads two narrow
-     * columns, never a signal's blocks or actions, and it scans one of the
-     * partial indexes that hold the open signals only, so the resolved
-     * signals, which are most of the table, are never read.
+     * Returns the id and thread ref of every open signal, snoozed or not.
+     * Only a signal that came from an event has a thread ref, so a core
+     * signal is left out. It reads two narrow columns, never a signal's
+     * blocks or actions, and it scans one of the partial indexes that hold
+     * the open signals only, so the resolved signals, which are most of the
+     * table, are never read.
      */
-    listToDoThreads: (
-      now: string,
-    ): Effect.Effect<
+    listOpenThreads: (): Effect.Effect<
       ReadonlyArray<{ readonly signalId: string; readonly threadRef: string }>,
       SqlError
     > =>
       Effect.map(
         sql<{ readonly id: Uint8Array; readonly thread_ref: string }>`
-          SELECT s.id, s.thread_ref FROM ${sql.literal(SIGNALS_WITH_SNOOZES)}
-          WHERE ${sql.and([...buildToDoConditions(now), sql`s.thread_ref IS NOT NULL`])}
+          SELECT id, thread_ref FROM signals
+          WHERE status = 'open' AND thread_ref IS NOT NULL
         `,
         (rows) =>
           rows.map((row) => ({ signalId: uuidToString(row.id), threadRef: row.thread_ref })),

@@ -9,17 +9,17 @@
  * is seeded with a migrated schema and no statistics, as a controller starts.
  *
  * It times `signal.queryYourWork`, the whole read, and its two statements.
- * Each case has 200 signals on To do, and 1,000 open Tasks that each carry 50
+ * Each case has 200 open signals, and 1,000 open Tasks that each carry 50
  * provenance entries, one for each of 50 refs. Task `i` carries the refs of
  * the signals `i` to `i + 49`, so the Tasks 1 to 200 each match one or more
- * To do signals, and the read returns 200 rows.
+ * open signals, and the read returns 200 rows.
  * Three more cases add one kind of history each, because the read must follow
- * the To do list and the Tasks that match it, not the signals and Tasks ever
+ * the open signals and the Tasks that match them, not the signals and Tasks ever
  * written:
  *
  * - 20,000 resolved signals;
  * - 20,000 open Tasks that match no signal;
- * - 20,000 done Tasks that carry the refs of the To do signals.
+ * - 20,000 done Tasks that carry the refs of the open signals.
  *
  * What it guards is an order of magnitude: the ceiling is far above what the
  * read takes and far below a read of every Task or every provenance entry.
@@ -28,7 +28,6 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
-import { nowIso } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { taskRepository } from "../tasks";
 import { signalRepository } from "./repository";
@@ -44,7 +43,7 @@ const CEILING_MS = 100;
 const RUNS = 25;
 const WARM_UP_RUNS = 5;
 
-const TO_DO_SIGNALS = 200;
+const OPEN_SIGNALS = 200;
 const TASKS = 1000;
 const REFS_PER_TASK = 50;
 const AT = "2026-10-20T10:00:00.000Z";
@@ -66,7 +65,7 @@ interface History {
   readonly resolvedSignals?: number;
   /** Open Tasks that carry refs no signal has. */
   readonly unrelatedOpenTasks?: number;
-  /** Done Tasks that carry the refs of the To do signals. */
+  /** Done Tasks that carry the refs of the open signals. */
   readonly doneTasksOnRefs?: number;
 }
 
@@ -123,10 +122,10 @@ const insertTasks = (first: number, count: number, status: "open" | "done", refB
 const seed = (history: History) =>
   Effect.gen(function* () {
     const { resolvedSignals = 0, unrelatedOpenTasks = 0, doneTasksOnRefs = 0 } = history;
-    yield* insertSignals(1, TO_DO_SIGNALS, "open", 1);
+    yield* insertSignals(1, OPEN_SIGNALS, "open", 1);
     yield* insertTasks(1, TASKS, "open", 1);
     // The resolved signals and the done Tasks are on the same refs as the
-    // To do list, so only their status keeps them out of Your work.
+    // open signals, so only their status keeps them out of Your work.
     yield* insertSignals(1_000_000, resolvedSignals, "resolved", 1);
     yield* insertTasks(2_000_000, unrelatedOpenTasks, "open", 5_000_000);
     yield* insertTasks(3_000_000, doneTasksOnRefs, "done", 1);
@@ -145,10 +144,10 @@ const measureMedian = <A, E, R>(read: Effect.Effect<A, E, R>) =>
   });
 
 const CASES: ReadonlyArray<readonly [string, History]> = [
-  ["200 To do signals, 1,000 Tasks", {}],
-  ["200 To do signals, 1,000 Tasks, 20,000 resolved signals", { resolvedSignals: 20_000 }],
-  ["200 To do signals, 1,000 Tasks, 20,000 unrelated open Tasks", { unrelatedOpenTasks: 20_000 }],
-  ["200 To do signals, 1,000 Tasks, 20,000 done Tasks", { doneTasksOnRefs: 20_000 }],
+  ["200 open signals, 1,000 Tasks", {}],
+  ["200 open signals, 1,000 Tasks, 20,000 resolved signals", { resolvedSignals: 20_000 }],
+  ["200 open signals, 1,000 Tasks, 20,000 unrelated open Tasks", { unrelatedOpenTasks: 20_000 }],
+  ["200 open signals, 1,000 Tasks, 20,000 done Tasks", { doneTasksOnRefs: 20_000 }],
 ];
 
 describe.runIf(SPEED_TESTS_ENABLED)("Your work's read", () => {
@@ -160,13 +159,13 @@ describe.runIf(SPEED_TESTS_ENABLED)("Your work's read", () => {
         const tasks = yield* taskRepository;
         const yourWork = yield* YourWork;
         const rows = (yield* yourWork.query()).tasks;
-        const threads = yield* signals.listToDoThreads(yield* nowIso);
+        const threads = yield* signals.listOpenThreads();
         const refs = threads.map((thread) => thread.threadRef);
         return {
           rows: rows.length,
           replyBytes: JSON.stringify(rows).length,
           queryYourWork: yield* measureMedian(yourWork.query()),
-          toDoThreads: yield* measureMedian(Effect.flatMap(nowIso, signals.listToDoThreads)),
+          openThreads: yield* measureMedian(signals.listOpenThreads()),
           openTasks: yield* measureMedian(tasks.listOpenOnRefs(refs)),
         };
       }).pipe(
@@ -180,11 +179,11 @@ describe.runIf(SPEED_TESTS_ENABLED)("Your work's read", () => {
       [
         `${name} (${String(medians.rows)} rows, ${String(medians.replyBytes)} bytes), median of ${String(RUNS)}:`,
         `  signal.queryYourWork, whole read  ${format(medians.queryYourWork)}`,
-        `  thread refs of the To do signals  ${format(medians.toDoThreads)}`,
+        `  thread refs of the open signals   ${format(medians.openThreads)}`,
         `  open Tasks on those refs          ${format(medians.openTasks)}`,
       ].join("\n") + "\n",
     );
-    expect(medians.rows).toBe(TO_DO_SIGNALS);
+    expect(medians.rows).toBe(OPEN_SIGNALS);
     expect(medians.queryYourWork).toBeLessThan(CEILING_MS);
   });
 });

@@ -1,6 +1,6 @@
 /**
  * The Your work read: `signal.queryYourWork` returns the open Tasks that
- * belong to a signal on To do (spec 10 section 9.5; spec 11, `signal`).
+ * belong to an open signal (spec 10 section 9.5; spec 11, `signal`).
  *
  * It is a service of its own, like `TaskTracking`, so `SignalService` does not
  * grow a second dependency on Task rows. It reads signals through the signal
@@ -13,7 +13,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import type { Forbidden, SignalYourWork, Unauthenticated, YourWorkTask } from "@hercule/contract";
 import { requireGrant } from "../actor";
-import { nowIso } from "../db";
 import { taskRepository } from "../tasks";
 import { signalRepository } from "./repository";
 
@@ -25,20 +24,26 @@ const make = Effect.gen(function* () {
     /**
      * Returns Your work: the open Tasks (status `open` or `in-progress`, not
      * deleted) whose provenance carries the thread ref of a signal on To do
-     * (open, not snoozed). Each Task appears once, with the ids of the To do
-     * signals it belongs to, in ascending order. The Tasks are ordered by
+     * (open, snoozed or not). Each Task appears once, with the ids of the
+     * open signals it belongs to, in ascending order. The Tasks are ordered by
      * `updatedAt`, newest first, then by id. It is worked out on every read
      * and never stored.
+     *
+     * A snooze plays no part, on purpose. A client decides which signals are
+     * on To do from its own read of To do, and keeps from this read the
+     * Tasks of those signals. If this read also judged snoozes, a snooze that
+     * ran out between the two reads would leave a signal on To do with no
+     * Task here, and nothing would ask again.
      *
      * The caller needs `signal.read` and `task.read`: the rows hold both a
      * signal's id and a Task's title, so signal access alone must not reveal a
      * Task. Any caller that holds both may read it, a session included, because
      * it can already read the same facts from `signal.query` and `task.query`.
      *
-     * It is two statements: the thread refs of the To do signals, then the
+     * It is two statements: the thread refs of the open signals, then the
      * open Tasks that carry those refs. Neither loads a signal's blocks or a
-     * Task's description or provenance, so the work follows the To do list and
-     * the Tasks that match it, not the Tasks there are. It opens no
+     * Task's description or provenance, so the work follows the open signals
+     * and the Tasks that match them, not the Tasks there are. It opens no
      * transaction, so both run on the read-only connection and never wait for a
      * writer. The two are not an atomic snapshot: a signal resolved between
      * them still counts, and the push that change makes brings the next read.
@@ -47,9 +52,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("signal.queryYourWork");
         yield* requireGrant("task.query");
-        const toDo = yield* signals.listToDoThreads(yield* nowIso);
+        const openThreads = yield* signals.listOpenThreads();
         const signalIdsByRef = new Map<string, Array<string>>();
-        for (const { signalId, threadRef } of toDo) {
+        for (const { signalId, threadRef } of openThreads) {
           signalIdsByRef.set(threadRef, [...(signalIdsByRef.get(threadRef) ?? []), signalId]);
         }
         const found = yield* tasks.listOpenOnRefs([...signalIdsByRef.keys()]);

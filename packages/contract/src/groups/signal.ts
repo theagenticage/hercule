@@ -607,9 +607,9 @@ export const SignalLowerPriorityResult = Schema.Struct({
 export type SignalLowerPriorityResult = Schema.Schema.Type<typeof SignalLowerPriorityResult>;
 
 /**
- * One Task of Your work: an open Task that belongs to at least one signal on
- * To do. `signalIds` holds the ids of those signals, so a client can tell
- * which rows of To do the Task covers.
+ * One Task of Your work: an open Task that belongs to at least one open
+ * signal, snoozed or not. `signalIds` holds the ids of those signals, so a
+ * client can tell which rows of To do the Task covers.
  */
 export const YourWorkTask = Schema.Struct({
   id: Id,
@@ -624,10 +624,13 @@ export type YourWorkTask = Schema.Schema.Type<typeof YourWorkTask>;
 /**
  * What `signal.queryYourWork` returns. Your work is the open Tasks (status
  * `open` or `in-progress`, not deleted) whose provenance carries the thread
- * ref of a signal on To do (open, not snoozed). Each Task appears once, with
- * the ids of the To do signals it belongs to. The Tasks are ordered by
- * `updatedAt`, newest first, then by id. Your work is worked out on every
- * read and never stored (spec 10 section 9.5).
+ * ref of an open signal, snoozed or not. Each Task appears once, with the ids
+ * of the open signals it belongs to. A snooze plays no part: the client keeps
+ * the Tasks whose `signalIds` meet its own read of To do, so To do alone
+ * decides what shows, and a snooze that runs out between the two reads cannot
+ * make them disagree. The Tasks are ordered by `updatedAt`, newest first,
+ * then by id. Your work is worked out on every read and never stored (spec 10
+ * section 9.5).
  */
 export const SignalYourWork = Schema.Struct({ tasks: Schema.Array(YourWorkTask) });
 

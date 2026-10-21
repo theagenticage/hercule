@@ -652,16 +652,18 @@ export const trackingQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads Your work (`signal.queryYourWork`): the open Tasks that belong to a
- * signal on To do, each with the ids of those signals (spec 10 §9.5). One
- * request answers it, whatever the number of signals. `matchYourWork` matches
- * the Tasks to the To do list the app holds.
+ * Reads Your work (`signal.queryYourWork`): the open Tasks that belong to an
+ * open signal, snoozed or not, each with the ids of those signals (spec 10
+ * §9.5). One request answers it, whatever the number of signals.
+ * `matchYourWork` matches the Tasks to the To do list the app holds, so the
+ * app's own read of To do decides which signals show Your work. The
+ * controller does not judge snoozes here, so a snooze that runs out, which
+ * sends no push, needs no new read of Your work.
  *
  * Shell data, kept for the life of the window. A push on the `task` topic
  * reads it again, because a Task's status or provenance may have changed, and
- * so does a push on the `signal` topic, because the To do list decides it.
- * The snooze timer reads it again when a snooze runs out, which sends no
- * push.
+ * so does a push on the `signal` topic, because a signal may have opened or
+ * resolved.
  */
 export const yourWorkQuery = (client: HerculeClient) =>
   queryOptions({

@@ -1,4 +1,4 @@
-/** Tests how the Tasks the controller names as Your work are matched to the signals on To do. */
+/** Tests how the Tasks the controller names for open signals are matched to the signals on To do. */
 import type { Signal, YourWorkTask } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { matchYourWork } from "./your-work";
@@ -40,7 +40,7 @@ describe("matchYourWork", () => {
     expect(yourWork.has("c")).toBe(false);
   });
 
-  it("drops a signal the user moved off To do, whatever the controller last said", () => {
+  it("drops a signal that is not on To do, such as one the user moved off it or one that is snoozed, though the controller named it", () => {
     const tasks = [buildTask("t1", ["a", "b"])];
     expect([...matchYourWork([buildSignal("a"), buildSignal("b")], tasks).keys()]).toEqual([
       "a",
