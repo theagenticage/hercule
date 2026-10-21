@@ -5,8 +5,8 @@ import {
   canMarkTrackingRowDone,
   countWaitingTrackingRows,
   describeTrackingLine,
+  findTrackingTasksAffectedByRunPush,
   groupTrackingRows,
-  isTrackingAffectedByRunPush,
   listRecentTrackingRows,
   type TrackingState,
 } from "./tracking";
@@ -409,33 +409,51 @@ describe("waiting on the user", () => {
   });
 });
 
-describe("isTrackingAffectedByRunPush", () => {
+describe("findTrackingTasksAffectedByRunPush", () => {
   const tasks = [
     buildTask("a", buildRun("r2", 5, "completed"), { latestLiveRun: buildRun("r1", 0, "running") }),
+    buildTask("b", buildRun("r4", 5, "completed")),
   ];
 
-  it("is affected by a push that names a Task's newest run or newest live run", () => {
-    expect(isTrackingAffectedByRunPush(tasks, { ids: ["r1"], kind: "updated" })).toBe(true);
-    expect(isTrackingAffectedByRunPush(tasks, { ids: ["x", "r2"], kind: "deleted" })).toBe(true);
+  it("names the Task whose newest run or newest live run the push names", () => {
+    expect(findTrackingTasksAffectedByRunPush(tasks, { ids: ["r1"], kind: "updated" })).toEqual([
+      "a",
+    ]);
+    expect(
+      findTrackingTasksAffectedByRunPush(tasks, { ids: ["x", "r2"], kind: "deleted" }),
+    ).toEqual(["a"]);
   });
 
-  it("is affected by a push that names an older live run, whose end changes which Requests the row waits on", () => {
+  it("names each Task a push reaches, and only those", () => {
+    expect(
+      findTrackingTasksAffectedByRunPush(tasks, { ids: ["r4", "r1"], kind: "updated" }),
+    ).toEqual(["a", "b"]);
+    expect(findTrackingTasksAffectedByRunPush(tasks, { ids: ["r4"], kind: "updated" })).toEqual([
+      "b",
+    ]);
+  });
+
+  it("names the Task whose older live run the push names, because its end changes which Requests the row waits on", () => {
     const withOlderLiveRun = [
       buildTask("a", buildRun("r3", 8, "running"), { liveRunIds: ["r3", "r-older"] }),
     ];
     expect(
-      isTrackingAffectedByRunPush(withOlderLiveRun, { ids: ["r-older"], kind: "updated" }),
-    ).toBe(true);
+      findTrackingTasksAffectedByRunPush(withOlderLiveRun, { ids: ["r-older"], kind: "updated" }),
+    ).toEqual(["a"]);
   });
 
-  it("is affected by a push that lists no ids, and by the creation of a run, which may be a re-run", () => {
-    expect(isTrackingAffectedByRunPush(tasks, { ids: [], kind: "updated" })).toBe(true);
-    expect(isTrackingAffectedByRunPush(tasks, { ids: ["new"], kind: "created" })).toBe(true);
+  it("names every Task for a push that lists no ids, and for the creation of a run, which may be a re-run", () => {
+    expect(findTrackingTasksAffectedByRunPush(tasks, { ids: [], kind: "updated" })).toBe("every");
+    expect(findTrackingTasksAffectedByRunPush(tasks, { ids: ["new"], kind: "created" })).toBe(
+      "every",
+    );
   });
 
-  it("is not affected by a change to a run no Task holds", () => {
-    expect(isTrackingAffectedByRunPush(tasks, { ids: ["x", "y"], kind: "updated" })).toBe(false);
-    expect(isTrackingAffectedByRunPush([], { ids: ["x"], kind: "updated" })).toBe(false);
+  it("names no Task for a change to a run no Task holds", () => {
+    expect(findTrackingTasksAffectedByRunPush(tasks, { ids: ["x", "y"], kind: "updated" })).toEqual(
+      [],
+    );
+    expect(findTrackingTasksAffectedByRunPush([], { ids: ["x"], kind: "updated" })).toEqual([]);
   });
 });
 

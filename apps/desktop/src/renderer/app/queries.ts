@@ -637,7 +637,7 @@ export const assistantsQuery = (client: HerculeClient) =>
  *
  * The key is stable, so the entry is the same whichever Tasks are tracked. A
  * push on the `task` topic reads it again, and one on the `run` topic when
- * the push can change it (see `isTrackingAffectedByRunPush`).
+ * the push can change it (see `findTrackingTasksAffectedByRunPush`).
  */
 export const trackingQuery = (client: HerculeClient) =>
   queryOptions({
@@ -659,10 +659,10 @@ export const trackingQuery = (client: HerculeClient) =>
  *
  * Only the pane that is open reads it, so a Task nobody opened costs nothing.
  * It is kept current by pushes: one on the `task` topic that names the Task,
- * and one on the `run` topic when the push can change Tracking (see
- * `isTrackingAffectedByRunPush`). Both mark it out of date, and it is read
- * again only while a pane shows it. Its cost is one request per open pane and
- * per such push, and no timer.
+ * and one on the `run` topic that can change this Task's runs (see
+ * `findTrackingTasksAffectedByRunPush`). Both mark it out of date, and it is
+ * read again only while a pane shows it. Its cost is one request per open pane
+ * and per such push, and no timer.
  */
 export const trackingDetailQuery = (client: HerculeClient, taskId: string) =>
   queryOptions({

@@ -52,14 +52,14 @@ export const queryKeys = {
   /**
    * Tracking as one read: the tracked Tasks and their runs. Live topics:
    * `task` reads it again on every push, and `run` only when the push can
-   * change it (see `isTrackingAffectedByRunPush`), so no key maps it for
+   * change it (see `findTrackingTasksAffectedByRunPush`), so no key maps it for
    * `run` here. The key is stable: the Tasks tracked change, the key does not.
    */
   tracking: (): LiveQueryKey => ["tracking"],
   /**
    * What the Tracking pane of one Task draws (`task.readTracking`). Live
    * topics: `task` reads it again when its push names the Task, or names no
-   * ids; `run` follows the rule of `tracking` (see `isTrackingAffectedByRunPush`),
+   * ids; `run` follows the rule of `tracking` (see `findTrackingTasksAffectedByRunPush`),
    * so no key maps it for `run` here. Without an id, the key is the prefix of
    * every Task's detail, and it is apart from `tracking()`, which is a
    * different read.

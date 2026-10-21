@@ -110,9 +110,10 @@ const buildTrackingRun = (id: string, status: TrackingRun["status"]): TrackingRu
 });
 
 /**
- * Returns a query client whose cache holds Tracking with one Task (`t-1`,
- * newest run `r-new`, live), and the detail of `t-1` and of another Task,
- * all fresh. Tracking is read before the detail, as the app does.
+ * Returns a query client whose cache holds Tracking with two Tasks (`t-1`,
+ * newest run `r-new`, live; `t-2`, newest run `r-two`, live), and the detail
+ * of each and of a Task Tracking does not hold, all fresh. Tracking is read
+ * before the details, as the app does.
  */
 const buildCachedTracking = () => {
   const queryClient = new QueryClient();
@@ -127,30 +128,58 @@ const buildCachedTracking = () => {
         latestLiveRun: buildTrackingRun("r-new", "running"),
         liveRunIds: ["r-new"],
       },
+      {
+        taskId: "t-2",
+        title: "Task t-2",
+        handoffs: [],
+        latestRun: buildTrackingRun("r-two", "running"),
+        latestLiveRun: buildTrackingRun("r-two", "running"),
+        liveRunIds: ["r-two"],
+      },
     ],
   };
   queryClient.setQueryData(queryKeys.tracking(), read);
   queryClient.setQueryData(queryKeys.trackingDetail("t-1"), {});
   queryClient.setQueryData(queryKeys.trackingDetail("t-2"), {});
+  queryClient.setQueryData(queryKeys.trackingDetail("t-untracked"), {});
   const isStale = (queryKey: ReadonlyArray<unknown>): boolean =>
     queryClient.getQueryState(queryKey)?.isInvalidated === true;
   return { queryClient, isStale };
 };
 
 describe("invalidateForPush", () => {
-  it("marks Tracking and every Tracking detail out of date when a run push names the newest run of a tracked Task", () => {
+  it("marks Tracking and the detail of the Task whose run a push names out of date, and no other detail", () => {
     const { queryClient, isStale } = buildCachedTracking();
     invalidateForPush(queryClient, "run", [], { ids: ["r-new"], kind: "updated" });
     expect(isStale(queryKeys.tracking())).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
-    expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(true);
+    expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(false);
+    expect(isStale(queryKeys.trackingDetail("t-untracked"))).toBe(false);
   });
 
-  it("marks them out of date for a run that was created, which a re-run is", () => {
+  it("marks the details of every Task a push names a run of", () => {
+    const { queryClient, isStale } = buildCachedTracking();
+    invalidateForPush(queryClient, "run", [], { ids: ["r-new", "r-two"], kind: "updated" });
+    expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
+    expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(true);
+    expect(isStale(queryKeys.trackingDetail("t-untracked"))).toBe(false);
+  });
+
+  it("marks Tracking and every detail out of date for a run that was created, which a re-run is", () => {
     const { queryClient, isStale } = buildCachedTracking();
     invalidateForPush(queryClient, "run", [], { ids: ["r-other"], kind: "created" });
     expect(isStale(queryKeys.tracking())).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
+    expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(true);
+    expect(isStale(queryKeys.trackingDetail("t-untracked"))).toBe(true);
+  });
+
+  it("marks Tracking and every detail out of date for a push that names no ids", () => {
+    const { queryClient, isStale } = buildCachedTracking();
+    invalidateForPush(queryClient, "run", [], { ids: [], kind: "updated" });
+    expect(isStale(queryKeys.tracking())).toBe(true);
+    expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
+    expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(true);
   });
 
   it("leaves Tracking and its details alone for a run of no tracked Task", () => {

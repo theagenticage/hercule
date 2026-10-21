@@ -36,8 +36,8 @@ import { useEffect } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import {
+  findTrackingTasksAffectedByRunPush,
   invalidateWithoutCancelling,
-  isTrackingAffectedByRunPush,
   queryKeys,
   type Live,
   type LiveInvalidatePush,
@@ -50,18 +50,20 @@ import { useWindowVisible } from "./window-visibility";
 
 /**
  * Reads again every query a push on `topic` makes stale: the queries under
- * `keys`, and for a `run` push, Tracking and every Task's Tracking detail when
- * the push can change them (see `isTrackingAffectedByRunPush`). A `run` push is
- * about every run, such as the ones cron fires start, and Tracking holds only
- * the runs of its Tasks, so most of them leave it as it is.
+ * `keys`, and for a `run` push, Tracking and the Tracking details of the Tasks
+ * the push can change (see `findTrackingTasksAffectedByRunPush`). A `run` push
+ * is about every run, such as the ones cron fires start, and Tracking holds
+ * only the runs of its Tasks, so most of them leave it as it is.
  *
- * The same test serves the details, though a detail lists up to twenty runs of
- * its Task and Tracking only its newest ones. A run that has ended never
- * changes again, so an older run in a detail cannot be what a push is about.
- * A re-run is a `created` push, which the test accepts. What can change is the
- * Task's newest run and its live runs, and the test covers those. Only the open
- * pane's detail is read again; the others are marked out of date and read
- * when their pane opens.
+ * A push that names runs marks out of date the details of the Tasks that hold
+ * those runs only, so a push about one Task's run never re-reads the open pane
+ * of another. A detail lists up to twenty runs of its Task and Tracking only
+ * its newest ones, but a run that has ended never changes again, so an older
+ * run in a detail cannot be what a push is about. What can change is the Task's
+ * newest run and its live runs, and the rule covers those. A push that lists no
+ * ids, or creates a run, may reach any Task, so it marks every detail out of
+ * date. Only the open pane's detail is read again; the others are read when
+ * their pane opens.
  */
 export const invalidateForPush = (
   queryClient: QueryClient,
@@ -72,9 +74,16 @@ export const invalidateForPush = (
   for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
   if (topic !== "run") return;
   const read = queryClient.getQueryData<TrackingRead>(queryKeys.tracking());
-  if (read === undefined || isTrackingAffectedByRunPush(read.tasks, push)) {
-    invalidateWithoutCancelling(queryClient, queryKeys.tracking());
+  const affected =
+    read === undefined ? "every" : findTrackingTasksAffectedByRunPush(read.tasks, push);
+  if (affected !== "every" && affected.length === 0) return;
+  invalidateWithoutCancelling(queryClient, queryKeys.tracking());
+  if (affected === "every") {
     invalidateWithoutCancelling(queryClient, queryKeys.trackingDetail());
+    return;
+  }
+  for (const taskId of affected) {
+    invalidateWithoutCancelling(queryClient, queryKeys.trackingDetail(taskId));
   }
 };
 
