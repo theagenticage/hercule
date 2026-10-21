@@ -3,11 +3,7 @@
  * they handed to agents (spec 17 §Tracking).
  */
 import { memo, useId, useLayoutEffect, useRef, type JSX } from "react";
-import {
-  canMarkTrackingStateDone,
-  decideTrackingStatePose,
-  type TrackingState,
-} from "@hercule/client-core";
+import { decideTrackingStatePose, type TrackingState } from "@hercule/client-core";
 import { buildHueStyle, buildLook, Face } from "../../faces";
 import { CheckIcon } from "../../icons/check";
 import { AgeLabel } from "../age-label";
@@ -24,6 +20,8 @@ export interface TrackingRowFacts {
   readonly taskId: string;
   readonly title: string;
   readonly state: TrackingState;
+  /** Whether the row has a Mark done control: no run of its Task is live and it waits on no Request (`canMarkTrackingRowDone`). */
+  readonly canMarkDone: boolean;
   /**
    * The text the colleague's face that leads the row is drawn from: the id of
    * the workflow that has the work, or its name when the run has no workflow
@@ -53,10 +51,11 @@ export interface TrackingRowFacts {
  * - `lastInGroup` marks the row that ends its group, which has no gap under it.
  *   Each row of opened Tracking carries its own gap, as Intake's rows do, so the
  *   virtual list knows each row's height without measuring it.
- * - A Finished, Failed or Stopped row has a Mark done control beside it, which
- *   shows while the pointer is on the row or the keyboard's focus is on the
- *   control, as Intake's row controls do. It calls `onMarkDone`. A Working row
- *   and a Needs you row have none, because marking them done could leave a run going.
+ * - A row with `canMarkDone` has a Mark done control beside it, which shows
+ *   while the pointer is on the row or the keyboard's focus is on the control,
+ *   as Intake's row controls do. It calls `onMarkDone`. A row whose Task has a
+ *   run going, or that waits on a Request, has none, because marking it done
+ *   could leave a run going.
  *
  * The row is one button, with its control beside it, so a screen reader reads
  * the title, the line and the time as one name. The props are the row's facts,
@@ -73,6 +72,7 @@ export const TrackingRowItem = memo(function TrackingRowItem({
   taskId,
   title,
   state,
+  canMarkDone,
   faceSeed,
   workflowName,
   lineText,
@@ -170,7 +170,7 @@ export const TrackingRowItem = memo(function TrackingRowItem({
           className="tr-run-end"
         />
       </button>
-      {canMarkTrackingStateDone(state) && (
+      {canMarkDone && (
         <span className="ask-acts">
           <button
             type="button"

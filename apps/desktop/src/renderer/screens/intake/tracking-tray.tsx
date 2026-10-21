@@ -5,6 +5,7 @@ import type { JSX, ReactNode } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
+  canMarkTrackingRowDone,
   countWaitingTrackingRows,
   describeTrackingLine,
   groupTrackingRows,
@@ -30,6 +31,7 @@ const buildRowFacts = (row: TrackingRow): TrackingRowFacts => {
     taskId: row.task.taskId,
     title: row.task.title,
     state: row.state,
+    canMarkDone: canMarkTrackingRowDone(row),
     faceSeed: readTrackingFaceSeed(row),
     workflowName: line.workflowName,
     lineText: line.text,

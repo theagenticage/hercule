@@ -2,12 +2,11 @@ import type { Signal, TrackingRun, TrackingTask } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   buildTrackingRows,
-  canMarkTrackingStateDone,
+  canMarkTrackingRowDone,
   countWaitingTrackingRows,
-  decideTrackingRowDestination,
   describeTrackingLine,
+  findTrackingTasksAffectedByRunPush,
   groupTrackingRows,
-  isTrackingAffectedByRunPush,
   listRecentTrackingRows,
   type TrackingState,
 } from "./tracking";
@@ -223,7 +222,7 @@ describe("a Task that needs you", () => {
     const [asked] = buildTrackingRows([working], [request], NO_YOUR_WORK);
     expect(asked).toMatchObject({
       state: "needs-you",
-      waitsOn: { kind: "request", session: request },
+      waitsOn: { kind: "request", session: request, signalAlsoWaits: false },
       since: at(7),
     });
     // The row still reads its run, so the run can be opened.
@@ -291,7 +290,7 @@ describe("a Task that needs you", () => {
     // The newest run failed, but the older live run asks, so the row waits on the Request.
     expect(buildTrackingRows([failed], [request], yourWork)[0]).toMatchObject({
       state: "needs-you",
-      waitsOn: { kind: "request", session: request },
+      waitsOn: { kind: "request", session: request, signalAlsoWaits: true },
     });
     expect(buildTrackingRows([failed], [], yourWork)[0]?.state).toBe("needs-you");
   });
@@ -328,14 +327,33 @@ describe("a Task that needs you", () => {
     ]);
   });
 
-  it("counts toward To do but cannot be marked done", () => {
+  it("counts toward To do, and cannot be marked done while it waits on a Request", () => {
     const rows = buildTrackingRows(
       [working, buildTask("b", buildRun("r2", 0, "running"))],
       [],
       buildYourWork([[buildSignal("sig", 1), ["a"]]]),
     );
     expect(countWaitingTrackingRows(rows)).toBe(1);
-    expect(canMarkTrackingStateDone("needs-you")).toBe(false);
+    const asked = buildTrackingRows(
+      [working],
+      [buildWaitingSession("s1", "r1", 7)],
+      NO_YOUR_WORK,
+    )[0]!;
+    expect(canMarkTrackingRowDone(asked)).toBe(false);
+  });
+
+  it("can be marked done while it waits on a signal and no run is live, and not while one is", () => {
+    const yourWork = buildYourWork([[buildSignal("sig", 1), ["a", "b"]]]);
+    const [finished, going] = buildTrackingRows(
+      [
+        buildTask("a", buildRun("r1", 0, "completed")),
+        buildTask("b", buildRun("r2", 0, "running")),
+      ],
+      [],
+      yourWork,
+    );
+    expect(canMarkTrackingRowDone(finished!)).toBe(true);
+    expect(canMarkTrackingRowDone(going!)).toBe(false);
   });
 });
 
@@ -375,40 +393,67 @@ describe("waiting on the user", () => {
   });
 
   it("lets Finished, Failed and Stopped rows be marked done, and never a Working one", () => {
-    expect(canMarkTrackingStateDone("finished")).toBe(true);
-    expect(canMarkTrackingStateDone("failed")).toBe(true);
-    expect(canMarkTrackingStateDone("stopped")).toBe(true);
-    expect(canMarkTrackingStateDone("working")).toBe(false);
+    const canMark = (run: TrackingRun) =>
+      canMarkTrackingRowDone(buildTrackingRows([buildTask("a", run)], [], NO_YOUR_WORK)[0]!);
+    expect(canMark(buildRun("r", 0, "completed"))).toBe(true);
+    expect(canMark(buildRun("r", 0, "failed"))).toBe(true);
+    expect(canMark(buildRun("r", 0, "cancelled"))).toBe(true);
+    expect(canMark(buildRun("r", 0, "running"))).toBe(false);
+  });
+
+  it("does not let a Failed row be marked done while an older run of its Task is live", () => {
+    const failed = buildTask("a", buildRun("r2", 5, "failed"), {
+      latestLiveRun: buildRun("r1", 0, "running"),
+    });
+    expect(canMarkTrackingRowDone(buildTrackingRows([failed], [], NO_YOUR_WORK)[0]!)).toBe(false);
   });
 });
 
-describe("isTrackingAffectedByRunPush", () => {
+describe("findTrackingTasksAffectedByRunPush", () => {
   const tasks = [
     buildTask("a", buildRun("r2", 5, "completed"), { latestLiveRun: buildRun("r1", 0, "running") }),
+    buildTask("b", buildRun("r4", 5, "completed")),
   ];
 
-  it("is affected by a push that names a Task's newest run or newest live run", () => {
-    expect(isTrackingAffectedByRunPush(tasks, { ids: ["r1"], kind: "updated" })).toBe(true);
-    expect(isTrackingAffectedByRunPush(tasks, { ids: ["x", "r2"], kind: "deleted" })).toBe(true);
+  it("names the Task whose newest run or newest live run the push names", () => {
+    expect(findTrackingTasksAffectedByRunPush(tasks, { ids: ["r1"], kind: "updated" })).toEqual([
+      "a",
+    ]);
+    expect(
+      findTrackingTasksAffectedByRunPush(tasks, { ids: ["x", "r2"], kind: "deleted" }),
+    ).toEqual(["a"]);
   });
 
-  it("is affected by a push that names an older live run, whose end changes which Requests the row waits on", () => {
+  it("names each Task a push reaches, and only those", () => {
+    expect(
+      findTrackingTasksAffectedByRunPush(tasks, { ids: ["r4", "r1"], kind: "updated" }),
+    ).toEqual(["a", "b"]);
+    expect(findTrackingTasksAffectedByRunPush(tasks, { ids: ["r4"], kind: "updated" })).toEqual([
+      "b",
+    ]);
+  });
+
+  it("names the Task whose older live run the push names, because its end changes which Requests the row waits on", () => {
     const withOlderLiveRun = [
       buildTask("a", buildRun("r3", 8, "running"), { liveRunIds: ["r3", "r-older"] }),
     ];
     expect(
-      isTrackingAffectedByRunPush(withOlderLiveRun, { ids: ["r-older"], kind: "updated" }),
-    ).toBe(true);
+      findTrackingTasksAffectedByRunPush(withOlderLiveRun, { ids: ["r-older"], kind: "updated" }),
+    ).toEqual(["a"]);
   });
 
-  it("is affected by a push that lists no ids, and by the creation of a run, which may be a re-run", () => {
-    expect(isTrackingAffectedByRunPush(tasks, { ids: [], kind: "updated" })).toBe(true);
-    expect(isTrackingAffectedByRunPush(tasks, { ids: ["new"], kind: "created" })).toBe(true);
+  it("names every Task for a push that lists no ids, and for the creation of a run, which may be a re-run", () => {
+    expect(findTrackingTasksAffectedByRunPush(tasks, { ids: [], kind: "updated" })).toBe("every");
+    expect(findTrackingTasksAffectedByRunPush(tasks, { ids: ["new"], kind: "created" })).toBe(
+      "every",
+    );
   });
 
-  it("is not affected by a change to a run no Task holds", () => {
-    expect(isTrackingAffectedByRunPush(tasks, { ids: ["x", "y"], kind: "updated" })).toBe(false);
-    expect(isTrackingAffectedByRunPush([], { ids: ["x"], kind: "updated" })).toBe(false);
+  it("names no Task for a change to a run no Task holds", () => {
+    expect(findTrackingTasksAffectedByRunPush(tasks, { ids: ["x", "y"], kind: "updated" })).toEqual(
+      [],
+    );
+    expect(findTrackingTasksAffectedByRunPush([], { ids: ["x"], kind: "updated" })).toEqual([]);
   });
 });
 
@@ -499,29 +544,5 @@ describe("groupTrackingRows", () => {
 
   it("returns no group for no row", () => {
     expect(groupTrackingRows([])).toEqual([]);
-  });
-});
-
-describe("decideTrackingRowDestination", () => {
-  const working = buildTask("a", buildRun("r1", 0, "running"));
-
-  it("opens the run's page for a row that waits on nothing", () => {
-    const row = buildTrackingRows([working], [], NO_YOUR_WORK)[0]!;
-    expect(decideTrackingRowDestination(row)).toEqual({ kind: "run", runId: "r1" });
-  });
-
-  it("opens the thread of the session whose Request waits", () => {
-    const row = buildTrackingRows(
-      [working],
-      [buildWaitingSession("s1", "r1", 7)],
-      NO_YOUR_WORK,
-    )[0]!;
-    expect(decideTrackingRowDestination(row)).toEqual({ kind: "thread", sessionId: "s1" });
-  });
-
-  it("opens the signal that names the Task as Your work", () => {
-    const yourWork = buildYourWork([[buildSignal("sig", 1), ["a"]]]);
-    const row = buildTrackingRows([working], [], yourWork)[0]!;
-    expect(decideTrackingRowDestination(row)).toEqual({ kind: "signal", signalId: "sig" });
   });
 });

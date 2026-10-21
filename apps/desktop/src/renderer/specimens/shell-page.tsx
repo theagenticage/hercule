@@ -82,6 +82,7 @@ import type {
   SignedInUser,
   SkillsPreviewFilter,
   Task,
+  TrackingDetail,
   TrackingTask,
   TranscriptRow,
   Workspace,
@@ -141,6 +142,7 @@ import {
   startTasksQuery,
   subagentsQuery,
   threadsQuery,
+  trackingDetailQuery,
   trackingQuery,
   yourWorkQuery,
   transcriptQuery,
@@ -235,6 +237,16 @@ export interface SidebarRecords {
    * Hercule segment's count and Intake's Tracking read. None when left out.
    */
   readonly tracking?: ReadonlyArray<TrackingTask>;
+  /**
+   * What `task.readTracking` returns for each Task whose pane a scene opens,
+   * by the Task's id. None when left out.
+   */
+  readonly trackingDetails?: ReadonlyMap<string, TrackingDetail>;
+  /**
+   * The signals handed to the Tasks of `tracking`, as `signal.read` returns
+   * them, which each Tracking pane reads under "You asked". None when left out.
+   */
+  readonly handedSignals?: ReadonlyArray<Signal>;
   /**
    * What `signal.queryYourWork` returns: the open Tasks that belong to a
    * signal on To do, which make a Tracking row Needs you (Your work). None
@@ -334,6 +346,8 @@ export interface IntakeRecords {
   readonly view?: "later" | "done" | "everything";
   /** Whether Tracking is opened over the To do list. Folded when left out. */
   readonly trackingOpen?: boolean;
+  /** The Task whose pane is open in opened Tracking. None when left out. */
+  readonly trackingTaskId?: string;
   /**
    * What the Everything view reads: the events its one page holds, newest
    * first, under the search text, the handling filter and the source tab it
@@ -586,6 +600,12 @@ const seedQueryCache = (
     tasks: records.tracking ?? [],
     readStartedAt: 0,
   });
+  for (const [taskId, detail] of records.trackingDetails ?? []) {
+    queryClient.setQueryData(trackingDetailQuery(client, taskId).queryKey, detail);
+  }
+  for (const signal of records.handedSignals ?? []) {
+    queryClient.setQueryData(signalQuery(client, signal.id).queryKey, signal);
+  }
   queryClient.setQueryData(yourWorkQuery(client).queryKey, { tasks: records.yourWorkTasks ?? [] });
   queryClient.setQueryData(liveAgentSessionsQuery(client).queryKey, records.agentSessions ?? []);
   queryClient.setQueryData(
@@ -1389,6 +1409,7 @@ export async function mountIntakeSpecimen(
   if (intake.view !== undefined) search.set("view", intake.view);
   if (intake.signal !== null) search.set("signal", intake.signal.id);
   if (intake.trackingOpen === true) search.set("tracking", "true");
+  if (intake.trackingTaskId !== undefined) search.set("task", intake.trackingTaskId);
   const everything = intake.everything;
   if (everything?.selectedEventId !== undefined) {
     search.set("event", String(everything.selectedEventId));

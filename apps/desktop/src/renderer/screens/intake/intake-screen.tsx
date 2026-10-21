@@ -31,7 +31,7 @@ import {
   type IntakeView,
   type SignalMove,
   type SignalMovePlan,
-  type TrackingRowDestination,
+  type TrackingDestination,
 } from "@hercule/client-core";
 import {
   settingsQuery,
@@ -50,13 +50,14 @@ import { isTextField } from "../../app/text-field";
 import { pickSelectionAfterMove } from "./pick-selection-after-move";
 import { SignalPane, type SignalPaneHandle } from "./signal-pane";
 import { SnoozeMenu } from "./snooze-menu";
+import { TrackingPane } from "./tracking-pane";
 import { TrackingTray } from "./tracking-tray";
 import { useIntakeSplit } from "./use-intake-split";
 import { useHeldSignals } from "./use-held-signals";
 import { useHeldTrackingRows } from "./use-held-tracking-rows";
 import { useIntakeTabs } from "./use-intake-tabs";
 import { useTrackingControls } from "./use-tracking-controls";
-import { useTrackingTickOff } from "./use-tracking-tick-off";
+import { useTakeOffTracking } from "./use-take-off-tracking";
 import {
   IntakeMovesContext,
   useMoveToast,
@@ -98,8 +99,11 @@ const isCheckable = (signal: Signal | undefined, view: SignalView): signal is Si
  * list column (`trackingOpen`, which `onTrackingOpenChange` changes; opening
  * it clears the selected signal). The rows of Tracking that wait on the user
  * count in To do, so a list with no signal but such rows is not at inbox
- * zero. A press on a row of Tracking calls `onOpenTrackingRow` with where the
- * row goes: its run, the thread whose Request waits, or the signal that waits.
+ * zero. While Tracking is open, the split follows its selected row
+ * (`selectedTaskId`, which `onSelectTask` changes): the pane shows that row,
+ * and the pane's links call `onOpenDestination` with where they go: a run, the
+ * thread whose Request waits, or the signal that waits. A click on a row of
+ * folded Tracking opens Tracking on that row.
  *
  * The keys of spec 17 §Keys act while the focus is in the list or the pane
  * and never in a text field:
@@ -113,17 +117,20 @@ const isCheckable = (signal: Signal | undefined, view: SignalView): signal is Si
  *   Reply box, and `O` opens the signal on its source.
  * - Esc clears the checks, and then steps back.
  * - `T` opens and closes Tracking. While it is open, `J`/`K` and `↓`/`↑` walk
- *   only its rows, `E` marks the selected row done unless it is Working, and
- *   Esc clears the selection, then closes Tracking.
+ *   only its rows, `↩` on a row shows its pane, `E` marks the selected row
+ *   done unless a run of it is live, `O` opens the selected row's run, and Esc
+ *   hides the pane, then clears the selection, then closes Tracking.
  */
 export function IntakeScreen({
   view,
   pluginId,
   selectedId: selectedIdParam,
   trackingOpen: trackingOpenParam,
+  selectedTaskId: selectedTaskIdParam,
   onSelect,
   onTrackingOpenChange,
-  onOpenTrackingRow,
+  onSelectTask,
+  onOpenDestination,
   onViewChange,
   onPluginChange,
 }: {
@@ -134,14 +141,22 @@ export function IntakeScreen({
   /** Whether Tracking is opened over the list. It shows on To do only. */
   readonly trackingOpen: boolean;
   readonly onSelect: (signalId: string | null) => void;
-  /** Opens or closes Tracking. Opening it also clears the selected signal. */
-  readonly onTrackingOpenChange: (open: boolean) => void;
+  /** The selected row of Tracking, which shows while Tracking is opened. */
+  readonly selectedTaskId: string | null;
   /**
-   * Goes where a row of Tracking opens: the page of a run, the thread of a
-   * session, or a signal in To do, which the route selects with Tracking
-   * closed.
+   * Opens or closes Tracking. Opening it also clears the selected signal and
+   * selects the row of `taskId`, when one is given. Closing it clears the
+   * selected row.
    */
-  readonly onOpenTrackingRow: (destination: TrackingRowDestination) => void;
+  readonly onTrackingOpenChange: (open: boolean, taskId?: string) => void;
+  /** Selects the row of `taskId` in opened Tracking, or no row with `null`. */
+  readonly onSelectTask: (taskId: string | null) => void;
+  /**
+   * Goes where a link of the pane of a Tracking row opens: the page of a run,
+   * the thread of a session, or a signal in To do, which the route selects
+   * with Tracking closed.
+   */
+  readonly onOpenDestination: (destination: TrackingDestination) => void;
   readonly onViewChange: (view: IntakeView) => void;
   readonly onPluginChange: (pluginId: string | null) => void;
 }): JSX.Element {
@@ -163,6 +178,11 @@ export function IntakeScreen({
   // Tracking covers the list, so no signal is selected while it is open.
   const trackingOpen = view === "to-do" && trackingOpenParam;
   const selectedId = trackingOpen ? null : selectedIdParam;
+  // A selected row that Tracking no longer draws is not selected.
+  const selectedTaskId =
+    trackingOpen && trackingRows.some((row) => row.task.taskId === selectedTaskIdParam)
+      ? selectedTaskIdParam
+      : null;
   const { data: toDo } = useSuspenseQuery(signalsToDoQuery(client));
   const { data: settings } = useSuspenseQuery(settingsQuery(client));
   const timezone = resolveDisplayTimezone(settings.user.timezone);
@@ -172,7 +192,11 @@ export function IntakeScreen({
   const scope = `${view}:${pluginId ?? "all"}`;
   const [focusPaneFor, setFocusPaneFor] = useState<string | null>(null);
   const [focusSelectedRow, setFocusSelectedRow] = useState(false);
-  const split = useIntakeSplit(selectedId, "data-signal-id");
+  // While Tracking is open, the split follows its selected row instead of a signal.
+  const split = useIntakeSplit(
+    trackingOpen ? selectedTaskId : selectedId,
+    trackingOpen ? "data-task-id" : "data-signal-id",
+  );
   const { listRef, fits, paneShown, paneDrawn, setDismissed } = split;
   const paneRef = useRef<SignalPaneHandle>(null);
   // Read by `openSignal` when it runs, so `openSignal` keeps one identity
@@ -213,7 +237,7 @@ export function IntakeScreen({
   );
   const toast = useMoveToast();
   const moves = useSignalMoveRunner(client, timezone, held, toast);
-  const tickOff = useTrackingTickOff(client, toast);
+  const takeOff = useTakeOffTracking(client, toast);
   const sections: ReadonlyArray<IntakeSection> =
     view === "to-do"
       ? groupSignalsIntoSections(held.shown, pluginId)
@@ -243,27 +267,33 @@ export function IntakeScreen({
     if (ids.size === 0) setPreview(null);
   };
 
+  /** Goes where a link of the pane of a Tracking row opens. */
+  const openDestination = (destination: TrackingDestination): void => {
+    if (destination.kind === "signal") {
+      // The pane shows even if the user closed an earlier one, and the sheet
+      // that held the focus goes with Tracking, so the list takes it.
+      setDismissed(false);
+      listRef.current?.focus({ preventScroll: true });
+    }
+    onOpenDestination(destination);
+  };
+
   const tracking = useTrackingControls({
     open: trackingOpen,
     readRows: readTrackingRows,
     shownRows: trackingRows,
+    selectedTaskId,
+    addressTaskId: trackingOpen ? selectedTaskIdParam : null,
     heldTracking,
-    tickOff,
-    listRef,
+    takeOff,
+    split,
     onOpening: () => {
       updateChecks(new Set());
       setMenu(null);
     },
     onOpenChange: onTrackingOpenChange,
-    onOpenRow: (destination) => {
-      if (destination.kind === "signal") {
-        // The pane shows even if the user closed an earlier one, and the sheet
-        // that held the focus goes with Tracking, so the list takes it.
-        setDismissed(false);
-        listRef.current?.focus({ preventScroll: true });
-      }
-      onOpenTrackingRow(destination);
-    },
+    onSelectTask,
+    onOpenDestination: openDestination,
   });
 
   /** Selects `signalId` and shows the pane, as a click on its row does. */
@@ -389,6 +419,8 @@ export function IntakeScreen({
 
   // A press on a row's checkbox or move. The list's rows are memoized, so the
   // list gets one function that keeps its identity and runs the latest one.
+  // State keeps the function, not `useCallback`: the React Compiler cannot
+  // keep a `useCallback` that reads a ref, and skips the whole component.
   const runRowActionRef = useRef<(signalId: string, action: SignalRowAction) => void>(null);
   useLayoutEffect(() => {
     runRowActionRef.current = (signalId, action) => {
@@ -404,9 +436,9 @@ export function IntakeScreen({
       }
     };
   });
-  const runRowAction = useCallback((signalId: string, action: SignalRowAction): void => {
+  const [runRowAction] = useState(() => (signalId: string, action: SignalRowAction): void => {
     runRowActionRef.current?.(signalId, action);
-  }, []);
+  });
 
   const hasNextPage = paged.hasNextPage;
   const isFetchingNextPage = paged.isFetchingNextPage;
@@ -469,7 +501,7 @@ export function IntakeScreen({
       case "e": {
         event.preventDefault();
         // On a row of folded Tracking, `E` marks that row done, not the selected signal.
-        if (focusedTaskId !== undefined) tracking.markTaskDone(focusedTaskId);
+        if (focusedTaskId !== undefined) tracking.takeOffTask(focusedTaskId, "done");
         else runKeyMove("done");
         return;
       }
@@ -507,12 +539,14 @@ export function IntakeScreen({
     }
   };
 
-  const canToggle = fits && !trackingOpen && (paneShown || listedSignals.length > 0);
+  const canToggle =
+    fits && (paneShown || (trackingOpen ? trackingRows.length > 0 : listedSignals.length > 0));
+  const paneNoun = trackingOpen ? "the pane" : "the signal";
   const toggleTitle = !fits
     ? "Widen the window to show the pane"
     : paneShown
-      ? "Hide the signal  Esc"
-      : "Show the signal";
+      ? `Hide ${paneNoun}  Esc`
+      : `Show ${paneNoun}`;
 
   // While a move is sent, its rows hold their highlight; before, a bulk
   // button with hover or focus shows what it would do.
@@ -564,13 +598,15 @@ export function IntakeScreen({
         tabs={tabs}
         pluginId={pluginId}
         plugins={plugins}
-        paneLabel="Signal pane"
+        paneLabel={trackingOpen ? "Tracking pane" : "Signal pane"}
         paneToggle={{
           title: toggleTitle,
           shown: paneShown,
           enabled: canToggle,
           onPress: () => {
             if (paneShown) setDismissed(true);
+            else if (trackingOpen)
+              tracking.selectRow(selectedTaskId ?? trackingRows[0]!.task.taskId);
             else
               openSignal(
                 selectedId ?? moveSignalSelection(sections, null, 1) ?? listedSignals[0]!.id,
@@ -677,7 +713,7 @@ export function IntakeScreen({
                 <TrackingTray
                   rows={trackingRows}
                   open={trackingOpen}
-                  selectedTaskId={tracking.selectedTaskId}
+                  selectedTaskId={selectedTaskId}
                   signalCount={listedSignals.length}
                   signalSources={[
                     ...new Set(listedSignals.map((signal) => parsePluginId(signal.kind))),
@@ -688,29 +724,45 @@ export function IntakeScreen({
                   flights={flights}
                   onOpen={tracking.openTracking}
                   onClose={tracking.closeTracking}
-                  onOpenRow={tracking.openTrackingRow}
-                  onMarkDone={tracking.markTaskDone}
+                  onOpenRow={tracking.selectRow}
+                  onMarkDone={(taskId) => {
+                    tracking.takeOffTask(taskId, "done");
+                  }}
                 />
               )}
             </>
           }
           pane={
-            selectedId !== null &&
-            paneDrawn && (
-              <SignalPane
-                key={selectedId}
-                signalId={selectedId}
-                listed={selectedSignal}
-                timezone={timezone}
-                shown={paneShown}
-                focusSuggestedOnOpen={focusPaneFor === selectedId}
-                onFocusedSuggested={() => {
-                  setFocusPaneFor(null);
-                }}
-                onShowInTracking={tracking.showTaskInTracking}
-                ref={paneRef}
-              />
-            )
+            trackingOpen
+              ? selectedTaskId !== null &&
+                paneDrawn && (
+                  <TrackingPane
+                    key={selectedTaskId}
+                    taskId={selectedTaskId}
+                    timezone={timezone}
+                    shown={paneShown}
+                    focusAnswerOnOpen={tracking.paneFocusTaskId === selectedTaskId}
+                    onFocusedAnswer={tracking.clearPaneFocus}
+                    onTakeOff={tracking.takeOffTask}
+                    onOpenDestination={openDestination}
+                  />
+                )
+              : selectedId !== null &&
+                paneDrawn && (
+                  <SignalPane
+                    key={selectedId}
+                    signalId={selectedId}
+                    listed={selectedSignal}
+                    timezone={timezone}
+                    shown={paneShown}
+                    focusSuggestedOnOpen={focusPaneFor === selectedId}
+                    onFocusedSuggested={() => {
+                      setFocusPaneFor(null);
+                    }}
+                    onShowInTracking={tracking.showTaskInTracking}
+                    ref={paneRef}
+                  />
+                )
           }
         />
       </IntakeMovesContext>

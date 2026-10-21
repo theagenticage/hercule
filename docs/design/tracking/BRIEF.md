@@ -112,8 +112,8 @@ Round Trip's: one trip, top to bottom, joined by a hairline.
   - for Failed, the reason first, in tomato;
   - **What it did:** the output of the run's last agent step, named ("From the step *Review*"), drawn by its shape (below);
   - for Working, the latest step, live, in place of What it did;
-  - for a Task with more than one run, its runs as steps;
-  - the action step the run ended on, when the workflow did something itself after the agent ("Open a pull request · Opened draft PR #1302");
+  - for a Task with more than one run, or whose newest run is live, its runs as steps (a single run that has ended draws none);
+  - the action step the run ended on, when the workflow did something itself after the agent ("Open a pull request · Opened draft PR #1302"), only for a newest run that completed;
   - Linked work: the PR and its change line;
   - for a Request, the question and its answers, as Round Trip's run pane has them.
 - **The signal that waits,** for Needs you by a signal: a third message in the trip, from the source, with "Open the signal".
@@ -139,6 +139,20 @@ The agent's last message alone, as #797 and #803 first had it, is not enough for
 Open the run is in the head on every state, so the list of answers leaves it out, as Round Trip's did.
 
 A Task that is Needs you by a signal has no live run: its agent finished, and a source has since raised a signal about the work, such as checks failing on its PR. So Stop the run, decision 9's answer for Needs you, would stop nothing. The Task gets the answers of its last run's state instead.
+
+*(Amended 2026-10-21, [#803](https://github.com/theagenticage/hercule/issues/803).)* Slice 3 builds the pane, and the app knowingly differs from the drawing in these places:
+- The head's standing line has no harness, model or runner. No read carries them. The line is "Finished at 09:20 after 8m", "Failed at 09:26 after 6m", "Stopped at 08:47", "Started at 09:33 · 8m so far" or "Waiting on you since 09:33".
+- A Stopped row never says "by you". No field says who stopped the run.
+- What it did shows on every row that is not Working, when its run is the Task's newest run, whether or not that run has ended: a Needs you row that waits on a Request of a live newest run shows the output of the run's last completed agent step, as the `?state=needs-you` drawing does, as context for the question. The action step the run ended on never shows for a live run, because the controller sets it for a completed run only. A row that names an older run shows neither.
+- The action step the run ended on shows the step's name only. No record keeps a summary of what an action step did, so there is no "Opened draft PR #1302".
+- A Request's Allow once, Always allow and Deny are not in the pane. The card has "Open the thread", where the thread's own answers are.
+- There is no foot line ("Leaves Tracking when...") and no fine print under the answers, as Intake's own pane has none.
+- A missing value in a field of the output reads "none".
+- Try again is not an answer until [#804](https://github.com/theagenticage/hercule/issues/804), and Linked work is not drawn until [#807](https://github.com/theagenticage/hercule/issues/807). The pane draws no placeholder for either.
+- Mark done follows one rule: it is an answer, and `E` presses it, when no run of the Task is live and the row does not wait on a Request. So a Needs you row that waits on a signal has Mark done and Cancel while its agent has finished, with none suggested, as the table above has it. A Failed and a Stopped row suggest nothing, so `↩` never marks a failure done. The row's own Mark done control on hover follows the same rule.
+- Cancel sets the Task `cancelled`, which takes the row off Tracking as Mark done does.
+- Stop the run keeps the run's workspace, and the pane asks nothing. The row stays in Tracking as Stopped.
+- A failed Stop shows its error under its button, and a failed Mark done or Cancel shows it in the toast's place.
 
 ## Done
 

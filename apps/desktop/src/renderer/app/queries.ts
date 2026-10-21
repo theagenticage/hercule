@@ -637,7 +637,7 @@ export const assistantsQuery = (client: HerculeClient) =>
  *
  * The key is stable, so the entry is the same whichever Tasks are tracked. A
  * push on the `task` topic reads it again, and one on the `run` topic when
- * the push can change it (see `isTrackingAffectedByRunPush`).
+ * the push can change it (see `findTrackingTasksAffectedByRunPush`).
  */
 export const trackingQuery = (client: HerculeClient) =>
   queryOptions({
@@ -649,6 +649,27 @@ export const trackingQuery = (client: HerculeClient) =>
       return { tasks, readStartedAt };
     },
     ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads what the Tracking pane of the Task `taskId` draws (`task.readTracking`):
+ * its first handoff, its newest runs with the output of the newest run's last
+ * agent step. Fails with a `not_found` `ApiError` when no such Task exists,
+ * which is not tried again: the pane shows that the Task was not found.
+ *
+ * Only the pane that is open reads it, so a Task nobody opened costs nothing.
+ * It is kept current by pushes: one on the `task` topic that names the Task,
+ * and one on the `run` topic that can change this Task's runs (see
+ * `findTrackingTasksAffectedByRunPush`). Both mark it out of date, and it is
+ * read again only while a pane shows it. Its cost is one request per open pane
+ * and per such push, and no timer.
+ */
+export const trackingDetailQuery = (client: HerculeClient, taskId: string) =>
+  queryOptions({
+    queryKey: queryKeys.trackingDetail(taskId),
+    queryFn: () => client.task.readTracking({ params: { id: taskId } }),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
   });
 
 /**

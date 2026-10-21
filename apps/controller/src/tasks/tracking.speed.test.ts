@@ -14,7 +14,11 @@
  *   on every push of the `task` and `run` topics;
  * - its two halves, the tracked Tasks and the newest runs of those Tasks;
  * - the Task lookup of a handoff, and so of the describe line of every Hand to
- *   an agent answer on To do.
+ *   an agent answer on To do;
+ * - `task.readTracking`, which the desktop app sends when a row's pane opens:
+ *   on one Task with a long history, a plan of many steps and a 1 MB output,
+ *   and on a Task whose newest output has 12 keys of 100,000 characters (the
+ *   last two cases below).
  *
  * Each case seeds 10 or 1,000 tracked Tasks. A Task has between 1 and 50 runs,
  * so a case holds about 25 runs for every Task, and the newest run of a Task
@@ -34,7 +38,13 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { MAX_TRACKING_HANDOFFS } from "@hercule/contract";
+import {
+  MAX_TRACKING_DETAIL_RUNS,
+  MAX_TRACKING_HANDOFFS,
+  MAX_TRACKING_OUTPUT_FIELDS,
+  MAX_TRACKING_OUTPUT_LABEL,
+  MAX_TRACKING_STEP_NAME,
+} from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { TaskTrackingRunsLayer } from "../daemon/runs";
 import { inTransaction, TestDatabase } from "../db/testing";
@@ -69,8 +79,9 @@ const RUN_ID = "printf('%08x000070008001%012x', i, k)";
 const NEWEST_RUN_ID = "printf('%08x000070008001%012x', i, 1 + (i % 50))";
 
 /**
- * Writes `count` in-progress Tasks, each with a handoff entry and a ref, and
- * for Task `i` between 1 and 50 runs, in one transaction. Generated in SQL, so
+ * Writes `count` in-progress Tasks, each with a handoff entry that names the
+ * Task's first run and a ref, and for Task `i` between 1 and 50 runs, in one
+ * transaction. Generated in SQL, so
  * seeding 25,000 runs takes a moment. The ids are UUIDs made of `i` and `k`.
  */
 const seed = (count: number) =>
@@ -87,7 +98,8 @@ const seed = (count: number) =>
       WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${count})
       INSERT INTO task_provenance (id, task_id, ref, event_id, run_id, signal_id, at, actor)
       SELECT randomblob(16), ${sql.literal(`unhex(${TASK_ID})`)}, 'github:issue:acme/api#' || i, 1,
-             randomblob(16), randomblob(16), '2026-10-20T10:00:00.000Z', 'user'
+             ${sql.literal(`unhex(printf('%08x000070008001%012x', i, 1))`)}, randomblob(16),
+             '2026-10-20T10:00:00.000Z', 'user'
       FROM n`;
     // The k-th run of Task i is k minutes after 10:00; the last one is the newest.
     yield* sql`
@@ -228,5 +240,202 @@ describe.runIf(SPEED_TESTS_ENABLED)("Tracking's reads", () => {
     expect(medians.rows).toBe(count);
     expect(medians.mostHandoffs).toBeLessThanOrEqual(MAX_TRACKING_HANDOFFS);
     if (count === 1000) expect(medians.queryTracking).toBeLessThan(CEILING_MS);
+  });
+});
+
+/** The runs `seedPaneHistory` adds to the first tracked Task. */
+const PANE_RUNS = 1000;
+
+/** The steps of the plan of each of those runs. */
+const PANE_PLAN_STEPS = 50;
+
+/**
+ * The runs before the newest that `seedPaneHistory` gives loop iterations, and
+ * how many extra iterations of its agent step each one has. Each iteration
+ * has a session and a `LOOP_OUTPUT_CHARACTERS` characters output, so a read
+ * that walks past the outputs of the pane's runs shows up here.
+ */
+const LOOP_RUNS = MAX_TRACKING_DETAIL_RUNS - 1;
+const LOOP_ITERATIONS = 20;
+const LOOP_OUTPUT_CHARACTERS = 50_000;
+
+/** The most time the pane's read may take, in milliseconds. */
+const PANE_CEILING_MS = 50;
+
+/** The most bytes the pane's reply may hold. A pane's text and fields are cut well below it. */
+const PANE_REPLY_CEILING_BYTES = 20_000;
+
+/**
+ * Adds `PANE_RUNS` completed runs to the first tracked Task, each with a plan
+ * of `PANE_PLAN_STEPS` steps and an agent step that completed with a session
+ * and a small output, then an action step that finished later. The newest
+ * run's agent step has a 1 MB text output. They are newer than the runs
+ * `seed` wrote. The `LOOP_RUNS` runs before the newest also ran their agent
+ * step `LOOP_ITERATIONS` more times, as a loop does, each with a session and a
+ * large output. Written in SQL, in one transaction.
+ */
+const seedPaneHistory = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const plan = `(SELECT json_object('name', 'Implement', 'steps', json_group_array(json_object(
+                   'id', 's' || j, 'kind', CASE WHEN j = 1 THEN 'agent' ELSE 'action' END,
+                   'action', 'github/open-pr', 'prompt', 'Do the work and report what you did')))
+                 FROM (WITH RECURSIVE m(j) AS (SELECT 1 UNION ALL SELECT j + 1 FROM m
+                                                WHERE j < ${PANE_PLAN_STEPS})
+                       SELECT j FROM m))`;
+  yield* sql`
+    WITH RECURSIVE m(k) AS (SELECT 101 UNION ALL SELECT k + 1 FROM m WHERE k < ${100 + PANE_RUNS})
+    INSERT INTO runs (id, plan, inputs, origin, task_id, status, created_at, started_at, finished_at)
+    SELECT ${sql.literal(`unhex(printf('%08x000070008001%012x', 1, k))`)}, ${sql.literal(plan)}, '{}',
+           '{"kind":"manual","actor":"user"}', unhex(printf('%08x000070008000%012x', 1, 0)),
+           'completed', strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-21', '+' || k || ' seconds'),
+           strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-21', '+' || k || ' seconds'),
+           strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-21', '+' || k || ' seconds')
+    FROM m`;
+  yield* sql`
+    WITH RECURSIVE m(k) AS (SELECT 101 UNION ALL SELECT k + 1 FROM m WHERE k < ${100 + PANE_RUNS})
+    INSERT INTO run_steps (run_id, step_id, iteration, status, output, session_id, created_at,
+                           started_at, finished_at)
+    SELECT unhex(printf('%08x000070008001%012x', 1, k)), 's1', 1, 'completed',
+           CASE WHEN k = ${100 + PANE_RUNS}
+                THEN json_object('text', replace(hex(zeroblob(200000)), '00', 'word '),
+                                 'exitStatus', 'completed')
+                ELSE '{"text":"Done","exitStatus":"completed"}' END,
+           randomblob(16), '2026-10-21T00:00:00.000Z', '2026-10-21T00:00:00.000Z',
+           '2026-10-21T00:00:01.000Z'
+    FROM m`;
+  yield* sql`
+    WITH RECURSIVE m(k) AS (SELECT 101 UNION ALL SELECT k + 1 FROM m WHERE k < ${100 + PANE_RUNS})
+    INSERT INTO run_steps (run_id, step_id, iteration, status, output, created_at, started_at,
+                           finished_at)
+    SELECT unhex(printf('%08x000070008001%012x', 1, k)), 's2', 1, 'completed', '{}',
+           '2026-10-21T00:00:01.000Z', '2026-10-21T00:00:01.000Z', '2026-10-21T00:00:02.000Z'
+    FROM m`;
+  yield* sql`
+    WITH RECURSIVE m(k) AS (SELECT ${100 + PANE_RUNS - LOOP_RUNS} UNION ALL SELECT k + 1 FROM m
+                            WHERE k < ${100 + PANE_RUNS - 1}),
+         it(n) AS (SELECT 2 UNION ALL SELECT n + 1 FROM it WHERE n < ${LOOP_ITERATIONS + 1})
+    INSERT INTO run_steps (run_id, step_id, iteration, status, output, session_id, created_at,
+                           started_at, finished_at)
+    SELECT unhex(printf('%08x000070008001%012x', 1, k)), 's1', n, 'completed',
+           json_object('text', replace(hex(zeroblob(${LOOP_OUTPUT_CHARACTERS / 5})), '00', 'word ')),
+           randomblob(16), '2026-10-21T00:00:00.000Z', printf('2026-10-21T00:00:%02d.000Z', n),
+           printf('2026-10-21T00:00:%02d.500Z', n)
+    FROM m CROSS JOIN it`;
+}).pipe(inTransaction);
+
+/** The output keys `seedLongKeyOutput` writes, and the length of each key. */
+const LONG_KEYS = 12;
+const LONG_KEY_LENGTH = 100_000;
+
+/**
+ * Gives the newest run `seedPaneHistory` wrote an output schema with no
+ * `properties`, and an output of `LONG_KEYS` keys of `LONG_KEY_LENGTH`
+ * characters each: the labels of its fields then come from the agent's own
+ * keys. It also gives its agent step and its ending action step names of
+ * `LONG_KEY_LENGTH` characters.
+ */
+const seedLongKeyOutput = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const newestRun = `unhex(printf('%08x000070008001%012x', 1, ${100 + PANE_RUNS}))`;
+  yield* sql`
+    UPDATE runs SET plan = json_set(
+      plan,
+      '$.steps[0].outputSchema', json('{"type":"object"}'),
+      '$.steps[0].name', replace(hex(zeroblob(${LONG_KEY_LENGTH})), '00', 'n'),
+      '$.steps[1].name', replace(hex(zeroblob(${LONG_KEY_LENGTH})), '00', 'a'))
+    WHERE id = ${sql.literal(newestRun)}`;
+  yield* sql`
+    UPDATE run_steps SET output = (
+      SELECT json_group_object(printf('%02d', j) || replace(hex(zeroblob(${LONG_KEY_LENGTH})), '00', 'k'), j)
+      FROM (WITH RECURSIVE m(j) AS (SELECT 1 UNION ALL SELECT j + 1 FROM m WHERE j < ${LONG_KEYS})
+            SELECT j FROM m))
+    WHERE run_id = ${sql.literal(newestRun)} AND step_id = 's1'`;
+}).pipe(inTransaction);
+
+describe.runIf(SPEED_TESTS_ENABLED)("the Tracking pane's read", () => {
+  it("with a Task of 1,000 runs, a 50-step plan and a 1 MB output, reads in bounded time and replies in bounded size", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seed(1);
+        yield* seedPaneHistory;
+        const tasks = yield* taskRepository;
+        const tracking = yield* TaskTracking;
+        const taskId = (yield* tasks.listTracked())[0]!.id;
+        const detail = yield* tracking.read(taskId);
+        return {
+          detail,
+          replyBytes: JSON.stringify(detail).length,
+          readTracking: yield* measureMedian(tracking.read(taskId)),
+        };
+      }).pipe(
+        Effect.provideService(CurrentActor, USER),
+        Effect.provide(
+          TaskTrackingLayer.pipe(
+            Layer.provideMerge(TaskTrackingRunsLayer),
+            Layer.provideMerge(TestDatabase),
+          ),
+        ),
+      ),
+    );
+
+    process.stderr.write(
+      `task.readTracking with ${String(PANE_RUNS)} runs and a 1 MB output, ` +
+        `${String(result.replyBytes)} bytes, median of ${String(RUNS)}: ` +
+        `${result.readTracking.toFixed(2)} ms\n`,
+    );
+    expect(result.detail.runs).toHaveLength(MAX_TRACKING_DETAIL_RUNS);
+    // The first handoff's run is the Task's oldest, far older than the 20 newest.
+    expect(result.detail.runs.map((run) => run.id)).not.toContain(result.detail.firstHandoff.runId);
+    expect(result.detail.firstHandoff.workflowName).toBe("Implement");
+    // The newest run's 1 MB text, cut to the limit.
+    expect(result.detail.output).toMatchObject({ kind: "text" });
+    expect((result.detail.output as { text: string }).text.length).toBeGreaterThan(900);
+    expect(result.detail.endingActionStepName).toBe("github/open-pr");
+    expect(result.replyBytes).toBeLessThan(PANE_REPLY_CEILING_BYTES);
+    expect(result.readTracking).toBeLessThan(PANE_CEILING_MS);
+  });
+
+  it("with a newest output of 12 keys of 100,000 characters each, cuts the labels and step names and replies in bounded size", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seed(1);
+        yield* seedPaneHistory;
+        yield* seedLongKeyOutput;
+        const tasks = yield* taskRepository;
+        const tracking = yield* TaskTracking;
+        const taskId = (yield* tasks.listTracked())[0]!.id;
+        const detail = yield* tracking.read(taskId);
+        return {
+          detail,
+          replyBytes: JSON.stringify(detail).length,
+          readTracking: yield* measureMedian(tracking.read(taskId)),
+        };
+      }).pipe(
+        Effect.provideService(CurrentActor, USER),
+        Effect.provide(
+          TaskTrackingLayer.pipe(
+            Layer.provideMerge(TaskTrackingRunsLayer),
+            Layer.provideMerge(TestDatabase),
+          ),
+        ),
+      ),
+    );
+
+    process.stderr.write(
+      `task.readTracking with ${String(LONG_KEYS)} output keys of ${String(LONG_KEY_LENGTH)} characters, ` +
+        `${String(result.replyBytes)} bytes, median of ${String(RUNS)}: ` +
+        `${result.readTracking.toFixed(2)} ms\n`,
+    );
+    const output = result.detail.output;
+    expect(output?.kind).toBe("fields");
+    const fields = output?.kind === "fields" ? output.fields : [];
+    expect(fields).toHaveLength(Math.min(LONG_KEYS, MAX_TRACKING_OUTPUT_FIELDS));
+    for (const field of fields) {
+      expect(field.label.length).toBeLessThanOrEqual(MAX_TRACKING_OUTPUT_LABEL);
+    }
+    expect(output?.stepName).toHaveLength(MAX_TRACKING_STEP_NAME);
+    expect(result.detail.endingActionStepName).toHaveLength(MAX_TRACKING_STEP_NAME);
+    expect(result.replyBytes).toBeLessThan(PANE_REPLY_CEILING_BYTES);
+    expect(result.readTracking).toBeLessThan(PANE_CEILING_MS);
   });
 });

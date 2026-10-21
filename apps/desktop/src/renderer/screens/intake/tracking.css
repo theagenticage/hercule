@@ -2,10 +2,11 @@
    (docs/design/tracking/tracking.css). Its class names are the drawing's with
    a `tr-` prefix for the `rt-` ones, so each rule maps 1:1 to the drawing's
    rule. Rows reuse Intake's control classes (`ask-acts`, `ask-act`), and the
-   section heading and count come from the shared controls. The drawing's own
-   pane and the answer buttons on its Needs you rows (`rt-run-ans`) are not
-   ported: a press on a Needs you row opens the thread or the signal that
-   waits. Each departure from the drawing says why. */
+   section heading and count come from the shared controls. The answer buttons
+   on the drawing's Needs you rows (`rt-run-ans`) are not ported: the pane
+   holds what waits. The drawing's pane (tracking-pane.css, scoped under
+   `.rt-pane`) is ported under `.tr-pane`, rule by rule. Each departure from
+   the drawing says why. */
 
 /* ---------- The tray ---------- */
 /* Either Intake or Tracking in the list column, never both. Folded, Tracking
@@ -313,4 +314,377 @@
   border-radius: var(--r-md);
   background: var(--raised);
   box-shadow: var(--shadow-2);
+}
+
+/* ---------- The pane ---------- */
+/* Ported from the drawing's tracking-pane.css, which scopes every rule under
+   `.rt-pane`; here the scope is `.tr-pane`. Not ported, because the pane
+   draws nothing for them: the pull request the agent opened (`.rt-verdict`,
+   `.rt-change`, arriving with linked work), the result after the action step's
+   name (`.rt-out-sep`: no record carries it), and the answers inside a
+   question card (`.rt-ask .ledger`, `.rt-ask .ans`: the card holds one button,
+   and the thread has the answers). */
+/* The head: the face beside the workflow's name is 18px, 2px taller than the
+   line, so it hangs past it without growing the line. */
+.tr-pane .ad-kind .src .cr {
+  margin: -2px 0;
+}
+/* The state's word in the head, in the colour its row's line wears. The
+   drawing's system.css names these `you-ink`, `ok-ink` and `fail-ink`. */
+.tr-pane .tr-tone--you {
+  color: var(--you-ink);
+}
+.tr-pane .tr-tone--ok {
+  color: var(--ok);
+}
+.tr-pane .tr-tone--fail {
+  color: var(--fail-ink);
+}
+/* The verdict: 26px under the trip, 2px more than a signal's answers. */
+.tr-pane .ad-answers {
+  margin-top: 26px;
+}
+/* A live name in a describe line never breaks across lines. */
+.tr-pane .ans-desc b {
+  white-space: nowrap;
+}
+
+/* ---------- The trip: you asked, it did, and what waits ---------- */
+.tr-pane .tr-trip {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  margin-top: 22px;
+}
+.tr-pane .tr-msg {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+/* A hairline from each message's face down to the next one: the trip, out and back. */
+.tr-pane .tr-msg:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  top: 34px;
+  bottom: -16px;
+  left: 13.5px;
+  width: 1px;
+  background: var(--line);
+}
+.tr-pane .tr-av {
+  display: grid;
+  justify-items: center;
+  height: 28px;
+}
+/* A source that speaks in the trip, such as GitHub Actions, wears its mark on a sunken disc. */
+.tr-pane .tr-src-av {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--sunken);
+  color: var(--ink);
+}
+.tr-pane .tr-src-av .br {
+  opacity: 0.8;
+}
+.tr-pane .tr-msg-body {
+  min-width: 0;
+}
+/* The line of a message's name. The drawing sets it with `.msg-name`, which the
+   thread and the assistant draw their own way here, so the rules it takes from
+   there are part of this one. */
+.tr-pane .tr-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 22px;
+  margin: 0;
+  color: var(--who-ink, var(--ink));
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.tr-pane .tr-msg--you .tr-name,
+.tr-pane .tr-msg--src .tr-name {
+  color: var(--ink);
+}
+.tr-pane .tr-name small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+
+/* What you asked: the signal you handed off, in two lines. */
+.tr-pane .tr-orig {
+  margin-top: 4px;
+  padding: 1px 0 1px 12px;
+  box-shadow: inset 2px 0 0 var(--line);
+}
+.tr-pane .tr-orig-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.tr-pane .tr-orig-h b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.tr-pane .tr-orig-src {
+  display: inline-grid;
+  color: var(--ink);
+  opacity: 0.8;
+}
+/* The drawing's quote is a `p`. Here it is a `div`, because the signal's first
+   block is markdown, whose paragraphs, lists and headings are blocks. They all
+   run on in the two lines the quote is clamped to: no margin between them, and
+   every heading in the quote's own type. */
+.tr-pane .tr-orig-q {
+  display: -webkit-box;
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--t-13);
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.tr-pane .tr-orig-q :is(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, pre, table) {
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+.tr-pane .tr-orig-q img {
+  display: none;
+}
+.tr-pane .tr-orig-q code,
+.tr-pane .tr-did :not(.codeblock) > code {
+  padding: 0 4px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  font-size: 12px;
+  /* Inline code is a name: it never breaks at its hyphen, so "Retry-After" stays one piece. */
+  white-space: nowrap;
+}
+
+/* What it did: the agent's last message, why it failed, and the PR it opened. */
+.tr-pane .tr-text {
+  margin: 8px 0 0;
+  font-size: var(--t-14);
+  line-height: 1.55;
+}
+.tr-pane .tr-did > * {
+  margin: 0;
+}
+.tr-pane .tr-did > * + * {
+  margin-top: 6px;
+}
+/* Markdown can hold more than the drawing's paragraphs and bullets: numbered
+   lists, headings, quotes and code. They take the message's type and its
+   rhythm, as Intake's text does. */
+.tr-pane .tr-did :is(ul, ol) {
+  margin: 0;
+  padding-left: 18px;
+}
+.tr-pane .tr-did li + li {
+  margin-top: 4px;
+}
+.tr-pane .tr-did :is(h1, h2, h3, h4, h5, h6) {
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+  line-height: inherit;
+}
+.tr-pane .tr-did blockquote {
+  padding-left: 12px;
+  box-shadow: inset 2px 0 0 var(--line);
+  color: var(--muted);
+}
+.tr-pane .tr-did a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tr-pane .tr-fail {
+  padding-left: 12px;
+  box-shadow: inset 2px 0 0 var(--fail);
+}
+/* The drawing's "Read the rest in the thread" is a link; here it is a button
+   that goes to a page of the app, drawn the same. */
+.tr-pane .tr-more {
+  display: inline-block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tr-pane .tr-more:hover {
+  color: var(--ink);
+}
+
+/* The runs: when each started and how it ended, and for live work what the agent does now.
+   Not in the drawing: the list is one grid, and each line takes its columns
+   from it, so the time column is as wide as the widest time. A run from another
+   day has a date before its time ("4 Sep 09:04"), which does not fit the
+   drawing's 38px; on the same day the column is the drawing's 38px. */
+.tr-pane .tr-steps {
+  display: grid;
+  grid-template-columns: minmax(38px, auto) 14px minmax(0, 1fr);
+  gap: 6px 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--t-13);
+}
+.tr-pane .tr-steps li {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+}
+.tr-pane .tr-steps time {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tr-pane .tr-steps li.is-live {
+  color: var(--ink);
+}
+/* A line's words: the workflow's name, which opens the run, then how the run
+   went, and at the end a quiet way into the run's thread. Not in the drawing,
+   which has no links in the runs. */
+.tr-pane .tr-step-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.tr-pane .tr-step-line {
+  min-width: 0;
+}
+.tr-pane .tr-step-who {
+  color: var(--who-ink);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 2px;
+}
+.tr-pane .tr-step-who:hover {
+  text-decoration-color: currentColor;
+}
+.tr-pane .tr-step-thread {
+  flex: none;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tr-pane .tr-step-thread:hover {
+  color: var(--ink);
+}
+
+/* What waits on you: the question a run asks, or the signal that names the work, in the waiting
+   tint, as the Requests dock draws one. */
+.tr-pane .tr-ask {
+  margin-top: 14px;
+  padding: 10px 8px 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--you-tint);
+}
+.tr-pane .tr-ask-q {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-weight: var(--w-medium);
+}
+.tr-pane .tr-ask--signal {
+  margin-top: 4px;
+  padding-bottom: 10px;
+}
+.tr-pane .tr-ask--signal .tr-ask-q {
+  align-items: flex-start;
+  margin-bottom: 10px;
+  font-size: var(--t-13);
+  font-weight: var(--w-regular);
+  line-height: 1.5;
+}
+.tr-pane .tr-ask--signal .tr-ask-q .mark {
+  margin-top: 2px;
+}
+
+/* Where "What it did" comes from: the run's last agent step, named, since a run has several. */
+.tr-pane .tr-out-from {
+  margin: 4px 0 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.tr-pane .tr-out-from b {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+/* A structured output: its top-level fields, one ruled row each, as the checks block rules its
+   rows. The label is the schema's title. */
+.tr-pane .tr-out {
+  margin: 0;
+}
+.tr-pane .tr-out > div {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 12px;
+  padding: 7px 0;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+.tr-pane .tr-out > div:first-child {
+  box-shadow:
+    inset 0 1px 0 var(--line-soft),
+    inset 0 -1px 0 var(--line-soft);
+}
+.tr-pane .tr-out dt {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 19.5px;
+}
+/* Not in the drawing: a value with no space in it, such as an address, wraps
+   instead of pushing the pane wider. */
+.tr-pane .tr-out dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+/* A value is cut to two lines; the whole value is in the run. */
+.tr-pane .tr-out-value {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.tr-pane .tr-out-count {
+  color: var(--muted);
+}
+.tr-pane .tr-out + .tr-more {
+  margin-top: 8px;
+}
+/* The action step a run ended on, after the agent. */
+.tr-pane .tr-out-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: var(--t-13);
+}
+.tr-pane .tr-out-action .ic {
+  flex: none;
+  color: var(--faint);
 }

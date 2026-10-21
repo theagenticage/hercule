@@ -911,3 +911,171 @@ describe("the query plans of the newest runs of some Tasks", () => {
     expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
   });
 });
+
+describe("the runs the Tracking pane reads", () => {
+  const TASK = "0190c000-0000-7000-8000-0000000000b1";
+  const OTHER_TASK = "0190c000-0000-7000-8000-0000000000b2";
+  const SESSION = "0190c000-0000-7000-8000-0000000000d1";
+  const LATER_SESSION = "0190c000-0000-7000-8000-0000000000d2";
+  const minute = (n: number) => `2026-09-24T10:${String(n).padStart(2, "0")}:00.000Z`;
+  const PLAN = {
+    name: "Implement",
+    steps: [
+      { id: "work", kind: "agent", name: "Work", outputSchema: { type: "object" } },
+      { id: "review", kind: "agent" },
+      { id: "screen", kind: "text-generation" },
+      { id: "open", kind: "action", name: "Open it", action: "github/open-pr" },
+    ],
+  } as unknown as WorkflowDefinition;
+
+  /** Starts a step of the run and completes it with `output` at `at`. */
+  const completeStep = (
+    runId: string,
+    stepId: string,
+    started: { readonly sessionId: string } | undefined,
+    output: unknown,
+    at: string,
+  ) =>
+    Effect.gen(function* () {
+      const runs = yield* runRepository;
+      const step = { stepId, iteration: 1 };
+      yield* runs.insertSteps(runId, [stepId], at);
+      yield* runs.startStep(runId, step, started, at);
+      yield* runs.finishStep(
+        runId,
+        step,
+        { status: "completed", output },
+        { startedAt: at, finishedAt: at },
+      );
+    });
+
+  it("lists the newest runs of one Task, newest first, and no run of another Task", async () => {
+    const [listed, listedLimit] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const ids: Array<string> = [];
+        for (let n = 1; n <= 5; n++) {
+          ids.push(yield* runs.insert({ ...NEW_RUN, taskId: TASK }, minute(n)));
+        }
+        yield* runs.insert({ ...NEW_RUN, taskId: OTHER_TASK }, minute(9));
+        return [
+          (yield* runs.listNewestOfTask(TASK, 3)).map((run) => run.id),
+          ids.toReversed().slice(0, 3),
+        ] as const;
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(listed).toEqual(listedLimit);
+  });
+
+  it("returns the workflow name of a run as its plan holds it, and none for a run that does not exist", async () => {
+    const [named, missing] = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const id = yield* runs.insert({ ...NEW_RUN, plan: PLAN, taskId: TASK }, minute(1));
+        return [
+          yield* runs.readWorkflowName(id),
+          yield* runs.readWorkflowName("0190c000-0000-7000-8000-0000000000ff"),
+        ] as const;
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(named).toEqual(Option.some("Implement"));
+    expect(missing).toEqual(Option.none());
+  });
+
+  it("returns the session of a run's newest step record that has one, and leaves out a run with none", async () => {
+    const sessions = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const withSessions = yield* runs.insert(
+          { ...NEW_RUN, plan: PLAN, taskId: TASK },
+          minute(1),
+        );
+        yield* runs.start(withSessions, minute(1));
+        yield* completeStep(withSessions, "work", { sessionId: SESSION }, {}, minute(2));
+        yield* completeStep(withSessions, "review", { sessionId: LATER_SESSION }, {}, minute(3));
+        const without = yield* runs.insert({ ...NEW_RUN, taskId: TASK }, minute(4));
+        const map = yield* runs.listLastSessions([withSessions, without]);
+        return { withSessions: map.get(withSessions), without: map.get(without) };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(sessions).toEqual({ withSessions: LATER_SESSION, without: undefined });
+  });
+
+  it("reads the newest completed agent step with its plan's name and schema, and the newest completed step of any kind", async () => {
+    const steps = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const id = yield* runs.insert({ ...NEW_RUN, plan: PLAN, taskId: TASK }, minute(1));
+        yield* runs.start(id, minute(1));
+        yield* completeStep(id, "review", { sessionId: SESSION }, { text: "Fine" }, minute(2));
+        yield* completeStep(id, "work", { sessionId: LATER_SESSION }, { a: 1 }, minute(3));
+        yield* completeStep(id, "screen", undefined, { text: "No agent" }, minute(4));
+        yield* completeStep(id, "open", { sessionId: SESSION }, {}, minute(5));
+        return yield* runs.readLastCompletedSteps(id);
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(steps.last).toEqual({ kind: "action", name: "Open it", action: "github/open-pr" });
+    expect(steps.agent).toEqual({
+      stepId: "work",
+      name: "Work",
+      sessionId: LATER_SESSION,
+      output: { a: 1 },
+      outputSchema: { type: "object" },
+    });
+  });
+
+  it("reads nothing for a run that completed no step", async () => {
+    const steps = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        const id = yield* runs.insert({ ...NEW_RUN, plan: PLAN, taskId: TASK }, minute(1));
+        return yield* runs.readLastCompletedSteps(id);
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(steps).toEqual({ last: undefined, agent: undefined });
+  });
+});
+
+describe("the query plans of the Tracking pane's run reads", () => {
+  const TASK = "0190c000-0000-7000-8000-0000000000b1";
+  const RUN = "0190c000-0000-7000-8000-0000000000c1";
+
+  it("looks a run's workflow name up by the run's key", async () => {
+    const plan = await explainStatement("json_extract(plan", (runs) => runs.readWorkflowName(RUN));
+
+    expect(plan).toEqual(["SEARCH runs USING INDEX sqlite_autoindex_runs_1 (id=?)"]);
+  });
+
+  it("looks a Task's newest runs up on runs_task_id, already in order", async () => {
+    const plan = await explainStatement("ORDER BY created_at DESC", (runs) =>
+      runs.listNewestOfTask(TASK, 20),
+    );
+
+    expect(plan).toEqual(["SEARCH runs USING INDEX runs_task_id (task_id=?)"]);
+  });
+
+  it("probes each run by key and its last session on run_steps_session alone, with no sort and no step record opened", async () => {
+    const plan = await explainStatement("s.session_id", (runs) => runs.listLastSessions([RUN]));
+
+    expect(plan).toContain("SEARCH runs USING COVERING INDEX sqlite_autoindex_runs_1 (id=?)");
+    // Covering: the index holds `session_id`, so the table is never read, and with it no output.
+    expect(plan).toContain("SEARCH s USING COVERING INDEX run_steps_session (run_id=?)");
+    expect(plan.some((step) => step.startsWith("SCAN"))).toBe(false);
+    expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
+  });
+
+  it("reads one run by key, walks its plan's steps and probes each step's records by key", async () => {
+    const plan = await explainStatement("json_each", (runs) => runs.readLastCompletedSteps(RUN));
+
+    expect(plan).toContain("SEARCH runs USING INDEX sqlite_autoindex_runs_1 (id=?)");
+    expect(plan).toContain(
+      "SEARCH s USING INDEX sqlite_autoindex_run_steps_1 (run_id=? AND step_id=?)",
+    );
+    expect(plan.some((step) => step === "SCAN runs" || step === "SCAN s")).toBe(false);
+  });
+});

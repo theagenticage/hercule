@@ -11,6 +11,7 @@ import {
   type SignalAnswerStyle,
 } from "@hercule/client-core";
 import { buildLook, Face } from "../../faces";
+import { LedgerAnswer } from "./ledger-answer";
 
 /** The classes of an answer's button, by how the pane draws the answer. */
 const BUTTON_CLASSES: Readonly<Record<SignalAnswerStyle, string>> = {
@@ -141,7 +142,10 @@ export function SignalAnswers({
   );
 }
 
-/** Renders one answer as a ledger row: its button, its describe line, and its error when it failed. */
+/**
+ * Renders one answer as a ledger row. The key beside it is ↩ for the
+ * suggested answer, R to open a reply, and E for Done.
+ */
 function AnswerRow({
   answer,
   locked,
@@ -158,48 +162,26 @@ function AnswerRow({
   readonly onAct: (actionId: string) => void;
 }): JSX.Element {
   const { action, style, suggested } = answer;
-  const describeId = `${idPrefix}-${action.id}-describe`;
-  const errorId = `${idPrefix}-${action.id}-error`;
   return (
-    <>
-      <button
-        type="button"
-        className="ans"
-        data-action-id={action.id}
-        aria-label={action.label}
-        aria-describedby={error === null ? describeId : `${describeId} ${errorId}`}
-        aria-disabled={locked || undefined}
-        onClick={() => {
-          if (locked) return;
-          if (style === "reply") onOpenReply(action.id);
-          else onAct(action.id);
-        }}
-      >
-        <span className={suggested ? "btn btn--accent" : BUTTON_CLASSES[style]}>
-          {answer.workflowId !== null && (
-            <Face look={buildLook(answer.workflowId)} pose="idle" size={18} />
-          )}
-          <span className="ans-label">{action.label}</span>
-        </span>
-        <span className="ans-desc" id={describeId}>
-          <DescribeLineText action={action} />
-        </span>
-        {/* The key that answers from the pane: ↩ for the suggested answer, R to
-            open a reply, and E for Done. */}
-        {suggested ? (
-          <kbd aria-hidden="true">↩</kbd>
-        ) : style === "reply" ? (
-          <kbd aria-hidden="true">R</kbd>
-        ) : style === "done" ? (
-          <kbd aria-hidden="true">E</kbd>
-        ) : null}
-      </button>
-      {error !== null && (
-        <p className="ad-err" id={errorId} role="alert">
-          {error}
-        </p>
-      )}
-    </>
+    <LedgerAnswer
+      answerId={action.id}
+      label={action.label}
+      buttonClass={suggested ? "btn btn--accent" : BUTTON_CLASSES[style]}
+      mark={
+        answer.workflowId === null ? undefined : (
+          <Face look={buildLook(answer.workflowId)} pose="idle" size={18} />
+        )
+      }
+      describe={<DescribeLineText action={action} />}
+      shortcut={suggested ? "↩" : style === "reply" ? "R" : style === "done" ? "E" : null}
+      error={error}
+      locked={locked}
+      idPrefix={idPrefix}
+      onPress={() => {
+        if (style === "reply") onOpenReply(action.id);
+        else onAct(action.id);
+      }}
+    />
   );
 }
 

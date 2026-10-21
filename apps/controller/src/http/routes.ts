@@ -268,6 +268,7 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
     return handlers
       .handle("query", ({ query }) => withApiErrors(tasks.query(query)))
       .handle("queryTracking", () => withApiErrors(tracking.query()))
+      .handle("readTracking", ({ params }) => withApiErrors(tracking.read(params.id)))
       .handle("read", ({ params }) => withApiErrors(tasks.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(tasks.create(payload)))
       .handle("update", ({ params, payload }) =>

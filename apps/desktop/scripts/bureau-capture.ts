@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares thirty-six pairs of
+ * For each theme, Whitehaven and Orient Express, it compares thirty-eight pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -57,6 +57,15 @@
  *   intake-directions/asks/desktop/intake.html, with Marta's review request
  *   open: the design's page edited by specimens/intake-reference.ts, and the
  *   Intake specimen (intake.html);
+ * - the Tracking pane (the pane's column, x 704-1440 below the header) of the
+ *   Tracking drawing, tracking/index.html, in its Finished and Failed states
+ *   (`?state=finished`, `?state=failed`): the drawing edited by
+ *   specimens/tracking-pane-reference.ts, and the Intake specimen's
+ *   `tracking-pane-finished` and `tracking-pane-failed` scenes. The list beside
+ *   the pane is not compared. The reference module lists what the app
+ *   knowingly draws differently: the standing line without the harness, model
+ *   and runner, no foot and no Try again, and a run's line under the
+ *   message;
  * - the workflow list (the main pane) of workflows.html, in its table view:
  *   the book's page stilled by specimens/workflows-reference.ts, and the
  *   Workflows specimen (workflows.html). The app draws only the rows near
@@ -667,6 +676,53 @@ const INTAKE_PARTS = [
   ".ad-keys",
 ];
 
+// Every part of the Tracking pane whose box is compared, as a selector inside
+// the pane's section, `.asks-detail`: the head, the trip with its messages,
+// the output's rows, the runs and the answers. The drawing writes the trip's
+// classes `rt-` where the app writes `tr-`, so each selector names both.
+const TRACKING_PANE_PARTS = [
+  ".rt-pane, .tr-pane",
+  ".ad-kind",
+  ".ad-kind .src",
+  ".ad-kind .src > svg",
+  ".ad-kind .btn",
+  ".ad-title",
+  ".ad-asked",
+  ".rt-trip, .tr-trip",
+  ".rt-msg, .tr-msg",
+  ".rt-av, .tr-av",
+  ".rt-msg-body, .tr-msg-body",
+  ".rt-name, .tr-name",
+  ".rt-name small, .tr-name small",
+  ".rt-orig, .tr-orig",
+  ".rt-orig-h, .tr-orig-h",
+  ".rt-orig-src, .tr-orig-src",
+  ".rt-orig-h > *, .tr-orig-h > *",
+  ".rt-step-text > *, .tr-step-text > *",
+  ".rt-step-text > * > *, .tr-step-text > * > *",
+  ".rt-orig-q, .tr-orig-q",
+  ".rt-text, .tr-text",
+  ".rt-out-from, .tr-out-from",
+  ".rt-out, .tr-out",
+  ".rt-out > div, .tr-out > div",
+  ".rt-out dt, .tr-out dt",
+  ".rt-out dd, .tr-out dd",
+  ".rt-more, .tr-more",
+  ".rt-steps, .tr-steps",
+  ".rt-steps li, .tr-steps li",
+  ".rt-steps time, .tr-steps time",
+  ".rt-step-text, .tr-step-text",
+  ".rt-step-thread, .tr-step-thread",
+  ".ad-answers",
+  ".ledger",
+  ".ans",
+  ".ans .btn",
+  ".ans-desc",
+  ".ans > kbd",
+  ".ad-keys",
+  ".ad-keys > span",
+];
+
 // Every part of the workflow list's table whose box is compared, as a
 // selector inside `main.main`: the header with its filters and search, the
 // column heads, the group headings, and each row's cells.
@@ -1110,6 +1166,29 @@ const buildProfilesPair = (
 });
 
 /** The regions of book pages compared with an app specimen, in the order they are compared. */
+/**
+ * The Tracking pane's region: the pane beside the list, under the header. The
+ * list beside it differs from the drawing's in ways other tickets own, such as
+ * the Request answered in its row, so only the pane is compared.
+ */
+const TRACKING_PANE_REGION: Rect = { x: 704, y: 52, width: WIDTH - 704, height: HEIGHT - 52 };
+
+/** Returns the pair that compares the Tracking pane of the drawing's `?state=` with the app's scene of the same name. */
+function buildTrackingPanePair(state: string): RegionPair {
+  return {
+    name: `tracking-pane-${state}`,
+    bookPage: "tracking/index.html",
+    referenceModule: "tracking-pane-reference.ts",
+    specimenPage: "intake.html",
+    state,
+    // The drawing reads `?bar=off`, and the specimen `?scene=`; each ignores the other's.
+    search: { bar: "off", scene: `tracking-pane-${state}` },
+    region: TRACKING_PANE_REGION,
+    scope: ".asks-detail",
+    parts: TRACKING_PANE_PARTS,
+  };
+}
+
 const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   {
     name: "sidebar",
@@ -1229,6 +1308,8 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
     scope: "main.main",
     parts: INTAKE_PARTS,
   },
+  buildTrackingPanePair("finished"),
+  buildTrackingPanePair("failed"),
   {
     name: "workflows",
     bookPage: "crew-bureau-2/desktop/workflows.html",

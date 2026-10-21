@@ -93,6 +93,7 @@ const COMMANDS: Record<string, string> = {
   "task.query": "task list",
   "task.queryTracking": "task tracking",
   "task.read": "task read",
+  "task.readTracking": "task read-tracking",
   "task.create": "task create",
   "task.update": "task update",
   "task.delete": "task delete",
@@ -329,6 +330,7 @@ const RESOLVES: Record<string, string> = {
   "profile.delete id": "profile.query",
 
   "task.read id": "task.query",
+  "task.readTracking id": "task.query",
   "task.update id": "task.query",
   "task.delete id": "task.query",
 

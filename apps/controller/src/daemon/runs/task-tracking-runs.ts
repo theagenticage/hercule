@@ -1,6 +1,7 @@
 /**
  * Task Tracking Runs: answers, for `task.queryTracking`, the newest run, the
- * newest live run and all the live runs of each tracked Task.
+ * newest live run and all the live runs of each tracked Task, and for
+ * `task.readTracking`, the newest runs of one Task and how the newest ended.
  *
  * It lives in the controller daemon because the port belongs to the tasks
  * domain and is answered from the runs repository, and the runs domain
@@ -9,11 +10,23 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import { describeFailureCause, type RunSummary, type TrackingRun } from "@hercule/contract";
+import type { SqlError } from "effect/unstable/sql/SqlError";
+import {
+  describeFailureCause,
+  MAX_TRACKING_DETAIL_RUNS,
+  MAX_TRACKING_FAILURE_CAUSE,
+  type RunSummary,
+  type TrackingRun,
+} from "@hercule/contract";
 import { runRepository } from "../../runs";
-import { TaskTrackingRuns, type TrackedRuns } from "../../tasks";
+import { cutText, TaskTrackingRuns, type TrackedRunHistory, type TrackedRuns } from "../../tasks";
 
-/** Converts a run summary into the run facts Tracking reads, with `failureMessage` for a failed run. */
+/**
+ * Converts a run summary into the run facts Tracking reads, with
+ * `failureMessage` for a failed run. The failure cause is cut to
+ * `MAX_TRACKING_FAILURE_CAUSE` characters, because an error message has no
+ * length of its own.
+ */
 const buildTrackingRun = (run: RunSummary, failureMessage: string | undefined): TrackingRun => ({
   id: run.id,
   workflowId: run.workflowId,
@@ -24,7 +37,12 @@ const buildTrackingRun = (run: RunSummary, failureMessage: string | undefined): 
   ...("finishedAt" in run ? { finishedAt: run.finishedAt } : {}),
   awaitedSignalIds: "awaitedSignalIds" in run ? run.awaitedSignalIds : [],
   ...(run.status === "failed"
-    ? { failureCause: describeFailureCause({ reason: run.failureReason, message: failureMessage }) }
+    ? {
+        failureCause: cutText(
+          describeFailureCause({ reason: run.failureReason, message: failureMessage }),
+          MAX_TRACKING_FAILURE_CAUSE,
+        ),
+      }
     : {}),
 });
 
@@ -40,6 +58,44 @@ const buildTrackingRun = (run: RunSummary, failureMessage: string | undefined): 
 export const TaskTrackingRunsLayer: Layer.Layer<TaskTrackingRuns, never, SqlClient.SqlClient> =
   Layer.effect(TaskTrackingRuns)(
     Effect.map(runRepository, (runs) => ({
+      readRunHistory: (taskId: string): Effect.Effect<TrackedRunHistory, SqlError> =>
+        Effect.gen(function* () {
+          const newestFirst = yield* runs.listNewestOfTask(taskId, MAX_TRACKING_DETAIL_RUNS);
+          if (newestFirst.length === 0) {
+            return { runs: [], agentStep: undefined, endingActionStepName: undefined };
+          }
+          const ids = newestFirst.map((run) => run.id);
+          const messages = yield* runs.listFailureMessages(
+            newestFirst.filter((run) => run.status === "failed").map((run) => run.id),
+          );
+          const sessions = yield* runs.listLastSessions(ids);
+          const { last, agent } = yield* runs.readLastCompletedSteps(ids[0]!);
+          return {
+            runs: newestFirst.toReversed().map((run) => {
+              const sessionId = sessions.get(run.id);
+              return {
+                ...buildTrackingRun(run, messages.get(run.id)),
+                ...(sessionId === undefined ? {} : { sessionId }),
+              };
+            }),
+            agentStep:
+              agent === undefined
+                ? undefined
+                : {
+                    stepName: agent.name ?? agent.stepId,
+                    sessionId: agent.sessionId,
+                    output: agent.output,
+                    outputSchema: agent.outputSchema,
+                  },
+            // Only a completed run ended on a step. A live run has not ended, and a failed run is
+            // explained by its failure cause.
+            endingActionStepName:
+              newestFirst[0]!.status === "completed" && last?.kind === "action"
+                ? (last.name ?? last.action)
+                : undefined,
+          };
+        }),
+      readWorkflowName: runs.readWorkflowName,
       readLatestRuns: (taskIds: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           const { latest, live } = yield* runs.listLatestOfTasks(taskIds);

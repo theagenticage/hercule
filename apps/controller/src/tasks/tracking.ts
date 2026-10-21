@@ -1,7 +1,8 @@
 /**
- * Tracking's read: `task.queryTracking` returns every in-progress Task that
+ * Tracking's reads: `task.queryTracking` returns every in-progress Task that
  * has a handoff entry, with the facts a client works the Task's state out
- * from (spec 11, `task`; ADR 0046).
+ * from, and `task.readTracking` returns what the pane of one Task draws
+ * (spec 11, `task`; ADR 0046).
  *
  * The Task rows are this domain's. The newest run of each Task and its live
  * runs belong to the runs domain, which depends on this one, so this
@@ -11,16 +12,23 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
-import type {
-  Forbidden,
-  TaskTracking as TaskTrackingReading,
-  TrackingRun,
-  Unauthenticated,
+import {
+  createNotFoundError,
+  type Forbidden,
+  MAX_TRACKING_STEP_NAME,
+  type NotFound,
+  type TaskTracking as TaskTrackingReading,
+  type TrackingDetail,
+  type TrackingDetailRun,
+  type TrackingRun,
+  type Unauthenticated,
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
 import { taskRepository } from "./repository";
+import { cutText, shapeTrackingOutput, type CompletedAgentStep } from "./tracking-output";
 
 /**
  * The runs Tracking reads of a Task: its newest run, its newest live run when
@@ -31,6 +39,24 @@ export interface TrackedRuns {
   readonly latestRun: TrackingRun;
   readonly latestLiveRun?: TrackingRun;
   readonly liveRunIds: ReadonlyArray<string>;
+}
+
+/**
+ * The runs the Tracking pane of a Task draws, and the facts of the newest
+ * run's ending that its `TrackingOutput` is shaped from.
+ */
+export interface TrackedRunHistory {
+  /** The Task's newest runs, at most `MAX_TRACKING_DETAIL_RUNS`, oldest first. */
+  readonly runs: ReadonlyArray<TrackingDetailRun>;
+  /** The newest run's last completed agent step, when it completed one. */
+  readonly agentStep: CompletedAgentStep | undefined;
+  /**
+   * The name of the action step the newest run ended on: its `name`, else its
+   * action's id. Set only when the newest run completed and its last
+   * completed step is an action step. A live run has not ended, and a failed
+   * run is explained by its failure, so neither has one.
+   */
+  readonly endingActionStepName: string | undefined;
 }
 
 export class TaskTrackingRuns extends Context.Service<
@@ -47,6 +73,23 @@ export class TaskTrackingRuns extends Context.Service<
     readonly readLatestRuns: (
       taskIds: ReadonlyArray<string>,
     ) => Effect.Effect<ReadonlyArray<TrackedRuns>, SqlError>;
+
+    /**
+     * Returns the newest `MAX_TRACKING_DETAIL_RUNS` runs of the Task, oldest
+     * first, each with the session of its last agent step, and the facts the
+     * newest run's `TrackingOutput` is shaped from. A Task with no run has no runs
+     * and no facts. The read is one lookup of the Task's newest runs, never
+     * the Task's whole history, and it reads no transcript: only the output
+     * of the one agent step the `TrackingOutput` comes from.
+     */
+    readonly readRunHistory: (taskId: string) => Effect.Effect<TrackedRunHistory, SqlError>;
+
+    /**
+     * Returns the name of the workflow of the run `runId`, as it was when the
+     * run started, or none when there is no such run. One lookup of the run
+     * by its id, whatever the run's age.
+     */
+    readonly readWorkflowName: (runId: string) => Effect.Effect<Option.Option<string>, SqlError>;
   }
 >()("hercule/controller/tasks/TaskTrackingRuns") {}
 
@@ -100,6 +143,51 @@ const make = Effect.gen(function* () {
                   },
                 ];
           }),
+        };
+      }),
+
+    /**
+     * Returns what the Tracking pane of one Task draws: the Task's first
+     * handoff with the name of its workflow, its newest runs, what the newest run's last agent step
+     * produced (cut to fit a pane), and the action step that run ended on.
+     * Fails with `NotFound` when the Task does not exist, is deleted, or was
+     * never handed off, because the pane follows handed-off work only. The
+     * handoff's run always exists, so a missing one is read as a Task that was
+     * never handed off.
+     *
+     * The caller needs `task.read` and `run.read`, as for `query`. It opens
+     * no transaction, so it reads on the read-only connection.
+     *
+     * Its size does not follow the Task's history or its output: it holds at
+     * most `MAX_TRACKING_DETAIL_RUNS` runs, and the text and values of the
+     * output, the step names and the failure causes are cut.
+     */
+    read: (
+      taskId: string,
+    ): Effect.Effect<TrackingDetail, Unauthenticated | Forbidden | NotFound | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.readTracking");
+        yield* requireGrant("run.query");
+        const handoff = Option.getOrUndefined(yield* tasks.readFirstHandoff(taskId));
+        const workflowName =
+          handoff === undefined
+            ? undefined
+            : Option.getOrUndefined(yield* runs.readWorkflowName(handoff.runId));
+        if (handoff === undefined || workflowName === undefined) {
+          return yield* Effect.fail(createNotFoundError("no such handed-off task"));
+        }
+        const history = yield* runs.readRunHistory(taskId);
+        const output =
+          history.agentStep === undefined ? undefined : shapeTrackingOutput(history.agentStep);
+        return {
+          firstHandoff: { ...handoff, workflowName },
+          runs: history.runs,
+          ...(output === undefined ? {} : { output }),
+          ...(history.endingActionStepName === undefined
+            ? {}
+            : {
+                endingActionStepName: cutText(history.endingActionStepName, MAX_TRACKING_STEP_NAME),
+              }),
         };
       }),
   };

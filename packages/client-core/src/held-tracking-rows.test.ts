@@ -6,13 +6,13 @@ import type { TrackingRun, TrackingTask } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   dropTrackingHandoff,
-  dropTrackingRowMarkedDone,
+  dropTrackingRowTakenOff,
   followListedTrackingRows,
   followTrackingRead,
   isTrackingHandoffAcknowledged,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
-  recordTrackingRowMarkedDone,
+  recordTrackingRowTakenOff,
   startHeldTrackingRows,
   updateTrackingRowsHolding,
 } from "./held-tracking-rows";
@@ -69,20 +69,20 @@ describe("followListedTrackingRows", () => {
     expect(held.shown).toEqual([B, finished, C]);
   });
 
-  it("takes a row the user marked done off at once while other changes wait", () => {
+  it("takes a row the user took off at once while other changes wait", () => {
     let held = updateTrackingRowsHolding(startHeldTrackingRows([A, B]), true);
-    held = recordTrackingRowMarkedDone(held, "a");
+    held = recordTrackingRowTakenOff(held, "a");
     held = followListedTrackingRows(held, [B, C], 10);
     expect(readIds(held.shown)).toEqual(["b"]);
-    expect(held.markedDoneTaskIds.size).toBe(0);
+    expect(held.takenOffTaskIds.size).toBe(0);
   });
 
   it("waits for the read that shows the row gone, and holds nothing back after it", () => {
     let held = updateTrackingRowsHolding(startHeldTrackingRows([A, B]), true);
-    held = recordTrackingRowMarkedDone(held, "a");
+    held = recordTrackingRowTakenOff(held, "a");
     held = followListedTrackingRows(held, [A, B], 10);
     expect(readIds(held.shown)).toEqual(["a", "b"]);
-    expect(held.markedDoneTaskIds.has("a")).toBe(true);
+    expect(held.takenOffTaskIds.has("a")).toBe(true);
   });
 
   it("shows the whole read once a read that started after the handoff committed arrives", () => {
@@ -172,9 +172,9 @@ describe("a handoff that later handoffs have pushed out of the read", () => {
 });
 
 describe("dropping the user's own changes", () => {
-  it("makes a later change to the row wait again once its mark done failed", () => {
+  it("makes a later change to the row wait again once its take-off failed", () => {
     let held = updateTrackingRowsHolding(startHeldTrackingRows([A, B]), true);
-    held = dropTrackingRowMarkedDone(recordTrackingRowMarkedDone(held, "a"), "a");
+    held = dropTrackingRowTakenOff(recordTrackingRowTakenOff(held, "a"), "a");
     held = followListedTrackingRows(held, [B], 10);
     expect(readIds(held.shown)).toEqual(["a", "b"]);
   });

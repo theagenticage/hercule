@@ -52,10 +52,20 @@ export const queryKeys = {
   /**
    * Tracking as one read: the tracked Tasks and their runs. Live topics:
    * `task` reads it again on every push, and `run` only when the push can
-   * change it (see `isTrackingAffectedByRunPush`), so no key maps it for
+   * change it (see `findTrackingTasksAffectedByRunPush`), so no key maps it for
    * `run` here. The key is stable: the Tasks tracked change, the key does not.
    */
   tracking: (): LiveQueryKey => ["tracking"],
+  /**
+   * What the Tracking pane of one Task draws (`task.readTracking`). Live
+   * topics: `task` reads it again when its push names the Task, or names no
+   * ids; `run` follows the rule of `tracking` (see `findTrackingTasksAffectedByRunPush`),
+   * so no key maps it for `run` here. Without an id, the key is the prefix of
+   * every Task's detail, and it is apart from `tracking()`, which is a
+   * different read.
+   */
+  trackingDetail: (taskId?: string): LiveQueryKey =>
+    taskId === undefined ? ["trackingDetail"] : ["trackingDetail", taskId],
   /**
    * Your work as one read (`signal.queryYourWork`): the open Tasks that
    * belong to an open signal, snoozed or not. Live topics: `task` and
@@ -399,11 +409,18 @@ export const buildQueryKeys = (
   // when a screen starts reading a new topic.
   if (topic === "task") {
     return ids.length === 0
-      ? [queryKeys.tasks(), queryKeys.task(), queryKeys.tracking(), queryKeys.yourWork()]
+      ? [
+          queryKeys.tasks(),
+          queryKeys.task(),
+          queryKeys.tracking(),
+          queryKeys.trackingDetail(),
+          queryKeys.yourWork(),
+        ]
       : [
           queryKeys.tasks(),
           ...ids.map((id) => queryKeys.task(id)),
           queryKeys.tracking(),
+          ...ids.map((id) => queryKeys.trackingDetail(id)),
           queryKeys.yourWork(),
         ];
   }

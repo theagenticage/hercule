@@ -79,9 +79,18 @@ export interface TrackingRead {
   readonly readStartedAt: number;
 }
 
-/** What a Needs you row waits on: an open Request of a run's session, or an open signal. */
+/**
+ * What a Needs you row waits on: an open Request of a run's session, or an open
+ * signal. A Request wins over a signal. `signalAlsoWaits` is true when an open
+ * signal names the Task too, so answering the Request would not take the row
+ * off Needs you.
+ */
 type TrackingWait =
-  | { readonly kind: "request"; readonly session: WaitingRunSession }
+  | {
+      readonly kind: "request";
+      readonly session: WaitingRunSession;
+      readonly signalAlsoWaits: boolean;
+    }
   | { readonly kind: "signal"; readonly signal: Signal };
 
 /** The fields every row of Tracking has. */
@@ -185,8 +194,9 @@ const findTrackingWait = (
     .toSorted(
       (a, b) => a.activityAt.localeCompare(b.activityAt) || a.sessionId.localeCompare(b.sessionId),
     )[0];
-  if (session !== undefined) return { kind: "request", session };
   const signal = oldestSignalByTask.get(task.taskId);
+  if (session !== undefined)
+    return { kind: "request", session, signalAlsoWaits: signal !== undefined };
   return signal === undefined ? undefined : { kind: "signal", signal };
 };
 
@@ -263,42 +273,50 @@ export const countWaitingTrackingRows = (rows: ReadonlyArray<TrackingRow>): numb
   rows.filter((row) => isTrackingStateWaitingOnUser(row.state)).length;
 
 /**
- * Checks whether a row in `state` can be marked done: the work has stopped, so
- * ticking it off leaves no run going. A Working row cannot, because marking it
- * done would leave its run running. A Needs you row cannot either: it may be
- * waiting on a Request of a live run.
+ * Checks whether `row` can be marked done: no run of its Task is live, and the
+ * row does not wait on a Request. Marking a Task done while a run still goes
+ * would leave that run working on finished work, and a Request blocks its agent
+ * until it is answered. So Finished, Failed and Stopped rows can be marked
+ * done, and so can a Needs you row that waits on a signal while no run is live
+ * (its agent finished, and the signal is what remains). A Working row cannot,
+ * and neither can a row that waits on a Request, because its run is live.
  */
-export const canMarkTrackingStateDone = (state: TrackingState): boolean =>
-  state !== "working" && state !== "needs-you";
+export const canMarkTrackingRowDone = (row: TrackingRow): boolean =>
+  row.task.liveRunIds.length === 0 &&
+  !(row.state === "needs-you" && row.waitsOn.kind === "request");
 
 /**
- * Checks whether a push on the `run` topic can change the `task.queryTracking`
- * read behind Tracking, so it must be read again. A Request or a signal that
- * starts or stops waiting is not a run push: the app rebuilds the rows from
- * them (`buildTrackingRows`) without this read. `push` is the push's `ids` and
- * `kind`. It can when:
+ * Returns which of `tasks` a push on the `run` topic can change in the
+ * `task.queryTracking` read behind Tracking and in each Task's Tracking
+ * detail, so they must be read again. `push` is the push's `ids` and `kind`.
+ * The result is:
  *
- * - it lists no ids, which means every run may have changed;
- * - it names the newest run, or any live run, of one of `tasks`, whatever
- *   happened to it. An older live run counts because its end changes which
- *   Requests the row waits on;
- * - it is the creation of a run, because a re-run keeps its Task's id and
- *   starts a run no row holds yet, and a re-run makes no `task` push.
+ * - `"every"` when the push lists no ids, which means every run may have
+ *   changed, or is the creation of a run, because a re-run keeps its Task's id
+ *   and starts a run no row holds yet, and a re-run makes no `task` push;
+ * - else the ids of the Tasks whose newest run, newest live run or any live
+ *   run the push names, whatever happened to that run. An older live run
+ *   counts because its end changes which Requests the row waits on. The list
+ *   is empty when the push names no run of any of `tasks`, such as one a cron
+ *   fire started, which leaves Tracking as it is.
  *
- * Every other run, such as one a cron fire started, leaves Tracking as it is.
+ * A Request or a signal that starts or stops waiting is not a run push: the
+ * app rebuilds the rows from them (`buildTrackingRows`) without this read.
  */
-export const isTrackingAffectedByRunPush = (
+export const findTrackingTasksAffectedByRunPush = (
   tasks: ReadonlyArray<TrackingTask>,
   push: { readonly ids: ReadonlyArray<string>; readonly kind: "created" | "updated" | "deleted" },
-): boolean =>
-  push.ids.length === 0 ||
-  push.kind === "created" ||
-  tasks.some(
-    (task) =>
-      push.ids.includes(task.latestRun.id) ||
-      (task.latestLiveRun !== undefined && push.ids.includes(task.latestLiveRun.id)) ||
-      task.liveRunIds.some((runId) => push.ids.includes(runId)),
-  );
+): "every" | ReadonlyArray<string> =>
+  push.ids.length === 0 || push.kind === "created"
+    ? "every"
+    : tasks
+        .filter(
+          (task) =>
+            push.ids.includes(task.latestRun.id) ||
+            (task.latestLiveRun !== undefined && push.ids.includes(task.latestLiveRun.id)) ||
+            task.liveRunIds.some((runId) => push.ids.includes(runId)),
+        )
+        .map((task) => task.taskId);
 
 /**
  * Returns the pose of the face that stands for `row` in the pane: the pose of
@@ -396,24 +414,11 @@ export const groupTrackingRows = (rows: ReadonlyArray<TrackingRow>): ReadonlyArr
     return inState.length === 0 ? [] : [{ state, rows: inState }];
   });
 
-/** Where opening a row of Tracking goes. */
-export type TrackingRowDestination =
+/**
+ * Where a link in the pane of a Tracking row goes: a run's page, a session's
+ * thread, or a signal in Intake's To do.
+ */
+export type TrackingDestination =
   | { readonly kind: "run"; readonly runId: string }
   | { readonly kind: "thread"; readonly sessionId: string }
   | { readonly kind: "signal"; readonly signalId: string };
-
-/**
- * Decides where opening `row` goes. A Needs you row goes to what waits on the
- * user, because that is what the user came to answer:
- *
- * - by a Request, the thread of the session that asks;
- * - by a signal, that signal in Intake's To do.
- *
- * A row in any other state goes to the page of its run.
- */
-export const decideTrackingRowDestination = (row: TrackingRow): TrackingRowDestination => {
-  if (row.state !== "needs-you") return { kind: "run", runId: row.run.id };
-  return row.waitsOn.kind === "request"
-    ? { kind: "thread", sessionId: row.waitsOn.session.sessionId }
-    : { kind: "signal", signalId: row.waitsOn.signal.id };
-};
