@@ -575,7 +575,6 @@
   text-decoration: underline;
   text-decoration-color: transparent;
   text-underline-offset: 2px;
-  transition: text-decoration-color var(--dur-1);
 }
 .tr-pane .tr-step-who:hover {
   text-decoration-color: currentColor;
