@@ -19,8 +19,9 @@ const SCREENS = join(HERE, "../../../screens");
 
 /**
  * The folders and single files whose sources are compiled: the route folders
- * of the three pages and of a run's page, the screens they draw, and the
- * folders they share. A folder is compiled without its tests.
+ * of the three pages and of a run's page, the screens they draw, the folders
+ * they share, and the parts of Intake's Tracking pane. A folder is compiled
+ * without its tests.
  */
 const PATHS = [
   join(HERE, "workflows"),
@@ -34,6 +35,9 @@ const PATHS = [
   join(SCREENS, "project-groups"),
   join(SCREENS, "list-pane"),
   join(SCREENS, "thread/use-sender-reading.ts"),
+  join(SCREENS, "intake/tracking-pane.tsx"),
+  join(SCREENS, "intake/tracking-trip.tsx"),
+  join(SCREENS, "intake/tracking-messages.tsx"),
 ];
 
 /**

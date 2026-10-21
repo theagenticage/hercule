@@ -1814,6 +1814,9 @@ describe("the pane's answers", () => {
       extra: { ...storeTracking(), [`POST ${stopPath}`]: { body: CANCELLED_RUN } },
     });
     await userEvent.click(getRowButton(WORKING_TASK));
+    expect(getPane()!.querySelector(".ans-desc")?.textContent).toBe(
+      "Stops Implement. The row stays in Tracking, as Stopped",
+    );
     await userEvent.click(within(getPane()!).getByRole("button", { name: "Stop the run" }));
 
     await waitFor(() => {
@@ -2033,6 +2036,36 @@ describe("the pane's trip", () => {
     await waitFor(() => {
       expect(router.latestLocation.pathname).toBe(`/runs/${EARLIER_RUN_ID}`);
     });
+  });
+
+  it("shows the error of a read that fails after the trip was drawn, in place of the old trip", async () => {
+    let answering = true;
+    const { live } = await openIntake("/intake?tracking=true", {
+      extra: {
+        ...storeTracking(),
+        [`GET /api/v1/tasks/${FINISHED_TASK.id}/tracking`]: () =>
+          answering
+            ? {
+                body: buildTrackingDetail(
+                  FINISHED_TASK,
+                  buildRunSummary(FINISHED_TASK, "completed"),
+                ),
+              }
+            : { status: 404, body: buildErrorBody("not_found", "The Task was not found.") },
+      },
+    });
+    await live.waitForFirstPushes();
+    await userEvent.click(getRowButton(FINISHED_TASK));
+    await waitFor(() => {
+      expect(getPane()!.querySelector(".tr-orig-q")).not.toBeNull();
+    });
+
+    answering = false;
+    act(() => live.pushInvalidation("task", [FINISHED_TASK.id]));
+
+    const failure = await within(getPane()!).findByRole("alert");
+    expect(failure.textContent).toBe("The Task was not found.");
+    expect(getPane()!.querySelector(".tr-trip")).toBeNull();
   });
 });
 
