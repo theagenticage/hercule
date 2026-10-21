@@ -1950,6 +1950,33 @@ describe("the pane's answers", () => {
     });
   });
 
+  it("leaves the focus on the page's body when the user clicked it before the run ended", async () => {
+    let status: RunSummary["status"] = "running";
+    const rows = () => [[WORKING_TASK, status] as const];
+    const { live } = await openIntake("/intake?tracking=true", {
+      extra: storeTracking(rows(), { readRows: rows }),
+    });
+    await live.waitForFirstPushes();
+    await userEvent.click(getRowButton(WORKING_TASK));
+    const stop = within(getPane()!).getByRole("button", { name: "Stop the run" });
+    act(() => {
+      stop.focus();
+    });
+    await userEvent.click(document.body);
+    expect(document.activeElement).toBe(document.body);
+
+    status = "completed";
+    act(() => live.pushInvalidation("run", [getRunId(WORKING_TASK)]));
+
+    await within(getPane()!).findByRole("button", { name: "Mark done" });
+    expect(stop.isConnected).toBe(false);
+    // Give a late repair the time it would need before asserting it never came.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(document.activeElement).toBe(document.body);
+  });
+
   it("shows a refused stop under its button, and leaves the row as it was", async () => {
     await openIntake("/intake?tracking=true", {
       extra: {

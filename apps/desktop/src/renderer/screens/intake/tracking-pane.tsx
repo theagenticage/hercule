@@ -169,8 +169,10 @@ function TrackingRowDetail({
   // run turning into Mark done once the run has stopped, the trip's Thread
   // button when a failed re-read replaces the trip with its error. The focus
   // would then fall to the page's body, outside the screen's keys, so it moves
-  // to the pane. The pane remembers what had the focus, because a click on
-  // the page's body also leaves the body focused, and that one stays.
+  // to the pane. The pane remembers which element had the focus, and repairs
+  // only when that element was removed. When the user clicks the page's body,
+  // the focused element stays in the page, so it is forgotten and the focus
+  // stays on the body.
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (root === null) return;
@@ -179,8 +181,20 @@ function TrackingRowDetail({
       lastFocused = event.target;
     };
     // A focus that moved to another element is not lost, so it is forgotten.
+    // A focus that moved to no element is either a removal or the user leaving
+    // the pane for the body. Only one microtask later is the element's
+    // removal visible, so the choice waits for it.
     const forgetWhenMoved = (event: FocusEvent): void => {
-      if (event.relatedTarget !== null) lastFocused = null;
+      const element = event.target;
+      if (event.relatedTarget !== null) {
+        lastFocused = null;
+        return;
+      }
+      queueMicrotask(() => {
+        if (element === lastFocused && element instanceof Node && element.isConnected) {
+          lastFocused = null;
+        }
+      });
     };
     const repair = (): void => {
       const lost = lastFocused instanceof Node && !lastFocused.isConnected;
