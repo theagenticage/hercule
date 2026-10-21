@@ -458,8 +458,10 @@ export const TrackingDetail = Schema.Struct({
   outcome: Schema.optionalKey(TrackingOutcome),
   /**
    * The name of the action step the newest run ended on: its `name`, else its
-   * action's id. Present only when the run's last completed step is an action
-   * step, and so finished after the agent step `outcome` comes from.
+   * action's id. Present only when the newest run completed and its last
+   * completed step is an action step, so it finished after the agent step
+   * `outcome` comes from. A run that is live or failed has not ended on a
+   * step, so it has none.
    */
   endingActionStepName: Schema.optionalKey(Schema.String),
 });

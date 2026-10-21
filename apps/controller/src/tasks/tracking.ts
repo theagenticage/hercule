@@ -51,8 +51,10 @@ export interface TrackedRunHistory {
   /** The newest run's last completed agent step, when it completed one. */
   readonly agentStep: AgentStepResult | undefined;
   /**
-   * The name of the action step the newest run's last completed step is,
-   * when that step is an action step: its `name`, else its action's id.
+   * The name of the action step the newest run ended on: its `name`, else its
+   * action's id. Set only when the newest run completed and its last
+   * completed step is an action step. A live run has not ended, and a failed
+   * run is explained by its failure, so neither has one.
    */
   readonly endingActionStepName: string | undefined;
 }

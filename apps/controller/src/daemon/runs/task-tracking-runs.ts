@@ -76,8 +76,12 @@ export const TaskTrackingRunsLayer: Layer.Layer<TaskTrackingRuns, never, SqlClie
                     output: agent.output,
                     outputSchema: agent.outputSchema,
                   },
+            // Only a completed run ended on a step. A live run has not ended, and a failed run is
+            // explained by its failure cause.
             endingActionStepName:
-              last?.kind === "action" ? (last.name ?? last.action ?? undefined) : undefined,
+              newestFirst[0]!.status === "completed" && last?.kind === "action"
+                ? (last.name ?? last.action ?? undefined)
+                : undefined,
           };
         }),
       readLatestRuns: (taskIds: ReadonlyArray<string>) =>

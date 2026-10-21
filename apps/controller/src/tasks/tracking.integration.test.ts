@@ -564,6 +564,43 @@ describe("task.readTracking", () => {
     });
   });
 
+  it("names no ending action step for a run that is live or failed, whatever step it completed last", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const steps = [
+        {
+          id: "work",
+          kind: "agent" as const,
+          sessionId: SESSION_A,
+          output: { text: "Done" },
+          finishedAt: minute(2),
+        },
+        {
+          id: "open",
+          kind: "action" as const,
+          name: "Open the pull request",
+          action: "github/open-pr",
+          output: {},
+          finishedAt: minute(3),
+        },
+      ];
+      const running = await insertTrackedTask(harness, "running");
+      await insertRunWithSteps(harness, running, { at: minute(1), steps });
+      const failed = await insertTrackedTask(harness, "failed");
+      await insertRunWithSteps(harness, failed, {
+        at: minute(1),
+        steps,
+        ending: { status: "failed", failureReason: "step-failed", failedStepId: "next" },
+      });
+
+      for (const taskId of [running, failed]) {
+        const detail = await readDetail(harness.base, token, taskId);
+        expect(detail.outcome).toMatchObject({ kind: "text", text: "Done" });
+        expect(detail).not.toHaveProperty("endingActionStepName");
+      }
+    });
+  });
+
   it("does not take a text generation step for an agent step", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
