@@ -28,6 +28,7 @@ import { buildLook, Face } from "../../faces";
 import { ExternalIcon } from "../../icons/external";
 import { LedgerAnswer } from "./ledger-answer";
 import { TrackingTrip } from "./tracking-trip";
+import type { RerunTracking } from "./use-rerun-tracking";
 import type { TakeOffStatus } from "./use-take-off-tracking";
 import "./tracking.css";
 
@@ -60,8 +61,9 @@ const STATE_TONES: Readonly<Record<TrackingState, string | undefined>> = {
  * `focusAnswerOnOpen` puts the focus on the suggested answer as soon as the
  * pane shows the row, or on the pane itself when no answer is suggested, then
  * calls `onFocusedAnswer`. `onTakeOff` is called with the Task and the status
- * the user's answer sets it to, `done` or `cancelled`. `onOpenDestination` is
- * called with the run the user opens.
+ * the user's answer sets it to, `done` or `cancelled`. `rerun` starts the
+ * re-run Try again asks for, and tells whether one is starting for the row.
+ * `onOpenDestination` is called with the run the user opens.
  */
 export function TrackingPane({
   taskId,
@@ -70,6 +72,7 @@ export function TrackingPane({
   focusAnswerOnOpen,
   onFocusedAnswer,
   onTakeOff,
+  rerun,
   onOpenDestination,
 }: {
   readonly taskId: string;
@@ -78,6 +81,7 @@ export function TrackingPane({
   readonly focusAnswerOnOpen: boolean;
   readonly onFocusedAnswer: () => void;
   readonly onTakeOff: (taskId: string, status: TakeOffStatus) => void;
+  readonly rerun: RerunTracking;
   readonly onOpenDestination: (destination: TrackingDestination) => void;
 }): JSX.Element {
   const row = useTrackingRows().find((each) => each.task.taskId === taskId);
@@ -90,6 +94,7 @@ export function TrackingPane({
           focusAnswerOnOpen={focusAnswerOnOpen}
           onFocusedAnswer={onFocusedAnswer}
           onTakeOff={onTakeOff}
+          rerun={rerun}
           onOpenDestination={onOpenDestination}
         />
       )}
@@ -100,17 +105,19 @@ export function TrackingPane({
 /**
  * Renders the pane of `row`: its head, its trip, its answers and its keys.
  *
- * Stop the run and Try again are sent from here, since no other part of the
- * screen stops or re-runs a run.
+ * Stop the run is sent from here, since no other part of the screen stops a
+ * run. It sends `keepWorkspace: true`, so the run's workspace is kept: the pane
+ * asks for no confirmation, and the drawing's foot notes that stopping leaves
+ * the agent's work where it is. Try again is sent by `rerun`, which the screen
+ * owns (see `useRerunTracking`).
  *
- * - Stop the run sends `keepWorkspace: true`, so the run's workspace is kept:
- *   the pane asks for no confirmation, and the drawing's foot says that
- *   stopping leaves the agent's work where it is.
- * - Try again re-runs the Task's newest run with no `mode`, so the workflow runs
- *   as it is stored now and a fix made after the failure is picked up. The new
- *   run keeps the Task, so the row turns Working on the same Task.
+ * Every answer is locked while Stop is being sent or a re-run of the row's Task
+ * is starting. Tracking's read keeps showing the old run until the new run
+ * arrives, so Try again would still be on screen, and a second press would
+ * start a second run. Mark done and Cancel are locked too: closing the Task
+ * would leave the starting run on a closed Task.
  *
- * A refusal of either shows under its button, never in a toast.
+ * A refusal of Stop or of Try again shows under its button, never in a toast.
  */
 function TrackingRowDetail({
   row,
@@ -118,6 +125,7 @@ function TrackingRowDetail({
   focusAnswerOnOpen,
   onFocusedAnswer,
   onTakeOff,
+  rerun,
   onOpenDestination,
 }: {
   readonly row: TrackingRow;
@@ -125,6 +133,7 @@ function TrackingRowDetail({
   readonly focusAnswerOnOpen: boolean;
   readonly onFocusedAnswer: () => void;
   readonly onTakeOff: (taskId: string, status: TakeOffStatus) => void;
+  readonly rerun: RerunTracking;
   readonly onOpenDestination: (destination: TrackingDestination) => void;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
@@ -141,28 +150,17 @@ function TrackingRowDetail({
       client.run.cancel({ params: { id: runId }, payload: { keepWorkspace: true } }),
     onSuccess: (cancelled, runId) => {
       queryClient.setQueryData(queryKeys.run(runId), cancelled);
-      invalidateWithoutCancelling(queryClient, queryKeys.runs());
       invalidateWithoutCancelling(queryClient, queryKeys.tracking());
     },
   });
-
-  const tryAgain = useMutation({
-    mutationFn: (runId: string) => client.run.rerun({ params: { id: runId }, payload: {} }),
-    onSuccess: () => {
-      invalidateWithoutCancelling(queryClient, queryKeys.runs());
-      invalidateWithoutCancelling(queryClient, queryKeys.tracking());
-    },
-  });
-  // The re-run is accepted before the next read of Tracking shows its new run.
-  // Until the row names a run other than the one re-run, Try again would still
-  // be on screen and a second press would start a second run, so every answer
-  // waits.
-  const awaitingRowOfNewRun = tryAgain.isSuccess && tryAgain.variables === row.task.latestRun.id;
-  const answersLocked = stop.isPending || tryAgain.isPending || awaitingRowOfNewRun;
-  // The refusal of an answer's own mutation, which shows under its button.
-  const readRefusal = (kind: TrackingAnswer["kind"]): string | null => {
-    const mutation = kind === "stop-run" ? stop : kind === "try-again" ? tryAgain : undefined;
-    return mutation?.isError === true ? readErrorMessage(mutation.error) : null;
+  const answersLocked = stop.isPending || rerun.isStarting(row.task);
+  /** Returns what shows under the button of `answer`: the refusal of the request it sent, if any. */
+  const readRefusal = (answer: TrackingAnswer): string | null => {
+    if (answer.kind === "stop-run") {
+      return stop.isError ? readErrorMessage(stop.error) : null;
+    }
+    if (answer.kind === "try-again") return rerun.readRefusal(row.task);
+    return null;
   };
 
   // The standing line of a Working row counts "8m so far", so it follows the
@@ -245,7 +243,7 @@ function TrackingRowDetail({
         stop.mutate(answer.run.id);
         return;
       case "try-again":
-        tryAgain.mutate(answer.run.id);
+        rerun.start(taskId, answer.run.id);
         return;
       case "mark-done":
         onTakeOff(taskId, "done");
@@ -295,7 +293,7 @@ function TrackingRowDetail({
                 answer={answer}
                 taskTitle={title}
                 locked={answersLocked}
-                error={readRefusal(answer.kind)}
+                error={readRefusal(answer)}
                 idPrefix={idPrefix}
                 onPress={pressAnswer}
               />

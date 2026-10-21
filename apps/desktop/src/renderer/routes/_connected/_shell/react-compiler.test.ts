@@ -40,6 +40,7 @@ const PATHS = [
   join(SCREENS, "intake/tracking-messages.tsx"),
   join(SCREENS, "intake/intake-screen.tsx"),
   join(SCREENS, "intake/use-held-tracking-rows.ts"),
+  join(SCREENS, "intake/use-rerun-tracking.ts"),
   join(SCREENS, "intake/use-take-off-tracking.ts"),
   join(SCREENS, "intake/use-tracking-controls.ts"),
 ];

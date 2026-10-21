@@ -57,6 +57,7 @@ import { useHeldSignals } from "./use-held-signals";
 import { useHeldTrackingRows } from "./use-held-tracking-rows";
 import { useIntakeTabs } from "./use-intake-tabs";
 import { useTrackingControls } from "./use-tracking-controls";
+import { useRerunTracking } from "./use-rerun-tracking";
 import { useTakeOffTracking } from "./use-take-off-tracking";
 import {
   IntakeMovesContext,
@@ -238,6 +239,7 @@ export function IntakeScreen({
   const toast = useMoveToast();
   const moves = useSignalMoveRunner(client, timezone, held, toast);
   const takeOff = useTakeOffTracking(client, toast);
+  const rerun = useRerunTracking(client);
   const sections: ReadonlyArray<IntakeSection> =
     view === "to-do"
       ? groupSignalsIntoSections(held.shown, pluginId)
@@ -286,6 +288,7 @@ export function IntakeScreen({
     addressTaskId: trackingOpen ? selectedTaskIdParam : null,
     heldTracking,
     takeOff,
+    rerun,
     split,
     onOpening: () => {
       updateChecks(new Set());
@@ -744,6 +747,7 @@ export function IntakeScreen({
                     focusAnswerOnOpen={tracking.paneFocusTaskId === selectedTaskId}
                     onFocusedAnswer={tracking.clearPaneFocus}
                     onTakeOff={tracking.takeOffTask}
+                    rerun={rerun}
                     onOpenDestination={openDestination}
                   />
                 )
