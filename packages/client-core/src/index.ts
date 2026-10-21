@@ -519,13 +519,13 @@ export {
 } from "./held-signals";
 export {
   dropTrackingHandoff,
-  dropTrackingRowMarkedDone,
+  dropTrackingRowTakenOff,
   followListedTrackingRows,
   followTrackingRead,
   isTrackingHandoffAcknowledged,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
-  recordTrackingRowMarkedDone,
+  recordTrackingRowTakenOff,
   startHeldTrackingRows,
   updateTrackingRowsHolding,
   type HeldTrackingRows,

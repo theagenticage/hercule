@@ -1,6 +1,6 @@
 /**
- * Taking a Tracking row off Tracking: marking its Task done or cancelled, by
- * `E`, by a row's Mark done control, or by the pane's answers (spec 17
+ * Taking a Tracking row off Tracking: setting its Task to done or cancelled,
+ * by `E`, by a row's Mark done control, or by the pane's answers (spec 17
  * §Tracking).
  */
 import { useRef } from "react";
@@ -28,13 +28,14 @@ interface TakeOff {
 /** Takes Tracking rows off Tracking. */
 export interface TakeOffTracking {
   /**
-   * Sets the Task to `status`, which takes its row out of Tracking, then
-   * calls `onTakenOff`. When that fails, it calls `onFailed` instead. Taking
-   * off different Tasks runs side by side, each with its own toast. A second
-   * request for a Task that is being taken off is ignored: the first one does
-   * what it asks, and reports it.
+   * Sets the Task to `status`, which takes its row out of Tracking. When that
+   * fails, it calls `onFailed`. It does not choose the next selected row: the
+   * selection moves on when the row leaves the read (see `useTrackingControls`).
+   * Taking off different Tasks runs side by side, each with its own toast. A
+   * second request for a Task that is being taken off is ignored: the first
+   * one does what it asks, and reports it.
    */
-  readonly run: (takeOff: TakeOff, onTakenOff?: () => void, onFailed?: () => void) => void;
+  readonly run: (takeOff: TakeOff, onFailed: () => void) => void;
 }
 
 /** Returns the toast's words for a row taken off Tracking. */
@@ -81,17 +82,16 @@ export const useTakeOffTracking = (
     },
   });
   return {
-    run: (input, onTakenOff, onFailed) => {
+    run: (input, onFailed) => {
       if (pendingTaskIds.current.has(input.taskId)) return;
       pendingTaskIds.current.add(input.taskId);
       takeOff.mutateAsync(input).then(
         () => {
           pendingTaskIds.current.delete(input.taskId);
-          onTakenOff?.();
         },
         () => {
           pendingTaskIds.current.delete(input.taskId);
-          onFailed?.();
+          onFailed();
         },
       );
     },

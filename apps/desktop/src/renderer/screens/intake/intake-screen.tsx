@@ -283,6 +283,7 @@ export function IntakeScreen({
     readRows: readTrackingRows,
     shownRows: trackingRows,
     selectedTaskId,
+    addressTaskId: trackingOpen ? selectedTaskIdParam : null,
     heldTracking,
     takeOff,
     split,

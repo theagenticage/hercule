@@ -5,7 +5,8 @@
  * pointer leaves, so no row moves under the pointer. A change the user's own
  * action made applies at once:
  *
- * - Marking a row done takes that row off, and nothing else moves.
+ * - Taking a row off Tracking (Mark done or Cancel) removes that row, and
+ *   nothing else moves.
  * - A handoff adds the row of its Task, and the rows show the last read
  *   whole, because the new row lands among them. A read shows the handoff
  *   when it started after the handoff committed, not when it lists the
@@ -26,8 +27,8 @@ export interface HeldTrackingRows {
   readonly shown: ReadonlyArray<TrackingRow>;
   /** Whether changes the user did not make wait, because the pointer is on the list column. */
   readonly holding: boolean;
-  /** The Tasks the user marked done, until `listed` has no row of them. */
-  readonly markedDoneTaskIds: ReadonlySet<string>;
+  /** The Tasks the user is taking off Tracking, until `listed` has no row of them. */
+  readonly takenOffTaskIds: ReadonlySet<string>;
   /**
    * The signals the user is handing off, each with when its handoff
    * committed, or `null` while it is still being sent. A handoff stays until a
@@ -41,14 +42,14 @@ export const startHeldTrackingRows = (listed: ReadonlyArray<TrackingRow>): HeldT
   listed,
   shown: listed,
   holding: false,
-  markedDoneTaskIds: new Set(),
+  takenOffTaskIds: new Set(),
   handoffs: new Map(),
 });
 
 /**
  * Follows a new read of the rows, `listed`, which started at `readStartedAt`.
  * The user's own changes that `listed` shows apply and are forgotten: a row
- * marked done that it lacks, and a handoff that committed before the read
+ * taken off that it lacks, and a handoff that committed before the read
  * started. While holding, every other change waits. Otherwise the rows shown
  * are `listed`.
  */
@@ -58,21 +59,19 @@ export const followListedTrackingRows = (
   readStartedAt: number,
 ): HeldTrackingRows => {
   const taskIds = new Set(listed.map((row) => row.task.taskId));
-  const markedDone = [...held.markedDoneTaskIds].filter((id) => !taskIds.has(id));
+  const takenOff = [...held.takenOffTaskIds].filter((id) => !taskIds.has(id));
   const shownHandoffs = [...held.handoffs]
     .filter(([, committedAt]) => committedAt !== null && committedAt <= readStartedAt)
     .map(([signalId]) => signalId);
   const shown =
     !held.holding || shownHandoffs.length > 0
       ? listed
-      : held.shown.filter((row) => !markedDone.includes(row.task.taskId));
+      : held.shown.filter((row) => !takenOff.includes(row.task.taskId));
   return {
     ...held,
     listed,
     shown,
-    markedDoneTaskIds: new Set(
-      [...held.markedDoneTaskIds].filter((id) => !markedDone.includes(id)),
-    ),
+    takenOffTaskIds: new Set([...held.takenOffTaskIds].filter((id) => !takenOff.includes(id))),
     handoffs: new Map([...held.handoffs].filter(([id]) => !shownHandoffs.includes(id))),
   };
 };
@@ -117,25 +116,25 @@ export const isTrackingHandoffAcknowledged = (
   );
 
 /**
- * Records that the user is marking the Task `taskId` done. Call it when the
- * action starts, before it is sent, because the read that shows the change can
- * come before the action's answer.
+ * Records that the user is taking the Task `taskId` off Tracking, by marking
+ * it done or cancelling it. Call it when the action starts, before it is sent,
+ * because the read that shows the change can come before the action's answer.
  */
-export const recordTrackingRowMarkedDone = (
+export const recordTrackingRowTakenOff = (
   held: HeldTrackingRows,
   taskId: string,
 ): HeldTrackingRows => ({
   ...held,
-  markedDoneTaskIds: new Set([...held.markedDoneTaskIds, taskId]),
+  takenOffTaskIds: new Set([...held.takenOffTaskIds, taskId]),
 });
 
-/** Forgets that the user is marking `taskId` done, because the action failed. */
-export const dropTrackingRowMarkedDone = (
+/** Forgets that the user is taking `taskId` off Tracking, because the action failed. */
+export const dropTrackingRowTakenOff = (
   held: HeldTrackingRows,
   taskId: string,
 ): HeldTrackingRows => ({
   ...held,
-  markedDoneTaskIds: new Set([...held.markedDoneTaskIds].filter((id) => id !== taskId)),
+  takenOffTaskIds: new Set([...held.takenOffTaskIds].filter((id) => id !== taskId)),
 });
 
 /** Records that the user is handing the signal `signalId` off. Call it when the handoff starts. */

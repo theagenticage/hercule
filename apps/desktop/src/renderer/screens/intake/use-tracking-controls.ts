@@ -1,9 +1,10 @@
 /**
  * What the user does with Tracking on Intake's To do view: opening and
  * closing it, selecting a row and showing its pane, taking a row off, and
- * opening the selected row's run (spec 17 §Tracking, §Keys).
+ * opening the selected row's run (spec 17 §Tracking, §Keys). It also moves the
+ * selection on when the selected row leaves Tracking.
  */
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffectEvent, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   canMarkTrackingRowDone,
   type TrackingDestination,
@@ -25,9 +26,16 @@ interface TrackingControlsInput {
    */
   readonly selectedTaskId: string | null;
   /**
+   * The Task in the address while Tracking is opened, whether or not its row
+   * is still in Tracking, else `null`. When its row leaves `readRows`, the
+   * selection moves on (see `useTrackingControls`), which `selectedTaskId`
+   * cannot tell: it is already `null` by then.
+   */
+  readonly addressTaskId: string | null;
+  /**
    * Tracking's rows as last read. Whether a row can be taken off, and where
    * its run is, are decided from them, not from `shownRows`: a row that is
-   * Working now must not be ticked off, though it may still be drawn Finished
+   * Working now must not be taken off, though it may still be drawn Finished
    * while changes wait.
    */
   readonly readRows: ReadonlyArray<TrackingRow>;
@@ -71,8 +79,8 @@ export interface TrackingControls {
   /**
    * Sets the Task `taskId` to `status`, which takes its row off Tracking,
    * unless its row can be taken off no more (see `canMarkTrackingRowDone`) or
-   * is gone from the last read. When the row was the selected one, the
-   * selection goes to the next row that stays.
+   * is gone from the last read. The row leaves when the read no longer has
+   * it, and the selection follows then, as for any row that leaves.
    */
   readonly takeOffTask: (taskId: string, status: TakeOffStatus) => void;
   /**
@@ -102,10 +110,22 @@ export interface TrackingControls {
   ) => void;
 }
 
-/** Returns the controls of Tracking for the screen to wire to its keys, to `TrackingTray` and to the pane. */
+/**
+ * Returns the controls of Tracking for the screen to wire to its keys, to
+ * `TrackingTray` and to the pane.
+ *
+ * When the selected row leaves `readRows`, for whatever reason (the user took
+ * it off, another client did, a push removed it), the selection moves to the
+ * row `pickSelectionAfterMove` picks from the rows as they were drawn before it
+ * left, or clears when none stays. The pane follows `readRows`, not
+ * `shownRows`: a held row may still be drawn, but the pane cannot show a Task
+ * the last read no longer has, so the selection must not stay on it. If the
+ * focus fell to the page's body with the row's pane, it goes to the sheet.
+ */
 export const useTrackingControls = ({
   open,
   selectedTaskId,
+  addressTaskId,
   readRows,
   shownRows,
   heldTracking,
@@ -119,11 +139,40 @@ export const useTrackingControls = ({
   const { listRef, setDismissed } = split;
   const [paneFocusTaskId, setPaneFocusTaskId] = useState<string | null>(null);
   const shownIds = shownRows.map((row) => row.task.taskId);
-  // Read when a request ends, which can be after the selection moved on.
+  const readIds = readRows.map((row) => row.task.taskId);
+  // Read by `selectRow` when it runs, so a click is ignored on the selected
+  // row without `selectRow` changing as the selection moves.
   const selectedTaskIdRef = useRef(selectedTaskId);
   useLayoutEffect(() => {
     selectedTaskIdRef.current = selectedTaskId;
   }, [selectedTaskId]);
+  // The rows drawn when the screen last committed: where the selection goes
+  // from when its row leaves, which the new rows no longer have.
+  const drawnIdsRef = useRef(shownIds);
+
+  /** Returns the element that holds the focus for the keys while Tracking is opened, else the list. */
+  const findFocusHolder = (): HTMLElement | null | undefined =>
+    open ? listRef.current?.querySelector<HTMLElement>(".tr-tray.is-open") : listRef.current;
+
+  const selectNextWhenSelectedRowLeaves = useEffectEvent(() => {
+    if (!open || addressTaskId === null || readIds.includes(addressTaskId)) return;
+    const drawnIds = drawnIdsRef.current;
+    if (!drawnIds.includes(addressTaskId)) return;
+    const leftIds = drawnIds.filter((id) => !readIds.includes(id));
+    onSelectTask(pickSelectionAfterMove(drawnIds, addressTaskId, leftIds));
+    // The pane of the row that left was removed with the focus in it.
+    const focused = document.activeElement;
+    if (focused === null || focused === document.body) {
+      findFocusHolder()?.focus({ preventScroll: true });
+    }
+  });
+  useLayoutEffect(() => {
+    selectNextWhenSelectedRowLeaves();
+  }, [readRows, addressTaskId, open]);
+  // After the effect above, which reads the rows of the commit before this one.
+  useLayoutEffect(() => {
+    drawnIdsRef.current = shownIds;
+  });
 
   const openTracking = (): void => {
     onOpening();
@@ -152,12 +201,17 @@ export const useTrackingControls = ({
     if (taskId !== selectedTaskIdRef.current) onSelectTask(taskId);
   };
 
-  /** Moves the selection by `step`, and stops at the first and the last row. */
+  /**
+   * Moves the selection by `step`, and stops at the first and the last row.
+   * The keys walk past a row that is drawn only because changes are held: the
+   * last read no longer has it, so it has no pane to show.
+   */
   const moveSelection = (step: 1 | -1): void => {
-    if (shownIds.length === 0) return;
-    const at = selectedTaskId === null ? -1 : shownIds.indexOf(selectedTaskId);
-    const next = at < 0 ? (step === 1 ? 0 : shownIds.length - 1) : at + step;
-    onSelectTask(shownIds[Math.min(Math.max(next, 0), shownIds.length - 1)]!);
+    const walkedIds = shownIds.filter((id) => readIds.includes(id));
+    if (walkedIds.length === 0) return;
+    const at = selectedTaskId === null ? -1 : walkedIds.indexOf(selectedTaskId);
+    const next = at < 0 ? (step === 1 ? 0 : walkedIds.length - 1) : at + step;
+    onSelectTask(walkedIds[Math.min(Math.max(next, 0), walkedIds.length - 1)]!);
   };
 
   /**
@@ -173,27 +227,17 @@ export const useTrackingControls = ({
     const inRow = focused.closest(".tr-run-item")?.getAttribute("data-item-key") === taskId;
     const inPane = focused.closest(".asks-detail") !== null;
     if (!inRow && !inPane) return;
-    const holder = open
-      ? listRef.current?.querySelector<HTMLElement>(".tr-tray.is-open")
-      : listRef.current;
-    holder?.focus({ preventScroll: true });
+    findFocusHolder()?.focus({ preventScroll: true });
   };
 
   const takeOffTask = (taskId: string, status: TakeOffStatus): void => {
     const row = readRows.find((each) => each.task.taskId === taskId);
     if (row === undefined || !canMarkTrackingRowDone(row)) return;
-    const next = pickSelectionAfterMove(shownIds, taskId, [taskId]);
-    heldTracking.registerMarkedDone(taskId);
+    heldTracking.registerTakeOff(taskId);
     moveFocusOffTask(taskId);
-    takeOff.run(
-      { taskId, title: row.task.title, status },
-      () => {
-        if (selectedTaskIdRef.current === taskId) onSelectTask(next);
-      },
-      () => {
-        heldTracking.forgetMarkedDone(taskId);
-      },
-    );
+    takeOff.run({ taskId, title: row.task.title, status }, () => {
+      heldTracking.forgetTakeOff(taskId);
+    });
   };
 
   const handleOpenedKey = (

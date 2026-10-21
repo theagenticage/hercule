@@ -1,6 +1,6 @@
 /**
  * Tests Tracking in Intake: the rows folded under the list and opened over
- * it, the keys that walk and tick them off, the pane a selected row opens, its
+ * it, the keys that walk and take them off, the pane a selected row opens, its
  * answers, and the To do count that takes in the rows that wait on the user.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +24,7 @@ import {
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
+  holdAnswer,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -729,6 +730,106 @@ describe("a row that moves to another state's heading", () => {
   });
 });
 
+describe("a selected row that leaves Tracking", () => {
+  it("moves the selection and the focus on when another client takes the open row off while the pointer holds the rows", async () => {
+    let rows: ReadonlyArray<readonly [Task, RunSummary["status"]]> = ROWS;
+    const { live } = await openIntake("/intake?tracking=true", {
+      extra: storeTracking(ROWS, { readRows: () => rows }),
+    });
+    await live.waitForFirstPushes();
+    // The pointer is on the list column: the sheet keeps the rows it shows.
+    await userEvent.hover(getList());
+    await userEvent.keyboard("jj");
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        within(getPane()!).getByRole("button", { name: "Mark done" }),
+      );
+    });
+
+    rows = ROWS.filter(([task]) => task.id !== FINISHED_TASK.id);
+    act(() => live.pushInvalidation("task"));
+
+    // The pane follows the last read, so it moves to the next row at once. The sheet keeps the
+    // row it draws until the pointer leaves.
+    await waitFor(() => {
+      expect(readSelected()).toEqual([WORKING_TASK.id]);
+    });
+    expect(readRowIds()).toContain(FINISHED_TASK.id);
+    expect(within(getPane()!).getByRole("heading", { level: 2 }).textContent).toBe(
+      WORKING_TASK.title,
+    );
+    expect(document.activeElement).not.toBe(document.body);
+
+    // The keys reach Intake, and K walks past the row that is held but gone from the last read.
+    await userEvent.keyboard("k");
+    expect(readSelected()).toEqual([FAILED_TASK.id]);
+    await userEvent.keyboard("{Escape}");
+    expect(isPaneShown()).toBe(false);
+    await userEvent.keyboard("{Escape}");
+    expect(readSelected()).toEqual([]);
+  });
+
+  it("clears the selection when the last row leaves, and keeps the keys working", async () => {
+    let rows: ReadonlyArray<readonly [Task, RunSummary["status"]]> = [[FAILED_TASK, "failed"]];
+    const { live } = await openIntake("/intake?tracking=true", {
+      extra: storeTracking(rows, { readRows: () => rows }),
+    });
+    await live.waitForFirstPushes();
+    await userEvent.keyboard("j");
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(document.activeElement).toBe(getPane()!.querySelector("article"));
+    });
+
+    rows = [];
+    act(() => live.pushInvalidation("task"));
+    await waitFor(() => {
+      expect(readRowIds()).toEqual([]);
+    });
+    expect(getPane()).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(isOpen()).toBe(false);
+    });
+  });
+
+  it("selects the next row when the push that takes the row off comes before the request's answer", async () => {
+    const taken = new Set<string>();
+    const held = holdAnswer();
+    const { calls, live } = await openIntake("/intake?tracking=true", {
+      extra: {
+        ...storeTracking(ROWS, { readRows: () => ROWS.filter(([task]) => !taken.has(task.id)) }),
+        [`PATCH /api/v1/tasks/${FINISHED_TASK.id}`]: () => {
+          // The controller commits, announces it, and only then answers.
+          taken.add(FINISHED_TASK.id);
+          return held.handler();
+        },
+      },
+    });
+    await live.waitForFirstPushes();
+    await userEvent.click(getRowButton(FINISHED_TASK));
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Mark done" }));
+    await waitFor(() => {
+      expect(findMarkDone(calls)).toHaveLength(1);
+    });
+
+    act(() => live.pushInvalidation("task"));
+    await waitFor(() => {
+      expect(readRowIds()).toEqual([FAILED_TASK.id, WORKING_TASK.id, STOPPED_TASK.id]);
+    });
+    await waitFor(() => {
+      expect(readSelected()).toEqual([WORKING_TASK.id]);
+    });
+
+    held.answer({ body: { ...FINISHED_TASK, status: "done" } });
+    expect((await findToast()).textContent).toBe("Marked done: Rate-limit the public API");
+    expect(readSelected()).toEqual([WORKING_TASK.id]);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+});
+
 describe("a focused control that leaves its row", () => {
   it.each([false, true])(
     "moves the focus to the row's button when a re-run takes away its Mark done (opened: %s)",
@@ -1417,7 +1518,7 @@ describe("marking a row done", () => {
     });
   });
 
-  it("sends two tick-offs side by side, one per Task, and takes both rows off", async () => {
+  it("sends two take-offs side by side, one per Task, and takes both rows off", async () => {
     const releases: Array<() => void> = [];
     const handlers = storeTracking();
     const hold = (task: Task): Handler => {
@@ -1455,7 +1556,7 @@ describe("marking a row done", () => {
     });
   });
 
-  it("does not tick a row off that is Working in the last read, though it is still drawn Finished", async () => {
+  it("does not take a row off that is Working in the last read, though it is still drawn Finished", async () => {
     let status: RunSummary["status"] = "completed";
     const { calls, live } = await openIntake("/intake?tracking=true", {
       extra: storeTracking([[FINISHED_TASK, "completed"]], {
@@ -1729,7 +1830,7 @@ describe("marking a row done", () => {
     });
   });
 
-  it("shows a failed tick-off in the toast's place, and the row stays", async () => {
+  it("shows a failed take-off in the toast's place, and the row stays", async () => {
     await openIntake("/intake?tracking=true", {
       extra: {
         ...storeTracking(),
@@ -2181,6 +2282,27 @@ describe("Tracking's reads", () => {
     expect(findTrackingReads(calls)).toHaveLength(before);
   });
 
+  it("reads no pane's Task while the pane is hidden, whatever rows J walks over", async () => {
+    const { calls, live } = await openIntake("/intake?tracking=true");
+    // The controller's first push on each topic reads everything again, and it is not what this test counts.
+    await live.waitForFirstPushes();
+    const countDetailReads = () =>
+      calls.filter(
+        (call) => call.method === "GET" && /^\/api\/v1\/tasks\/[^/]+\/tracking$/.test(call.path),
+      ).length;
+    await userEvent.click(getRowButton(FAILED_TASK));
+    await waitFor(() => {
+      expect(countDetailReads()).toBe(1);
+    });
+
+    await userEvent.keyboard("{Escape}");
+    expect(isPaneShown()).toBe(false);
+    await userEvent.keyboard("jjj");
+    expect(readSelected()).toEqual([STOPPED_TASK.id]);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(countDetailReads()).toBe(1);
+  });
+
   it("reads a pane's Task and handoff signal once when it opens, and again only for a push that can change it", async () => {
     const { calls, live } = await openIntake("/intake?tracking=true");
     await live.waitForFirstPushes();
@@ -2218,6 +2340,12 @@ describe("Tracking's reads", () => {
     });
     await settle();
     expect([countDetailReads(WORKING_TASK), countSignalReads(WORKING_TASK)]).toEqual([2, 1]);
+
+    // A push that names another Task's run reads this pane's detail no more.
+    act(() => live.pushInvalidation("run", [getRunId(FINISHED_TASK)]));
+    await settle();
+    expect(countDetailReads(WORKING_TASK)).toBe(2);
+    expect(countDetailReads(FINISHED_TASK)).toBe(1);
 
     // A push for a run no row holds reads nothing.
     const callsBefore = calls.length;

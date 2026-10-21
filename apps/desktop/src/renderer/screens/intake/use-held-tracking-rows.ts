@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import { hashKey, useQueryClient } from "@tanstack/react-query";
 import {
   dropTrackingHandoff,
-  dropTrackingRowMarkedDone,
+  dropTrackingRowTakenOff,
   followTrackingRead,
   isTrackingHandoffAcknowledged,
   queryKeys,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
-  recordTrackingRowMarkedDone,
+  recordTrackingRowTakenOff,
   startHeldTrackingRows,
   updateTrackingRowsHolding,
   type TrackingRead,
@@ -19,10 +19,10 @@ import {
 export interface HeldTrackingRowsState {
   /** The rows Tracking shows, in Tracking's order: the last read, less the changes held back. */
   readonly shown: ReadonlyArray<TrackingRow>;
-  /** Records that the user is marking the Task `taskId` done. Call it when the action starts. */
-  readonly registerMarkedDone: (taskId: string) => void;
-  /** Forgets that the user is marking `taskId` done, because the action failed. */
-  readonly forgetMarkedDone: (taskId: string) => void;
+  /** Records that the user is taking the Task `taskId` off Tracking. Call it when the action starts. */
+  readonly registerTakeOff: (taskId: string) => void;
+  /** Forgets that the user is taking `taskId` off Tracking, because the action failed. */
+  readonly forgetTakeOff: (taskId: string) => void;
   /** Records that the user is handing the signal `signalId` off. Call it when the handoff starts. */
   readonly registerHandoff: (signalId: string) => void;
   /** Forgets the handoff of `signalId`, because it failed. */
@@ -83,11 +83,11 @@ export const useHeldTrackingRows = (
   }, [queryClient]);
   return {
     shown: next.shown,
-    registerMarkedDone: (taskId) => {
-      setHeld((current) => recordTrackingRowMarkedDone(current, taskId));
+    registerTakeOff: (taskId) => {
+      setHeld((current) => recordTrackingRowTakenOff(current, taskId));
     },
-    forgetMarkedDone: (taskId) => {
-      setHeld((current) => dropTrackingRowMarkedDone(current, taskId));
+    forgetTakeOff: (taskId) => {
+      setHeld((current) => dropTrackingRowTakenOff(current, taskId));
     },
     registerHandoff: (signalId) => {
       setHeld((current) => recordTrackingHandoff(current, signalId));
