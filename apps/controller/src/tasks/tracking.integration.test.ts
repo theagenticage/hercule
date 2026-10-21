@@ -162,7 +162,8 @@ describe("task.queryTracking", () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const taskId = await insertTrackedTask(harness, "Retry failed webhooks");
-      for (let n = 1; n <= 30; n++) {
+      const first = await insertRun(harness, taskId, { at: minute(1), ending: COMPLETED });
+      for (let n = 2; n <= 30; n++) {
         await insertRun(harness, taskId, { at: minute(n), ending: COMPLETED });
       }
       const live = await insertRun(harness, taskId, { at: minute(40) });
@@ -178,7 +179,7 @@ describe("task.queryTracking", () => {
       expect(rows[0]).toMatchObject({
         taskId,
         title: "Retry failed webhooks",
-        handoffs: [{ signalId: SIGNAL, runId: expect.any(String), at: AT }],
+        handoffs: [{ signalId: SIGNAL, runId: first, at: AT }],
         latestRun: {
           id: failed,
           workflowName: "Implement",
