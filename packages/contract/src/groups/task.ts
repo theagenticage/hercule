@@ -348,6 +348,15 @@ export const TrackingTask = Schema.Struct({
   latestRun: TrackingRun,
   /** The Task's newest run that is pending or running, when one is. */
   latestLiveRun: Schema.optionalKey(TrackingRun),
+  /**
+   * The ids of every run of the Task that is pending or running, newest first,
+   * so the first is `latestLiveRun`'s. Empty when no run is live. A Task can
+   * have more than one live run: a second handoff on the same Task starts a
+   * new run while the first still goes on. A client that asks whether any
+   * live run of the Task is waiting on the user, for example through an open
+   * Request of its session, looks for the run among these ids.
+   */
+  liveRunIds: Schema.Array(Id),
 });
 
 export type TrackingTask = Schema.Schema.Type<typeof TrackingTask>;

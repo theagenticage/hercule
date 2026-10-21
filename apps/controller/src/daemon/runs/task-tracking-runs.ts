@@ -1,6 +1,6 @@
 /**
- * Task Tracking Runs: answers, for `task.queryTracking`, the newest run and
- * the newest live run of each tracked Task.
+ * Task Tracking Runs: answers, for `task.queryTracking`, the newest run, the
+ * newest live run and all the live runs of each tracked Task.
  *
  * It lives in the controller daemon because the port belongs to the tasks
  * domain and is answered from the runs repository, and the runs domain
@@ -33,7 +33,9 @@ const buildTrackingRun = (run: RunSummary, failureMessage: string | undefined): 
  * repository. The tasks domain cannot import the runs domain, which depends
  * on it, so the controller daemon connects the two. A failed run's cause is
  * worked out from its own failure message or its failed step's error, in one
- * statement for all the failed runs, so no run is read whole.
+ * statement for all the failed runs, so no run is read whole. The repository
+ * already returns the live runs of all the Tasks in one statement, so the ids
+ * of every live run cost no further read.
  */
 export const TaskTrackingRunsLayer: Layer.Layer<TaskTrackingRuns, never, SqlClient.SqlClient> =
   Layer.effect(TaskTrackingRuns)(
@@ -47,20 +49,23 @@ export const TaskTrackingRunsLayer: Layer.Layer<TaskTrackingRuns, never, SqlClie
           const build = (run: RunSummary): TrackingRun =>
             buildTrackingRun(run, messages.get(run.id));
           // The live runs come newest first, so the first of a Task is its newest.
-          const newestLiveByTask = new Map<string, RunSummary>();
+          const liveByTask = new Map<string, Array<RunSummary>>();
           for (const run of live) {
-            if (run.taskId !== undefined && !newestLiveByTask.has(run.taskId)) {
-              newestLiveByTask.set(run.taskId, run);
-            }
+            if (run.taskId === undefined) continue;
+            const ofTask = liveByTask.get(run.taskId);
+            if (ofTask === undefined) liveByTask.set(run.taskId, [run]);
+            else ofTask.push(run);
           }
           return latest.flatMap((run): ReadonlyArray<TrackedRuns> => {
             if (run.taskId === undefined) return [];
-            const liveRun = newestLiveByTask.get(run.taskId);
+            const liveRuns = liveByTask.get(run.taskId) ?? [];
+            const newestLive = liveRuns[0];
             return [
               {
                 taskId: run.taskId,
                 latestRun: build(run),
-                ...(liveRun === undefined ? {} : { latestLiveRun: build(liveRun) }),
+                ...(newestLive === undefined ? {} : { latestLiveRun: build(newestLive) }),
+                liveRunIds: liveRuns.map((liveRun) => liveRun.id),
               },
             ];
           });
