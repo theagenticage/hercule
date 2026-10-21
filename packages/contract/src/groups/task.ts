@@ -369,14 +369,17 @@ export type TaskTracking = Schema.Schema.Type<typeof TaskTracking>;
 /** The most runs `task.readTracking` lists: the Task's newest ones. */
 export const MAX_TRACKING_DETAIL_RUNS = 20;
 
-/** The most characters of a text output. A longer text is cut and ends with "…". */
+/** The most characters of a text output. A longer text is cut to this many, "…" included. */
 export const MAX_TRACKING_OUTPUT_TEXT = 1000;
 
 /** The most fields of a fields output. The schema's later properties are left out. */
 export const MAX_TRACKING_OUTPUT_FIELDS = 12;
 
-/** The most characters of one string value of a fields output. A longer one is cut and ends with "…". */
+/** The most characters of one string value of a fields output. A longer one is cut to this many, "…" included. */
 export const MAX_TRACKING_OUTPUT_VALUE = 300;
+
+/** The most characters of the label of a field. A longer label is cut to this many, "…" included. */
+export const MAX_TRACKING_OUTPUT_LABEL = 80;
 
 /**
  * One run of a Task as the Tracking pane lists it: the facts of a Tracking
@@ -410,8 +413,11 @@ export type TrackingOutputValue = Schema.Schema.Type<typeof TrackingOutputValue>
 
 /** One top-level field of a structured output, with the label a person reads. */
 export const TrackingOutputField = Schema.Struct({
-  /** The `title` of the field's property in the step's output schema, else the property's name. */
-  label: Schema.String,
+  /**
+   * The `title` of the field's property in the step's output schema, else the
+   * property's name, at most `MAX_TRACKING_OUTPUT_LABEL` characters.
+   */
+  label: bounded(0, MAX_TRACKING_OUTPUT_LABEL),
   value: TrackingOutputValue,
 });
 

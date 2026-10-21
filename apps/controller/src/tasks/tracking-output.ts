@@ -11,6 +11,7 @@
 import type * as Schema from "effect/Schema";
 import {
   MAX_TRACKING_OUTPUT_FIELDS,
+  MAX_TRACKING_OUTPUT_LABEL,
   MAX_TRACKING_OUTPUT_TEXT,
   MAX_TRACKING_OUTPUT_VALUE,
   type TrackingOutput,
@@ -37,16 +38,18 @@ const isJsonObject = (value: Schema.Json | undefined): value is { [name: string]
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
- * Cuts `text` to at most `limit` characters and ends it with "…". Returns
- * `text` unchanged when it fits.
+ * Returns `text` unchanged when it has at most `limit` characters. Otherwise
+ * returns a cut of it that ends with "…" and has at most `limit` characters,
+ * the "…" included, so a contract that bounds the field by `limit` accepts
+ * it. Characters are counted as the string's `length` counts them.
  *
  * The cut falls at the last paragraph break within the limit, else the last
- * line break, else the last space, else at the limit. Ending on a break keeps
- * a sentence or a list item from being torn in half. A break only counts in
- * the second half of the limit: a paragraph break at character 5 of 1000
- * would throw away almost the whole text to save one word, so such a text is
- * cut at a later line break or space, or at the limit. The cut never splits a
- * surrogate pair, which would leave half an emoji.
+ * line break, else the last space, else just short of the limit. Ending on a
+ * break keeps a sentence or a list item from being torn in half. A break only
+ * counts in the second half of the limit: a paragraph break at character 5 of
+ * 1000 would throw away almost the whole text to save one word, so such a text
+ * is cut at a later line break or space, or just short of the limit. The cut
+ * never splits a surrogate pair, which would leave half an emoji.
  */
 export const cutText = (text: string, limit: number): string => {
   if (text.length <= limit) return text;
@@ -55,9 +58,11 @@ export const cutText = (text: string, limit: number): string => {
   const breaks = [head.lastIndexOf("\n\n"), head.lastIndexOf("\n"), head.search(/\s\S*$/)];
   const at = breaks.find((index) => index >= earliestBreak);
   if (at !== undefined) return head.slice(0, at).trimEnd() + ELLIPSIS;
-  const lastCode = head.charCodeAt(head.length - 1);
+  // One character is kept free for the ellipsis.
+  const room = head.slice(0, limit - 1);
+  const lastCode = room.charCodeAt(room.length - 1);
   const isHighSurrogate = lastCode >= 0xd800 && lastCode <= 0xdbff;
-  return (isHighSurrogate ? head.slice(0, -1) : head) + ELLIPSIS;
+  return (isHighSurrogate ? room.slice(0, -1) : room) + ELLIPSIS;
 };
 
 /** Shapes one field value: strings are cut, an array or an object is counted. */
@@ -70,16 +75,21 @@ const shapeValue = (value: Schema.Json): TrackingOutputValue => {
 
 /**
  * Returns the label of a field: the `title` of its property in the output
- * schema, else the property's name.
+ * schema, else the property's name, cut to `MAX_TRACKING_OUTPUT_LABEL`
+ * characters. A title is as long as its author wrote it, and a property's
+ * name is whatever key the agent put in its output, so neither is bounded
+ * until it is cut here.
  */
-const readFieldLabel = (
+const buildFieldLabel = (
   properties: { [name: string]: Schema.Json } | undefined,
   name: string,
 ): string => {
   const property = properties?.[name];
-  return isJsonObject(property) && typeof property["title"] === "string" && property["title"] !== ""
-    ? property["title"]
-    : name;
+  const label =
+    isJsonObject(property) && typeof property["title"] === "string" && property["title"] !== ""
+      ? property["title"]
+      : name;
+  return cutText(label, MAX_TRACKING_OUTPUT_LABEL);
 };
 
 /**
@@ -98,7 +108,7 @@ const shapeFields = (
     (name) => Object.hasOwn(output, name),
   );
   return names.slice(0, MAX_TRACKING_OUTPUT_FIELDS).map((name) => ({
-    label: readFieldLabel(properties, name),
+    label: buildFieldLabel(properties, name),
     value: shapeValue(output[name]!),
   }));
 };

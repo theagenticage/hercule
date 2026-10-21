@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_TRACKING_OUTPUT_FIELDS,
+  MAX_TRACKING_OUTPUT_LABEL,
   MAX_TRACKING_OUTPUT_TEXT,
   MAX_TRACKING_OUTPUT_VALUE,
 } from "@hercule/contract";
@@ -65,7 +66,7 @@ describe("shapeTrackingOutput for a step with no output schema", () => {
 
     expect(output).toMatchObject({ kind: "text" });
     const text = (output as { text: string }).text;
-    expect(text.length).toBeLessThanOrEqual(MAX_TRACKING_OUTPUT_TEXT + 1);
+    expect(text.length).toBeLessThanOrEqual(MAX_TRACKING_OUTPUT_TEXT);
     expect(text.endsWith("word…")).toBe(true);
   });
 });
@@ -90,8 +91,22 @@ describe("cutText", () => {
     expect(cutText("alpha beta gamma delta", 14)).toBe("alpha beta…");
   });
 
-  it("cuts at the limit when there is nothing to break on", () => {
-    expect(cutText("x".repeat(30), 10)).toBe("x".repeat(10) + "…");
+  it("cuts just short of the limit, so the ellipsis fits, when there is nothing to break on", () => {
+    const cut = cutText("x".repeat(30), 10);
+
+    expect(cut).toBe("x".repeat(9) + "…");
+    expect(cut).toHaveLength(10);
+  });
+
+  it.each([
+    ["a text with words", "word ".repeat(100)],
+    ["a text with lines", "line\n".repeat(100)],
+    ["a text with nothing to break on", "x".repeat(500)],
+    ["a text of emoji", "😀".repeat(200)],
+  ])("never returns more than the limit, for %s", (_, text) => {
+    for (const limit of [1, 2, 3, 10, 49, 50, 51, 80]) {
+      expect(cutText(text, limit).length).toBeLessThanOrEqual(limit);
+    }
   });
 
   it("accepts a break exactly at half the limit", () => {
@@ -107,7 +122,7 @@ describe("cutText", () => {
   });
 
   it("cuts at the limit when every break is in the first half", () => {
-    expect(cutText("ab\n\nc defghijklmnopqrstuvwxyz", 12)).toBe("ab\n\nc defghi…");
+    expect(cutText("ab\n\nc defghijklmnopqrstuvwxyz", 12)).toBe("ab\n\nc defgh…");
   });
 
   it("does not split a surrogate pair", () => {
@@ -116,8 +131,11 @@ describe("cutText", () => {
     expect(cut).toBe("a😀…");
   });
 
+  it("drops a high surrogate that the cut would leave at its end", () => {
+    expect(cutText("a" + "😀".repeat(10), 3)).toBe("a…");
+  });
   it("ignores a break at the very start", () => {
-    expect(cutText("\nabcdefghijklmnop", 8)).toBe("\nabcdefg…");
+    expect(cutText("\nabcdefghijklmnop", 8)).toBe("\nabcdef…");
   });
 });
 
@@ -187,8 +205,32 @@ describe("shapeTrackingOutput for a step with an output schema", () => {
     );
 
     const value = fields[0]!.value as string;
-    expect(value.length).toBeLessThanOrEqual(MAX_TRACKING_OUTPUT_VALUE + 1);
+    expect(value.length).toBeLessThanOrEqual(MAX_TRACKING_OUTPUT_VALUE);
     expect(value.endsWith("…")).toBe(true);
+  });
+
+  it("cuts a long title, and a long property name when the schema has no properties", () => {
+    const title = "A very long title ".repeat(100);
+    const key = "k".repeat(100_000);
+
+    const titled = readFields(
+      shapeTrackingOutput(buildStep({ verdict: 1 }, { properties: { verdict: { title } } })),
+    );
+    const named = readFields(shapeTrackingOutput(buildStep({ [key]: 1 }, { type: "object" })));
+
+    for (const [{ label }] of [titled, named]) {
+      expect(label.length).toBeLessThanOrEqual(MAX_TRACKING_OUTPUT_LABEL);
+      expect(label.endsWith("…")).toBe(true);
+    }
+    expect(titled[0]!.label.startsWith("A very long title")).toBe(true);
+  });
+
+  it("keeps a label that fits", () => {
+    const label = "x".repeat(MAX_TRACKING_OUTPUT_LABEL);
+
+    const fields = readFields(shapeTrackingOutput(buildStep({ [label]: 1 }, { type: "object" })));
+
+    expect(fields[0]!.label).toBe(label);
   });
 
   it("lists at most the field limit, from the schema's first properties", () => {
