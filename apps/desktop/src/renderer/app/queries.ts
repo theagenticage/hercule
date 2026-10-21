@@ -675,15 +675,19 @@ export const trackingQuery = (client: HerculeClient) =>
  *   from a write to its cached list. `startYourWorkRefresh` sees both. A
  *   signal that arrives or goes without changing the refs costs no request.
  *
- * It reads To do first, so it reads for the newest signals, and it records
- * the refs it read for. `startYourWorkRefresh` compares those refs with the
- * ones To do has when the read settles.
+ * It reads for the To do list the cache holds when it starts, and records the
+ * refs it read for. It never waits for a read of To do that is under way: a
+ * refresh would give it other refs than the ones `startYourWorkRefresh` sees
+ * at the start, and a failed read could then go unrepeated. When that
+ * refresh lands, `startYourWorkRefresh` compares the refs of To do with the
+ * ones the read was made for. Only a cold start, with no To do list cached,
+ * reads To do here.
  */
 export const yourWorkQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.yourWork(),
     queryFn: async ({ client: queryClient }): Promise<YourWorkRead> => {
-      const refs = listYourWorkRefs(await queryClient.fetchQuery(signalsToDoQuery(client)));
+      const refs = listYourWorkRefs(await queryClient.ensureQueryData(signalsToDoQuery(client)));
       const batches = await Promise.all(
         batchYourWorkRefs(refs).map((batch) =>
           readEveryPage((page) =>

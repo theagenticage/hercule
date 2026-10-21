@@ -8,7 +8,12 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { queryKeys, type HerculeClient, type YourWorkRead } from "@hercule/client-core";
+import {
+  invalidateWithoutCancelling,
+  queryKeys,
+  type HerculeClient,
+  type YourWorkRead,
+} from "@hercule/client-core";
 import type { Signal } from "@hercule/contract";
 import { signalsToDoQuery, yourWorkQuery } from "./queries";
 import { startYourWorkRefresh } from "./your-work-refresh";
@@ -55,10 +60,17 @@ const buildShell = (initialSignals: ReadonlyArray<Signal>) => {
   }> = [];
   let readsRunning = 0;
   let mostReadsRunning = 0;
+  let holdToDoRead: ((items: ReadonlyArray<Signal>) => void) | undefined;
+  let holdingToDoReads = false;
   const client = {
     signal: {
-      query: ({ query }: { query: { view: string } }) =>
-        Promise.resolve({ items: query.view === "later" ? [] : signals }),
+      query: ({ query }: { query: { view: string } }) => {
+        if (query.view === "later") return Promise.resolve({ items: [] });
+        if (!holdingToDoReads) return Promise.resolve({ items: signals });
+        return new Promise((resolve) => {
+          holdToDoRead = (items) => resolve({ items });
+        });
+      },
     },
     task: {
       query: ({ query }: { query: { refs: ReadonlyArray<string> } }) =>
@@ -97,6 +109,25 @@ const buildShell = (initialSignals: ReadonlyArray<Signal>) => {
     pushSignals: async (next: ReadonlyArray<Signal>) => {
       signals = next;
       await queryClient.fetchQuery({ ...toDo, staleTime: 0 });
+    },
+    /**
+     * Marks To do outdated, as a push on the `signal` topic does, and holds
+     * the read that follows until the test calls the returned function with
+     * the list the controller answers.
+     */
+    startHeldToDoRead: async (): Promise<(items: ReadonlyArray<Signal>) => Promise<void>> => {
+      holdingToDoReads = true;
+      invalidateWithoutCancelling(queryClient, toDo.queryKey);
+      await vi.waitFor(() => {
+        expect(holdToDoRead).toBeDefined();
+      });
+      holdingToDoReads = false;
+      return async (items) => {
+        holdToDoRead!(items);
+        await vi.waitFor(() => {
+          expect(queryClient.isFetching({ queryKey: toDo.queryKey })).toBe(0);
+        });
+      };
     },
     /** Answers the oldest Task read that waits, and lets the cache react. */
     answerNextTaskRead: async () => {
@@ -310,6 +341,51 @@ describe("startYourWorkRefresh", () => {
       expect(shell.taskReads).toHaveLength(1);
     });
     expect(shell.taskReads[0]!.refs).toHaveLength(2);
+  });
+
+  it("reads for the To do list it finds cached, not for one that a read of To do is still fetching", async () => {
+    const shell = buildShell([buildSignal(1)]);
+    cleanups.push(startYourWorkRefresh(shell.queryClient));
+    shell.observe();
+    await vi.waitFor(() => {
+      expect(shell.taskReads).toHaveLength(1);
+    });
+
+    // To do moves on while the first read runs, and another read of To do is on its way.
+    shell.queryClient.setQueryData(shell.toDoOptions.queryKey, [buildSignal(3)]);
+    const answerToDoRead = await shell.startHeldToDoRead();
+    shell.taskReads.shift()!.answer();
+
+    // The next read of Your work does not wait for that read of To do or take its refs. The
+    // refs it asks for must be the ones the refresh compares against when it fails.
+    await vi.waitFor(() => {
+      expect(shell.taskReads).toHaveLength(1);
+    });
+    expect(shell.taskReads[0]!.refs).toEqual(["github:pr:acme/shop#3"]);
+
+    // The read of To do lands later, and its refs are caught once Your work is idle.
+    await answerToDoRead([buildSignal(4)]);
+    await shell.answerNextTaskRead();
+    expect(shell.readYourWork()?.refs).toEqual(["github:pr:acme/shop#3"]);
+    await vi.waitFor(() => {
+      expect(shell.taskReads).toHaveLength(1);
+    });
+    expect(shell.taskReads[0]!.refs).toEqual(["github:pr:acme/shop#4"]);
+    expect(shell.mostReadsRunning()).toBe(1);
+  });
+
+  it("reads To do itself when none is cached yet", async () => {
+    const shell = buildShell([buildSignal(1), buildSignal(2)]);
+    cleanups.push(startYourWorkRefresh(shell.queryClient));
+    // Only Your work is observed: nothing else reads To do.
+    cleanups.push(
+      new QueryObserver(shell.queryClient, yourWorkQuery(shell.client)).subscribe(() => {}),
+    );
+
+    await vi.waitFor(() => {
+      expect(shell.taskReads).toHaveLength(1);
+    });
+    expect(shell.taskReads[0]!.refs).toEqual(["github:pr:acme/shop#1", "github:pr:acme/shop#2"]);
   });
 
   it("stops reading once it is stopped", async () => {
