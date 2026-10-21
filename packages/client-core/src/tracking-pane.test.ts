@@ -100,15 +100,22 @@ const buildSignalRow = (run: TrackingRun, liveRunIds: ReadonlyArray<string> = []
 
 describe("listTrackingAnswers", () => {
   it("offers only Stop the run, never suggested, while a run is going", () => {
-    const stopOnly = [{ kind: "stop-run", suggested: false }];
+    const stopOnly = [{ kind: "stop-run", runId: "run-1", suggested: false }];
     expect(listTrackingAnswers(buildRow(buildRun("running")))).toEqual(stopOnly);
     expect(listTrackingAnswers(buildRow(buildRun("pending")))).toEqual(stopOnly);
     expect(listTrackingAnswers(buildRequestRow(buildRun("running")))).toEqual(stopOnly);
   });
 
-  it("offers Stop the run on a row whose newest run ended but an older run is live", () => {
-    const row = buildSignalRow(buildRun("failed"), ["run-older"]);
-    expect(listTrackingAnswers(row)).toEqual([{ kind: "stop-run", suggested: false }]);
+  it("stops the Task's newest live run, not the row's run, when the row's run failed and an older run is live", () => {
+    const row = buildRow(buildRun("failed"));
+    const older = buildRun("running", { id: "run-older" });
+    const failedWithLiveRun: TrackingRow = {
+      ...row,
+      task: { ...row.task, latestLiveRun: older, liveRunIds: ["run-older"] },
+    };
+    expect(listTrackingAnswers(failedWithLiveRun)).toEqual([
+      { kind: "stop-run", runId: "run-older", suggested: false },
+    ]);
   });
 
   it("suggests Mark done on a Finished row, then Cancel", () => {
@@ -133,13 +140,17 @@ describe("describeTrackingStanding", () => {
   const describe_ = (row: TrackingRow) => describeTrackingStanding(row, TIMEZONE, NOW);
 
   it("says when a Finished or Failed run ended and how long it took", () => {
-    expect(describe_(buildRow(buildRun("completed")))).toBe("Finished at 09:29 after 8m 0s");
-    expect(describe_(buildRow(buildRun("failed")))).toBe("Failed at 09:29 after 8m 0s");
+    expect(describe_(buildRow(buildRun("completed")))).toBe("Finished at 09:29 after 8m");
+    expect(describe_(buildRow(buildRun("failed")))).toBe("Failed at 09:29 after 8m");
   });
 
-  it("drops the seconds from a duration of an hour or more", () => {
-    const long = buildRun("completed", { startedAt: at(0), finishedAt: at(64) });
-    expect(describe_(buildRow(long))).toBe("Finished at 10:04 after 1h 4m");
+  it("reads a duration in whole minutes, seconds only under a minute, and hours with the minutes left", () => {
+    const took = (startedAt: string, finishedAt: string) =>
+      describe_(buildRow(buildRun("completed", { startedAt, finishedAt })));
+    expect(took(at(0), at(64))).toBe("Finished at 10:04 after 1h 4m");
+    expect(took(at(0), at(120))).toBe("Finished at 11:00 after 2h");
+    expect(took(at(0), at(8.5))).toBe("Finished at 09:08 after 8m");
+    expect(took(at(0), at(2 / 3))).toBe("Finished at 09:00 after 40s");
   });
 
   it("leaves the duration out of a run that never started", () => {

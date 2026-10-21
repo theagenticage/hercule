@@ -5,31 +5,29 @@
  */
 import type { TrackingRun } from "@hercule/contract";
 import { formatAge } from "./threads/age";
-import { formatDuration } from "./threads/duration";
 import { formatMessageTime } from "./threads/message-time";
 import { canMarkTrackingRowDone, nameTrackingState, type TrackingRow } from "./tracking";
 
 /**
  * One answer the pane offers.
  *
- * - `stop-run`: cancels the run that is going.
+ * - `stop-run`: cancels the run `runId`, the Task's newest live run.
  * - `mark-done`: takes the row off Tracking and sets its Task `done`.
  * - `cancel`: takes the row off Tracking and sets its Task `cancelled`.
  *
  * `suggested` marks the answer that `↩` presses. At most one answer of a row
- * is suggested.
+ * is suggested, and Stop the run never is.
  */
-export interface TrackingAnswer {
-  readonly kind: "stop-run" | "mark-done" | "cancel";
-  readonly suggested: boolean;
-}
+export type TrackingAnswer =
+  | { readonly kind: "stop-run"; readonly runId: string; readonly suggested: false }
+  | { readonly kind: "mark-done" | "cancel"; readonly suggested: boolean };
 
 /**
  * Returns the answers the pane offers for `row`, in the order it draws them.
  *
  * - A row that cannot be marked done (see `canMarkTrackingRowDone`) has a run
- *   that is going, so its only answer is to stop that run. Stop is never
- *   suggested, so `↩` cannot stop a run by accident.
+ *   that is going, so its only answer is to stop the Task's newest live run.
+ *   Stop is never suggested, so `↩` cannot stop a run by accident.
  * - Any other row can be marked done or cancelled. Mark done is suggested on a
  *   Finished row only: a Failed, Stopped or waiting-on-a-signal row asks the
  *   user to decide, so nothing is suggested.
@@ -37,7 +35,13 @@ export interface TrackingAnswer {
  * Trying a failed run again is not an answer yet.
  */
 export const listTrackingAnswers = (row: TrackingRow): ReadonlyArray<TrackingAnswer> => {
-  if (!canMarkTrackingRowDone(row)) return [{ kind: "stop-run", suggested: false }];
+  if (!canMarkTrackingRowDone(row)) {
+    // A row that cannot be marked done has a live run, so `latestLiveRun` is set. The row's own
+    // run is a fallback that does not occur: it may have ended while an older run goes on.
+    return [
+      { kind: "stop-run", runId: row.task.latestLiveRun?.id ?? row.run.id, suggested: false },
+    ];
+  }
   return [
     { kind: "mark-done", suggested: row.state === "finished" },
     { kind: "cancel", suggested: false },
@@ -45,12 +49,18 @@ export const listTrackingAnswers = (row: TrackingRow): ReadonlyArray<TrackingAns
 };
 
 /**
- * Returns the time of `instant` as a person reads it ("09:20", or "4 Sep 09:20"
- * on another day), or `undefined` when the time cannot be formatted, so the
- * caller leaves the time out rather than show a wrong one.
+ * Returns how long a run took as the head line reads it: "40s" under a minute,
+ * then whole minutes, "8m", and from an hour on "1h 4m" or "1h" on the hour.
  */
-const formatMoment = (instant: string, timezone: string, now: Date): string | undefined =>
-  formatMessageTime(new Date(instant), timezone, now);
+const formatTookTime = (ms: number): string => {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return `${String(Math.max(0, Math.floor(ms / 1000)))}s`;
+  if (minutes < 60) return `${String(minutes)}m`;
+  const rest = minutes % 60;
+  return rest === 0
+    ? `${String(minutes / 60)}h`
+    : `${String(Math.floor(minutes / 60))}h ${String(rest)}m`;
+};
 
 /** Returns when a run ended, or for a run that has not ended, when it was created. */
 const readRunEnd = (run: TrackingRun): string => run.finishedAt ?? run.createdAt;
@@ -93,27 +103,27 @@ const nameRunEnding = (run: TrackingRun): "finished" | "failed" | "stopped" | un
  */
 export const describeTrackingStanding = (row: TrackingRow, timezone: string, now: Date): string => {
   if (row.state === "needs-you") {
-    const since = formatMoment(row.since, timezone, now);
+    const since = formatMessageTime(new Date(row.since), timezone, now);
     return since === undefined ? "Waiting on you" : `Waiting on you since ${since}`;
   }
   const { run } = row;
   if (row.state === "working") {
     const start = readRunStart(run);
-    const started = formatMoment(start, timezone, now);
+    const started = formatMessageTime(new Date(start), timezone, now);
     const age = formatAge(start, now);
     const sinceStart = age === "now" ? "just now" : `${age} so far`;
     return started === undefined
       ? `Started · ${sinceStart}`
       : `Started at ${started} · ${sinceStart}`;
   }
-  const ended = formatMoment(readRunEnd(run), timezone, now);
+  const ended = formatMessageTime(new Date(readRunEnd(run)), timezone, now);
   const word = nameTrackingState(row.state);
   const when = ended === undefined ? word : `${word} at ${ended}`;
   const tookMs =
     row.state === "stopped" || run.startedAt === undefined || run.finishedAt === undefined
       ? undefined
       : Date.parse(run.finishedAt) - Date.parse(run.startedAt);
-  return tookMs === undefined ? when : `${when} after ${formatDuration(tookMs)}`;
+  return tookMs === undefined ? when : `${when} after ${formatTookTime(tookMs)}`;
 };
 
 /**
@@ -153,11 +163,11 @@ export const describeTrackingRunLine = (run: TrackingRun): string => {
  */
 export const describeTrackingStamp = (row: TrackingRow, timezone: string, now: Date): string => {
   if (row.state === "needs-you" && row.waitsOn.kind === "request") {
-    const since = formatMoment(row.since, timezone, now);
+    const since = formatMessageTime(new Date(row.since), timezone, now);
     return since === undefined ? "waiting on you" : `waiting on you since ${since}`;
   }
   const ending = nameRunEnding(row.run);
   if (ending === undefined) return "working";
-  const ended = formatMoment(readRunEnd(row.run), timezone, now);
+  const ended = formatMessageTime(new Date(readRunEnd(row.run)), timezone, now);
   return ended === undefined ? ending : `${ending} ${ended}`;
 };
