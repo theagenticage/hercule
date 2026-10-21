@@ -427,7 +427,6 @@ describe("task.readTracking", () => {
 
       const detail = await readDetail(harness.base, token, taskId);
 
-      expect(detail.taskId).toBe(taskId);
       expect(detail.firstHandoff).toEqual({
         signalId: SIGNAL,
         runId: "0199e0e7-0006-7000-8000-000000000001",

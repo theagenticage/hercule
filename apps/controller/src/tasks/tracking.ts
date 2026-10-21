@@ -166,7 +166,6 @@ const make = Effect.gen(function* () {
         const output =
           history.agentStep === undefined ? undefined : shapeTrackingOutput(history.agentStep);
         return {
-          taskId,
           firstHandoff,
           runs: history.runs,
           ...(output === undefined ? {} : { output }),

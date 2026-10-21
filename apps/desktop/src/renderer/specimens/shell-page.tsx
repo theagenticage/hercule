@@ -238,10 +238,10 @@ export interface SidebarRecords {
    */
   readonly tracking?: ReadonlyArray<TrackingTask>;
   /**
-   * What `task.readTracking` returns for each Task whose pane a scene opens.
-   * None when left out.
+   * What `task.readTracking` returns for each Task whose pane a scene opens,
+   * by the Task's id. None when left out.
    */
-  readonly trackingDetails?: ReadonlyArray<TrackingDetail>;
+  readonly trackingDetails?: ReadonlyMap<string, TrackingDetail>;
   /**
    * The signals handed to the Tasks of `tracking`, as `signal.read` returns
    * them, which each Tracking pane reads under "You asked". None when left out.
@@ -600,8 +600,8 @@ const seedQueryCache = (
     tasks: records.tracking ?? [],
     readStartedAt: 0,
   });
-  for (const detail of records.trackingDetails ?? []) {
-    queryClient.setQueryData(trackingDetailQuery(client, detail.taskId).queryKey, detail);
+  for (const [taskId, detail] of records.trackingDetails ?? []) {
+    queryClient.setQueryData(trackingDetailQuery(client, taskId).queryKey, detail);
   }
   for (const signal of records.handedSignals ?? []) {
     queryClient.setQueryData(signalQuery(client, signal.id).queryKey, signal);

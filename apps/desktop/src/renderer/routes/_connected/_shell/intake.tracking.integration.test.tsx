@@ -244,7 +244,6 @@ const buildTrackingDetail = (
   run: RunSummary,
   extra: Partial<Pick<TrackingDetail, "output" | "endingActionStepName" | "runs">> = {},
 ): TrackingDetail => ({
-  taskId: task.id,
   firstHandoff: buildTrackingTask(task, run).handoffs[0]!,
   runs: [{ ...buildTrackingRun(run), sessionId: getSessionId(task) }],
   ...extra,

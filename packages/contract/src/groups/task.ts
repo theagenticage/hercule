@@ -445,7 +445,6 @@ export type TrackingOutput = Schema.Schema.Type<typeof TrackingOutput>;
 
 /** What `task.readTracking` returns: what the Tracking pane of one Task draws. */
 export const TrackingDetail = Schema.Struct({
-  taskId: Id,
   /** The Task's oldest handoff: the signal the user first handed to an agent. */
   firstHandoff: TrackingHandoff,
   /** The Task's newest runs, at most `MAX_TRACKING_DETAIL_RUNS`, oldest first. */

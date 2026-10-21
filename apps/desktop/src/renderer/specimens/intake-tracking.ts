@@ -264,27 +264,31 @@ const buildTextOutput = (
 ): TrackingOutput => ({ kind: "text", stepName, sessionId, text: paragraphs.join("\n\n") });
 
 /**
- * Builds what `task.readTracking` returns for `task`, which has one run. The
- * run's last agent step ran in the session `sessionId`.
+ * Builds what `task.readTracking` returns for `task`, which has one run, with
+ * the Task's id, which the read is keyed by. The run's last agent step ran in
+ * the session `sessionId`.
  */
 const buildDetail = (
   task: TrackingTask,
   sessionId: string,
   rest: Pick<TrackingDetail, "output" | "endingActionStepName"> = {},
-): TrackingDetail => ({
-  taskId: task.taskId,
-  firstHandoff: task.handoffs[task.handoffs.length - 1]!,
-  runs: [{ ...task.latestRun, sessionId }],
-  ...rest,
-});
+): readonly [string, TrackingDetail] => [
+  task.taskId,
+  {
+    firstHandoff: task.handoffs[task.handoffs.length - 1]!,
+    runs: [{ ...task.latestRun, sessionId }],
+    ...rest,
+  },
+];
 
 /** Builds the session id of the run of the task numbered `number`, as the pane's "Thread" link names it. */
 const buildSessionId = (number: number): string =>
   `01a0ec64-7a00-7000-8000-${String(number + 300).padStart(12, "0")}`;
 
 /**
- * What `task.readTracking` returns for each tracked Task the drawing opens a
- * pane for, with the text of the drawing (docs/design/tracking). Where the
+ * What `task.readTracking` returns, by the Task's id, for each tracked Task
+ * the drawing opens a pane for, with the text of the drawing
+ * (docs/design/tracking). Where the
  * drawing's wording needs more than the read holds, the read holds less:
  *
  * - The drawing does not name the step a text output comes from, except for
@@ -293,7 +297,7 @@ const buildSessionId = (number: number): string =>
  *   drawing adds what it did, "Opened draft PR #1302", which no record holds.
  * - A Working run has no output: the pane does not draw one.
  */
-export const TRACKING_DETAILS: ReadonlyArray<TrackingDetail> = [
+export const TRACKING_DETAILS: ReadonlyMap<string, TrackingDetail> = new Map([
   buildDetail(RATE_LIMIT, buildSessionId(2), {
     output: {
       kind: "fields",
@@ -334,7 +338,7 @@ export const TRACKING_DETAILS: ReadonlyArray<TrackingDetail> = [
       "Swapped the renderer in `invoices/pdf.ts`. Two invoice snapshots differ in the footer's line height.",
     ]),
   }),
-];
+]);
 
 /**
  * Builds the signal that was handed to the Task `task`, which the pane's

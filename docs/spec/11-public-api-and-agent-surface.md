@@ -197,7 +197,6 @@ interface TrackingRun {
 
 ```ts
 interface TrackingDetail {
-  taskId: string
   firstHandoff: { signalId: string; runId: string; at: string }   // the Task's oldest handoff: the signal "You asked" shows
   runs: TrackingDetailRun[]                                       // the Task's newest runs, at most 20, oldest first
   output?: TrackingOutput                                         // what the newest run's last completed agent step produced
