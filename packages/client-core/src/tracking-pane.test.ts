@@ -163,21 +163,29 @@ describe("listTrackingAnswers", () => {
     expect(stopOf(buildRequestRow(newest, true))).toBe(false);
   });
 
-  it("suggests Mark done on a Finished row, then Cancel", () => {
-    expect(listTrackingAnswers(buildRow(buildRun("completed")))).toEqual([
-      { kind: "mark-done", suggested: true },
-      { kind: "cancel", suggested: false },
+  it("offers Try again, Mark done and Cancel in the order of the state, suggesting one on Finished and Failed rows only", () => {
+    const orderOf = (row: TrackingRow) =>
+      listTrackingAnswers(row).map(({ kind, suggested }) => (suggested ? `${kind}*` : kind));
+    expect(orderOf(buildRow(buildRun("completed")))).toEqual(["mark-done*", "try-again", "cancel"]);
+    expect(orderOf(buildRow(buildRun("failed")))).toEqual(["try-again*", "mark-done", "cancel"]);
+    expect(orderOf(buildRow(buildRun("cancelled")))).toEqual(["try-again", "mark-done", "cancel"]);
+    expect(orderOf(buildSignalRow(buildRun("completed")))).toEqual([
+      "try-again",
+      "mark-done",
+      "cancel",
     ]);
   });
 
-  it("suggests nothing on a Failed, Stopped or waiting-on-a-signal row, which can still be marked done or cancelled", () => {
-    const unsuggested = [
-      { kind: "mark-done", suggested: false },
-      { kind: "cancel", suggested: false },
-    ];
-    expect(listTrackingAnswers(buildRow(buildRun("failed")))).toEqual(unsuggested);
-    expect(listTrackingAnswers(buildRow(buildRun("cancelled")))).toEqual(unsuggested);
-    expect(listTrackingAnswers(buildSignalRow(buildRun("completed")))).toEqual(unsuggested);
+  it("re-runs the Task's newest run, even when the row names an older run", () => {
+    const older = buildRun("failed", { id: "run-1" });
+    const newest = buildRun("completed", { id: "run-2" });
+    const row: TrackingRow = {
+      task: buildTask(newest, []),
+      run: older,
+      state: "failed",
+      since: at(29),
+    };
+    expect(listTrackingAnswers(row)[0]).toMatchObject({ kind: "try-again", run: { id: "run-2" } });
   });
 });
 
