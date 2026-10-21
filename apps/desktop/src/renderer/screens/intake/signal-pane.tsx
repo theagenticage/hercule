@@ -244,7 +244,7 @@ function SignalDetail({
       return;
     }
     const button = rootRef.current?.querySelector<HTMLElement>(
-      `[data-action-id="${CSS.escape(suggested.action.id)}"]`,
+      `[data-answer="${CSS.escape(suggested.action.id)}"]`,
     );
     button?.focus();
     button?.scrollIntoView({ block: "nearest" });

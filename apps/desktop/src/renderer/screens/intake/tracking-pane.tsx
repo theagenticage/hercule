@@ -25,6 +25,7 @@ import { useClockValue } from "../../app/age-clock";
 import { useTrackingRows } from "../../app/tracking";
 import { buildLook, Face } from "../../faces";
 import { ExternalIcon } from "../../icons/external";
+import { LedgerAnswer } from "./ledger-answer";
 import { TrackingTrip } from "./tracking-trip";
 import type { TakeOffStatus } from "./use-take-off-tracking";
 import "./tracking.css";
@@ -261,8 +262,8 @@ function TrackingRowDetail({
 }
 
 /**
- * Renders one answer as a ledger row, as the signal pane draws its answers:
- * the button, what pressing it does, and the key that presses it. `error`
+ * Renders one answer as a ledger row, as the signal pane draws its answers.
+ * The key beside it is ↩ for the suggested answer and E for Mark done. `error`
  * shows under the button when the answer failed. While `locked`, the answer
  * keeps its place and its focus, and does nothing.
  */
@@ -281,46 +282,22 @@ function AnswerRow({
   readonly idPrefix: string;
   readonly onPress: (answer: TrackingAnswer) => void;
 }): JSX.Element {
-  const describeId = `${idPrefix}-${answer.kind}-describe`;
-  const errorId = `${idPrefix}-${answer.kind}-error`;
-  const label = ANSWER_LABELS[answer.kind];
-  const buttonClass = answer.suggested
-    ? "btn btn--accent"
-    : answer.kind === "cancel"
-      ? "btn btn--quiet"
-      : "btn";
   return (
-    <>
-      <button
-        type="button"
-        className="ans"
-        data-answer={answer.kind}
-        aria-label={label}
-        aria-describedby={error === null ? describeId : `${describeId} ${errorId}`}
-        aria-disabled={locked || undefined}
-        onClick={() => {
-          if (!locked) onPress(answer);
-        }}
-      >
-        <span className={buttonClass}>
-          <span className="ans-label">{label}</span>
-        </span>
-        <span className="ans-desc" id={describeId}>
-          {describeAnswer(answer, workflowName)}
-        </span>
-        {/* The key that presses the answer from the pane: ↩ for the suggested answer, E for Mark done. */}
-        {answer.suggested ? (
-          <kbd aria-hidden="true">↩</kbd>
-        ) : answer.kind === "mark-done" ? (
-          <kbd aria-hidden="true">E</kbd>
-        ) : null}
-      </button>
-      {error !== null && (
-        <p className="ad-err" id={errorId} role="alert">
-          {error}
-        </p>
-      )}
-    </>
+    <LedgerAnswer
+      answerId={answer.kind}
+      label={ANSWER_LABELS[answer.kind]}
+      buttonClass={
+        answer.suggested ? "btn btn--accent" : answer.kind === "cancel" ? "btn btn--quiet" : "btn"
+      }
+      describe={describeAnswer(answer, workflowName)}
+      shortcut={answer.suggested ? "↩" : answer.kind === "mark-done" ? "E" : null}
+      error={error}
+      locked={locked}
+      idPrefix={idPrefix}
+      onPress={() => {
+        onPress(answer);
+      }}
+    />
   );
 }
 
