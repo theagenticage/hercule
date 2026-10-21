@@ -105,6 +105,7 @@ const COMMANDS: Record<string, string> = {
   "permission.request": "permission request",
   "notification.act": "notification act",
   "signal.query": "signal list",
+  "signal.queryYourWork": "signal your-work",
   "signal.read": "signal read",
   "signal.raise": "signal raise",
   "signal.act": "signal act",

@@ -58,7 +58,7 @@ import {
   refuseAmbiguousActions,
   ResolutionOrigin,
 } from "./notification";
-import { TaskCreateInput, TaskPriority } from "./task";
+import { TaskCreateInput, TaskPriority, TaskStatus } from "./task";
 
 /**
  * Re-exported from the package plugins are written against, so a plugin cuts
@@ -607,6 +607,33 @@ export const SignalLowerPriorityResult = Schema.Struct({
 export type SignalLowerPriorityResult = Schema.Schema.Type<typeof SignalLowerPriorityResult>;
 
 /**
+ * One Task of Your work: an open Task that belongs to at least one signal on
+ * To do. `signalIds` holds the ids of those signals, so a client can tell
+ * which rows of To do the Task covers.
+ */
+export const YourWorkTask = Schema.Struct({
+  id: Id,
+  title: Schema.String,
+  status: TaskStatus,
+  updatedAt: Timestamp,
+  signalIds: Schema.Array(Id),
+});
+
+export type YourWorkTask = Schema.Schema.Type<typeof YourWorkTask>;
+
+/**
+ * What `signal.queryYourWork` returns. Your work is the open Tasks (status
+ * `open` or `in-progress`, not deleted) whose provenance carries the thread
+ * ref of a signal on To do (open, not snoozed). Each Task appears once, with
+ * the ids of the To do signals it belongs to. The Tasks are ordered by
+ * `updatedAt`, newest first, then by id. Your work is worked out on every
+ * read and never stored (spec 10 section 9.5).
+ */
+export const SignalYourWork = Schema.Struct({ tasks: Schema.Array(YourWorkTask) });
+
+export type SignalYourWork = Schema.Schema.Type<typeof SignalYourWork>;
+
+/**
  * The payload of `signal.raise`. The core fills in the origin from the
  * caller, never from the payload. It refuses:
  *
@@ -770,6 +797,12 @@ export const signal = HttpApiGroup.make("signal")
       query: SignalFilter,
       success: SignalPage,
       error: [Unauthenticated, Forbidden, Validation, Internal],
+    }),
+    // A static path beside `/signals/:id`: the router prefers it, and
+    // "your-work" is not an id.
+    HttpApiEndpoint.get("queryYourWork", "/signals/your-work", {
+      success: SignalYourWork,
+      error: [Unauthenticated, Forbidden, Internal],
     }),
     HttpApiEndpoint.get("read", "/signals/:id", {
       params: { id: Id },

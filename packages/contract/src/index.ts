@@ -582,10 +582,12 @@ export {
   SignalUnsnoozeResult,
   SignalView,
   SignalWithdrawInput,
+  SignalYourWork,
   SkippedSignal,
   TextBlock,
   ThreadMessage,
   UnknownBlock,
+  YourWorkTask,
   type CoreSignalKind,
 } from "./groups/signal";
 export {

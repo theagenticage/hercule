@@ -809,6 +809,12 @@ export const CLI = {
       },
     },
   },
+  "signal.queryYourWork": {
+    command: "signal your-work",
+    help: "Lists Your work: the open and in-progress tasks that belong to a signal on your To do list. A task appears once, with the ids of the To do signals it belongs to, newest update first. It is worked out when you ask and never stored. Needs the task read grant as well as the signal read grant.",
+    examples: [{ args: [] }],
+    fields: {},
+  },
   "signal.read": {
     command: "signal read",
     help: "Shows one signal: its blocks, its actions and where it came from.",

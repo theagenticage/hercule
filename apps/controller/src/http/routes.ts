@@ -94,6 +94,8 @@ import {
   SignalRaisesLayer,
   SignalService,
   SignalServiceLayer,
+  YourWork,
+  YourWorkLayer,
 } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
 import { EventKindCatalogLayer, Plugins } from "../plugins";
@@ -294,8 +296,10 @@ const notificationRoutes = HttpApiBuilder.group(api, "notification", (handlers) 
 const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
   Effect.gen(function* () {
     const signals = yield* SignalService;
+    const yourWork = yield* YourWork;
     return handlers
       .handle("query", ({ query }) => withApiErrors(signals.query(query)))
+      .handle("queryYourWork", () => withApiErrors(yourWork.query()))
       .handle("read", ({ params }) => withApiErrors(signals.read(params.id)))
       .handle("raise", ({ payload }) => withApiErrors(signals.raise(payload)))
       .handle("act", ({ params, payload }) =>
@@ -904,6 +908,7 @@ const operationServices = Layer.mergeAll(
   // Tracking's read gets each Task's newest runs from the runs repository,
   // which the controller daemon connects to the tasks domain.
   TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),
+  YourWorkLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
   // service is provided to it rather than merged next to it. Retiring a runner
