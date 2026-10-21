@@ -2,6 +2,7 @@ import type { Signal, TrackingRun, TrackingTask } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import type { TrackingRow } from "./tracking";
 import {
+  describeTrackingOutputValue,
   describeTrackingRunLine,
   describeTrackingStamp,
   describeTrackingStanding,
@@ -247,5 +248,35 @@ describe("describeTrackingStamp", () => {
     expect(describeTrackingStamp(buildRow(buildRun("completed")), "Not/AZone", NOW)).toBe(
       "finished",
     );
+  });
+});
+
+describe("describeTrackingOutputValue", () => {
+  it("returns a string or a number as it is, not muted", () => {
+    expect(describeTrackingOutputValue("Ship it")).toEqual({ text: "Ship it", muted: false });
+    expect(describeTrackingOutputValue("")).toEqual({ text: "", muted: false });
+    expect(describeTrackingOutputValue(3)).toEqual({ text: "3", muted: false });
+    expect(describeTrackingOutputValue(0)).toEqual({ text: "0", muted: false });
+    expect(describeTrackingOutputValue(0.5)).toEqual({ text: "0.5", muted: false });
+  });
+
+  it("returns a boolean as yes or no, not muted", () => {
+    expect(describeTrackingOutputValue(true)).toEqual({ text: "yes", muted: false });
+    expect(describeTrackingOutputValue(false)).toEqual({ text: "no", muted: false });
+  });
+
+  it("returns null as none, muted", () => {
+    expect(describeTrackingOutputValue(null)).toEqual({ text: "none", muted: true });
+  });
+
+  it("returns a count of items, singular for one, muted", () => {
+    expect(describeTrackingOutputValue({ items: 1 })).toEqual({ text: "1 item", muted: true });
+    expect(describeTrackingOutputValue({ items: 0 })).toEqual({ text: "0 items", muted: true });
+    expect(describeTrackingOutputValue({ items: 4 })).toEqual({ text: "4 items", muted: true });
+  });
+
+  it("returns a count of fields, singular for one, muted", () => {
+    expect(describeTrackingOutputValue({ fields: 1 })).toEqual({ text: "1 field", muted: true });
+    expect(describeTrackingOutputValue({ fields: 2 })).toEqual({ text: "2 fields", muted: true });
   });
 });

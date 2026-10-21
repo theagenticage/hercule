@@ -7,8 +7,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { buildQueryKeys, queryKeys, type Live } from "@hercule/client-core";
-import { useSubagentsLive } from "./live";
+import { buildQueryKeys, queryKeys, type Live, type TrackingRead } from "@hercule/client-core";
+import type { TrackingRun } from "@hercule/contract";
+import { invalidateForPush, useSubagentsLive } from "./live";
 
 /** What a subscription to a topic like `subagent` is called with on each push. */
 type InvalidateHandler = (keys: ReadonlyArray<ReadonlyArray<unknown>>) => void;
@@ -95,5 +96,78 @@ describe("useSubagentsLive", () => {
 
     expect(handlers.size).toBe(0);
     expect(reads.count).toBe(0);
+  });
+});
+
+/** Builds a run that is live, or ended, created at a fixed time. */
+const buildTrackingRun = (id: string, status: TrackingRun["status"]): TrackingRun => ({
+  id,
+  workflowId: null,
+  workflowName: "Implement",
+  status,
+  createdAt: "2026-10-20T09:00:00.000Z",
+  awaitedSignalIds: [],
+});
+
+/**
+ * Returns a query client whose cache holds Tracking with one Task (`t-1`,
+ * newest run `r-new`, live), and the detail of `t-1` and of another Task,
+ * all fresh. Tracking is read before the detail, as the app does.
+ */
+const buildCachedTracking = () => {
+  const queryClient = new QueryClient();
+  const read: TrackingRead = {
+    readStartedAt: 0,
+    tasks: [
+      {
+        taskId: "t-1",
+        title: "Task t-1",
+        handoffs: [],
+        latestRun: buildTrackingRun("r-new", "running"),
+        latestLiveRun: buildTrackingRun("r-new", "running"),
+        liveRunIds: ["r-new"],
+      },
+    ],
+  };
+  queryClient.setQueryData(queryKeys.tracking(), read);
+  queryClient.setQueryData(queryKeys.trackingDetail("t-1"), {});
+  queryClient.setQueryData(queryKeys.trackingDetail("t-2"), {});
+  const isStale = (queryKey: ReadonlyArray<unknown>): boolean =>
+    queryClient.getQueryState(queryKey)?.isInvalidated === true;
+  return { queryClient, isStale };
+};
+
+describe("invalidateForPush", () => {
+  it("marks Tracking and every Tracking detail out of date when a run push names the newest run of a tracked Task", () => {
+    const { queryClient, isStale } = buildCachedTracking();
+    invalidateForPush(queryClient, "run", [], { ids: ["r-new"], kind: "updated" });
+    expect(isStale(queryKeys.tracking())).toBe(true);
+    expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
+    expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(true);
+  });
+
+  it("marks them out of date for a run that was created, which a re-run is", () => {
+    const { queryClient, isStale } = buildCachedTracking();
+    invalidateForPush(queryClient, "run", [], { ids: ["r-other"], kind: "created" });
+    expect(isStale(queryKeys.tracking())).toBe(true);
+    expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
+  });
+
+  it("leaves Tracking and its details alone for a run of no tracked Task", () => {
+    const { queryClient, isStale } = buildCachedTracking();
+    invalidateForPush(queryClient, "run", [], { ids: ["r-cron"], kind: "updated" });
+    expect(isStale(queryKeys.tracking())).toBe(false);
+    expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(false);
+    expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(false);
+  });
+
+  it("marks only the detail of the Task a task push names out of date", () => {
+    const { queryClient, isStale } = buildCachedTracking();
+    invalidateForPush(queryClient, "task", buildQueryKeys("task", ["t-1"]), {
+      ids: ["t-1"],
+      kind: "updated",
+    });
+    expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
+    expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(false);
   });
 });

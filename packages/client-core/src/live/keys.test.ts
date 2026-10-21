@@ -42,6 +42,40 @@ describe("Tracking's key", () => {
   });
 });
 
+describe("a Task's Tracking detail key", () => {
+  it("is read again for the Tasks a task push names", () => {
+    const keys = buildQueryKeys("task", ["t1", "t2"]);
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.trackingDetail("t1"))));
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.trackingDetail("t2"))));
+  });
+
+  it("is not read again for a Task the push does not name", () => {
+    assert.isFalse(
+      buildQueryKeys("task", ["t1"]).some((key) => isPrefixOf(key, queryKeys.trackingDetail("t2"))),
+    );
+  });
+
+  it("is read again for every Task when a task push names no ids", () => {
+    assert.isTrue(
+      buildQueryKeys("task", []).some((key) => isPrefixOf(key, queryKeys.trackingDetail("t1"))),
+    );
+  });
+
+  it("is left to the run push's own rule, so no key maps it for a run push", () => {
+    for (const ids of [[], ["r1"]]) {
+      assert.isFalse(
+        buildQueryKeys("run", ids).some((key) => isPrefixOf(key, queryKeys.trackingDetail())),
+      );
+    }
+  });
+
+  it("is apart from Tracking's own read and from the task record", () => {
+    assert.isFalse(isPrefixOf(queryKeys.tracking(), queryKeys.trackingDetail("t1")));
+    assert.isFalse(isPrefixOf(queryKeys.trackingDetail(), queryKeys.tracking()));
+    assert.isFalse(isPrefixOf(queryKeys.task("t1"), queryKeys.trackingDetail("t1")));
+  });
+});
+
 describe("Your work's key", () => {
   it("is read again on every task push, with or without ids", () => {
     for (const ids of [[], ["t1"]]) {

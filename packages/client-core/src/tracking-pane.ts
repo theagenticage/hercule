@@ -3,7 +3,7 @@
  * it offers, the line under its title, the lines of its runs, and the stamp
  * beside the agent's name (spec 17 §Tracking).
  */
-import type { TrackingRun } from "@hercule/contract";
+import type { TrackingOutputValue, TrackingRun } from "@hercule/contract";
 import { formatAge } from "./threads/age";
 import { formatMessageTime } from "./threads/message-time";
 import { canMarkTrackingRowDone, nameTrackingState, type TrackingRow } from "./tracking";
@@ -170,4 +170,28 @@ export const describeTrackingStamp = (row: TrackingRow, timezone: string, now: D
   if (ending === undefined) return "working";
   const ended = formatMessageTime(new Date(readRunEnd(row.run)), timezone, now);
   return ended === undefined ? ending : `${ending} ${ended}`;
+};
+
+/**
+ * Describes one value of a run's structured output as a line of the pane: a
+ * string or number as it is, a boolean as "yes" or "no", and a missing value
+ * (`null`) as "none". A list or an object arrives as its size only, so it
+ * reads "1 item", "3 items", "1 field" or "2 fields". `muted` is true for
+ * those counts and for "none", which the pane draws in the quiet colour,
+ * because they stand for something that is not there to read.
+ *
+ * "none" rather than a dash: in a ruled row of label and value, a dash looks
+ * like a drawing glitch, and a word reads as the answer it is.
+ */
+export const describeTrackingOutputValue = (
+  value: TrackingOutputValue,
+): { readonly text: string; readonly muted: boolean } => {
+  if (value === null) return { text: "none", muted: true };
+  if (typeof value === "boolean") return { text: value ? "yes" : "no", muted: false };
+  if (typeof value === "object") {
+    const [count, one, many] =
+      "items" in value ? [value.items, "item", "items"] : [value.fields, "field", "fields"];
+    return { text: `${count} ${count === 1 ? one : many}`, muted: true };
+  }
+  return { text: String(value), muted: false };
 };

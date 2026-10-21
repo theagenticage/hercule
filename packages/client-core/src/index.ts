@@ -446,6 +446,7 @@ export {
   type TrackingState,
 } from "./tracking";
 export {
+  describeTrackingOutputValue,
   describeTrackingRunLine,
   describeTrackingStamp,
   describeTrackingStanding,

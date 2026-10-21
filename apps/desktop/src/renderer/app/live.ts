@@ -50,10 +50,18 @@ import { useWindowVisible } from "./window-visibility";
 
 /**
  * Reads again every query a push on `topic` makes stale: the queries under
- * `keys`, and for a `run` push, Tracking when the push can change it
- * (see `isTrackingAffectedByRunPush`). A `run` push is about every run, such as
- * the ones cron fires start, and Tracking holds only the runs of its Tasks, so
- * most of them leave it as it is.
+ * `keys`, and for a `run` push, Tracking and every Task's Tracking detail when
+ * the push can change them (see `isTrackingAffectedByRunPush`). A `run` push is
+ * about every run, such as the ones cron fires start, and Tracking holds only
+ * the runs of its Tasks, so most of them leave it as it is.
+ *
+ * The same test serves the details, though a detail lists up to twenty runs of
+ * its Task and Tracking only its newest ones. A run that has ended never
+ * changes again, so an older run in a detail cannot be what a push is about.
+ * A re-run is a `created` push, which the test accepts. What can change is the
+ * Task's newest run and its live runs, and the test covers those. Only the open
+ * pane's detail is read again; the others are marked out of date and read
+ * when their pane opens.
  */
 export const invalidateForPush = (
   queryClient: QueryClient,
@@ -66,6 +74,7 @@ export const invalidateForPush = (
   const read = queryClient.getQueryData<TrackingRead>(queryKeys.tracking());
   if (read === undefined || isTrackingAffectedByRunPush(read.tasks, push)) {
     invalidateWithoutCancelling(queryClient, queryKeys.tracking());
+    invalidateWithoutCancelling(queryClient, queryKeys.trackingDetail());
   }
 };
 

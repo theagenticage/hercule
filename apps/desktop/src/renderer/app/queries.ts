@@ -652,6 +652,27 @@ export const trackingQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads what the Tracking pane of the Task `taskId` draws (`task.readTracking`):
+ * its first handoff, its newest runs with the output of the newest run's last
+ * agent step. Fails with a `not_found` `ApiError` when no such Task exists,
+ * which is not tried again: the pane shows that the Task was not found.
+ *
+ * Only the pane that is open reads it, so a Task nobody opened costs nothing.
+ * It is kept current by pushes: one on the `task` topic that names the Task,
+ * and one on the `run` topic when the push can change Tracking (see
+ * `isTrackingAffectedByRunPush`). Both mark it out of date, and it is read
+ * again only while a pane shows it. Its cost is one request per open pane and
+ * per such push, and no timer.
+ */
+export const trackingDetailQuery = (client: HerculeClient, taskId: string) =>
+  queryOptions({
+    queryKey: queryKeys.trackingDetail(taskId),
+    queryFn: () => client.task.readTracking({ params: { id: taskId } }),
+    retry: isWorthRetrying,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
  * Reads Your work (`signal.queryYourWork`): the open Tasks that belong to an
  * open signal, snoozed or not, each with the ids of those signals (spec 10
  * §9.5). One request answers it, whatever the number of signals.
