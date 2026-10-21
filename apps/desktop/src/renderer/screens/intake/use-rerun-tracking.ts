@@ -8,7 +8,7 @@
  * And the keys that take a row off Tracking live in the screen: closing a Task
  * while its re-run starts would leave the starting run on a closed Task.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   invalidateWithoutCancelling,
@@ -32,7 +32,7 @@ export interface RerunTracking {
   /**
    * Re-runs the run `runId` of the Task `taskId` with no `mode`, so the
    * workflow runs as it is stored now and the new run keeps the Task. A
-   * request for a run whose re-run is sending, or was accepted, is ignored:
+   * request for a Task whose re-run is sending, or for a run whose re-run was accepted, is ignored:
    * a second one would start a second run. Re-runs of different Tasks run
    * side by side.
    */
@@ -55,6 +55,11 @@ export interface RerunTracking {
 /** Returns the function that re-runs a Tracking row's run (`run.rerun`), and the questions the screen asks of the re-runs in flight. */
 export const useRerunTracking = (client: HerculeClient): RerunTracking => {
   const queryClient = useQueryClient();
+  // Both exist on purpose. The ref decides at once whether a request for a
+  // Task is already sending: React Query runs `onMutate` after an await and
+  // the state it sets redraws later, so two quick presses would both read no
+  // entry. The state is what the pane redraws from: the lock and the refusal.
+  const sendingTaskIds = useRef(new Set<string>());
   const [entries, setEntries] = useState<Readonly<Record<string, RerunEntry>>>({});
   const setEntry = (taskId: string, entry: RerunEntry): void => {
     setEntries((current) => ({ ...current, [taskId]: entry }));
@@ -77,12 +82,16 @@ export const useRerunTracking = (client: HerculeClient): RerunTracking => {
     onError: (error, { taskId, runId }) => {
       setEntry(taskId, { runId, status: "refused", message: readErrorMessage(error) });
     },
+    onSettled: (_started, _error, { taskId }) => {
+      sendingTaskIds.current.delete(taskId);
+    },
   });
   return {
     start: (taskId, runId) => {
+      if (sendingTaskIds.current.has(taskId)) return;
       const entry = entries[taskId];
-      if (entry?.status === "sending") return;
       if (entry?.status === "accepted" && entry.runId === runId) return;
+      sendingTaskIds.current.add(taskId);
       rerun.mutate({ taskId, runId });
     },
     isStarting: (task) => {

@@ -2130,6 +2130,19 @@ describe("the pane's Try again", () => {
     expect(findReruns(calls)).toHaveLength(1);
   });
 
+  it("starts one run when Try again is pressed twice before the screen redraws", async () => {
+    const { calls } = await openRerunnable(FAILED_TASK, "failed");
+    await userEvent.click(getRowButton(FAILED_TASK));
+    const tryAgain = findAnswer("try-again")!;
+    act(() => {
+      tryAgain.click();
+      tryAgain.click();
+    });
+    await waitFor(() => {
+      expect(findReruns(calls)).toHaveLength(1);
+    });
+  });
+
   it("keeps the row on Tracking when E is pressed while the re-run is starting", async () => {
     const { calls, startNewRun } = await openRerunnable(FAILED_TASK, "failed");
     // By keys only: a pointer over the list would hold the row's change back.
