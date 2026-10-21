@@ -367,6 +367,21 @@ describe("describeTrackingTrip", () => {
     expect(drawn.endingActionStepName).toBeUndefined();
   });
 
+  it("leaves the output and the ending action step out of a row whose run is not the newest, such as a Request of an older live run", () => {
+    const older = buildRun("running", { id: "run-older" });
+    const newest = buildRun("completed", { id: "run-newest" });
+    const row: TrackingRow = {
+      ...buildRequestRow(older),
+      task: { ...buildTask(newest, ["run-older"]), latestLiveRun: older },
+    };
+    const drawn = trip(
+      row,
+      buildDetail([older, newest], { output: OUTPUT, endingActionStepName: "Post the review" }),
+    );
+    expect(drawn.output).toBeUndefined();
+    expect(drawn.endingActionStepName).toBeUndefined();
+  });
+
   it("opens the newest run's page for the whole output, and the row's run when the read lists none", () => {
     const first = buildRun("failed", { id: "run-1" });
     const second = buildRun("completed", { id: "run-2" });

@@ -245,11 +245,11 @@ export interface TrackingTrip {
   readonly stamp: string;
   /** Why the run failed. Set on a Failed row only, and only when the run carries a cause. */
   readonly failureCause: string | undefined;
-  /** What the newest run's last agent step put out. Absent on a Working row, and when the run has none. */
+  /** What the newest run's last agent step put out. Absent unless the row's run is the newest and not live, and when the run has none. */
   readonly output: TrackingOutput | undefined;
   /** The run "See the whole output" opens: the newest run, whose output it is. */
   readonly outputRunId: string;
-  /** The action step the newest run ended on. Absent on a Working row, and when the run did not end on one. */
+  /** The action step the newest run ended on. Absent unless the row's run is the newest and not live, and when the run did not end on one. */
   readonly endingActionStepName: string | undefined;
   /** The runs, oldest first. Empty when the list adds nothing to the agent's name line (see `shouldListTrackingRuns`). */
   readonly runs: ReadonlyArray<TrackingTripRun>;
@@ -259,10 +259,14 @@ export interface TrackingTrip {
  * Describes the trip of `row` from the Task's read `detail`, with times in
  * `timezone` as seen from `now`.
  *
- * The output and the ending action step belong to the newest run. A Working
- * row names its newest live run, which can be an older run than the newest,
- * so the pane leaves both out there: they would sit under the wrong run's
- * name, and a run that goes on has not ended on anything.
+ * The output and the ending action step belong to the newest run. The pane
+ * shows them under the name of the row's run, so it shows them only when that
+ * run is the newest and has ended:
+ *
+ * - A Working row names its newest live run, which can be an older run than
+ *   the newest, and a run that goes on has not ended on anything.
+ * - A Needs you row that waits on a Request names the run of that Request,
+ *   which can also be an older live run while the newest run has completed.
  */
 export const describeTrackingTrip = (
   row: TrackingRow,
@@ -272,14 +276,14 @@ export const describeTrackingTrip = (
 ): TrackingTrip => {
   const handedTo = `handed to ${detail.firstHandoff.workflowName}`;
   const handedAt = formatMessageTime(new Date(detail.firstHandoff.at), timezone, now);
-  const ended = row.state !== "working";
+  const showsNewestRunsEnd = row.state !== "working" && row.run.id === row.task.latestRun.id;
   return {
     askedSmall: handedAt === undefined ? handedTo : `${handedAt} · ${handedTo}`,
     stamp: describeTrackingStamp(row, timezone, now),
     failureCause: row.state === "failed" ? row.run.failureCause : undefined,
-    output: ended ? detail.output : undefined,
+    output: showsNewestRunsEnd ? detail.output : undefined,
     outputRunId: detail.runs.at(-1)?.id ?? row.run.id,
-    endingActionStepName: ended ? detail.endingActionStepName : undefined,
+    endingActionStepName: showsNewestRunsEnd ? detail.endingActionStepName : undefined,
     runs: shouldListTrackingRuns(detail.runs)
       ? detail.runs.map((run) => {
           // A run that has not ended is led by when it started.
