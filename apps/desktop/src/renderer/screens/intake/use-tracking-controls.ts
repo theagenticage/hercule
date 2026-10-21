@@ -139,7 +139,8 @@ export const useTrackingControls = ({
   const { listRef, setDismissed } = split;
   const [paneFocusTaskId, setPaneFocusTaskId] = useState<string | null>(null);
   const shownIds = shownRows.map((row) => row.task.taskId);
-  const readIds = readRows.map((row) => row.task.taskId);
+  // A set, because the keys and the effect below test every drawn row against it.
+  const readIds = new Set(readRows.map((row) => row.task.taskId));
   // Read by `selectRow` when it runs, so a click is ignored on the selected
   // row without `selectRow` changing as the selection moves.
   const selectedTaskIdRef = useRef(selectedTaskId);
@@ -155,10 +156,10 @@ export const useTrackingControls = ({
     open ? listRef.current?.querySelector<HTMLElement>(".tr-tray.is-open") : listRef.current;
 
   const selectNextWhenSelectedRowLeaves = useEffectEvent(() => {
-    if (!open || addressTaskId === null || readIds.includes(addressTaskId)) return;
+    if (!open || addressTaskId === null || readIds.has(addressTaskId)) return;
     const drawnIds = drawnIdsRef.current;
     if (!drawnIds.includes(addressTaskId)) return;
-    const leftIds = drawnIds.filter((id) => !readIds.includes(id));
+    const leftIds = drawnIds.filter((id) => !readIds.has(id));
     onSelectTask(pickSelectionAfterMove(drawnIds, addressTaskId, leftIds));
     // The pane of the row that left was removed with the focus in it.
     const focused = document.activeElement;
@@ -207,7 +208,7 @@ export const useTrackingControls = ({
    * last read no longer has it, so it has no pane to show.
    */
   const moveSelection = (step: 1 | -1): void => {
-    const walkedIds = shownIds.filter((id) => readIds.includes(id));
+    const walkedIds = shownIds.filter((id) => readIds.has(id));
     if (walkedIds.length === 0) return;
     const at = selectedTaskId === null ? -1 : walkedIds.indexOf(selectedTaskId);
     const next = at < 0 ? (step === 1 ? 0 : walkedIds.length - 1) : at + step;
