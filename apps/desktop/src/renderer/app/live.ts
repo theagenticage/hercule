@@ -25,10 +25,6 @@
  * Each push invalidates the query keys it lists. The screens never deal with
  * the socket.
  *
- * Your work is read again whenever the thread refs of the To do signals
- * change, from a push or from any other write to To do's cache (see
- * `startYourWorkRefresh`). No topic maps to that, so it is started here.
- *
  * Projects and resources have no live topic yet (#279 adds
  * them). After a reconnect, pushes may have been lost while the connection
  * was down, so they are read again then (the topics' own reads are read again
@@ -50,7 +46,6 @@ import {
 } from "@hercule/client-core";
 import type { MutableLiveTopic } from "@hercule/contract";
 import { ageClock } from "./age-clock";
-import { startYourWorkRefresh } from "./your-work-refresh";
 import { useWindowVisible } from "./window-visibility";
 
 /**
@@ -115,7 +110,6 @@ export const useLiveConnection = (live: Live, queryClient: QueryClient): void =>
   useScreenTopicsLive(live, queryClient, RUN_TOPICS);
 
   useEffect(() => {
-    const stopYourWorkRefresh = startYourWorkRefresh(queryClient);
     const unsubscribes = SHELL_TOPICS.map((topic) =>
       live.subscribe(topic, (keys) => {
         for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
@@ -139,7 +133,6 @@ export const useLiveConnection = (live: Live, queryClient: QueryClient): void =>
     return () => {
       for (const unsubscribe of unsubscribes) unsubscribe();
       stopFollowingStatus();
-      stopYourWorkRefresh();
       void live.stop();
     };
   }, [live, queryClient, router]);

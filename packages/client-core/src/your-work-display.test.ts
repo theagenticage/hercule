@@ -1,9 +1,8 @@
 /** Tests how Your work is described for the pane and for a signal's row. */
-import type { Signal, TrackingRun, TrackingTask } from "@hercule/contract";
+import type { Signal, TrackingRun, TrackingTask, YourWorkTask } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import { buildTrackingRows, type TrackingRow } from "./tracking";
 import { describeYourWork, describeYourWorkOnRow } from "./your-work-display";
-import type { YourWorkTask } from "./your-work";
 
 const AT = "2026-10-20T09:00:00.000Z";
 
@@ -25,7 +24,7 @@ const buildTask = (id: string, overrides: Partial<YourWorkTask> = {}): YourWorkT
   title: `Task ${id}`,
   status: "open",
   updatedAt: AT,
-  provenanceRefs: [],
+  signalIds: [SIGNAL.id],
   ...overrides,
 });
 

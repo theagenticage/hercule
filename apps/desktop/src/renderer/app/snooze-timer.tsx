@@ -29,7 +29,7 @@
 import { useEffect } from "react";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { invalidateWithoutCancelling, queryKeys, type HerculeClient } from "@hercule/client-core";
-import { signalsToDoQuery, snoozeTimerQuery } from "./queries";
+import { signalsToDoQuery, snoozeTimerQuery, yourWorkQuery } from "./queries";
 
 /** The longest delay `setTimeout` keeps. A longer one runs after 1 ms instead. */
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -57,6 +57,8 @@ export function SnoozeTimer({ client }: { readonly client: HerculeClient }): nul
     const runsOutAt = Date.parse(until);
     const readUntilAgain = (): void => {
       invalidateWithoutCancelling(queryClient, signalsToDoQuery(client).queryKey);
+      // A snooze that ran out joins To do without a push, and Your work follows To do.
+      invalidateWithoutCancelling(queryClient, yourWorkQuery(client).queryKey);
     };
     let retryDelay = CONTROLLER_CLOCK_MARGIN_MS;
     let timer: ReturnType<typeof setTimeout>;

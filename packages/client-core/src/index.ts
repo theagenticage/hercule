@@ -517,16 +517,7 @@ export {
   type HeldTrackingRows,
 } from "./held-tracking-rows";
 export { describeInboxZeroLine, type InboxZeroLine } from "./inbox-zero";
-export {
-  batchYourWorkRefs,
-  buildYourWorkTask,
-  isYourWorkReadOutdated,
-  listSignalsWithThreadRef,
-  listYourWorkRefs,
-  matchYourWork,
-  type YourWork,
-  type YourWorkRead,
-} from "./your-work";
+export { matchYourWork, type YourWork } from "./your-work";
 export { describeYourWork, describeYourWorkOnRow, type YourWorkItem } from "./your-work-display";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";

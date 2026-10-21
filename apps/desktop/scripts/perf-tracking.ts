@@ -16,9 +16,9 @@
  * Your work is measured in the same launch. The fixture makes
  * `THREAD_SIGNALS` of the To do signals signals about a thread
  * (`makeSignalsAboutThreads`), and `seedYourWork` makes `YOUR_WORK_TASKS` open
- * Tasks that carry those threads' refs, so the app's batched `task.query` has
- * something to return. `runSignalSeries` makes the signal pushes that decide
- * whether it reads again.
+ * Tasks that carry those threads' refs, so `signal.queryYourWork` has
+ * something to return. `runSignalSeries` makes the signal pushes that read it
+ * again.
  *
  * What the controller spends on the read is the controller benchmark's to
  * measure against the real statements, not this script's.
@@ -97,8 +97,8 @@ const PAGE = {
 
 /** The routes of Tracking's reads, by operation. A GET to any other `/tasks` or `/runs` route counts as "other". */
 const SNAPSHOT_ROUTE = "/api/v1/tasks/tracking";
-/** Your work's read is `task.query` with `refs`; To do is `signal.query` with the view `to-do`. */
-const YOUR_WORK_ROUTE = "/api/v1/tasks";
+/** Your work's read is `signal.queryYourWork`; To do is `signal.query` with the view `to-do`. */
+const YOUR_WORK_ROUTE = "/api/v1/signals/your-work";
 const TO_DO_ROUTE = "/api/v1/signals";
 const RUN_READ_ROUTE = /^\/api\/v1\/runs\/[0-9a-f-]{36}$/;
 const TASKS_OR_RUNS_ROUTE = /^\/api\/v1\/(tasks|runs)(\/|$)/;
@@ -108,7 +108,7 @@ export const TRACKED_COUNT = 10;
 const SERIES_CHANGES = 10;
 
 /**
- * How many To do signals are about a thread, so Your work reads for them
+ * How many To do signals are about a thread, so Your work has Tasks for them
  * (`--tracking-thread-signals=N`, 60 unless given). Spec 17 budgets 200 signals
  * on To do, and 60 is a busy week of pull requests. 200 is the worst case.
  */
@@ -117,9 +117,6 @@ export const THREAD_SIGNALS = Number(
     .find((argument) => argument.startsWith("--tracking-thread-signals="))
     ?.split("=")[1] ?? 60,
 );
-
-/** How many `task.query` reads cover the refs of `THREAD_SIGNALS` signals: a read takes at most 64 refs (`MAX_FILTER_VALUES`), and these refs are far under the byte limit the app also batches by. */
-const YOUR_WORK_BATCHES = Math.ceil(THREAD_SIGNALS / 64);
 
 /** How many open Tasks `seedYourWork` makes, and how many threads' refs each carries. */
 const YOUR_WORK_TASKS = 10;
@@ -345,13 +342,14 @@ interface Activity {
   /** Reads of `task.queryTracking`, of `run.read`, and of any other `/tasks` or `/runs` route. */
   readonly snapshots: number;
   readonly runReads: number;
-  /** Reads of `task.query { refs }`, which are Your work's, and of To do (`signal.query` with the view `to-do`). */
+  /** Reads of `signal.queryYourWork`, and of To do (`signal.query` with the view `to-do`). */
   readonly yourWorkReads: number;
   readonly toDoReads: number;
   readonly otherReads: number;
   /** Pushes on each topic, not counting the first message after subscribing, which are `firstMessages`. */
   readonly taskPushes: number;
   readonly runPushes: number;
+  readonly signalPushes: number;
   readonly firstMessages: number;
   /** How many of the first messages are on the task and run topics, the two whose first message may re-read Tracking. */
   readonly firstTaskAndRunMessages: number;
@@ -379,8 +377,8 @@ export function summarizeActivity({ requests, pushes }: Recording): Activity {
   );
   const snapshots = gets.filter(({ url }) => url.pathname === SNAPSHOT_ROUTE);
   const runReads = gets.filter(({ url }) => RUN_READ_ROUTE.test(url.pathname));
-  const yourWork = gets.filter(
-    ({ url }) => url.pathname === YOUR_WORK_ROUTE && url.searchParams.has("refs"),
+  const yourWork = requests.filter(
+    ({ method, url }) => method === "GET" && url.pathname === YOUR_WORK_ROUTE,
   );
   const toDoReads = requests.filter(
     ({ method, url }) =>
@@ -392,15 +390,16 @@ export function summarizeActivity({ requests, pushes }: Recording): Activity {
     runReads: runReads.length,
     yourWorkReads: yourWork.length,
     toDoReads: toDoReads.length,
-    otherReads: gets.length - snapshots.length - runReads.length - yourWork.length,
+    otherReads: gets.length - snapshots.length - runReads.length,
     taskPushes: changes.filter(({ topic }) => topic === "task").length,
     runPushes: changes.filter(({ topic }) => topic === "run").length,
+    signalPushes: changes.filter(({ topic }) => topic === "signal").length,
     firstMessages: pushes.length - changes.length,
     firstTaskAndRunMessages: pushes.filter(
       ({ initial, topic }) => initial && (topic === "task" || topic === "run"),
     ).length,
     snapshotTiming: describeTiming("task.queryTracking", snapshots),
-    yourWorkTiming: describeTiming("task.query for Your work", yourWork),
+    yourWorkTiming: describeTiming("signal.queryYourWork", yourWork),
   };
 }
 
@@ -408,7 +407,7 @@ export function summarizeActivity({ requests, pushes }: Recording): Activity {
 const formatActivity = (a: Activity): string =>
   `${String(a.taskPushes)} task and ${String(a.runPushes)} run pushes` +
   `${a.firstMessages === 0 ? "" : ` and ${String(a.firstMessages)} first messages`}; ` +
-  `${String(a.snapshots)} task.queryTracking, ${String(a.yourWorkReads)} task.query for Your work, ` +
+  `${String(a.snapshots)} task.queryTracking, ${String(a.yourWorkReads)} signal.queryYourWork, ` +
   `${String(a.toDoReads)} To do, ${String(a.runReads)} run.read, ${String(a.otherReads)} other reads` +
   `${a.snapshotTiming}${a.yourWorkTiming}`;
 
@@ -517,11 +516,10 @@ interface SignalSeries {
 
 /**
  * Runs two series of changes to To do. The first raises signals about no
- * thread, which can never be Your work: To do is read again for each, and Your
- * work must not be. The second snoozes a signal about a thread and brings it
- * back, alternately, which changes the thread refs To do holds each time: Your
- * work must be read again once for each change. Fails when To do holds no
- * signal about a thread, because `prepareLaunch` made none.
+ * thread, which can never be Your work. The second snoozes a signal about a
+ * thread and brings it back, alternately, which changes Your work each time.
+ * Both read To do and Your work again once for each push. Fails when To do
+ * holds no signal about a thread, because `prepareLaunch` made none.
  */
 async function runSignalSeries(scenario: Scenario): Promise<SignalSeries> {
   const { fixture } = scenario;
@@ -866,21 +864,24 @@ export const isLoadWithinBound = (load: Activity): boolean =>
 
 /**
  * Checks whether Your work's reads at the shell's start are within the bound the spec
- * sets: at least one `task.query { refs }`, because To do holds signals about
- * threads, and at most one more for the first message of the task topic, the
- * only first message that reads it again. One read covers 64 refs, so `batches`
- * reads make one pass, and a repeated pass is the second.
+ * sets: one `signal.queryYourWork`, and at most one more for the first message
+ * of each of the task and signal topics, the two whose first message reads it
+ * again.
  */
-export const isYourWorkLoadWithinBound = (load: Activity, batches: number): boolean =>
-  load.yourWorkReads >= batches && load.yourWorkReads <= 2 * batches;
+export const isYourWorkLoadWithinBound = (load: Activity): boolean =>
+  load.yourWorkReads >= 1 && load.yourWorkReads <= 3;
 
 /** Whether a series read Tracking once for each push on the task topic, and read no run. */
 const readsOncePerPush = (cost: SeriesCost): boolean =>
   cost.snapshots >= cost.changes && cost.snapshots <= cost.taskPushes && cost.runReads === 0;
 
-/** Whether a series read Your work, in `batches` reads, once for each push on the task topic. */
-const readsYourWorkOncePerPush = (cost: SeriesCost, batches: number): boolean =>
-  cost.yourWorkReads >= cost.changes * batches && cost.yourWorkReads <= cost.taskPushes * batches;
+/** Whether a series read Your work once for each push on the task topic. */
+const readsYourWorkOncePerTaskPush = (cost: SeriesCost): boolean =>
+  cost.yourWorkReads >= cost.changes && cost.yourWorkReads <= cost.taskPushes;
+
+/** Whether a series read Your work once for each push on the signal topic. */
+const readsYourWorkOncePerSignalPush = (cost: SeriesCost): boolean =>
+  cost.yourWorkReads >= cost.changes && cost.yourWorkReads <= cost.signalPushes;
 
 /** Whether a series read Tracking at most once for each run it started, and read no run. */
 const readsAtMostOncePerCreation = (cost: SeriesCost): boolean =>
@@ -924,16 +925,15 @@ export function reportTrackingInteractions(result: TrackingInteractions): void {
     ],
     [
       "Reads of Your work while the shell loads",
-      `${String(YOUR_WORK_BATCHES)} task.query for ${String(THREAD_SIGNALS)} refs (one for each 64), and at most as many again for the first message of the task topic`,
+      "one signal.queryYourWork, and at most one more for the first message of each of the task and signal topics",
       formatActivity(load),
-      isYourWorkLoadWithinBound(load, YOUR_WORK_BATCHES),
+      isYourWorkLoadWithinBound(load),
     ],
     [
       "A Task created, nothing tracked",
       oncePerPush,
       formatSeries(nothingTracked.tasks),
-      readsOncePerPush(nothingTracked.tasks) &&
-        readsYourWorkOncePerPush(nothingTracked.tasks, YOUR_WORK_BATCHES),
+      readsOncePerPush(nothingTracked.tasks) && readsYourWorkOncePerTaskPush(nothingTracked.tasks),
     ],
     [
       "A run that is not about a Task, nothing tracked",
@@ -948,13 +948,13 @@ export function reportTrackingInteractions(result: TrackingInteractions): void {
       handOffs.snapshots >= handOffs.changes &&
         handOffs.snapshots <= handOffs.taskPushes + handOffs.runPushes &&
         handOffs.runReads === 0 &&
-        handOffs.yourWorkReads <= handOffs.taskPushes * YOUR_WORK_BATCHES,
+        handOffs.yourWorkReads <= handOffs.taskPushes + handOffs.signalPushes,
     ],
     [
       `A Task created, ${String(TRACKED_COUNT)} tracked`,
       oncePerPush,
       formatSeries(tracked.tasks),
-      readsOncePerPush(tracked.tasks) && readsYourWorkOncePerPush(tracked.tasks, YOUR_WORK_BATCHES),
+      readsOncePerPush(tracked.tasks) && readsYourWorkOncePerTaskPush(tracked.tasks),
     ],
     [
       `A run that is not about a Task, ${String(TRACKED_COUNT)} tracked`,
@@ -964,18 +964,17 @@ export function reportTrackingInteractions(result: TrackingInteractions): void {
     ],
     [
       "A signal about no thread raised",
-      "To do read again for each push; no task.query for Your work",
+      "To do and Your work read again once for each push",
       formatSeries(signals.withoutThread),
       signals.withoutThread.toDoReads >= signals.withoutThread.changes &&
-        signals.withoutThread.yourWorkReads === 0,
+        readsYourWorkOncePerSignalPush(signals.withoutThread),
     ],
     [
       "A signal about a thread snoozed and brought back",
-      `To do read again for each push; ${String(YOUR_WORK_BATCHES)} task.query for Your work for each change, because the refs change each time`,
+      "To do and Your work read again once for each push",
       formatSeries(signals.leavingAndComing),
       signals.leavingAndComing.toDoReads >= signals.leavingAndComing.changes &&
-        signals.leavingAndComing.yourWorkReads ===
-          signals.leavingAndComing.changes * YOUR_WORK_BATCHES,
+        readsYourWorkOncePerSignalPush(signals.leavingAndComing),
     ],
     [
       "The window hidden",
@@ -985,7 +984,7 @@ export function reportTrackingInteractions(result: TrackingInteractions): void {
         !hidden.heldHidden.includes("run") &&
         hidden.task.snapshots >= 1 &&
         hidden.task.snapshots <= hidden.task.taskPushes &&
-        hidden.task.yourWorkReads >= YOUR_WORK_BATCHES &&
+        hidden.task.yourWorkReads >= 1 &&
         hidden.run.yourWorkReads === 0 &&
         hidden.run.runPushes === 0 &&
         hidden.run.snapshots === 0 &&

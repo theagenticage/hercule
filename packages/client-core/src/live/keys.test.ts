@@ -51,21 +51,30 @@ describe("Your work's key", () => {
     }
   });
 
-  it("is left to the To do read's own rule, so no key maps it for a signal push", () => {
+  it("is read again on every signal push, with or without ids", () => {
     for (const ids of [[], ["s1"]]) {
-      assert.isFalse(
+      assert.isTrue(
         buildQueryKeys("signal", ids).some((key) => isPrefixOf(key, queryKeys.yourWork())),
+      );
+    }
+  });
+
+  it("is not read again by a push that cannot change it", () => {
+    for (const topic of ["workflow", "connection", "plugin", "run"] as const) {
+      assert.isFalse(
+        buildQueryKeys(topic, ["x"]).some((key) => isPrefixOf(key, queryKeys.yourWork())),
       );
     }
   });
 });
 
 describe("signal pushes", () => {
-  it("invalidates every list and the changed signals", () => {
+  it("invalidates every list, the changed signals and Your work", () => {
     assert.deepStrictEqual(buildQueryKeys("signal", ["first", "second"]), [
       queryKeys.signals(),
       queryKeys.signal("first"),
       queryKeys.signal("second"),
+      queryKeys.yourWork(),
     ]);
   });
 
@@ -83,7 +92,11 @@ describe("signal pushes", () => {
   });
 
   it("invalidates every signal after reconnect", () => {
-    assert.deepStrictEqual(buildQueryKeys("signal", []), [queryKeys.signals(), queryKeys.signal()]);
+    assert.deepStrictEqual(buildQueryKeys("signal", []), [
+      queryKeys.signals(),
+      queryKeys.signal(),
+      queryKeys.yourWork(),
+    ]);
   });
 
   it("reaches a filtered list through the list prefix", () => {

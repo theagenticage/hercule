@@ -18,13 +18,11 @@ import {
 } from "@tanstack/react-query";
 import {
   ApiError,
-  batchYourWorkRefs,
   collectRunningTurnRows,
   collectSenderSessionIds,
   classifyTranscriptPage,
   detectLocalRunner,
   findTranscriptAfterPosition,
-  listYourWorkRefs,
   type EventListFilter,
   isNotFound,
   mergeNewestMessagePage,
@@ -33,13 +31,11 @@ import {
   queryKeys,
   readEveryPage,
   readSenderSession,
-  buildYourWorkTask,
   type HerculeClient,
   type MessagePage,
   type MessagePages,
   type ThreadCopy,
   type TrackingRead,
-  type YourWorkRead,
   waitForOptionalReads,
 } from "@hercule/client-core";
 import { WALK_CATCH_UP_SECONDS } from "../office/engine/contracts";
@@ -656,49 +652,21 @@ export const trackingQuery = (client: HerculeClient) =>
   });
 
 /**
- * Reads Your work: the open Tasks that the thread refs of the To do signals
- * name (spec 10 §9.5). The signals on screen are the To do list, which the
- * shell holds whole, so the read takes its refs from there and sends one
- * `task.query { refs }` per batch of refs, every page of it, rather than one
- * read per signal. Which Task belongs to which signal is worked out on the
- * client (`matchYourWork`).
+ * Reads Your work (`signal.queryYourWork`): the open Tasks that belong to a
+ * signal on To do, each with the ids of those signals (spec 10 §9.5). One
+ * request answers it, whatever the number of signals. `matchYourWork` matches
+ * the Tasks to the To do list the app holds.
  *
- * The key is stable, never one that includes the refs: a new key would be a
- * read nothing has loaded, and the screens that suspend on it would hide the
- * app. The refs read for are part of the answer (`YourWorkRead`) instead.
- *
- * Two things read it again:
- *
- * - A push on the `task` topic, like Tracking, because a Task's status or
- *   provenance may have changed.
- * - A change of the thread refs of the To do signals, from a read of To do or
- *   from a write to its cached list. `startYourWorkRefresh` sees both. A
- *   signal that arrives or goes without changing the refs costs no request.
- *
- * It reads for the To do list the cache holds when it starts, and records the
- * refs it read for. It never waits for a read of To do that is under way: a
- * refresh would give it other refs than the ones `startYourWorkRefresh` sees
- * at the start, and a failed read could then go unrepeated. When that
- * refresh lands, `startYourWorkRefresh` compares the refs of To do with the
- * ones the read was made for. Only a cold start, with no To do list cached,
- * reads To do here.
+ * Shell data, kept for the life of the window. A push on the `task` topic
+ * reads it again, because a Task's status or provenance may have changed, and
+ * so does a push on the `signal` topic, because the To do list decides it.
+ * The snooze timer reads it again when a snooze runs out, which sends no
+ * push.
  */
 export const yourWorkQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.yourWork(),
-    queryFn: async ({ client: queryClient }): Promise<YourWorkRead> => {
-      const refs = listYourWorkRefs(await queryClient.ensureQueryData(signalsToDoQuery(client)));
-      const batches = await Promise.all(
-        batchYourWorkRefs(refs).map((batch) =>
-          readEveryPage((page) =>
-            client.task.query({
-              query: { refs: batch, status: ["open", "in-progress"], ...page },
-            }),
-          ),
-        ),
-      );
-      return { tasks: batches.flat().map(buildYourWorkTask), refs };
-    },
+    queryFn: () => client.signal.queryYourWork(),
     ...SHELL_READ_OPTIONS,
   });
 

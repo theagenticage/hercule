@@ -9,7 +9,7 @@ import { act, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
 import type { Signal, SignalFilter } from "@hercule/contract";
-import { signalsToDoQuery, snoozeTimerQuery } from "./queries";
+import { signalsToDoQuery, snoozeTimerQuery, yourWorkQuery } from "./queries";
 import { SnoozeTimer } from "./snooze-timer";
 
 const NOW = Date.parse("2026-10-11T10:00:00Z");
@@ -28,7 +28,8 @@ interface Read {
  * off Later once its clock reaches `controllerRunsOutAt`, which is `until`
  * unless the test sets it later. A Later read answers `laterLatencyMs`
  * after it is sent, from the controller's state at that moment. Returns
- * every read made since, in the order they were sent.
+ * every read of the signal lists made since, in the order they were sent,
+ * and the times of the reads of Your work.
  */
 const renderSnoozeTimer = (
   until: string | null,
@@ -36,9 +37,14 @@ const renderSnoozeTimer = (
   laterLatencyMs = 0,
 ) => {
   const reads: Read[] = [];
+  const yourWorkReads: number[] = [];
   const isSnoozed = (): boolean => until !== null && Date.now() < controllerRunsOutAt;
   const client = {
     signal: {
+      queryYourWork: () => {
+        yourWorkReads.push(Date.now());
+        return Promise.resolve({ tasks: [] });
+      },
       query: ({ query }: { readonly query: SignalFilter }) => {
         reads.push({ view: query.view, at: Date.now() });
         if (query.view !== "later") return Promise.resolve({ items: [] });
@@ -65,7 +71,9 @@ const renderSnoozeTimer = (
   // signal list reads it.
   queryClient.setQueryData(signalsToDoQuery(client).queryKey, []);
   new QueryObserver(queryClient, signalsToDoQuery(client)).subscribe(() => {});
-  return { reads, queryClient };
+  queryClient.setQueryData(yourWorkQuery(client).queryKey, { tasks: [] });
+  new QueryObserver(queryClient, yourWorkQuery(client)).subscribe(() => {});
+  return { reads, yourWorkReads, queryClient };
 };
 
 beforeEach(() => {
@@ -107,6 +115,17 @@ describe("SnoozeTimer", () => {
     expect(emptyLater).toBeGreaterThanOrEqual(0);
     expect(toDo).toBeGreaterThan(emptyLater);
     expect(reads[toDo]!.at).toBeGreaterThanOrEqual(until);
+  });
+
+  it("reads Your work with To do once the snooze has run out, because no push tells it", async () => {
+    const until = NOW + FIVE_MINUTES_MS;
+    const { yourWorkReads } = renderSnoozeTimer(new Date(until).toISOString());
+
+    await act(() => vi.advanceTimersByTimeAsync(FIVE_MINUTES_MS));
+    expect(yourWorkReads).toEqual([]);
+
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(yourWorkReads[0]).toBeGreaterThanOrEqual(until);
   });
 
   it("reads To do after the controller moved the signal, even when Later answers after To do", async () => {

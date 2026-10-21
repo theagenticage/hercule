@@ -2,14 +2,14 @@
  * Tests the hooks that read Your work and Tracking's rows: they match the
  * signals to their Tasks and build the rows, keep their identity while
  * nothing they are built from changes, and a change to To do that touches no
- * signal with a thread ref draws nothing again.
+ * signal Your work names draws nothing again.
  */
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
-import type { Signal, TrackingRun, TrackingTask } from "@hercule/contract";
+import type { Signal, TrackingRun, TrackingTask, YourWorkTask } from "@hercule/contract";
 import { liveAgentSessionsQuery, signalsToDoQuery, trackingQuery, yourWorkQuery } from "./queries";
 import { useTrackingRows, useYourWork } from "./tracking";
 
@@ -22,6 +22,13 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
 
 const AT = "2026-10-20T10:00:00.000Z";
 const THREAD_REF = "github:pr:acme/shop#1";
+const YOUR_WORK_TASK: YourWorkTask = {
+  id: "t1",
+  title: "Fix t1",
+  status: "open",
+  updatedAt: AT,
+  signalIds: ["s1"],
+};
 
 const buildSignal = (id: string, threadRef: string): Signal => ({
   id,
@@ -61,23 +68,14 @@ const buildTrackingTask = (taskId: string, title = `Fix ${taskId}`): TrackingTas
   };
 };
 
-/** Builds the open Task `id` whose provenance names `ref`, as `task.query` returns it. */
-const buildTaskNamingRef = (id: string, ref: string) => ({
-  id,
-  title: `Fix ${id}`,
-  status: "open",
-  updatedAt: AT,
-  provenance: [{ ref, at: AT, actor: "user" }],
-});
-
 /** Sets up a query cache that holds the shell's reads, as the shell's loader leaves it. */
 const setUp = async (signals: ReadonlyArray<Signal>, tracked: ReadonlyArray<TrackingTask>) => {
   const client = {
-    signal: { query: () => Promise.resolve({ items: signals }) },
-    task: {
-      query: () => Promise.resolve({ items: [buildTaskNamingRef("t1", THREAD_REF)] }),
-      queryTracking: () => Promise.resolve({ rows: tracked }),
+    signal: {
+      query: () => Promise.resolve({ items: signals }),
+      queryYourWork: () => Promise.resolve({ tasks: [YOUR_WORK_TASK] }),
     },
+    task: { queryTracking: () => Promise.resolve({ rows: tracked }) },
     session: { query: () => Promise.resolve({ items: [] }) },
   } as unknown as HerculeClient;
   route.client = client;
@@ -146,7 +144,7 @@ describe("useYourWork and useTrackingRows", () => {
     expect(result.current[1]).toBe(rows);
   });
 
-  it("draw nothing again for a change to To do that touches no signal with a thread ref", async () => {
+  it("draw nothing again for a change to To do that touches no signal Your work names", async () => {
     const { wrapper, writeToDo } = await setUp(
       [buildSignal("s1", THREAD_REF)],
       [buildTrackingTask("t1")],
@@ -168,7 +166,7 @@ describe("useYourWork and useTrackingRows", () => {
     expect(result.current).toBe(rows);
   });
 
-  it("build the rows again when a signal with a thread ref changes", async () => {
+  it("build the rows again when a signal Your work names leaves To do", async () => {
     const { wrapper, writeToDo } = await setUp(
       [buildSignal("s1", THREAD_REF)],
       [buildTrackingTask("t1")],

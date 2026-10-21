@@ -21,7 +21,7 @@
  * look, with a tache and a homburg, is Hercule's, which no seed can hash to,
  * so its face differs.
  */
-import type { Session, Task, TrackingRun, TrackingTask } from "@hercule/contract";
+import type { Session, TrackingRun, TrackingTask, YourWorkTask } from "@hercule/contract";
 import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { SidebarRecords } from "./shell-page";
 
@@ -140,41 +140,30 @@ const SDK = buildTask(
   buildRun("run-t-sdk", "Implement", 19, { status: "running", startedAt: minutesAgo(19) }),
 );
 
-/** Builds an open Task as `task.query` returns it, with the thread ref `ref` in its provenance. */
+/** Builds a Task of Your work as `signal.queryYourWork` returns it, about the signal `signalId`. */
 const buildWorkTask = (
   id: string,
   title: string,
-  status: Task["status"],
-  ref: string,
+  status: YourWorkTask["status"],
   signalId: string,
-  runId: string | undefined,
-): Task => ({
-  id,
-  title,
-  description: "",
-  status,
-  priority: "normal",
-  labels: [],
-  provenance: [
-    { signalId, ...(runId === undefined ? {} : { runId }), ref, at: minutesAgo(40), actor: "user" },
-  ],
-  createdAt: minutesAgo(40),
-  updatedAt: minutesAgo(30),
-  statusChangedAt: minutesAgo(40),
-});
+): YourWorkTask => ({ id, title, status, updatedAt: minutesAgo(30), signalIds: [signalId] });
 
 /**
- * The Task Refunds for partial captures as `task.query` returns it, with the
- * pull request's ref in its provenance. A signal whose thread is that pull
- * request is about this Task (Your work).
+ * The id of the checks that failed on the agent's pull request, which the
+ * Tasks Refunds for partial captures and Document the refund flow are Your
+ * work for.
  */
-const REFUNDS_TASK: Task = buildWorkTask(
+export const AGENT_CHECKS_SIGNAL_ID = "01a0ec64-7a00-7000-8000-000000000040";
+
+/** The id of Sentry's alert on checkout, which the Task Fix 3-D Secure checkout is Your work for. */
+export const ALERT_SIGNAL_ID = "01a0ec64-7a00-7000-8000-000000000001";
+
+/** The Task Refunds for partial captures, which the failed checks on its pull request are about (Your work). */
+const REFUNDS_TASK = buildWorkTask(
   REFUNDS.taskId,
   REFUNDS.title,
   "in-progress",
-  REFUNDS_PULL_REQUEST_REF,
-  REFUNDS.handoffs[0]!.signalId,
-  REFUNDS.latestRun.id,
+  AGENT_CHECKS_SIGNAL_ID,
 );
 
 /** The Sentry issue behind the alert on checkout, as a signal's thread names it. */
@@ -194,26 +183,15 @@ const FIX_CHECKOUT = buildTask(
  */
 export const YOUR_WORK_RECORDS: Partial<SidebarRecords> = {
   tracking: [FIX_CHECKOUT, ...TRACKING_RECORDS],
-  yourWorkTasks: [
-    buildWorkTask(
-      "t-3ds",
-      FIX_CHECKOUT.title,
-      "in-progress",
-      FIX_CHECKOUT_REF,
-      "signal-t-3ds",
-      "run-t-3ds",
-    ),
-  ],
+  yourWorkTasks: [buildWorkTask("t-3ds", FIX_CHECKOUT.title, "in-progress", ALERT_SIGNAL_ID)],
 };
 
 /** An open Task on the agent's pull request that nobody handed to an agent, so no row of Tracking follows it. */
-export const UNTRACKED_WORK_TASK: Task = buildWorkTask(
+export const UNTRACKED_WORK_TASK: YourWorkTask = buildWorkTask(
   "t-docs",
   "Document the refund flow",
   "open",
-  REFUNDS_PULL_REQUEST_REF,
-  "signal-t-docs",
-  undefined,
+  AGENT_CHECKS_SIGNAL_ID,
 );
 
 /** The session of the Upgrade the Stripe SDK run that asks to run `git push`, 3 minutes ago. */

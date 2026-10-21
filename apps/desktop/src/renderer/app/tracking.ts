@@ -9,13 +9,12 @@ import {
   buildTrackingRows,
   countToDo,
   countWaitingTrackingRows,
-  listSignalsWithThreadRef,
   matchYourWork,
   type TrackingRead,
   type TrackingRow,
   type YourWork,
-  type YourWorkRead,
 } from "@hercule/client-core";
+import type { Signal, SignalYourWork } from "@hercule/contract";
 import { signalsToDoQuery, trackingQuery, yourWorkQuery } from "./queries";
 import { useWaitingRunSessions } from "./waiting";
 
@@ -25,24 +24,34 @@ import { useWaitingRunSessions } from "./waiting";
 // kept while it equals the last one, so a read that changes none of the parts
 // a caller uses draws nothing again.
 const selectTrackingTasks = (read: TrackingRead) => read.tasks;
-const selectYourWorkTasks = (read: YourWorkRead) => read.tasks;
+const selectYourWorkTasks = (read: SignalYourWork) => read.tasks;
 
 /**
  * Returns Your work: for each To do signal, the open Tasks it is about, as
- * `matchYourWork` works them out from the signals with a thread ref and the
- * Tasks the last read of Your work holds. The shell's loader reads both, so it
- * never waits in practice. Each caller builds its own map, which costs well
- * under a millisecond at the largest sizes (200 signals, 50 Tasks of 200
- * provenance entries each). The map keeps its identity until a signal with a
- * thread ref or a Task changes.
+ * `matchYourWork` matches the Tasks the controller named to the cached To do
+ * list. The shell's loader reads both, so it never waits in practice. Each
+ * caller builds its own map, which is cheap: one pass over the Tasks and the
+ * signals.
+ *
+ * The signals are selected from To do: only those a Task names. A change to
+ * any other signal, or a new one, leaves the selection as it was, so it draws
+ * nothing again. A signal the user moves off To do leaves the selection at
+ * once, and with it Your work, before the controller's answer is read again.
+ * The map keeps its identity until a signal Your work names or a Task changes.
  */
 export function useYourWork(): YourWork {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const tasks = useSuspenseQuery({ ...yourWorkQuery(client), select: selectYourWorkTasks }).data;
+  // Made again only when the Tasks change, because Query keeps a selection
+  // only while the select function is the same one.
+  const selectNamedSignals = useMemo(() => {
+    const namedIds = new Set(tasks.flatMap((task) => task.signalIds));
+    return (signals: ReadonlyArray<Signal>) => signals.filter(({ id }) => namedIds.has(id));
+  }, [tasks]);
   const signals = useSuspenseQuery({
     ...signalsToDoQuery(client),
-    select: listSignalsWithThreadRef,
+    select: selectNamedSignals,
   }).data;
-  const tasks = useSuspenseQuery({ ...yourWorkQuery(client), select: selectYourWorkTasks }).data;
   return useMemo(() => matchYourWork(signals, tasks), [signals, tasks]);
 }
 

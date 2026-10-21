@@ -85,11 +85,10 @@ import type {
   TrackingTask,
   TranscriptRow,
   Workspace,
+  YourWorkTask,
 } from "@hercule/contract";
 import {
   createClient,
-  listYourWorkRefs,
-  buildYourWorkTask,
   type FetchLike,
   type HerculeClient,
   type Live,
@@ -237,11 +236,11 @@ export interface SidebarRecords {
    */
   readonly tracking?: ReadonlyArray<TrackingTask>;
   /**
-   * The open Tasks whose provenance names a signal's thread, which make a
-   * Tracking row Needs you when one of the signals on To do is about them
-   * (Your work). None when left out.
+   * What `signal.queryYourWork` returns: the open Tasks that belong to a
+   * signal on To do, which make a Tracking row Needs you (Your work). None
+   * when left out.
    */
-  readonly yourWorkTasks?: ReadonlyArray<Task>;
+  readonly yourWorkTasks?: ReadonlyArray<YourWorkTask>;
 }
 
 /** What the thread screen reads of the one thread it shows, as the thread route's loader reads it. */
@@ -587,10 +586,7 @@ const seedQueryCache = (
     tasks: records.tracking ?? [],
     readStartedAt: 0,
   });
-  queryClient.setQueryData(yourWorkQuery(client).queryKey, {
-    tasks: (records.yourWorkTasks ?? []).map(buildYourWorkTask),
-    refs: listYourWorkRefs(records.signals ?? []),
-  });
+  queryClient.setQueryData(yourWorkQuery(client).queryKey, { tasks: records.yourWorkTasks ?? [] });
   queryClient.setQueryData(liveAgentSessionsQuery(client).queryKey, records.agentSessions ?? []);
   queryClient.setQueryData(
     assistantsQuery(client).queryKey,

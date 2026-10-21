@@ -117,6 +117,8 @@ import {
 import type { FetchLike } from "@hercule/client-core";
 import { stopSpecimenClockAt } from "./fixed-clock";
 import {
+  AGENT_CHECKS_SIGNAL_ID,
+  ALERT_SIGNAL_ID,
   FIX_CHECKOUT_REF,
   NEEDS_YOU_RECORDS,
   REFUNDS_PULL_REQUEST_REF,
@@ -337,6 +339,7 @@ const SANNE = { name: "Sanne" };
 
 /** Sentry's alert on checkout: urgent, so it heads the list under Now. */
 const ALERT = buildSignal(1, 169, {
+  id: ALERT_SIGNAL_ID,
   kind: "sentry/alert-for-you",
   title: "Checkout fails for EU cards with 3-D Secure",
   priority: "urgent",
@@ -628,6 +631,7 @@ const TO_DO: ReadonlyArray<Signal> = [ALERT, CHANGES, REVIEW, CHECKS, MENTION, S
  * captures as Your work, so the Task's Tracking row is Needs you.
  */
 const AGENT_CHECKS = buildSignal(40, 8, {
+  id: AGENT_CHECKS_SIGNAL_ID,
   kind: "github/checks-failed",
   title: "Refund partial captures",
   asker: "GitHub Actions",

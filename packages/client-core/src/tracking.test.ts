@@ -121,7 +121,7 @@ const buildYourWork = (about: ReadonlyArray<readonly [Signal, ReadonlyArray<stri
           title: `Task ${id}`,
           status: "in-progress" as const,
           updatedAt: at(0),
-          provenanceRefs: [],
+          signalIds: [signal.id],
         })),
       },
     ]),

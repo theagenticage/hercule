@@ -3,6 +3,7 @@
  * the face on a signal's row, and a Now row's line (spec 17 §Intake rows, §The
  * pane). `matchYourWork` finds the Tasks; this file decides what they say.
  */
+import type { YourWorkTask } from "@hercule/contract";
 import {
   decideTrackingRowPose,
   isTrackingStateWaitingOnUser,
@@ -11,7 +12,6 @@ import {
   type TrackingRow,
 } from "./tracking";
 import type { Pose } from "./threads/pose";
-import type { YourWorkTask } from "./your-work";
 
 /** A Task of Your work that is a row of Tracking. */
 interface TrackedWork {

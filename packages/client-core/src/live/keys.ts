@@ -57,11 +57,12 @@ export const queryKeys = {
    */
   tracking: (): LiveQueryKey => ["tracking"],
   /**
-   * Your work as one read: the open Tasks that the thread refs of the To do
-   * signals name. Live topics: `task` reads it again on every push. A change
-   * to the signals reads it again only when their thread refs change, so no
-   * key maps it for `signal` here; the app watches the refs itself. The key
-   * is stable: the refs read change, the key does not.
+   * Your work as one read (`signal.queryYourWork`): the open Tasks that
+   * belong to a signal on To do. Live topics: `task` and `signal` read it
+   * again on every push, because a Task's provenance and the To do list both
+   * decide it. It is kept out of the `signals` prefix on purpose: that prefix
+   * is also read again by every `workflow`, `connection` and `plugin` push,
+   * which cannot change Your work.
    */
   yourWork: (): LiveQueryKey => ["your-work"],
   projects: (): LiveQueryKey => ["projects"],
@@ -520,10 +521,11 @@ export const buildQueryKeys = (
   // Any signal change refetches every list, whatever its filter, because a
   // raised or resolved signal moves in or out of them. A signal's own read is
   // refetched only when the push lists its id, or when the push lists no ids.
+  // Your work is read again too, because it follows the To do list.
   if (topic === "signal") {
     return ids.length === 0
-      ? [queryKeys.signals(), queryKeys.signal()]
-      : [queryKeys.signals(), ...ids.map((id) => queryKeys.signal(id))];
+      ? [queryKeys.signals(), queryKeys.signal(), queryKeys.yourWork()]
+      : [queryKeys.signals(), ...ids.map((id) => queryKeys.signal(id)), queryKeys.yourWork()];
   }
   // Any Discussion change refetches every page of the listing. A
   // Discussion's own page is refetched only when the push lists its id, or

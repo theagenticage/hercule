@@ -28,8 +28,7 @@ const readOf = (url: string): RecordedRequest => ({
   bodyBytes: 10,
 });
 const snapshotRead = (): RecordedRequest => readOf("http://127.0.0.1/api/v1/tasks/tracking");
-const yourWorkRead = (): RecordedRequest =>
-  readOf("http://127.0.0.1/api/v1/tasks?refs=github%3Apull-request%3Aacme%2Fa%231&status=open");
+const yourWorkRead = (): RecordedRequest => readOf("http://127.0.0.1/api/v1/signals/your-work");
 const toDoRead = (): RecordedRequest => readOf("http://127.0.0.1/api/v1/signals?view=to-do");
 
 describe("isLoadWithinBound", () => {
@@ -56,7 +55,7 @@ describe("isLoadWithinBound", () => {
 });
 
 describe("summarizeActivity", () => {
-  it("counts Your work's task.query and To do apart from Tracking's read and the other reads", () => {
+  it("counts Your work's read and To do apart from Tracking's read and the other reads", () => {
     const load = summarizeActivity({
       requests: [
         snapshotRead(),
@@ -74,7 +73,7 @@ describe("summarizeActivity", () => {
       toDoReads: 1,
       otherReads: 1,
     });
-    expect(load.yourWorkTiming).toContain("task.query for Your work median");
+    expect(load.yourWorkTiming).toContain("signal.queryYourWork median");
   });
 
   it("does not let Your work's reads count as other reads at the start", () => {
@@ -93,15 +92,12 @@ describe("isYourWorkLoadWithinBound", () => {
       pushes: [],
     });
 
-  it("accepts one pass of the batches, and one more for the task topic's first message", () => {
-    expect(isYourWorkLoadWithinBound(loadWith(1), 1)).toBe(true);
-    expect(isYourWorkLoadWithinBound(loadWith(2), 1)).toBe(true);
-    expect(isYourWorkLoadWithinBound(loadWith(4), 2)).toBe(true);
+  it("accepts the read of the start, and one more for each of the task and signal topics' first messages", () => {
+    for (const reads of [1, 2, 3]) expect(isYourWorkLoadWithinBound(loadWith(reads))).toBe(true);
   });
 
   it("refuses a start that read Your work too few or too many times", () => {
-    expect(isYourWorkLoadWithinBound(loadWith(0), 1)).toBe(false);
-    expect(isYourWorkLoadWithinBound(loadWith(3), 1)).toBe(false);
-    expect(isYourWorkLoadWithinBound(loadWith(1), 2)).toBe(false);
+    expect(isYourWorkLoadWithinBound(loadWith(0))).toBe(false);
+    expect(isYourWorkLoadWithinBound(loadWith(4))).toBe(false);
   });
 });
