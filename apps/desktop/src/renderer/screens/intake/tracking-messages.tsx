@@ -56,7 +56,7 @@ export function AskedMessage({
             <div className="tr-orig-h">
               <span className="tr-orig-src">{quote.mark}</span>
               <b>{quote.who}</b>
-              {quote.kindAndPlace !== "" && <span>· {quote.kindAndPlace}</span>}
+              {quote.kindAndPlace !== "" && <span>{`· ${quote.kindAndPlace}`}</span>}
             </div>
             <div className="tr-orig-q">{quote.text}</div>
           </div>
@@ -223,8 +223,8 @@ export function RunList({
                 }}
               >
                 {line.workflowName}
-              </button>{" "}
-              {line.outcome}
+              </button>
+              {` ${line.outcome}`}
             </span>
             {line.sessionId !== undefined && (
               <button

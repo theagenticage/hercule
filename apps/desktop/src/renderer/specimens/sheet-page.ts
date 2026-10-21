@@ -142,17 +142,6 @@ export function drawBookBrand(name: string, size: number): Element {
 }
 
 /**
- * Returns the state mark crew.js draws for `state` ("done", "failed",
- * "waiting"...) at `size` pixels, as an element. crew.js returns a mark only
- * as a string of markup, so the mark is parsed from it.
- */
-export function drawBookMark(state: string, size: number): Element {
-  const template = document.createElement("template");
-  template.innerHTML = readCrew().mark(state, size);
-  return template.content.firstElementChild!;
-}
-
-/**
  * Holds a Bureau book page still for a capture: stops every animation, so a
  * waiting face shows the frame the app draws, and hides the traffic-light
  * placeholders (`.tl`), where macOS draws the real ones over the app's

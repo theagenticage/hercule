@@ -17,14 +17,10 @@
  * 4. makes Mark done the answer ahead of Cancel in a Failed pane, where the
  *    drawing suggests Try again, so no answer is suggested there and Mark
  *    done's key is E, as the keys line says;
- * 5. draws the run's line under what the agent did, which the drawing draws
- *    only for two runs or more and for a Working one, because the app always
- *    draws it: the time, the run's mark, the workflow's name, how the run
- *    went, and a link to the run's thread;
- * 6. draws the colleague's face from the look the app gives the workflow's
+ * 5. draws the colleague's face from the look the app gives the workflow's
  *    id, in the head and before the agent's message, because the book casts
  *    Investigate a look (a tache and a homburg) that no id hashes to;
- * 7. writes the step the output comes from, which the drawing leaves out for
+ * 6. writes the step the output comes from, which the drawing leaves out for
  *    a text output, and the failure reason as the run records it.
  *
  * It fails when the drawing has no part it edits, because the drawing has
@@ -32,7 +28,7 @@
  */
 import { buildLook } from "../faces/look";
 import { findElement, findElementByText } from "./book-page";
-import { drawBookFace, drawBookMark, markSheetReady, stillBookPage } from "./sheet-page";
+import { drawBookFace, markSheetReady, stillBookPage } from "./sheet-page";
 
 stillBookPage();
 const style = document.createElement("style");
@@ -46,13 +42,6 @@ const pane = findElement(document, ".asks-detail .rt-pane");
 // runner, three parts joined by " · ".
 const standing = findElement(pane, ".ad-asked");
 standing.textContent = standing.textContent.split(" · ").slice(0, -3).join(" · ");
-
-// The app writes the "· " before the kind and the place as a text node of its
-// own, which shapes the text in two runs and makes the line 1/128 px wider
-// than the drawing's one run. The drawing is changed to match, so the
-// comparison stays exact.
-const kindAndPlace = findElement(pane, ".rt-orig-h > span:last-child");
-kindAndPlace.replaceChildren("· ", kindAndPlace.textContent.slice("· ".length));
 
 findElement(pane, ".ad-foot").remove();
 findElement(pane, '[data-answer="again"]').closest(".ans")?.remove();
@@ -85,57 +74,5 @@ if (state === "failed") {
   from.append("From the step ", step);
   findElement(did, ".rt-did").before(from);
 }
-
-// The app's rules for the run's line, which the drawing has none of: the
-// words are a flex row with the link to the thread at its end.
-const runStyle = document.createElement("style");
-runStyle.textContent = `
-  .rt-pane .rt-step-text {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    min-width: 0;
-  }
-  .rt-pane .rt-step-who {
-    color: var(--who-ink);
-    text-decoration: underline;
-    text-decoration-color: transparent;
-    text-underline-offset: 2px;
-  }
-  .rt-pane .rt-step-thread {
-    flex: none;
-    margin-left: auto;
-    color: var(--faint);
-    font-size: var(--t-12);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-`;
-document.head.append(runStyle);
-
-const finishedAt = state === "failed" ? "09:26" : "09:20";
-const outcome = state === "failed" ? "failed: permission denied on ops-db" : "finished";
-const time = document.createElement("time");
-time.textContent = finishedAt;
-// The workflow's name is a button that opens the run, in its colleague's hue, as the drawing writes the agent's name.
-const who = document.createElement("button");
-who.className = "rt-step-who who-ink";
-who.style.setProperty("--hue", agentName.style.getPropertyValue("--hue"));
-who.textContent = workflowName;
-const words = document.createElement("span");
-// The space and the outcome are two text nodes, as the app writes them.
-words.append(who, " ", outcome);
-const thread = document.createElement("span");
-thread.className = "rt-step-thread";
-thread.textContent = "Thread";
-const text = document.createElement("span");
-text.className = "rt-step-text";
-text.append(words, thread);
-const line = document.createElement("li");
-line.append(time, drawBookMark(state === "failed" ? "failed" : "done", 14), text);
-const steps = document.createElement("ol");
-steps.className = "rt-steps";
-steps.append(line);
-did.append(steps);
 
 await markSheetReady();
