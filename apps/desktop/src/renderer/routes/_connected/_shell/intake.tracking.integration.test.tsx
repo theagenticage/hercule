@@ -1927,6 +1927,29 @@ describe("the pane's answers", () => {
     expect(document.querySelector("dialog[open]")).toBeNull();
   });
 
+  it("moves the focus to the pane when the run ends under a focused Stop the run, so the keys still work", async () => {
+    let status: RunSummary["status"] = "running";
+    const rows = () => [[WORKING_TASK, status] as const];
+    const { live } = await openIntake("/intake?tracking=true", {
+      extra: storeTracking(rows(), { readRows: rows }),
+    });
+    await live.waitForFirstPushes();
+    await userEvent.click(getRowButton(WORKING_TASK));
+    const stop = within(getPane()!).getByRole("button", { name: "Stop the run" });
+    act(() => {
+      stop.focus();
+    });
+
+    status = "completed";
+    act(() => live.pushInvalidation("run", [getRunId(WORKING_TASK)]));
+
+    await within(getPane()!).findByRole("button", { name: "Mark done" });
+    expect(stop.isConnected).toBe(false);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(getPane()!.querySelector("article"));
+    });
+  });
+
   it("shows a refused stop under its button, and leaves the row as it was", async () => {
     await openIntake("/intake?tracking=true", {
       extra: {
@@ -2052,6 +2075,68 @@ describe("the pane's trip", () => {
     });
   });
 
+  it("draws no output under a newer run while the Task's read is still being redone, then follows it", async () => {
+    const NEWER_RUN_ID = "01a06d02-7c00-7000-8000-0000000000f2";
+    let newerRunStarted = false;
+    const held = holdAnswer();
+    const readRows = () =>
+      [[FINISHED_TASK, newerRunStarted ? "failed" : "completed"] as const] as const;
+    const buildRun = (task: Task, status: RunSummary["status"]): RunSummary =>
+      newerRunStarted
+        ? { ...buildRunSummary(task, status), id: NEWER_RUN_ID }
+        : buildRunSummary(task, status);
+    const readTrip = `GET /api/v1/tasks/${FINISHED_TASK.id}/tracking`;
+    const { calls, live } = await openIntake("/intake?tracking=true", {
+      extra: {
+        ...storeTracking(readRows(), { readRows, buildRun }),
+        [readTrip]: () =>
+          newerRunStarted
+            ? held.handler()
+            : {
+                body: buildTrackingDetail(FINISHED_TASK, buildRun(FINISHED_TASK, "completed"), {
+                  output: REVIEW_OUTPUT,
+                  endingActionStepName: "Post the review",
+                }),
+              },
+      },
+    });
+    await live.waitForFirstPushes();
+    await userEvent.click(getRowButton(FINISHED_TASK));
+    await waitFor(() => {
+      expect(getPane()!.querySelector(".tr-out-action")?.textContent).toBe("Post the review");
+    });
+    const countTripReads = () => calls.filter((call) => call.path === readTrip.slice(4)).length;
+    const readsBefore = countTripReads();
+
+    // A new run fails at once. Tracking's read answers, and the Task's read is still on its way.
+    newerRunStarted = true;
+    act(() => live.pushInvalidation("run", [NEWER_RUN_ID], undefined, "created"));
+
+    await waitFor(() => {
+      expect(getPane()!.querySelector(".ad-kind")?.textContent).toContain("Failed");
+    });
+    await waitFor(() => {
+      expect(countTripReads()).toBe(readsBefore + 1);
+    });
+    expect(getPane()!.querySelector(".tr-out-from")).toBeNull();
+    expect(getPane()!.querySelector(".tr-out-action")).toBeNull();
+    expect(screen.queryByRole("button", { name: "See the whole output in the run" })).toBeNull();
+
+    const earlier = buildRunSummary(FINISHED_TASK, "completed");
+    held.answer({
+      body: buildTrackingDetail(FINISHED_TASK, buildRun(FINISHED_TASK, "failed"), {
+        runs: [
+          { ...buildTrackingRun(earlier), sessionId: getSessionId(FINISHED_TASK) },
+          { ...buildTrackingRun(buildRun(FINISHED_TASK, "failed")) },
+        ],
+      }),
+    });
+    await waitFor(() => {
+      expect(getPane()!.querySelectorAll(".tr-steps li")).toHaveLength(2);
+    });
+    expect(getPane()!.querySelector(".tr-out-from")).toBeNull();
+  });
+
   it("follows the run live: its end draws the output in the open pane", async () => {
     let status: RunSummary["status"] = "running";
     const rows = () => [[WORKING_TASK, status] as const];
@@ -2167,6 +2252,57 @@ describe("the pane's trip", () => {
     const failure = await within(getPane()!).findByRole("alert");
     expect(failure.textContent).toBe("The Task was not found.");
     expect(getPane()!.querySelector(".tr-trip")).toBeNull();
+  });
+
+  it("moves the focus to the pane when a failed re-read replaces the trip with its error, so the keys still work", async () => {
+    let answering = true;
+    const failedRun = buildRunSummary(FAILED_TASK, "failed");
+    const readTrip = `GET /api/v1/tasks/${FAILED_TASK.id}/tracking`;
+    const { live } = await openIntake("/intake?tracking=true", {
+      extra: {
+        ...storeTracking(),
+        [readTrip]: () =>
+          answering
+            ? {
+                body: buildTrackingDetail(FAILED_TASK, failedRun, {
+                  runs: [
+                    {
+                      ...buildTrackingRun(failedRun),
+                      id: EARLIER_RUN_ID,
+                      failureCause: "step failed",
+                      sessionId: EARLIER_SESSION_ID,
+                    },
+                    { ...buildTrackingRun(failedRun), sessionId: getSessionId(FAILED_TASK) },
+                  ],
+                }),
+              }
+            : { status: 404, body: buildErrorBody("not_found", "The Task was not found.") },
+      },
+    });
+    await live.waitForFirstPushes();
+    await userEvent.click(getRowButton(FAILED_TASK));
+    const thread = await waitFor(() => {
+      const found = getPane()!.querySelector<HTMLElement>(".tr-step-thread");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    act(() => {
+      thread.focus();
+    });
+    const selected = readSelected();
+
+    answering = false;
+    act(() => live.pushInvalidation("task", [FAILED_TASK.id]));
+
+    await within(getPane()!).findByRole("alert");
+    expect(thread.isConnected).toBe(false);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(getPane()!.querySelector("article"));
+    });
+    await userEvent.keyboard("j");
+    await waitFor(() => {
+      expect(readSelected()).not.toEqual(selected);
+    });
   });
 });
 

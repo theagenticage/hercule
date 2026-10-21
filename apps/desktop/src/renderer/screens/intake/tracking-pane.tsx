@@ -165,18 +165,39 @@ function TrackingRowDetail({
     if (focusAnswerOnOpen) focusSuggestedAnswer();
   }, [focusAnswerOnOpen]);
 
-  // When the answers change while the pane shows the row, such as Stop the
-  // run turning into Mark done once the run has stopped, a focused answer is
-  // removed. The focus would fall to the page's body, outside the screen's
-  // keys, so it moves to the pane.
-  const answerKinds = answers.map((answer) => answer.kind).join();
-  const previousAnswerKinds = useRef(answerKinds);
+  // Anything the pane draws can be removed while it holds the focus: Stop the
+  // run turning into Mark done once the run has stopped, the trip's Thread
+  // button when a failed re-read replaces the trip with its error. The focus
+  // would then fall to the page's body, outside the screen's keys, so it moves
+  // to the pane. The pane remembers what had the focus, because a click on
+  // the page's body also leaves the body focused, and that one stays.
   useLayoutEffect(() => {
-    if (previousAnswerKinds.current === answerKinds) return;
-    previousAnswerKinds.current = answerKinds;
-    const focused = document.activeElement;
-    if (focused === null || focused === document.body) rootRef.current?.focus();
-  }, [answerKinds]);
+    const root = rootRef.current;
+    if (root === null) return;
+    let lastFocused: EventTarget | null = null;
+    const remember = (event: FocusEvent): void => {
+      lastFocused = event.target;
+    };
+    // A focus that moved to another element is not lost, so it is forgotten.
+    const forgetWhenMoved = (event: FocusEvent): void => {
+      if (event.relatedTarget !== null) lastFocused = null;
+    };
+    const repair = (): void => {
+      const lost = lastFocused instanceof Node && !lastFocused.isConnected;
+      const onBody = document.activeElement === null || document.activeElement === document.body;
+      if (lost && onBody) root.focus();
+      if (lost) lastFocused = null;
+    };
+    root.addEventListener("focusin", remember);
+    root.addEventListener("focusout", forgetWhenMoved);
+    const observer = new MutationObserver(repair);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => {
+      root.removeEventListener("focusin", remember);
+      root.removeEventListener("focusout", forgetWhenMoved);
+      observer.disconnect();
+    };
+  }, []);
 
   const pressAnswer = (answer: TrackingAnswer): void => {
     switch (answer.kind) {
