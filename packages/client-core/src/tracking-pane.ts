@@ -4,6 +4,7 @@
  * beside the agent's name (spec 17 §Tracking).
  */
 import type { TrackingOutputValue, TrackingRun } from "@hercule/contract";
+import { isRunLive } from "./run-display";
 import { formatAge } from "./threads/age";
 import { formatMessageTime } from "./threads/message-time";
 import { canMarkTrackingRowDone, nameTrackingState, type TrackingRow } from "./tracking";
@@ -147,6 +148,17 @@ export const describeTrackingRunLine = (run: TrackingRun): string => {
         ? `waiting for ${run.awaitedSignalIds.join(", ")}`
         : "working";
   }
+};
+
+/**
+ * Checks whether the pane draws its list of runs. `runs` are the Task's runs,
+ * oldest first. The list is drawn when there are two or more runs, or when the
+ * newest one is live. With one run that has ended, the list would repeat what
+ * the pane's name line and its links already say.
+ */
+export const shouldListTrackingRuns = (runs: ReadonlyArray<TrackingRun>): boolean => {
+  const newest = runs.at(-1);
+  return runs.length >= 2 || (newest !== undefined && isRunLive(newest.status));
 };
 
 /**

@@ -242,7 +242,7 @@ const buildHandoffSignal = (task: Task): Signal => ({
 const buildTrackingDetail = (
   task: Task,
   run: RunSummary,
-  extra: Partial<Pick<TrackingDetail, "outcome" | "endingActionStepName">> = {},
+  extra: Partial<Pick<TrackingDetail, "outcome" | "endingActionStepName" | "runs">> = {},
 ): TrackingDetail => ({
   taskId: task.id,
   firstHandoff: buildTrackingTask(task, run).handoffs[0]!,
@@ -271,7 +271,7 @@ const storeTracking = (
     buildExtra?: (
       task: Task,
       run: RunSummary,
-    ) => Partial<Pick<TrackingDetail, "outcome" | "endingActionStepName">>;
+    ) => Partial<Pick<TrackingDetail, "outcome" | "endingActionStepName" | "runs">>;
   } = {},
 ) => {
   const done = new Set<string>();
@@ -1896,9 +1896,8 @@ describe("the pane's trip", () => {
       ["Findings", "3 items"],
       ["Ready to merge", "yes"],
     ]);
-    const runs = [...did.querySelectorAll(".tr-steps li")];
-    expect(runs).toHaveLength(1);
-    expect(runs[0]!.textContent).toMatch(/^(\d+ \w+ )?\d\d:\d\dReview PR finishedThread$/);
+    // One run that has ended: the name line already says when and how it ended.
+    expect(did.querySelector(".tr-steps")).toBeNull();
     expect(did.querySelector(".tr-out-action")?.textContent).toBe("Post the review");
 
     await userEvent.click(
@@ -1921,9 +1920,7 @@ describe("the pane's trip", () => {
     expect(reason.textContent).toBe("permission denied on ops-db");
     // The reason is the first thing the agent says.
     expect(reason.previousElementSibling?.classList.contains("tr-name")).toBe(true);
-    expect(getPane()!.querySelector(".tr-steps li")?.textContent).toContain(
-      "Implement failed: permission denied on ops-db",
-    );
+    expect(getPane()!.querySelector(".tr-steps")).toBeNull();
 
     await userEvent.click(within(getPane()!).getByRole("button", { name: "Mark done" }));
     await waitFor(() => {
@@ -1970,7 +1967,54 @@ describe("the pane's trip", () => {
       "Lowercased the SKUs in the search index.",
     );
     expect(getPane()!.querySelector(".ad-kind")?.textContent).toContain("Finished");
-    expect(getPane()!.querySelector(".tr-steps li")?.textContent).toContain("Implement finished");
+    // The run has ended and is the Task's only one, so the list of runs goes.
+    expect(getPane()!.querySelector(".tr-steps")).toBeNull();
+  });
+
+  const EARLIER_RUN_ID = "01a06d02-7c00-7000-8000-0000000000f1";
+  const EARLIER_SESSION_ID = "01a06d02-7400-7000-8000-0000000000f1";
+
+  it("lists both runs of a Task that was run again, each with its links", async () => {
+    const { router } = await openIntake("/intake?tracking=true", {
+      extra: storeTracking(ROWS, {
+        buildExtra: (task, run) =>
+          task.id === FAILED_TASK.id
+            ? {
+                runs: [
+                  {
+                    ...buildTrackingRun(run),
+                    id: EARLIER_RUN_ID,
+                    failureCause: "step failed",
+                    sessionId: EARLIER_SESSION_ID,
+                  },
+                  { ...buildTrackingRun(run), sessionId: getSessionId(task) },
+                ],
+              }
+            : {},
+      }),
+    });
+    await userEvent.click(getRowButton(FAILED_TASK));
+
+    const lines = await waitFor(() => {
+      const found = [...getPane()!.querySelectorAll(".tr-steps li")];
+      expect(found).toHaveLength(2);
+      return found;
+    });
+    expect(lines.map((line) => line.querySelector(".tr-step-line")?.textContent)).toEqual([
+      "Implement failed: step failed",
+      "Implement failed: permission denied on ops-db",
+    ]);
+    expect(lines.map((line) => line.querySelector(".tr-step-thread")?.textContent)).toEqual([
+      "Thread",
+      "Thread",
+    ]);
+
+    await userEvent.click(
+      within(lines[0] as HTMLElement).getByRole("button", { name: "Implement" }),
+    );
+    await waitFor(() => {
+      expect(router.latestLocation.pathname).toBe(`/runs/${EARLIER_RUN_ID}`);
+    });
   });
 });
 

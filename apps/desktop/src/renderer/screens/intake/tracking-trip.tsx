@@ -24,6 +24,7 @@ import {
   nameSignalSource,
   readErrorMessage,
   readTrackingFaceSeed,
+  shouldListTrackingRuns,
   type TrackingDestination,
   type TrackingRow,
 } from "@hercule/client-core";
@@ -192,11 +193,13 @@ function Trip({
             onOpenThread={openThread}
           />
         )}
-        <RunList
-          lines={detail.runs.map((run) => buildRunLine(run, timezone, now))}
-          onOpenRun={openRun}
-          onOpenThread={openThread}
-        />
+        {shouldListTrackingRuns(detail.runs) && (
+          <RunList
+            lines={detail.runs.map((run) => buildRunLine(run, timezone, now))}
+            onOpenRun={openRun}
+            onOpenThread={openThread}
+          />
+        )}
         {detail.endingActionStepName !== undefined && (
           <EndedOnAction stepName={detail.endingActionStepName} />
         )}

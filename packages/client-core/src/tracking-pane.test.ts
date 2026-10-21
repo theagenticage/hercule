@@ -8,6 +8,7 @@ import {
   describeTrackingStamp,
   describeTrackingStanding,
   listTrackingAnswers,
+  shouldListTrackingRuns,
 } from "./tracking-pane";
 
 const START = "2026-10-20T09:00:00.000Z";
@@ -229,6 +230,29 @@ describe("decideTrackingRunPose", () => {
     expect(decideTrackingRunPose(buildRun("cancelled"))).toBe("idle");
     expect(decideTrackingRunPose(buildRun("running"))).toBe("working");
     expect(decideTrackingRunPose(buildRun("pending"))).toBe("working");
+  });
+});
+
+describe("shouldListTrackingRuns", () => {
+  it("leaves out the list for a single run that has ended", () => {
+    expect(shouldListTrackingRuns([buildRun("completed")])).toBe(false);
+    expect(shouldListTrackingRuns([buildRun("failed")])).toBe(false);
+    expect(shouldListTrackingRuns([buildRun("cancelled")])).toBe(false);
+  });
+
+  it("lists a single run that is live", () => {
+    expect(shouldListTrackingRuns([buildRun("running")])).toBe(true);
+    expect(shouldListTrackingRuns([buildRun("pending")])).toBe(true);
+  });
+
+  it("lists two or more runs, whether or not the newest is live", () => {
+    const first = buildRun("failed", { id: "run-1" });
+    expect(shouldListTrackingRuns([first, buildRun("completed", { id: "run-2" })])).toBe(true);
+    expect(shouldListTrackingRuns([first, buildRun("running", { id: "run-2" })])).toBe(true);
+  });
+
+  it("lists nothing when there are no runs", () => {
+    expect(shouldListTrackingRuns([])).toBe(false);
   });
 });
 
