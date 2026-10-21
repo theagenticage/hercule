@@ -229,7 +229,7 @@ export const IntakeList = memo(function IntakeList({
         signal={item.signal}
         lastInSection={item.lastInSection}
         faceSeed={work.faceSeed}
-        yourWorkTitle={item.inNow ? work.firstTaskTitle : null}
+        yourWorkTitle={item.inNow ? work.leadTaskTitle : null}
         plugins={plugins}
         raisers={raisers}
         selected={item.signal.id === selectedId}

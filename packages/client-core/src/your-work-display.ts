@@ -82,13 +82,18 @@ interface YourWorkOnRow {
    * row is led by its source's mark.
    */
   readonly faceSeed: string | null;
-  /** The title of the first Task of Your work, which a Now row leads its second line with. `null` when the signal has no Your work. */
-  readonly firstTaskTitle: string | null;
+  /**
+   * The title of the Task that leads the row, which a Now row names in its
+   * second line: the Task whose agent's face leads the row, else the first
+   * Task. `null` when the signal has no Your work.
+   */
+  readonly leadTaskTitle: string | null;
 }
 
 /**
  * Describes what a signal's row draws of its Your work `tasks`: the face of
- * the first tracked Task, and the title of the first Task. `rows` are
+ * the first tracked Task, and the title of that same Task. When no Task is
+ * tracked there is no face, and the title is the first Task's. `rows` are
  * Tracking's rows.
  */
 export const describeYourWorkOnRow = (
@@ -97,5 +102,8 @@ export const describeYourWorkOnRow = (
 ): YourWorkOnRow => {
   const items = describeYourWork(tasks, rows);
   const tracked = items.find((item): item is TrackedWork => item.kind === "tracked");
-  return { faceSeed: tracked?.faceSeed ?? null, firstTaskTitle: items[0]?.title ?? null };
+  return {
+    faceSeed: tracked?.faceSeed ?? null,
+    leadTaskTitle: (tracked ?? items[0])?.title ?? null,
+  };
 };

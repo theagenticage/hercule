@@ -120,22 +120,22 @@ describe("describeYourWorkOnRow", () => {
   it("has neither a face nor a title for a signal with no Your work", () => {
     expect(describeYourWorkOnRow([], [buildRow("a", "failed")])).toEqual({
       faceSeed: null,
-      firstTaskTitle: null,
+      leadTaskTitle: null,
     });
   });
 
-  it("leads with the face of the first tracked Task, and the title of the first Task whichever it is", () => {
+  it("names the Task whose face leads the row, the first tracked one, even when an untracked Task comes first", () => {
     const rows = [buildRow("b", "failed", "wf-b"), buildRow("c", "failed", "wf-c")];
     expect(describeYourWorkOnRow([buildTask("a"), buildTask("b"), buildTask("c")], rows)).toEqual({
       faceSeed: "wf-b",
-      firstTaskTitle: "Task a",
+      leadTaskTitle: "Task b",
     });
   });
 
-  it("has no face when no Task is tracked", () => {
+  it("names the first Task, and has no face, when no Task is tracked", () => {
     expect(describeYourWorkOnRow([buildTask("a")], [])).toEqual({
       faceSeed: null,
-      firstTaskTitle: "Task a",
+      leadTaskTitle: "Task a",
     });
   });
 });
