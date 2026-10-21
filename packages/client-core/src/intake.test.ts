@@ -35,6 +35,7 @@ import {
   describeSignalOutcomeMoment,
   describeSignalProvenance,
   describeSignalRow,
+  describeYourWorkRowLine,
   findReplyAnswer,
   findSuggestedAnswer,
   fitIntakeListWidth,
@@ -423,6 +424,30 @@ describe("describeSignalRow", () => {
         RAISERS,
       ),
     ).toBe("You · #ops");
+  });
+});
+
+describe("describeYourWorkRowLine", () => {
+  it("leads with the Task, then the kind in lower case and where, and leaves out who asks", () => {
+    expect(
+      describeYourWorkRowLine(
+        buildSignal("a", {
+          kind: "sentry/alert-for-you",
+          asker: "Sentry",
+          place: "webshop-prod",
+        }),
+        "Fix 3-D Secure checkout",
+      ),
+    ).toEqual({
+      taskTitle: "Fix 3-D Secure checkout",
+      rest: " · alert for you · webshop-prod",
+    });
+  });
+
+  it("leaves the kind of an unsure signal out, and has nothing after the Task with no place", () => {
+    expect(
+      describeYourWorkRowLine(buildSignal("a", { kind: "unsure", origin: fromUser() }), "Task"),
+    ).toEqual({ taskTitle: "Task", rest: "" });
   });
 });
 

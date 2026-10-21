@@ -1,4 +1,4 @@
-import type { TrackingRun, TrackingTask } from "@hercule/contract";
+import type { Signal, Task, TrackingRun, TrackingTask } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   buildTrackingRows,
@@ -8,8 +8,12 @@ import {
   groupTrackingRows,
   isTrackingAffectedByRunPush,
   listRecentTrackingRows,
+  nameTrackingState,
+  readTrackingFaceSeed,
   type TrackingState,
+  type TrackingWaits,
 } from "./tracking";
+import type { WaitingRunSession } from "./waiting";
 
 const START = "2026-10-20T09:00:00.000Z";
 const at = (minutes: number): string =>
@@ -50,8 +54,73 @@ const buildTask = (
   ...(latestLiveRun === undefined ? {} : { latestLiveRun }),
 });
 
-const stateOf = (task: TrackingTask): TrackingState | undefined =>
-  buildTrackingRows([task])[0]?.state;
+const NO_WAITS: TrackingWaits = { requests: [], signals: [], yourWork: new Map() };
+
+/** Builds Tracking's rows; `waits` defaults to nothing waiting on the user. */
+const buildRows = (tasks: ReadonlyArray<TrackingTask>, waits: TrackingWaits = NO_WAITS) =>
+  buildTrackingRows(tasks, waits);
+
+/** Builds the session of run `runId` that waits on the question `question`, last active at minute `activityAt`. */
+const buildWaitingSession = (
+  sessionId: string,
+  runId: string,
+  activityAt: number,
+  question = "Run git push?",
+): WaitingRunSession => ({
+  sessionId,
+  runId,
+  stepId: "implement",
+  title: `Implement · implement`,
+  question,
+  activityAt: at(activityAt),
+});
+
+/** Builds an open signal raised at minute `createdAt`, about `place`, or about no place for `null`. */
+const buildSignal = (
+  id: string,
+  createdAt: number,
+  place: string | null = "payments-api #1302",
+): Signal => ({
+  id,
+  kind: "github/checks-failed",
+  origin: { type: "api", actor: "user", eventIds: [], reason: "Test" },
+  title: `Signal ${id}`,
+  ...(place === null ? {} : { place }),
+  priority: "normal",
+  blocks: [],
+  actions: [],
+  match: {},
+  status: "open",
+  createdAt: at(createdAt),
+});
+
+/** Builds Your work for `signals`: each signal is about the Tasks whose ids are listed for it. */
+const buildWaitsOfSignals = (
+  about: ReadonlyArray<readonly [Signal, ReadonlyArray<string>]>,
+  requests: ReadonlyArray<WaitingRunSession> = [],
+): TrackingWaits => ({
+  requests,
+  signals: about.map(([signal]) => signal),
+  yourWork: new Map(
+    about.map(([signal, taskIds]) => [
+      signal.id,
+      taskIds.map((id): Task => ({
+        id,
+        title: `Task ${id}`,
+        description: "",
+        status: "in-progress",
+        priority: "normal",
+        labels: [],
+        provenance: [],
+        createdAt: at(0),
+        updatedAt: at(0),
+        statusChangedAt: at(0),
+      })),
+    ]),
+  ),
+});
+
+const stateOf = (task: TrackingTask): TrackingState | undefined => buildRows([task])[0]?.state;
 
 describe("buildTrackingRows", () => {
   it("puts a Task whose newest run failed in Failed, even when an older run is live", () => {
@@ -59,7 +128,7 @@ describe("buildTrackingRows", () => {
       latestLiveRun: buildRun("r1", 0, "running"),
     });
     expect(stateOf(task)).toBe("failed");
-    expect(buildTrackingRows([task])[0]?.run.id).toBe("r2");
+    expect(buildRows([task])[0]?.run.id).toBe("r2");
   });
 
   it("puts a Task with a live run in Working, pending or running", () => {
@@ -69,7 +138,7 @@ describe("buildTrackingRows", () => {
 
   it("keeps a Task working while an older run is live and the newest run completed, and reads the live run", () => {
     const live = buildRun("r1", 0, "running");
-    const [row] = buildTrackingRows([
+    const [row] = buildRows([
       buildTask("a", buildRun("r2", 5, "completed"), { latestLiveRun: live }),
     ]);
     expect(row?.state).toBe("working");
@@ -85,7 +154,7 @@ describe("buildTrackingRows", () => {
   });
 
   it("reads since from when the run ended, or when a live run was created", () => {
-    const since = (run: TrackingRun) => buildTrackingRows([buildTask("a", run)])[0]?.since;
+    const since = (run: TrackingRun) => buildRows([buildTask("a", run)])[0]?.since;
     expect(since(buildRun("r", 0, "failed"))).toBe(at(10));
     expect(since(buildRun("r", 0, "completed"))).toBe(at(10));
     expect(since(buildRun("r", 0, "cancelled"))).toBe(at(10));
@@ -95,7 +164,7 @@ describe("buildTrackingRows", () => {
   });
 
   it("orders Failed, Finished, Working, Stopped", () => {
-    const rows = buildTrackingRows([
+    const rows = buildRows([
       buildTask("stopped", buildRun("r1", 0, "cancelled")),
       buildTask("working", buildRun("r2", 0, "running")),
       buildTask("finished", buildRun("r3", 0, "completed")),
@@ -118,7 +187,7 @@ describe("buildTrackingRows", () => {
         { signalId: "s1", runId: "r0", at: at(5) },
       ],
     };
-    const rows = buildTrackingRows([
+    const rows = buildRows([
       again,
       buildTask("middle", buildRun("r2", 0, "completed"), { handedOffAt: 30 }),
       buildTask("old", buildRun("r1", 0, "completed"), { handedOffAt: 20 }),
@@ -127,9 +196,118 @@ describe("buildTrackingRows", () => {
   });
 });
 
+describe("a Task that needs you", () => {
+  const working = buildTask("a", buildRun("r1", 0, "running"));
+
+  it("turns Needs you while a session of its live run has a Request, and back to Working once it is answered", () => {
+    const request = buildWaitingSession("s1", "r1", 7);
+    const [asked] = buildRows([working], { ...NO_WAITS, requests: [request] });
+    expect(asked).toMatchObject({
+      state: "needs-you",
+      waitsOn: { kind: "request", session: request },
+      since: at(7),
+    });
+    // The row still reads its run, so the run can be opened.
+    expect(asked?.run.id).toBe("r1");
+    expect(stateOf(working)).toBe("working");
+  });
+
+  it("finds a Request on the newest live run when an older run is the newest", () => {
+    const task = buildTask("a", buildRun("r2", 5, "completed"), {
+      latestLiveRun: buildRun("r1", 0, "running"),
+    });
+    const rows = buildRows([task], { ...NO_WAITS, requests: [buildWaitingSession("s1", "r1", 7)] });
+    expect(rows[0]?.state).toBe("needs-you");
+  });
+
+  it("ignores the Request of a run that is not live or not the row's", () => {
+    const finished = buildTask("a", buildRun("r1", 0, "completed"));
+    const requests = [buildWaitingSession("s1", "r1", 7), buildWaitingSession("s2", "other", 7)];
+    expect(buildRows([working, finished], { ...NO_WAITS, requests })[1]?.state).toBe("finished");
+    expect(
+      buildRows([buildTask("b", buildRun("r9", 0, "running"))], { ...NO_WAITS, requests })[0]
+        ?.state,
+    ).toBe("working");
+  });
+
+  it("turns Needs you while an open signal names the Task as Your work, whatever its runs did", () => {
+    const signal = buildSignal("sig", 3);
+    const waits = buildWaitsOfSignals([[signal, ["a", "b", "c"]]]);
+    const tasks = [
+      buildTask("a", buildRun("r1", 0, "running")),
+      buildTask("b", buildRun("r2", 0, "failed")),
+      buildTask("c", buildRun("r3", 0, "completed")),
+    ];
+    const rows = buildRows(tasks, waits);
+    expect(rows.map((row) => row.state)).toEqual(["needs-you", "needs-you", "needs-you"]);
+    expect(rows[0]).toMatchObject({ waitsOn: { kind: "signal", signal }, since: at(3) });
+  });
+
+  it("leaves a Task alone when the signals are about other Tasks", () => {
+    const waits = buildWaitsOfSignals([[buildSignal("sig", 3), ["other"]]]);
+    expect(buildRows([working], waits)[0]?.state).toBe("working");
+  });
+
+  it("puts a Request above a signal, and Needs you above Failed", () => {
+    const failed = buildTask("a", buildRun("r2", 5, "failed"), {
+      latestLiveRun: buildRun("r1", 0, "running"),
+    });
+    const request = buildWaitingSession("s1", "r1", 9);
+    const waits = buildWaitsOfSignals([[buildSignal("sig", 1), ["a"]]], [request]);
+    // The newest run failed, but the older live run asks, so the row waits on the Request.
+    expect(buildRows([failed], waits)[0]).toMatchObject({
+      state: "needs-you",
+      waitsOn: { kind: "request", session: request },
+    });
+    expect(
+      buildRows([failed], buildWaitsOfSignals([[buildSignal("sig", 1), ["a"]]]))[0]?.state,
+    ).toBe("needs-you");
+  });
+
+  it("picks the oldest Request, and the oldest signal, whatever order they come in", () => {
+    const requests = [
+      buildWaitingSession("s2", "r1", 8),
+      buildWaitingSession("s1", "r1", 4),
+      buildWaitingSession("s3", "r1", 6),
+    ];
+    const asked = buildRows([working], { ...NO_WAITS, requests })[0];
+    expect(asked).toMatchObject({ waitsOn: { session: { sessionId: "s1" } }, since: at(4) });
+
+    const signals = [buildSignal("new", 9), buildSignal("old", 2), buildSignal("mid", 5)];
+    const raised = buildRows(
+      [working],
+      buildWaitsOfSignals(signals.map((signal) => [signal, ["a"]] as const)),
+    )[0];
+    expect(raised).toMatchObject({ waitsOn: { signal: { id: "old" } }, since: at(2) });
+  });
+
+  it("orders Needs you above every other state, the oldest handoff first inside it", () => {
+    const tasks = [
+      buildTask("failed", buildRun("r1", 0, "failed")),
+      buildTask("late", buildRun("r2", 0, "running"), { handedOffAt: 20 }),
+      buildTask("early", buildRun("r3", 0, "completed"), { handedOffAt: 10 }),
+    ];
+    const waits = buildWaitsOfSignals([[buildSignal("sig", 1), ["late", "early"]]]);
+    expect(buildRows(tasks, waits).map((row) => row.task.taskId)).toEqual([
+      "early",
+      "late",
+      "failed",
+    ]);
+  });
+
+  it("counts toward To do but cannot be marked done", () => {
+    const rows = buildRows(
+      [working, buildTask("b", buildRun("r2", 0, "running"))],
+      buildWaitsOfSignals([[buildSignal("sig", 1), ["a"]]]),
+    );
+    expect(countWaitingTrackingRows(rows)).toBe(1);
+    expect(canMarkTrackingStateDone("needs-you")).toBe(false);
+  });
+});
+
 describe("listRecentTrackingRows", () => {
   const buildRow = (id: string, minute: number) =>
-    buildTrackingRows([buildTask(id, buildRun(`r-${id}`, minute - 10, "completed"))])[0]!;
+    buildRows([buildTask(id, buildRun(`r-${id}`, minute - 10, "completed"))])[0]!;
 
   it("lists the two rows that entered their state last, newest first", () => {
     const rows = [buildRow("a", 5), buildRow("b", 30), buildRow("c", 20), buildRow("d", 1)];
@@ -144,7 +322,7 @@ describe("listRecentTrackingRows", () => {
 
 describe("waiting on the user", () => {
   it("counts the waiting rows", () => {
-    const rows = buildTrackingRows([
+    const rows = buildRows([
       buildTask("a", buildRun("r1", 0, "failed")),
       buildTask("b", buildRun("r2", 0, "completed")),
       buildTask("c", buildRun("r3", 0, "running")),
@@ -163,28 +341,28 @@ describe("waiting on the user", () => {
 });
 
 describe("isTrackingAffectedByRunPush", () => {
-  const rows = buildTrackingRows([
+  const tasks = [
     buildTask("a", buildRun("r2", 5, "completed"), { latestLiveRun: buildRun("r1", 0, "running") }),
-  ]);
+  ];
 
-  it("is affected by a push that names a row's newest run or newest live run", () => {
-    expect(isTrackingAffectedByRunPush(rows, { ids: ["r1"], kind: "updated" })).toBe(true);
-    expect(isTrackingAffectedByRunPush(rows, { ids: ["x", "r2"], kind: "deleted" })).toBe(true);
+  it("is affected by a push that names a Task's newest run or newest live run", () => {
+    expect(isTrackingAffectedByRunPush(tasks, { ids: ["r1"], kind: "updated" })).toBe(true);
+    expect(isTrackingAffectedByRunPush(tasks, { ids: ["x", "r2"], kind: "deleted" })).toBe(true);
   });
 
   it("is affected by a push that lists no ids, and by the creation of a run, which may be a re-run", () => {
-    expect(isTrackingAffectedByRunPush(rows, { ids: [], kind: "updated" })).toBe(true);
-    expect(isTrackingAffectedByRunPush(rows, { ids: ["new"], kind: "created" })).toBe(true);
+    expect(isTrackingAffectedByRunPush(tasks, { ids: [], kind: "updated" })).toBe(true);
+    expect(isTrackingAffectedByRunPush(tasks, { ids: ["new"], kind: "created" })).toBe(true);
   });
 
-  it("is not affected by a change to a run no row holds", () => {
-    expect(isTrackingAffectedByRunPush(rows, { ids: ["x", "y"], kind: "updated" })).toBe(false);
+  it("is not affected by a change to a run no Task holds", () => {
+    expect(isTrackingAffectedByRunPush(tasks, { ids: ["x", "y"], kind: "updated" })).toBe(false);
     expect(isTrackingAffectedByRunPush([], { ids: ["x"], kind: "updated" })).toBe(false);
   });
 });
 
 describe("describeTrackingLine", () => {
-  const rowOf = (run: TrackingRun) => buildTrackingRows([buildTask("a", run)])[0]!;
+  const rowOf = (run: TrackingRun) => buildRows([buildTask("a", run)])[0]!;
 
   it("names the workflow apart from the rest of the line", () => {
     expect(describeTrackingLine(rowOf(buildRun("r", 0, "completed")))).toEqual({
@@ -215,6 +393,26 @@ describe("describeTrackingLine", () => {
     );
   });
 
+  it("leads a Needs you line with what waits, with no workflow name: a Request's question", () => {
+    const task = buildTask("a", buildRun("r", 0, "running"));
+    const row = buildRows([task], {
+      ...NO_WAITS,
+      requests: [buildWaitingSession("s", "r", 1, "Run git push?")],
+    })[0]!;
+    expect(describeTrackingLine(row)).toEqual({ workflowName: null, text: "Run git push?" });
+  });
+
+  it("leads a Needs you line with what waits: a signal's kind and place", () => {
+    const task = buildTask("a", buildRun("r", 0, "completed"));
+    const line = (signal: Signal) =>
+      describeTrackingLine(buildRows([task], buildWaitsOfSignals([[signal, ["a"]]]))[0]!);
+    expect(line(buildSignal("sig", 1))).toEqual({
+      workflowName: null,
+      text: "Checks failed on payments-api #1302",
+    });
+    expect(line(buildSignal("sig", 1, null)).text).toBe("Checks failed");
+  });
+
   it("says a cancelled run is stopped", () => {
     expect(describeTrackingLine(rowOf(buildRun("r", 0, "cancelled"))).text).toBe("· stopped");
   });
@@ -222,18 +420,23 @@ describe("describeTrackingLine", () => {
 
 describe("groupTrackingRows", () => {
   it("groups the rows by state in Tracking's order, keeping the order inside a group", () => {
-    const rows = buildTrackingRows([
-      buildTask("w1", buildRun("r1", 0, "running"), { handedOffAt: 1 }),
-      buildTask("f1", buildRun("r2", 0, "failed")),
-      buildTask("w2", buildRun("r3", 0, "running"), { handedOffAt: 2 }),
-      buildTask("s1", buildRun("r4", 0, "cancelled")),
-    ]);
+    const rows = buildRows(
+      [
+        buildTask("w1", buildRun("r1", 0, "running"), { handedOffAt: 1 }),
+        buildTask("f1", buildRun("r2", 0, "failed")),
+        buildTask("w2", buildRun("r3", 0, "running"), { handedOffAt: 2 }),
+        buildTask("s1", buildRun("r4", 0, "cancelled")),
+        buildTask("n1", buildRun("r5", 0, "running")),
+      ],
+      buildWaitsOfSignals([[buildSignal("sig", 1), ["n1"]]]),
+    );
     expect(
       groupTrackingRows(rows).map(({ state, rows: inState }) => [
         state,
         inState.map((row) => row.task.taskId),
       ]),
     ).toEqual([
+      ["needs-you", ["n1"]],
       ["failed", ["f1"]],
       ["working", ["w1", "w2"]],
       ["stopped", ["s1"]],
@@ -242,5 +445,27 @@ describe("groupTrackingRows", () => {
 
   it("returns no group for no row", () => {
     expect(groupTrackingRows([])).toEqual([]);
+  });
+});
+
+describe("readTrackingFaceSeed", () => {
+  it("is the workflow's id, or its name when the run has no workflow", () => {
+    const [byId] = buildRows([
+      buildTask(
+        "a",
+        buildRun("r1", 0, "failed", { workflowId: "wf-1", workflowName: "Implement" }),
+      ),
+    ]);
+    const [byName] = buildRows([buildTask("b", buildRun("r2", 0, "failed"))]);
+    expect(readTrackingFaceSeed(byId!)).toBe("wf-1");
+    expect(readTrackingFaceSeed(byName!)).toBe("Implement");
+  });
+});
+
+describe("nameTrackingState", () => {
+  it("names every state in the words of Tracking's headings", () => {
+    expect(
+      (["needs-you", "failed", "finished", "working", "stopped"] as const).map(nameTrackingState),
+    ).toEqual(["Needs you", "Failed", "Finished", "Working", "Stopped"]);
   });
 });

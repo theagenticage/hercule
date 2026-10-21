@@ -3,8 +3,10 @@
  * `task.queryTracking` returns, which the real Intake screen draws.
  *
  * The rows are the Tracking drawing's (docs/design/tracking/tracking-data.js,
- * at 09:41), without the Needs you rows, which come with a later slice. The
- * drawing's lines that need more than a run summary hold differ:
+ * at 09:41). The two Needs you rows are not in `TRACKING_RECORDS`: a Task is
+ * Needs you only with something that waits on it, so they come with what
+ * waits, in `NEEDS_YOU_RECORDS`. The drawing's lines that need more than a run
+ * summary hold differ:
  *
  * - A Working row's line is "working", not the agent's latest message, and a
  *   run that waits on a signal trigger names the trigger ("waiting for
@@ -19,8 +21,8 @@
  * look, with a tache and a homburg, is Hercule's, which no seed can hash to,
  * so its face differs.
  */
-import type { TrackingRun, TrackingTask } from "@hercule/contract";
-import { SPECIMEN_NOW } from "./sidebar-fixture";
+import type { Session, Task, TrackingRun, TrackingTask } from "@hercule/contract";
+import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
 
 /** The ids that give a workflow the face the book casts for it, where its name would hash to another. */
 const WORKFLOW_SEEDS: Readonly<Record<string, string>> = { "Fix bug": "Fix bug 160" };
@@ -97,7 +99,7 @@ const SKU = buildTask(
   "t-sku",
   "Lowercase SKUs in search",
   8,
-  buildRun("run-t-sku", "Fix bug", 8, { status: "running", startedAt: minutesAgo(6) }),
+  buildRun("run-t-sku", "Fix bug", 6, { status: "running", startedAt: minutesAgo(5) }),
 );
 const PDF = buildTask(
   "t-pdf",
@@ -114,3 +116,146 @@ export const TRACKING_RECORDS: ReadonlyArray<TrackingTask> = [
   SKU,
   PDF,
 ];
+
+/** The pull request the checks of Refunds for partial captures failed on, as a signal's thread names it. */
+export const REFUNDS_PULL_REQUEST_REF = "github:pull:payments-api#1302";
+
+const REFUNDS = buildTask(
+  "t-212",
+  "Refunds for partial captures",
+  70,
+  buildRun("run-t-212", "Implement", 70, {
+    status: "completed",
+    startedAt: minutesAgo(70),
+    finishedAt: minutesAgo(49),
+  }),
+);
+const SDK = buildTask(
+  "t-sdk",
+  "Upgrade the Stripe SDK to v14",
+  19,
+  buildRun("run-t-sdk", "Implement", 19, { status: "running", startedAt: minutesAgo(19) }),
+);
+
+/**
+ * The Task Refunds for partial captures as `task.query` returns it, with the
+ * pull request's ref in its provenance. A signal whose thread is that pull
+ * request is about this Task (Your work).
+ */
+const REFUNDS_TASK: Task = {
+  id: REFUNDS.taskId,
+  title: REFUNDS.title,
+  description: "",
+  status: "in-progress",
+  priority: "normal",
+  labels: [],
+  provenance: [
+    {
+      signalId: REFUNDS.handoffs[0]!.signalId,
+      runId: REFUNDS.latestRun.id,
+      ref: REFUNDS_PULL_REQUEST_REF,
+      at: minutesAgo(70),
+      actor: "user",
+    },
+  ],
+  createdAt: minutesAgo(70),
+  updatedAt: minutesAgo(49),
+  statusChangedAt: minutesAgo(70),
+};
+
+/** The Sentry issue behind the alert on checkout, as a signal's thread names it. */
+export const FIX_CHECKOUT_REF = "sentry:issue:WEBSHOP-3DS";
+
+const FIX_CHECKOUT = buildTask(
+  "t-3ds",
+  "Fix 3-D Secure checkout for EU cards",
+  40,
+  buildRun("run-t-3ds", "Fix bug", 40, { status: "running", startedAt: minutesAgo(39) }),
+);
+
+/** Builds an open Task as `task.query` returns it, with the thread ref `ref` in its provenance. */
+const buildWorkTask = (
+  id: string,
+  title: string,
+  status: Task["status"],
+  ref: string,
+  signalId: string,
+  runId: string | undefined,
+): Task => ({
+  id,
+  title,
+  description: "",
+  status,
+  priority: "normal",
+  labels: [],
+  provenance: [
+    { signalId, ...(runId === undefined ? {} : { runId }), ref, at: minutesAgo(40), actor: "user" },
+  ],
+  createdAt: minutesAgo(40),
+  updatedAt: minutesAgo(30),
+  statusChangedAt: minutesAgo(40),
+});
+
+/**
+ * What a scene with Your work on a Now signal holds: the Task that fixes the
+ * alert on checkout, which an agent works on, besides the Tracking rows of
+ * the drawing.
+ */
+export const YOUR_WORK_RECORDS = {
+  tracking: [FIX_CHECKOUT, ...TRACKING_RECORDS],
+  yourWorkTasks: [
+    buildWorkTask(
+      "t-3ds",
+      FIX_CHECKOUT.title,
+      "in-progress",
+      FIX_CHECKOUT_REF,
+      "signal-t-3ds",
+      "run-t-3ds",
+    ),
+  ],
+};
+
+/** An open Task on the agent's pull request that nobody handed to an agent, so no row of Tracking follows it. */
+export const UNTRACKED_WORK_TASK: Task = buildWorkTask(
+  "t-docs",
+  "Document the refund flow",
+  "open",
+  REFUNDS_PULL_REQUEST_REF,
+  "signal-t-docs",
+  undefined,
+);
+
+/** The session of the Upgrade the Stripe SDK run that asks to run `git push`, 3 minutes ago. */
+const SDK_SESSION: Session = {
+  ...SPECIMEN_RECORDS.threads[0]!,
+  id: "01a0ec64-7a00-7000-8000-0000000000e1",
+  title: "Implement · implement",
+  status: "busy",
+  runId: SDK.latestRun.id,
+  stepId: "implement",
+  openRequests: [
+    {
+      requestId: "r-sdk",
+      itemId: "tool-sdk",
+      decisions: ["allow", "deny"],
+      kind: "command_approval",
+      detail: { command: "git push -u origin chore/stripe-sdk-14" },
+    },
+  ],
+  lastActivityAt: minutesAgo(3),
+};
+
+/**
+ * What a Tracking scene with the two Needs you rows holds, beside the
+ * signals on To do (which must include the checks that failed on
+ * `REFUNDS_PULL_REQUEST_REF`):
+ *
+ * - `tracking`: the drawing's seven rows;
+ * - `agentSessions`: the session whose Request makes Upgrade the Stripe SDK Needs you;
+ * - `yourWorkTasks`: the Task the failed checks are about, which makes Refunds for partial captures Needs you.
+ */
+export const NEEDS_YOU_RECORDS = {
+  tracking: [REFUNDS, SDK, ...TRACKING_RECORDS],
+  agentSessions: [SDK_SESSION],
+  yourWorkTasks: [REFUNDS_TASK],
+};

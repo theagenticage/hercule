@@ -161,14 +161,16 @@
 .ask-item.is-checked {
   --row-fill: color-mix(in srgb, var(--ink) 7%, var(--surface));
 }
+/* The lead column is 24px so a face fits, as the Tracking drawing has it. The
+   text still starts 42px in, where Intake's drawing has it. */
 .ask-row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
   min-height: 52px;
-  padding: 7px 10px;
+  padding: 7px 10px 7px 8px;
   border-radius: var(--r-md);
   text-align: left;
   transition: background var(--dur-1);
@@ -200,6 +202,22 @@
 .ask-mark:has(> .signal-face) {
   opacity: 1;
 }
+/* The face of the agent on a signal's Task leads the row at full strength, as
+   Hercule's face does; only a source's mark is softened. */
+.ask-mark--face {
+  opacity: 1;
+}
+.ask-mark--face .cr {
+  display: block;
+}
+/* The source's mark at the start of the second line, on a row led by a face. */
+.ask-src {
+  display: inline-grid;
+  margin-right: 6px;
+  vertical-align: -1px;
+  color: var(--ink);
+  opacity: 0.75;
+}
 .ask-text {
   display: flex;
   flex-direction: column;
@@ -230,6 +248,11 @@
   color: var(--faint);
   font-size: var(--t-11);
   font-variant-numeric: tabular-nums;
+}
+/* What a row leads its second line with instead of who asks: a Now row's Your work. */
+.ask-state {
+  color: var(--ink);
+  font-weight: var(--w-medium);
 }
 /* Back from a snooze: it leads the row in your colour. */
 .ask-back {
@@ -1233,6 +1256,11 @@
 }
 .b-work-text span:last-child {
   color: var(--muted);
+}
+/* Your work on a Task whose row waits on the user: its state word, in your colour. */
+.b-work-text span:last-child b {
+  color: var(--you-ink);
+  font-size: inherit;
 }
 
 /* Everything's pane: what came of the event, one block per handling, under a

@@ -16,7 +16,11 @@ import type { TrackingRow } from "./tracking";
 
 /** The rows Tracking shows, and what decides them. */
 export interface HeldTrackingRows {
-  /** Tracking's rows as last read, in Tracking's order. */
+  /**
+   * Tracking's rows as last built, in Tracking's order. A row changes when the
+   * Tasks are read again, and also when a Request or a signal that a row waits
+   * on comes or goes, because Needs you is built from them.
+   */
   readonly listed: ReadonlyArray<TrackingRow>;
   /** The rows Tracking shows: `listed`, less the changes held back. */
   readonly shown: ReadonlyArray<TrackingRow>;
@@ -25,8 +29,9 @@ export interface HeldTrackingRows {
   /** The Tasks the user marked done, until `listed` has no row of them. */
   readonly markedDoneTaskIds: ReadonlySet<string>;
   /**
-   * When the read that gave `listed` started, on the clock `TrackingRead` names.
-   * Everything in `listed` is as the controller held it from that moment on.
+   * When the newest read of Tracking's Tasks that the record has followed
+   * started, on the clock `TrackingRead` names. The Tasks in `listed` are as
+   * the controller held them from that moment on.
    */
   readonly readStartedAt: number;
   /**
@@ -84,25 +89,47 @@ export const followListedTrackingRows = (
 };
 
 /**
- * Follows a read of Tracking as a whole: its `rows` and when it started. It is
- * `followListedTrackingRows`, except that it leaves `held` as it is, the very
- * same record, when `rows` are the rows already listed and the read
- * acknowledges no handoff. A read that changed none of the rows, which the
- * query then shares with the read before it, can still be the first that started
- * after a handoff committed.
+ * Follows the rows, `rows`, as last built from the newest read of Tracking's
+ * Tasks, which started at `readStartedAt`. It is `followListedTrackingRows`,
+ * except that it leaves `held` as it is, the very same record, when `rows` are
+ * the rows already listed and the read acknowledges no handoff. A read that
+ * changed none of the Tasks, which the query then shares with the read before
+ * it, can still be the first that started after a handoff committed.
  */
 export const followTrackingRead = (
   held: HeldTrackingRows,
   rows: ReadonlyArray<TrackingRow>,
   readStartedAt: number,
-): HeldTrackingRows => {
-  const acknowledges = [...held.handoffs.values()].some(
-    (committedAt) => committedAt !== null && committedAt <= readStartedAt,
-  );
-  return rows === held.listed && !acknowledges
+): HeldTrackingRows =>
+  rows === held.listed && !isHandoffCommittedBefore(held, readStartedAt)
     ? held
     : followListedTrackingRows(held, rows, readStartedAt);
-};
+
+/** Checks whether a handoff of `held` committed before a read that started at `readStartedAt`. */
+const isHandoffCommittedBefore = (held: HeldTrackingRows, readStartedAt: number): boolean =>
+  [...held.handoffs.values()].some(
+    (committedAt) => committedAt !== null && committedAt <= readStartedAt,
+  );
+
+/**
+ * Records that a read of Tracking's Tasks, which started at `readStartedAt`,
+ * has succeeded. Returns `held` itself unless that read is the first that
+ * started after a handoff committed. Then it returns a new record, so the
+ * screen draws again and follows the rows (`followTrackingRead`) with the
+ * rows built from the read.
+ *
+ * It does not follow the rows itself, because it does not have them: they are
+ * built from the Tasks and from what waits on the user. If it applied the
+ * handoff to the rows listed so far, a read that also changed the Tasks, such
+ * as the one that adds the handed-off Task's row, would acknowledge the
+ * handoff before that row was listed, and a record holding back changes would
+ * never show it.
+ */
+export const recordTrackingRead = (
+  held: HeldTrackingRows,
+  readStartedAt: number,
+): HeldTrackingRows =>
+  isHandoffCommittedBefore(held, readStartedAt) ? { ...held, readStartedAt } : held;
 
 /**
  * Records that the user is marking the Task `taskId` done. Call it when the

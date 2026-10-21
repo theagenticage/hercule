@@ -392,6 +392,7 @@ export {
   describeSignalOutcomeMoment,
   describeSignalProvenance,
   describeSignalRow,
+  describeYourWorkRowLine,
   EVENT_HANDLING_OPTIONS,
   findReplyAnswer,
   findSuggestedAnswer,
@@ -424,6 +425,7 @@ export {
   type SignalOutcome,
   type SignalRaiserNames,
   type UrgentSignal,
+  type YourWorkRowLine,
 } from "./intake";
 export {
   buildTrackingRows,
@@ -433,12 +435,17 @@ export {
   groupTrackingRows,
   isTrackingAffectedByRunPush,
   listRecentTrackingRows,
+  nameTrackingState,
+  readTrackingFaceSeed,
   type TrackingGroup,
   type TrackingLine,
   type TrackingRead,
   type TrackingRow,
   type TrackingState,
+  type TrackingWait,
+  type TrackingWaits,
 } from "./tracking";
+export { decideTrackingRowDestination, type TrackingRowDestination } from "./tracking-destination";
 export {
   decideSidebarDragEnd,
   DEFAULT_SIDEBAR_LAYOUT,
@@ -502,6 +509,7 @@ export {
   dropTrackingRowMarkedDone,
   followListedTrackingRows,
   followTrackingRead,
+  recordTrackingRead,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
   recordTrackingRowMarkedDone,
@@ -510,6 +518,23 @@ export {
   type HeldTrackingRows,
 } from "./held-tracking-rows";
 export { describeInboxZeroLine, type InboxZeroLine } from "./inbox-zero";
+export {
+  batchYourWorkRefs,
+  isYourWorkReadOutdated,
+  listSignalsWithThreadRef,
+  listYourWorkRefs,
+  matchYourWork,
+  type YourWork,
+  type YourWorkRead,
+} from "./your-work";
+export {
+  describeYourWork,
+  describeYourWorkOnRow,
+  type TrackedWork,
+  type UntrackedWork,
+  type YourWorkItem,
+  type YourWorkOnRow,
+} from "./your-work-display";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
 export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";

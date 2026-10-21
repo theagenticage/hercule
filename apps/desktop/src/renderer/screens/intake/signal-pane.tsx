@@ -36,6 +36,7 @@ import {
   describeSignalOutcomeMoment,
   describeSignalProvenance,
   describeSnoozeLine,
+  describeYourWork,
   findReplyAnswer,
   findSuggestedAnswer,
   formatMessageTime,
@@ -56,6 +57,7 @@ import {
 } from "../../app/queries";
 import { AlarmIcon } from "../../icons/alarm";
 import { ExternalIcon } from "../../icons/external";
+import { useTrackingRows, useYourWork } from "../../app/tracking";
 import { Mark } from "../../marks";
 import { IgnoreDialog } from "./ignore-dialog";
 import { SignalAnswers, type AnswerFailure } from "./signal-answers";
@@ -84,7 +86,8 @@ export interface SignalPaneHandle {
  *
  * `focusSuggestedOnOpen` puts the focus on the suggested answer as soon as
  * the pane shows the signal, then calls `onFocusedSuggested`. `ref` gives
- * the screen's keys the pane's moves.
+ * the screen's keys the pane's moves. `onShowInTracking` is called with a
+ * Task's id when the user asks to see the Task's row in Tracking.
  */
 export function SignalPane({
   signalId,
@@ -93,6 +96,7 @@ export function SignalPane({
   shown,
   focusSuggestedOnOpen,
   onFocusedSuggested,
+  onShowInTracking,
   ref,
 }: {
   readonly signalId: string;
@@ -101,6 +105,7 @@ export function SignalPane({
   readonly shown: boolean;
   readonly focusSuggestedOnOpen: boolean;
   readonly onFocusedSuggested: () => void;
+  readonly onShowInTracking: (taskId: string) => void;
   readonly ref: Ref<SignalPaneHandle>;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
@@ -114,6 +119,7 @@ export function SignalPane({
           timezone={timezone}
           focusSuggestedOnOpen={focusSuggestedOnOpen}
           onFocusedSuggested={onFocusedSuggested}
+          onShowInTracking={onShowInTracking}
           ref={ref}
         />
       ) : read.isError ? (
@@ -141,12 +147,14 @@ function SignalDetail({
   timezone,
   focusSuggestedOnOpen,
   onFocusedSuggested,
+  onShowInTracking,
   ref,
 }: {
   readonly signal: Signal;
   readonly timezone: string;
   readonly focusSuggestedOnOpen: boolean;
   readonly onFocusedSuggested: () => void;
+  readonly onShowInTracking: (taskId: string) => void;
   readonly ref: Ref<SignalPaneHandle>;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
@@ -199,6 +207,9 @@ function SignalDetail({
   const { data: workflows } = useSuspenseQuery(workflowsQuery(client));
   const { data: assistants } = useSuspenseQuery(assistantsQuery(client));
   const raisers = { workflows, assistants };
+  // Your work is read for the signals on To do only, so a signal on Later or Done has none.
+  const yourWorkTasks = useYourWork().get(signal.id) ?? [];
+  const yourWork = describeYourWork(yourWorkTasks, useTrackingRows());
   const origin = signal.origin;
   // Only a signal raised from an event has an event to read, so the list of
   // reads is empty for any other signal.
@@ -352,7 +363,13 @@ function SignalDetail({
             {snoozeLine}
           </p>
         )}
-        <SignalBlocks blocks={signal.blocks} task={signal.task} timezone={timezone} />
+        <SignalBlocks
+          blocks={signal.blocks}
+          task={signal.task}
+          yourWork={yourWork}
+          timezone={timezone}
+          onShowInTracking={onShowInTracking}
+        />
         {buildFailure !== null && <p className="ad-flag">{buildFailure}</p>}
         {notScreened !== null && <p className="ad-flag">{notScreened}</p>}
         {outcome === null ? (

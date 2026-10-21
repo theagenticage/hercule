@@ -31,6 +31,7 @@ import {
   type IntakeView,
   type SignalMove,
   type SignalMovePlan,
+  type TrackingRowDestination,
 } from "@hercule/client-core";
 import {
   settingsQuery,
@@ -97,7 +98,8 @@ const isCheckable = (signal: Signal | undefined, view: SignalView): signal is Si
  * list column (`trackingOpen`, which `onTrackingOpenChange` changes; opening
  * it clears the selected signal). The rows of Tracking that wait on the user
  * count in To do, so a list with no signal but such rows is not at inbox
- * zero. A press on a row of Tracking calls `onOpenRun` with its run's id.
+ * zero. A press on a row of Tracking calls `onOpenTrackingRow` with where the
+ * row goes: its run, the thread whose Request waits, or the signal that waits.
  *
  * The keys of spec 17 §Keys act while the focus is in the list or the pane
  * and never in a text field:
@@ -121,7 +123,7 @@ export function IntakeScreen({
   trackingOpen: trackingOpenParam,
   onSelect,
   onTrackingOpenChange,
-  onOpenRun,
+  onOpenTrackingRow,
   onViewChange,
   onPluginChange,
 }: {
@@ -134,8 +136,12 @@ export function IntakeScreen({
   readonly onSelect: (signalId: string | null) => void;
   /** Opens or closes Tracking. Opening it also clears the selected signal. */
   readonly onTrackingOpenChange: (open: boolean) => void;
-  /** Opens the page of a run. */
-  readonly onOpenRun: (runId: string) => void;
+  /**
+   * Goes where a row of Tracking opens: the page of a run, the thread of a
+   * session, or a signal in To do, which the route selects with Tracking
+   * closed.
+   */
+  readonly onOpenTrackingRow: (destination: TrackingRowDestination) => void;
   readonly onViewChange: (view: IntakeView) => void;
   readonly onPluginChange: (pluginId: string | null) => void;
 }): JSX.Element {
@@ -247,7 +253,15 @@ export function IntakeScreen({
       setMenu(null);
     },
     onOpenChange: onTrackingOpenChange,
-    onOpenRun,
+    onOpenRow: (destination) => {
+      if (destination.kind === "signal") {
+        // The pane shows even if the user closed an earlier one, and the sheet
+        // that held the focus goes with Tracking, so the list takes it.
+        setDismissed(false);
+        listRef.current?.focus({ preventScroll: true });
+      }
+      onOpenTrackingRow(destination);
+    },
   });
 
   /** Selects `signalId` and shows the pane, as a click on its row does. */
@@ -693,6 +707,7 @@ export function IntakeScreen({
                 onFocusedSuggested={() => {
                   setFocusPaneFor(null);
                 }}
+                onShowInTracking={tracking.showTaskInTracking}
                 ref={paneRef}
               />
             )

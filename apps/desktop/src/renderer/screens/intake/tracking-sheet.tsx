@@ -13,7 +13,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import type { TrackingState } from "@hercule/client-core";
+import { nameTrackingState, type TrackingState } from "@hercule/client-core";
 import { ChevronLeftIcon } from "../../icons/chevron-left";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { Mark } from "../../marks";
@@ -233,7 +233,7 @@ export function TrackingSheet({
               return item.kind === "heading" ? (
                 <h3 key={item.key} className="section-h asks-sec tr-sec" data-item-key={item.key}>
                   <Mark state={TRACKING_STATE_LOOKS[item.state].mark} size={14} />
-                  {TRACKING_STATE_LOOKS[item.state].word}
+                  {nameTrackingState(item.state)}
                   <span className="count">{item.count}</span>
                 </h3>
               ) : (

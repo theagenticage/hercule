@@ -1,10 +1,15 @@
 /**
  * What the user does with Tracking on Intake's To do view: opening and
- * closing it, selecting a row, ticking a row off, and opening a row's run
- * (spec 17 §Tracking, §Keys).
+ * closing it, selecting a row, ticking a row off, and opening a row, which
+ * goes to its run or to what waits on the user (spec 17 §Tracking, §Keys).
  */
 import { useState, type KeyboardEvent, type RefObject } from "react";
-import { canMarkTrackingStateDone, type TrackingRow } from "@hercule/client-core";
+import {
+  canMarkTrackingStateDone,
+  decideTrackingRowDestination,
+  type TrackingRow,
+  type TrackingRowDestination,
+} from "@hercule/client-core";
 import { pickSelectionAfterMove } from "./pick-selection-after-move";
 import type { HeldTrackingRowsState } from "./use-held-tracking-rows";
 import type { TrackingTickOff } from "./use-tracking-tick-off";
@@ -28,7 +33,8 @@ interface TrackingControlsInput {
   /** Called as Tracking opens, so the screen can put away what the sheet covers: its checks and menus. */
   readonly onOpening: () => void;
   readonly onOpenChange: (open: boolean) => void;
-  readonly onOpenRun: (runId: string) => void;
+  /** Called with where a row goes when the user opens it. */
+  readonly onOpenRow: (destination: TrackingRowDestination) => void;
 }
 
 /** The controls of Tracking, as `useTrackingControls` returns them. */
@@ -36,6 +42,11 @@ export interface TrackingControls {
   /** The selected row's Task, while Tracking is opened and the row is still drawn, else `null`. */
   readonly selectedTaskId: string | null;
   readonly openTracking: () => void;
+  /**
+   * Opens Tracking with the row of `taskId` selected, so the sheet scrolls to
+   * the row and puts the focus on it. A Task with no row leaves nothing selected.
+   */
+  readonly showTaskInTracking: (taskId: string) => void;
   readonly closeTracking: () => void;
   /**
    * Marks the Task `taskId` done, unless its row is Working in the last read
@@ -43,7 +54,7 @@ export interface TrackingControls {
    * to the next row that stays.
    */
   readonly markTaskDone: (taskId: string) => void;
-  /** Opens the page of the run of the row of `taskId`. */
+  /** Opens the row of `taskId`: what waits on the user when it is Needs you, else its run's page. */
   readonly openTrackingRow: (taskId: string) => void;
   /**
    * Runs a key pressed while Tracking is opened. `key` is the key as the
@@ -69,7 +80,7 @@ export const useTrackingControls = ({
   listRef,
   onOpening,
   onOpenChange,
-  onOpenRun,
+  onOpenRow,
 }: TrackingControlsInput): TrackingControls => {
   // The selected row of opened Tracking. A row that left Tracking is not
   // selected any more.
@@ -81,6 +92,12 @@ export const useTrackingControls = ({
   const openTracking = (): void => {
     onOpening();
     setSelection(null);
+    onOpenChange(true);
+  };
+
+  const showTaskInTracking = (taskId: string): void => {
+    onOpening();
+    setSelection(taskId);
     onOpenChange(true);
   };
 
@@ -132,7 +149,7 @@ export const useTrackingControls = ({
 
   const openTrackingRow = (taskId: string): void => {
     const row = shownRows.find((each) => each.task.taskId === taskId);
-    if (row !== undefined) onOpenRun(row.run.id);
+    if (row !== undefined) onOpenRow(decideTrackingRowDestination(row));
   };
 
   const handleOpenedKey = (
@@ -172,6 +189,7 @@ export const useTrackingControls = ({
   return {
     selectedTaskId,
     openTracking,
+    showTaskInTracking,
     closeTracking,
     markTaskDone,
     openTrackingRow,

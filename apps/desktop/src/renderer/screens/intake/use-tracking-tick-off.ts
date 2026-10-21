@@ -53,7 +53,7 @@ export const useTrackingTickOff = (
     onSuccess: (_task, { taskId, title }) => {
       queryClient.setQueryData<TrackingRead>(
         trackingQuery(client).queryKey,
-        (read) => read && { ...read, rows: read.rows.filter((row) => row.task.taskId !== taskId) },
+        (read) => read && { ...read, tasks: read.tasks.filter((task) => task.taskId !== taskId) },
       );
       invalidateWithoutCancelling(queryClient, queryKeys.tasks());
       invalidateWithoutCancelling(queryClient, queryKeys.task(taskId));

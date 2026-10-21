@@ -56,6 +56,14 @@ export const queryKeys = {
    * `run` here. The key is stable: the Tasks tracked change, the key does not.
    */
   tracking: (): LiveQueryKey => ["tracking"],
+  /**
+   * Your work as one read: the open Tasks that the thread refs of the To do
+   * signals name. Live topics: `task` reads it again on every push. A change
+   * to the signals reads it again only when their thread refs change, so no
+   * key maps it for `signal` here (see `signalsToDoQuery`). The key is stable:
+   * the refs read change, the key does not.
+   */
+  yourWork: (): LiveQueryKey => ["your-work"],
   projects: (): LiveQueryKey => ["projects"],
   /**
    * No live topic yet: a resource changed elsewhere, such as from the CLI,
@@ -390,8 +398,13 @@ export const buildQueryKeys = (
   // when a screen starts reading a new topic.
   if (topic === "task") {
     return ids.length === 0
-      ? [queryKeys.tasks(), queryKeys.task(), queryKeys.tracking()]
-      : [queryKeys.tasks(), ...ids.map((id) => queryKeys.task(id)), queryKeys.tracking()];
+      ? [queryKeys.tasks(), queryKeys.task(), queryKeys.tracking(), queryKeys.yourWork()]
+      : [
+          queryKeys.tasks(),
+          ...ids.map((id) => queryKeys.task(id)),
+          queryKeys.tracking(),
+          queryKeys.yourWork(),
+        ];
   }
   // Any runner change refetches the list. A runner's own page is refetched
   // only when the push lists its id, or when the push lists no ids.

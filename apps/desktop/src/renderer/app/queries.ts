@@ -18,12 +18,15 @@ import {
 } from "@tanstack/react-query";
 import {
   ApiError,
+  batchYourWorkRefs,
   collectRunningTurnRows,
   collectSenderSessionIds,
-  buildTrackingRows,
   classifyTranscriptPage,
   detectLocalRunner,
   findTranscriptAfterPosition,
+  invalidateWithoutCancelling,
+  isYourWorkReadOutdated,
+  listYourWorkRefs,
   type EventListFilter,
   isNotFound,
   mergeNewestMessagePage,
@@ -37,6 +40,7 @@ import {
   type MessagePages,
   type ThreadCopy,
   type TrackingRead,
+  type YourWorkRead,
   waitForOptionalReads,
 } from "@hercule/client-core";
 import { WALK_CATCH_UP_SECONDS } from "../office/engine/contracts";
@@ -630,10 +634,11 @@ export const assistantsQuery = (client: HerculeClient) =>
 /**
  * Reads Tracking: `task.queryTracking` returns every Task Tracking follows,
  * with its title, its handoffs, and its newest run and newest live run, and
- * the rows are built from that (`buildTrackingRows`), with the time the read
- * started (`TrackingRead`). The Hercule segment's count and Tracking's rows
- * both come from it, so it is shell data, kept for the life of the window, and
- * every reader shares the one array of rows.
+ * the time the read started (`TrackingRead`). The rows are not built here:
+ * a row also depends on the Requests and signals that wait on its Task, which
+ * change on their own, so the app builds them from this read and those (see
+ * `useTrackingRows`). The Hercule segment's count and Tracking's rows both
+ * come from it, so it is shell data, kept for the life of the window.
  *
  * The key is stable, so the entry is the same whichever Tasks are tracked. A
  * push on the `task` topic reads it again, and one on the `run` topic when
@@ -645,7 +650,55 @@ export const trackingQuery = (client: HerculeClient) =>
     queryFn: async (): Promise<TrackingRead> => {
       // Taken before the request, so a read that started after a change committed shows the change.
       const readStartedAt = performance.now();
-      return { rows: buildTrackingRows((await client.task.queryTracking()).rows), readStartedAt };
+      const { rows: tasks } = await client.task.queryTracking();
+      return { tasks, readStartedAt };
+    },
+    ...SHELL_READ_OPTIONS,
+  });
+
+/**
+ * Reads Your work: the open Tasks that the thread refs of the To do signals
+ * name (spec 10 §9.5). The signals on screen are the To do list, which the
+ * shell holds whole, so the read takes its refs from there and sends one
+ * `task.query { refs }` per batch of refs, every page of it, rather than one
+ * read per signal. Which Task belongs to which signal is worked out on the
+ * client (`matchYourWork`).
+ *
+ * The key is stable, never one that includes the refs: a new key would be a
+ * read nothing has loaded, and the screens that suspend on it would hide the
+ * app. The refs read for are part of the answer (`YourWorkRead`) instead.
+ *
+ * Two things read it again:
+ *
+ * - A push on the `task` topic, like Tracking, because a Task's status or
+ *   provenance may have changed.
+ * - A read of To do whose thread refs differ from the ones this read was made
+ *   for (see `signalsToDoQuery`). A signal that arrives or goes without
+ *   changing the refs costs no request.
+ *
+ * It reads To do first, so it reads for the newest signals. It reads To do
+ * again after the Tasks, and when its refs changed meanwhile, reads the Tasks
+ * once more. That covers a To do read that finished while this read had no
+ * answer yet, which the check in `signalsToDoQuery` cannot compare with.
+ */
+export const yourWorkQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.yourWork(),
+    queryFn: async ({ client: queryClient }): Promise<YourWorkRead> => {
+      let signals = await queryClient.fetchQuery(signalsToDoQuery(client));
+      for (;;) {
+        const batches = await Promise.all(
+          batchYourWorkRefs(signals).map((refs) =>
+            readEveryPage((page) =>
+              client.task.query({ query: { refs, status: ["open", "in-progress"], ...page } }),
+            ),
+          ),
+        );
+        const read = { tasks: batches.flat(), refs: listYourWorkRefs(signals) };
+        const latest = await queryClient.fetchQuery(signalsToDoQuery(client));
+        if (!isYourWorkReadOutdated(read, latest)) return read;
+        signals = latest;
+      }
     },
     ...SHELL_READ_OPTIONS,
   });
@@ -664,6 +717,15 @@ const SNOOZE_TIMER_KEY = ["snooze-timer"] as const;
  * reads is missing from To do but still sets the timer, which reads To do
  * again once it has run out. Read in the other order, or apart, that snooze
  * could be missing from both, and To do would stay without it.
+ *
+ * Each read also checks Your work (`yourWorkQuery`): when the thread refs of
+ * the signals just read differ from the ones Your work was last read for, Your
+ * work is read again. It is checked here, as the snooze timer is written here,
+ * because this is the one place that sees every list of signals before anyone
+ * uses it: Your work needs no subscription of its own, and a signal that
+ * leaves the refs alone costs no request. The check runs before this read
+ * returns, and Your work reads To do first, so that read joins this one and
+ * gets the new signals.
  */
 export const signalsToDoQuery = (client: HerculeClient) =>
   queryOptions({
@@ -671,7 +733,11 @@ export const signalsToDoQuery = (client: HerculeClient) =>
     queryFn: async ({ client: queryClient }) => {
       const soonest = await client.signal.query({ query: { view: "later", limit: 1 } });
       queryClient.setQueryData(SNOOZE_TIMER_KEY, soonest.items[0]?.snooze?.until ?? null);
-      return (await client.signal.query({ query: { view: "to-do" } })).items;
+      const { items } = await client.signal.query({ query: { view: "to-do" } });
+      if (isYourWorkReadOutdated(queryClient.getQueryData(queryKeys.yourWork()), items)) {
+        invalidateWithoutCancelling(queryClient, queryKeys.yourWork());
+      }
+      return items;
     },
     ...SHELL_READ_OPTIONS,
   });
@@ -1755,8 +1821,9 @@ export const queuedInputsQuery = (client: HerculeClient, sessionId: string) =>
  * assistants and the current session of each one's main conversation, the
  * Connections, the signed-in user, Intake's To do list, whose count the
  * Hercule segment shows, the Tasks Tracking lists and their runs (the count
- * takes in Tracking's waiting rows), and the plugins that name each signal's
- * source.
+ * takes in Tracking's waiting rows), the Tasks that To do's signals are
+ * about (Your work, which makes a row Needs you), and the plugins that name
+ * each signal's source.
  * Resolves once every read is cached,
  * and fails with the first read that fails.
  *
@@ -1791,6 +1858,7 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(signalsToDoQuery(client)),
     queryClient.ensureQueryData(snoozeTimerQuery(client)),
     queryClient.ensureQueryData(trackingQuery(client)),
+    queryClient.ensureQueryData(yourWorkQuery(client)),
     queryClient.ensureQueryData(pluginsQuery(client)),
     queryClient
       .ensureQueryData(assistantsQuery(client))

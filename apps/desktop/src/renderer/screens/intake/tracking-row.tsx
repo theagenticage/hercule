@@ -25,9 +25,9 @@ export interface TrackingRowFacts {
    * (a workflow sent with the request). The same text always gives the same face.
    */
   readonly faceSeed: string;
-  /** The workflow's name, which the line draws in the colleague's hue. */
-  readonly workflowName: string;
-  /** What follows the workflow's name on the line, with its own separator: "failed · reason", "finished", "· stopped". */
+  /** The workflow's name, which the line draws in the colleague's hue, or null on a line that says what waits. */
+  readonly workflowName: string | null;
+  /** What follows the workflow's name on the line, with its own separator: "failed · reason", "finished", "· stopped". With no workflow name it is the whole line. */
   readonly lineText: string;
   /** When the row entered its state, as an ISO time. The time at the row's end shows how long ago that was. */
   readonly since: string;
@@ -41,8 +41,9 @@ export interface TrackingRowFacts {
  * colleague's hue and `lineText`. At the end is how long the row has been in
  * its state.
  *
- * - Failed and Finished rows wait on the user, so their line and time are
- *   marigold and green, and a Finished row sits on a green wash.
+ * - Needs you, Failed and Finished rows wait on the user, so their line and time
+ *   are marigold, marigold and green, and a Finished row sits on a green wash.
+ *   A Needs you row's line says what waits and has no workflow name.
  * - `selected` marks the open row. A press on the row calls `onOpen`.
  * - `onScreen` is whether the row is in view, which keeps its time current.
  * - `lastInGroup` marks the row that ends its group, which has no gap under it.
@@ -51,7 +52,7 @@ export interface TrackingRowFacts {
  * - A Finished, Failed or Stopped row has a Mark done control beside it, which
  *   shows while the pointer is on the row or the keyboard's focus is on the
  *   control, as Intake's row controls do. It calls `onMarkDone`. A Working row
- *   has none, because marking it done would leave its run going.
+ *   and a Needs you row have none, because marking them done could leave a run going.
  *
  * The row is one button, with its control beside it, so a screen reader reads
  * the title, the line and the time as one name.
@@ -105,7 +106,7 @@ export const TrackingRowItem = memo(function TrackingRowItem({
   const look = buildLook(faceSeed);
   const classes = [
     "tr-run-item",
-    state === "failed" ? "is-you" : "",
+    state === "failed" || state === "needs-you" ? "is-you" : "",
     state === "finished" ? "is-finished" : "",
     selected ? "is-on" : "",
     lastInGroup ? "tr-run-item--last" : "",
@@ -143,10 +144,12 @@ export const TrackingRowItem = memo(function TrackingRowItem({
           <span className="tr-run-title">{title}</span>
           {/* The separator and the line are one string, so the line is shaped as one run of text, as the drawing's is. */}
           <span className="tr-run-sub">
-            <span className="tr-run-who" style={buildHueStyle(look.hue)}>
-              {workflowName}
-            </span>
-            {` ${lineText}`}
+            {workflowName !== null && (
+              <span className="tr-run-who" style={buildHueStyle(look.hue)}>
+                {workflowName}
+              </span>
+            )}
+            {workflowName === null ? lineText : ` ${lineText}`}
           </span>
         </span>
         <AgeLabel

@@ -1,24 +1,85 @@
 /**
- * Reads Tracking's rows and the To do count that takes them in. Every place
- * that shows either reads it here, so they always agree.
+ * Reads Tracking's rows, Your work, and the To do count that takes them in.
+ * Every place that shows any of them reads it here, so they always agree.
  */
+import { useMemo } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { countToDo, countWaitingTrackingRows, type TrackingRow } from "@hercule/client-core";
-import { signalsToDoQuery, trackingQuery } from "./queries";
+import {
+  buildTrackingRows,
+  countToDo,
+  countWaitingTrackingRows,
+  listSignalsWithThreadRef,
+  matchYourWork,
+  type TrackingRead,
+  type TrackingRow,
+  type YourWork,
+  type YourWorkRead,
+} from "@hercule/client-core";
+import { signalsToDoQuery, trackingQuery, yourWorkQuery } from "./queries";
+import { useWaitingRunSessions } from "./waiting";
+
+// The selects below capture nothing and live at module level. Query keeps a
+// selection only while the select function is the same one, so a function
+// made in render would run again on every render. What a select returns is
+// kept while it equals the last one, so a read that changes none of the parts
+// a caller uses draws nothing again.
+const selectTrackingTasks = (read: TrackingRead) => read.tasks;
+const selectYourWorkTasks = (read: YourWorkRead) => read.tasks;
 
 /**
- * Returns Tracking's rows, in Tracking's order. The shell's loader reads
- * them, so they never wait in practice. The array is built once, by the read,
- * so every caller gets the same array until a read changes a row.
+ * Returns the Tasks Tracking follows, as the last read gives them. The array
+ * keeps its identity until a read changes a Task.
+ */
+function useTrackingTasks() {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  return useSuspenseQuery({ ...trackingQuery(client), select: selectTrackingTasks }).data;
+}
+
+/**
+ * Returns the To do signals that have a thread ref, which are the only ones
+ * that can be Your work. It keeps its identity until one of them changes, so
+ * a signal without a thread ref changes nothing that reads it.
+ */
+function useSignalsWithThreadRef() {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  return useSuspenseQuery({ ...signalsToDoQuery(client), select: listSignalsWithThreadRef }).data;
+}
+
+/**
+ * Returns Your work: for each To do signal, the open Tasks it is about, as
+ * `matchYourWork` works them out from the signals and the Tasks the last read
+ * of Your work holds. The shell's loader reads both, so it never waits in
+ * practice. The map keeps its identity until a signal or a Task it is built
+ * from changes.
+ */
+export function useYourWork(): YourWork {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const signals = useSignalsWithThreadRef();
+  const tasks = useSuspenseQuery({ ...yourWorkQuery(client), select: selectYourWorkTasks }).data;
+  // A manual `useMemo`, because the map's identity is what keeps the rows from
+  // being built again, and the React Compiler may skip memoizing a value that a
+  // plain function builds from other values (it assumes the function can change them).
+  return useMemo(() => matchYourWork(signals, tasks), [signals, tasks]);
+}
+
+/**
+ * Returns Tracking's rows, in Tracking's order, built from the Tasks of the
+ * last read, the Requests of the live runs' sessions and the signals Your work
+ * names (`buildTrackingRows`). The shell's loader reads all of them, so they
+ * never wait in practice. Each caller builds its own array, which is cheap and
+ * happens again only when one of those changes. The array keeps its identity
+ * until then.
  */
 export function useTrackingRows(): ReadonlyArray<TrackingRow> {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  // Only the rows are selected, so a read that changes none of them draws nothing again.
-  return useSuspenseQuery({
-    ...trackingQuery(client),
-    select: (read) => read.rows,
-  }).data;
+  const tasks = useTrackingTasks();
+  const requests = useWaitingRunSessions();
+  const signals = useSignalsWithThreadRef();
+  const yourWork = useYourWork();
+  return useMemo(
+    () => buildTrackingRows(tasks, { requests, signals, yourWork }),
+    [tasks, requests, signals, yourWork],
+  );
 }
 
 /**

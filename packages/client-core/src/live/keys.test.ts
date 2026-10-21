@@ -42,6 +42,24 @@ describe("Tracking's key", () => {
   });
 });
 
+describe("Your work's key", () => {
+  it("is read again on every task push, with or without ids", () => {
+    for (const ids of [[], ["t1"]]) {
+      assert.isTrue(
+        buildQueryKeys("task", ids).some((key) => isPrefixOf(key, queryKeys.yourWork())),
+      );
+    }
+  });
+
+  it("is left to the To do read's own rule, so no key maps it for a signal push", () => {
+    for (const ids of [[], ["s1"]]) {
+      assert.isFalse(
+        buildQueryKeys("signal", ids).some((key) => isPrefixOf(key, queryKeys.yourWork())),
+      );
+    }
+  });
+});
+
 describe("signal pushes", () => {
   it("invalidates every list and the changed signals", () => {
     assert.deepStrictEqual(buildQueryKeys("signal", ["first", "second"]), [

@@ -11,13 +11,16 @@ import {
   followTrackingRead,
   recordTrackingHandoff,
   recordTrackingHandoffCommitted,
+  recordTrackingRead,
   recordTrackingRowMarkedDone,
   startHeldTrackingRows,
   updateTrackingRowsHolding,
 } from "./held-tracking-rows";
-import { buildTrackingRows, type TrackingRow } from "./tracking";
+import { buildTrackingRows, type TrackingRow, type TrackingWaits } from "./tracking";
 
 const AT = "2026-10-20T09:00:00.000Z";
+
+const NO_WAITS: TrackingWaits = { requests: [], signals: [], yourWork: new Map() };
 
 /** Builds the newest run of the Task `id`, in `status`. */
 const buildRun = (id: string, status: TrackingRun["status"]): TrackingRun => ({
@@ -42,7 +45,7 @@ const buildRow = (id: string, status: TrackingRun["status"] = "running"): Tracki
     handoffs: [{ signalId: `signal-${id}`, runId: latestRun.id, at: AT }],
     latestRun,
   };
-  return buildTrackingRows([task])[0]!;
+  return buildTrackingRows([task], NO_WAITS)[0]!;
 };
 
 const A = buildRow("a");
@@ -108,29 +111,35 @@ describe("a handoff that later handoffs have pushed out of the read", () => {
   /** Builds a finished Task `t`, and the same Task Working with only the newest `count` handoffs listed. */
   const buildWorking = (count: number): TrackingRow => {
     const latest = buildRun("t-latest", "running");
-    return buildTrackingRows([
+    return buildTrackingRows(
+      [
+        {
+          taskId: "t",
+          title: "Task t",
+          // The read lists the newest handoffs first, at most ten of them.
+          handoffs: Array.from({ length: count }, (_, index) => ({
+            signalId: `signal-later-${String(index)}`,
+            runId: `run-later-${String(index)}`,
+            at: AT,
+          })),
+          latestRun: latest,
+          latestLiveRun: latest,
+        },
+      ],
+      NO_WAITS,
+    )[0]!;
+  };
+  const finished = buildTrackingRows(
+    [
       {
         taskId: "t",
         title: "Task t",
-        // The read lists the newest handoffs first, at most ten of them.
-        handoffs: Array.from({ length: count }, (_, index) => ({
-          signalId: `signal-later-${String(index)}`,
-          runId: `run-later-${String(index)}`,
-          at: AT,
-        })),
-        latestRun: latest,
-        latestLiveRun: latest,
+        handoffs: [{ signalId: "signal-t0", runId: "run-t0", at: AT }],
+        latestRun: buildRun("t0", "completed"),
       },
-    ])[0]!;
-  };
-  const finished = buildTrackingRows([
-    {
-      taskId: "t",
-      title: "Task t",
-      handoffs: [{ signalId: "signal-t0", runId: "run-t0", at: AT }],
-      latestRun: buildRun("t0", "completed"),
-    },
-  ])[0]!;
+    ],
+    NO_WAITS,
+  )[0]!;
 
   it.each([1, 10])(
     "applies the user's handoff when a read after its commit lists %s later handoffs and not its own",
@@ -186,7 +195,6 @@ describe("followTrackingRead", () => {
   it("leaves the record as it is for a read that changes no row and acknowledges nothing", () => {
     const held = holdingWithConfirmedHandoff(100);
     expect(followTrackingRead(held, held.listed, 50)).toBe(held);
-    expect(followTrackingRead(holdingWithConfirmedHandoff(null), A ? [A] : [], 500)).not.toBe(held);
   });
 
   it("acknowledges the handoff on a read that changes no row but started after it committed", () => {
@@ -210,5 +218,36 @@ describe("followTrackingRead", () => {
   it("waits for a handoff that is still being sent, whatever the read", () => {
     const held = holdingWithConfirmedHandoff(null);
     expect(followTrackingRead(held, held.listed, 1_000)).toBe(held);
+  });
+});
+
+describe("recordTrackingRead", () => {
+  const holdingWithHandoffCommittedAt = (committedAt: number) => {
+    let held = updateTrackingRowsHolding(startHeldTrackingRows([A], 10), true);
+    held = recordTrackingHandoff(held, "signal-b");
+    return recordTrackingHandoffCommitted(held, "signal-b", committedAt);
+  };
+
+  it("leaves the record as it is for a read that acknowledges no handoff", () => {
+    const held = holdingWithHandoffCommittedAt(100);
+    expect(recordTrackingRead(held, 99)).toBe(held);
+    const idle = startHeldTrackingRows([A]);
+    expect(recordTrackingRead(idle, 1_000)).toBe(idle);
+  });
+
+  it("shows the handed-off Task's row when the read that acknowledges it also adds the row", () => {
+    // The read lands first, and only later does the screen build the rows from it.
+    let held = recordTrackingRead(holdingWithHandoffCommittedAt(100), 120);
+    expect(held.handoffs.size).toBe(1);
+    held = followTrackingRead(held, [A, B], 120);
+    expect(readIds(held.shown)).toEqual(["a", "b"]);
+    expect(held.handoffs.size).toBe(0);
+  });
+
+  it("shows the rows held back so far when the acknowledging read changes no row", () => {
+    let held = followListedTrackingRows(holdingWithHandoffCommittedAt(100), [A, B], 90);
+    expect(readIds(held.shown)).toEqual(["a"]);
+    held = followTrackingRead(recordTrackingRead(held, 120), held.listed, 120);
+    expect(readIds(held.shown)).toEqual(["a", "b"]);
   });
 });
