@@ -17,12 +17,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Statement from "effect/unstable/sql/Statement";
-import {
-  MAX_TRACKING_DETAIL_RUNS,
-  MAX_TRACKING_HANDOFFS,
-  type Grant,
-  type TrackingRun,
-} from "@hercule/contract";
+import { MAX_TRACKING_HANDOFFS, type Grant, type TrackingRun } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { taskRepository, type NewTask } from "./repository";
@@ -377,11 +372,11 @@ describe("task.readTracking", () => {
 
     expect(detail.firstHandoff).toEqual({ signalId: SIGNAL_A, runId: RUN_A, at: AT });
     expect(detail.runs.map((run) => run.id)).toEqual([RUN_A]);
-    expect(detail).not.toHaveProperty("outcome");
+    expect(detail).not.toHaveProperty("output");
     expect(detail).not.toHaveProperty("endingActionStepName");
   });
 
-  it("shapes the newest run's last agent step into the outcome, and names the action step the run ended on", async () => {
+  it("shapes the newest run's last agent step into the output, and names the action step the run ended on", async () => {
     const detail = await runTracking(
       USER,
       [],
@@ -397,31 +392,13 @@ describe("task.readTracking", () => {
       },
     );
 
-    expect(detail.outcome).toEqual({
+    expect(detail.output).toEqual({
       kind: "text",
       stepName: "Review",
       sessionId: AGENT_STEP.sessionId,
       text: "All good.",
     });
     expect(detail.endingActionStepName).toBe("Open the pull request");
-  });
-
-  it("keeps the newest runs when the port returns more than a pane lists", async () => {
-    const runs = Array.from({ length: MAX_TRACKING_DETAIL_RUNS + 3 }, (_, n) =>
-      buildRun(`0199e0e7-0006-7000-8000-${String(n).padStart(12, "0")}`),
-    );
-    const detail = await runTracking(
-      USER,
-      [],
-      Effect.gen(function* () {
-        const taskId = yield* insertTask({ provenance: [{ signalId: SIGNAL_A, runId: RUN_A }] });
-        return yield* Effect.flatMap(TaskTracking, (tracking) => tracking.read(taskId));
-      }),
-      [],
-      { ...NO_HISTORY, runs },
-    );
-
-    expect(detail.runs).toEqual(runs.slice(-MAX_TRACKING_DETAIL_RUNS));
   });
 
   it.each([

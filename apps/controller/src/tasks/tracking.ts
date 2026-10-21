@@ -17,7 +17,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   createNotFoundError,
-  MAX_TRACKING_DETAIL_RUNS,
   type Forbidden,
   type NotFound,
   type TaskTracking as TaskTrackingReading,
@@ -28,7 +27,7 @@ import {
 } from "@hercule/contract";
 import { requireGrant } from "../actor";
 import { taskRepository } from "./repository";
-import { shapeTrackingOutcome, type AgentStepResult } from "./tracking-outcome";
+import { shapeTrackingOutput, type CompletedAgentStep } from "./tracking-output";
 
 /**
  * The runs Tracking reads of a Task: its newest run, its newest live run when
@@ -43,13 +42,13 @@ export interface TrackedRuns {
 
 /**
  * The runs the Tracking pane of a Task draws, and the facts of the newest
- * run's ending that its outcome is shaped from.
+ * run's ending that its `TrackingOutput` is shaped from.
  */
 export interface TrackedRunHistory {
   /** The Task's newest runs, at most `MAX_TRACKING_DETAIL_RUNS`, oldest first. */
   readonly runs: ReadonlyArray<TrackingDetailRun>;
   /** The newest run's last completed agent step, when it completed one. */
-  readonly agentStep: AgentStepResult | undefined;
+  readonly agentStep: CompletedAgentStep | undefined;
   /**
    * The name of the action step the newest run ended on: its `name`, else its
    * action's id. Set only when the newest run completed and its last
@@ -77,10 +76,10 @@ export class TaskTrackingRuns extends Context.Service<
     /**
      * Returns the newest `MAX_TRACKING_DETAIL_RUNS` runs of the Task, oldest
      * first, each with the session of its last agent step, and the facts the
-     * newest run's outcome is shaped from. A Task with no run has no runs
+     * newest run's `TrackingOutput` is shaped from. A Task with no run has no runs
      * and no facts. The read is one lookup of the Task's newest runs, never
      * the Task's whole history, and it reads no transcript: only the output
-     * of the one agent step the outcome comes from.
+     * of the one agent step the `TrackingOutput` comes from.
      */
     readonly readRunHistory: (taskId: string) => Effect.Effect<TrackedRunHistory, SqlError>;
   }
@@ -151,7 +150,7 @@ const make = Effect.gen(function* () {
      *
      * Its size does not follow the Task's history or its output: it holds at
      * most `MAX_TRACKING_DETAIL_RUNS` runs, and the text and values of the
-     * outcome are cut.
+     * output are cut.
      */
     read: (
       taskId: string,
@@ -164,13 +163,13 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(createNotFoundError("no such handed-off task"));
         }
         const history = yield* runs.readRunHistory(taskId);
-        const outcome =
-          history.agentStep === undefined ? undefined : shapeTrackingOutcome(history.agentStep);
+        const output =
+          history.agentStep === undefined ? undefined : shapeTrackingOutput(history.agentStep);
         return {
           taskId,
           firstHandoff,
-          runs: history.runs.slice(-MAX_TRACKING_DETAIL_RUNS),
-          ...(outcome === undefined ? {} : { outcome }),
+          runs: history.runs,
+          ...(output === undefined ? {} : { output }),
           ...(history.endingActionStepName === undefined
             ? {}
             : { endingActionStepName: history.endingActionStepName }),

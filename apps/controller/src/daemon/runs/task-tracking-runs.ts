@@ -80,7 +80,7 @@ export const TaskTrackingRunsLayer: Layer.Layer<TaskTrackingRuns, never, SqlClie
             // explained by its failure cause.
             endingActionStepName:
               newestFirst[0]!.status === "completed" && last?.kind === "action"
-                ? (last.name ?? last.action ?? undefined)
+                ? (last.name ?? last.action)
                 : undefined,
           };
         }),

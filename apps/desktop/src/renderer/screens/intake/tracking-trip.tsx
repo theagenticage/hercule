@@ -2,7 +2,7 @@
  * The body of the Tracking pane: the trip of the work from the user's
  * handoff to where it stands now, as the Tracking drawing draws it (spec 17
  * §Tracking). It reads what the pane's row does not hold: the Task's runs and
- * the outcome of its last agent step (`task.readTracking`), and the signal the
+ * the output of its last agent step (`task.readTracking`), and the signal the
  * user first handed off (`signal.read`).
  */
 import type { JSX, ReactNode } from "react";
@@ -44,7 +44,7 @@ import {
   AskedMessage,
   EndedOnAction,
   FailureReason,
-  Outcome,
+  StepOutput,
   QuestionCard,
   RunList,
   SignalMessage,
@@ -164,9 +164,9 @@ function Trip({
         ? { kind: "failed", message: readErrorMessage(asked.error) }
         : { kind: "loading" };
 
-  const { outcome } = detail;
-  // The outcome is the newest run's, so its page is the newest run's.
-  const outcomeRunId = detail.runs.at(-1)?.id ?? row.run.id;
+  const { output } = detail;
+  // The output is the newest run's, so its page is the newest run's.
+  const outputRunId = detail.runs.at(-1)?.id ?? row.run.id;
   const waitsOn = row.state === "needs-you" ? row.waitsOn : undefined;
   return (
     <div className="tr-trip">
@@ -184,11 +184,11 @@ function Trip({
         {row.state === "failed" && row.run.failureCause !== undefined && (
           <FailureReason cause={row.run.failureCause} />
         )}
-        {row.state !== "working" && outcome !== undefined && (
-          <Outcome
-            outcome={outcome}
+        {row.state !== "working" && output !== undefined && (
+          <StepOutput
+            output={output}
             onOpenRun={() => {
-              openRun(outcomeRunId);
+              openRun(outputRunId);
             }}
             onOpenThread={openThread}
           />

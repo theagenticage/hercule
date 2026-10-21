@@ -236,13 +236,13 @@ const buildHandoffSignal = (task: Task): Signal => ({
 
 /**
  * Builds what `task.readTracking` returns for `task`, whose one run is `run`:
- * the handoff, the run with its session, and the `outcome` and
+ * the handoff, the run with its session, and the `output` and
  * `endingActionStepName` the test gives.
  */
 const buildTrackingDetail = (
   task: Task,
   run: RunSummary,
-  extra: Partial<Pick<TrackingDetail, "outcome" | "endingActionStepName" | "runs">> = {},
+  extra: Partial<Pick<TrackingDetail, "output" | "endingActionStepName" | "runs">> = {},
 ): TrackingDetail => ({
   taskId: task.id,
   firstHandoff: buildTrackingTask(task, run).handoffs[0]!,
@@ -256,7 +256,7 @@ const buildTrackingDetail = (
  * reads one Task's trip, `signal.read` reads the signal each Task was handed
  * off, and `task.update` marks a Task done. `readRows` gives the rows at the
  * time of each read, so a test can change a run's status between two reads;
- * `buildRun` builds the run of a row; `buildExtra` gives the outcome of a
+ * `buildRun` builds the run of a row; `buildExtra` gives the output of a
  * Task's trip.
  */
 const storeTracking = (
@@ -271,7 +271,7 @@ const storeTracking = (
     buildExtra?: (
       task: Task,
       run: RunSummary,
-    ) => Partial<Pick<TrackingDetail, "outcome" | "endingActionStepName" | "runs">>;
+    ) => Partial<Pick<TrackingDetail, "output" | "endingActionStepName" | "runs">>;
   } = {},
 ) => {
   const done = new Set<string>();
@@ -1844,7 +1844,7 @@ describe("the pane's answers", () => {
 
 describe("the pane's trip", () => {
   /** What a Review PR run put out: a verdict, a count of findings and a flag, as its output schema titles them. */
-  const REVIEW_OUTCOME: TrackingDetail["outcome"] = {
+  const REVIEW_OUTPUT: TrackingDetail["output"] = {
     kind: "fields",
     stepName: "Review",
     sessionId: getSessionId(FINISHED_TASK),
@@ -1861,7 +1861,7 @@ describe("the pane's trip", () => {
         buildRun: (task, status) => buildRunSummary(task, status, "Review PR"),
         buildExtra: (task) =>
           task.id === FINISHED_TASK.id
-            ? { outcome: REVIEW_OUTCOME, endingActionStepName: "Post the review" }
+            ? { output: REVIEW_OUTPUT, endingActionStepName: "Post the review" }
             : {},
       }),
     });
@@ -1930,7 +1930,7 @@ describe("the pane's trip", () => {
     });
   });
 
-  it("follows the run live: its end draws the outcome in the open pane", async () => {
+  it("follows the run live: its end draws the output in the open pane", async () => {
     let status: RunSummary["status"] = "running";
     const rows = () => [[WORKING_TASK, status] as const];
     const { live } = await openIntake("/intake?tracking=true", {
@@ -1939,7 +1939,7 @@ describe("the pane's trip", () => {
         buildExtra: (task, run) =>
           run.status === "completed"
             ? {
-                outcome: {
+                output: {
                   kind: "text",
                   stepName: "Code",
                   sessionId: getSessionId(task),

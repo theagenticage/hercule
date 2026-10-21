@@ -438,7 +438,7 @@ describe("task.readTracking", () => {
         [second, SESSION_B],
       ]);
       expect(detail.runs[1]).toMatchObject({ status: "completed", workflowName: "Implement" });
-      expect(detail.outcome).toEqual({
+      expect(detail.output).toEqual({
         kind: "fields",
         stepName: "Review",
         sessionId: SESSION_B,
@@ -472,18 +472,18 @@ describe("task.readTracking", () => {
 
       const detail = await readDetail(harness.base, token, taskId);
 
-      expect(detail.outcome).toMatchObject({
+      expect(detail.output).toMatchObject({
         kind: "text",
         stepName: "write-notes",
         sessionId: SESSION_A,
       });
-      const text = (detail.outcome as { text: string }).text;
+      const text = (detail.output as { text: string }).text;
       expect(text.length).toBeLessThanOrEqual(MAX_TRACKING_OUTPUT_TEXT + 1);
       expect(text.endsWith("goes on.…")).toBe(true);
     });
   });
 
-  it("names the action step a run ended on, by its name or else its action, beside the agent step's outcome", async () => {
+  it("names the action step a run ended on, by its name or else its action, beside the agent step's output", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const named = await insertTrackedTask(harness, "named");
@@ -552,7 +552,7 @@ describe("task.readTracking", () => {
       });
 
       expect(await readDetail(harness.base, token, named)).toMatchObject({
-        outcome: { kind: "text", text: "Done" },
+        output: { kind: "text", text: "Done" },
         endingActionStepName: "Open the pull request",
       });
       expect(await readDetail(harness.base, token, unnamed)).toMatchObject({
@@ -595,7 +595,7 @@ describe("task.readTracking", () => {
 
       for (const taskId of [running, failed]) {
         const detail = await readDetail(harness.base, token, taskId);
-        expect(detail.outcome).toMatchObject({ kind: "text", text: "Done" });
+        expect(detail.output).toMatchObject({ kind: "text", text: "Done" });
         expect(detail).not.toHaveProperty("endingActionStepName");
       }
     });
@@ -620,12 +620,12 @@ describe("task.readTracking", () => {
 
       const detail = await readDetail(harness.base, token, taskId);
 
-      expect(detail).not.toHaveProperty("outcome");
+      expect(detail).not.toHaveProperty("output");
       expect(detail).not.toHaveProperty("endingActionStepName");
     });
   });
 
-  it("gives a failed run's cause, and keeps the outcome of the agent step that completed before the failure", async () => {
+  it("gives a failed run's cause, and keeps the output of the agent step that completed before the failure", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const failedFirst = await insertTrackedTask(harness, "fails at once");
@@ -658,9 +658,9 @@ describe("task.readTracking", () => {
         failureCause: "permission denied on ops-db",
       });
       expect(first.runs[0]).not.toHaveProperty("sessionId");
-      expect(first).not.toHaveProperty("outcome");
+      expect(first).not.toHaveProperty("output");
       expect(later.runs[0]).toMatchObject({ id: run, status: "failed", sessionId: SESSION_A });
-      expect(later.outcome).toMatchObject({ kind: "text", text: "Half done" });
+      expect(later.output).toMatchObject({ kind: "text", text: "Half done" });
     });
   });
 

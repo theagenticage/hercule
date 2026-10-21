@@ -324,8 +324,8 @@ describe.runIf(SPEED_TESTS_ENABLED)("the Tracking pane's read", () => {
     );
     expect(result.detail.runs).toHaveLength(MAX_TRACKING_DETAIL_RUNS);
     // The newest run's 1 MB text, cut to the limit.
-    expect(result.detail.outcome).toMatchObject({ kind: "text" });
-    expect((result.detail.outcome as { text: string }).text.length).toBeGreaterThan(900);
+    expect(result.detail.output).toMatchObject({ kind: "text" });
+    expect((result.detail.output as { text: string }).text.length).toBeGreaterThan(900);
     expect(result.detail.endingActionStepName).toBe("github/open-pr");
     expect(result.replyBytes).toBeLessThan(PANE_REPLY_CEILING_BYTES);
     expect(result.readTracking).toBeLessThan(PANE_CEILING_MS);

@@ -1,6 +1,6 @@
 /**
- * Shapes what an agent step produced into the outcome the Tracking pane
- * draws (`task.readTracking`).
+ * Shapes what an agent step produced into the `TrackingOutput` the
+ * Tracking pane draws (`task.readTracking`).
  *
  * A step with no output schema ends with `{ text, exitStatus }`, and its
  * `text` is the agent's last message. A step with an output schema ends with
@@ -13,13 +13,13 @@ import {
   MAX_TRACKING_OUTPUT_FIELDS,
   MAX_TRACKING_OUTPUT_TEXT,
   MAX_TRACKING_OUTPUT_VALUE,
-  type TrackingOutcome,
+  type TrackingOutput,
   type TrackingOutputField,
   type TrackingOutputValue,
 } from "@hercule/contract";
 
 /** What the shaping reads of a completed agent step. */
-export interface AgentStepResult {
+export interface CompletedAgentStep {
   /** The step's `name`, else its id. */
   readonly stepName: string;
   /** The session that ran the step. Absent when the step has none. */
@@ -104,15 +104,15 @@ const shapeFields = (
 };
 
 /**
- * Returns the outcome the pane draws for a completed agent step, or
+ * Returns the `TrackingOutput` the pane draws for a completed agent step, or
  * `undefined` when the step left nothing to draw:
  *
- * - a step with an output schema gives a `fields` outcome, unless its output
+ * - a step with an output schema gives `fields`, unless the step's output
  *   is not an object or holds none of the schema's properties;
- * - a step with no output schema gives a `text` outcome from the output's
+ * - a step with no output schema gives `text` from the step's output
  *   `text`, unless that is missing, not a string, or blank.
  */
-export const shapeTrackingOutcome = (step: AgentStepResult): TrackingOutcome | undefined => {
+export const shapeTrackingOutput = (step: CompletedAgentStep): TrackingOutput | undefined => {
   const identity = {
     stepName: step.stepName,
     ...(step.sessionId === undefined ? {} : { sessionId: step.sessionId }),

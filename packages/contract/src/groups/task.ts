@@ -369,13 +369,13 @@ export type TaskTracking = Schema.Schema.Type<typeof TaskTracking>;
 /** The most runs `task.readTracking` lists: the Task's newest ones. */
 export const MAX_TRACKING_DETAIL_RUNS = 20;
 
-/** The most characters of a text outcome. A longer text is cut and ends with "…". */
+/** The most characters of a text output. A longer text is cut and ends with "…". */
 export const MAX_TRACKING_OUTPUT_TEXT = 1000;
 
-/** The most fields of a fields outcome. The schema's later properties are left out. */
+/** The most fields of a fields output. The schema's later properties are left out. */
 export const MAX_TRACKING_OUTPUT_FIELDS = 12;
 
-/** The most characters of one string value of a fields outcome. A longer one is cut and ends with "…". */
+/** The most characters of one string value of a fields output. A longer one is cut and ends with "…". */
 export const MAX_TRACKING_OUTPUT_VALUE = 300;
 
 /**
@@ -392,7 +392,7 @@ export const TrackingDetailRun = Schema.Struct({
 export type TrackingDetailRun = Schema.Schema.Type<typeof TrackingDetailRun>;
 
 /**
- * The value of one field of a fields outcome. A string longer than
+ * The value of one field of a fields output. A string longer than
  * `MAX_TRACKING_OUTPUT_VALUE` is cut. An array and an object are not sent,
  * only how many items or fields they hold, so a reply never grows with the
  * output.
@@ -422,7 +422,7 @@ export type TrackingOutputField = Schema.Schema.Type<typeof TrackingOutputField>
  * step with no output schema, fields for a step with one. The text and every
  * value are cut, so the reply does not grow with the output.
  */
-export const TrackingOutcome = Schema.Union([
+export const TrackingOutput = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("text"),
     /** The step's `name`, else its id. */
@@ -441,7 +441,7 @@ export const TrackingOutcome = Schema.Union([
   }),
 ]);
 
-export type TrackingOutcome = Schema.Schema.Type<typeof TrackingOutcome>;
+export type TrackingOutput = Schema.Schema.Type<typeof TrackingOutput>;
 
 /** What `task.readTracking` returns: what the Tracking pane of one Task draws. */
 export const TrackingDetail = Schema.Struct({
@@ -455,12 +455,12 @@ export const TrackingDetail = Schema.Struct({
    * produced. Absent when the run has completed no agent step, or the step
    * left nothing to show.
    */
-  outcome: Schema.optionalKey(TrackingOutcome),
+  output: Schema.optionalKey(TrackingOutput),
   /**
    * The name of the action step the newest run ended on: its `name`, else its
    * action's id. Present only when the newest run completed and its last
    * completed step is an action step, so it finished after the agent step
-   * `outcome` comes from. A run that is live or failed has not ended on a
+   * `output` comes from. A run that is live or failed has not ended on a
    * step, so it has none.
    */
   endingActionStepName: Schema.optionalKey(Schema.String),

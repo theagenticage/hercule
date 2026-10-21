@@ -26,7 +26,7 @@ import {
   type Session,
   type Signal,
   type TrackingDetail,
-  type TrackingOutcome,
+  type TrackingOutput,
   type TrackingRun,
   type TrackingTask,
   type YourWorkTask,
@@ -257,11 +257,11 @@ const SDK_SESSION: Session = {
  * Builds the text a step with no output schema leaves: the message's
  * paragraphs, which the controller sends as the output's markdown.
  */
-const buildTextOutcome = (
+const buildTextOutput = (
   stepName: string,
   sessionId: string,
   paragraphs: ReadonlyArray<string>,
-): TrackingOutcome => ({ kind: "text", stepName, sessionId, text: paragraphs.join("\n\n") });
+): TrackingOutput => ({ kind: "text", stepName, sessionId, text: paragraphs.join("\n\n") });
 
 /**
  * Builds what `task.readTracking` returns for `task`, which has one run. The
@@ -270,7 +270,7 @@ const buildTextOutcome = (
 const buildDetail = (
   task: TrackingTask,
   sessionId: string,
-  rest: Pick<TrackingDetail, "outcome" | "endingActionStepName"> = {},
+  rest: Pick<TrackingDetail, "output" | "endingActionStepName"> = {},
 ): TrackingDetail => ({
   taskId: task.taskId,
   firstHandoff: task.handoffs[task.handoffs.length - 1]!,
@@ -291,11 +291,11 @@ const buildSessionId = (number: number): string =>
  *   Refunds for partial captures. The names here are plausible ones.
  * - Refunds for partial captures ends on the action "Open a pull request"; the
  *   drawing adds what it did, "Opened draft PR #1302", which no record holds.
- * - A Working run has no outcome: the pane does not draw one.
+ * - A Working run has no output: the pane does not draw one.
  */
 export const TRACKING_DETAILS: ReadonlyArray<TrackingDetail> = [
   buildDetail(RATE_LIMIT, buildSessionId(2), {
-    outcome: {
+    output: {
       kind: "fields",
       stepName: "Review",
       sessionId: buildSessionId(2),
@@ -313,24 +313,24 @@ export const TRACKING_DETAILS: ReadonlyArray<TrackingDetail> = [
     },
   }),
   buildDetail(SDK, SDK_SESSION.id, {
-    outcome: buildTextOutcome("Write the change", SDK_SESSION.id, [
+    output: buildTextOutput("Write the change", SDK_SESSION.id, [
       "Replaced the 9 reads of `charges` with `latest_charge` and updated the fixtures. All 212 tests pass. Pushing the branch to open the PR.",
     ]),
   }),
   buildDetail(REFUNDS, buildSessionId(6), {
-    outcome: buildTextOutcome("Write the change", buildSessionId(6), [
+    output: buildTextOutput("Write the change", buildSessionId(6), [
       "Added `createRefund(orderId, lines)` with a partial amount per line, and a migration for `refund_lines`. Stripe gets one refund per call, with an idempotency key per order and line. Pushed `feat/partial-refunds`. The unit tests pass here; I did not run the Stripe test-mode suite, which needs the team's key.",
     ]),
     endingActionStepName: "Open a pull request",
   }),
   buildDetail(BACKUP, buildSessionId(1), {
-    outcome: buildTextOutcome("Check the backup job", buildSessionId(1), [
+    output: buildTextOutput("Check the backup job", buildSessionId(1), [
       "`pg_dump` of `events` (41 GB) took 1h 52m last night, past the job's 90-minute limit. I could not read the slow query log to see what held it up: the role `hercule_ro` may not read `pg_stat_statements`.",
     ]),
   }),
   buildDetail(SKU, buildSessionId(4)),
   buildDetail(PDF, buildSessionId(5), {
-    outcome: buildTextOutcome("Write the change", buildSessionId(5), [
+    output: buildTextOutput("Write the change", buildSessionId(5), [
       "Swapped the renderer in `invoices/pdf.ts`. Two invoice snapshots differ in the footer's line height.",
     ]),
   }),

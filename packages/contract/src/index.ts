@@ -483,7 +483,7 @@ export {
   TrackingDetail,
   TrackingDetailRun,
   TrackingHandoff,
-  TrackingOutcome,
+  TrackingOutput,
   TrackingOutputField,
   TrackingOutputValue,
   TrackingRun,

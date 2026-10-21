@@ -14,4 +14,3 @@ export {
   type TrackedRunHistory,
   type TrackedRuns,
 } from "./tracking";
-export type { AgentStepResult } from "./tracking-outcome";

@@ -5,7 +5,7 @@
  * data and works the values out (spec 17 §Tracking).
  */
 import type { CSSProperties, JSX, ReactNode } from "react";
-import type { TrackingOutcome } from "@hercule/contract";
+import type { TrackingOutput } from "@hercule/contract";
 import { describeTrackingOutputValue } from "@hercule/client-core";
 import { Mark, type MarkState } from "../../marks";
 import { BoltIcon } from "../../icons/bolt";
@@ -113,24 +113,24 @@ export function FailureReason({ cause }: { readonly cause: string }): JSX.Elemen
  * whole output in the run; a step without one is its final message as
  * markdown, and a link to its thread when it has one.
  */
-export function Outcome({
-  outcome,
+export function StepOutput({
+  output,
   onOpenRun,
   onOpenThread,
 }: {
-  readonly outcome: TrackingOutcome;
+  readonly output: TrackingOutput;
   readonly onOpenRun: () => void;
   readonly onOpenThread: (sessionId: string) => void;
 }): JSX.Element {
   return (
     <>
       <p className="tr-out-from">
-        From the step <b>{outcome.stepName}</b>
+        From the step <b>{output.stepName}</b>
       </p>
-      {outcome.kind === "fields" ? (
+      {output.kind === "fields" ? (
         <>
           <dl className="tr-out">
-            {outcome.fields.map((field, index) => {
+            {output.fields.map((field, index) => {
               const value = describeTrackingOutputValue(field.value);
               return (
                 // Two fields can share a label, so the position is the key. The fields never reorder.
@@ -156,14 +156,14 @@ export function Outcome({
       ) : (
         <>
           <div className="tr-text tr-did">
-            <Markdown text={outcome.text} />
+            <Markdown text={output.text} />
           </div>
-          {outcome.sessionId !== undefined && (
+          {output.sessionId !== undefined && (
             <button
               type="button"
               className="tr-more"
               onClick={() => {
-                onOpenThread(outcome.sessionId!);
+                onOpenThread(output.sessionId!);
               }}
             >
               Read the rest in the thread
