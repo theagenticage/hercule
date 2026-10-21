@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { TrackingRow } from "./tracking";
 import {
   describeTrackingOutputValue,
-  describeTrackingRun,
-  describeTrackingStamp,
   describeTrackingStanding,
   describeTrackingTrip,
   findNextTrackingElapsedChange,
@@ -251,41 +249,6 @@ describe("describeTrackingStanding", () => {
   });
 });
 
-describe("describeTrackingRun", () => {
-  it("names how a run that ended ended, and marks it", () => {
-    expect(describeTrackingRun(buildRun("completed"))).toEqual({
-      pose: "done",
-      word: "finished",
-      text: "finished",
-    });
-    expect(describeTrackingRun(buildRun("cancelled"))).toEqual({
-      pose: "idle",
-      word: "stopped",
-      text: "stopped",
-    });
-  });
-
-  it("gives the reason a run failed, when it carries one", () => {
-    expect(describeTrackingRun(buildRun("failed"))).toEqual({
-      pose: "failed",
-      word: "failed",
-      text: "failed",
-    });
-    expect(
-      describeTrackingRun(buildRun("failed", { failureCause: "permission denied on ops-db" })),
-    ).toEqual({ pose: "failed", word: "failed", text: "failed: permission denied on ops-db" });
-  });
-
-  it("says a live run is working, or names the signals it only waits on", () => {
-    const working = { pose: "working", word: "working", text: "working" };
-    expect(describeTrackingRun(buildRun("running"))).toEqual(working);
-    expect(describeTrackingRun(buildRun("pending"))).toEqual(working);
-    expect(
-      describeTrackingRun(buildRun("running", { awaitedSignalIds: ["checks_passed", "merged"] })),
-    ).toEqual({ ...working, text: "waiting for checks_passed, merged" });
-  });
-});
-
 describe("findNextTrackingElapsedChange", () => {
   it("is the next whole minute since the start, in the first minute, under an hour and past it", () => {
     const next = (since: string, now: Date) =>
@@ -393,6 +356,84 @@ describe("describeTrackingTrip", () => {
     expect(drawn.endingActionStepName).toBeUndefined();
   });
 
+  /** Returns the trip's list entry for `run`, listed after an earlier run so the list is drawn. */
+  const listRun = (run: TrackingRun) =>
+    trip(buildRow(run), buildDetail([buildRun("completed", { id: "run-0" }), run])).runs.at(-1)!;
+
+  it("names how a run that ended ended, and marks it", () => {
+    expect(listRun(buildRun("completed"))).toMatchObject({ pose: "done", text: "finished" });
+    expect(listRun(buildRun("cancelled"))).toMatchObject({ pose: "idle", text: "stopped" });
+  });
+
+  it("gives the reason a run failed, when it carries one", () => {
+    expect(listRun(buildRun("failed"))).toMatchObject({ pose: "failed", text: "failed" });
+    expect(
+      listRun(buildRun("failed", { failureCause: "permission denied on ops-db" })),
+    ).toMatchObject({ pose: "failed", text: "failed: permission denied on ops-db" });
+  });
+
+  it("says a live run is working, or names the signals it only waits on", () => {
+    expect(listRun(buildRun("running"))).toMatchObject({ pose: "working", text: "working" });
+    expect(listRun(buildRun("pending"))).toMatchObject({ pose: "working", text: "working" });
+    expect(
+      listRun(buildRun("running", { awaitedSignalIds: ["checks_passed", "merged"] })),
+    ).toMatchObject({ pose: "working", text: "waiting for checks_passed, merged" });
+  });
+
+  describe("the stamp", () => {
+    const stamp = (row: TrackingRow) => trip(row, buildDetail([row.run])).stamp;
+
+    it("stamps the time the run ended", () => {
+      expect(stamp(buildRow(buildRun("completed")))).toBe("finished 09:29");
+      expect(stamp(buildRow(buildRun("failed")))).toBe("failed 09:29");
+      expect(stamp(buildRow(buildRun("cancelled")))).toBe("stopped 09:29");
+    });
+
+    it("says a live run is working", () => {
+      expect(stamp(buildRow(buildRun("running")))).toBe("working");
+    });
+
+    it("stamps a Request's wait with when the session was last active", () => {
+      expect(stamp(buildRequestRow(buildRun("running")))).toBe("waiting on you since 09:33");
+    });
+
+    it("stamps a row that waits on a signal with its last run, not with the wait", () => {
+      expect(stamp(buildSignalRow(buildRun("completed")))).toBe("finished 09:29");
+      expect(stamp(buildSignalRow(buildRun("failed")))).toBe("failed 09:29");
+      expect(stamp(buildSignalRow(buildRun("running"), ["run-1"]))).toBe("working");
+    });
+
+    it("is the word alone when the time cannot be formatted", () => {
+      const run = buildRun("completed");
+      expect(describeTrackingTrip(buildRow(run), buildDetail([run]), "Not/AZone", NOW).stamp).toBe(
+        "finished",
+      );
+    });
+  });
+
+  it("leaves the output and the ending action step out when the read still lists an older newest run than the row's", () => {
+    const older = buildRun("completed", { id: "run-older" });
+    const newer = buildRun("failed", { id: "run-newer" });
+    const stale = buildDetail([older], { output: OUTPUT, endingActionStepName: "Post the review" });
+
+    const drawn = trip(buildRow(newer), stale);
+
+    expect(drawn.output).toBeUndefined();
+    expect(drawn.endingActionStepName).toBeUndefined();
+    // Once the read lists the newer run too, it shows what the read holds for it.
+    const fresh = buildDetail([older, newer], {
+      output: OUTPUT,
+      endingActionStepName: "Post the review",
+    });
+    expect(trip(buildRow(newer), fresh).output).toBe(OUTPUT);
+    expect(trip(buildRow(newer), fresh).endingActionStepName).toBe("Post the review");
+  });
+
+  it("leaves the output out when the read lists no runs", () => {
+    const run = buildRun("completed");
+    expect(trip(buildRow(run), buildDetail([], { output: OUTPUT })).output).toBeUndefined();
+  });
+
   it("opens the newest run's page for the whole output, and the row's run when the read lists none", () => {
     const first = buildRun("failed", { id: "run-1" });
     const second = buildRun("completed", { id: "run-2" });
@@ -441,36 +482,6 @@ describe("describeTrackingTrip", () => {
   it("lists a single run that is live, led by when it started", () => {
     const live = buildRun("running");
     expect(trip(buildRow(live), buildDetail([live])).runs).toHaveLength(1);
-  });
-});
-
-describe("describeTrackingStamp", () => {
-  const stamp = (row: TrackingRow) => describeTrackingStamp(row, TIMEZONE, NOW);
-
-  it("stamps the time the run ended", () => {
-    expect(stamp(buildRow(buildRun("completed")))).toBe("finished 09:29");
-    expect(stamp(buildRow(buildRun("failed")))).toBe("failed 09:29");
-    expect(stamp(buildRow(buildRun("cancelled")))).toBe("stopped 09:29");
-  });
-
-  it("says a live run is working", () => {
-    expect(stamp(buildRow(buildRun("running")))).toBe("working");
-  });
-
-  it("stamps a Request's wait with when the session was last active", () => {
-    expect(stamp(buildRequestRow(buildRun("running")))).toBe("waiting on you since 09:33");
-  });
-
-  it("stamps a row that waits on a signal with its last run, not with the wait", () => {
-    expect(stamp(buildSignalRow(buildRun("completed")))).toBe("finished 09:29");
-    expect(stamp(buildSignalRow(buildRun("failed")))).toBe("failed 09:29");
-    expect(stamp(buildSignalRow(buildRun("running"), ["run-1"]))).toBe("working");
-  });
-
-  it("is the word alone when the time cannot be formatted", () => {
-    expect(describeTrackingStamp(buildRow(buildRun("completed")), "Not/AZone", NOW)).toBe(
-      "finished",
-    );
   });
 });
 

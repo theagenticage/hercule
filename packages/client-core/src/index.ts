@@ -448,8 +448,6 @@ export {
 } from "./tracking";
 export {
   describeTrackingOutputValue,
-  describeTrackingRun,
-  describeTrackingStamp,
   describeTrackingStanding,
   describeTrackingTrip,
   findNextTrackingElapsedChange,

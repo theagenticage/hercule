@@ -131,7 +131,7 @@ const RUN_STATUS_FACTS: Readonly<
  *   permission denied on ops-db", and a live run that only waits on signal
  *   triggers reads "waiting for pr_checks, pr_merged", naming them by id.
  */
-export const describeTrackingRun = (
+const describeTrackingRun = (
   run: TrackingRun,
 ): {
   readonly pose: "working" | "done" | "failed" | "idle";
@@ -211,7 +211,7 @@ const shouldListTrackingRuns = (runs: ReadonlyArray<TrackingRun>): boolean => {
  *
  * A time that cannot be formatted is left out, so the stamp is the word alone.
  */
-export const describeTrackingStamp = (row: TrackingRow, timezone: string, now: Date): string => {
+const describeTrackingStamp = (row: TrackingRow, timezone: string, now: Date): string => {
   if (row.state === "needs-you" && row.waitsOn.kind === "request") {
     const since = formatMessageTime(new Date(row.since), timezone, now);
     return since === undefined ? "waiting on you" : `waiting on you since ${since}`;
@@ -249,11 +249,11 @@ export interface TrackingTrip {
   readonly stamp: string;
   /** Why the run failed. Set on a Failed row only, and only when the run carries a cause. */
   readonly failureCause: string | undefined;
-  /** What the newest run's last completed agent step put out. Absent unless the row is not Working and its run is the newest, and when the run has none. */
+  /** What the newest run's last completed agent step put out. Absent unless the row is not Working and its run is the newest run of the row and of the read, and when the run has none. */
   readonly output: TrackingOutput | undefined;
   /** The run "See the whole output" opens: the newest run, whose output it is. */
   readonly outputRunId: string;
-  /** The action step the newest run ended on. Absent unless the row is not Working and its run is the newest, and when the run did not end on one (a live run never has). */
+  /** The action step the newest run ended on. Absent unless the row is not Working and its run is the newest run of the row and of the read, and when the run did not end on one (a live run never has). */
   readonly endingActionStepName: string | undefined;
   /** The runs, oldest first. Empty when the list adds nothing to the agent's name line (see `shouldListTrackingRuns`). */
   readonly runs: ReadonlyArray<TrackingTripRun>;
@@ -265,8 +265,11 @@ export interface TrackingTrip {
  *
  * The output and the ending action step belong to the newest run. The pane
  * shows them under the name of the row's run, so it shows them only when the
- * row is not Working and that run is the newest run. The run need not have
- * ended:
+ * row is not Working and that run is the newest run, both in the row and in
+ * `detail`. The two come from separate reads, and one can be older than the
+ * other: a new run makes the row name a newer run while `detail` still lists
+ * the older one, whose output must not be drawn under the new run. The run
+ * need not have ended:
  *
  * - A Needs you row that waits on a Request of the newest run, while that run
  *   still goes, shows the output of the run's last completed agent step. It is
@@ -289,7 +292,10 @@ export const describeTrackingTrip = (
 ): TrackingTrip => {
   const handedTo = `handed to ${detail.firstHandoff.workflowName}`;
   const handedAt = formatMessageTime(new Date(detail.firstHandoff.at), timezone, now);
-  const showsNewestRunsEnd = row.state !== "working" && row.run.id === row.task.latestRun.id;
+  const showsNewestRunsEnd =
+    row.state !== "working" &&
+    row.run.id === row.task.latestRun.id &&
+    row.run.id === detail.runs.at(-1)?.id;
   return {
     askedSmall: handedAt === undefined ? handedTo : `${handedAt} · ${handedTo}`,
     stamp: describeTrackingStamp(row, timezone, now),
