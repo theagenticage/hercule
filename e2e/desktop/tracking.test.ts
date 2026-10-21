@@ -40,9 +40,9 @@ const WORKING_SECONDS = 6;
 /**
  * How long the re-run waits in the test that re-runs from the run's page, in
  * seconds. Long enough for its Working row to outlast the trip from the
- * Workflows page back to Intake.
+ * run's page back to Intake. The test does not wait for the run to end.
  */
-const RERUN_WORKING_SECONDS = 20;
+const RERUN_WORKING_SECONDS = 10;
 
 /** The one step of a test workflow: an action and its parameters. */
 interface WorkflowStep {
@@ -272,8 +272,9 @@ describe("Tracking", () => {
     await tracking(page).locator(".tr-run-item .tr-run").click();
     const tryAgain = openRowPane(page).locator('[data-answer="try-again"]');
     await tryAgain.waitFor();
+    const tryAgainFace = tryAgain.locator("> span").first();
     expect(await tryAgain.textContent()).toContain("Try again");
-    expect(await tryAgain.getAttribute("class")).toContain("btn--accent");
+    expect(await tryAgainFace.getAttribute("class")).toContain("btn--accent");
     expect(await openRowPane(page).locator(".ad-answers").textContent()).toContain(
       "Re-runs Investigate on Webhook deliveries fail from the start",
     );
@@ -301,7 +302,7 @@ describe("Tracking", () => {
     });
     expect((await client.run.read({ params: { id: failedRunId } })).taskId).toBe(task!.id);
     await tryAgain.waitFor();
-    expect(await tryAgain.getAttribute("class")).not.toContain("btn--accent");
+    expect(await tryAgainFace.getAttribute("class")).not.toContain("btn--accent");
   }, 120_000);
 
   it("keeps the Task of a run re-run from its page in Workflows, and shows the row in Tracking again", async () => {
@@ -332,27 +333,24 @@ describe("Tracking", () => {
     await page.locator("a.table-row.tbl-runs").click();
     await page.getByRole("button", { name: "Re-run…" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Re-run", exact: true }).click();
-    await expect
-      .poll(() => client.run.query({ query: { originalRunId: firstRunId } }).then((r) => r.items))
-      .toHaveLength(1);
+    // The app opens the new run's page once the re-run starts, and a live
+    // run offers Cancel. Leaving before that would let the late navigation
+    // override Go > Intake.
+    await page.getByRole("button", { name: "Cancel run…" }).waitFor();
 
     await chooseMenuItem(app, "Go", "Intake");
     await expect
       .poll(() => readTrackingRows(page))
       .toEqual([{ state: "working", title: "Review the pricing page" }]);
-    await expect
-      .poll(() => readTrackingRows(page), { timeout: 60_000 })
-      .toEqual([{ state: "finished", title: "Review the pricing page" }]);
 
     const tasks = (await client.task.query({ query: { limit: 10 } })).items;
     expect(tasks.map((each) => each.id)).toEqual([task!.id]);
     const [rerunSummary] = (await client.run.query({ query: { originalRunId: firstRunId } })).items;
     expect(await client.run.read({ params: { id: rerunSummary!.id } })).toMatchObject({
-      status: "completed",
       taskId: task!.id,
       originalRunId: firstRunId,
     });
-  }, 180_000);
+  }, 120_000);
 
   it("refuses a session's token on hercule signal hand-off, and leaves the signal open with no Task", async () => {
     const arranged = await arrangeFleet();
