@@ -148,8 +148,8 @@ A Task that is Needs you by a signal has no live run: its agent finished, and a 
 - A Request's Allow once, Always allow and Deny are not in the pane. The card has "Open the thread", where the thread's own answers are.
 - There is no foot line ("Leaves Tracking when...") and no fine print under the answers, as Intake's own pane has none.
 - A missing value in a field of the output reads "none".
-- Try again is not an answer until [#804](https://github.com/theagenticage/hercule/issues/804), and Linked work is not drawn until [#807](https://github.com/theagenticage/hercule/issues/807). The pane draws no placeholder for either.
-- Mark done follows one rule: it is an answer, and `E` presses it, when no run of the Task is live and the row does not wait on a Request. So a Needs you row that waits on a signal has Mark done and Cancel while its agent has finished, with none suggested, as the table above has it. A Failed and a Stopped row suggest nothing, so `↩` never marks a failure done. The row's own Mark done control on hover follows the same rule.
+- Try again is built ([#804](https://github.com/theagenticage/hercule/issues/804)), with the order and the suggestion in the table above. Linked work is not drawn until [#807](https://github.com/theagenticage/hercule/issues/807), and the pane draws no placeholder for it.
+- Mark done follows one rule: it is an answer, and `E` presses it, when no run of the Task is live and the row does not wait on a Request. So a Needs you row that waits on a signal has Mark done and Cancel while its agent has finished, with none suggested, as the table above has it. A Failed row suggests Try again and a Stopped row suggests nothing, so `↩` never marks a failure done. The row's own Mark done control on hover follows the same rule.
 - Cancel sets the Task `cancelled`, which takes the row off Tracking as Mark done does.
 - Stop the run keeps the run's workspace, and the pane asks nothing. The row stays in Tracking as Stopped.
 - A failed Stop shows its error under its button, and a failed Mark done or Cancel shows it in the toast's place.
