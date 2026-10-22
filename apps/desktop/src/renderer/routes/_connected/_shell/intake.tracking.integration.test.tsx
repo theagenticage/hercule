@@ -2979,6 +2979,20 @@ describe("Done with handed-off signals", () => {
     expect(within(pane).queryByRole("alert")).toBeNull();
   });
 
+  it("moves the focus to the trip's button when Try again succeeds while it has the focus", async () => {
+    legsRefused = true;
+    await openDone(`/intake?view=done&signal=${CLOSED_DONE.id}`, [PLAIN_SIGNAL]);
+    const pane = await waitForPane();
+    const retry = await within(pane).findByRole("button", { name: "Try again" });
+    retry.focus();
+
+    legsRefused = false;
+    await userEvent.keyboard("{Enter}");
+    const tripButton = await within(pane).findByRole("button", { name: "Open the run" });
+    expect(within(pane).queryByRole("alert")).toBeNull();
+    expect(document.activeElement).toBe(tripButton);
+  });
+
   it("tells no trip in the pane on To do of a signal whose leg the Done pages still hold", async () => {
     const { router } = await openDone();
     await waitFor(() => {

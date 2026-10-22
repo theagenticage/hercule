@@ -354,17 +354,23 @@ function SignalDetail({
   }, [openedOpen, resolved]);
 
   // The trip's button goes when its leg leaves the read, as when the Task is
-  // deleted. If the button had the focus, the focus falls to the page's body
-  // and the screen's keys stop working, so it moves to the pane.
+  // deleted. The failure line and its "Try again" button go when the read
+  // succeeds. If either had the focus, the focus falls to the page's body and
+  // the screen's keys stop working. It moves to the trip's button when there is
+  // one, the natural next step after a successful retry, and to the pane
+  // otherwise.
   const hasTrip = trip !== null;
-  const hadTripRef = useRef(false);
+  const hadControlsRef = useRef({ trip: false, failure: false });
   useLayoutEffect(() => {
-    const hadTrip = hadTripRef.current;
-    hadTripRef.current = hasTrip;
-    if (!hadTrip || hasTrip) return;
+    const had = hadControlsRef.current;
+    hadControlsRef.current = { trip: hasTrip, failure: legReadFailed };
+    const lostControl = (had.trip && !hasTrip) || (had.failure && !legReadFailed);
+    if (!lostControl) return;
     const focused = document.activeElement;
-    if (focused === null || focused === document.body) rootRef.current?.focus();
-  }, [hasTrip]);
+    if (focused !== null && focused !== document.body) return;
+    const tripButton = rootRef.current?.querySelector<HTMLElement>("[data-trip-button]");
+    (tripButton ?? rootRef.current)?.focus();
+  }, [hasTrip, legReadFailed]);
 
   return (
     <>
