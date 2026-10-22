@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="../../shared/page.js"></script>
+    <link rel="stylesheet" href="../../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="../shared/book.css" />
+    <script src="../shared/book.js"></script>
+    <title>Workbench, refined · The sidebar, regrouped · Hercule</title>
+    <style>
+      /* This page's own pieces, on top of the book's. */
+      .w2-crops {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 408px));
+        gap: 40px;
+        justify-content: start;
+      }
+      .w2-split {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 48px;
+        align-items: start;
+      }
+      .w2-split > .bk-frame {
+        width: 476px;
+      }
+      .w2-split--narrow > .bk-frame {
+        width: 408px;
+      }
+      .w2-split--unfold > .bk-frame {
+        width: 340px;
+      }
+      .w2-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+        min-width: 0;
+      }
+      .w2-heads {
+        display: flex;
+        flex-direction: column;
+        gap: 36px;
+      }
+      .w2-heads .bk-frame--narrow {
+        max-width: 828px;
+      }
+      .w2-variant {
+        display: grid;
+        grid-template-columns: 230px minmax(0, 1fr);
+        gap: 24px;
+        align-items: start;
+      }
+      .w2-variant > div:first-child h3 {
+        margin-top: 4px;
+      }
+      .w2-variant .bk-body {
+        font-size: var(--t-14);
+      }
+      .w2-variant-frames {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        min-width: 0;
+      }
+      .w2-states {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 56px 32px;
+      }
+      .w2-rule {
+        display: grid;
+        gap: 10px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .w2-rule li {
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr);
+        gap: 16px;
+        align-items: baseline;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--line-soft);
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.55;
+      }
+      .w2-rule li b {
+        color: var(--ink);
+      }
+      .w2-dots {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: var(--t-12);
+      }
+      .w2-dots i {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        box-sizing: border-box;
+      }
+      .w2-dots .y {
+        background: var(--you);
+      }
+      .w2-dots .g {
+        background: var(--accent-ink);
+      }
+      .w2-dots .q {
+        border: 1.5px solid var(--faint);
+      }
+      .w2-dots em {
+        margin-left: 2px;
+        color: var(--faint);
+        font-style: normal;
+        font-weight: var(--w-medium);
+      }
+      .w2-keys td:first-child {
+        white-space: nowrap;
+      }
+      .w2-keys kbd {
+        display: inline-grid;
+        place-items: center;
+        min-width: 22px;
+        height: 22px;
+        padding: 0 6px;
+        border-radius: 6px;
+        background: var(--sunken);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        font-size: var(--t-12);
+        font-weight: var(--w-medium);
+      }
+      .w2-q h4 {
+        margin-bottom: 6px;
+      }
+      .w2-back {
+        display: inline-block;
+        margin-top: 24px;
+        margin-right: 24px;
+        color: var(--muted);
+        font-size: var(--t-14);
+      }
+      .w2-verdict {
+        display: inline-flex;
+        align-items: center;
+        height: 22px;
+        padding: 0 9px;
+        border-radius: var(--r-pill);
+        background: color-mix(in oklab, var(--accent) 13%, transparent);
+        color: var(--accent-ink);
+        font-size: var(--t-12);
+        font-weight: var(--w-bold);
+      }
+      @media (max-width: 900px) {
+        .w2-crops,
+        .w2-split,
+        .w2-states,
+        .w2-variant {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .w2-split > .bk-frame,
+        .w2-split--narrow > .bk-frame,
+        .w2-split--unfold > .bk-frame {
+          width: auto;
+        }
+        .w2-rule li {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 4px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="bk-top"><a class="bk-brand" href="../index.html"><i data-face="Hercule" data-pose="idle" data-size="24"></i>The sidebar, regrouped <small>four directions in Crew Bureau</small></a><nav class="bk-links"><a href="../index.html#team">The team</a><a href="../index.html#brief">The brief</a><a href="../case-files/index.html">Case Files</a><a href="../lineage/index.html">Lineage</a><a href="../workbench/index.html">Workbench</a><a href="../workbench-refined/index.html" aria-current="page">Workbench, refined</a><a href="../tracks/index.html">Tracks</a><a href="../index.html#compare">Compare</a><a href="../index.html#pick">The pick</a></nav><div class="bk-themes"><button data-theme-option="whitehaven">Whitehaven</button><button data-theme-option="orient-express">Orient Express</button></div></header>
+
+    <main class="bk">
+      <!-- ============================================================ hero -->
+      <section class="bk-hero">
+        <div class="bk-eyebrow">Direction 3 · round 2</div>
+        <h1><span class="bk-num">3</span>Workbench, refined</h1>
+        <p class="bk-lever">One row per piece of work. It says what waits on you, and opens into its threads when you ask.</p>
+        <p class="bk-lede">Rogier picked Workbench as the cleanest sidebar, without the change counts, and asked two hard questions. What happens to the dots at ten threads, if they must be clickable inside a popover? And what happens to the header, when real thread titles are long and three of them already reach the buttons?</p>
+        <p class="bk-lede">This round answers both with real-length titles and a ten-thread piece of work. The dots become a summary, never more than three, and one button that <b>unfolds</b> the bench in place. The hover card stays what today's is: something to read, never something to click. And the header names threads by their <b>role</b>, keeps the open and the waiting ones in view, and puts the rest behind a real menu.</p>
+      </section>
+
+      <figure class="bk-frame bk-wide" data-src="desktop.html?state=stress" data-caption="Ten threads on one bench, 09:41" data-note="The migration's lead is open. The header names each thread by its role, keeps the waiting review in view, and puts six more behind +6. The sidebar row says what waits on you, and its dots read: one waiting, two working, seven more."></figure>
+
+      <!-- ============================================================ what changed -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">What changed since round 1</div>
+        <h2>Less on the row, nothing that floats and asks to be clicked</h2>
+        <div class="bk-grid">
+          <div class="bk-card">
+            <ul class="bk-list">
+              <li><b>No change counts,</b> in the sidebar or the header. The PR stays, without numbers.</li>
+              <li><b>Line 2 says what waits on you</b> when anything on the bench does: "review asks · 409 from Stripe: error or retry?". Otherwise the PR or the branch, as before.</li>
+              <li><b>No faces in the sidebar</b> but the ones Waiting on you already draws today.</li>
+              <li><b>The dots are a summary:</b> at most three, then "+n". They are no longer buttons one by one, and they lose the open-thread ring.</li>
+            </ul>
+          </div>
+          <div class="bk-card">
+            <ul class="bk-list">
+              <li><b>Reaching a thread means unfolding the bench,</b> with the dots or with →. Each thread is then a 32px line you click.</li>
+              <li><b>The hover card stays read-only and inert,</b> as today's. It lists the crew and says how to unfold.</li>
+              <li><b>The header has three variants,</b> drawn with real-length titles and a ten-thread bench, at 1440 and at 1100px.</li>
+              <li><b>Finish</b> crossfades over the status word on hover, as today's Done does.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ the row -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The row</div>
+        <h2>Round 1 beside round 2</h2>
+        <p class="bk-lede">The same morning, the same crop. Round 2 drops the counts and the open-thread ring, and spends line 2 on the one thing worth reading there: what waits on you. A lone thread is today's row, unchanged.</p>
+        <div class="w2-crops">
+          <figure class="bk-frame" data-src="../workbench/desktop.html?state=everyday&amp;list=top" data-crop="0,0,272,900" data-zoom="1.5" data-caption="Round 1" data-note="Branch and counts on line 2; one dot per thread, each a button, a ring on the open one."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=everyday&amp;list=top" data-crop="0,0,272,900" data-zoom="1.5" data-caption="Round 2" data-note="Line 2 asks in marigold when the bench waits on you, else shows the PR or the branch. The dots summarize; the cluster unfolds."></figure>
+        </div>
+      </section>
+
+      <!-- ============================================================ the waiting line -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The waiting line</div>
+        <h2>Line 2 says what the bench is waiting for</h2>
+        <div class="w2-split w2-split--narrow">
+          <figure class="bk-frame" data-src="desktop.html?state=stress&amp;list=top" data-crop="0,364,272,250" data-zoom="1.5" data-caption="Two benches waiting on you" data-note="The payout report's check asks how to count refunds. The ten-thread migration's review asks about a 409."></figure>
+          <div>
+            <p class="bk-body">While any thread of a bench waits on you, line 2 gives its question, in the marigold ink that always means you: <b>"check asks · Settlement or payout date?"</b>. The role says which thread asks, the glyph is that thread's provider, and the status word above says whether it is a Question or an Approval.</p>
+            <p class="bk-body">When the lead itself waits, line 2 is just its question: "Run git push?". When nothing waits, it goes back to the PR, "#1287 Draft ✓", or the branch, or the machine.</p>
+            <p class="bk-body">So the most useful sentence on the row is the one you can act on, and you no longer have to find the partner to learn what it wants. Waiting on you, at the top, reads the same way: the bench's name, then the role and its question.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ the dots rule -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The dots rule</div>
+        <h2>Never more than three dots</h2>
+        <div class="w2-split w2-split--narrow">
+          <figure class="bk-frame" data-src="desktop.html?state=rows" data-crop="0,118,272,350" data-zoom="1.5" data-caption="1, 2, 3 and 10 threads" data-note="A specimen of the rule, drawn from the real rows."></figure>
+          <div>
+            <ul class="w2-rule">
+              <li><b>1 thread</b><span>Today's row, exactly. No dots, no chevron, no new word.</span></li>
+              <li><b>2 or 3 threads</b><span>One dot per thread, the most urgent first: <span class="w2-dots"><i class="y"></i><i class="g"></i><i class="q"></i></span> waiting, working, quiet.</span></li>
+              <li><b>More than 3</b><span>The three most urgent, then the rest as a number: <span class="w2-dots"><i class="y"></i><i class="g"></i><i class="g"></i><em>+7</em></span>. The cluster's width stays under 50px at any crew size.</span></li>
+              <li><b>Not buttons</b><span>A single dot is never a target. The whole cluster is one button, which unfolds the bench; a chevron appears beside it on hover and on focus.</span></li>
+              <li><b>No ring</b><span>Which thread is open lives in the header, and in the unfolded lines. The row only says the bench is open.</span></li>
+            </ul>
+            <p class="bk-body" style="margin-top: 16px">The colors are the status words': marigold waits on you, the accent's ink works, an empty ring rests. Its accessible name reads the counts: "10 threads: 1 waiting on you, 3 working, 6 quiet. Unfold".</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ unfold -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">Unfold, not a clickable popover</div>
+        <h2>The sidebar opens in place. Nothing floats.</h2>
+        <p class="bk-lede">Rogier's worry was right: a hover card full of targets is not how today's card, or any Mac sidebar, behaves. It hides when the pointer leaves, so reaching into it is a race. So the card stays inert, and the way to a thread is the way every sidebar already works: open the item, and its children are lines in the list.</p>
+        <div class="w2-split w2-split--unfold">
+          <figure class="bk-frame" data-src="desktop.html?state=unfold" data-h="1200" data-crop="0,118,272,980" data-zoom="1.25" data-caption="Unfolded" data-note="The migration and the 3-D Secure fix, unfolded. One 32px line per thread: its role, its agent, its status. With more than two quiet, they fold into one line, here 6 quiet, which opens them."></figure>
+          <div class="w2-stack">
+            <figure class="bk-frame" data-src="desktop.html?state=card" data-crop="0,290,600,390" data-caption="The hover card" data-note="Read-only and inert, as today's: no pointer events, no focus. Eight threads at most, and the hint that says how to reach them."></figure>
+            <div class="bk-card bk-card--quiet"><h4>Why unfold wins</h4><p class="bk-body">It is the gesture people already know from Finder, Mail and every tree. It works with the keyboard (→ and ←), with VoiceOver (a group with an expanded state), and with any number of threads. And it never covers the window.</p></div>
+            <div class="bk-card bk-card--quiet"><h4>What stays calm</h4><p class="bk-body">Unfolding is memory only, so a relaunch folds everything. Opening a thread from the header never unfolds a bench or scrolls the list. A partner joining adds a dot, never a line, unless you unfolded the bench yourself.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ the header problem -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The header problem</div>
+        <h2>Three real titles already reach the buttons</h2>
+        <p class="bk-lede">Today's header gives every thread of the workspace a tab with its whole title. Titles are long in real use, so with ten threads the tabs run off the window, and the header's own buttons are pushed out of it.</p>
+        <figure class="bk-frame" data-src="../today/desktop.html?state=stress" data-crop="272,0,1168,58" data-caption="Today, with the ten-thread workspace" data-note="The tabs run past the window's edge. The side pane, editor and More buttons are pushed out of the window, and nothing separates the tabs from where they were."></figure>
+      </section>
+
+      <!-- ============================================================ the three variants -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The three header variants</div>
+        <h2>Roles, one switcher, or shrinking tabs</h2>
+        <p class="bk-lede">Each variant works on every state of the screen: add <code>&amp;header=a</code>, <code>b</code> or <code>c</code> to its address. All three keep the same right-hand cluster, Duet, the PR, Finish and More, and end at least 24px before it, laid out again when the window is resized. Each is drawn here at 1440 and at 1100px.</p>
+        <div class="w2-heads">
+          <div class="w2-variant">
+            <div><h3>A · Roles, then overflow</h3><p class="bk-body">The crumb carries the bench's name, cut at about 280px. Tabs are named by role, with today's marks. What does not fit goes behind "+n", but the open tab and any waiting one always stay.</p></div>
+            <div class="w2-variant-frames">
+              <figure class="bk-frame" data-src="desktop.html?state=stress&amp;header=a" data-crop="272,0,1168,58" data-caption="1440"></figure>
+              <figure class="bk-frame bk-frame--narrow" data-src="desktop.html?state=stress&amp;header=a" data-w="1100" data-crop="272,0,828,58" data-caption="1100" data-note="The open lead and the waiting review stay; eight go behind +8."></figure>
+            </div>
+          </div>
+          <div class="w2-variant">
+            <div><h3>B · One switcher</h3><p class="bk-body">The crumb, then one pill for the open thread, "lead · Claude Code ▾", with the bench's dots beside it. Its menu lists the whole crew. The same width at any crew size.</p></div>
+            <div class="w2-variant-frames">
+              <figure class="bk-frame" data-src="desktop.html?state=stress&amp;header=b" data-crop="272,0,1168,58" data-caption="1440"></figure>
+              <figure class="bk-frame bk-frame--narrow" data-src="desktop.html?state=stress&amp;header=b" data-w="1100" data-crop="272,0,828,58" data-caption="1100"></figure>
+            </div>
+          </div>
+          <div class="w2-variant">
+            <div><h3>C · Shrinking tabs</h3><p class="bk-body">Today's tabs by title, shrinking like a browser's: every tab gets the same width, between 72 and 200px. Below 72, the rest go behind "+n".</p></div>
+            <div class="w2-variant-frames">
+              <figure class="bk-frame" data-src="desktop.html?state=stress&amp;header=c" data-crop="272,0,1168,58" data-caption="1440" data-note="Nine tabs at 72px: Mig…, Fin…, Adv…"></figure>
+              <figure class="bk-frame bk-frame--narrow" data-src="desktop.html?state=stress&amp;header=c" data-w="1100" data-crop="272,0,828,58" data-caption="1100"></figure>
+            </div>
+          </div>
+        </div>
+        <div class="bk-huh" style="margin-top: 56px">
+          <div class="bk-eyebrow">The recommendation</div>
+          <h2>A: name threads by role, and let the rest overflow.</h2>
+          <p>A role is short because it says what the thread adds, not what the whole piece of work is: "review", "tests", "API docs". The bench's name is said once, in the crumb. So five or six tabs fit where today's three did not, and the ones that matter never leave: the open one, and the one that waits on you.</p>
+          <p>B is the calmest at any size, but it hides who is working until you open its menu, and switching always takes two moves. C is what browsers do, and at ten threads it turns every title into three letters; it is the best fallback for a crew with no roles at all. A keeps today's tabs, and only changes what they say.</p>
+        </div>
+        <figure class="bk-frame" style="margin-top: 40px" data-src="desktop.html?state=menu" data-caption="The +6 menu" data-note="A real menu, not a hover card: it opens on a click, ↑ and ↓ move, Enter opens, Esc closes. Each line has the thread's mark, its role or title, its agent and its status."></figure>
+      </section>
+
+      <!-- ============================================================ roles -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">Roles</div>
+        <h2>Where a role comes from</h2>
+        <p class="bk-lede">Everything above leans on roles, so they have to be dependable. They come from three places, in this order.</p>
+        <div class="bk-grid bk-grid--3">
+          <div class="bk-card"><div class="bk-eyebrow">1 · The lead names it</div><p class="bk-body">The usual case. The lead starts the partner with <code>hercule session spawn --role review</code>, so the role is the lead's own word for the job. All eight named partners on the migration got theirs this way.</p></div>
+          <div class="bk-card"><div class="bk-eyebrow">2 · A Text Generation writes it</div><p class="bk-body">For a thread Rogier adds with the header's +, a Text Generation writes one from its first message, the way a title is written: <code>sessions/thread.role</code>.</p></div>
+          <div class="bk-card"><div class="bk-eyebrow">3 · The title, as a fallback</div><p class="bk-body">Until a role exists, the thread shows its title, cut short: at 160px on a tab, and to the line's width when unfolded. The two threads added with + on the migration show this, in the menu above.</p></div>
+        </div>
+        <div class="bk-scroll" style="margin-top: 32px">
+          <table class="bk-table">
+            <thead><tr><th>On the migration</th><th>Shown as</th><th>Where it came from</th></tr></thead>
+            <tbody>
+              <tr><td>Migrate the unmigrated payout endpoints to the Result error shape</td><td>lead</td><td>It started the bench; its title names the bench</td></tr>
+              <tr><td>Adversarial review of the Result error shape on the payout endpoints</td><td>review</td><td>The lead, at spawn</td></tr>
+              <tr><td>Write contract tests for every migrated payout endpoint</td><td>tests</td><td>The lead, at spawn</td></tr>
+              <tr><td>Update the OpenAPI document for the new Result error responses</td><td>API docs</td><td>The lead, at spawn</td></tr>
+              <tr><td>Second adversarial pass on refunds and reversals under the new error shape</td><td>refunds review</td><td>The lead, at spawn</td></tr>
+              <tr><td>Draft the changelog entry and the migration note for API consumers</td><td>its title, cut short</td><td>Added with +; its role is not written yet</td></tr>
+              <tr><td>Ask whether Stripe can send payout.failed twice for the same payout</td><td>its title, cut short</td><td>Added with +; its role is not written yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============================================================ keys -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The keys</div>
+        <h2>Everything works from the keyboard</h2>
+        <div class="bk-scroll">
+          <table class="bk-table w2-keys">
+            <thead><tr><th>Key</th><th>Where</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>→</kbd></td><td>A bench row</td><td>Unfolds the bench</td></tr>
+              <tr><td><kbd>←</kbd></td><td>A bench row, or one of its lines</td><td>Folds the bench, and puts the focus back on its row</td></tr>
+              <tr><td><kbd>↩</kbd></td><td>A bench row</td><td>Opens the bench where you left it, the lead the first time</td></tr>
+              <tr><td><kbd>↩</kbd></td><td>An unfolded line</td><td>Opens that thread</td></tr>
+              <tr><td><kbd>⌥1</kbd> to <kbd>⌥9</kbd></td><td>Anywhere in a bench</td><td>Opens its first to ninth thread, in the order of its tabs, hidden ones too</td></tr>
+              <tr><td><kbd>↓</kbd> <kbd>↩</kbd></td><td>The "+n" button, or B's switcher</td><td>Opens the menu</td></tr>
+              <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>↩</kbd> <kbd>esc</kbd></td><td>The menu</td><td>Moves, opens the thread, closes and puts the focus back on the button</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============================================================ states -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The states</div>
+        <h2>The same bench, through the morning</h2>
+        <p class="bk-lede">Every frame is live: hover a row, click the dots, press → and ←, or open a frame on its own with Open ↗.</p>
+        <div class="w2-states">
+          <figure class="bk-frame" data-src="desktop.html?state=everyday" data-caption="The heavy morning" data-note="The 3-D Secure fix is open. Its row says Run git push?; its tabs are lead, research and review."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=partner" data-caption="In a partner" data-note="The review is open. Its tab is pressed, the bench's row is selected, and the lead's waiting tab stays in view."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=spawn" data-replay data-caption="A lead starts a partner" data-note="At 09:41 Rotate staging secrets starts verify. Two dots appear in its row and two tabs in its header. No row is added, and nothing in the list moves."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=done" data-replay data-caption="Finish the bench" data-note="Finish marks the crew done at once. The bench lands on the Done shelf as one row, with one Undo."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=swarm" data-caption="The swarm" data-note="21 benches for 35 threads. Upgrade Postgres to 18 reads ◉ ● ○: its rollback plan waits on you."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=lens" data-caption="Another lens: grouped by status" data-note="Needs you, Working, Quiet. The bench is the atom, so it moves whole; the project's tile takes the glyph's place on line 2."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=stress" data-theme="orient-express" data-caption="Orient Express" data-note="The ten-thread bench in the dark flagship."></figure>
+          <figure class="bk-frame" data-src="desktop.html?state=unfold" data-theme="orient-express" data-caption="Unfolded, in the dark" data-note="The hairline that holds a bench's lines together, and the chevron that says it is open."></figure>
+        </div>
+      </section>
+
+      <!-- ============================================================ needs -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">What it takes</div>
+        <h2>What it needs, and what it no longer needs</h2>
+        <div class="bk-grid">
+          <div class="bk-card">
+            <div class="bk-eyebrow">Needs</div>
+            <ul class="bk-list">
+              <li><b>The lead.</b> Expose <code>sessions.created_by</code> on Session as <code>startedBy</code>, and store <code>leadSessionId</code> on a thread started with the header's +.</li>
+              <li><b>Roles.</b> A <code>--role</code> flag on <code>hercule session spawn</code>, stored on the session; and a Text Generation, <code>sessions/thread.role</code>, for threads that start without one.</li>
+              <li><b>The waiting line.</b> Nothing new: it is the Request's one-line question, which Waiting on you already shows.</li>
+              <li><b>Spec.</b> Spec 17 §The sidebar (one row per bench, the waiting line, the dots rule, unfolding), the thread header (role tabs and the "+n" menu), and the hover card's list of the crew.</li>
+            </ul>
+          </div>
+          <div class="bk-card bk-card--quiet">
+            <div class="bk-eyebrow">No longer needs</div>
+            <ul class="bk-list">
+              <li><b>Change counts.</b> No runner <code>git diff --shortstat</code>, nothing reported on the workspace, nothing to keep fresh.</li>
+              <li><b>The PR state is optional.</b> When the GitHub Connection gives it, line 2 and the header show "#1287 Draft"; without it, the branch. Nothing else depends on it.</li>
+              <li><b>Clickable popovers.</b> No hover card with targets in it, and no focus traps outside the list.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================================ costs -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">What it costs</div>
+        <h2>In ADR 0037's terms</h2>
+        <div class="bk-card">
+          <ul class="bk-list">
+            <li><b>Processes:</b> none new.</li>
+            <li><b>Memory:</b> fewer rows than today, one per bench. An unfolded bench adds a 32px line per shown thread, and "n quiet" keeps a ten-thread bench to five lines. The hover card is the one card today's sidebar already has.</li>
+            <li><b>Work while idle:</b> none. No timers, no polling.</li>
+            <li><b>Work per streamed token:</b> none. A row redraws when a thread's status changes, not when it streams. The header lays its tabs out when it is drawn, when a status changes, and when the window is resized, once a frame at most.</li>
+            <li><b>Bundle bytes:</b> the bench row, the dots and the unfolded lines in the shell's chunk; the tab layout and the menu in the thread's chunk. The duet of round 1 is not part of this round.</li>
+            <li><b>Measured by:</b> the perf script's sidebar scenario with 500 threads as benches, with one ten-thread bench unfolded, and the window dragged from 1440 to 1100 to check the tabs' layout stays inside the frame budget.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ============================================================ open questions -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">For the grilling session</div>
+        <h2>Open questions</h2>
+        <div class="bk-grid bk-grid--3">
+          <div class="bk-card bk-card--quiet w2-q"><h4>The noun</h4><p class="bk-body">Is "bench" the word? It reads well on Finish ("finish the bench") and in the docs, but nobody says it today. The alternatives are a piece of work, a crew, or no noun at all, with the lead's title standing for it.</p></div>
+          <div class="bk-card bk-card--quiet w2-q"><h4>Does + always join?</h4><p class="bk-body">The header's + starts a thread on the open bench. Is that always what you mean, or do you sometimes want a stranger in the same worktree? If so, + needs a second choice: "On this bench" or "Alone, in this worktree".</p></div>
+          <div class="bk-card bk-card--quiet w2-q"><h4>The role flag</h4><p class="bk-body">Should <code>hercule session spawn</code> take <code>--role</code>, and should the lead be told to use it? Without it, every partner waits for a Text Generation, and its tab shows the title until then.</p></div>
+        </div>
+      </section>
+
+      <!-- ============================================================ links -->
+      <section class="bk-sec">
+        <div class="bk-eyebrow">The four directions</div>
+        <nav class="bk-next">
+          <a href="../case-files/index.html"><i>1</i><b>Case Files</b><span>One piece of work, one row. The crew rides on it as faces.</span></a>
+          <a href="../lineage/index.html"><i>2</i><b>Lineage</b><span>Every thread keeps its row. Kinship is drawn, not boxed.</span></a>
+          <a href="../workbench/index.html"><i>3</i><b>Workbench</b><span>The sidebar lists the work. The window seats the crew.</span></a>
+          <a href="../tracks/index.html"><i>4</i><b>Tracks</b><span>Every piece of work is a lane, every thread a track in it.</span></a>
+        </nav>
+        <a class="w2-back" href="../workbench/index.html">Back to Workbench, round 1</a><a class="w2-back" href="../index.html">Back to the book: the team, the brief and the comparison</a>
+      </section>
+    </main>
+
+    <script src="../../crew-bureau-2/brands.js"></script>
+    <script src="../../crew-bureau-2/crew.js"></script>
+  </body>
+</html>
