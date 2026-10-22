@@ -906,9 +906,10 @@
   gap: 12px;
 }
 .ad-outcome-top {
-  display: flex;
+  display: grid;
+  grid-template-columns: 28px 1fr;
   align-items: center;
-  gap: 12px;
+  column-gap: 12px;
 }
 .ad-outcome-desc {
   margin: 0;
@@ -920,9 +921,18 @@
   color: var(--ink);
   font-weight: var(--w-medium);
 }
-/* The button under a Done signal's trip sits at the start of its column. */
-.ad-outcome-go {
-  align-self: flex-start;
+/* The first step of a Done signal's trip is the outcome's bold line; the
+   rest of the trip runs on in the regular weight. */
+.ad-outcome-trip {
+  color: var(--ink);
+  font-size: var(--t-14);
+}
+/* The button of a Done signal's trip sits under the outcome's lines, in their
+   column, 10px below them: the pane's gap between stacked blocks. */
+.ad-outcome-button {
+  grid-column: 2;
+  justify-self: start;
+  margin-top: 10px;
 }
 .ad-mark {
   display: grid;
@@ -1290,7 +1300,7 @@
 .b-work-text b {
   font-size: var(--t-14);
 }
-.b-work-text span:last-child {
+.b-work-text > span:last-child {
   color: var(--muted);
 }
 /* Your work under the signal's blocks keeps the blocks' distance from them. */
@@ -1298,7 +1308,7 @@
   margin-top: 18px;
 }
 /* Your work on a Task whose row waits on the user: its state word, in your colour. */
-.b-work-text span:last-child b {
+.b-work-text > span:last-child b {
   color: var(--you-ink);
   font-size: inherit;
 }

@@ -57,6 +57,7 @@ import {
 import {
   assistantsQuery,
   eventQuery,
+  handoffLegQuery,
   pluginsQuery,
   signalQuery,
   workflowsQuery,
@@ -65,7 +66,7 @@ import { AlarmIcon } from "../../icons/alarm";
 import { ExternalIcon } from "../../icons/external";
 import { useTrackingRows, useYourWork } from "../../app/tracking";
 import { Mark } from "../../marks";
-import { HANDOFF_TRIP_SEPARATOR, HandoffTripLine } from "./handoff-trip-line";
+import { HandoffTripHeadline } from "./handoff-trip-line";
 import { IgnoreDialog } from "./ignore-dialog";
 import { SignalAnswers, type AnswerFailure } from "./signal-answers";
 import { SignalBlocks } from "./signal-blocks";
@@ -85,7 +86,7 @@ export interface SignalPaneHandle {
    * to a run, else the signal on its source, in the default browser. Does
    * nothing when its address is not known.
    */
-  readonly openTarget: () => void;
+  readonly openRunOrSource: () => void;
 }
 
 /**
@@ -236,8 +237,17 @@ function SignalDetail({
   const yourWorkTasks = useYourWork().get(signal.id)?.tasks ?? [];
   const trackingRows = useTrackingRows();
   const yourWork = describeYourWork(yourWorkTasks, trackingRows);
-  const runId = signal.resolution?.runId;
-  const leg = runId === undefined ? undefined : legs.get(runId);
+  // Only Done tells a trip. A signal resolved elsewhere while it shows on To
+  // do or Later keeps its plain outcome, even when the Done pages know its leg.
+  const runId = moves.view === "done" ? signal.resolution?.runId : undefined;
+  // A signal whose run is on no loaded Done page, such as one reached by a
+  // link to the second page, reads its leg alone.
+  const legOnPages = runId === undefined ? undefined : legs.get(runId);
+  const readLeg = useQuery({
+    ...handoffLegQuery(client, runId ?? ""),
+    enabled: runId !== undefined && legOnPages === undefined,
+  });
+  const leg = legOnPages ?? readLeg.data ?? undefined;
   const trip = describeHandoffTrip(
     signal,
     leg,
@@ -292,7 +302,7 @@ function SignalDetail({
     openReply: () => {
       if (reply !== undefined && signal.status === "open") focusReply(reply.action.id);
     },
-    openTarget: () => {
+    openRunOrSource: () => {
       if (tripRun !== null) onOpenRun(tripRun);
       else sourceLinkRef.current?.click();
     },
@@ -339,6 +349,19 @@ function SignalDetail({
     const focused = document.activeElement;
     if (focused === null || focused === document.body) rootRef.current?.focus();
   }, [openedOpen, resolved]);
+
+  // The trip's button goes when its leg leaves the read, as when the Task is
+  // deleted. If the button had the focus, the focus falls to the page's body
+  // and the screen's keys stop working, so it moves to the pane.
+  const hasTrip = trip !== null;
+  const hadTripRef = useRef(false);
+  useLayoutEffect(() => {
+    const hadTrip = hadTripRef.current;
+    hadTripRef.current = hasTrip;
+    if (!hadTrip || hasTrip) return;
+    const focused = document.activeElement;
+    if (focused === null || focused === document.body) rootRef.current?.focus();
+  }, [hasTrip]);
 
   return (
     <>
@@ -444,23 +467,13 @@ function SignalDetail({
                 </span>
                 <span className="b-work-text">
                   <span className="b-work-label">{outcome.label}</span>
-                  <b>{outcome.outcome}</b>
+                  {trip === null ? <b>{outcome.outcome}</b> : <HandoffTripHeadline trip={trip} />}
                   <span>{outcomeMoment}</span>
                 </span>
-              </div>
-              {resolvedElsewhere !== null && <p className="ad-outcome-desc">{resolvedElsewhere}</p>}
-              {trip !== null && (
-                <>
-                  <p className="ad-outcome-desc">
-                    <HandoffTripLine
-                      steps={trip.steps.join(HANDOFF_TRIP_SEPARATOR)}
-                      end={trip.end.text}
-                      tone={trip.end.tone}
-                    />
-                  </p>
+                {trip !== null && (
                   <button
                     type="button"
-                    className="btn btn--sm ad-outcome-go"
+                    className="btn btn--sm ad-outcome-button"
                     data-trip-button
                     onClick={() => {
                       if (trip.destination.kind === "tracking") {
@@ -470,8 +483,9 @@ function SignalDetail({
                   >
                     {trip.destination.kind === "tracking" ? "Go to Tracking" : "Open the run"}
                   </button>
-                </>
-              )}
+                )}
+              </div>
+              {resolvedElsewhere !== null && <p className="ad-outcome-desc">{resolvedElsewhere}</p>}
             </section>
             {resolvedElsewhere !== null && keptDraft !== "" && (
               <div className="ad-compose">
@@ -506,7 +520,7 @@ function SignalDetail({
           canSnooze
           later={moves.view === "later"}
           canOpen={sourceUrl !== null}
-          tripKey={null}
+          tripDestination={null}
         />
       ) : (
         <PaneKeys
@@ -516,7 +530,7 @@ function SignalDetail({
           canSnooze={false}
           later={false}
           canOpen={sourceUrl !== null}
-          tripKey={trip?.destination.kind ?? null}
+          tripDestination={trip?.destination.kind ?? null}
         />
       )}
     </>
@@ -550,7 +564,7 @@ function OfferedRuleMatchCount({
  * Renders the keys at the foot of the pane, each with what it does for this
  * signal. `later` is set when the pane shows a signal on Later, which `U`
  * puts back on To do. A resolved signal takes no answer and no move, so its
- * foot keeps only J K, O and Esc. `tripKey` is where the trip of a
+ * foot keeps only J K, O and Esc. `tripDestination` is where the trip of a
  * handed-off signal on Done leads: `↩` goes to Tracking, and `O` opens the run
  * in place of the source.
  */
@@ -561,7 +575,7 @@ function PaneKeys({
   canSnooze,
   later,
   canOpen,
-  tripKey,
+  tripDestination,
 }: {
   readonly suggestedKey: string | null;
   readonly replyKey: string | null;
@@ -569,7 +583,7 @@ function PaneKeys({
   readonly canSnooze: boolean;
   readonly later: boolean;
   readonly canOpen: boolean;
-  readonly tripKey: "tracking" | "run" | null;
+  readonly tripDestination: "tracking" | "run" | null;
 }): JSX.Element {
   return (
     <div className="ad-keys" aria-hidden="true">
@@ -582,7 +596,7 @@ function PaneKeys({
           <kbd>↩</kbd> {suggestedKey}
         </span>
       )}
-      {tripKey === "tracking" && (
+      {tripDestination === "tracking" && (
         <span>
           <kbd>↩</kbd> go to Tracking
         </span>
@@ -607,7 +621,7 @@ function PaneKeys({
           <kbd>U</kbd> unsnooze
         </span>
       )}
-      {tripKey === "run" ? (
+      {tripDestination === "run" ? (
         <span>
           <kbd>O</kbd> open the run
         </span>

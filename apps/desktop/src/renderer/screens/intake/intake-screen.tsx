@@ -214,7 +214,7 @@ export function IntakeScreen({
   // Done pages also hold the leg of each handoff on them.
   const laterPaged = useInfiniteQuery({
     ...signalsLaterQuery(client, pluginId ?? undefined),
-    enabled: view !== "to-do" && view !== "done",
+    enabled: view === "later",
   });
   const donePaged = useInfiniteQuery({
     ...signalsDoneQuery(client, pluginId ?? undefined),
@@ -550,7 +550,7 @@ export function IntakeScreen({
         return;
       case "o":
         event.preventDefault();
-        if (paneShown) paneRef.current?.openTarget();
+        if (paneShown) paneRef.current?.openRunOrSource();
         return;
       case "Escape":
         event.preventDefault();

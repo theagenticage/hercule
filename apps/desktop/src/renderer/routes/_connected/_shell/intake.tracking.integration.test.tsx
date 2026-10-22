@@ -2799,9 +2799,28 @@ describe("Done with handed-off signals", () => {
     buildLeg(CLOSED_TASK, "completed", "done"),
   ];
 
-  /** Opens Done with the handed-off signals, the plain one, and Tracking's rows. */
-  const openDone = (path = "/intake?view=done") => {
-    const listed = [OPEN_DONE, CLOSED_DONE, PLAIN_SIGNAL];
+  // The legs the controller knows. A test changes them to stand for the
+  // controller's answer after something happened to a Task.
+  let knownLegs = LEGS;
+  beforeEach(() => {
+    knownLegs = LEGS;
+  });
+
+  const waitForPane = () =>
+    waitFor(() => {
+      const pane = getPane();
+      expect(pane).not.toBeNull();
+      return pane!;
+    });
+
+  /**
+   * Opens Done with `listed`, Tracking's rows, and the legs the controller
+   * answers for the runs it is asked about.
+   */
+  const openDone = (
+    path = "/intake?view=done",
+    listed = [OPEN_DONE, CLOSED_DONE, PLAIN_SIGNAL],
+  ) => {
     return openIntake(path, {
       extra: {
         ...storeTracking(),
@@ -2810,7 +2829,12 @@ describe("Done with handed-off signals", () => {
             items: new URLSearchParams(call.search).get("view") === "done" ? listed : [],
           },
         }),
-        "GET /api/v1/tasks/legs": () => ({ body: { legs: LEGS } }),
+        "GET /api/v1/tasks/legs": (call): Answer => {
+          const asked = new URLSearchParams(call.search)
+            .getAll("runIds")
+            .flatMap((ids) => ids.split(","));
+          return { body: { legs: knownLegs.filter((leg) => asked.includes(leg.runId)) } };
+        },
         [`GET /api/v1/signals/${OPEN_DONE.id}`]: () => ({ body: OPEN_DONE }),
         [`GET /api/v1/signals/${CLOSED_DONE.id}`]: () => ({ body: CLOSED_DONE }),
       },
@@ -2875,6 +2899,80 @@ describe("Done with handed-off signals", () => {
     await userEvent.keyboard("o");
     await waitFor(() => {
       expect(router.latestLocation.pathname).toBe(`/runs/${getRunId(CLOSED_TASK)}`);
+    });
+  });
+
+  it("moves the focus to the pane when the trip goes while its button has the focus", async () => {
+    const { live } = await openDone(`/intake?view=done&signal=${CLOSED_DONE.id}`);
+    const button = await within(await waitForPane()).findByRole("button", { name: "Open the run" });
+    button.focus();
+
+    // The Task was deleted, so the controller no longer knows the leg.
+    knownLegs = [];
+    act(() => live.pushInvalidation("task", [CLOSED_TASK.id]));
+    await waitFor(() => {
+      expect(within(getPane()!).queryByRole("button", { name: "Open the run" })).toBeNull();
+    });
+    expect(getPane()!.contains(document.activeElement)).toBe(true);
+    // The keys of the screen still work from there.
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(getPane()!.hasAttribute("inert")).toBe(true);
+    });
+  });
+
+  it("presses the trip button with a second Enter after the first moved the focus onto it", async () => {
+    await openDone();
+    await waitFor(() => {
+      expect(getSignalRow(OPEN_DONE).querySelector(".ask-mark--face .cr")).not.toBeNull();
+    });
+    getSignalRow(OPEN_DONE).focus();
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(document.activeElement?.textContent).toBe("Go to Tracking");
+    });
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(isOpen()).toBe(true);
+    });
+  });
+
+  it("shows the trip of a signal that is on no loaded page, read when the pane opens", async () => {
+    await openDone(`/intake?view=done&signal=${CLOSED_DONE.id}`, [PLAIN_SIGNAL]);
+    const pane = await waitForPane();
+    await within(pane).findByRole("button", { name: "Open the run" });
+    expect(pane.querySelector(".ad-outcome")?.textContent).toContain("Handed to Implement → done");
+  });
+
+  it("tells no trip in the pane on To do of a signal whose leg the Done pages still hold", async () => {
+    const { router } = await openDone();
+    await waitFor(() => {
+      expect(getSignalRow(CLOSED_DONE).querySelector(".ask-mark--face .cr")).not.toBeNull();
+    });
+
+    await router.navigate({ to: "/intake", search: { signal: CLOSED_DONE.id } });
+    const pane = await waitForPane();
+    await waitFor(() => {
+      expect(pane.querySelector(".ad-outcome")).not.toBeNull();
+    });
+    expect(pane.querySelector(".ad-outcome")?.textContent).not.toContain("→");
+    expect(within(pane).queryByRole("button", { name: "Open the run" })).toBeNull();
+  });
+
+  it("ends a row's trip with done once the Task is ticked off and its push arrives", async () => {
+    const { live } = await openDone();
+    await waitFor(() => {
+      expect(getSignalRow(OPEN_DONE).querySelector(".ask-sub")?.textContent).toBe(
+        "Handed to Implement → finished",
+      );
+    });
+
+    knownLegs = [{ ...LEGS[0]!, taskStatus: "done" }, LEGS[1]!];
+    act(() => live.pushInvalidation("task", [FINISHED_TASK.id]));
+    await waitFor(() => {
+      expect(getSignalRow(OPEN_DONE).querySelector(".ask-sub")?.textContent).toBe(
+        "Handed to Implement → done",
+      );
     });
   });
 });
