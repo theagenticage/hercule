@@ -12,6 +12,7 @@ import {
   computeEffectiveConfig,
   readThreadConfig,
   type MessageDraft,
+  type ThreadCatalogs,
   type Thread,
   type ThreadPicks,
 } from "./config";
@@ -39,21 +40,25 @@ export type Submission = SpawnSubmission | InputSubmission;
  * back, so it need not check the request's kind.
  */
 export function buildSubmission(
+  catalogs: ThreadCatalogs,
   thread: Extract<Thread, { kind: "active" }>,
   picks: ThreadPicks,
   message: MessageDraft,
 ): InputSubmission;
 export function buildSubmission(
+  catalogs: ThreadCatalogs,
   thread: Extract<Thread, { kind: "draft" }>,
   picks: ThreadPicks,
   message: MessageDraft,
 ): SpawnSubmission;
 export function buildSubmission(
+  catalogs: ThreadCatalogs,
   thread: Thread,
   picks: ThreadPicks,
   message: MessageDraft,
 ): Submission;
 export function buildSubmission(
+  catalogs: ThreadCatalogs,
   thread: Thread,
   picks: ThreadPicks,
   message: MessageDraft,
@@ -77,7 +82,7 @@ export function buildSubmission(
   // A field the user did not pick is left out, never sent as an empty string:
   // the controller has its own default for each one, and the `Id` schema
   // rejects an empty string.
-  const config = computeEffectiveConfig(readThreadConfig(thread), picks);
+  const config = computeEffectiveConfig(catalogs, readThreadConfig(thread), picks);
   // Leave `workspace` out both for a thread that works without a checkout and
   // for a draft with no workspace chosen yet: the contract accepts neither
   // `{ kind: "none" }` nor `null` for the field.

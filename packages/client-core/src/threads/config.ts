@@ -15,7 +15,8 @@ import type {
   Workspace,
 } from "@hercule/contract";
 import type { ShelfItem } from "../attachments/shelf";
-import type { ThreadDefaults } from "./thread-defaults";
+import { buildRunnerMenu } from "./runner-menu";
+import { findDefaultModel, type ThreadDefaults } from "./thread-defaults";
 import type { WorkspacePick } from "./workspaces";
 
 /**
@@ -105,19 +106,64 @@ export const readThreadConfig = (thread: Thread): ThreadConfig =>
       };
 
 /**
+ * Returns the existing workspace `config` joins, or `undefined` when it joins
+ * none or the workspace is not in the catalogs. An existing workspace is on one
+ * runner and never moves, so a thread that joins one runs there.
+ */
+export const findJoinedWorkspace = (
+  catalogs: ThreadCatalogs,
+  config: ThreadConfig,
+): Workspace | undefined => {
+  const picked = config.workspace;
+  return picked?.kind === "existing"
+    ? (catalogs.workspaces ?? []).find((each) => each.id === picked.workspaceId)
+    : undefined;
+};
+
+/**
  * Returns what a thread runs with while the composer is open: its own config
  * with the picks applied. The model options belong to one model on one
  * instance. So the thread's stored options are kept only while the picked
  * instance and model are the ones the thread already has; for any other pair,
  * only the picked options are used.
+ *
+ * The picks hold only what the user chose. When they pick an account but no
+ * runner, the runner is the account's default runner (or the runner of the
+ * existing workspace the draft joins). When they pick no model either, the
+ * model is the account's default model on that runner. These are computed here
+ * on every call and never stored in the picks, so a later account change
+ * cannot mistake an earlier account's default for a choice of the user. An
+ * explicit `null` in the picks is a pick of "none" (an account with no models),
+ * not a missing pick, so only `undefined` falls back.
  */
-export const computeEffectiveConfig = (base: ThreadConfig, picks: ThreadPicks): ThreadConfig => {
-  const instanceId = picks.instanceId ?? base.instanceId;
-  const model = picks.model ?? base.model;
+export const computeEffectiveConfig = (
+  catalogs: ThreadCatalogs,
+  base: ThreadConfig,
+  picks: ThreadPicks,
+): ThreadConfig => {
+  const instanceId = picks.instanceId === undefined ? base.instanceId : picks.instanceId;
+  const pickedInstance =
+    picks.instanceId === undefined
+      ? undefined
+      : catalogs.instances.find((each) => each.id === picks.instanceId);
+  const merged = { ...base, ...picks };
+  const runnerId =
+    pickedInstance === undefined || picks.runnerId !== undefined
+      ? merged.runnerId
+      : (findJoinedWorkspace(catalogs, merged)?.runnerId ??
+        buildRunnerMenu(catalogs.runners, catalogs.thisMacRunnerId, pickedInstance)
+          .defaultRunnerId);
+  const model =
+    picks.model !== undefined
+      ? picks.model
+      : pickedInstance === undefined
+        ? base.model
+        : findDefaultModel(pickedInstance, runnerId);
   const same = instanceId === base.instanceId && model === base.model;
   return {
-    ...base,
-    ...picks,
+    ...merged,
+    instanceId,
+    runnerId,
     model,
     options: same ? { ...base.options, ...picks.options } : { ...picks.options },
   };

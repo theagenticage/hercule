@@ -23,7 +23,13 @@ import type {
 } from "@hercule/contract";
 import { buildAccessModeMenu, type AccessModeMenuItem } from "./access-modes";
 import { findAccountName, buildLoginTarget, findSnapshotOn, type LoginTarget } from "./catalog";
-import type { ThreadCatalogs, ThreadConfig, ThreadKind, ThreadPicks } from "./config";
+import {
+  findJoinedWorkspace,
+  type ThreadCatalogs,
+  type ThreadConfig,
+  type ThreadKind,
+  type ThreadPicks,
+} from "./config";
 import {
   buildRunnerMenu,
   findDimmedReason,
@@ -234,14 +240,8 @@ const locateModel = (
 export const findModelDescriptor = (
   catalogs: ThreadCatalogs,
   config: ThreadConfig,
-): ModelDescriptor | undefined => {
-  const picked = config.workspace;
-  const joined =
-    picked?.kind === "existing"
-      ? (catalogs.workspaces ?? []).find((each) => each.id === picked.workspaceId)
-      : undefined;
-  return locateModel(catalogs, config, joined).descriptor;
-};
+): ModelDescriptor | undefined =>
+  locateModel(catalogs, config, findJoinedWorkspace(catalogs, config)).descriptor;
 
 /** Returns everything the composer shows for a thread's config. */
 export const buildComposerFields = (

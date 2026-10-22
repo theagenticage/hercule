@@ -188,6 +188,7 @@ export function DraftScreen({
   const submit = (): void => {
     if (!canSend || isMutationRunning(queryClient, startKey)) return;
     const submission = buildSubmission(
+      catalogs,
       { kind: "draft", config: view.base },
       addWorkspacePicks(pending.picks, workspace, workspaces),
       pending.message,

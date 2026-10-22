@@ -156,7 +156,7 @@ export function ThreadComposer({
   };
   const thread = { kind: "active", session } as const;
   const base = readThreadConfig(thread);
-  const config = computeEffectiveConfig(base, pending.picks);
+  const config = computeEffectiveConfig(catalogs, base, pending.picks);
   const fields = buildComposerFields(catalogs, config, "active");
   const readOnly = findResumeBlockedReason(session);
   const busy = session.status === "busy";
@@ -232,7 +232,7 @@ export function ThreadComposer({
   };
   const submit = (): void => {
     if (!canSend || isMutationRunning(queryClient, sendKey)) return;
-    const submission = buildSubmission(thread, pending.picks, pending.message);
+    const submission = buildSubmission(catalogs, thread, pending.picks, pending.message);
     pendingSubmissions.clearFailure(sessionId);
     if (stopAgent.error !== null) stopAgent.reset();
     images.clearRefusal();

@@ -12,8 +12,14 @@
 import { describe, expect, it } from "vitest";
 import type { ModelOption, ProviderInstance, Runner, Workspace } from "@hercule/contract";
 import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
-import { addWorkspacePicks, applyPicks, buildModelPicks, buildWorkspacePicks } from "./apply-pick";
-import type { ThreadConfig, ThreadPicks } from "./config";
+import {
+  addWorkspacePicks,
+  applyPicks,
+  buildModelPicks,
+  buildWorkspacePicks,
+  type ComposerPick,
+} from "./apply-pick";
+import { computeEffectiveConfig, type ThreadConfig, type ThreadPicks } from "./config";
 import { MOSS, PRIMARY, THREAD_3F1, WEBSHOP } from "./workspaces.testing";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
@@ -94,6 +100,17 @@ const CATALOGS: {
   thisMacRunnerId: LOCAL.id,
   workspaces: [THREAD_3F1],
 };
+
+const TEAM_DEFAULT_ON_LOCAL = { ...GPT, slug: "team-local" };
+const TEAM_DEFAULT_ON_REMOTE = { ...GPT, slug: "team-remote" };
+const TEAM_DEFAULT_ON_MOSS = { ...GPT, slug: "team-moss" };
+
+/** Logged in on the local, remote and moss runners, each with a different default model. */
+const TEAM = buildInstance("team", "Team", [
+  buildSnapshot({ runnerId: LOCAL.id, models: [TEAM_DEFAULT_ON_LOCAL] }),
+  buildSnapshot({ runnerId: REMOTE.id, models: [TEAM_DEFAULT_ON_REMOTE] }),
+  buildSnapshot({ runnerId: MOSS.id, models: [TEAM_DEFAULT_ON_MOSS] }),
+]);
 
 /**
  * Returns what the thread runs with while the picks are made: the defaults with
@@ -199,15 +216,18 @@ describe("applyPicks with one choice", () => {
     );
   });
 
-  it("takes the runner and model from the instance's defaults, and drops the options the default model does not offer", () => {
-    expect(
-      applyPicks(CATALOGS, CONFIG, { model: SONNET.slug, options: { effort: "high" } }, [
-        { kind: "instanceId", value: CODEX.id },
-      ]),
-    ).toEqual({
-      instanceId: CODEX.id,
+  it("picks only the account, whose default runner and model apply, and drops the options the default model does not offer", () => {
+    const picks = applyPicks(
+      CATALOGS,
+      CONFIG,
+      { model: SONNET.slug, options: { effort: "high" } },
+      [{ kind: "instanceId", value: CODEX.id }],
+    );
+    expect(picks).toEqual({ instanceId: CODEX.id });
+    expect(computeEffectiveConfig(CATALOGS, CONFIG, picks)).toMatchObject({
       runnerId: REMOTE.id,
       model: GPT.slug,
+      options: {},
     });
   });
 
@@ -266,7 +286,152 @@ describe("applyPicks", () => {
       { kind: "instanceId", value: CODEX.id },
       { kind: "model", value: "gpt-5-mini" },
     ]);
-    expect(picks).toEqual({ instanceId: CODEX.id, runnerId: REMOTE.id, model: "gpt-5-mini" });
+    expect(picks).toEqual({ instanceId: CODEX.id, model: "gpt-5-mini" });
+  });
+
+  it("keeps a model that equals the thread's own when it is picked after another account", () => {
+    // The other account offers the same model slug. The slug is picked, not
+    // left to that account's default model.
+    const other = buildInstance("other", "Other", [
+      buildSnapshot({
+        runnerId: LOCAL.id,
+        models: [
+          { ...GPT, slug: "first" },
+          { ...GPT, slug: SONNET.slug, isDefault: false },
+        ],
+      }),
+    ]);
+    const catalogs = { ...CATALOGS, instances: [CLAUDE, other] };
+    expect(
+      applyPicks(catalogs, CONFIG, {}, buildModelPicks(CONFIG, other.id, SONNET.slug)),
+    ).toEqual({ instanceId: other.id, model: SONNET.slug });
+  });
+
+  it("picks a runner that is not the default of the picked account, though it is the thread's own", () => {
+    const picks = applyPicks(CATALOGS, CONFIG, { instanceId: CODEX.id }, [
+      { kind: "runnerId", value: LOCAL.id },
+    ]);
+    expect(picks).toEqual({ instanceId: CODEX.id, runnerId: LOCAL.id });
+  });
+});
+
+describe("applyPicks with an account change", () => {
+  const catalogs = { ...CATALOGS, instances: [CLAUDE, CODEX, TEAM] };
+  const pickAccount = (instanceId: string): ComposerPick => ({
+    kind: "instanceId",
+    value: instanceId,
+  });
+
+  it("keeps a picked runner when the new account is logged in there, and reads the default model from it", () => {
+    const picks = applyPicks(catalogs, CONFIG, { runnerId: REMOTE.id }, [pickAccount(TEAM.id)]);
+    expect(picks).toEqual({ instanceId: TEAM.id, runnerId: REMOTE.id });
+    expect(computeEffectiveConfig(catalogs, CONFIG, picks)).toMatchObject({
+      runnerId: REMOTE.id,
+      model: TEAM_DEFAULT_ON_REMOTE.slug,
+    });
+  });
+
+  it("keeps a picked runner across a cross-account model pick", () => {
+    expect(
+      applyPicks(catalogs, CONFIG, { runnerId: REMOTE.id }, buildModelPicks(CONFIG, TEAM.id, "x")),
+    ).toEqual({ instanceId: TEAM.id, runnerId: REMOTE.id, model: "x" });
+  });
+
+  it("drops the model pick of the old account", () => {
+    expect(applyPicks(catalogs, CONFIG, { model: OPUS.slug }, [pickAccount(TEAM.id)])).toEqual({
+      instanceId: TEAM.id,
+    });
+  });
+
+  it("drops a picked runner the new account is not logged in on, so its default runner applies", () => {
+    const picks = applyPicks(catalogs, CONFIG, { runnerId: MOSS.id }, [pickAccount(CODEX.id)]);
+    expect(picks).toEqual({ instanceId: CODEX.id });
+    expect(computeEffectiveConfig(catalogs, CONFIG, picks)).toMatchObject({
+      runnerId: REMOTE.id,
+      model: GPT.slug,
+    });
+  });
+
+  it("follows the default runner of each account when no runner is picked (A, B, then C)", () => {
+    // Codex is on the remote runner only, Team is on both and defaults to the
+    // local one. The remote runner that Codex ran on must not stick to Team.
+    const toCodex = applyPicks(catalogs, CONFIG, {}, [pickAccount(CODEX.id)]);
+    expect(computeEffectiveConfig(catalogs, CONFIG, toCodex).runnerId).toBe(REMOTE.id);
+    const toTeam = applyPicks(catalogs, CONFIG, toCodex, [pickAccount(TEAM.id)]);
+    expect(toTeam).toEqual({ instanceId: TEAM.id });
+    expect(computeEffectiveConfig(catalogs, CONFIG, toTeam)).toMatchObject({
+      runnerId: LOCAL.id,
+      model: TEAM_DEFAULT_ON_LOCAL.slug,
+    });
+  });
+
+  it("keeps a runner the user picked through two account changes (pick, B, then C)", () => {
+    // The user picked the remote runner on the first account. Codex defaults
+    // to the remote runner too, and Team defaults to the local one.
+    const picked = applyPicks(catalogs, CONFIG, {}, [{ kind: "runnerId", value: REMOTE.id }]);
+    const toCodex = applyPicks(catalogs, CONFIG, picked, [pickAccount(CODEX.id)]);
+    const toTeam = applyPicks(catalogs, CONFIG, toCodex, [pickAccount(TEAM.id)]);
+    expect(toTeam).toEqual({ instanceId: TEAM.id, runnerId: REMOTE.id });
+  });
+
+  it("leaves nothing of an earlier account when the base account is picked again (A, B, then A)", () => {
+    const toCodex = applyPicks(catalogs, CONFIG, {}, [pickAccount(CODEX.id)]);
+    expect(applyPicks(catalogs, CONFIG, toCodex, [pickAccount(CLAUDE.id)])).toEqual({});
+  });
+
+  it("keeps a picked runner when the base account is picked again and is usable there", () => {
+    const held: ThreadPicks = { instanceId: TEAM.id, runnerId: REMOTE.id };
+    expect(applyPicks(catalogs, CONFIG, held, [pickAccount(CLAUDE.id)])).toEqual({
+      runnerId: REMOTE.id,
+    });
+  });
+
+  it("drops a picked runner when the base account is picked again and is not usable there", () => {
+    const config = { ...CONFIG, instanceId: CODEX.id, model: GPT.slug, runnerId: REMOTE.id };
+    const held: ThreadPicks = { instanceId: TEAM.id, runnerId: ISLAND.id };
+    expect(applyPicks(catalogs, config, held, [pickAccount(CODEX.id)])).toEqual({});
+  });
+
+  it("carries no model and no options to an account that has no snapshot anywhere", () => {
+    const empty = buildInstance("empty", "Empty", []);
+    const withEmpty = { ...catalogs, instances: [CLAUDE, empty] };
+    const picks = applyPicks(withEmpty, CONFIG, { options: { effort: "low" } }, [
+      pickAccount(empty.id),
+    ]);
+    expect(picks).toEqual({ instanceId: empty.id });
+    expect(computeEffectiveConfig(withEmpty, CONFIG, picks)).toMatchObject({
+      model: null,
+      runnerId: null,
+      options: {},
+    });
+  });
+
+  it("leaves the runner to the workspace the draft joins, and reads the model from its runner", () => {
+    const joined = { kind: "existing", workspaceId: THREAD_3F1.id } as const;
+    const config: ThreadConfig = { ...CONFIG, workspace: joined };
+    const picks = applyPicks(catalogs, config, {}, [pickAccount(TEAM.id)]);
+    expect(picks).toEqual({ instanceId: TEAM.id });
+    expect(computeEffectiveConfig(catalogs, config, picks)).toMatchObject({
+      runnerId: MOSS.id,
+      model: TEAM_DEFAULT_ON_MOSS.slug,
+    });
+    // Even when the account is not on the workspace's runner at all: the
+    // composer's blocker explains it, and no other runner is picked.
+    const toCodex = applyPicks(catalogs, config, {}, [pickAccount(CODEX.id)]);
+    expect(toCodex).toEqual({ instanceId: CODEX.id });
+    expect(computeEffectiveConfig(catalogs, config, toCodex)).toMatchObject({
+      runnerId: MOSS.id,
+      model: null,
+    });
+  });
+
+  it("keeps the runner of a joined workspace in the picks when the base account is picked again", () => {
+    const joined = { kind: "existing", workspaceId: THREAD_3F1.id } as const;
+    const held: ThreadPicks = { workspace: joined, runnerId: MOSS.id, instanceId: CODEX.id };
+    expect(applyPicks(catalogs, CONFIG, held, [pickAccount(CLAUDE.id)])).toEqual({
+      workspace: joined,
+      runnerId: MOSS.id,
+    });
   });
 });
 
@@ -347,9 +512,10 @@ describe("applyPicks with an existing workspace", () => {
       { options: { effort: "low" } },
       buildModelPicks(CONFIG, other.id, "reasoner"),
     );
+    // The account's default runner is the config's runner already, so no
+    // runner is picked.
     expect(picks).toEqual({
       instanceId: other.id,
-      runnerId: LOCAL.id,
       model: "reasoner",
       options: { effort: "low" },
     });

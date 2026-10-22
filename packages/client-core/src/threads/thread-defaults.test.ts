@@ -16,6 +16,7 @@ import {
   buildDraftConfig,
   computeInstanceDefaults,
   computeThreadDefaults,
+  findDefaultModel,
 } from "./thread-defaults";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
@@ -60,6 +61,16 @@ const HAIKU = {
 };
 
 const NO_SETTINGS: SettingsState["user"] = {};
+
+describe("findDefaultModel", () => {
+  it("returns null when no runner is given, rather than reading the first snapshot", () => {
+    const claude = buildInstance("claude-code", "Claude Code", [
+      buildSnapshotOn(LOCAL.id, [SONNET]),
+    ]);
+
+    expect(findDefaultModel(claude, null)).toBeNull();
+  });
+});
 
 describe("computeInstanceDefaults", () => {
   it("resolves the runner first and reads the model from that runner's catalog", () => {

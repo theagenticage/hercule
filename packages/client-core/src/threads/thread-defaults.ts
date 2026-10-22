@@ -23,7 +23,7 @@ import type {
 } from "@hercule/contract";
 import type { ThreadConfig } from "./config";
 import { findDefaultInstanceId } from "./default-instance";
-import { buildThreadModelField } from "./model-field";
+import { buildThreadModelField, type ThreadModelField } from "./model-field";
 import { buildRunnerMenu } from "./runner-menu";
 
 const DEFAULT_PROFILE_NAME = "unrestricted";
@@ -38,11 +38,41 @@ export interface ThreadDefaults {
 }
 
 /**
+ * Returns the slug of the model a new thread starts with, from `field`: the
+ * model marked as default, else the first one, else `null` when there are none.
+ */
+const chooseDefaultModel = (field: ThreadModelField): string | null =>
+  field.options.find((option) => option.isDefault)?.slug ?? field.options[0]?.slug ?? null;
+
+/**
+ * Returns the slug of the model a new thread on `instance` starts with when it
+ * runs on `runnerId`: the default model of the instance's snapshot on that
+ * runner, else its first model, else `null`. Returns `null` too when the
+ * instance has no snapshot on that runner or is not logged in there. It never
+ * reads another runner's snapshot, because a catalog belongs to one instance on
+ * one runner (spec 06 §3.1), and a model of another runner would show
+ * `not offered on <runner>` before the user has touched anything.
+ */
+export const findDefaultModel = (
+  instance: ProviderInstance,
+  runnerId: string | null,
+): string | null => {
+  const snapshot = instance.snapshots.find((each) => each.runnerId === runnerId);
+  return chooseDefaultModel(
+    buildThreadModelField(
+      { snapshots: snapshot === undefined ? [] : [snapshot] },
+      runnerId,
+      undefined,
+    ),
+  );
+};
+
+/**
  * Returns the runner a new thread on this instance would be placed on, and
  * the default model on that runner. The runner is resolved first, and the
- * model is read from that runner's snapshot: a catalog belongs to one instance
- * on one runner (spec 06 §3.1). A model read from another runner's snapshot
- * could show `not offered on <runner>` before the user has touched anything.
+ * model is read from that runner's snapshot. When no runner is usable, the
+ * model comes from the instance's first snapshot, so Settings still lists
+ * the models of an instance whose runners are all offline.
  */
 export const computeInstanceDefaults = (
   instance: ProviderInstance,
@@ -50,10 +80,10 @@ export const computeInstanceDefaults = (
   thisMacRunnerId: string | null,
 ): { readonly runnerId: string | null; readonly model: string | null } => {
   const runnerId = buildRunnerMenu(runners, thisMacRunnerId, instance).defaultRunnerId;
-  const field = buildThreadModelField(instance, runnerId, undefined);
-  const model =
-    field.options.find((option) => option.isDefault)?.slug ?? field.options[0]?.slug ?? null;
-  return { runnerId, model };
+  return {
+    runnerId,
+    model: chooseDefaultModel(buildThreadModelField(instance, runnerId, undefined)),
+  };
 };
 
 /** Returns the defaults for a new thread, from the user's settings and the available catalogs. */

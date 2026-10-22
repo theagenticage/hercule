@@ -152,7 +152,7 @@ export function useComposerModel(
 
   const session = thread.kind === "active" ? thread.session : null;
   const base = readThreadConfig(thread);
-  const config = computeEffectiveConfig(base, picks);
+  const config = computeEffectiveConfig(catalogs, base, picks);
   const fields = buildComposerFields(catalogs, config, thread.kind);
   // Recent is updated only after a successful send.
   const rememberRecentModel = (): void => {
@@ -277,6 +277,7 @@ export function useComposerModel(
       // one message is never sent twice.
       if (sendingRef.current || spawn.isPending || input.isPending) return;
       const sent = buildSubmission(
+        catalogs,
         thread,
         thread.kind === "draft"
           ? addWorkspacePicks(picks, fields.workspace.value, catalogs.workspaces ?? [])

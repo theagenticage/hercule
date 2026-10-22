@@ -2,7 +2,8 @@
  * Applies one selector choice to the picks the composer holds. Three rules:
  *
  * - `config` is the thread's own config, without the picks applied, so a pick
- *   is compared with what the thread would run with if nothing were picked.
+ *   is compared with what the thread would run with if that field were not
+ *   picked (for a model or runner, the default of a picked account counts).
  * - A pick that equals that value is not a pick: it is removed from the picks.
  * - The model options belong to the model that offered them. `applyPicks`
  *   keeps the options the user had after a pick that changes the catalog
@@ -10,15 +11,16 @@
  *   ends up with also offers, with a valid value. The others are dropped,
  *   rather than sent as a value that catalog never offered.
  */
-import type { AccessMode, ModelOption, Workspace } from "@hercule/contract";
+import type { AccessMode, ModelOption, ProviderInstance, Workspace } from "@hercule/contract";
 import { findModelDescriptor } from "./composer-fields";
 import {
   computeEffectiveConfig,
+  findJoinedWorkspace,
   type ThreadCatalogs,
   type ThreadConfig,
   type ThreadPicks,
 } from "./config";
-import { computeInstanceDefaults } from "./thread-defaults";
+import { buildRunnerMenu } from "./runner-menu";
 import { findRunnerForPick, type WorkspacePick } from "./workspaces";
 
 export type ComposerPick =
@@ -60,7 +62,7 @@ const reconcileOptions = (
   picks: ThreadPicks,
 ): ThreadPicks => {
   const withoutOptions = omitPicks(picks, "options");
-  const next = computeEffectiveConfig(config, withoutOptions);
+  const next = computeEffectiveConfig(catalogs, config, withoutOptions);
   const offered = findModelDescriptor(catalogs, next)?.options ?? [];
   const kept = Object.entries(shown).filter(
     ([id, value]) =>
@@ -81,6 +83,47 @@ const revertPick = (picks: ThreadPicks, key: Key, ...also: readonly Key[]): Thre
   picks[key] === undefined ? picks : omitPicks(picks, key, ...also);
 
 /**
+ * Applies the pick of the account `instance`, a different one from the one the
+ * thread's config holds or the same one again. Returns the new picks.
+ *
+ * The picks hold only what the user chose. Picking an account therefore
+ * writes just the account. Its default runner and default model are not
+ * written: `computeEffectiveConfig` derives them while no runner or model is
+ * picked. What the account change does with the other picks:
+ *
+ * - The model pick is dropped, because a model belongs to the account that
+ *   offered it. The model step that follows an account step in
+ *   `buildModelPicks` picks the new one.
+ * - A picked runner stays when the account is usable there (its row in the
+ *   runner menu is not dimmed), and is dropped otherwise, so the account's
+ *   default runner applies.
+ * - A workspace the draft joins is on one runner and never moves, so its
+ *   runner pick is left alone. If the account is unusable there, the
+ *   composer's blocker says so.
+ *
+ * Choosing the base account again drops the account pick the same way: the
+ * account and model picks go, and the runner pick goes unless it is usable for
+ * the base account or fixed by a joined workspace.
+ */
+const applyInstancePick = (
+  catalogs: ThreadCatalogs,
+  config: ThreadConfig,
+  picks: ThreadPicks,
+  instance: ProviderInstance,
+): ThreadPicks => {
+  const joined = findJoinedWorkspace(catalogs, computeEffectiveConfig(catalogs, config, picks));
+  const menu = buildRunnerMenu(catalogs.runners, catalogs.thisMacRunnerId, instance);
+  const keepsRunner =
+    picks.runnerId !== undefined &&
+    (joined !== undefined ||
+      menu.rows.find((row) => row.runnerId === picks.runnerId)?.dimmed === null);
+  const dropped = keepsRunner ? (["model"] as const) : (["model", "runnerId"] as const);
+  return config.instanceId === instance.id
+    ? revertPick(picks, "instanceId", ...dropped)
+    : { ...omitPicks(picks, ...dropped), instanceId: instance.id };
+};
+
+/**
  * Applies one selector choice to the picks. Purely structural: it sets or
  * reverts the picked field and touches no model options, which `applyPicks`
  * reconciles once all the choices are in.
@@ -93,23 +136,13 @@ const applyPick = (
 ): ThreadPicks => {
   switch (pick.kind) {
     case "model":
-      return config.model === pick.value
+      return computeEffectiveConfig(catalogs, config, omitPicks(picks, "model")).model ===
+        pick.value
         ? revertPick(picks, "model")
         : { ...picks, model: pick.value };
     case "instanceId": {
       const instance = catalogs.instances.find((each) => each.id === pick.value);
-      if (instance === undefined) return picks;
-      if (config.instanceId === pick.value)
-        return revertPick(picks, "instanceId", "model", "runnerId");
-      // A catalog belongs to one instance on one runner, and the runner of the
-      // previous instance may not host this one. So resolve the runner first,
-      // then read the model from that runner's snapshot.
-      const forInstance = computeInstanceDefaults(
-        instance,
-        catalogs.runners,
-        catalogs.thisMacRunnerId,
-      );
-      return { ...picks, instanceId: pick.value, ...forInstance };
+      return instance === undefined ? picks : applyInstancePick(catalogs, config, picks, instance);
     }
     case "option":
       return { ...picks, options: { ...picks.options, [pick.id]: pick.value } };
@@ -118,7 +151,8 @@ const applyPick = (
         ? revertPick(picks, "accessMode")
         : { ...picks, accessMode: pick.value };
     case "runnerId":
-      return config.runnerId === pick.value
+      return computeEffectiveConfig(catalogs, config, omitPicks(picks, "runnerId")).runnerId ===
+        pick.value
         ? revertPick(picks, "runnerId")
         : { ...picks, runnerId: pick.value };
     // Unlike the others, a workspace pick is not compared with the config: the
@@ -133,8 +167,8 @@ const applyPick = (
  * Applies several selector choices to the picks, in order, and returns the
  * new picks. One choice in a menu can set more than one field, so
  * `buildModelPicks` and `buildWorkspacePicks` return a list. The order
- * matters: picking an account resets the model, so the account comes before
- * the model.
+ * matters: picking an account drops the model pick, so the account comes
+ * before the model.
  *
  * Owns the rule that model options survive when offered. When any choice can
  * change the catalog the thread runs with (a model, account, runner or
@@ -155,6 +189,7 @@ export const applyPicks = (
   const applied = steps.reduce((held, step) => applyPick(catalogs, config, held, step), picks);
   if (!steps.some((step) => step.kind !== "option" && step.kind !== "accessMode")) return applied;
   const shown = computeEffectiveConfig(
+    catalogs,
     config,
     steps
       .filter((step) => step.kind === "option")
@@ -171,8 +206,7 @@ export const applyPicks = (
  * - the account, then the model, when it does not.
  *
  * The account is not picked again when it already applies, because picking
- * an account resets the machine and the model to that account's defaults,
- * and a machine the user picked would be lost.
+ * an account replaces the model with that account's default.
  */
 export const buildModelPicks = (
   current: Pick<ThreadConfig, "instanceId">,

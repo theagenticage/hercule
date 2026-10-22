@@ -1,14 +1,18 @@
 /**
- * Tests `buildSubmission(thread, picks, message)`, which builds the request the
+ * Tests `buildSubmission(catalogs, thread, picks, message)`, which builds the request the
  * composer sends: a spawn for a draft thread and an input for an active one,
  * each tagged with its kind. For an active thread, what matters is what it
  * leaves out: a session's access mode and runner are fixed, so an input has
  * the text and only the picks the user actually made.
  */
 import { describe, expect, it } from "vitest";
-import type { Session } from "@hercule/contract";
+import type { Runner, Session } from "@hercule/contract";
+import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
 import { addFilesToShelf, markShelfItemUploaded } from "../attachments/shelf";
+import type { ThreadCatalogs } from "./config";
 import { buildSubmission } from "./submission";
+
+const NO_CATALOGS: ThreadCatalogs = { instances: [], runners: [], thisMacRunnerId: null };
 
 const CONFIG = {
   instanceId: "instance-claude-code",
@@ -55,7 +59,7 @@ const MESSAGE = { text: "ship it", attachments: [] };
 
 describe("buildSubmission: a draft thread", () => {
   it("spawns with the draft's config, no workspace and the config's profile", () => {
-    expect(buildSubmission(DRAFT, {}, MESSAGE)).toEqual({
+    expect(buildSubmission(NO_CATALOGS, DRAFT, {}, MESSAGE)).toEqual({
       kind: "spawn",
       input: {
         prompt: "ship it",
@@ -69,9 +73,33 @@ describe("buildSubmission: a draft thread", () => {
     });
   });
 
+  it("sends the default runner and model of the account picked, not the draft's own", () => {
+    // The draft runs Claude on the local runner. Codex is logged in on the
+    // remote runner only, and the picks hold the account alone.
+    const local: Runner = { ...BARE, id: "r-local" };
+    const remote: Runner = { ...BARE, id: "r-remote" };
+    const codex = buildInstance("codex", "Codex", [
+      buildSnapshot({ runnerId: local.id, auth: { status: "unauthenticated" }, models: [] }),
+      buildSnapshot({
+        runnerId: remote.id,
+        models: [{ slug: "gpt-5", name: "GPT-5", imageInput: { maxBytes: null }, options: [] }],
+      }),
+    ]);
+    const catalogs: ThreadCatalogs = {
+      instances: [codex],
+      runners: [local, remote],
+      thisMacRunnerId: local.id,
+    };
+
+    expect(buildSubmission(catalogs, DRAFT, { instanceId: codex.id }, MESSAGE)).toMatchObject({
+      input: { instanceId: codex.id, model: "gpt-5", runnerId: "r-remote", options: {} },
+    });
+  });
+
   it("applies the picks made since the draft was built", () => {
     expect(
       buildSubmission(
+        NO_CATALOGS,
         DRAFT,
         { model: "claude-opus-5", options: {}, accessMode: "full-access", runnerId: "r-remote" },
         MESSAGE,
@@ -93,7 +121,7 @@ describe("buildSubmission: a draft thread", () => {
 
 describe("buildSubmission: an active thread", () => {
   it("sends the text alone when nothing was picked", () => {
-    expect(buildSubmission(ACTIVE, {}, MESSAGE)).toEqual({
+    expect(buildSubmission(NO_CATALOGS, ACTIVE, {}, MESSAGE)).toEqual({
       kind: "input",
       sessionId: SESSION.id,
       payload: { text: "ship it" },
@@ -101,7 +129,7 @@ describe("buildSubmission: an active thread", () => {
   });
 
   it("sends a picked model with the text", () => {
-    expect(buildSubmission(ACTIVE, { model: "claude-opus-5" }, MESSAGE)).toEqual({
+    expect(buildSubmission(NO_CATALOGS, ACTIVE, { model: "claude-opus-5" }, MESSAGE)).toEqual({
       kind: "input",
       sessionId: SESSION.id,
       payload: { text: "ship it", model: "claude-opus-5" },
@@ -109,7 +137,7 @@ describe("buildSubmission: an active thread", () => {
   });
 
   it("sends picked options with the text", () => {
-    expect(buildSubmission(ACTIVE, { options: { effort: "high" } }, MESSAGE)).toEqual({
+    expect(buildSubmission(NO_CATALOGS, ACTIVE, { options: { effort: "high" } }, MESSAGE)).toEqual({
       kind: "input",
       sessionId: SESSION.id,
       payload: { text: "ship it", options: { effort: "high" } },
@@ -118,7 +146,12 @@ describe("buildSubmission: an active thread", () => {
 
   it("sends both when both were picked", () => {
     expect(
-      buildSubmission(ACTIVE, { model: "claude-opus-5", options: { effort: "high" } }, MESSAGE),
+      buildSubmission(
+        NO_CATALOGS,
+        ACTIVE,
+        { model: "claude-opus-5", options: { effort: "high" } },
+        MESSAGE,
+      ),
     ).toEqual({
       kind: "input",
       sessionId: SESSION.id,
@@ -128,7 +161,12 @@ describe("buildSubmission: an active thread", () => {
 
   it("sends no other key, whatever else the picks hold", () => {
     expect(
-      buildSubmission(ACTIVE, { accessMode: "full-access", runnerId: "r-remote" }, MESSAGE),
+      buildSubmission(
+        NO_CATALOGS,
+        ACTIVE,
+        { accessMode: "full-access", runnerId: "r-remote" },
+        MESSAGE,
+      ),
     ).toEqual({ kind: "input", sessionId: SESSION.id, payload: { text: "ship it" } });
   });
 });
@@ -152,7 +190,9 @@ const IN_PROJECT = {
 
 describe("buildSubmission: the project and the workspace", () => {
   it("sends the project and the main workspace the draft works in", () => {
-    expect(buildSubmission({ kind: "draft", config: IN_PROJECT }, {}, MESSAGE)).toEqual({
+    expect(
+      buildSubmission(NO_CATALOGS, { kind: "draft", config: IN_PROJECT }, {}, MESSAGE),
+    ).toEqual({
       kind: "spawn",
       input: {
         prompt: "ship it",
@@ -170,6 +210,7 @@ describe("buildSubmission: the project and the workspace", () => {
 
   it("leaves the actual shared branch unchanged despite an old saved branch pick", () => {
     const input = buildSubmission(
+      NO_CATALOGS,
       {
         kind: "draft",
         config: {
@@ -191,6 +232,7 @@ describe("buildSubmission: the project and the workspace", () => {
 
   it("sends one checkout per repo, with each one's base branch", () => {
     const input = buildSubmission(
+      NO_CATALOGS,
       {
         kind: "draft",
         config: {
@@ -226,6 +268,7 @@ describe("buildSubmission: the project and the workspace", () => {
   it("sends the workspace a thread joins", () => {
     expect(
       buildSubmission(
+        NO_CATALOGS,
         {
           kind: "draft",
           config: { ...IN_PROJECT, workspace: { kind: "existing", workspaceId: "ws-thread-3f1" } },
@@ -238,6 +281,7 @@ describe("buildSubmission: the project and the workspace", () => {
 
   it("sends no workspace at all for a thread that works without a checkout", () => {
     const sent = buildSubmission(
+      NO_CATALOGS,
       { kind: "draft", config: { ...IN_PROJECT, workspace: { kind: "none" } } },
       {},
       MESSAGE,
@@ -251,6 +295,7 @@ describe("buildSubmission: the project and the workspace", () => {
 
   it("sends neither key for a draft with no project and no workspace", () => {
     const sent = buildSubmission(
+      NO_CATALOGS,
       { kind: "draft", config: { ...IN_PROJECT, projectId: null, workspace: null } },
       {},
       MESSAGE,
@@ -264,6 +309,7 @@ describe("buildSubmission: the project and the workspace", () => {
   it("applies a workspace picked since the draft was built", () => {
     expect(
       buildSubmission(
+        NO_CATALOGS,
         { kind: "draft", config: IN_PROJECT },
         { workspace: { kind: "ephemeral", checkouts: [{ resourceId: "res-webshop" }] } },
         MESSAGE,
@@ -275,7 +321,12 @@ describe("buildSubmission: the project and the workspace", () => {
 
   it("sends no workspace for an active thread, whose placement is fixed", () => {
     expect(
-      buildSubmission(ACTIVE, { workspace: { kind: "none" }, projectId: "p-webshop" }, MESSAGE),
+      buildSubmission(
+        NO_CATALOGS,
+        ACTIVE,
+        { workspace: { kind: "none" }, projectId: "p-webshop" },
+        MESSAGE,
+      ),
     ).toEqual({ kind: "input", sessionId: SESSION.id, payload: { text: "ship it" } });
   });
 });
@@ -297,12 +348,14 @@ describe("buildSubmission: images", () => {
   });
 
   it("sends the ids of the uploaded images, with or without text", () => {
-    expect(buildSubmission(ACTIVE, {}, { text: "", attachments })).toEqual({
+    expect(buildSubmission(NO_CATALOGS, ACTIVE, {}, { text: "", attachments })).toEqual({
       kind: "input",
       sessionId: SESSION.id,
       payload: { text: "", attachments: ["att-1"] },
     });
-    expect(buildSubmission(DRAFT, {}, { text: "look", attachments }).input).toMatchObject({
+    expect(
+      buildSubmission(NO_CATALOGS, DRAFT, {}, { text: "look", attachments }).input,
+    ).toMatchObject({
       prompt: "look",
       attachments: ["att-1"],
     });

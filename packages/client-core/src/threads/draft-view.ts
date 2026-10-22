@@ -94,7 +94,7 @@ export const buildDraftView = (
     thisMacRunnerId,
     ...address,
   });
-  const config = computeEffectiveConfig(base, picks);
+  const config = computeEffectiveConfig(reads, base, picks);
   const fields = buildComposerFields(reads, config, "draft");
   const pick = fields.workspace.value;
   // The menus use the machine the fields settled on, not the raw pick. Before
