@@ -40,6 +40,7 @@ import {
   findTrackingTasksAffectedByRunPush,
   invalidateWithoutCancelling,
   isAnyLegAffectedByRunPush,
+  isAnyLegAffectedByTaskPush,
   queryKeys,
   type Live,
   type LiveInvalidatePush,
@@ -48,31 +49,42 @@ import {
 } from "@hercule/client-core";
 import type { HandoffLeg, MutableLiveTopic } from "@hercule/contract";
 import { ageClock } from "./age-clock";
-import { isDoneListKey, type DoneSignalPage } from "./queries";
+import { isDoneListKey, isHandoffLegKey, type DoneSignalPage } from "./queries";
 import { useWindowVisible } from "./window-visibility";
 
 /**
- * Marks out of date every Done list the cache holds, whichever source tab it
- * is for, and reads again the ones a screen shows. `isAffected` is given the
- * legs the lists hold and decides whether to do so. Does nothing when the
- * lists hold no leg, because then no trip can have changed.
+ * Marks out of date the reads that hold handoff legs: every Done list the
+ * cache holds, whichever source tab it is for, and every leg a Done pane
+ * reads on its own (see `handoffLegQuery`). `isAffected` is given all the
+ * legs they hold and decides whether the push can change any of them.
+ *
+ * - A read that is running is always marked, whatever the push is about. It
+ *   may have been answered before the change the push reports, and it holds
+ *   no leg yet to judge by (its first read), so the push cannot be dropped
+ *   safely. It is read again once that read settles.
+ * - Every other read is marked only when `isAffected` is true. When they hold
+ *   no leg, no trip can have changed, so nothing is marked.
  */
-const invalidateDoneLists = (
+const invalidateLegReads = (
   queryClient: QueryClient,
   isAffected: (legs: ReadonlyArray<HandoffLeg>) => boolean,
 ): void => {
-  const lists = queryClient.getQueryCache().findAll({
-    queryKey: queryKeys.signals(),
-    predicate: (query) => isDoneListKey(query.queryKey),
+  const reads = queryClient.getQueryCache().findAll({
+    predicate: (query) => isDoneListKey(query.queryKey) || isHandoffLegKey(query.queryKey),
   });
-  const legs = lists.flatMap(
-    (list) =>
-      (list.state.data as InfiniteData<DoneSignalPage> | undefined)?.pages.flatMap(
-        (page) => page.legs,
-      ) ?? [],
+  const legs = reads.flatMap((read) =>
+    isDoneListKey(read.queryKey)
+      ? ((read.state.data as InfiniteData<DoneSignalPage> | undefined)?.pages.flatMap(
+          (page) => page.legs,
+        ) ?? [])
+      : ((read.state.data as HandoffLeg | null | undefined) ?? []),
   );
-  if (legs.length === 0 || !isAffected(legs)) return;
-  for (const list of lists) invalidateWithoutCancelling(queryClient, list.queryKey);
+  const affected = legs.length > 0 && isAffected(legs);
+  for (const read of reads) {
+    if (affected || read.state.fetchStatus !== "idle") {
+      invalidateWithoutCancelling(queryClient, read.queryKey);
+    }
+  }
 };
 
 /**
@@ -92,11 +104,13 @@ const invalidateDoneLists = (
  * date. Only the open pane's detail is read again; the others are read when
  * their pane opens.
  *
- * Intake's Done lists hold the leg of each handoff on their pages. A `task`
- * push (a Task closed, or a handoff continued it) reads every Done list
- * again. A `run` push reads them again only when it can change a leg any of
- * them holds (see `isAnyLegAffectedByRunPush`). A `signal` push already reads
- * them through its keys.
+ * Intake's Done lists hold the leg of each handoff on their pages, and a Done
+ * pane may read one leg on its own. A `task` push reads them again only when
+ * it can change a leg they hold (see `isAnyLegAffectedByTaskPush`), and so
+ * does a `run` push (see `isAnyLegAffectedByRunPush`). A read that is running
+ * when either arrives is always read again, so no push is lost to the answer
+ * of a read that started before it. A `signal` push already reads the Done
+ * lists through its keys.
  */
 export const invalidateForPush = (
   queryClient: QueryClient,
@@ -105,9 +119,11 @@ export const invalidateForPush = (
   push: LiveInvalidatePush,
 ): void => {
   for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
-  if (topic === "task") invalidateDoneLists(queryClient, () => true);
+  if (topic === "task") {
+    invalidateLegReads(queryClient, (legs) => isAnyLegAffectedByTaskPush(legs, push));
+  }
   if (topic !== "run") return;
-  invalidateDoneLists(queryClient, (legs) => isAnyLegAffectedByRunPush(legs, push));
+  invalidateLegReads(queryClient, (legs) => isAnyLegAffectedByRunPush(legs, push));
   const read = queryClient.getQueryData<TrackingRead>(queryKeys.tracking());
   const affected =
     read === undefined ? "every" : findTrackingTasksAffectedByRunPush(read.tasks, push);

@@ -767,16 +767,28 @@ export const snoozeTimerQuery = (client: HerculeClient) =>
 export type DoneSignalPage = SignalPage & { readonly legs: ReadonlyArray<HandoffLeg> };
 
 /**
- * Returns whether `queryKey` is the key of a Done list that `signalsDoneQuery`
- * reads, whichever source tab it is for. The cleared-today read has the same
- * view but larger pages and no legs, so it is not one.
+ * The last part of the key of every Done list that `signalsDoneQuery` reads.
+ * The cleared-today read has the same filter in a larger page size and no
+ * legs, so only this mark tells the two apart for certain. The key still
+ * starts with `signals`, so a push on the `signal` topic reads Done lists
+ * again like every other signal list.
  */
-export const isDoneListKey = (queryKey: QueryKey): boolean => {
-  const filter = queryKey[1] as SignalFilter | undefined;
-  return (
-    queryKey[0] === "signals" && filter?.view === "done" && filter.limit === DEFAULT_PAGE_LIMIT
-  );
-};
+const DONE_LIST_MARK = "with-legs";
+
+/**
+ * Returns whether `queryKey` is the key of a Done list that `signalsDoneQuery`
+ * reads, whichever source tab it is for. The data of such a query holds the
+ * legs of its pages (see `DoneSignalPage`).
+ */
+export const isDoneListKey = (queryKey: QueryKey): boolean =>
+  queryKey[0] === "signals" && queryKey[2] === DONE_LIST_MARK;
+
+/** The first part of the key of every leg that `handoffLegQuery` reads. */
+const HANDOFF_LEG_KEY_PREFIX = "handoff-leg";
+
+/** Returns whether `queryKey` is the key of a leg that `handoffLegQuery` reads. */
+export const isHandoffLegKey = (queryKey: QueryKey): boolean =>
+  queryKey[0] === HANDOFF_LEG_KEY_PREFIX;
 
 /**
  * Reads Intake's Done list page by page, newest first: every resolved
@@ -787,14 +799,17 @@ export const isDoneListKey = (queryKey: QueryKey): boolean => {
  * `MAX_LEG_QUERY_RUNS` signals long, so one request is always enough.
  *
  * It is kept current by pushes, which read the held pages again: a `signal`
- * push (a signal resolved or changed), a `task` push (a Task closed, or a
- * handoff continued it), and a `run` push that can change a held leg (see
- * `invalidateForPush`). A cron run that touches no handoff reads nothing.
- * The cost is two requests per page read, and no timer.
+ * push (a signal resolved or changed), a `task` push that can change a held
+ * leg, and a `run` push that can change a held leg (see `invalidateForPush`).
+ * A push that arrives while a page is being read reads it once more after
+ * that. A run's creation push reads the held pages while they are shown (two
+ * requests per held page), because a re-run is created before any leg holds
+ * it. Later pushes about other runs, such as a cron run's, are ignored. There
+ * is no timer.
  */
 export const signalsDoneQuery = (client: HerculeClient, source?: string) =>
   infiniteQueryOptions({
-    queryKey: queryKeys.signals(buildPagedSignalFilter("done", source)),
+    queryKey: [...queryKeys.signals(buildPagedSignalFilter("done", source)), DONE_LIST_MARK],
     queryFn: async ({ pageParam }): Promise<DoneSignalPage> => {
       const page = await client.signal.query({
         query: buildPagedSignalFilter("done", source, pageParam),
@@ -806,6 +821,24 @@ export const signalsDoneQuery = (client: HerculeClient, source?: string) =>
     },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => page.nextCursor,
+    ...LIVE_KEPT_READ_OPTIONS,
+  });
+
+/**
+ * Reads the leg of the handoff that started the run `runId`, or `null` when
+ * that run is no handoff's. The pane of a Done signal uses it when its leg is
+ * on no loaded Done page, such as after a link or a reload to a signal past
+ * the first page. It is kept current like a Done list (see
+ * `invalidateForPush`), and its key lies outside the `signals` prefix because
+ * a signal push cannot change a leg.
+ */
+export const handoffLegQuery = (client: HerculeClient, runId: string) =>
+  queryOptions({
+    queryKey: [HANDOFF_LEG_KEY_PREFIX, runId],
+    queryFn: async (): Promise<HandoffLeg | null> => {
+      const { legs } = await client.task.queryLegs({ query: { runIds: [runId] } });
+      return legs[0] ?? null;
+    },
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
