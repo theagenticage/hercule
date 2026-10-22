@@ -2520,7 +2520,7 @@ describe("Thread: model options are sent with the submission", () => {
     });
   });
 
-  it("resets the picks when a model is picked, and never patches the session", async () => {
+  it("keeps the picked option when another model that offers it is picked, and never patches the session", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       "GET /api/v1/providers": providers,
@@ -2545,8 +2545,12 @@ describe("Thread: model options are sent with the submission", () => {
       if (found === undefined) throw new Error("input not sent yet");
       return found;
     });
-    // The option picks were cleared together with the model that offered them.
-    expect(call.body).toEqual({ text: "Also check the logs", model: "claude-opus-5" });
+    // Opus offers `effort` too, so the pick goes with the new model.
+    expect(call.body).toEqual({
+      text: "Also check the logs",
+      model: "claude-opus-5",
+      options: { effort: "high" },
+    });
     expect(
       api.calls.some(
         (call) => call.method === "PATCH" && call.path === `/api/v1/sessions/${SESSION_ID}`,
@@ -2554,7 +2558,60 @@ describe("Thread: model options are sent with the submission", () => {
     ).toBe(false);
   });
 
-  it("shows the newly picked model's defaults instead of the stored model's options", async () => {
+  it("brings a picked option back when the model that offers it is picked again", async () => {
+    const user = userEvent.setup();
+    const [snapshot] = INSTANCE_OPTIONS.snapshots;
+    // A third model that offers no options.
+    const withPlainModel: ProviderInstance = {
+      ...INSTANCE_OPTIONS,
+      snapshots: [
+        {
+          ...snapshot!,
+          models: [
+            ...snapshot!.models,
+            {
+              slug: "claude-haiku-4",
+              name: "Claude Haiku 4",
+              imageInput: { maxBytes: null },
+              options: [],
+            },
+          ],
+        },
+      ],
+    };
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
+      "GET /api/v1/providers": { body: [withPlainModel] },
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
+        body: { inputId: INPUT_ID, result: "opened" },
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Medium" }));
+    await user.click(await screen.findByRole("radio", { name: "High" }));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
+    await pickRow(user, /claude haiku 4/i);
+    // Haiku 4 offers no options, so the selector is gone while it is picked.
+    expect(screen.queryByRole("button", { name: "High" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /claude haiku 4/i }));
+    await pickRow(user, /claude sonnet 5/i);
+    expect(screen.getByRole("button", { name: "High" })).toBeDefined();
+
+    await user.type(screen.getByRole("textbox"), "Also check the logs");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    const call = await waitFor(() => {
+      const found = api.calls.find(
+        (each) => each.method === "POST" && each.path === `/api/v1/sessions/${SESSION_ID}/input`,
+      );
+      if (found === undefined) throw new Error("input not sent yet");
+      return found;
+    });
+    // Sonnet 5 is the session's own model again, so only the option travels.
+    expect(call.body).toEqual({ text: "Also check the logs", options: { effort: "high" } });
+  });
+
+  it("keeps the stored options when the newly picked model offers them", async () => {
     const user = userEvent.setup();
     await openApp(
       buildSession({
@@ -2567,13 +2624,15 @@ describe("Thread: model options are sent with the submission", () => {
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     await pickRow(user, /claude opus 5/i);
-    await user.click(await screen.findByRole("button", { name: "Medium" }));
+    await user.click(await screen.findByRole("button", { name: "High" }));
 
-    // The stored `high` belongs to the other model, and the server drops it
-    // when the model changes, so the options show the descriptor's default.
-    const medium = await screen.findByRole<HTMLButtonElement>("radio", { name: "Medium" });
-    expect(medium.getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByRole("radio", { name: "High" }).getAttribute("aria-checked")).toBe("false");
+    // The stored `high` is a choice Opus offers too, so it carries over
+    // instead of falling back to the descriptor's default.
+    const high = await screen.findByRole<HTMLButtonElement>("radio", { name: "High" });
+    expect(high.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Medium" }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
   });
 
@@ -2621,6 +2680,63 @@ describe("Thread: model options are sent with the submission", () => {
       return found[1];
     });
     expect(second?.body).toEqual({ text: "And the metrics" });
+  });
+
+  it("keeps an option picked while the message is on its way, and clears only the picks it carried", async () => {
+    const user = userEvent.setup();
+    let stored: Record<string, string> = {};
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let holding = false;
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
+      "GET /api/v1/providers": providers,
+      // The session read that follows the input is held back, so the user
+      // can pick again while the send has not finished.
+      [`GET /api/v1/sessions/${SESSION_ID}`]: async () => {
+        if (holding) await held;
+        return {
+          body: buildSession({
+            status: "idle",
+            modelSelection: { model: "claude-sonnet-5", options: stored },
+          }),
+        };
+      },
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: (call) => {
+        stored = { ...stored, ...(call.body as { options: Record<string, string> }).options };
+        holding = true;
+        return { body: { inputId: INPUT_ID, result: "opened" } };
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Medium" }));
+    await user.click(await screen.findByRole("radio", { name: "High" }));
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByRole("textbox"), "Also check the logs");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+    await waitFor(() => {
+      expect(
+        api.calls.some(
+          (each) => each.method === "POST" && each.path === `/api/v1/sessions/${SESSION_ID}/input`,
+        ),
+      ).toBe(true);
+    });
+
+    await user.click(screen.getByRole("button", { name: "High" }));
+    await user.click(await screen.findByRole("radio", { name: "Low" }));
+    await user.keyboard("{Escape}");
+    await act(async () => {
+      release();
+      await held;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
+    });
+    // The stored session says high, so only the pick made after the send can
+    // make the selector say low.
+    expect(screen.getByRole("button", { name: "Low" })).toBeDefined();
   });
 
   it("keeps the picks until the session is read again, so the next send uses the stored session", async () => {

@@ -1,6 +1,6 @@
 /**
  * Tests the model menu's content: Recent, the thread's account with its older
- * models folded, the other accounts, the filter, and the picks each row makes,
+ * models folded, the other accounts, the filter, and the choice each row makes,
  * on a thread that has started and on a Draft Thread.
  */
 import { describe, expect, it, vi } from "vitest";
@@ -8,9 +8,9 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   readThreadConfig,
-  type ComposerPick,
   type RecentModel,
   type ThreadCatalogs,
+  type ThreadChoice,
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
@@ -72,7 +72,7 @@ const buildCatalogs = (instances: readonly ProviderInstance[]): ThreadCatalogs =
   thisMacRunnerId: null,
 });
 
-/** Renders the menu and returns the function that received each pick. */
+/** Renders the menu and returns the function that received each choice. */
 const renderMenu = ({
   instances = [FIXTURE_INSTANCE, WORK_INSTANCE],
   config = CONFIG,
@@ -84,17 +84,17 @@ const renderMenu = ({
   readonly kind?: ThreadKind;
   readonly recent?: readonly RecentModel[];
 } = {}) => {
-  const onPick = vi.fn<(picks: readonly ComposerPick[]) => void>();
+  const onChoose = vi.fn<(choice: ThreadChoice) => void>();
   render(
     <ModelMenu
       catalogs={buildCatalogs(instances)}
       config={config}
       kind={kind}
       readRecent={() => recent}
-      onPick={onPick}
+      onChoose={onChoose}
     />,
   );
-  return onPick;
+  return onChoose;
 };
 
 /** Returns the text of each row of each section, in order. A section's label is its first row. */
@@ -140,9 +140,9 @@ describe("the model menu", () => {
     expect(screen.getByRole("button", { name: "Claude Sonnet 5 · default" })).toBeTruthy();
   });
 
-  it("shows the older models on request, and hands each row's model pick to onPick", async () => {
+  it("shows the older models on request, and hands each row's model choice to onChoose", async () => {
     const user = userEvent.setup();
-    const onPick = renderMenu({
+    const onChoose = renderMenu({
       recent: [{ instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" }],
     });
 
@@ -156,9 +156,9 @@ describe("the model menu", () => {
     await user.click(screen.getByRole("button", { name: "Claude Opus 5 · personal" }));
     await user.click(screen.getByRole("button", { name: "Claude Sonnet 4" }));
 
-    expect(onPick.mock.calls).toEqual([
-      [[{ kind: "model", value: "claude-opus-5" }]],
-      [[{ kind: "model", value: "claude-sonnet-4" }]],
+    expect(onChoose.mock.calls).toEqual([
+      [{ kind: "model", instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" }],
+      [{ kind: "model", instanceId: FIXTURE_INSTANCE.id, model: "claude-sonnet-4" }],
     ]);
   });
 
@@ -173,33 +173,28 @@ describe("the model menu", () => {
     expect(readSections().slice(1)).toEqual([["personal", "Claude Haiku 4.2"]]);
   });
 
-  it("lets a Draft Thread switch to another account, which picks the account alone", async () => {
+  it("lets a Draft Thread switch to another account, which chooses the account alone", async () => {
     const user = userEvent.setup();
-    const onPick = renderMenu({ kind: "draft" });
+    const onChoose = renderMenu({ kind: "draft" });
 
     expect(readSections()[1]).toEqual(["work · work@example.com · Claude Pro1 model"]);
     await user.click(
       screen.getByRole("button", { name: "work · work@example.com · Claude Pro1 model" }),
     );
 
-    expect(onPick.mock.calls).toEqual([[[{ kind: "instanceId", value: WORK_INSTANCE.id }]]]);
+    expect(onChoose.mock.calls).toEqual([[{ kind: "account", instanceId: WORK_INSTANCE.id }]]);
   });
 
-  it("lists another account's matching models on a Draft Thread, each picking the account and the model", async () => {
+  it("lists another account's matching models on a Draft Thread, each choosing the account and the model together", async () => {
     const user = userEvent.setup();
-    const onPick = renderMenu({ kind: "draft", instances: [MANY_INSTANCE, WORK_INSTANCE] });
+    const onChoose = renderMenu({ kind: "draft", instances: [MANY_INSTANCE, WORK_INSTANCE] });
 
     await user.type(screen.getByRole("textbox", { name: "Filter models" }), "haiku 5");
     expect(readSections().slice(1)).toEqual([["work", "Claude Haiku 5 · default"]]);
     await user.click(screen.getByRole("button", { name: "Claude Haiku 5 · default" }));
 
-    expect(onPick.mock.calls).toEqual([
-      [
-        [
-          { kind: "instanceId", value: WORK_INSTANCE.id },
-          { kind: "model", value: "claude-haiku-5" },
-        ],
-      ],
+    expect(onChoose.mock.calls).toEqual([
+      [{ kind: "model", instanceId: WORK_INSTANCE.id, model: "claude-haiku-5" }],
     ]);
   });
 });

@@ -702,13 +702,15 @@ export {
   type ThreadBlock,
   type WorkBlock,
 } from "./threads/blocks";
+export { applyThreadChoice, type ThreadChoice } from "./threads/thread-choice";
 export {
-  addWorkspacePicks,
-  applyPicks,
-  buildModelPicks,
-  buildWorkspacePicks,
-  type ComposerPick,
-} from "./threads/apply-pick";
+  resolveThreadConfig,
+  type OutgoingChange,
+  type ResolvedActive,
+  type ResolvedConfig,
+  type ResolvedDraft,
+  type ResolvedThread,
+} from "./threads/resolve-thread";
 export type { LoginTarget } from "./threads/catalog";
 export {
   buildComposerFields,
@@ -719,7 +721,7 @@ export {
   type MachineRow,
   type ModelPill,
 } from "./threads/composer-fields";
-export { computeEffectiveConfig, holdsMessageContent, readThreadConfig } from "./threads/config";
+export { holdsMessageContent, readThreadConfig } from "./threads/config";
 export { countThreadsByPose, type ThreadCounts } from "./threads/counts";
 export { buildDraftView, type DraftAddress, type DraftView } from "./threads/draft-view";
 export type {

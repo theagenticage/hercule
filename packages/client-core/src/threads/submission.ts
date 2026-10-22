@@ -1,20 +1,15 @@
 /**
  * Builds the request the composer sends: a spawn for a draft thread, and an
  * input for an active one. An active thread's placement, access mode and
- * account are fixed, so its input has the text and only the picks the user
- * actually made. A key that is left out keeps the session's current value.
- * Either request carries the ids of the draft's uploaded images, and leaves
- * `attachments` out when there are none.
+ * account are fixed, so its input has the text and only what the resolved
+ * thread changes (`outgoing`). A key that is left out keeps the session's
+ * current value. Either request carries the ids of the draft's uploaded
+ * images, and leaves `attachments` out when there are none.
  */
 import type { SessionInputPayload, SessionSpawnInput } from "@hercule/contract";
 import { listUploadedAttachmentIds } from "../attachments/shelf";
-import {
-  computeEffectiveConfig,
-  readThreadConfig,
-  type MessageDraft,
-  type Thread,
-  type ThreadPicks,
-} from "./config";
+import type { MessageDraft } from "./config";
+import type { ResolvedActive, ResolvedDraft, ResolvedThread } from "./resolve-thread";
 
 /** The request that starts a Draft Thread. */
 interface SpawnSubmission {
@@ -32,56 +27,31 @@ interface InputSubmission {
 export type Submission = SpawnSubmission | InputSubmission;
 
 /**
- * Returns the request that sends `message` with `picks` from `thread`: an
+ * Returns the request that sends `message` from the resolved thread: an
  * input for a thread that has started, and a spawn for a Draft Thread.
  *
  * A caller that knows which kind of thread it holds gets that kind of request
  * back, so it need not check the request's kind.
  */
-export function buildSubmission(
-  thread: Extract<Thread, { kind: "active" }>,
-  picks: ThreadPicks,
-  message: MessageDraft,
-): InputSubmission;
-export function buildSubmission(
-  thread: Extract<Thread, { kind: "draft" }>,
-  picks: ThreadPicks,
-  message: MessageDraft,
-): SpawnSubmission;
-export function buildSubmission(
-  thread: Thread,
-  picks: ThreadPicks,
-  message: MessageDraft,
-): Submission;
-export function buildSubmission(
-  thread: Thread,
-  picks: ThreadPicks,
-  message: MessageDraft,
-): Submission {
+export function buildSubmission(resolved: ResolvedActive, message: MessageDraft): InputSubmission;
+export function buildSubmission(resolved: ResolvedDraft, message: MessageDraft): SpawnSubmission;
+export function buildSubmission(resolved: ResolvedThread, message: MessageDraft): Submission;
+export function buildSubmission(resolved: ResolvedThread, message: MessageDraft): Submission {
   const attachmentIds = listUploadedAttachmentIds(message.attachments);
   const attachments = attachmentIds.length === 0 ? {} : { attachments: attachmentIds };
-  if (thread.kind === "active") {
-    const { model, options } = picks;
+  if (resolved.kind === "active") {
     return {
       kind: "input",
-      sessionId: thread.session.id,
-      payload: {
-        text: message.text,
-        ...attachments,
-        ...(model === undefined || model === null ? {} : { model }),
-        ...(options === undefined ? {} : { options }),
-      },
+      sessionId: resolved.sessionId,
+      payload: { text: message.text, ...attachments, ...resolved.outgoing },
     };
   }
 
   // A field the user did not pick is left out, never sent as an empty string:
   // the controller has its own default for each one, and the `Id` schema
   // rejects an empty string.
-  const config = computeEffectiveConfig(readThreadConfig(thread), picks);
-  // Leave `workspace` out both for a thread that works without a checkout and
-  // for a draft with no workspace chosen yet: the contract accepts neither
-  // `{ kind: "none" }` nor `null` for the field.
-  const workspace = config.workspace ?? null;
+  const { config } = resolved;
+  const { workspace } = config;
   return {
     kind: "spawn",
     input: {
@@ -96,7 +66,11 @@ export function buildSubmission(
       ...(config.projectId === null || config.projectId === undefined
         ? {}
         : { projectId: config.projectId }),
-      ...(workspace === null || workspace.kind === "none"
+      // A thread that works without a checkout leaves `workspace` out: the
+      // contract does not accept `{ kind: "none" }` for the field. A main
+      // workspace is sent by its repo alone, because it is the one shared
+      // branch.
+      ...(workspace.kind === "none"
         ? {}
         : {
             workspace:

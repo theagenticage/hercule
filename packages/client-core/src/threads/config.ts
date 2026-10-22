@@ -38,8 +38,10 @@ export interface ThreadConfig extends ThreadDefaults {
 }
 
 /**
- * What the user has changed since the last submission. The permission profile
- * is not included, because the composer has no control for it.
+ * What the user has chosen since the last submission. A pick is kept even
+ * while the current account, runner or model cannot honour it, and applies
+ * again when it can (see `resolveThreadConfig`). The permission profile is not
+ * included, because the composer has no control for it.
  */
 export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId">>;
 
@@ -103,22 +105,3 @@ export const readThreadConfig = (thread: Thread): ThreadConfig =>
             ? { kind: "none" }
             : { kind: "existing", workspaceId: thread.session.workspaceId },
       };
-
-/**
- * Returns what a thread runs with while the composer is open: its own config
- * with the picks applied. The model options belong to one model on one
- * instance. So the thread's stored options are kept only while the picked
- * instance and model are the ones the thread already has; for any other pair,
- * only the picked options are used.
- */
-export const computeEffectiveConfig = (base: ThreadConfig, picks: ThreadPicks): ThreadConfig => {
-  const instanceId = picks.instanceId ?? base.instanceId;
-  const model = picks.model ?? base.model;
-  const same = instanceId === base.instanceId && model === base.model;
-  return {
-    ...base,
-    ...picks,
-    model,
-    options: same ? { ...base.options, ...picks.options } : { ...picks.options },
-  };
-};

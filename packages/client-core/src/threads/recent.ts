@@ -1,5 +1,6 @@
 import { Option, Schema } from "effect";
 import type { ThreadPicks } from "./config";
+import type { ResolvedThread } from "./resolve-thread";
 
 /**
  * The last three (instance, model) pairs the user picked, newest first. The
@@ -24,18 +25,21 @@ export const pushRecent = (
   ].slice(0, LIMIT);
 
 /**
- * Returns the pair to add to the Recent list once a submission sent with
- * `picks` on the account `instanceId` succeeds. Returns `null` when the user
- * picked no model, or the thread has no account: Recent holds the models the
- * user picked, never a default.
+ * Returns the pair to add to the Recent list once a submission succeeds, or
+ * `null` when the user made no model choice or the thread has no model.
+ * `picks` are the raw picks the submission was sent with: Recent holds the
+ * models the user picked, never a default. The pair itself is the account and
+ * model the thread resolved to, which is what was sent.
  */
 export const buildRecentModel = (
   picks: ThreadPicks,
-  instanceId: string | null,
-): RecentModel | null =>
-  picks.model === undefined || picks.model === null || instanceId === null
+  resolved: ResolvedThread,
+): RecentModel | null => {
+  const { instanceId, model } = resolved.config;
+  return picks.model == null || instanceId === null || model === null
     ? null
-    : { instanceId, model: picks.model };
+    : { instanceId, model };
+};
 
 /** The stored form of the Recent list: the JSON text of its pairs, in order. */
 const StoredRecentModels = Schema.fromJsonString(

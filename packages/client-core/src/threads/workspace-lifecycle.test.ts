@@ -1,6 +1,8 @@
 import { expect, it } from "vitest";
 import type { StartingRevision } from "@hercule/contract";
 import { buildBranchField } from "./branch-menu";
+import type { ThreadCatalogs } from "./config";
+import { resolveThreadConfig } from "./resolve-thread";
 import { buildSubmission } from "./submission";
 import { buildThreadWorkspaceLabel } from "./thread-workspace";
 import { buildWorkspaceMenu } from "./workspace-menu";
@@ -31,6 +33,8 @@ const draft = {
     profileId: null,
   },
 };
+
+const NO_CATALOGS: ThreadCatalogs = { instances: [], runners: [], thisMacRunnerId: null };
 
 it("defaults a coding project to separate files while honoring each explicit stored choice", () => {
   expect(decideDefaultWorkspacePick([WEBSHOP], null)).toEqual({
@@ -80,8 +84,10 @@ it("keeps the actual main branch when a Thread shares its files", () => {
     expect(field.locked).not.toBeNull();
   }
   expect(
-    buildSubmission(draft, { workspace: pick }, { text: "Share these files", attachments: [] })
-      .input.workspace,
+    buildSubmission(resolveThreadConfig(NO_CATALOGS, draft, { workspace: pick }), {
+      text: "Share these files",
+      attachments: [],
+    }).input.workspace,
   ).toEqual(pick);
 });
 
@@ -95,8 +101,10 @@ it.each<StartingRevision>([
     checkouts: [{ resourceId: WEBSHOP.id, startingRevision }],
   };
   expect(
-    buildSubmission(draft, { workspace }, { text: "Use the chosen revision", attachments: [] })
-      .input.workspace,
+    buildSubmission(resolveThreadConfig(NO_CATALOGS, draft, { workspace }), {
+      text: "Use the chosen revision",
+      attachments: [],
+    }).input.workspace,
   ).toEqual(workspace);
 });
 

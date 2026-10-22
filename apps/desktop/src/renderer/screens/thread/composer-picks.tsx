@@ -1,10 +1,10 @@
 import type { JSX } from "react";
 import {
   buildOptionsLabel,
-  type ComposerPick,
   type ModelPill,
   type RecentModel,
   type ThreadCatalogs,
+  type ThreadChoice,
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
@@ -21,22 +21,22 @@ import { ProviderLogo } from "./provider-logo";
  * `OptionsMenu`.
  *
  * `descriptors` are the options the model declares, `selected` the values in
- * use, and `modelName` the model's name for the menu's header. `onPick`
- * receives each option the user sets. `disabled` leaves the trigger drawn but
- * unable to open the menu.
+ * use, and `modelName` the model's name for the menu's header. `onChoose`
+ * receives the choice of each option the user sets. `disabled` leaves the
+ * trigger drawn but unable to open the menu.
  */
 export function OptionsPick({
   descriptors,
   selected,
   modelName,
   disabled,
-  onPick,
+  onChoose,
 }: {
   readonly descriptors: readonly ModelOption[];
   readonly selected: Readonly<Record<string, string | boolean>>;
   readonly modelName: string | null;
   readonly disabled: boolean;
-  readonly onPick: (steps: readonly ComposerPick[]) => void;
+  readonly onChoose: (choice: ThreadChoice) => void;
 }): JSX.Element {
   return (
     <ComposerMenu
@@ -57,7 +57,7 @@ export function OptionsPick({
           selected={selected}
           modelName={modelName}
           onPick={(id, value) => {
-            onPick([{ kind: "option", id, value }]);
+            onChoose({ kind: "option", id, value });
           }}
         />
       )}
@@ -72,9 +72,9 @@ export function OptionsPick({
  *
  * `pill` is what the trigger shows, and `catalogs`, `config` and `kind` are
  * what the menu is built from. `readRecent` returns the Recent list, which
- * the menu reads when it opens. `onPick` receives the picks a row makes, and
- * the menu then closes. `disabled` leaves the trigger drawn but unable to open
- * the menu.
+ * the menu reads when it opens. `onChoose` receives the choice a row makes,
+ * and the menu then closes. `disabled` leaves the trigger drawn but unable to
+ * open the menu.
  */
 export function ModelPick({
   pill,
@@ -83,7 +83,7 @@ export function ModelPick({
   kind,
   disabled,
   readRecent,
-  onPick,
+  onChoose,
 }: {
   readonly pill: ModelPill;
   readonly catalogs: ThreadCatalogs;
@@ -91,7 +91,7 @@ export function ModelPick({
   readonly kind: ThreadKind;
   readonly disabled: boolean;
   readonly readRecent: () => readonly RecentModel[];
-  readonly onPick: (steps: readonly ComposerPick[]) => void;
+  readonly onChoose: (choice: ThreadChoice) => void;
 }): JSX.Element {
   return (
     <ComposerMenu
@@ -116,8 +116,8 @@ export function ModelPick({
           config={config}
           kind={kind}
           readRecent={readRecent}
-          onPick={(picks) => {
-            onPick(picks);
+          onChoose={(choice) => {
+            onChoose(choice);
             close();
           }}
         />

@@ -1,20 +1,12 @@
 /**
  * Tests `readThreadConfig(thread)`, which returns what the thread itself runs
- * with, and `computeEffectiveConfig(base, picks)`, which returns what the
- * composer shows and what a draft spawns with. The model options survive a
- * pick that does not change the model, and are dropped when another model or
- * account is picked. It also tests `holdsMessageContent(message)`, which
- * decides whether a message draft holds anything to send.
+ * with, and `holdsMessageContent(message)`, which decides whether a message
+ * draft holds anything to send.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
 import type { ShelfItem } from "../attachments/shelf";
-import {
-  computeEffectiveConfig,
-  holdsMessageContent,
-  readThreadConfig,
-  type ThreadConfig,
-} from "./config";
+import { holdsMessageContent, readThreadConfig, type ThreadConfig } from "./config";
 
 const BASE: ThreadConfig = {
   instanceId: "i-claude",
@@ -24,36 +16,6 @@ const BASE: ThreadConfig = {
   profileId: "p-unrestricted",
   options: { effort: "high" },
 };
-
-describe("computeEffectiveConfig", () => {
-  it("returns the thread's own config when nothing is picked", () => {
-    expect(computeEffectiveConfig(BASE, {})).toEqual(BASE);
-  });
-
-  it("applies the picked options over the model's current options", () => {
-    expect(computeEffectiveConfig(BASE, { options: { thinking: true } }).options).toEqual({
-      effort: "high",
-      thinking: true,
-    });
-  });
-
-  it("drops the stored options when another account is picked, because they belong to the old account and model", () => {
-    expect(computeEffectiveConfig(BASE, { instanceId: "i-codex" }).options).toEqual({});
-  });
-
-  it("drops the stored options when another model is picked, because they belong to the old model", () => {
-    expect(computeEffectiveConfig(BASE, { model: "claude-opus-5" })).toMatchObject({
-      model: "claude-opus-5",
-      options: {},
-    });
-  });
-
-  it("keeps the options picked for the newly picked model", () => {
-    expect(
-      computeEffectiveConfig(BASE, { model: "claude-opus-5", options: { effort: "low" } }).options,
-    ).toEqual({ effort: "low" });
-  });
-});
 
 const SESSION: Session = {
   id: "s1",

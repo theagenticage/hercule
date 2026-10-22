@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ProviderInstance, Runner, Task } from "@hercule/contract";
+import type { ProviderInstance, Runner, Task, Workspace } from "@hercule/contract";
 import { buildRunner } from "@hercule/client-core/threads/testing";
 import { buildDraftKey } from "../../app/pending-submissions";
 import {
@@ -470,6 +470,50 @@ describe("the new-thread screen", () => {
         kind: "ephemeral",
         checkouts: [{ resourceId: SIDEBAR_FIXTURE.resources[0]!.id }],
       },
+    });
+  });
+});
+
+describe("the machine of a joined workspace", () => {
+  it("starts on the machine of an existing workspace the user joined, though only the workspace was picked", async () => {
+    const studio = buildRunner("01a06d02-7700-7000-8000-0000000000ab", "studio");
+    const [snapshot] = FIXTURE_INSTANCE.snapshots;
+    const [primary, other] = SIDEBAR_FIXTURE.workspaces as [Workspace, Workspace];
+    const joined = { ...other, runnerId: studio.id };
+    const calls = stubApi({
+      ...buildSidebarHandlers({
+        ...SIDEBAR_FIXTURE,
+        runners: [...SIDEBAR_FIXTURE.runners, studio],
+        workspaces: [primary, joined],
+        providers: [
+          {
+            ...FIXTURE_INSTANCE,
+            snapshots: [...FIXTURE_INSTANCE.snapshots, { ...snapshot!, runnerId: studio.id }],
+          },
+        ],
+      }),
+      ...buildThreadHandlers(STARTED),
+      "POST /api/v1/sessions": { body: STARTED.session },
+    });
+    const { context } = await renderApp(
+      createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }),
+      { path: `/?project=${WEBSHOP.id}` },
+    );
+    const field = await screen.findByRole("textbox", { name: "Message" });
+
+    act(() => {
+      context.controller!.pendingSubmissions.writePicks(buildDraftKey(WEBSHOP.id, null), {
+        workspace: { kind: "existing", workspaceId: joined.id },
+      });
+    });
+    await userEvent.type(field, "Fix the cart{Enter}");
+
+    await waitFor(() => {
+      expect(readSpawns(calls)).toHaveLength(1);
+    });
+    expect(readSpawns(calls)[0]?.body).toMatchObject({
+      runnerId: studio.id,
+      workspace: { kind: "existing", workspaceId: joined.id },
     });
   });
 });
