@@ -164,6 +164,12 @@ Each handed-off signal's Done row is led by the face of the agent it went to. It
 
 The pane draws the leg as Round Trip's trip: one line per step, with its time and who took it. Under it: "Go to Tracking", which opens Tracking on the Task while it is open, or "Open the run" once it is closed.
 
+*(Amended 2026-10-22, [#805](https://github.com/theagenticage/hercule/issues/805).)* Slice 5 builds Done's trip, and the app knowingly differs from the drawing in these places:
+- The pane has no "This handoff" step timeline and no foot line. It draws the trip as the one line the row shows, with the button under it. The reads hold no actor for a stop or a tick-off, and the ticket asks for the line and where opening it goes. A later ticket can add the timeline.
+- A Working row that only waits on a signal trigger ends its line with "working", not "waiting for checks" (the drawing's d-checkout). The leg and the Tracking rows do not carry the awaited trigger, and slice 1 already draws that row's line as "waiting for *ids*" in Tracking.
+- "Go to Tracking" shows while the Task's row in Tracking agrees with the leg, meaning the row's newest handoff is this one. It does not show for an earlier leg of a Task whose row has moved on to a newer handoff, nor once the Task is done or cancelled. "Open the run" shows then, and opens the leg's newest run.
+- UI differences: to be filled by the coordinator.
+
 ## Keys
 
 | Key | Does |
