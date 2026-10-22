@@ -25,6 +25,25 @@ const THINKING: ModelOption = {
   default: false,
 };
 
+// The shape the pi provider declares: thinking as a list of levels.
+const THINKING_LEVELS: ModelOption = {
+  id: "thinking",
+  label: "Thinking",
+  kind: "select",
+  choices: [
+    { value: "low", label: "Low" },
+    { value: "high", label: "High" },
+    { value: "max", label: "Max" },
+  ],
+  default: "low",
+};
+
+const THINKING_LEVELS_WITH_OFF: ModelOption = {
+  ...THINKING_LEVELS,
+  choices: [{ value: "off", label: "Off" }, ...(THINKING_LEVELS.choices ?? [])],
+  default: "off",
+};
+
 const FAST_MODE: ModelOption = {
   id: "fastMode",
   label: "Fast mode",
@@ -47,6 +66,20 @@ describe("buildOptionsLabel", () => {
 
   it("returns null while thinking is off", () => {
     expect(buildOptionsLabel([THINKING], { thinking: false })).toBeNull();
+  });
+
+  it("uses the picked level's label for a thinking option that lists levels", () => {
+    expect(buildOptionsLabel([THINKING_LEVELS], { thinking: "max" })).toBe("Max");
+  });
+
+  it("uses the default level's label before a level is picked", () => {
+    expect(buildOptionsLabel([THINKING_LEVELS], {})).toBe("Low");
+  });
+
+  it("returns null while a thinking option that lists levels is at its off level", () => {
+    expect(buildOptionsLabel([THINKING_LEVELS_WITH_OFF], {})).toBeNull();
+    expect(buildOptionsLabel([THINKING_LEVELS_WITH_OFF], { thinking: "off" })).toBeNull();
+    expect(buildOptionsLabel([THINKING_LEVELS_WITH_OFF], { thinking: "high" })).toBe("High");
   });
 
   it("returns null when fast mode is the only option, because the bolt has nothing to follow", () => {
