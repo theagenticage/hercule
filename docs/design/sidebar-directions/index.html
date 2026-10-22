@@ -10,6 +10,38 @@
     <script src="shared/book.js"></script>
     <title>The sidebar, regrouped · four directions · Hercule</title>
     <style>
+      /* ---------- round 2 ---------- */
+      .ix-round2 {
+        display: block;
+        margin: 0 0 48px;
+        padding: 22px 26px 24px;
+        border-radius: var(--r-lg);
+        background: color-mix(in oklab, var(--accent) 9%, var(--raised));
+        box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 22%, transparent);
+        text-decoration: none;
+        transition: box-shadow var(--dur-1), transform var(--dur-1);
+      }
+      .ix-round2:hover {
+        box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent), var(--shadow-2);
+        transform: translateY(-1px);
+      }
+      .ix-round2 .bk-eyebrow {
+        margin-bottom: 8px;
+        color: var(--accent-ink);
+      }
+      .ix-round2 b {
+        display: block;
+        font-size: 18px;
+        letter-spacing: -0.01em;
+      }
+      .ix-round2 span:last-child {
+        display: block;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 14.5px;
+        line-height: 1.55;
+      }
+
       /* ---------- the problem ---------- */
       .ix-shot {
         margin: 0;
@@ -426,6 +458,7 @@
         <a href="case-files/index.html">Case Files</a>
         <a href="lineage/index.html">Lineage</a>
         <a href="workbench/index.html">Workbench</a>
+        <a href="workbench-refined/index.html">Workbench, refined</a>
         <a href="tracks/index.html">Tracks</a>
         <a href="#compare">Compare</a>
         <a href="#pick">The pick</a>
@@ -442,6 +475,12 @@
         <p class="bk-lede">More and more, one piece of work is two or three threads. You start a thread, and it starts a partner: Claude migrates the endpoints, Codex tries to break the migration. The lead writes the partner a better brief than you would, so this is how work will keep arriving.</p>
         <p class="bk-lede">The sidebar does not know any of this. Every thread is a row like any other, sorted by when it started. Start three pieces of work and you get eight rows that nothing ties together. Below: what a full design team would do with that, the brief that came out of it, and <b>four directions that each organize the list by something different</b>: the crew, the lineage, the product, and time. <a href="#pick"><b>Skip to the recommendation →</b></a></p>
       </section>
+
+      <a class="ix-round2" href="workbench-refined/index.html">
+        <span class="bk-eyebrow">Round 2 · 23 October</span>
+        <b>You picked Workbench, without the diffs. It is refined here →</b>
+        <span>No change counts, a cap on the dots, a crew you unfold instead of a popover you click, and three ways to keep long titles from swallowing the header.</span>
+      </a>
 
       <figure class="ix-shot">
         <div class="ix-shot-img"><img src="shared/rogier-sidebar-today.png" alt="Rogier's sidebar and header: two threads of one piece of work, shown as two unrelated rows in the sidebar, while the header's tabs list both" /></div>
@@ -704,7 +743,8 @@
 
       <!-- ================================================================ pick -->
       <section class="bk-sec" id="pick">
-        <div class="bk-eyebrow">The recommendation</div>
+        <div class="bk-eyebrow">The recommendation, and your pick</div>
+        <p class="bk-lede" style="margin-bottom: 18px !important"><b>Your pick (23 October): Workbench, without the diffs.</b> The faces of Case Files were too much of a distraction in the sidebar. Round 2 refines Workbench: <a href="workbench-refined/index.html"><b>Workbench, refined →</b></a>. My recommendation below is kept as it was written.</p>
         <h2>Build Case Files as the sidebar. Take Workbench's findings into the thread.</h2>
         <div class="ix-pick">
           <div>

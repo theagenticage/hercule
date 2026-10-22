@@ -21,8 +21,10 @@
 
   var threads = W.threads.slice();
   if (STATE === "swarm") threads = threads.concat(W.swarm.threads);
+  if (STATE === "stress") threads = threads.concat(W.stress.threads);
 
   var exchanges = W.exchanges.slice();
+  if (STATE === "stress") exchanges = exchanges.concat(W.stress.exchanges);
 
   /** Returns the thread with this id, or undefined. */
   function getThread(id) {
@@ -531,7 +533,8 @@
   /**
    * Registers the direction. Fields:
    *   rootClass   a class on the window's root, under which the direction scopes every rule
-   *   initial     the thread open at load, by state; default "t3ds" (the partner state opens "t3dsReview")
+   *   initial     the thread open at load, by state; default "t3ds" (the partner state opens
+   *               "t3dsReview", the stress state the lead of its ten-thread piece of work)
    *   drawList(listEl, api)              draws the sidebar's thread list (required)
    *   drawHeader(thread, api)            returns header markup to replace the default, or null
    *   drawMain(mainEl, thread, api)      draws the whole main pane; return false to fall back
@@ -547,7 +550,7 @@
     if (STATE === "spawn") threads = threads.filter(function (t) { return t.id !== W.spawn.thread.id; });
     buildWindow();
     var first = typeof dir.initial === "function" ? dir.initial(STATE) : dir.initial;
-    openId = first || (STATE === "partner" ? "t3dsReview" : "t3ds");
+    openId = first || (STATE === "partner" ? "t3dsReview" : STATE === "stress" ? W.stress.open : "t3ds");
     dir.drawList(els.list, api);
     drawMain();
     if (dir.onOpen) dir.onOpen(openId, api);

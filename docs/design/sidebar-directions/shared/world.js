@@ -278,6 +278,39 @@
   });
 
   /*
+   * The stress state adds one piece of work the way it looks in real use: ten threads with titles
+   * as long as real titles get, mirroring Rogier's "Migrate unmigrated endpoints to MwsResult".
+   * `roleBy` says where a role came from: "lead" when the lead named it as it started the partner
+   * (`hercule session spawn --role review`), "generated" when a Text Generation wrote it. Two
+   * partners Rogier added with the header's + have no role yet, so a design must fall back to
+   * their titles.
+   */
+  WORKSPACES["ws-shape"] = { kind: "worktree", repo: "payments-api", branch: "rogier/result-error-shape", from: "main", machine: "studio-mac" };
+  var STRESS = {
+    open: "xLead",
+    threads: [
+      { id: "xLead", title: "Migrate the unmigrated payout endpoints to the Result error shape", project: "payments-api", provider: "claude", model: "Opus 5.5", workspace: "ws-shape", pose: "working", status: "working", started: "08:12", last: "09:41", lead: null, result: "14 of 22 endpoints migrated. Fixing the review's finding on GET /v1/payouts/:id." },
+      { id: "xReview", title: "Adversarial review of the Result error shape on the payout endpoints", project: "payments-api", provider: "codex", model: "gpt-5.4", workspace: "ws-shape", pose: "waiting", status: "question", ask: "Should a 409 from Stripe become a Result error or a retry?", askShort: "409 from Stripe: error or retry?", started: "08:40", last: "09:37", lead: "xLead", joined: "spawned", role: "review", roleBy: "lead", result: "2 findings so far, 1 blocking." },
+      { id: "xTests", title: "Write contract tests for every migrated payout endpoint", project: "payments-api", provider: "codex", model: "gpt-5.4-mini", workspace: "ws-shape", pose: "working", status: "working", started: "08:44", last: "09:40", lead: "xLead", joined: "spawned", role: "tests", roleBy: "lead", result: "31 contract tests, 2 failing on purpose until the lead's fix lands." },
+      { id: "xDocs", title: "Update the OpenAPI document for the new Result error responses", project: "payments-api", provider: "claude", model: "Sonnet 5", workspace: "ws-shape", pose: "working", status: "working", started: "09:20", last: "09:41", lead: "xLead", joined: "spawned", role: "API docs", roleBy: "lead", result: "Rewriting the error schemas of 14 operations." },
+      { id: "xInventory", title: "Find every payout endpoint that still returns a raw IActionResult", project: "payments-api", provider: "claude", model: "Haiku 4.5", workspace: "ws-shape", pose: "idle", status: null, started: "08:15", last: "08:31", lead: "xLead", joined: "spawned", role: "inventory", roleBy: "lead", result: "22 endpoints, 8 still unmigrated." },
+      { id: "xMobile", title: "Check that the mobile app still parses payout errors after the change", project: "payments-api", provider: "codex", model: "gpt-5.4", workspace: "ws-shape", pose: "idle", status: null, started: "09:02", last: "09:24", lead: "xLead", joined: "spawned", role: "mobile check", roleBy: "lead", result: "The app parses the new shape; one toast shows the raw code." },
+      { id: "xBench", title: "Benchmark payout list latency before and after the migration", project: "payments-api", provider: "codex", model: "gpt-5.4-mini", workspace: "ws-shape", pose: "idle", status: null, started: "08:58", last: "09:11", lead: "xLead", joined: "spawned", role: "benchmark", roleBy: "lead", result: "p95 unchanged at 84ms." },
+      { id: "xRefunds", title: "Second adversarial pass on refunds and reversals under the new error shape", project: "payments-api", provider: "claude", model: "Opus 5.5", workspace: "ws-shape", pose: "idle", status: null, started: "09:05", last: "09:33", lead: "xLead", joined: "spawned", role: "refunds review", roleBy: "lead", result: "No findings on refunds; one on reversals, not blocking." },
+      { id: "xChangelog", title: "Draft the changelog entry and the migration note for API consumers", project: "payments-api", provider: "claude", model: "Haiku 4.5", workspace: "ws-shape", pose: "idle", status: null, started: "09:26", last: "09:30", lead: "xLead", joined: "added", role: null, result: "Draft ready for the lead to check." },
+      { id: "xStripe", title: "Ask whether Stripe can send payout.failed twice for the same payout", project: "payments-api", provider: "claude", model: "Sonnet 5", workspace: "ws-shape", pose: "idle", status: null, started: "09:14", last: "09:19", lead: "xLead", joined: "added", role: null, result: "Yes, on retries; the webhook handler must be idempotent." },
+    ],
+    exchanges: [
+      { at: "08:15", from: "xLead", to: "xInventory", kind: "brief", text: "List every payout endpoint and say which ones still return a raw IActionResult." },
+      { at: "08:31", from: "xInventory", to: "xLead", kind: "report", text: "22 endpoints. 8 still return a raw IActionResult; the list is in inventory.md." },
+      { at: "08:40", from: "xLead", to: "xReview", kind: "brief", text: "Try to break the Result error shape on the migrated payout endpoints. Look for errors that escape a Result." },
+      { at: "08:44", from: "xLead", to: "xTests", kind: "brief", text: "Write a contract test for every migrated endpoint, one per error case in the Result shape." },
+      { at: "09:28", from: "xReview", to: "xLead", kind: "report", text: "Blocking: PayoutError escapes through GET /v1/payouts/:id when the payout is archived." },
+      { at: "09:40", from: "xTests", to: "xLead", kind: "report", text: "31 contract tests written. 2 fail until GET /v1/payouts/:id is fixed." },
+    ],
+  };
+
+  /*
    * Transcripts for the threads a direction opens. Items:
    *   { me, at }                   Rogier's message
    *   { from, at, text }           a message another thread sent this one (an exchange)
@@ -333,6 +366,7 @@
     assistants: ASSISTANTS,
     spawn: SPAWN,
     swarm: SWARM,
+    stress: STRESS,
     transcripts: TRANSCRIPTS,
   };
 })();
