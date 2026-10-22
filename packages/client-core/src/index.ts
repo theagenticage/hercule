@@ -449,6 +449,7 @@ export {
 export {
   describeHandoffTrip,
   isAnyLegAffectedByRunPush,
+  isAnyLegAffectedByTaskPush,
   type HandoffTrip,
   type HandoffTripDestination,
 } from "./handoff-leg";

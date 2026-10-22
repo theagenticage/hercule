@@ -1,6 +1,10 @@
 import type { HandoffLeg, Signal, TrackingRun } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
-import { describeHandoffTrip, isAnyLegAffectedByRunPush } from "./handoff-leg";
+import {
+  describeHandoffTrip,
+  isAnyLegAffectedByRunPush,
+  isAnyLegAffectedByTaskPush,
+} from "./handoff-leg";
 import { buildTrackingRows, type TrackingRow } from "./tracking";
 import type { YourWork } from "./your-work";
 
@@ -16,6 +20,9 @@ const buildRun = (id: string, status: RunStatus, workflowName = "Implement"): Tr
   createdAt: AT,
   awaitedSignalIds: [],
 });
+
+/** Builds the newest run of a leg, which carries only its id and status. */
+const buildLegRun = (id: string, status: RunStatus): HandoffLeg["latestRun"] => ({ id, status });
 
 /** Builds the signal "sig", resolved by a handoff that started `runId`. */
 const buildSignal = (runId: string | null = "run-1"): Signal => ({
@@ -52,7 +59,7 @@ const buildLeg = (overrides: Partial<HandoffLeg> = {}): HandoffLeg => ({
   workflowId: null,
   workflowName: "Implement",
   rerunCount: 0,
-  latestRun: buildRun("run-1", "completed"),
+  latestRun: buildLegRun("run-1", "completed"),
   liveRunIds: [],
   ...overrides,
 });
@@ -73,14 +80,14 @@ const buildYourWorkAbout = (taskId: string): YourWork =>
 
 /**
  * Builds the Tracking row of the Task "task" whose newest handoff started
- * `handoffRunId`. The row is in the state of its newest run, or Needs you
+ * `handoffRunId`. Its newest run is `latestRunId`. The row is in the state of that run, or Needs you
  * when `needsYou` is set, as a live run with an open Request makes it.
  */
 const buildRow = (
   status: RunStatus,
-  { handoffRunId = "run-1", needsYou = false, signalWaits = false } = {},
+  { handoffRunId = "run-1", latestRunId = "run-1", needsYou = false, signalWaits = false } = {},
 ): TrackingRow => {
-  const run = buildRun("run-1", status);
+  const run = buildRun(latestRunId, status);
   const live = status === "pending" || status === "running";
   const [row] = buildTrackingRows(
     [
@@ -116,7 +123,7 @@ describe("describeHandoffTrip", () => {
     it("Task working: Handed to Fix bug -> working", () => {
       const leg = buildLeg({
         workflowName: "Fix bug",
-        latestRun: buildRun("run-1", "running"),
+        latestRun: buildLegRun("run-1", "running"),
         liveRunIds: ["run-1"],
       });
       const trip = describeHandoffTrip(buildSignal(), leg, buildRow("running"));
@@ -130,7 +137,7 @@ describe("describeHandoffTrip", () => {
 
     it("Task needing you by a Request on a live run: Handed to Implement -> needs you", () => {
       const leg = buildLeg({
-        latestRun: buildRun("run-1", "running"),
+        latestRun: buildLegRun("run-1", "running"),
         liveRunIds: ["run-1"],
       });
       const trip = describeHandoffTrip(buildSignal(), leg, buildRow("running", { needsYou: true }));
@@ -145,7 +152,7 @@ describe("describeHandoffTrip", () => {
     it("Task failed: Handed to Investigate -> failed (the same word is said once)", () => {
       const leg = buildLeg({
         workflowName: "Investigate",
-        latestRun: buildRun("run-1", "failed"),
+        latestRun: buildLegRun("run-1", "failed"),
       });
       const trip = describeHandoffTrip(buildSignal(), leg, buildRow("failed"));
       expect(trip).toMatchObject({
@@ -166,7 +173,7 @@ describe("describeHandoffTrip", () => {
     });
 
     it("Task stopped: Handed to Implement -> stopped", () => {
-      const leg = buildLeg({ latestRun: buildRun("run-1", "cancelled") });
+      const leg = buildLeg({ latestRun: buildLegRun("run-1", "cancelled") });
       const trip = describeHandoffTrip(buildSignal(), leg, buildRow("cancelled"));
       expect(trip).toMatchObject({
         steps: ["Handed to Implement"],
@@ -194,7 +201,7 @@ describe("describeHandoffTrip", () => {
         workflowName: "Fix bug",
         taskStatus: "done",
         rerunCount: 1,
-        latestRun: buildRun("run-2", "completed"),
+        latestRun: buildLegRun("run-2", "completed"),
       });
       const trip = describeHandoffTrip(buildSignal(), leg, undefined);
       expect(trip).toMatchObject({
@@ -218,7 +225,7 @@ describe("describeHandoffTrip", () => {
         steps: ["Handed to Implement", "finished"],
         end: { text: "continued: Fix bug", tone: null },
         pose: "done",
-        destination: { kind: "run", runId: "run-1" },
+        destination: { kind: "tracking", taskId: "task" },
       });
     });
   });
@@ -226,7 +233,7 @@ describe("describeHandoffTrip", () => {
   describe("edge cases", () => {
     it("says a live earlier leg is still working", () => {
       const leg = buildLeg({
-        latestRun: buildRun("run-1", "running"),
+        latestRun: buildLegRun("run-1", "running"),
         liveRunIds: ["run-1"],
         next: { signalId: "sig-2", runId: "run-9", at: AT, workflowName: "Fix bug" },
       });
@@ -239,7 +246,7 @@ describe("describeHandoffTrip", () => {
     });
 
     it("ends an in-progress Task with no row on the leg's standing, and opens the run", () => {
-      const leg = buildLeg({ latestRun: buildRun("run-1", "failed") });
+      const leg = buildLeg({ latestRun: buildLegRun("run-1", "failed") });
       const trip = describeHandoffTrip(buildSignal(), leg, undefined);
       expect(trip).toMatchObject({
         steps: ["Handed to Implement"],
@@ -268,7 +275,89 @@ describe("describeHandoffTrip", () => {
       expect(trip?.steps).toEqual(["Handed to Implement"]);
       expect(trip?.end).toEqual({ text: "finished", tone: null });
       expect(trip?.pose).toBe("done");
-      expect(trip?.destination).toEqual({ kind: "run", runId: "run-1" });
+      expect(trip?.destination).toEqual({ kind: "tracking", taskId: "task" });
+    });
+
+    it.each([
+      ["the row's newest run is another run", buildRow("completed", { latestRunId: "run-2" })],
+      ["the row's newest run is in another status", buildRow("running")],
+    ])("ends on the leg's standing when %s", (_name, row) => {
+      const trip = describeHandoffTrip(buildSignal(), buildLeg(), row);
+      expect(trip).toMatchObject({
+        steps: ["Handed to Implement"],
+        end: { text: "finished", tone: null },
+        pose: "done",
+      });
+    });
+
+    it("does not call a re-run finished when the Done read is newer than the Tracking read", () => {
+      // Tracking was read while the re-run ran; Done after it finished.
+      const leg = buildLeg({ rerunCount: 1, latestRun: buildLegRun("run-2", "completed") });
+      const trip = describeHandoffTrip(
+        buildSignal(),
+        leg,
+        buildRow("running", { latestRunId: "run-2" }),
+      );
+      expect(trip).toMatchObject({
+        steps: ["Handed to Implement", "tried again once"],
+        end: { text: "finished", tone: null },
+        pose: "done",
+        destination: { kind: "tracking", taskId: "task" },
+      });
+    });
+
+    it("does not call a re-run running when the Tracking read is newer than the Done read", () => {
+      // Done was read while the re-run ran; Tracking after it finished.
+      const leg = buildLeg({
+        rerunCount: 1,
+        latestRun: buildLegRun("run-2", "running"),
+        liveRunIds: ["run-2"],
+      });
+      const trip = describeHandoffTrip(
+        buildSignal(),
+        leg,
+        buildRow("completed", { latestRunId: "run-2" }),
+      );
+      expect(trip).toMatchObject({
+        steps: ["Handed to Implement", "tried again once"],
+        end: { text: "working", tone: null },
+        pose: "working",
+        destination: { kind: "tracking", taskId: "task" },
+      });
+    });
+
+    it("trusts a row that agrees with a re-run leg", () => {
+      const leg = buildLeg({ rerunCount: 1, latestRun: buildLegRun("run-2", "completed") });
+      const trip = describeHandoffTrip(
+        buildSignal(),
+        leg,
+        buildRow("completed", { latestRunId: "run-2" }),
+      );
+      expect(trip?.end).toEqual({ text: "finished", tone: "finished" });
+    });
+
+    it("opens Tracking for an earlier leg while its Task is in progress, keeping its own end", () => {
+      const leg = buildLeg({
+        next: { signalId: "sig-2", runId: "run-9", at: AT, workflowName: "Fix bug" },
+      });
+      const trip = describeHandoffTrip(
+        buildSignal(),
+        leg,
+        buildRow("running", { latestRunId: "run-9" }),
+      );
+      expect(trip?.destination).toEqual({ kind: "tracking", taskId: "task" });
+      expect(trip?.end.text).toBe("continued: Fix bug");
+    });
+
+    it("opens Tracking for a leg whose row it disagrees with, but not for a done Task", () => {
+      const row = buildRow("running", { handoffRunId: "run-9" });
+      expect(describeHandoffTrip(buildSignal(), buildLeg(), row)?.destination).toEqual({
+        kind: "tracking",
+        taskId: "task",
+      });
+      expect(
+        describeHandoffTrip(buildSignal(), buildLeg({ taskStatus: "done" }), row)?.destination,
+      ).toEqual({ kind: "run", runId: "run-1" });
     });
 
     it("ends an open Task on the leg's standing even when a row is held", () => {
@@ -284,7 +373,7 @@ describe("describeHandoffTrip", () => {
     it("says done for a done Task whose run is still live", () => {
       const leg = buildLeg({
         taskStatus: "done",
-        latestRun: buildRun("run-1", "running"),
+        latestRun: buildLegRun("run-1", "running"),
         liveRunIds: ["run-1"],
       });
       const trip = describeHandoffTrip(buildSignal(), leg, undefined);
@@ -320,12 +409,12 @@ describe("describeHandoffTrip", () => {
     });
 
     it("draws the face of the leg's standing: a stopped leg is idle", () => {
-      const leg = buildLeg({ latestRun: buildRun("run-1", "cancelled") });
+      const leg = buildLeg({ latestRun: buildLegRun("run-1", "cancelled") });
       expect(describeHandoffTrip(buildSignal(), leg, undefined)?.pose).toBe("idle");
     });
 
     it("treats a failed newest run as failed even while an older run of the leg is live", () => {
-      const leg = buildLeg({ latestRun: buildRun("run-2", "failed"), liveRunIds: ["run-1"] });
+      const leg = buildLeg({ latestRun: buildLegRun("run-2", "failed"), liveRunIds: ["run-1"] });
       expect(describeHandoffTrip(buildSignal(), leg, undefined)?.end.text).toBe("failed");
     });
   });
@@ -353,8 +442,8 @@ describe("describeHandoffTrip", () => {
 
 describe("isAnyLegAffectedByRunPush", () => {
   const legs = [
-    buildLeg({ latestRun: buildRun("run-1", "running"), liveRunIds: ["run-1", "run-0"] }),
-    buildLeg({ runId: "run-3", latestRun: buildRun("run-4", "completed") }),
+    buildLeg({ latestRun: buildLegRun("run-1", "running"), liveRunIds: ["run-1", "run-0"] }),
+    buildLeg({ runId: "run-3", latestRun: buildLegRun("run-4", "completed") }),
   ];
 
   it("is true when the push lists no ids", () => {
@@ -383,5 +472,25 @@ describe("isAnyLegAffectedByRunPush", () => {
 
   it("is false with no legs held and a named run", () => {
     expect(isAnyLegAffectedByRunPush([], { ids: ["run-1"], kind: "updated" })).toBe(false);
+  });
+});
+
+describe("isAnyLegAffectedByTaskPush", () => {
+  const legs = [buildLeg({ taskId: "task-a" }), buildLeg({ taskId: "task-b" })];
+
+  it("is true when the push lists no ids", () => {
+    expect(isAnyLegAffectedByTaskPush(legs, { ids: [] })).toBe(true);
+  });
+
+  it("is true when a push names the Task of a leg", () => {
+    expect(isAnyLegAffectedByTaskPush(legs, { ids: ["x", "task-b"] })).toBe(true);
+  });
+
+  it("is false when a push names only Tasks no leg names", () => {
+    expect(isAnyLegAffectedByTaskPush(legs, { ids: ["task-c"] })).toBe(false);
+  });
+
+  it("is false with no legs held and a named Task", () => {
+    expect(isAnyLegAffectedByTaskPush([], { ids: ["task-a"] })).toBe(false);
   });
 });
