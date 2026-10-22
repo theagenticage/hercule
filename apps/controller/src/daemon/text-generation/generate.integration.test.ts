@@ -794,6 +794,11 @@ describe("the limit per runner", () => {
   });
 
   it("keeps a slot until the runner answers, even after its caller gave up", async () => {
+    // The deadline is far from the in-time answer, so a busy machine that
+    // delays a timer by half a second still answers the first ten in time.
+    const deadlineMs = 1500;
+    const inTimeAnswerMs = 100;
+    const lateAnswerMs = 2200;
     await withFleet(
       async (arranged) => {
         const answerTimers: Array<ReturnType<typeof setTimeout>> = [];
@@ -816,7 +821,7 @@ describe("the limit per runner", () => {
                   outcome: OK,
                 });
               },
-              received <= PERMITS ? 300 : 900,
+              received <= PERMITS ? inTimeAnswerMs : lateAnswerMs,
             ),
           );
           return undefined;
@@ -834,7 +839,7 @@ describe("the limit per runner", () => {
           for (const timer of answerTimers) clearTimeout(timer);
         }
       },
-      { textGenerationDeadline: Duration.millis(700) },
+      { textGenerationDeadline: Duration.millis(deadlineMs) },
     );
   });
 });
