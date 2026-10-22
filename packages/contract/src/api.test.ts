@@ -125,6 +125,7 @@ const NEW_OPERATIONS = [
     method: "GET",
     path: "/api/v1/tasks/tracking",
   },
+  { id: "task.queryLegs", requires: "task.read", method: "GET", path: "/api/v1/tasks/legs" },
   {
     id: "task.readTracking",
     requires: "task.read",

@@ -92,6 +92,7 @@ const COMMANDS: Record<string, string> = {
 
   "task.query": "task list",
   "task.queryTracking": "task tracking",
+  "task.queryLegs": "task legs",
   "task.read": "task read",
   "task.readTracking": "task read-tracking",
   "task.create": "task create",
@@ -333,6 +334,7 @@ const RESOLVES: Record<string, string> = {
   "task.readTracking id": "task.query",
   "task.update id": "task.query",
   "task.delete id": "task.query",
+  "task.queryLegs runIds": "run.query",
 
   "notification.read id": "notification.query",
   "notification.withdraw id": "notification.query",

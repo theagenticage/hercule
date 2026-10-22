@@ -16,7 +16,7 @@ import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
 import { Actor, ExternalRef, Id, Timestamp } from "../ids";
-import { page, pageParams } from "../pagination";
+import { DEFAULT_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
 import { EventId } from "./event-record";
@@ -465,9 +465,11 @@ export const TrackingOutput = Schema.Union([
 export type TrackingOutput = Schema.Schema.Type<typeof TrackingOutput>;
 
 /**
- * The Task's oldest handoff, as the Tracking pane draws it: the handoff, and
- * the name of the workflow it handed the signal to, which a client cannot
- * read from the pane's runs when that run is older than the newest ones.
+ * One handoff of a Task together with the name of the workflow it handed the
+ * signal to, which a client cannot read from other runs it holds when the
+ * handoff's run is older than the newest ones. The Tracking pane draws the
+ * Task's oldest handoff this way (`TrackingDetail.firstHandoff`), and a leg
+ * names the handoff that follows it this way (`HandoffLeg.next`).
  */
 export const TrackingFirstHandoff = Schema.Struct({
   ...TrackingHandoff.fields,
@@ -501,6 +503,73 @@ export const TrackingDetail = Schema.Struct({
 
 export type TrackingDetail = Schema.Schema.Type<typeof TrackingDetail>;
 
+/**
+ * The most run ids one `task.queryLegs` call takes. It is the size of a page of
+ * Done signals, so a client asks for the legs of one page in one call.
+ */
+export const MAX_LEG_QUERY_RUNS = DEFAULT_PAGE_LIMIT;
+
+/**
+ * The most ids `HandoffLeg.liveRunIds` lists. The ids are a sample of the
+ * leg's live runs, newest first: a leg is not expected to have more runs
+ * going at once, and the cap keeps the reply from growing with them.
+ */
+export const MAX_LEG_LIVE_RUNS = 20;
+
+/**
+ * One handoff of a signal to a Task's workflow, with where the work it
+ * started stands: the handoff's run and every run that re-runs it (a "leg").
+ * A client draws the line "handed to X, tried again twice, finished" from it
+ * without reading the Task's whole history.
+ */
+export const HandoffLeg = Schema.Struct({
+  /** The run the handoff started: the handoff entry's `runId`. */
+  runId: Id,
+  /** The signal the user handed off. */
+  signalId: Id,
+  /** The Task the handoff belongs to. */
+  taskId: Id,
+  /** The Task's status now. */
+  taskStatus: TaskStatus,
+  /** The workflow of the handoff's run. `null` for a run of a workflow that was sent with the run and never stored. */
+  workflowId: Schema.NullOr(Id),
+  /** The name of the workflow of the handoff's run, as it was when that run started. */
+  workflowName: Schema.String,
+  /**
+   * How many runs re-run the handoff's run. A re-run of a re-run counts, and
+   * each run counts once. The runs are those the leg holds, as `latestRun`
+   * describes.
+   */
+  rerunCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /**
+   * The newest run of the leg, by creation time and then id. It is the
+   * handoff's run when nothing re-ran it. A leg holds the handoff's run and
+   * every run that can be reached from it through the run it re-runs, however
+   * many re-runs deep, and that belongs to the same Task. It never holds a run
+   * only because it started around the same time.
+   */
+  latestRun: TrackingRun,
+  /**
+   * The ids of the leg's runs that are pending or running, newest first, at
+   * most `MAX_LEG_LIVE_RUNS`. Empty when no run of the leg is live.
+   */
+  liveRunIds: atMost(Id, MAX_LEG_LIVE_RUNS),
+  /**
+   * The Task's next handoff: the handoff entry appended to the Task right after
+   * this one, whichever signal it handed off. Absent when this is the Task's
+   * newest handoff. It marks the end of this leg's story: the user handed the
+   * Task on.
+   */
+  next: Schema.optionalKey(TrackingFirstHandoff),
+});
+
+export type HandoffLeg = Schema.Schema.Type<typeof HandoffLeg>;
+
+/** What `task.queryLegs` returns: the leg of each handoff that was asked for, in the order asked. */
+export const HandoffLegs = Schema.Struct({ legs: Schema.Array(HandoffLeg) });
+
+export type HandoffLegs = Schema.Schema.Type<typeof HandoffLegs>;
+
 export const task = HttpApiGroup.make("task")
   .add(
     HttpApiEndpoint.get("query", "/tasks", {
@@ -516,6 +585,25 @@ export const task = HttpApiGroup.make("task")
     HttpApiEndpoint.get("queryTracking", "/tasks/tracking", {
       success: TaskTracking,
       error: [Unauthenticated, Forbidden, Internal],
+    }),
+    /**
+     * Returns the leg of each given run that is the run of a handoff of a
+     * Task: the handoff, the runs that re-ran it, and where they stand. Each
+     * id is looked up on its own. An id that is not the run of a handoff of a
+     * Task that exists is left out of the reply, so the reply may hold fewer
+     * legs than ids: an unknown run, a run of no Task, a run of a deleted Task,
+     * and a run that only re-runs a handoff's run. The legs come in the order
+     * of the ids. Each leg is a fixed size, so the reply does not grow with a
+     * Task's history.
+     */
+    // A static path beside `/tasks/:id`, for the same reason as `/tasks/tracking`:
+    // the router prefers it, and "legs" is not an id.
+    HttpApiEndpoint.get("queryLegs", "/tasks/legs", {
+      query: Schema.Struct({
+        runIds: atMost(Id, MAX_LEG_QUERY_RUNS).check(Schema.isMinLength(1)),
+      }),
+      success: HandoffLegs,
+      error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     // `/tasks/:id/tracking` has one more segment than `/tasks/:id`, so the
     // router never takes it for that route.

@@ -574,6 +574,21 @@ export const CLI = {
     examples: [{ args: [] }],
     fields: {},
   },
+  "task.queryLegs": {
+    command: "task legs",
+    help: "Shows, for each run you name, where the handoff that started it stands. A leg is one handoff of a signal to a task's workflow plus every run that re-ran it, however many re-runs deep. Each leg gives the task and its status, the workflow, how many times the handoff's run was re-run, the newest run of the leg, the ids of its live runs, and the task's next handoff when the user handed the task on. A run that is not the run of a handoff of a task that exists is left out. Needs the run read grant as well as the task read grant.",
+    examples: [
+      { args: ["--run", "1f3a9c2e"] },
+      { args: ["--run", "1f3a9c2e", "--run", "7b2d40aa"] },
+    ],
+    fields: {
+      runIds: {
+        flag: "run",
+        help: "A handoff's run, by its id or a tail of eight or more characters; repeat the flag for up to 50 runs. Find a task's handoff runs with `hercule task read-tracking`.",
+        resolves: "run.query",
+      },
+    },
+  },
   "task.read": {
     command: "task read",
     help: "Reads one task in full, its Provenance included. Provenance is the append-only record of what created or touched it.",
