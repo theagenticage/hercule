@@ -111,10 +111,6 @@ export const TaskTrackingRunsLayer: Layer.Layer<TaskTrackingRuns, never, SqlClie
       ): Effect.Effect<ReadonlyArray<LegRuns>, SqlError> =>
         Effect.gen(function* () {
           const legs = yield* runs.listLegs(roots, MAX_LEG_LIVE_RUNS);
-          const latestRuns = legs.map((leg) => leg.latest);
-          const messages = yield* runs.listFailureMessages(
-            latestRuns.filter((run) => run.status === "failed").map((run) => run.id),
-          );
           const nextWorkflowNames = yield* runs.listWorkflowNames(
             roots.flatMap((root) => (root.nextRunId === undefined ? [] : [root.nextRunId])),
           );
@@ -126,7 +122,7 @@ export const TaskTrackingRunsLayer: Layer.Layer<TaskTrackingRuns, never, SqlClie
               workflowId: leg.workflowId,
               workflowName: leg.workflowName,
               rerunCount: leg.rerunCount,
-              latestRun: buildTrackingRun(leg.latest, messages.get(leg.latest.id)),
+              latestRun: leg.latest,
               liveRunIds: leg.liveRunIds,
               nextWorkflowName:
                 nextRunId === undefined ? undefined : nextWorkflowNames.get(nextRunId),

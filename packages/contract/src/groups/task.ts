@@ -547,8 +547,12 @@ export const HandoffLeg = Schema.Struct({
    * every run that can be reached from it through the run it re-runs, however
    * many re-runs deep, and that belongs to the same Task. It never holds a run
    * only because it started around the same time.
+   *
+   * Only its id and status: they are all a client reads, to name how the leg
+   * stands and to open the run. A client that wants more of the run reads the
+   * run itself.
    */
-  latestRun: TrackingRun,
+  latestRun: Schema.Struct({ id: Id, status: RunStatus }),
   /**
    * The ids of the leg's runs that are pending or running, newest first, at
    * most `MAX_LEG_LIVE_RUNS`. Empty when no run of the leg is live.

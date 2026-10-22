@@ -241,7 +241,7 @@ describe("task.queryLegs", () => {
     expect(legs.map((leg) => leg.runId)).toEqual([buildId("run", 6), buildId("run", 1)]);
   });
 
-  it("says why the newest run failed, and lists the live runs newest first up to the cap", async () => {
+  it("names the newest run, and lists the live runs newest first up to the cap", async () => {
     const live = MAX_LEG_LIVE_RUNS + 5;
     const { legs } = await runLegs(
       Effect.gen(function* () {
@@ -263,11 +263,7 @@ describe("task.queryLegs", () => {
 
     const leg = legs[0]!;
     expect(leg.rerunCount).toBe(live + 1);
-    expect(leg.latestRun).toMatchObject({
-      id: buildId("run", 2),
-      status: "failed",
-      failureCause: "permission denied on ops-db",
-    });
+    expect(leg.latestRun).toEqual({ id: buildId("run", 2), status: "failed" });
     // The 25 pending re-runs and the running root are live; the cap keeps the newest 20,
     // which share a time, so the greatest ids come first.
     expect(leg.liveRunIds).toHaveLength(MAX_LEG_LIVE_RUNS);

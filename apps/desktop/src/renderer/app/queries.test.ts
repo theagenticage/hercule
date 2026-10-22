@@ -675,14 +675,7 @@ const buildLeg = (n: number, runId: string): HandoffLeg => ({
   workflowId: null,
   workflowName: "Implement",
   rerunCount: 0,
-  latestRun: {
-    id: runId,
-    workflowId: null,
-    workflowName: "Implement",
-    status: "completed",
-    createdAt: "2026-10-20T09:00:00.000Z",
-    awaitedSignalIds: [],
-  },
+  latestRun: { id: runId, status: "completed" },
   liveRunIds: [],
 });
 

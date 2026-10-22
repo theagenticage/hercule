@@ -227,8 +227,8 @@ export interface RunLeg {
   readonly workflowName: string;
   /** The runs of the leg other than the root. */
   readonly rerunCount: number;
-  /** The newest run of the leg, root included. */
-  readonly latest: RunSummary;
+  /** The newest run of the leg, root included: its id and status, which is all a leg reports of it. */
+  readonly latest: { readonly id: string; readonly status: RunStatus };
   /** The leg's pending and running runs, newest first, capped. */
   readonly liveRunIds: ReadonlyArray<string>;
 }
@@ -1031,8 +1031,7 @@ const make = Effect.gen(function* () {
      * - the ids of the leg's pending or running runs, newest first, at most
      *   `maxLiveRunIds`.
      *
-     * One recursive statement for all the roots, plus one lookup of the step
-     * records of the newest runs that are running. The statement walks the
+     * One recursive statement for all the roots. The statement walks the
      * roots on the primary key and each run's re-runs on `runs_original_run_id`,
      * so its work follows the runs of the legs, never the Task's other runs. The
      * unary `+` on the Task check keeps SQLite from walking `runs_task_id`, the
@@ -1086,11 +1085,6 @@ const make = Effect.gen(function* () {
                  ${sql.literal(SUMMARY_COLUMNS)}
           FROM ranked CROSS JOIN runs ON runs.id = member_id
           WHERE newest_rank = 1 OR member_id = root_id OR live_rank <= ${maxLiveRunIds}`;
-        const records = yield* listActiveStepRecords(
-          rows
-            .filter((row) => row.newest_rank === 1 && row.status === "running")
-            .map((row) => row.id),
-        );
         const byRoot = new Map<string, Array<(typeof rows)[number]>>();
         for (const row of rows) {
           const rootId = uuidToString(row.root_id);
@@ -1106,7 +1100,7 @@ const make = Effect.gen(function* () {
             workflowId: root.workflow_id === null ? null : uuidToString(root.workflow_id),
             workflowName: root.workflow_name,
             rerunCount: root.size - 1,
-            latest: parseSummaryRow(newest, records.get(uuidToString(newest.id)) ?? []),
+            latest: { id: uuidToString(newest.id), status: newest.status },
             liveRunIds: ofRoot
               .filter((row) => row.live_rank !== null && row.live_rank <= maxLiveRunIds)
               .toSorted((a, b) => a.live_rank! - b.live_rank!)

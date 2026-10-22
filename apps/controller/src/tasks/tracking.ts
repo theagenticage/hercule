@@ -22,6 +22,7 @@ import {
   MAX_TRACKING_STEP_NAME,
   type HandoffLegs,
   type NotFound,
+  type RunStatus,
   type TaskTracking as TaskTrackingReading,
   type TrackingDetail,
   type TrackingDetailRun,
@@ -80,7 +81,7 @@ export interface LegRuns {
   /** The runs of the leg other than the handoff's run. */
   readonly rerunCount: number;
   /** The newest run of the leg, the handoff's run included. */
-  readonly latestRun: TrackingRun;
+  readonly latestRun: { readonly id: string; readonly status: RunStatus };
   /** The ids of the leg's pending and running runs, newest first, at most `MAX_LEG_LIVE_RUNS`. */
   readonly liveRunIds: ReadonlyArray<string>;
   /** The workflow name of the next handoff's run, when the root has one. */
