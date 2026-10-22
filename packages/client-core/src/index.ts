@@ -447,6 +447,12 @@ export {
   type TrackingState,
 } from "./tracking";
 export {
+  describeHandoffTrip,
+  isAnyLegAffectedByRunPush,
+  type HandoffTrip,
+  type HandoffTripDestination,
+} from "./handoff-leg";
+export {
   describeTrackingOutputValue,
   describeTrackingStanding,
   describeTrackingTrip,
