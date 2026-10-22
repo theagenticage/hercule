@@ -79,38 +79,23 @@ const describeRerunCount = (count: number): string => {
 };
 
 /**
- * Returns the row of `leg`'s Task when `trackingRow` shows what the leg shows,
- * else `undefined`. The two agree only when all of these hold:
+ * Returns the row of `leg`'s Task when its word may end the leg's line, else
+ * `undefined`. That is when the row is for the leg's Task, the row's newest
+ * handoff is the leg's handoff, and the leg was not handed on again.
  *
- * - the row is for the leg's Task;
- * - the row's newest handoff is the leg's handoff, and the leg was not handed
- *   on again;
- * - the row's newest run is the leg's newest run, in the same status;
- * - the row's live runs are the leg's live runs: the same ids, in any order.
- *
- * Done and Tracking are read at different moments. When any of these differ,
- * one read is older than the other, or a re-run of another leg is newer, and
- * the row's state would describe a different moment than the leg does.
- *
- * The live runs condition also rejects a row whose Task has a live run in
- * another leg. That is intended: the trip then falls back to the standing of
- * the leg, which is always true, and only loses the Tracking colour in a rare
- * case.
+ * Tracking's word is the Task's latest observed standing, so it ends the line of
+ * the Task's latest leg whatever the runs of earlier legs are doing. Done and
+ * Tracking are read separately, so they can disagree for a moment while one of
+ * them refreshes. That converges, because both are read again on the same
+ * pushes.
  */
 const findAgreeingRow = (leg: HandoffLeg, trackingRow: TrackingRow | undefined) =>
   trackingRow !== undefined &&
   trackingRow.task.taskId === leg.taskId &&
   trackingRow.task.handoffs[0]?.runId === leg.runId &&
-  leg.next === undefined &&
-  trackingRow.task.latestRun.id === leg.latestRun.id &&
-  trackingRow.task.latestRun.status === leg.latestRun.status &&
-  hasSameIds(trackingRow.task.liveRunIds, leg.liveRunIds)
+  leg.next === undefined
     ? trackingRow
     : undefined;
-
-/** Checks that `a` and `b` hold the same set of ids, in any order. */
-const hasSameIds = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean =>
-  new Set(a).size === new Set(b).size && a.every((id) => b.includes(id));
 
 /**
  * Describes the trip of the handoff that resolved `signal`, or returns `null`
@@ -128,9 +113,9 @@ const hasSameIds = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean
  *   `findAgreeingRow`): the word of the row's Tracking state. When the leg
  *   ended with another word than the row (a run finished, but the row needs
  *   you), the leg's own word comes before it.
- * - Anything else, such as a Task that is open, or whose row is not loaded,
- *   is newer than the leg or is older than it: the standing of the leg. A
- *   missing row never means the Task is done.
+ * - Anything else, such as a Task that is open, or whose row is not loaded or
+ *   names another handoff as its newest: the standing of the leg. A missing row
+ *   never means the Task is done.
  *
  * The face is the handed-to workflow's. Its pose is the row's while the row
  * agrees with the leg, else the pose of the Task or the leg's standing.

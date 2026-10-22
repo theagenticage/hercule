@@ -291,55 +291,7 @@ describe("describeHandoffTrip", () => {
       expect(trip?.destination).toEqual({ kind: "tracking", taskId: "task" });
     });
 
-    it.each([
-      ["the row's newest run is another run", buildRow("completed", { latestRunId: "run-2" })],
-      ["the row's newest run is in another status", buildRow("running")],
-    ])("ends on the leg's standing when %s", (_name, row) => {
-      const trip = describeHandoffTrip(buildSignal(), buildLeg(), row);
-      expect(trip).toMatchObject({
-        steps: ["Handed to Implement"],
-        end: { text: "finished", tone: null },
-        pose: "done",
-      });
-    });
-
-    it("does not call a re-run finished when the Done read is newer than the Tracking read", () => {
-      // Tracking was read while the re-run ran; Done after it finished.
-      const leg = buildLeg({ rerunCount: 1, latestRun: buildLegRun("run-2", "completed") });
-      const trip = describeHandoffTrip(
-        buildSignal(),
-        leg,
-        buildRow("running", { latestRunId: "run-2" }),
-      );
-      expect(trip).toMatchObject({
-        steps: ["Handed to Implement", "tried again once"],
-        end: { text: "finished", tone: null },
-        pose: "done",
-        destination: { kind: "tracking", taskId: "task" },
-      });
-    });
-
-    it("does not call a re-run running when the Tracking read is newer than the Done read", () => {
-      // Done was read while the re-run ran; Tracking after it finished.
-      const leg = buildLeg({
-        rerunCount: 1,
-        latestRun: buildLegRun("run-2", "running"),
-        liveRunIds: ["run-2"],
-      });
-      const trip = describeHandoffTrip(
-        buildSignal(),
-        leg,
-        buildRow("completed", { latestRunId: "run-2" }),
-      );
-      expect(trip).toMatchObject({
-        steps: ["Handed to Implement", "tried again once"],
-        end: { text: "working", tone: null },
-        pose: "working",
-        destination: { kind: "tracking", taskId: "task" },
-      });
-    });
-
-    it("trusts a row that agrees with a re-run leg", () => {
+    it("trusts a row for a re-run leg", () => {
       const leg = buildLeg({ rerunCount: 1, latestRun: buildLegRun("run-2", "completed") });
       const trip = describeHandoffTrip(
         buildSignal(),
@@ -349,38 +301,19 @@ describe("describeHandoffTrip", () => {
       expect(trip?.end).toEqual({ text: "finished", tone: "finished" });
     });
 
-    it("does not call a handoff finished when its older sibling re-run ended between the reads", () => {
-      // Runs B (older) and C (newer) re-ran the handoff. Tracking was read while B
-      // ran and C was done; Done after B ended, so every run has ended.
-      const leg = buildLeg({ rerunCount: 2, latestRun: buildLegRun("run-c", "completed") });
-      const row = buildRow("completed", { latestRunId: "run-c", liveRunIds: ["run-b"] });
-      const trip = describeHandoffTrip(buildSignal(), leg, row);
-      expect(trip).toMatchObject({
-        steps: ["Handed to Implement", "tried again twice"],
-        end: { text: "finished", tone: null },
-        pose: "done",
+    it("ends the latest leg on Tracking's word while an earlier leg's run is live or a re-run of it is newer", () => {
+      // The row's live runs (an earlier leg's) and newest run (a re-run of an earlier leg, started
+      // after this leg's handoff) are not the leg's, and Tracking's word still ends the line.
+      const row = buildRow("running", {
+        signalWaits: true,
+        latestRunId: "run-rerun",
+        liveRunIds: ["run-rerun", "run-earlier"],
       });
-    });
-
-    it("trusts a row that holds the same live runs as the leg, in any order", () => {
-      const leg = buildLeg({
-        rerunCount: 1,
-        latestRun: buildLegRun("run-1", "running"),
-        liveRunIds: ["run-1", "run-b"],
-      });
-      const row = buildRow("running", { needsYou: true, liveRunIds: ["run-b", "run-1"] });
-      const trip = describeHandoffTrip(buildSignal(), leg, row);
-      expect(trip?.end).toEqual({ text: "needs you", tone: "waits" });
-    });
-
-    it("ends on the leg's standing when the row holds a live run the leg does not", () => {
-      // The live run belongs to another leg of the Task.
-      const row = buildRow("completed", { liveRunIds: ["run-other"] });
       const trip = describeHandoffTrip(buildSignal(), buildLeg(), row);
       expect(trip).toMatchObject({
-        steps: ["Handed to Implement"],
-        end: { text: "finished", tone: null },
-        pose: "done",
+        steps: ["Handed to Implement", "finished"],
+        end: { text: "needs you", tone: "waits" },
+        destination: { kind: "tracking", taskId: "task" },
       });
     });
 
