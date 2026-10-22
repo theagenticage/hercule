@@ -12,8 +12,9 @@
  * - `runner`, for the runners, whose connectivity draws a thread as away;
  * - `workspace`, for working files, observations and retained work;
  * - `provider`, for the providers, whose catalogs name each thread's model;
- * - `task`, for the open tasks a Draft Thread offers to start from, and for
- *   the Tasks Tracking lists, whose waiting rows the To do count takes in;
+ * - `task`, for the open tasks a Draft Thread offers to start from, for the
+ *   Tasks Tracking lists, whose waiting rows the To do count takes in, and for
+ *   Intake's Done lists, whose rows show where a handoff's Task stands;
  * - `connection`, for the GitHub Connection the New project form clones
  *   through, which may be made in the web app while this app runs;
  * - `assistant`, for the assistants the sidebar's Assistants section lists;
@@ -33,20 +34,46 @@
  * names a record the cache does not hold (see `useRelatedReads`).
  */
 import { useEffect } from "react";
-import type { QueryClient } from "@tanstack/react-query";
+import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import {
   findTrackingTasksAffectedByRunPush,
   invalidateWithoutCancelling,
+  isAnyLegAffectedByRunPush,
   queryKeys,
   type Live,
   type LiveInvalidatePush,
   type LiveQueryKey,
   type TrackingRead,
 } from "@hercule/client-core";
-import type { MutableLiveTopic } from "@hercule/contract";
+import type { HandoffLeg, MutableLiveTopic } from "@hercule/contract";
 import { ageClock } from "./age-clock";
+import { isDoneListKey, type DoneSignalPage } from "./queries";
 import { useWindowVisible } from "./window-visibility";
+
+/**
+ * Marks out of date every Done list the cache holds, whichever source tab it
+ * is for, and reads again the ones a screen shows. `isAffected` is given the
+ * legs the lists hold and decides whether to do so. Does nothing when the
+ * lists hold no leg, because then no trip can have changed.
+ */
+const invalidateDoneLists = (
+  queryClient: QueryClient,
+  isAffected: (legs: ReadonlyArray<HandoffLeg>) => boolean,
+): void => {
+  const lists = queryClient.getQueryCache().findAll({
+    queryKey: queryKeys.signals(),
+    predicate: (query) => isDoneListKey(query.queryKey),
+  });
+  const legs = lists.flatMap(
+    (list) =>
+      (list.state.data as InfiniteData<DoneSignalPage> | undefined)?.pages.flatMap(
+        (page) => page.legs,
+      ) ?? [],
+  );
+  if (legs.length === 0 || !isAffected(legs)) return;
+  for (const list of lists) invalidateWithoutCancelling(queryClient, list.queryKey);
+};
 
 /**
  * Reads again every query a push on `topic` makes stale: the queries under
@@ -64,6 +91,12 @@ import { useWindowVisible } from "./window-visibility";
  * ids, or creates a run, may reach any Task, so it marks every detail out of
  * date. Only the open pane's detail is read again; the others are read when
  * their pane opens.
+ *
+ * Intake's Done lists hold the leg of each handoff on their pages. A `task`
+ * push (a Task closed, or a handoff continued it) reads every Done list
+ * again. A `run` push reads them again only when it can change a leg any of
+ * them holds (see `isAnyLegAffectedByRunPush`). A `signal` push already reads
+ * them through its keys.
  */
 export const invalidateForPush = (
   queryClient: QueryClient,
@@ -72,7 +105,9 @@ export const invalidateForPush = (
   push: LiveInvalidatePush,
 ): void => {
   for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
+  if (topic === "task") invalidateDoneLists(queryClient, () => true);
   if (topic !== "run") return;
+  invalidateDoneLists(queryClient, (legs) => isAnyLegAffectedByRunPush(legs, push));
   const read = queryClient.getQueryData<TrackingRead>(queryKeys.tracking());
   const affected =
     read === undefined ? "every" : findTrackingTasksAffectedByRunPush(read.tasks, push);
@@ -129,8 +164,8 @@ export const useLiveConnection = (live: Live, queryClient: QueryClient): void =>
 
   useEffect(() => {
     const unsubscribes = SHELL_TOPICS.map((topic) =>
-      live.subscribe(topic, (keys) => {
-        for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
+      live.subscribe(topic, (keys, push) => {
+        invalidateForPush(queryClient, topic, keys, push);
       }),
     );
 

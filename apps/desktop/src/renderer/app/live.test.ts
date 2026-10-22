@@ -8,8 +8,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { buildQueryKeys, queryKeys, type Live, type TrackingRead } from "@hercule/client-core";
-import type { TrackingRun } from "@hercule/contract";
+import type { HandoffLeg, TrackingRun } from "@hercule/contract";
 import { invalidateForPush, useSubagentsLive } from "./live";
+import type { DoneSignalPage } from "./queries";
 
 /** What a subscription to a topic like `subagent` is called with on each push. */
 type InvalidateHandler = (keys: ReadonlyArray<ReadonlyArray<unknown>>) => void;
@@ -198,5 +199,88 @@ describe("invalidateForPush", () => {
     });
     expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(false);
+  });
+});
+
+/**
+ * Returns a query client holding two Done lists, the "all" tab with one leg
+ * (newest run `r-new`, live run `r-live`) and the tab of the plugin "github"
+ * with none, and the cleared-today list. All are fresh.
+ */
+const buildCachedDoneLists = () => {
+  const queryClient = new QueryClient();
+  const leg: HandoffLeg = {
+    runId: "r-first",
+    signalId: "s-1",
+    taskId: "t-1",
+    taskStatus: "in-progress",
+    workflowId: null,
+    workflowName: "Implement",
+    rerunCount: 2,
+    latestRun: buildTrackingRun("r-new", "running"),
+    liveRunIds: ["r-live"],
+  };
+  const setPages = (queryKey: ReadonlyArray<unknown>, legs: ReadonlyArray<HandoffLeg>) => {
+    queryClient.setQueryData(queryKey, {
+      pages: [{ items: [], legs } satisfies DoneSignalPage],
+      pageParams: [undefined],
+    });
+  };
+  const all = queryKeys.signals({ view: "done", limit: 50 });
+  const github = queryKeys.signals({ view: "done", limit: 50, source: "github" });
+  const clearedToday = queryKeys.signals({ view: "done", limit: 500 });
+  setPages(all, [leg]);
+  setPages(github, []);
+  queryClient.setQueryData(clearedToday, { pages: [{ items: [] }], pageParams: [undefined] });
+  const isStale = (queryKey: ReadonlyArray<unknown>): boolean =>
+    queryClient.getQueryState(queryKey)?.isInvalidated === true;
+  return { queryClient, isStale, all, github, clearedToday };
+};
+
+describe("invalidateForPush for Intake's Done lists", () => {
+  it("marks every Done list out of date for a task push, and not the cleared-today list", () => {
+    const { queryClient, isStale, all, github, clearedToday } = buildCachedDoneLists();
+    invalidateForPush(queryClient, "task", buildQueryKeys("task", ["t-1"]), {
+      ids: ["t-1"],
+      kind: "updated",
+    });
+    expect(isStale(all)).toBe(true);
+    expect(isStale(github)).toBe(true);
+    expect(isStale(clearedToday)).toBe(false);
+  });
+
+  it("leaves the Done lists alone for a run push that names an unrelated run", () => {
+    const { queryClient, isStale, all, github } = buildCachedDoneLists();
+    invalidateForPush(queryClient, "run", [], { ids: ["r-cron"], kind: "updated" });
+    expect(isStale(all)).toBe(false);
+    expect(isStale(github)).toBe(false);
+  });
+
+  it.each([["r-new"], ["r-live"]])(
+    "marks every Done list out of date for a run push that names the held leg's run %s",
+    (runId) => {
+      const { queryClient, isStale, all, github, clearedToday } = buildCachedDoneLists();
+      invalidateForPush(queryClient, "run", [], { ids: [runId], kind: "updated" });
+      expect(isStale(all)).toBe(true);
+      expect(isStale(github)).toBe(true);
+      expect(isStale(clearedToday)).toBe(false);
+    },
+  );
+
+  it("marks the Done lists out of date for a run that was created", () => {
+    const { queryClient, isStale, all } = buildCachedDoneLists();
+    invalidateForPush(queryClient, "run", [], { ids: ["r-other"], kind: "created" });
+    expect(isStale(all)).toBe(true);
+  });
+
+  it("looks at the legs of every held Done list, not only the visible tab", () => {
+    const { queryClient, isStale, all, github } = buildCachedDoneLists();
+    // Only the "github" tab holds the leg this time.
+    const held = queryClient.getQueryData(all);
+    queryClient.setQueryData(github, held);
+    queryClient.setQueryData(all, { pages: [{ items: [], legs: [] }], pageParams: [undefined] });
+    invalidateForPush(queryClient, "run", [], { ids: ["r-live"], kind: "updated" });
+    expect(isStale(all)).toBe(true);
+    expect(isStale(github)).toBe(true);
   });
 });

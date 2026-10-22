@@ -46,11 +46,13 @@ import {
   MAX_PAGE_LIMIT,
   type ConversationMessage,
   type EventHandling,
+  type HandoffLeg,
   type Input,
   type RunSummary,
   type Runner,
   type Session,
   type SignalFilter,
+  type SignalPage,
   type SkillsPreviewFilter,
   type Task,
   type TranscriptRow,
@@ -757,15 +759,51 @@ export const snoozeTimerQuery = (client: HerculeClient) =>
   });
 
 /**
+ * One page of Intake's Done list: the signals as `signal.query` returns them,
+ * and the leg of each handoff among them (see `HandoffLeg`), so a row can tell
+ * where the work the user handed off stands. `legs` is empty when the page
+ * holds no signal that started a run.
+ */
+export type DoneSignalPage = SignalPage & { readonly legs: ReadonlyArray<HandoffLeg> };
+
+/**
+ * Returns whether `queryKey` is the key of a Done list that `signalsDoneQuery`
+ * reads, whichever source tab it is for. The cleared-today read has the same
+ * view but larger pages and no legs, so it is not one.
+ */
+export const isDoneListKey = (queryKey: QueryKey): boolean => {
+  const filter = queryKey[1] as SignalFilter | undefined;
+  return (
+    queryKey[0] === "signals" && filter?.view === "done" && filter.limit === DEFAULT_PAGE_LIMIT
+  );
+};
+
+/**
  * Reads Intake's Done list page by page, newest first: every resolved
- * signal, or only those of the plugin `source` for a plugin's tab. A push on
- * the `signal` topic reads the held pages again.
+ * signal, or only those of the plugin `source` for a plugin's tab. Each page
+ * is read with `signal.query`, then the legs of the handoffs on it with one
+ * `task.queryLegs` request for the run ids of its signals' resolutions. A
+ * page with no run id makes no second request. A page is at most
+ * `MAX_LEG_QUERY_RUNS` signals long, so one request is always enough.
+ *
+ * It is kept current by pushes, which read the held pages again: a `signal`
+ * push (a signal resolved or changed), a `task` push (a Task closed, or a
+ * handoff continued it), and a `run` push that can change a held leg (see
+ * `invalidateForPush`). A cron run that touches no handoff reads nothing.
+ * The cost is two requests per page read, and no timer.
  */
 export const signalsDoneQuery = (client: HerculeClient, source?: string) =>
   infiniteQueryOptions({
     queryKey: queryKeys.signals(buildPagedSignalFilter("done", source)),
-    queryFn: ({ pageParam }) =>
-      client.signal.query({ query: buildPagedSignalFilter("done", source, pageParam) }),
+    queryFn: async ({ pageParam }): Promise<DoneSignalPage> => {
+      const page = await client.signal.query({
+        query: buildPagedSignalFilter("done", source, pageParam),
+      });
+      const runIds = [...new Set(page.items.flatMap((signal) => signal.resolution?.runId ?? []))];
+      if (runIds.length === 0) return { ...page, legs: [] };
+      const { legs } = await client.task.queryLegs({ query: { runIds } });
+      return { ...page, legs };
+    },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (page) => page.nextCursor,
     ...LIVE_KEPT_READ_OPTIONS,

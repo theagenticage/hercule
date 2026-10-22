@@ -12,8 +12,10 @@
  * merges only the rows after the ones held when it holds some, replaces them
  * when the controller's log was replaced, takes the whole transcript from a
  * controller that ignores `after`, and does not retry a read from held rows;
- * that `forgetGoneThread` reads the session before it deletes the copy; and
- * that `showThreadCopy` starts the read the copy needs.
+ * that `forgetGoneThread` reads the session before it deletes the copy; that
+ * `showThreadCopy` starts the read the copy needs; and that `signalsDoneQuery`
+ * reads the legs of a page's handoffs in one request, and
+ * `signalsClearedTodayQuery` reads none.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InfiniteQueryObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
@@ -26,7 +28,7 @@ import {
   type MessagePages,
   isNotFound,
 } from "@hercule/client-core";
-import type { TranscriptRow } from "@hercule/contract";
+import type { HandoffLeg, Signal, TranscriptRow } from "@hercule/contract";
 import { createApiStub } from "@hercule/client-core/testing";
 import {
   ensureShellData,
@@ -37,6 +39,8 @@ import {
   removeQueryOnceUnobserved,
   showThreadCopy,
   setupQuery,
+  signalsClearedTodayQuery,
+  signalsDoneQuery,
   storeNewestMessages,
   storeSentMessage,
   transcriptQuery,
@@ -634,5 +638,101 @@ describe("showThreadCopy", () => {
       expect(queryClient.getQueryData(queryKeys.transcript(sessionId))).toEqual(thread.transcript);
     });
     expect(readTranscriptReads(calls, sessionId)).toHaveLength(1);
+  });
+});
+
+/** Builds the id with the number `n`, in the form the contract accepts. */
+const buildId = (n: number): string => `01a06d02-a000-7000-8000-${String(n).padStart(12, "0")}`;
+
+/** Builds a resolved signal, handed to an agent when `runId` is given. */
+const buildDoneSignal = (n: number, runId?: string): Signal => ({
+  id: buildId(n),
+  kind: "github/checks-failed",
+  origin: { type: "api", actor: "user", eventIds: [], reason: "Test" },
+  title: `Signal ${String(n)}`,
+  priority: "normal",
+  blocks: [],
+  actions: [],
+  match: {},
+  status: "resolved",
+  resolution: {
+    kind: "decided",
+    ...(runId === undefined ? {} : { runId }),
+    outcome: "Handled",
+    actor: "user",
+    origin: "web",
+    at: "2026-10-20T09:00:00.000Z",
+  },
+  createdAt: "2026-10-20T08:00:00.000Z",
+});
+
+/** Builds the leg of the handoff whose run is `runId`, finished and never re-run. */
+const buildLeg = (n: number, runId: string): HandoffLeg => ({
+  runId,
+  signalId: buildId(n),
+  taskId: buildId(100 + n),
+  taskStatus: "in-progress",
+  workflowId: null,
+  workflowName: "Implement",
+  rerunCount: 0,
+  latestRun: {
+    id: runId,
+    workflowId: null,
+    workflowName: "Implement",
+    status: "completed",
+    createdAt: "2026-10-20T09:00:00.000Z",
+    awaitedSignalIds: [],
+  },
+  liveRunIds: [],
+});
+
+describe("signalsDoneQuery", () => {
+  /**
+   * Returns a client whose controller answers a Done page with `items` and
+   * every leg request with `legs`, and the `runIds` of each leg request.
+   */
+  const answerDonePage = (items: ReadonlyArray<Signal>, legs: ReadonlyArray<HandoffLeg> = []) => {
+    const legRequests: string[][] = [];
+    const { fetch } = createApiStub({
+      "GET /api/v1/signals": { body: { items } },
+      "GET /api/v1/tasks/legs": (call) => {
+        legRequests.push(new URLSearchParams(call.search).getAll("runIds"));
+        return { body: { legs } };
+      },
+    });
+    return { client: createClient({ baseUrl: CONTROLLER_URL, fetch }), legRequests };
+  };
+
+  it("reads the legs of the page's handoffs in one request and returns them with the page", async () => {
+    const [run1, run2] = [buildId(201), buildId(202)] as const;
+    const leg = buildLeg(1, run1);
+    const { client, legRequests } = answerDonePage(
+      [buildDoneSignal(1, run1), buildDoneSignal(2, run2), buildDoneSignal(3)],
+      [leg],
+    );
+
+    const page = await new QueryClient().fetchInfiniteQuery(signalsDoneQuery(client));
+
+    expect(legRequests).toHaveLength(1);
+    expect(legRequests[0]?.join(",").split(",")).toEqual([run1, run2]);
+    expect(page.pages[0]?.legs).toEqual([leg]);
+    expect(page.pages[0]?.items).toHaveLength(3);
+  });
+
+  it("makes no leg request for a page with no handoff", async () => {
+    const { client, legRequests } = answerDonePage([buildDoneSignal(1)]);
+
+    const page = await new QueryClient().fetchInfiniteQuery(signalsDoneQuery(client));
+
+    expect(legRequests).toEqual([]);
+    expect(page.pages[0]?.legs).toEqual([]);
+  });
+
+  it("reads no legs for the cleared-today count", async () => {
+    const { client, legRequests } = answerDonePage([buildDoneSignal(1, buildId(201))]);
+
+    await new QueryClient().fetchInfiniteQuery(signalsClearedTodayQuery(client));
+
+    expect(legRequests).toEqual([]);
   });
 });

@@ -584,7 +584,7 @@ const seedQueryCache = (
     );
   }
   queryClient.setQueryData(signalsDoneQuery(client).queryKey, {
-    pages: [{ items: records.done ?? [] }],
+    pages: [{ items: records.done ?? [], legs: [] }],
     pageParams: [undefined],
   });
   queryClient.setQueryData(signalsClearedTodayQuery(client).queryKey, {
