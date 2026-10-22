@@ -2520,7 +2520,7 @@ describe("Thread: model options are sent with the submission", () => {
     });
   });
 
-  it("resets the picks when a model is picked, and never patches the session", async () => {
+  it("keeps the picked option when another model that offers it is picked, and never patches the session", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
       "GET /api/v1/providers": providers,
@@ -2545,8 +2545,12 @@ describe("Thread: model options are sent with the submission", () => {
       if (found === undefined) throw new Error("input not sent yet");
       return found;
     });
-    // The option picks were cleared together with the model that offered them.
-    expect(call.body).toEqual({ text: "Also check the logs", model: "claude-opus-5" });
+    // Opus offers `effort` too, so the pick goes with the new model.
+    expect(call.body).toEqual({
+      text: "Also check the logs",
+      model: "claude-opus-5",
+      options: { effort: "high" },
+    });
     expect(
       api.calls.some(
         (call) => call.method === "PATCH" && call.path === `/api/v1/sessions/${SESSION_ID}`,
@@ -2554,7 +2558,7 @@ describe("Thread: model options are sent with the submission", () => {
     ).toBe(false);
   });
 
-  it("shows the newly picked model's defaults instead of the stored model's options", async () => {
+  it("keeps the stored options when the newly picked model offers them", async () => {
     const user = userEvent.setup();
     await openApp(
       buildSession({
@@ -2567,13 +2571,15 @@ describe("Thread: model options are sent with the submission", () => {
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
     await pickRow(user, /claude opus 5/i);
-    await user.click(await screen.findByRole("button", { name: "Medium" }));
+    await user.click(await screen.findByRole("button", { name: "High" }));
 
-    // The stored `high` belongs to the other model, and the server drops it
-    // when the model changes, so the options show the descriptor's default.
-    const medium = await screen.findByRole<HTMLButtonElement>("radio", { name: "Medium" });
-    expect(medium.getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByRole("radio", { name: "High" }).getAttribute("aria-checked")).toBe("false");
+    // The stored `high` is a choice Opus offers too, so it carries over
+    // instead of falling back to the descriptor's default.
+    const high = await screen.findByRole<HTMLButtonElement>("radio", { name: "High" });
+    expect(high.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Medium" }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
     expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
   });
 

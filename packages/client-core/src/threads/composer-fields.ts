@@ -188,6 +188,61 @@ const findBlocker = (
 const findLockedReason = (kind: ThreadKind, field: string): string | null =>
   kind === "active" ? `Create a new thread to change the ${field}` : null;
 
+/** Where a config's model is found: the runner it runs on, and that runner's catalog for it. */
+interface ModelLocation {
+  readonly runner: Runner | undefined;
+  readonly snapshot: CapabilitySnapshot | undefined;
+  /** The model's descriptor, or `undefined` for a slug the snapshot does not list. */
+  readonly descriptor: ModelDescriptor | undefined;
+}
+
+/**
+ * Returns the runner `config` runs on, the instance's snapshot on that runner,
+ * and the descriptor of `config.model` in it. A catalog belongs to one
+ * instance on one runner, so the model is looked up there and nowhere else.
+ *
+ * An existing workspace is on one runner and never moves, so a thread that
+ * joins one (`joined`) uses that runner. A runner the user picked is already
+ * in `config.runnerId`.
+ */
+const locateModel = (
+  catalogs: ThreadCatalogs,
+  config: ThreadConfig,
+  joined: Workspace | undefined,
+): ModelLocation => {
+  const instance = catalogs.instances.find((each) => each.id === config.instanceId);
+  const runner = findReferenceRunner(
+    catalogs.runners,
+    joined?.runnerId ?? config.runnerId,
+    catalogs.thisMacRunnerId,
+  );
+  const snapshot = instance === undefined ? undefined : findSnapshotOn(instance, runner?.id);
+  return {
+    runner,
+    snapshot,
+    descriptor: snapshot?.models.find((model) => model.slug === config.model),
+  };
+};
+
+/**
+ * Returns the descriptor of the model `config` runs with, on the runner it
+ * runs on, or `undefined` when the instance has no snapshot there or the
+ * snapshot does not list the model (a custom slug). A thread that has started
+ * runs on the runner of its workspace, so joining the workspace first gives
+ * the same runner as `config.runnerId` does.
+ */
+export const findModelDescriptor = (
+  catalogs: ThreadCatalogs,
+  config: ThreadConfig,
+): ModelDescriptor | undefined => {
+  const picked = config.workspace;
+  const joined =
+    picked?.kind === "existing"
+      ? (catalogs.workspaces ?? []).find((each) => each.id === picked.workspaceId)
+      : undefined;
+  return locateModel(catalogs, config, joined).descriptor;
+};
+
 /** Returns everything the composer shows for a thread's config. */
 export const buildComposerFields = (
   catalogs: ThreadCatalogs,
@@ -210,16 +265,7 @@ export const buildComposerFields = (
     kind === "draft" && pick.kind === "existing"
       ? workspaces.find((each) => each.id === pick.workspaceId)
       : undefined;
-  // An existing workspace is on one runner and never moves, so a draft that
-  // joins one uses that runner. A runner the user picked is already in
-  // `config.runnerId`.
-  const runner = findReferenceRunner(
-    catalogs.runners,
-    joined?.runnerId ?? config.runnerId,
-    catalogs.thisMacRunnerId,
-  );
-  const snapshot = instance === undefined ? undefined : findSnapshotOn(instance, runner?.id);
-  const descriptor = snapshot?.models.find((model) => model.slug === config.model);
+  const { runner, snapshot, descriptor } = locateModel(catalogs, config, joined);
 
   // The label's name and dimmed reason come from the same runner. A runner
   // shown with another runner's reason would send the user to fix the wrong
