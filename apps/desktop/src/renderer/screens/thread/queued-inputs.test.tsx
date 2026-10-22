@@ -300,9 +300,9 @@ describe("the skills in a queued input", () => {
     await renderQueueWithSkills("Then $review the diff", [REVIEW]);
 
     await waitFor(() => {
-      expect(document.querySelector(".queued-text .skill-chip")?.textContent).toBe("review");
+      expect(document.querySelector(".queued-text .skill-chip")?.textContent).toBe("$review");
     });
-    expect(readRows()).toEqual(["Then review the diff"]);
+    expect(readRows()).toEqual(["Then $review the diff"]);
   });
 
   it("keeps a name the session does not have as text", async () => {
