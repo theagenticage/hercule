@@ -32,6 +32,11 @@ import { createNavBuilder } from "./nav";
 import { buildSim } from "./sim";
 import type { Stage } from "./stage";
 
+// Most tests here rebuild the Bureau (about 70 ms each) and step thousands of
+// frames. Alone they take up to 5 s, so on a busy machine the default of 5 s
+// fails tests that are correct and only slow.
+vi.setConfig({ testTimeout: 60_000 });
+
 /** A rig that draws nothing and records the actions and faces the sim gave it. */
 interface RecordingRig extends ColleagueRig {
   readonly actions: Action[];
@@ -1452,31 +1457,36 @@ describe("a world that changes nothing to draw", () => {
   });
 });
 
+/**
+ * How many visitors join and leave in the test below. The visitors alternate
+ * between a project and no project, and each one in a project makes the test
+ * rebuild the building twice, at about 70 ms a rebuild. A dozen visitors
+ * repeat every kind of join and leave many times over. With 50, the test took
+ * 3.5 s alone and timed out at 30 s when two test runs shared the CPU.
+ */
+const VISITOR_COUNT = 12;
+
 describe("many joins and leaves", () => {
-  it(
-    "leave the sim with the colleagues of the last world and no timers",
-    { timeout: 30_000 },
-    async () => {
-      const base = buildThread("base", "working");
-      const open = openOffice([base]);
-      const ids: string[] = [];
+  it("leave the sim with the colleagues of the last world and no timers", async () => {
+    const base = buildThread("base", "working");
+    const open = openOffice([base]);
+    const ids: string[] = [];
 
-      for (let index = 0; index < 50; index++) {
-        const id = `visitor-${index}`;
-        ids.push(id);
-        open.play([base, buildThread(id, "working", index % 2 === 0 ? WEBSHOP_PROJECT.id : null)]);
-        await open.advance(index % 4);
-        open.play([base]);
-        for (let second = 0; second < WALK_LIMIT && !open.departed.includes(id); second++) {
-          await open.advance(1);
-        }
+    for (let index = 0; index < VISITOR_COUNT; index++) {
+      const id = `visitor-${index}`;
+      ids.push(id);
+      open.play([base, buildThread(id, "working", index % 2 === 0 ? WEBSHOP_PROJECT.id : null)]);
+      await open.advance(index % 4);
+      open.play([base]);
+      for (let second = 0; second < WALK_LIMIT && !open.departed.includes(id); second++) {
+        await open.advance(1);
       }
-      await open.advance(60);
+    }
+    await open.advance(60);
 
-      expect([...open.sim.readStates().keys()]).toEqual(["base"]);
-      expect(open.departed).toEqual(ids);
-      expect([...open.rigs.keys()]).toEqual(["base"]);
-      expect(vi.getTimerCount()).toBe(0);
-    },
-  );
+    expect([...open.sim.readStates().keys()]).toEqual(["base"]);
+    expect(open.departed).toEqual(ids);
+    expect([...open.rigs.keys()]).toEqual(["base"]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });
