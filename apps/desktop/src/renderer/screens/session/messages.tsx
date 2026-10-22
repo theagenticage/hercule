@@ -224,7 +224,7 @@ function SkillMessageText({
 /**
  * Renders a message sent into the session: the images sent with it, then
  * the bubble, as markdown with its line breaks kept, and its time under it,
- * with a button that copies the message (`MessageCopyButton`).
+ * with a button before the time that copies the message (`MessageCopyButton`).
  * What the user typed shows HTML tags as typed: `<b>x</b>` reads `<b>x</b>`,
  * not a bold x. A message another agent sent is markdown with embedded HTML,
  * as an agent's own message is.
@@ -303,6 +303,7 @@ export const UserMessage = memo(function UserMessage({
           </div>
         )}
         <div className="bubble-meta">
+          {text === "" ? null : <MessageCopyButton text={text} />}
           {sending
             ? "Sending…"
             : steered
@@ -310,7 +311,6 @@ export const UserMessage = memo(function UserMessage({
                 ? "Steered"
                 : `Steered · ${time}`
               : time}
-          {text === "" ? null : <MessageCopyButton text={text} />}
         </div>
       </div>
     </div>
