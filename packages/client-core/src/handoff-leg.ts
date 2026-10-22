@@ -85,11 +85,17 @@ const describeRerunCount = (count: number): string => {
  * - the row is for the leg's Task;
  * - the row's newest handoff is the leg's handoff, and the leg was not handed
  *   on again;
- * - the row's newest run is the leg's newest run, in the same status.
+ * - the row's newest run is the leg's newest run, in the same status;
+ * - the row's live runs are the leg's live runs: the same ids, in any order.
  *
  * Done and Tracking are read at different moments. When any of these differ,
  * one read is older than the other, or a re-run of another leg is newer, and
  * the row's state would describe a different moment than the leg does.
+ *
+ * The live runs condition also rejects a row whose Task has a live run in
+ * another leg. That is intended: the trip then falls back to the standing of
+ * the leg, which is always true, and only loses the Tracking colour in a rare
+ * case.
  */
 const findAgreeingRow = (leg: HandoffLeg, trackingRow: TrackingRow | undefined) =>
   trackingRow !== undefined &&
@@ -97,9 +103,14 @@ const findAgreeingRow = (leg: HandoffLeg, trackingRow: TrackingRow | undefined) 
   trackingRow.task.handoffs[0]?.runId === leg.runId &&
   leg.next === undefined &&
   trackingRow.task.latestRun.id === leg.latestRun.id &&
-  trackingRow.task.latestRun.status === leg.latestRun.status
+  trackingRow.task.latestRun.status === leg.latestRun.status &&
+  hasSameIds(trackingRow.task.liveRunIds, leg.liveRunIds)
     ? trackingRow
     : undefined;
+
+/** Checks that `a` and `b` hold the same set of ids, in any order. */
+const hasSameIds = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean =>
+  new Set(a).size === new Set(b).size && a.every((id) => b.includes(id));
 
 /**
  * Describes the trip of the handoff that resolved `signal`, or returns `null`
