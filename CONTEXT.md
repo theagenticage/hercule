@@ -89,7 +89,7 @@ A provider-held question that one agent of a session - its own agent or one of i
 _Avoid_: user input (the old name for the `question` kind), permission request (reserved for grant escalation), approval prompt, tool prompt
 
 **Steering**:
-Delivering user input into a session's running turn, folding it into that turn instead of opening a new one. A guarantee every session gives: where the provider cannot steer natively, the running turn is interrupted and the input is sent as the next turn. An owner's message to a busy assistant is steered without being asked.
+Delivering user input into a session's running turn, folding it into that turn instead of opening a new one. A guarantee every session gives: where the provider cannot steer natively, the running turn is interrupted and the input is sent as the next turn. An owner's message to a busy assistant is steered without being asked, and so is one session's message to another session, unless it names itself or says `steer: false`.
 _Avoid_: interrupt (that's stopping a turn), inject
 
 **Queued Input**:
