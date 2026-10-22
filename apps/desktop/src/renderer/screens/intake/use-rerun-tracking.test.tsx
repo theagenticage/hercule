@@ -4,45 +4,41 @@
  * and a refusal that shows only while its run is still the newest.
  */
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import type { HerculeClient } from "@hercule/client-core";
 import type { TrackingTask } from "@hercule/contract";
 import { createQueryClient } from "../../app/query-client";
 import { useRerunTracking } from "./use-rerun-tracking";
 
-afterEach(() => {
-  vi.useRealTimers();
-});
-
 /** Builds a Tracking row of the Task `taskId` whose newest run is `runId`. */
 const buildTask = (taskId: string, runId: string): TrackingTask =>
   ({ taskId, latestRun: { id: runId } }) as TrackingTask;
 
-/**
- * Runs `change` and lets the hook redraw. Query tells the screen about a changed
- * request on the next tick, not at once.
- */
-const press = (change: () => void) =>
-  act(async () => {
-    change();
-    await (vi.isFakeTimers()
-      ? vi.advanceTimersByTimeAsync(0)
-      : new Promise((resolve) => setTimeout(resolve, 0)));
-  });
+/** Waits one macrotask, so a request already on its way to `run.rerun` has arrived. */
+const letPendingWorkRun = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
 /**
  * Renders the hook over the app's own query client, with a controller whose
- * `run.rerun` answers only when the test says. `answerNext` settles the
- * oldest request still waiting.
+ * `run.rerun` answers only when the test says.
+ *
+ * Query sends a request, and tells the hook about a changed request, a few
+ * ticks after the call that changed it. So the helpers wait for what they
+ * need and never for a fixed time:
+ * - `press` runs `starts` in one batch, then waits until the hook has drawn.
+ * - `accept` and `refuse` wait until the oldest unanswered request has reached
+ *   `run.rerun`, answer it, then wait until the hook has drawn the answer.
  */
 const renderRerun = () => {
-  const waiting: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+  const waiting: Array<{ accept: () => void; refuse: (message: string) => void }> = [];
   const rerun = vi.fn(
     () =>
       new Promise<unknown>((resolve, reject) => {
-        waiting.push({ resolve: () => resolve({ runId: "new" }), reject });
+        waiting.push({
+          accept: () => resolve({ runId: "new" }),
+          refuse: (message) => reject(new Error(message)),
+        });
       }),
   );
   const client = { run: { rerun } } as unknown as HerculeClient;
@@ -50,28 +46,58 @@ const renderRerun = () => {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
-  const view = renderHook(() => useRerunTracking(client), { wrapper });
+  let draws = 0;
+  const { result } = renderHook(
+    () => {
+      draws += 1;
+      return useRerunTracking(client);
+    },
+    { wrapper },
+  );
+
+  const waitForDrawAfter = async (change: () => void | Promise<void>) => {
+    const before = draws;
+    await act(change);
+    await waitFor(() => {
+      expect(draws).toBeGreaterThan(before);
+    });
+  };
+  let answered = 0;
+  const answerNext = async (answer: (request: (typeof waiting)[number]) => void) => {
+    await waitFor(() => {
+      expect(waiting.length).toBeGreaterThan(answered);
+    });
+    const request = waiting[answered]!;
+    answered += 1;
+    await waitForDrawAfter(() => answer(request));
+  };
   return {
     rerun,
     queryClient,
-    result: view.result,
-    accept: () => press(() => waiting.shift()!.resolve()),
-    refuse: (message: string) => press(() => waiting.shift()!.reject(new Error(message))),
+    result,
+    press: (starts: () => void) => waitForDrawAfter(starts),
+    accept: () => answerNext((request) => request.accept()),
+    refuse: (message: string) => answerNext((request) => request.refuse(message)),
   };
 };
 
 describe("useRerunTracking", () => {
   it("sends one request for two presses before the screen redraws", async () => {
-    const { result, rerun } = renderRerun();
+    const { result, rerun, press } = renderRerun();
+    // Both presses are in one batch, so the hook cannot draw between them.
     await press(() => {
       result.current.start("task-a", "run-1");
       result.current.start("task-a", "run-1");
     });
+    await waitFor(() => {
+      expect(rerun).toHaveBeenCalledTimes(1);
+    });
+    await letPendingWorkRun();
     expect(rerun).toHaveBeenCalledTimes(1);
   });
 
   it("locks while the request sends and while the Task's newest run is still the re-run run, and unlocks when the read shows a newer one", async () => {
-    const { result, accept, rerun } = renderRerun();
+    const { result, rerun, press, accept } = renderRerun();
     await press(() => {
       result.current.start("task-a", "run-1");
     });
@@ -79,19 +105,17 @@ describe("useRerunTracking", () => {
 
     await accept();
     expect(result.current.isStarting(buildTask("task-a", "run-1"))).toBe(true);
-    await press(() => {
+    act(() => {
       result.current.start("task-a", "run-1");
     });
+    await letPendingWorkRun();
     expect(rerun).toHaveBeenCalledTimes(1);
 
     expect(result.current.isStarting(buildTask("task-a", "run-2"))).toBe(false);
   });
 
   it("keeps a Task locked after the screen moved on to another Task's re-run and a long time passed", async () => {
-    // Query drops a finished request with no screen on it after `gcTime`, which the
-    // app sets to 0 for mutations. Only the fake clock makes this wait observable.
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const { result, accept } = renderRerun();
+    const { result, queryClient, press, accept } = renderRerun();
     await press(() => {
       result.current.start("task-a", "run-1");
     });
@@ -100,14 +124,17 @@ describe("useRerunTracking", () => {
       result.current.start("task-b", "run-1");
     });
     await accept();
+    // The app drops a finished request nobody shows after 0 ms. Real timers
+    // fire in order of their time, so after this wait that drop has happened.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+      await new Promise((resolve) => setTimeout(resolve, 50));
     });
+    expect(queryClient.getMutationCache().getAll()).toHaveLength(2);
     expect(result.current.isStarting(buildTask("task-a", "run-1"))).toBe(true);
   });
 
   it("shows a refusal only while its run is the Task's newest, and shows the next refusal alone", async () => {
-    const { result, queryClient, refuse } = renderRerun();
+    const { result, queryClient, press, refuse } = renderRerun();
     await press(() => {
       result.current.start("task-a", "run-1");
     });
@@ -126,12 +153,14 @@ describe("useRerunTracking", () => {
   });
 
   it("settles two Tasks' re-runs side by side, each on its own", async () => {
-    const { result, rerun, accept, refuse } = renderRerun();
+    const { result, rerun, press, accept, refuse } = renderRerun();
     await press(() => {
       result.current.start("task-a", "run-1");
       result.current.start("task-b", "run-1");
     });
-    expect(rerun).toHaveBeenCalledTimes(2);
+    await waitFor(() => {
+      expect(rerun).toHaveBeenCalledTimes(2);
+    });
 
     await refuse("A was refused");
     await accept();
