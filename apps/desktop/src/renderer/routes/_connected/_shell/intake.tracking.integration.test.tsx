@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
+  HandoffLeg,
   PluginDetail,
   Run,
   RunSummary,
@@ -2734,5 +2735,146 @@ describe("a face for a run of a workflow sent with the request", () => {
       }),
     });
     expect(getRowButton(FINISHED_TASK).textContent).toContain("Sent finished");
+  });
+});
+
+describe("Done with handed-off signals", () => {
+  /** Builds `task`'s handoff signal as Done lists it: resolved by the handoff, which started the Task's run. */
+  const buildDoneSignal = (task: Task): Signal => ({
+    ...buildHandoffSignal(task),
+    title: task.title,
+    status: "resolved",
+    resolution: {
+      kind: "decided",
+      actionId: `hand-to:${WORKFLOW_ID}`,
+      runId: getRunId(task),
+      outcome: "Handed to Implement",
+      actor: "user",
+      origin: "web",
+      at: task.createdAt,
+    },
+  });
+
+  /** Builds the leg of the handoff of `task`, whose run ended as `status`. */
+  const buildLeg = (
+    task: Task,
+    status: RunSummary["status"],
+    taskStatus: HandoffLeg["taskStatus"],
+  ): HandoffLeg => ({
+    runId: getRunId(task),
+    signalId: getHandoffSignalId(task),
+    taskId: task.id,
+    taskStatus,
+    workflowId: WORKFLOW_ID,
+    workflowName: "Implement",
+    rerunCount: 0,
+    latestRun: buildTrackingRun(buildRunSummary(task, status)),
+    liveRunIds: [],
+  });
+
+  /** A signal resolved by hand, which started no run. */
+  const PLAIN_SIGNAL: Signal = {
+    ...buildSignal("01a06d02-7a00-7000-8000-0000000000a1", "Merge 4 dependency bumps"),
+    status: "resolved",
+    resolution: {
+      kind: "decided",
+      outcome: "Done, nothing sent",
+      actor: "user",
+      origin: "web",
+      at: at(30),
+    },
+  };
+
+  /** The Task of a handoff that was marked done, so Tracking no longer lists it. */
+  const CLOSED_TASK = buildTask(
+    "01a06d02-7b00-7000-8000-0000000000c1",
+    "Discount codes ignore letter case",
+    5,
+  );
+
+  const OPEN_DONE = buildDoneSignal(FINISHED_TASK);
+  const CLOSED_DONE = buildDoneSignal(CLOSED_TASK);
+  const LEGS = [
+    buildLeg(FINISHED_TASK, "completed", "in-progress"),
+    buildLeg(CLOSED_TASK, "completed", "done"),
+  ];
+
+  /** Opens Done with the handed-off signals, the plain one, and Tracking's rows. */
+  const openDone = (path = "/intake?view=done") => {
+    const listed = [OPEN_DONE, CLOSED_DONE, PLAIN_SIGNAL];
+    return openIntake(path, {
+      extra: {
+        ...storeTracking(),
+        "GET /api/v1/signals": (call): Answer => ({
+          body: {
+            items: new URLSearchParams(call.search).get("view") === "done" ? listed : [],
+          },
+        }),
+        "GET /api/v1/tasks/legs": () => ({ body: { legs: LEGS } }),
+        [`GET /api/v1/signals/${OPEN_DONE.id}`]: () => ({ body: OPEN_DONE }),
+        [`GET /api/v1/signals/${CLOSED_DONE.id}`]: () => ({ body: CLOSED_DONE }),
+      },
+    });
+  };
+
+  it("leads a handed-off row with the agent's face and its trip, and a row with no run keeps its outcome", async () => {
+    await openDone();
+    const row = await waitFor(() => {
+      const found = getSignalRow(OPEN_DONE);
+      expect(found.querySelector(".ask-mark--face .cr")).not.toBeNull();
+      return found;
+    });
+    expect(row.querySelector(".ask-sub")?.textContent).toBe("Handed to Implement → finished");
+    expect(row.querySelector(".ask-sub .ask-src svg")).not.toBeNull();
+    expect(row.querySelector(".trip-end--finished")?.textContent).toBe("finished");
+    expect(getSignalRow(CLOSED_DONE).querySelector(".ask-sub")?.textContent).toBe(
+      "Handed to Implement → done",
+    );
+    const plain = getSignalRow(PLAIN_SIGNAL);
+    expect(plain.querySelector(".cr")).toBeNull();
+    expect(plain.querySelector(".ask-sub")?.textContent).toBe("Done, nothing sent");
+  });
+
+  it("offers Go to Tracking for a Task still in Tracking, which opens Tracking on its row", async () => {
+    const { router } = await openDone(`/intake?view=done&signal=${OPEN_DONE.id}`);
+    const pane = await waitFor(() => {
+      const found = getPane()!;
+      expect(within(found).getByRole("button", { name: "Go to Tracking" })).toBeTruthy();
+      return found;
+    });
+    expect(pane.querySelector(".ad-outcome")?.textContent).toContain(
+      "Handed to Implement → finished",
+    );
+    expect(pane.querySelector(".ad-keys")?.textContent).toContain("go to Tracking");
+    await userEvent.click(within(pane).getByRole("button", { name: "Go to Tracking" }));
+    await waitFor(() => {
+      expect(isOpen()).toBe(true);
+    });
+    // Tracking belongs to To do, so the view Done leaves with the signal.
+    expect(router.latestLocation.search).not.toHaveProperty("signal");
+    expect(router.latestLocation.search).not.toHaveProperty("view");
+    expect(readSelected()).toEqual([FINISHED_TASK.id]);
+  });
+
+  it("offers Open the run for a Task that left Tracking, from the button and from O", async () => {
+    const { router } = await openDone(`/intake?view=done&signal=${CLOSED_DONE.id}`);
+    const pane = await waitFor(() => {
+      const found = getPane()!;
+      expect(within(found).getByRole("button", { name: "Open the run" })).toBeTruthy();
+      return found;
+    });
+    expect(pane.querySelector(".ad-keys")?.textContent).toContain("open the run");
+    await userEvent.click(within(pane).getByRole("button", { name: "Open the run" }));
+    await waitFor(() => {
+      expect(router.latestLocation.pathname).toBe(`/runs/${getRunId(CLOSED_TASK)}`);
+    });
+
+    await router.navigate({ to: "/intake", search: { view: "done", signal: CLOSED_DONE.id } });
+    await screen.findByRole("heading", { level: 1, name: "Intake" });
+    getSignalRow(CLOSED_DONE).focus();
+    await userEvent.keyboard("o");
+    await waitFor(() => {
+      expect(router.latestLocation.pathname).toBe(`/runs/${getRunId(CLOSED_TASK)}`);
+    });
   });
 });

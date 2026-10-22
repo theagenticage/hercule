@@ -84,6 +84,12 @@
  *   Rate-limit the public API, Upgrade the Stripe SDK, Refunds for partial
  *   captures, Nightly backup, Lowercase SKUs and Move invoices to the new
  *   PDF renderer;
+ * - `done-trips`, `done-trips-tracking` and `done-trips-run`: the Done view
+ *   with the Tracking drawing's handed-off signals at 09:41, each led by the
+ *   face of the agent it went to, with its trip as the second line. The
+ *   second has Rate-limit the public API open, whose Task is still in
+ *   Tracking (Go to Tracking), the third Discount codes ignore letter case,
+ *   handed on and then done, whose pane offers the run (Open the run);
  * - `your-work-pane`: the pane of the checks that failed on the agent's pull
  *   request, with its Task as Your work, tracked and Needs you. Its row is led
  *   by the agent's face;
@@ -125,6 +131,7 @@ import { stopSpecimenClockAt } from "./fixed-clock";
 import {
   AGENT_CHECKS_SIGNAL_ID,
   ALERT_SIGNAL_ID,
+  DONE_TRIP_RECORDS,
   FIX_CHECKOUT_REF,
   NEEDS_YOU_RECORDS,
   REFUNDS_PULL_REQUEST_REF,
@@ -1324,6 +1331,35 @@ const buildTrackingPaneScene = (name: string, taskId: string): IntakeScene => ({
   },
 });
 
+/** The records of a Done scene with handed-off signals, beside the Tracking rows whose states end their lines. */
+const DONE_TRIP_SCENE_RECORDS: SidebarRecords = {
+  ...RECORDS,
+  ...NEEDS_YOU_RECORDS,
+  ...DONE_TRIP_RECORDS,
+  signals: [...TO_DO, AGENT_CHECKS],
+};
+
+/**
+ * Returns a scene that opens Done with the handed-off signals of the Tracking
+ * drawing, and the signal numbered `openIndex` in `DONE_TRIP_RECORDS.done`
+ * open in the pane, or none with `null`.
+ */
+const buildDoneTripScene = (name: string, openIndex: number | null): IntakeScene => {
+  const open = openIndex === null ? null : DONE_TRIP_RECORDS.done![openIndex]!;
+  return {
+    name: `done-trips${name}`,
+    records: DONE_TRIP_SCENE_RECORDS,
+    intake: {
+      signal: open,
+      event: open === null ? null : buildEvent(open, "https://github.com/rogier/webshop/pull/1291"),
+      view: "done",
+    },
+    play: async () => {
+      await waitForElement(open === null ? ".ask-row" : ".asks-detail .ad-outcome");
+    },
+  };
+};
+
 /** Every scene, in the order they are captured. The first is the one `pnpm compare:bureau` compares. */
 export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
   buildScene("review", REVIEW, REVIEW_URL),
@@ -1486,6 +1522,9 @@ export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
   buildTrackingPaneScene("failed", TASK_IDS.backup),
   buildTrackingPaneScene("working", TASK_IDS.sku),
   buildTrackingPaneScene("stopped", TASK_IDS.pdf),
+  buildDoneTripScene("", null),
+  buildDoneTripScene("-tracking", 3),
+  buildDoneTripScene("-run", 5),
   buildScene("your-work-pane", AGENT_CHECKS, REVIEW_URL, {
     records: { ...RECORDS, ...NEEDS_YOU_RECORDS, signals: [...TO_DO, AGENT_CHECKS] },
   }),

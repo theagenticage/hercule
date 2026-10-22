@@ -256,11 +256,13 @@ function IntakeRoute(): JSX.Element {
       selectedTaskId={task ?? null}
       onTrackingOpenChange={(open, taskId) => {
         // Opening Tracking covers the list, so the selected signal goes with it,
-        // and closing it takes its selected row away. Like the selection, it
-        // replaces the history entry.
+        // and closing it takes its selected row away. Tracking belongs to To do,
+        // so opening it from Done, where a handed-off signal can lead to it,
+        // shows To do. Like the selection, it replaces the history entry.
         void navigate({
           search: (previous) => ({
             ...previous,
+            view: open ? undefined : previous.view,
             tracking: open ? true : undefined,
             task: open ? taskId : undefined,
             signal: open ? undefined : previous.signal,

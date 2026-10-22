@@ -212,6 +212,19 @@
 .ask-mark--face .cr {
   display: block;
 }
+/* A Done row's face is 22px, 2px less than a To do row's, so it overflows the
+   lead column by 1px on each side and its centre stays 20px from the left. */
+.ask-mark--trip {
+  margin-inline: -1px;
+}
+/* The last step of a Done row's trip when it is not plain: marigold where the
+   user is waited on, the book's green ink where the work finished. */
+.trip-end--waits {
+  color: var(--you-ink);
+}
+.trip-end--finished {
+  color: var(--ok);
+}
 /* The source's mark at the start of the second line, on a row led by a face. */
 .ask-src {
   display: inline-grid;
@@ -410,6 +423,10 @@
 }
 .asks-rows--quiet .ask-mark {
   opacity: 0.55;
+}
+/* ... but only the marks: the face of the agent keeps its full colour. */
+.asks-rows--quiet .ask-mark--face {
+  opacity: 1;
 }
 /* When a snoozed signal comes back, on Later. */
 .ask-until {
@@ -902,6 +919,10 @@
 .ad-outcome-desc b {
   color: var(--ink);
   font-weight: var(--w-medium);
+}
+/* The button under a Done signal's trip sits at the start of its column. */
+.ad-outcome-go {
+  align-self: flex-start;
 }
 .ad-mark {
   display: grid;

@@ -67,6 +67,7 @@ import type {
   EventCountsByConnection,
   EventHandling,
   EventWithFacts,
+  HandoffLeg,
   IgnoreRuleWithCatches,
   Input,
   MemoryDocument,
@@ -224,6 +225,8 @@ export interface SidebarRecords {
   readonly later?: ReadonlyArray<Signal>;
   /** The signals on Done, newest first, which Intake's foot counts. None when left out. */
   readonly done?: ReadonlyArray<Signal>;
+  /** The leg of each handoff on `done`, which Done's rows and pane read their trips from. None when left out. */
+  readonly doneLegs?: ReadonlyArray<HandoffLeg>;
   /** The installed plugins, which name each signal's source. None when left out. */
   readonly plugins?: ReadonlyArray<PluginDetail>;
   /**
@@ -584,7 +587,7 @@ const seedQueryCache = (
     );
   }
   queryClient.setQueryData(signalsDoneQuery(client).queryKey, {
-    pages: [{ items: records.done ?? [], legs: [] }],
+    pages: [{ items: records.done ?? [], legs: records.doneLegs ?? [] }],
     pageParams: [undefined],
   });
   queryClient.setQueryData(signalsClearedTodayQuery(client).queryKey, {
