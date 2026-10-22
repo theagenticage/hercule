@@ -133,16 +133,21 @@ describe("listTrackingAnswers", () => {
       ...buildTask(newest, liveRunIds),
       latestLiveRun: newest,
     });
-    const stopOf = (row: TrackingRow) => {
+    const readLeavesRowStopped = (row: TrackingRow) => {
       const [answer] = listTrackingAnswers(row);
       return answer?.kind === "stop-run" ? answer.leavesRowStopped : undefined;
     };
-    expect(stopOf({ task: task(["run-2"]), run: newest, state: "working", since: at(20) })).toBe(
-      true,
-    );
+    expect(
+      readLeavesRowStopped({ task: task(["run-2"]), run: newest, state: "working", since: at(20) }),
+    ).toBe(true);
     // Another run stays live, so the row stays Working.
     expect(
-      stopOf({ task: task(["run-2", "run-1"]), run: newest, state: "working", since: at(20) }),
+      readLeavesRowStopped({
+        task: task(["run-2", "run-1"]),
+        run: newest,
+        state: "working",
+        since: at(20),
+      }),
     ).toBe(false);
     // The newest live run is older than the Task's newest run, whose state the row shows once it stops.
     const completed = buildRun("completed", { id: "run-3" });
@@ -150,34 +155,44 @@ describe("listTrackingAnswers", () => {
       ...buildTask(completed, ["run-1"]),
       latestLiveRun: older,
     };
-    expect(stopOf({ task: overtaken, run: older, state: "working", since: at(20) })).toBe(false);
+    expect(
+      readLeavesRowStopped({ task: overtaken, run: older, state: "working", since: at(20) }),
+    ).toBe(false);
     // A signal that waits keeps the row on Needs you.
     expect(
-      stopOf({
+      readLeavesRowStopped({
         ...buildSignalRow(newest, ["run-2"]),
         task: task(["run-2"]),
       }),
     ).toBe(false);
     // A Request alone: stopping the run leaves the row Stopped. With an open signal beside it, the signal keeps the row on Needs you.
-    expect(stopOf(buildRequestRow(newest))).toBe(true);
-    expect(stopOf(buildRequestRow(newest, true))).toBe(false);
+    expect(readLeavesRowStopped(buildRequestRow(newest))).toBe(true);
+    expect(readLeavesRowStopped(buildRequestRow(newest, true))).toBe(false);
   });
 
-  it("suggests Mark done on a Finished row, then Cancel", () => {
-    expect(listTrackingAnswers(buildRow(buildRun("completed")))).toEqual([
-      { kind: "mark-done", suggested: true },
-      { kind: "cancel", suggested: false },
+  it("offers Try again, Mark done and Cancel in the order of the state, suggesting one on Finished and Failed rows only", () => {
+    const listAnswerKinds = (row: TrackingRow) =>
+      listTrackingAnswers(row).map(({ kind, suggested }) => (suggested ? `${kind}*` : kind));
+    expect(listAnswerKinds(buildRow(buildRun("completed")))).toEqual([
+      "mark-done*",
+      "try-again",
+      "cancel",
     ]);
-  });
-
-  it("suggests nothing on a Failed, Stopped or waiting-on-a-signal row, which can still be marked done or cancelled", () => {
-    const unsuggested = [
-      { kind: "mark-done", suggested: false },
-      { kind: "cancel", suggested: false },
-    ];
-    expect(listTrackingAnswers(buildRow(buildRun("failed")))).toEqual(unsuggested);
-    expect(listTrackingAnswers(buildRow(buildRun("cancelled")))).toEqual(unsuggested);
-    expect(listTrackingAnswers(buildSignalRow(buildRun("completed")))).toEqual(unsuggested);
+    expect(listAnswerKinds(buildRow(buildRun("failed")))).toEqual([
+      "try-again*",
+      "mark-done",
+      "cancel",
+    ]);
+    expect(listAnswerKinds(buildRow(buildRun("cancelled")))).toEqual([
+      "try-again",
+      "mark-done",
+      "cancel",
+    ]);
+    expect(listAnswerKinds(buildSignalRow(buildRun("completed")))).toEqual([
+      "try-again",
+      "mark-done",
+      "cancel",
+    ]);
   });
 });
 

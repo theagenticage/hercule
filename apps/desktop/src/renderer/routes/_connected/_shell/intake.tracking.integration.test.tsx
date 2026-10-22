@@ -688,7 +688,7 @@ describe("opened Tracking over the list", () => {
 });
 
 describe("a row that moves to another state's heading", () => {
-  /** Opens opened Tracking with a Failed and a Working row, and returns how to fail the Working one. */
+  /** Opens Tracking with a Failed and a Working row, and returns how to fail the Working one. */
   const openWithMovableRow = async () => {
     let status: RunSummary["status"] = "running";
     const rows = () => [[FAILED_TASK, "failed"] as const, [WORKING_TASK, status] as const];
@@ -771,7 +771,7 @@ describe("a selected row that leaves Tracking", () => {
   });
 
   it("clears the selection when the last row leaves, and keeps the keys working", async () => {
-    let rows: ReadonlyArray<readonly [Task, RunSummary["status"]]> = [[FAILED_TASK, "failed"]];
+    let rows: ReadonlyArray<readonly [Task, RunSummary["status"]]> = [[STOPPED_TASK, "cancelled"]];
     const { live } = await openIntake("/intake?tracking=true", {
       extra: storeTracking(rows, { readRows: () => rows }),
     });
@@ -1101,12 +1101,12 @@ describe("selecting a row", () => {
 
   it("moves the focus to the pane on ↩ when no answer is suggested", async () => {
     await openIntake("/intake?tracking=true");
-    getRowButton(FAILED_TASK).focus();
+    getRowButton(STOPPED_TASK).focus();
     await userEvent.keyboard("{Enter}");
     await waitFor(() => {
       expect(document.activeElement).toBe(getPane()!.querySelector("article"));
     });
-    expect(readSelected()).toEqual([FAILED_TASK.id]);
+    expect(readSelected()).toEqual([STOPPED_TASK.id]);
   });
 
   it("opens the selected row's run page from Open the run and from O", async () => {
@@ -1994,6 +1994,172 @@ describe("the pane's answers", () => {
     expect(failure.textContent).toBe("The run has already ended.");
     expect(failure.previousElementSibling?.getAttribute("data-answer")).toBe("stop-run");
     expect(document.querySelector(".asks-toast")).toBeNull();
+  });
+});
+
+describe("the pane's Try again", () => {
+  const NEW_RUN_ID = "01a06d02-7c00-7000-8000-0000000000f2";
+  const rerunPath = (task: Task) => `/api/v1/runs/${getRunId(task)}/rerun`;
+  const findReruns = (calls: ReadonlyArray<Call>) =>
+    calls.filter((call) => call.method === "POST" && call.path.endsWith("/rerun"));
+  const findAnswer = (kind: string) =>
+    getPane()!.querySelector<HTMLElement>(`[data-answer="${kind}"]`);
+  const readState = (task: Task) =>
+    getRowButton(task).closest(".tr-run-item")!.getAttribute("data-state");
+
+  /**
+   * Opens Tracking with `task` in `status` and the rows `others` beside it.
+   * Once the test calls `startNewRun`, the controller's read lists a running
+   * run `NEW_RUN_ID` on `task`, as it does after a re-run starts.
+   */
+  const openRerunnable = async (
+    task: Task,
+    status: RunSummary["status"],
+    rerunAnswer: Handler = { body: { runId: NEW_RUN_ID } },
+    others: ReadonlyArray<readonly [Task, RunSummary["status"]]> = [],
+  ) => {
+    let started = false;
+    const rows = () => [[task, started ? "running" : status] as const, ...others];
+    const buildRun = (each: Task, eachStatus: RunSummary["status"]): RunSummary => ({
+      ...buildRunSummary(each, eachStatus),
+      ...(started && each.id === task.id ? { id: NEW_RUN_ID } : {}),
+    });
+    const opened = await openIntake("/intake?tracking=true", {
+      extra: {
+        ...storeTracking(rows(), { readRows: rows, buildRun }),
+        [`POST ${rerunPath(task)}`]: rerunAnswer,
+      },
+    });
+    await opened.live.waitForFirstPushes();
+    return {
+      ...opened,
+      startNewRun: () => {
+        started = true;
+        act(() => opened.live.pushInvalidation("task"));
+      },
+    };
+  };
+
+  it("re-runs a Failed row's run from ↩, keeps E from marking it done meanwhile, and turns the row Working on the same Task with the focus on the pane", async () => {
+    const { calls, startNewRun } = await openRerunnable(FAILED_TASK, "failed");
+    // By keys only: a pointer over the list would hold the row's change back.
+    getRowButton(FAILED_TASK).focus();
+    await userEvent.keyboard("{Enter}");
+    const tryAgain = findAnswer("try-again")!;
+    await waitFor(() => {
+      expect(document.activeElement).toBe(tryAgain);
+    });
+    expect(tryAgain.querySelector(".btn--accent")).not.toBeNull();
+    expect(tryAgain.querySelector(".ans-desc")?.textContent).toBe(
+      "Re-runs Implement on Nightly backup job timing out from the start",
+    );
+
+    const readsBefore = findTrackingReads(calls).length;
+    await userEvent.keyboard("{Enter}");
+    // The re-run was accepted and Tracking was read again, but still lists the failed run.
+    await waitFor(() => {
+      expect(findTrackingReads(calls).length).toBeGreaterThan(readsBefore);
+    });
+    expect(findReruns(calls).map((call) => [call.path, call.body])).toEqual([
+      [rerunPath(FAILED_TASK), {}],
+    ]);
+
+    await userEvent.keyboard("e");
+    expect(findMarkDone(calls)).toEqual([]);
+    expect(readRowIds()).toContain(FAILED_TASK.id);
+
+    startNewRun();
+    await waitFor(() => {
+      expect(readState(FAILED_TASK)).toBe("working");
+    });
+    expect(
+      [...getPane()!.querySelectorAll<HTMLElement>("[data-answer]")].map((a) => a.dataset.answer),
+    ).toEqual(["stop-run"]);
+    expect(readSelected()).toEqual([FAILED_TASK.id]);
+    expect(document.activeElement).toBe(getPane()!.querySelector("article"));
+    expect(findMarkDone(calls)).toEqual([]);
+  });
+
+  it("draws Try again after Mark done on a Finished row and before it on a Stopped row", async () => {
+    await openIntake("/intake?tracking=true");
+    const readAnswers = () =>
+      [...getPane()!.querySelectorAll<HTMLElement>("[data-answer]")].map((a) => a.dataset.answer);
+    await userEvent.click(getRowButton(FINISHED_TASK));
+    expect(readAnswers()).toEqual(["mark-done", "try-again", "cancel"]);
+    await userEvent.click(getRowButton(STOPPED_TASK));
+    expect(readAnswers()).toEqual(["try-again", "mark-done", "cancel"]);
+  });
+
+  it("shows a refused re-run under Try again, with no toast, and leaves the row as it was", async () => {
+    await openRerunnable(STOPPED_TASK, "cancelled", {
+      status: 409,
+      body: buildErrorBody("invalid_state", "The workflow was deleted."),
+    });
+    await userEvent.click(getRowButton(STOPPED_TASK));
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Try again" }));
+
+    const failure = await within(getPane()!).findByRole("alert");
+    expect(failure.textContent).toBe("The workflow was deleted.");
+    expect(failure.previousElementSibling?.getAttribute("data-answer")).toBe("try-again");
+    expect(document.querySelector(".asks-toast")).toBeNull();
+    expect(readState(STOPPED_TASK)).toBe("stopped");
+  });
+
+  it("keeps Try again locked, with no second re-run, when the user leaves the row or Intake and comes back before the read shows the new run", async () => {
+    let release = () => {};
+    const { calls, router, startNewRun } = await openRerunnable(
+      FAILED_TASK,
+      "failed",
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ body: { runId: NEW_RUN_ID } });
+        }),
+      [[STOPPED_TASK, "cancelled"]],
+    );
+    const expectLocked = async () => {
+      const tryAgain = findAnswer("try-again")!;
+      expect(tryAgain.getAttribute("aria-disabled")).toBe("true");
+      await userEvent.click(tryAgain);
+      expect(findReruns(calls)).toHaveLength(1);
+    };
+    await userEvent.click(getRowButton(FAILED_TASK));
+    await userEvent.click(within(getPane()!).getByRole("button", { name: "Try again" }));
+    await waitFor(() => {
+      expect(findReruns(calls)).toHaveLength(1);
+    });
+
+    // The pane is built anew for the row it comes back to.
+    await userEvent.click(getRowButton(STOPPED_TASK));
+    await userEvent.click(getRowButton(FAILED_TASK));
+    await expectLocked();
+
+    // The Office is another route, so Intake's screen is gone and built anew on the way back.
+    act(() => {
+      void router.navigate({ to: "/office" });
+    });
+    await screen.findByText("The Office");
+    act(() => {
+      void router.navigate({ to: "/intake", search: { tracking: true, task: FAILED_TASK.id } });
+    });
+    await screen.findByRole("heading", { level: 1, name: "Intake" });
+    await waitFor(() => {
+      expect(findAnswer("try-again")).not.toBeNull();
+    });
+    await expectLocked();
+
+    // The request is accepted, but the read still lists the failed run.
+    const readsBefore = findTrackingReads(calls).length;
+    release();
+    await waitFor(() => {
+      expect(findTrackingReads(calls).length).toBeGreaterThan(readsBefore);
+    });
+    await expectLocked();
+
+    startNewRun();
+    await waitFor(() => {
+      expect(readState(FAILED_TASK)).toBe("working");
+    });
+    expect(findReruns(calls)).toHaveLength(1);
   });
 });
 

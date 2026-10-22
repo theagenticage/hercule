@@ -23,6 +23,8 @@ import { canMarkTrackingRowDone, nameTrackingState, type TrackingRow } from "./t
  *   still live, `run` is not the Task's newest run so an earlier run's state
  *   shows, or an open signal keeps the row on Needs you (whether the row
  *   waits on the signal or on a Request beside it).
+ * - `try-again`: re-runs `run`, the Task's newest run, with `run.rerun`. The new
+ *   run keeps the Task, so the row turns Working on the same Task.
  * - `mark-done`: takes the row off Tracking and sets its Task `done`.
  * - `cancel`: takes the row off Tracking and sets its Task `cancelled`.
  *
@@ -36,6 +38,7 @@ export type TrackingAnswer =
       readonly leavesRowStopped: boolean;
       readonly suggested: false;
     }
+  | { readonly kind: "try-again"; readonly run: TrackingRun; readonly suggested: boolean }
   | { readonly kind: "mark-done" | "cancel"; readonly suggested: boolean };
 
 /**
@@ -44,11 +47,11 @@ export type TrackingAnswer =
  * - A row that cannot be marked done (see `canMarkTrackingRowDone`) has a run
  *   that is going, so its only answer is to stop the Task's newest live run.
  *   Stop is never suggested, so `↩` cannot stop a run by accident.
- * - Any other row can be marked done or cancelled. Mark done is suggested on a
- *   Finished row only: a Failed, Stopped or waiting-on-a-signal row asks the
- *   user to decide, so nothing is suggested.
- *
- * Trying a failed run again is not an answer yet.
+ * - Any other row can be tried again, marked done or cancelled. The suggested
+ *   answer is the likely next move: Mark done on a Finished row, Try again on a
+ *   Failed row. A Stopped or waiting-on-a-signal row asks the user to decide,
+ *   so nothing is suggested. Try again comes before Mark done except on a
+ *   Finished row, and Cancel is always last.
  */
 export const listTrackingAnswers = (row: TrackingRow): ReadonlyArray<TrackingAnswer> => {
   if (!canMarkTrackingRowDone(row)) {
@@ -64,10 +67,14 @@ export const listTrackingAnswers = (row: TrackingRow): ReadonlyArray<TrackingAns
       );
     return [{ kind: "stop-run", run, leavesRowStopped, suggested: false }];
   }
-  return [
-    { kind: "mark-done", suggested: row.state === "finished" },
-    { kind: "cancel", suggested: false },
-  ];
+  const tryAgain: TrackingAnswer = {
+    kind: "try-again",
+    run: row.task.latestRun,
+    suggested: row.state === "failed",
+  };
+  const markDone: TrackingAnswer = { kind: "mark-done", suggested: row.state === "finished" };
+  const cancel: TrackingAnswer = { kind: "cancel", suggested: false };
+  return row.state === "finished" ? [markDone, tryAgain, cancel] : [tryAgain, markDone, cancel];
 };
 
 /**

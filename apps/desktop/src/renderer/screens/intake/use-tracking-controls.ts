@@ -13,6 +13,7 @@ import {
 import { pickSelectionAfterMove } from "./pick-selection-after-move";
 import type { IntakeSplitState } from "./use-intake-split";
 import type { HeldTrackingRowsState } from "./use-held-tracking-rows";
+import type { RerunTracking } from "./use-rerun-tracking";
 import type { TakeOffStatus, TakeOffTracking } from "./use-take-off-tracking";
 
 /** What the controls act on, and where they report. */
@@ -43,6 +44,8 @@ interface TrackingControlsInput {
   readonly shownRows: ReadonlyArray<TrackingRow>;
   readonly heldTracking: HeldTrackingRowsState;
   readonly takeOff: TakeOffTracking;
+  /** The re-runs of Tasks, which the controls ask before they take a row off (see `takeOffTask`). */
+  readonly rerun: RerunTracking;
   /**
    * The split of the list and the pane. Its list column takes the focus when
    * Tracking closes, and its pane follows the selected row.
@@ -78,9 +81,12 @@ export interface TrackingControls {
   readonly selectRow: (taskId: string) => void;
   /**
    * Sets the Task `taskId` to `status`, which takes its row off Tracking,
-   * unless its row can be taken off no more (see `canMarkTrackingRowDone`) or
-   * is gone from the last read. The row leaves when the read no longer has
-   * it, and the selection follows then, as for any row that leaves.
+   * unless its row can be taken off no more (see `canMarkTrackingRowDone`), is
+   * gone from the last read, or has a re-run that is starting. Tracking's read
+   * still shows the old run until the re-run arrives, so the row looks as if
+   * it can be taken off, but closing the Task now would leave the starting run
+   * on a closed Task. The row leaves when the read no longer has it, and the
+   * selection follows then, as for any row that leaves.
    */
   readonly takeOffTask: (taskId: string, status: TakeOffStatus) => void;
   /**
@@ -130,6 +136,7 @@ export const useTrackingControls = ({
   shownRows,
   heldTracking,
   takeOff,
+  rerun,
   split,
   onOpening,
   onOpenChange,
@@ -233,7 +240,7 @@ export const useTrackingControls = ({
 
   const takeOffTask = (taskId: string, status: TakeOffStatus): void => {
     const row = readRows.find((each) => each.task.taskId === taskId);
-    if (row === undefined || !canMarkTrackingRowDone(row)) return;
+    if (row === undefined || !canMarkTrackingRowDone(row) || rerun.isStarting(row.task)) return;
     heldTracking.registerTakeOff(taskId);
     moveFocusOffTask(taskId);
     takeOff.run({ taskId, title: row.task.title, status }, () => {
