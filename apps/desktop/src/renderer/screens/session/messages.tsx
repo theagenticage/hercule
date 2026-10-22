@@ -14,7 +14,16 @@
  * current day, so every message draws again when the day changes and "09:04"
  * becomes "4 Sep 09:04".
  */
-import { memo, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+  type ReactNode,
+} from "react";
 import { flushSync } from "react-dom";
 import {
   formatMessageTime,
@@ -24,7 +33,10 @@ import {
 } from "@hercule/client-core";
 import type { Attachment } from "@hercule/contract";
 import { buildHueStyle, Face, type Look } from "../../faces";
+import { CheckIcon } from "../../icons/check";
+import { CopyIcon } from "../../icons/copy";
 import { SentImages } from "../attachments/sent-images";
+import { copyText } from "../clipboard";
 import { Markdown } from "./markdown";
 import { buildSenderLook, SenderChip, SenderChipPlaceholder } from "./sender-chip";
 import { useSessionSkills } from "./use-session-skills";
@@ -127,6 +139,43 @@ function BubbleText({ children }: { readonly children: ReactNode }): JSX.Element
   );
 }
 
+/** How long the copy button shows its result, in milliseconds, before it reads "Copy message" again. */
+const COPY_RESULT_MS = 1500;
+
+/**
+ * Renders the button under a message that copies `text`, the message as it
+ * was written: its Markdown, its line breaks and its `$name` Skill References,
+ * also the part a collapsed bubble hides. Pasted into the composer, the
+ * references become chips again.
+ *
+ * For `COPY_RESULT_MS` after a click the button shows a check mark and reads
+ * "Copied", or reads "Copy failed" when the browser refused, so the user
+ * knows to select the text by hand.
+ */
+function MessageCopyButton({ text }: { readonly text: string }): JSX.Element {
+  const [result, setResult] = useState<"copied" | "failed" | undefined>(undefined);
+  const resetTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(resetTimer.current), []);
+  const label =
+    result === "copied" ? "Copied" : result === "failed" ? "Copy failed" : "Copy message";
+  return (
+    <button
+      type="button"
+      className="icon-btn icon-btn--sm bubble-copy"
+      aria-label={label}
+      title={label}
+      data-result={result}
+      onClick={() => {
+        setResult(copyText(text) ? "copied" : "failed");
+        window.clearTimeout(resetTimer.current);
+        resetTimer.current = window.setTimeout(() => setResult(undefined), COPY_RESULT_MS);
+      }}
+    >
+      {result === "copied" ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+    </button>
+  );
+}
+
 /** The skills of a message that used none. One shared array, so the bubble's props do not change. */
 const NO_SKILLS: readonly string[] = [];
 
@@ -174,7 +223,8 @@ function SkillMessageText({
 
 /**
  * Renders a message sent into the session: the images sent with it, then
- * the bubble, as markdown with its line breaks kept, and its time under it.
+ * the bubble, as markdown with its line breaks kept, and its time under it,
+ * with a button that copies the message (`MessageCopyButton`).
  * What the user typed shows HTML tags as typed: `<b>x</b>` reads `<b>x</b>`,
  * not a bold x. A message another agent sent is markdown with embedded HTML,
  * as an agent's own message is.
@@ -260,6 +310,7 @@ export const UserMessage = memo(function UserMessage({
                 ? "Steered"
                 : `Steered · ${time}`
               : time}
+          {text === "" ? null : <MessageCopyButton text={text} />}
         </div>
       </div>
     </div>

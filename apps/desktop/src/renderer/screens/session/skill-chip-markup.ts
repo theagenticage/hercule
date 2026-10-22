@@ -84,6 +84,12 @@ export const splitSkillName = (
  *
  * The chip carries `data-skill`, the full name, so the editor can find the
  * chip under the pointer and look the skill up.
+ *
+ * A chip in a message also holds the `$` of its Skill Reference, drawn at no
+ * size (`.skill-sigil`). The reader sees the name alone, as in the composer,
+ * but a selection that holds the chip copies `$name`, which the composer turns
+ * into a chip again when it is pasted. The composer's own chip has no sigil:
+ * its editor writes `$name` itself when its content is copied.
  */
 export const buildSkillChipSpec = (
   name: string,
@@ -98,6 +104,7 @@ export const buildSkillChipSpec = (
       "data-placement": placement,
     },
     SKILL_ICON_SPEC,
+    ...(placement === "message" ? [["span", { class: "skill-sigil" }, "$"] as const] : []),
     ...(checkout === "" ? [] : [["span", { class: "skill-label-checkout" }, checkout] as const]),
     skill,
   ];

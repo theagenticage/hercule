@@ -56,6 +56,14 @@ describe("the chip's markup", () => {
     expect(drawEditorChip("review").querySelector(".skill-label-checkout")).toBeNull();
   });
 
+  it("holds the $ of a chip in a message, so that a copy of the chip is `$name`", () => {
+    const message = drawEditorChip("webshop:release", { placement: "message" });
+    expect(message.querySelector(".skill-sigil")?.textContent).toBe("$");
+    expect(message.textContent).toBe("$webshop:release");
+    // The composer writes `$name` itself when it copies a chip.
+    expect(drawEditorChip("review").textContent).toBe("review");
+  });
+
   it("sets no style attribute, which the Content-Security-Policy refuses", () => {
     const chip = drawEditorChip("review");
     expect(chip.outerHTML).not.toContain("style=");

@@ -26,6 +26,9 @@
   flex-direction: column;
   gap: var(--s-1);
   pointer-events: none;
+  /* The card sits in the DOM of the message it opens over, so a selection
+     across the chip would otherwise copy the card's text too. */
+  user-select: none;
   /* The card may sit inside the field and then inherits its pre-wrapped 14px
      text and its chip-free weight. */
   white-space: normal;

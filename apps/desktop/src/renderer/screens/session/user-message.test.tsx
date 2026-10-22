@@ -47,7 +47,7 @@ describe("a long message", () => {
   it("is drawn in full, with no button, when it is 10 lines or shorter", () => {
     renderMessageOfHeight(217);
 
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show full message" })).toBeNull();
     expect(text().style.maxHeight).toBe("");
   });
 
@@ -104,8 +104,9 @@ describe("the skill chips in a message", () => {
     await renderMessage("please $review the diff", ["review"], [REVIEW]);
 
     const chip = document.querySelector(".skill-chip")!;
-    expect(chip.textContent).toBe("review");
-    expect(document.querySelector(".bubble")!.textContent).toBe("please review the diff");
+    // The chip's `$` has no size, so the reader sees the name alone, and a copy holds `$review`.
+    expect(chip.textContent).toBe("$review");
+    expect(document.querySelector(".bubble")!.textContent).toBe("please $review the diff");
     expect(chip.getAttribute("data-placement")).toBe("message");
     // The card needs the session's skill, which arrives with the read.
     fireEvent.pointerEnter(chip);
@@ -129,16 +130,16 @@ describe("the skill chips in a message", () => {
     );
 
     expect([...document.querySelectorAll(".skill-chip")].map((chip) => chip.textContent)).toEqual([
-      "review",
+      "$review",
     ]);
-    expect(document.querySelector(".bubble")!.textContent).toBe("review then $debug");
+    expect(document.querySelector(".bubble")!.textContent).toBe("$review then $debug");
   });
 
   it("keeps the chip of a skill the session no longer has, with no hover card", async () => {
     await renderMessage("run $gone now", ["gone"], [REVIEW]);
 
     const chip = document.querySelector(".skill-chip")!;
-    expect(chip.textContent).toBe("gone");
+    expect(chip.textContent).toBe("$gone");
     fireEvent.pointerEnter(chip);
     expect(queryCard()).toBeNull();
   });
@@ -160,8 +161,89 @@ describe("the skill chips in a message", () => {
     );
 
     const chip = document.querySelector(".skill-chip")!;
-    expect(chip.textContent).toBe("review");
+    expect(chip.textContent).toBe("$review");
     fireEvent.pointerEnter(chip);
     expect(queryCard()).toBeNull();
+  });
+});
+
+describe("the button that copies a message", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  /** Stands in for the browser's copy command: it fires a `copy` event and returns `copies`. */
+  const stubCopyCommand = (copies: boolean) => {
+    const clipboard = new Map<string, string>();
+    const execCommand = vi.fn((command: string) => {
+      if (command !== "copy") return false;
+      const event = new Event("copy", { cancelable: true }) as ClipboardEvent;
+      Object.defineProperty(event, "clipboardData", {
+        value: { setData: (type: string, text: string) => clipboard.set(type, text) },
+      });
+      document.dispatchEvent(event);
+      return copies;
+    });
+    Object.defineProperty(document, "execCommand", { value: execCommand, configurable: true });
+    return clipboard;
+  };
+
+  const renderPlain = (text: string) =>
+    render(
+      <UserMessage
+        text={text}
+        attachments={[]}
+        at="2026-09-29T09:14:00.000Z"
+        timezone="UTC"
+        today={Date.UTC(2026, 8, 29)}
+      />,
+    );
+
+  it("copies the message as it was written, Markdown and line breaks included", () => {
+    const clipboard = stubCopyCommand(true);
+    renderPlain("**bold**\n\nsecond `code`");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message" }));
+
+    expect(clipboard.get("text/plain")).toBe("**bold**\n\nsecond `code`");
+  });
+
+  it("copies the $name of each skill, so that a paste into the composer makes the chips again", async () => {
+    const clipboard = stubCopyCommand(true);
+    await renderMessage("please $review the diff", ["review"], [REVIEW]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message" }));
+
+    expect(clipboard.get("text/plain")).toBe("please $review the diff");
+  });
+
+  it("reads Copied with a check for a moment, then Copy message again", () => {
+    vi.useFakeTimers();
+    stubCopyCommand(true);
+    renderPlain("hello");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message" }));
+    expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.getByRole("button", { name: "Copy message" })).toBeTruthy();
+  });
+
+  it("reads Copy failed when the browser refuses", () => {
+    stubCopyCommand(false);
+    renderPlain("hello");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message" }));
+
+    expect(screen.getByRole("button", { name: "Copy failed" })).toBeTruthy();
+  });
+
+  it("is not drawn for a message with no text", () => {
+    renderPlain("");
+
+    expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull();
   });
 });

@@ -52,6 +52,19 @@
   background: var(--press);
 }
 
+/* The `$` of a chip in a message is in the markup so that copying the chip
+   copies `$name` (skill-chip-markup.ts). It has no size, so the reader sees
+   the name alone. `font-size: 0` and not `display: none`, `visibility: hidden`
+   or a generated `::before`, because the browser leaves those out of a copy.
+   The chip is selected as a whole, as in the composer, so a drag, a double
+   click or a triple click cannot copy the name and leave the `$` behind. */
+.skill-chip[data-placement="message"] {
+  user-select: all;
+}
+.skill-sigil {
+  font-size: 0;
+}
+
 /* A repository skill's checkout, `webshop:`, is where it lives, not what it
    is, so it is quieter than the name. `--muted` is the book's secondary
    text. `--faint` (the book's hint colour) would be one step quieter, but

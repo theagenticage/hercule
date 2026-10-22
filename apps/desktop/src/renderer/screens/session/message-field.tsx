@@ -363,7 +363,14 @@ export function MessageField({
                 1,
                 1,
               );
-              view.dispatch(view.state.tr.replaceSelection(lines).scrollIntoView());
+              // Nobody is in the middle of typing pasted text, so a reference at
+              // the caret becomes a chip at once, as a copied chip is pasted back.
+              view.dispatch(
+                view.state.tr
+                  .replaceSelection(lines)
+                  .setMeta(CONVERT_ALL_REFERENCES, true)
+                  .scrollIntoView(),
+              );
             }
             event.preventDefault();
             return true;

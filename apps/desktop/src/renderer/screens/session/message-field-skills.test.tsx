@@ -359,6 +359,18 @@ describe("skill chips in the message field", () => {
     expect(readFieldText(readEditor())).toBe("Do $implement then $review");
   });
 
+  it("makes a chip of a reference that ends a pasted text, where the caret is", () => {
+    renderField();
+    fireEvent.paste(readField(), {
+      clipboardData: {
+        files: [],
+        getData: (type: string) => (type === "text/plain" ? "Do $review" : ""),
+      },
+    });
+    expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
+    expect(readFieldText(readEditor())).toBe("Do $review");
+  });
+
   it("leaves references in code as text", () => {
     const { setTextFromOutside } = renderField();
     setTextFromOutside("Run `$review` now");
