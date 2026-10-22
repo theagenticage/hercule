@@ -1,5 +1,5 @@
 /**
- * Tests `GET /tasks/tracking` and `GET /tasks/:id/tracking` over a real
+ * Tests `GET /tasks/tracking`, `GET /tasks/:id/tracking` and `GET /tasks/legs` over a real
  * socket, against the real `TaskTrackingRuns` port: what a row holds for
  * Tasks whose runs are in each state, how a Task with a long history reads,
  * which Tasks are left out, and what the pane of one Task draws: its runs,
@@ -11,6 +11,8 @@ import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import {
+  HandoffLegs,
+  MAX_LEG_QUERY_RUNS,
   MAX_TRACKING_DETAIL_RUNS,
   MAX_TRACKING_FAILURE_CAUSE,
   MAX_TRACKING_OUTPUT_TEXT,
@@ -840,6 +842,107 @@ describe("task.readTracking", () => {
       const refused = await readErrorBody(response);
       expect(response.status, refused.text).toBe(403);
       expect(refused.grant).toBe("task.read");
+    });
+  });
+});
+
+describe("task.queryLegs", () => {
+  /** Writes a run that re-runs `original` on the Task, and returns its id. */
+  const insertRerun = async (
+    { sql }: ServerHarness,
+    taskId: string,
+    original: string,
+    at: string,
+  ) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const runs = yield* runRepository;
+        return yield* runs.insert(
+          {
+            workflowId: null,
+            plan: PLAN,
+            inputs: {},
+            origin: { kind: "manual", actor: "user" },
+            entryStepIds: ["work"],
+            originalRunId: original,
+            taskId,
+          },
+          at,
+        );
+      }).pipe(inTransaction, Effect.provideService(SqlClient.SqlClient, sql), Effect.orDie),
+    );
+
+  const readLegs = async (base: string, token: string, query: string) => {
+    const response = await get(base, `/api/v1/tasks/legs${query}`, token);
+    expect(response.status, await response.clone().text()).toBe(200);
+    return Schema.decodeUnknownSync(HandoffLegs)(await response.json());
+  };
+
+  it("reads one run id as one id and repeated run ids as several, in the order given, and leaves out an id that is no handoff's run", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const firstTask = await insertTrackedTask(harness, "Retry failed webhooks");
+      const first = await insertRun(harness, firstTask, { at: minute(1), ending: COMPLETED });
+      const rerun = await insertRerun(harness, firstTask, first, minute(2));
+      const secondTask = await insertTrackedTask(harness, "Review the PR");
+      const second = await insertRun(harness, secondTask, { at: minute(3), ending: COMPLETED });
+
+      const one = await readLegs(harness.base, token, `?runIds=${first}`);
+      const several = await readLegs(
+        harness.base,
+        token,
+        `?runIds=${second}&runIds=${rerun}&runIds=${first}`,
+      );
+
+      expect(one.legs).toHaveLength(1);
+      expect(one.legs[0]).toMatchObject({
+        runId: first,
+        signalId: SIGNAL,
+        taskId: firstTask,
+        taskStatus: "in-progress",
+        workflowName: "Implement",
+        rerunCount: 1,
+        latestRun: { id: rerun, status: "pending" },
+        liveRunIds: [rerun],
+      });
+      // The re-run is no handoff's run, so only the two handoffs' runs are left.
+      expect(several.legs.map((leg) => leg.runId)).toEqual([second, first]);
+    });
+  });
+
+  it("refuses no run ids, and more run ids than a page holds, as validation errors", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const ids = Array.from(
+        { length: MAX_LEG_QUERY_RUNS + 1 },
+        (_, n) => `0199e0e7-0006-7000-8000-${String(n).padStart(12, "0")}`,
+      );
+
+      const none = await get(harness.base, "/api/v1/tasks/legs", token);
+      const tooMany = await get(
+        harness.base,
+        `/api/v1/tasks/legs?${ids.map((id) => `runIds=${id}`).join("&")}`,
+        token,
+      );
+
+      expect(none.status, await none.clone().text()).toBe(400);
+      expect(tooMany.status, await tooMany.clone().text()).toBe(400);
+    });
+  });
+
+  it("refuses a session that holds the task read grant but not the run read grant, and names the grant", async () => {
+    await withAgentFleet(async (arranged) => {
+      const agent = await spawnThreadWithGrants(arranged, "task-readers", ["task.read"]);
+
+      const response = await get(
+        arranged.harness.base,
+        `/api/v1/tasks/legs?runIds=${ABSENT_ID}`,
+        agent.token,
+      );
+
+      const refused = await readErrorBody(response);
+      expect(response.status, refused.text).toBe(403);
+      expect(refused.grant).toBe("run.read");
     });
   });
 });

@@ -107,6 +107,8 @@ const runTracking = <A, E>(
           Layer.provide(
             Layer.succeed(TaskTrackingRuns)({
               readRunHistory: () => Effect.succeed(history),
+              readTaskIds: () => Effect.succeed(new Map()),
+              readLegRuns: () => Effect.succeed([]),
               readWorkflowName: (runId) =>
                 Effect.succeed(Option.fromNullishOr(WORKFLOW_NAMES.get(runId))),
               readLatestRuns: (taskIds) =>
@@ -301,6 +303,8 @@ describe("task.queryTracking", () => {
               Layer.succeed(TaskTrackingRuns)({
                 readLatestRuns: () => Effect.succeed([]),
                 readRunHistory: () => Effect.succeed(NO_HISTORY),
+                readTaskIds: () => Effect.succeed(new Map()),
+                readLegRuns: () => Effect.succeed([]),
                 readWorkflowName: () => Effect.succeed(Option.none()),
               }),
             ),

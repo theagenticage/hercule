@@ -30,6 +30,10 @@
  * - 10,000 in-progress Tasks that have no handoff;
  * - 10,000 handoffs on one tracked Task.
  *
+ * Another case times `task.queryLegs` on the legs of 50 handoffs (a page of
+ * Done signals): each on its own Task of 100 handoffs and 100 runs, and one
+ * with 200 re-runs, half of them a chain of re-runs of re-runs.
+ *
  * What it guards is an order of magnitude: the read looks up each tracked
  * Task's newest runs and newest handoffs, so its time follows the number of
  * Tasks that are in progress, not the history behind them. The ceiling is far
@@ -39,6 +43,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import {
+  MAX_LEG_QUERY_RUNS,
   MAX_TRACKING_DETAIL_RUNS,
   MAX_TRACKING_HANDOFFS,
   MAX_TRACKING_OUTPUT_FIELDS,
@@ -437,5 +442,109 @@ describe.runIf(SPEED_TESTS_ENABLED)("the Tracking pane's read", () => {
     expect(result.detail.endingActionStepName).toHaveLength(MAX_TRACKING_STEP_NAME);
     expect(result.replyBytes).toBeLessThan(PANE_REPLY_CEILING_BYTES);
     expect(result.readTracking).toBeLessThan(PANE_CEILING_MS);
+  });
+});
+
+/** The handoffs asked for: one for each of this many Tasks, which is a page of Done signals. */
+const LEG_TASKS = MAX_LEG_QUERY_RUNS;
+
+/** The handoffs of each Task, each with a run of its own. */
+const LEG_HANDOFFS_PER_TASK = 100;
+
+/** The handoff asked for on each Task, the middle one, so the Task has handoffs before and after it. */
+const LEG_ASKED_HANDOFF = 50;
+
+/** The runs that re-run the asked handoff of the first Task: a chain of half, the rest direct. */
+const LEG_RERUNS = 200;
+
+/** The most time `task.queryLegs` may take, in milliseconds. */
+const LEGS_CEILING_MS = 50;
+
+/**
+ * Writes `LEG_TASKS` Tasks with `LEG_HANDOFFS_PER_TASK` handoffs each, a run
+ * for every handoff, and `LEG_RERUNS` runs that re-run the asked handoff of
+ * the first Task. In SQL, in one transaction.
+ */
+const seedLegs = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const askedRun = `unhex(printf('%08x000070008001%012x', 1, ${LEG_ASKED_HANDOFF}))`;
+  yield* sql`
+    WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${LEG_TASKS})
+    INSERT INTO tasks (id, title, description, status, priority, labels, created_at, updated_at,
+                       status_changed_at)
+    SELECT ${sql.literal(`unhex(${TASK_ID})`)}, 'Task ' || i, '', 'in-progress', 'normal', '[]',
+           '2026-10-20T10:00:00.000Z', '2026-10-20T10:00:00.000Z', '2026-10-20T10:00:00.000Z'
+    FROM n`;
+  yield* sql`
+    WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${LEG_TASKS}),
+         m(k) AS (SELECT 1 UNION ALL SELECT k + 1 FROM m WHERE k < ${LEG_HANDOFFS_PER_TASK})
+    INSERT INTO task_provenance (id, task_id, run_id, signal_id, at, actor)
+    SELECT randomblob(16), ${sql.literal(`unhex(${TASK_ID})`)}, ${sql.literal(`unhex(${RUN_ID})`)},
+           randomblob(16), strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-20', '+' || k || ' seconds'), 'user'
+    FROM n JOIN m`;
+  yield* sql`
+    WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${LEG_TASKS}),
+         m(k) AS (SELECT 1 UNION ALL SELECT k + 1 FROM m WHERE k < ${LEG_HANDOFFS_PER_TASK})
+    INSERT INTO runs (id, plan, inputs, origin, task_id, status, created_at, started_at, finished_at)
+    SELECT ${sql.literal(`unhex(${RUN_ID})`)}, '{"name":"Implement"}', '{}',
+           '{"kind":"manual","actor":"user"}', ${sql.literal(`unhex(${TASK_ID})`)}, 'completed',
+           strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-20', '+' || k || ' seconds'),
+           strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-20', '+' || k || ' seconds'),
+           strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-20', '+' || k || ' seconds')
+    FROM n JOIN m`;
+  // Re-run r of the asked handoff: the first half re-run the one before (a chain), the rest the handoff's run.
+  yield* sql`
+    WITH RECURSIVE r(j) AS (SELECT 1 UNION ALL SELECT j + 1 FROM r WHERE j < ${LEG_RERUNS})
+    INSERT INTO runs (id, plan, inputs, origin, task_id, original_run_id, status, created_at,
+                      started_at, finished_at)
+    SELECT unhex(printf('%08x000070008002%012x', 1, j)), '{"name":"Implement"}', '{}',
+           '{"kind":"manual","actor":"user"}', unhex(printf('%08x000070008000%012x', 1, 0)),
+           CASE WHEN j = 1 OR j > ${LEG_RERUNS / 2} THEN ${sql.literal(askedRun)}
+                ELSE unhex(printf('%08x000070008002%012x', 1, j - 1)) END,
+           'completed', strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-21', '+' || j || ' seconds'),
+           strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-21', '+' || j || ' seconds'),
+           strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-21', '+' || j || ' seconds')
+    FROM r`;
+}).pipe(inTransaction);
+
+describe.runIf(SPEED_TESTS_ENABLED)("the legs read", () => {
+  it("with 50 handoffs on Tasks of 100 handoffs and one leg of 200 re-runs, reads in bounded time and replies in bounded size", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedLegs;
+        const tracking = yield* TaskTracking;
+        // The ids are the ones the seed wrote: Task i's handoff run k, as a UUID.
+        const askedRunIds = Array.from(
+          { length: LEG_TASKS },
+          (_, index) =>
+            `${(index + 1).toString(16).padStart(8, "0")}-0000-7000-8001-${LEG_ASKED_HANDOFF.toString(16).padStart(12, "0")}`,
+        );
+        const { legs } = yield* tracking.queryLegs(askedRunIds);
+        return {
+          legs,
+          replyBytes: JSON.stringify(legs).length,
+          queryLegs: yield* measureMedian(tracking.queryLegs(askedRunIds)),
+        };
+      }).pipe(
+        Effect.provideService(CurrentActor, USER),
+        Effect.provide(
+          TaskTrackingLayer.pipe(
+            Layer.provideMerge(TaskTrackingRunsLayer),
+            Layer.provideMerge(TestDatabase),
+          ),
+        ),
+      ),
+    );
+
+    process.stderr.write(
+      `task.queryLegs with ${String(LEG_TASKS)} handoffs, Tasks of ${String(LEG_HANDOFFS_PER_TASK)} handoffs ` +
+        `and a leg of ${String(LEG_RERUNS)} re-runs, ${String(result.replyBytes)} bytes, median of ${String(RUNS)}: ` +
+        `${result.queryLegs.toFixed(2)} ms\n`,
+    );
+    expect(result.legs).toHaveLength(LEG_TASKS);
+    expect(result.legs[0]).toMatchObject({ rerunCount: LEG_RERUNS });
+    expect(result.legs[1]).toMatchObject({ rerunCount: 0 });
+    expect(result.legs.every((leg) => leg.next !== undefined)).toBe(true);
+    expect(result.queryLegs).toBeLessThan(LEGS_CEILING_MS);
   });
 });

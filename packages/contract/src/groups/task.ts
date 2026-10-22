@@ -471,18 +471,18 @@ export type TrackingOutput = Schema.Schema.Type<typeof TrackingOutput>;
  * Task's oldest handoff this way (`TrackingDetail.firstHandoff`), and a leg
  * names the handoff that follows it this way (`HandoffLeg.next`).
  */
-export const TrackingFirstHandoff = Schema.Struct({
+export const TrackingHandoffWithWorkflow = Schema.Struct({
   ...TrackingHandoff.fields,
   /** The name of the workflow of the handoff's run, as it was when that run started. */
   workflowName: Schema.String,
 });
 
-export type TrackingFirstHandoff = Schema.Schema.Type<typeof TrackingFirstHandoff>;
+export type TrackingHandoffWithWorkflow = Schema.Schema.Type<typeof TrackingHandoffWithWorkflow>;
 
 /** What `task.readTracking` returns: what the Tracking pane of one Task draws. */
 export const TrackingDetail = Schema.Struct({
   /** The Task's oldest handoff: the signal the user first handed to an agent. */
-  firstHandoff: TrackingFirstHandoff,
+  firstHandoff: TrackingHandoffWithWorkflow,
   /** The Task's newest runs, at most `MAX_TRACKING_DETAIL_RUNS`, oldest first. */
   runs: atMost(TrackingDetailRun, MAX_TRACKING_DETAIL_RUNS),
   /**
@@ -560,7 +560,7 @@ export const HandoffLeg = Schema.Struct({
    * newest handoff. It marks the end of this leg's story: the user handed the
    * Task on.
    */
-  next: Schema.optionalKey(TrackingFirstHandoff),
+  next: Schema.optionalKey(TrackingHandoffWithWorkflow),
 });
 
 export type HandoffLeg = Schema.Schema.Type<typeof HandoffLeg>;

@@ -11,6 +11,8 @@ export {
   TaskTracking,
   TaskTrackingLayer,
   TaskTrackingRuns,
+  type LegRoot,
+  type LegRuns,
   type TrackedRunHistory,
   type TrackedRuns,
 } from "./tracking";

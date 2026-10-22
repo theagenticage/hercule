@@ -103,6 +103,19 @@ export interface TrackedHandoff {
   readonly at: string;
 }
 
+/**
+ * One handoff entry of a non-deleted Task, found by the run it started, with
+ * the Task's status and the handoff entry appended right after it.
+ */
+export interface LegHandoff {
+  readonly runId: string;
+  readonly signalId: string;
+  readonly taskId: string;
+  readonly taskStatus: TaskStatus;
+  /** The Task's next handoff entry in append order. Absent for the Task's newest handoff. */
+  readonly next?: TrackedHandoff;
+}
+
 /** An open Task and one External Ref its provenance carries. */
 export interface OpenTaskOnRef {
   readonly ref: ExternalRef;
@@ -413,6 +426,72 @@ const make = Effect.gen(function* () {
               });
         },
       ),
+
+    /**
+     * Returns, for each `{ runId, taskId }` pair, the handoff entry of the
+     * Task `taskId` that started the run `runId`, with the Task's status and the
+     * Task's next handoff entry. A pair whose Task is deleted, or has no
+     * handoff entry for that run, is left out. The next handoff entry is the
+     * Task's handoff entry appended right after this one (the next greater
+     * `rowid`), among all the Task's handoff entries.
+     *
+     * One statement, and its work follows the pairs and the handoffs of the
+     * Tasks they name. Each pair reads its Task by key, then walks the Task's
+     * range on `task_provenance_handoff` (task, then time) to the entry that
+     * names the run, because no index holds the run of an entry. The same
+     * range is walked again to find the next entry. So a pair costs two passes
+     * over its Task's handoffs, never other Tasks' entries or the Task's other
+     * provenance. The pairs reach SQLite as one JSON text, so the
+     * statement does not grow with the number of pairs.
+     */
+    listLegHandoffs: (
+      pairs: ReadonlyArray<{ readonly runId: string; readonly taskId: string }>,
+    ): Effect.Effect<ReadonlyArray<LegHandoff>, SqlError> =>
+      pairs.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{
+              readonly run_id: Uint8Array;
+              readonly signal_id: Uint8Array;
+              readonly task_id: Uint8Array;
+              readonly status: TaskStatus;
+              readonly next_run_id: Uint8Array | null;
+              readonly next_signal_id: Uint8Array | null;
+              readonly next_at: string | null;
+            }>`
+              SELECT p.run_id, p.signal_id, t.id AS task_id, t.status,
+                     n.run_id AS next_run_id, n.signal_id AS next_signal_id, n.at AS next_at
+              FROM json_each(${JSON.stringify(
+                pairs.map((pair) => [
+                  pair.runId.replaceAll("-", ""),
+                  pair.taskId.replaceAll("-", ""),
+                ]),
+              )}) j
+              CROSS JOIN tasks t ON t.id = unhex(json_extract(j.value, '$[1]'))
+                                AND t.deleted_at IS NULL
+              CROSS JOIN task_provenance p ON p.task_id = t.id AND p.signal_id IS NOT NULL
+                                          AND p.run_id = unhex(json_extract(j.value, '$[0]'))
+              LEFT JOIN task_provenance n ON n.rowid = (
+                SELECT MIN(rowid) FROM task_provenance
+                WHERE task_id = p.task_id AND signal_id IS NOT NULL AND rowid > p.rowid)`,
+            (rows) =>
+              rows.map((row) => ({
+                runId: uuidToString(row.run_id),
+                signalId: uuidToString(row.signal_id),
+                taskId: uuidToString(row.task_id),
+                taskStatus: row.status,
+                // A handoff entry always names the run it started.
+                ...(row.next_run_id === null || row.next_signal_id === null || row.next_at === null
+                  ? {}
+                  : {
+                      next: {
+                        signalId: uuidToString(row.next_signal_id),
+                        runId: uuidToString(row.next_run_id),
+                        at: row.next_at,
+                      },
+                    }),
+              })),
+          ),
 
     /**
      * Returns every in-progress task that has a handoff entry, the most

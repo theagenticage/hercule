@@ -1,7 +1,8 @@
 /**
  * Tracking's reads: `task.queryTracking` returns every in-progress Task that
  * has a handoff entry, with the facts a client works the Task's state out
- * from, and `task.readTracking` returns what the pane of one Task draws
+ * from, `task.readTracking` returns what the pane of one Task draws, and
+ * `task.queryLegs` returns where the work of given handoffs stands
  * (spec 11, `task`; ADR 0046).
  *
  * The Task rows are this domain's. The newest run of each Task and its live
@@ -19,6 +20,7 @@ import {
   createNotFoundError,
   type Forbidden,
   MAX_TRACKING_STEP_NAME,
+  type HandoffLegs,
   type NotFound,
   type TaskTracking as TaskTrackingReading,
   type TrackingDetail,
@@ -59,6 +61,32 @@ export interface TrackedRunHistory {
   readonly endingActionStepName: string | undefined;
 }
 
+/**
+ * A handoff's run to read the leg of, with the run of the Task's next handoff
+ * when there is one.
+ */
+export interface LegRoot {
+  readonly runId: string;
+  readonly taskId: string;
+  readonly nextRunId: string | undefined;
+}
+
+/** What the runs say about the leg that starts at a handoff's run. */
+export interface LegRuns {
+  readonly runId: string;
+  /** The workflow of the handoff's run. */
+  readonly workflowId: string | null;
+  readonly workflowName: string;
+  /** The runs of the leg other than the handoff's run. */
+  readonly rerunCount: number;
+  /** The newest run of the leg, the handoff's run included. */
+  readonly latestRun: TrackingRun;
+  /** The ids of the leg's pending and running runs, newest first, at most `MAX_LEG_LIVE_RUNS`. */
+  readonly liveRunIds: ReadonlyArray<string>;
+  /** The workflow name of the next handoff's run, when the root has one. */
+  readonly nextWorkflowName: string | undefined;
+}
+
 export class TaskTrackingRuns extends Context.Service<
   TaskTrackingRuns,
   {
@@ -90,6 +118,27 @@ export class TaskTrackingRuns extends Context.Service<
      * by its id, whatever the run's age.
      */
     readonly readWorkflowName: (runId: string) => Effect.Effect<Option.Option<string>, SqlError>;
+
+    /**
+     * Returns the Task each run of `runIds` works on, by run id. A run that
+     * works on no Task, or does not exist, is left out. One lookup of each run
+     * by its id.
+     */
+    readonly readTaskIds: (
+      runIds: ReadonlyArray<string>,
+    ) => Effect.Effect<ReadonlyMap<string, string>, SqlError>;
+
+    /**
+     * Returns the leg that starts at each root run: the root and every run
+     * that can be reached from it through the run it re-runs, however many
+     * re-runs deep, and that works on the root's Task. A root that does not
+     * exist, or works on another Task, is left out. One recursive statement
+     * walks the legs of all the roots, so its work follows the runs of those
+     * legs, never the Tasks' other runs.
+     */
+    readonly readLegRuns: (
+      roots: ReadonlyArray<LegRoot>,
+    ) => Effect.Effect<ReadonlyArray<LegRuns>, SqlError>;
   }
 >()("hercule/controller/tasks/TaskTrackingRuns") {}
 
@@ -188,6 +237,72 @@ const make = Effect.gen(function* () {
             : {
                 endingActionStepName: cutText(history.endingActionStepName, MAX_TRACKING_STEP_NAME),
               }),
+        };
+      }),
+
+    /**
+     * Returns the leg of each run of `runIds` that is the run of a handoff of
+     * a Task that is not deleted: the handoff, the runs that re-ran it (the
+     * handoff's run plus every run reachable from it through the run it
+     * re-runs, on the same Task), and the Task's next handoff. The legs come in
+     * the order of `runIds`, and a repeated id gives one leg. An id that is not
+     * the run of such a handoff is left out: an unknown run, a run of no Task,
+     * a run of a deleted Task, and a run that only re-runs a handoff's run.
+     *
+     * The caller needs `task.queryLegs` and `run.query`, as for `query`. It
+     * opens no transaction, so it reads on the read-only connection.
+     *
+     * Its size is a fixed amount for each leg, whatever the history: the ids
+     * of the live runs are capped at `MAX_LEG_LIVE_RUNS`. Its cost follows the
+     * runs of the legs asked for and the handoffs of their Tasks, never other
+     * runs or Tasks: see `listLegHandoffs` and `readLegRuns`.
+     */
+    queryLegs: (
+      runIds: ReadonlyArray<string>,
+    ): Effect.Effect<HandoffLegs, Unauthenticated | Forbidden | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.queryLegs");
+        yield* requireGrant("run.query");
+        const asked = [...new Set(runIds)];
+        const taskIds = yield* runs.readTaskIds(asked);
+        const handoffs = yield* tasks.listLegHandoffs(
+          asked.flatMap((runId) => {
+            const taskId = taskIds.get(runId);
+            return taskId === undefined ? [] : [{ runId, taskId }];
+          }),
+        );
+        const legRuns = new Map(
+          (yield* runs.readLegRuns(
+            handoffs.map((handoff) => ({
+              runId: handoff.runId,
+              taskId: handoff.taskId,
+              nextRunId: handoff.next?.runId,
+            })),
+          )).map((leg) => [leg.runId, leg]),
+        );
+        const handoffsByRun = new Map(handoffs.map((handoff) => [handoff.runId, handoff]));
+        return {
+          legs: asked.flatMap((runId) => {
+            const handoff = handoffsByRun.get(runId);
+            const leg = legRuns.get(runId);
+            if (handoff === undefined || leg === undefined) return [];
+            return [
+              {
+                runId,
+                signalId: handoff.signalId,
+                taskId: handoff.taskId,
+                taskStatus: handoff.taskStatus,
+                workflowId: leg.workflowId,
+                workflowName: leg.workflowName,
+                rerunCount: leg.rerunCount,
+                latestRun: leg.latestRun,
+                liveRunIds: leg.liveRunIds,
+                ...(handoff.next === undefined || leg.nextWorkflowName === undefined
+                  ? {}
+                  : { next: { ...handoff.next, workflowName: leg.nextWorkflowName } }),
+              },
+            ];
+          }),
         };
       }),
   };
