@@ -216,19 +216,23 @@ interface RunRow {
 }
 
 /**
- * The leg that starts at one run: the run and every run that re-runs it,
- * however many re-runs deep, on the same Task.
+ * The leg that starts at a handoff's run: the run and every run that re-runs
+ * it, however many re-runs deep, on the same Task.
  */
 export interface RunLeg {
-  readonly rootId: string;
-  /** The root run's workflow id. */
+  /** The handoff's run. */
+  readonly runId: string;
+  /** The workflow id of the handoff's run. */
   readonly workflowId: string | null;
-  /** The name of the root run's workflow, as it was when the root started. */
+  /** The name of the workflow of the handoff's run, as it was when that run started. */
   readonly workflowName: string;
-  /** The runs of the leg other than the root. */
+  /** The runs of the leg other than the handoff's run. */
   readonly rerunCount: number;
-  /** The newest run of the leg, root included: its id and status, which is all a leg reports of it. */
-  readonly latest: { readonly id: string; readonly status: RunStatus };
+  /**
+   * The newest run of the leg, the handoff's run included. It is only the id
+   * and the status, which is all a leg reports of it.
+   */
+  readonly latestRun: { readonly id: string; readonly status: RunStatus };
   /** The leg's pending and running runs, newest first, capped. */
   readonly liveRunIds: ReadonlyArray<string>;
 }
@@ -1018,90 +1022,98 @@ const make = Effect.gen(function* () {
           ),
 
     /**
-     * Returns, for each root `{ runId, taskId }`, the leg that starts at the
-     * root run: the root and every run reachable from it through
+     * Returns, for each handoff's run `{ runId, taskId }`, the leg that starts
+     * at that run: the run and every run reachable from it through
      * `original_run_id` (a re-run, a re-run of a re-run, and so on) that works
-     * on the same Task. A root that does not exist, or works on another Task, is
-     * left out. For each leg it returns:
+     * on the same Task. `taskId` must be the Task the run itself works on, as
+     * `listTaskIds` reads it. A run that does not exist is left out. For each
+     * leg it returns:
      *
-     * - the root's workflow id and name;
-     * - the number of runs that re-run the root (the leg without the root);
-     * - the newest run of the leg, root included (latest `created_at`, then
-     *   greatest id);
+     * - the workflow id and name of the handoff's run;
+     * - the number of runs that re-run it (the leg without the handoff's run);
+     * - the newest run of the leg, the handoff's run included (latest
+     *   `created_at`, then greatest id), as its id and status;
      * - the ids of the leg's pending or running runs, newest first, at most
      *   `maxLiveRunIds`.
      *
-     * One recursive statement for all the roots. The statement walks the
-     * roots on the primary key and each run's re-runs on `runs_original_run_id`,
-     * so its work follows the runs of the legs, never the Task's other runs. The
-     * unary `+` on the Task check keeps SQLite from walking `runs_task_id`, the
-     * Task's whole history, once for every run of a leg. It
-     * ranks the runs of each leg in memory (SQLite window functions) and reads
-     * the summary columns of only the root, the newest run and the capped live
-     * runs of each leg. The roots reach SQLite as one JSON text, so the
-     * statement does not grow with the number of roots.
+     * One recursive statement for all the handoff runs. It walks them on the
+     * primary key and each run's re-runs on `runs_original_run_id`, so its
+     * work follows the runs of the legs asked for, never the Task's other
+     * runs. A wide fan-out of re-runs is therefore linear in its size. The
+     * unary `+` on the Task check keeps SQLite from walking `runs_task_id`,
+     * the Task's whole history, once for every run of a leg. It ranks the runs
+     * of each leg in memory (SQLite window functions) and reads the columns of
+     * only the handoff's run, the newest run and the capped live runs of each
+     * leg. The handoff runs reach SQLite as one JSON text, so the statement
+     * does not grow with their number.
      */
     listLegs: (
-      roots: ReadonlyArray<{ readonly runId: string; readonly taskId: string }>,
+      handoffRuns: ReadonlyArray<{ readonly runId: string; readonly taskId: string }>,
       maxLiveRunIds: number,
     ): Effect.Effect<ReadonlyArray<RunLeg>, SqlError> =>
       Effect.gen(function* () {
-        if (roots.length === 0) return [];
-        const hexRoots = JSON.stringify(
-          roots.map((root) => [root.runId.replaceAll("-", ""), root.taskId.replaceAll("-", "")]),
+        if (handoffRuns.length === 0) return [];
+        const hexHandoffRuns = JSON.stringify(
+          handoffRuns.map((handoffRun) => [
+            handoffRun.runId.replaceAll("-", ""),
+            handoffRun.taskId.replaceAll("-", ""),
+          ]),
         );
-        const rows = yield* sql<
-          SummaryRow & {
-            readonly root_id: Uint8Array;
-            readonly size: number;
-            readonly newest_rank: number;
-            readonly live_rank: number | null;
-            readonly is_root: number;
-          }
-        >`
+        const rows = yield* sql<{
+          readonly id: Uint8Array;
+          readonly status: RunStatus;
+          readonly workflow_id: Uint8Array | null;
+          readonly workflow_name: string;
+          readonly handoff_run_id: Uint8Array;
+          readonly size: number;
+          readonly newest_rank: number;
+          readonly live_rank: number | null;
+          readonly is_handoff_run: number;
+        }>`
           WITH RECURSIVE
-            roots(root_id, task_id) AS (
+            handoff_runs(run_id, task_id) AS (
               SELECT unhex(json_extract(value, '$[0]')), unhex(json_extract(value, '$[1]'))
-              FROM json_each(${hexRoots})),
-            members(root_id, member_id, task_id, created_at, is_live) AS (
-              SELECT roots.root_id, runs.id, roots.task_id, runs.created_at,
+              FROM json_each(${hexHandoffRuns})),
+            members(handoff_run_id, member_id, task_id, created_at, is_live) AS (
+              SELECT handoff_runs.run_id, runs.id, handoff_runs.task_id, runs.created_at,
                      runs.status IN ('pending', 'running')
-              FROM roots CROSS JOIN runs ON runs.id = roots.root_id AND runs.task_id = roots.task_id
+              FROM handoff_runs CROSS JOIN runs ON runs.id = handoff_runs.run_id
               UNION ALL
-              SELECT members.root_id, runs.id, members.task_id, runs.created_at,
+              SELECT members.handoff_run_id, runs.id, members.task_id, runs.created_at,
                      runs.status IN ('pending', 'running')
               FROM members CROSS JOIN runs ON runs.original_run_id = members.member_id
                                           AND +runs.task_id = members.task_id),
             ranked AS (
-              SELECT root_id, member_id, is_live,
-                     count(*) OVER (PARTITION BY root_id) AS size,
-                     row_number() OVER (PARTITION BY root_id
+              SELECT handoff_run_id, member_id, is_live,
+                     count(*) OVER (PARTITION BY handoff_run_id) AS size,
+                     row_number() OVER (PARTITION BY handoff_run_id
                                         ORDER BY created_at DESC, member_id DESC) AS newest_rank,
                      CASE WHEN is_live THEN
-                       row_number() OVER (PARTITION BY root_id, is_live
+                       row_number() OVER (PARTITION BY handoff_run_id, is_live
                                           ORDER BY created_at DESC, member_id DESC) END AS live_rank
               FROM members)
-          SELECT root_id, size, newest_rank, live_rank, member_id = root_id AS is_root,
-                 ${sql.literal(SUMMARY_COLUMNS)}
+          SELECT handoff_run_id, size, newest_rank, live_rank, member_id = handoff_run_id AS is_handoff_run,
+                 id, status, workflow_id, json_extract(plan, '$.name') AS workflow_name
           FROM ranked CROSS JOIN runs ON runs.id = member_id
-          WHERE newest_rank = 1 OR member_id = root_id OR live_rank <= ${maxLiveRunIds}`;
-        const byRoot = new Map<string, Array<(typeof rows)[number]>>();
+          WHERE newest_rank = 1 OR member_id = handoff_run_id OR live_rank <= ${maxLiveRunIds}`;
+        const byHandoffRun = new Map<string, Array<(typeof rows)[number]>>();
         for (const row of rows) {
-          const rootId = uuidToString(row.root_id);
-          const ofRoot = byRoot.get(rootId);
-          if (ofRoot === undefined) byRoot.set(rootId, [row]);
-          else ofRoot.push(row);
+          const runId = uuidToString(row.handoff_run_id);
+          const ofLeg = byHandoffRun.get(runId);
+          if (ofLeg === undefined) byHandoffRun.set(runId, [row]);
+          else ofLeg.push(row);
         }
-        return [...byRoot].map(([rootId, ofRoot]): RunLeg => {
-          const root = ofRoot.find((row) => row.is_root === 1)!;
-          const newest = ofRoot.find((row) => row.newest_rank === 1)!;
+        return [...byHandoffRun].map(([runId, ofLeg]): RunLeg => {
+          const handoffRun = ofLeg.find((row) => row.is_handoff_run === 1)!;
+          const newest = ofLeg.find((row) => row.newest_rank === 1)!;
           return {
-            rootId,
-            workflowId: root.workflow_id === null ? null : uuidToString(root.workflow_id),
-            workflowName: root.workflow_name,
-            rerunCount: root.size - 1,
-            latest: { id: uuidToString(newest.id), status: newest.status },
-            liveRunIds: ofRoot
+            runId,
+            workflowId:
+              handoffRun.workflow_id === null ? null : uuidToString(handoffRun.workflow_id),
+            workflowName: handoffRun.workflow_name,
+            rerunCount: handoffRun.size - 1,
+            latestRun: { id: uuidToString(newest.id), status: newest.status },
+            liveRunIds: ofLeg
               .filter((row) => row.live_rank !== null && row.live_rank <= maxLiveRunIds)
               .toSorted((a, b) => a.live_rank! - b.live_rank!)
               .map((row) => uuidToString(row.id)),

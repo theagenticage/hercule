@@ -62,18 +62,15 @@ export interface TrackedRunHistory {
   readonly endingActionStepName: string | undefined;
 }
 
-/**
- * A handoff's run to read the leg of, with the run of the Task's next handoff
- * when there is one.
- */
-export interface LegRoot {
+/** A handoff's run, to read the leg of, with the Task the handoff belongs to. */
+export interface HandoffRun {
   readonly runId: string;
   readonly taskId: string;
-  readonly nextRunId: string | undefined;
 }
 
-/** What the runs say about the leg that starts at a handoff's run. */
+/** The leg that starts at a handoff's run, as the runs describe it. */
 export interface LegRuns {
+  /** The handoff's run. */
   readonly runId: string;
   /** The workflow of the handoff's run. */
   readonly workflowId: string | null;
@@ -84,8 +81,6 @@ export interface LegRuns {
   readonly latestRun: { readonly id: string; readonly status: RunStatus };
   /** The ids of the leg's pending and running runs, newest first, at most `MAX_LEG_LIVE_RUNS`. */
   readonly liveRunIds: ReadonlyArray<string>;
-  /** The workflow name of the next handoff's run, when the root has one. */
-  readonly nextWorkflowName: string | undefined;
 }
 
 export class TaskTrackingRuns extends Context.Service<
@@ -121,6 +116,15 @@ export class TaskTrackingRuns extends Context.Service<
     readonly readWorkflowName: (runId: string) => Effect.Effect<Option.Option<string>, SqlError>;
 
     /**
+     * Returns the name of the workflow of each run of `runIds`, as it was when
+     * the run started, by run id. A run that does not exist is left out. One
+     * lookup of each run by its id.
+     */
+    readonly readWorkflowNames: (
+      runIds: ReadonlyArray<string>,
+    ) => Effect.Effect<ReadonlyMap<string, string>, SqlError>;
+
+    /**
      * Returns the Task each run of `runIds` works on, by run id. A run that
      * works on no Task, or does not exist, is left out. One lookup of each run
      * by its id.
@@ -130,15 +134,16 @@ export class TaskTrackingRuns extends Context.Service<
     ) => Effect.Effect<ReadonlyMap<string, string>, SqlError>;
 
     /**
-     * Returns the leg that starts at each root run: the root and every run
+     * Returns the leg that starts at each handoff's run: the run and every run
      * that can be reached from it through the run it re-runs, however many
-     * re-runs deep, and that works on the root's Task. A root that does not
-     * exist, or works on another Task, is left out. One recursive statement
-     * walks the legs of all the roots, so its work follows the runs of those
-     * legs, never the Tasks' other runs.
+     * re-runs deep, and that works on the same Task. `taskId` must be the Task
+     * the run works on, as `readTaskIds` returns it. A run that does not exist
+     * is left out. One recursive statement walks the legs of all the runs, so
+     * its work follows the size of the legs asked for, never the Tasks' other
+     * runs.
      */
     readonly readLegRuns: (
-      roots: ReadonlyArray<LegRoot>,
+      handoffRuns: ReadonlyArray<HandoffRun>,
     ) => Effect.Effect<ReadonlyArray<LegRuns>, SqlError>;
   }
 >()("hercule/controller/tasks/TaskTrackingRuns") {}
@@ -245,7 +250,8 @@ const make = Effect.gen(function* () {
      * Returns the leg of each run of `runIds` that is the run of a handoff of
      * a Task that is not deleted: the handoff, the runs that re-ran it (the
      * handoff's run plus every run reachable from it through the run it
-     * re-runs, on the same Task), and the Task's next handoff. The legs come in
+     * re-runs, on the same Task), and the Task's next handoff, the one that
+     * follows by time, then by the order it was appended. The legs come in
      * the order of `runIds`, and a repeated id gives one leg. An id that is not
      * the run of such a handoff is left out: an unknown run, a run of no Task,
      * a run of a deleted Task, and a run that only re-runs a handoff's run.
@@ -255,8 +261,9 @@ const make = Effect.gen(function* () {
      *
      * Its size is a fixed amount for each leg, whatever the history: the ids
      * of the live runs are capped at `MAX_LEG_LIVE_RUNS`. Its cost follows the
-     * runs of the legs asked for and the handoffs of their Tasks, never other
-     * runs or Tasks: see `listLegHandoffs` and `readLegRuns`.
+     * runs of the legs asked for, never the Task's other runs or handoffs:
+     * each handoff and its next one are found by index, see `listLegHandoffs`
+     * and `readLegRuns`.
      */
     queryLegs: (
       runIds: ReadonlyArray<string>,
@@ -273,20 +280,20 @@ const make = Effect.gen(function* () {
           }),
         );
         const legRuns = new Map(
-          (yield* runs.readLegRuns(
-            handoffs.map((handoff) => ({
-              runId: handoff.runId,
-              taskId: handoff.taskId,
-              nextRunId: handoff.next?.runId,
-            })),
-          )).map((leg) => [leg.runId, leg]),
+          (yield* runs.readLegRuns(handoffs.map(({ runId, taskId }) => ({ runId, taskId })))).map(
+            (leg) => [leg.runId, leg],
+          ),
+        );
+        // A handoff's run always exists, because runs are never deleted.
+        const nextWorkflowNames = yield* runs.readWorkflowNames(
+          handoffs.flatMap((handoff) => (handoff.next === undefined ? [] : [handoff.next.runId])),
         );
         const handoffsByRun = new Map(handoffs.map((handoff) => [handoff.runId, handoff]));
         return {
           legs: asked.flatMap((runId) => {
             const handoff = handoffsByRun.get(runId);
-            const leg = legRuns.get(runId);
-            if (handoff === undefined || leg === undefined) return [];
+            if (handoff === undefined) return [];
+            const leg = legRuns.get(runId)!;
             return [
               {
                 runId,
@@ -298,9 +305,14 @@ const make = Effect.gen(function* () {
                 rerunCount: leg.rerunCount,
                 latestRun: leg.latestRun,
                 liveRunIds: leg.liveRunIds,
-                ...(handoff.next === undefined || leg.nextWorkflowName === undefined
+                ...(handoff.next === undefined
                   ? {}
-                  : { next: { ...handoff.next, workflowName: leg.nextWorkflowName } }),
+                  : {
+                      next: {
+                        ...handoff.next,
+                        workflowName: nextWorkflowNames.get(handoff.next.runId)!,
+                      },
+                    }),
               },
             ];
           }),

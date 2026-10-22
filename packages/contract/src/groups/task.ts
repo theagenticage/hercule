@@ -559,10 +559,10 @@ export const HandoffLeg = Schema.Struct({
    */
   liveRunIds: atMost(Id, MAX_LEG_LIVE_RUNS),
   /**
-   * The Task's next handoff: the handoff entry appended to the Task right after
-   * this one, whichever signal it handed off. Absent when this is the Task's
-   * newest handoff. It marks the end of this leg's story: the user handed the
-   * Task on.
+   * The Task's next handoff: the handoff entry that follows this one by time,
+   * then by the order it was appended, whichever signal it handed off. Absent
+   * when this is the Task's newest handoff. It marks the end of this leg's
+   * story: the user handed the Task on.
    */
   next: Schema.optionalKey(TrackingHandoffWithWorkflow),
 });

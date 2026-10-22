@@ -24,8 +24,7 @@ import { runRepository } from "../../runs";
 import {
   cutText,
   TaskTrackingRuns,
-  type LegRoot,
-  type LegRuns,
+  type HandoffRun,
   type TrackedRunHistory,
   type TrackedRuns,
 } from "../../tasks";
@@ -105,30 +104,10 @@ export const TaskTrackingRunsLayer: Layer.Layer<TaskTrackingRuns, never, SqlClie
           };
         }),
       readWorkflowName: runs.readWorkflowName,
+      readWorkflowNames: runs.listWorkflowNames,
       readTaskIds: runs.listTaskIds,
-      readLegRuns: (
-        roots: ReadonlyArray<LegRoot>,
-      ): Effect.Effect<ReadonlyArray<LegRuns>, SqlError> =>
-        Effect.gen(function* () {
-          const legs = yield* runs.listLegs(roots, MAX_LEG_LIVE_RUNS);
-          const nextWorkflowNames = yield* runs.listWorkflowNames(
-            roots.flatMap((root) => (root.nextRunId === undefined ? [] : [root.nextRunId])),
-          );
-          const nextRunIds = new Map(roots.map((root) => [root.runId, root.nextRunId]));
-          return legs.map((leg): LegRuns => {
-            const nextRunId = nextRunIds.get(leg.rootId);
-            return {
-              runId: leg.rootId,
-              workflowId: leg.workflowId,
-              workflowName: leg.workflowName,
-              rerunCount: leg.rerunCount,
-              latestRun: leg.latest,
-              liveRunIds: leg.liveRunIds,
-              nextWorkflowName:
-                nextRunId === undefined ? undefined : nextWorkflowNames.get(nextRunId),
-            };
-          });
-        }),
+      readLegRuns: (handoffRuns: ReadonlyArray<HandoffRun>) =>
+        runs.listLegs(handoffRuns, MAX_LEG_LIVE_RUNS),
       readLatestRuns: (taskIds: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           const { latest, live } = yield* runs.listLatestOfTasks(taskIds);

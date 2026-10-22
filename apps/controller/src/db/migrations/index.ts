@@ -97,6 +97,7 @@ import skillUpstreamCommit from "./0086-skill-upstream-commit";
 import sessionLibrarySkills from "./0087-session-library-skills";
 import taskTracking from "./0088-task-tracking";
 import runStepSessions from "./0089-run-step-sessions";
+import handoffRun from "./0090-handoff-run";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -188,6 +189,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [87, "session-library-skills", Effect.succeed(sessionLibrarySkills)],
   [88, "task-tracking", Effect.succeed(taskTracking)],
   [89, "run-step-sessions", Effect.succeed(runStepSessions)],
+  [90, "handoff-run", Effect.succeed(handoffRun)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

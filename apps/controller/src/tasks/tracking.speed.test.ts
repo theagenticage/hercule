@@ -30,9 +30,11 @@
  * - 10,000 in-progress Tasks that have no handoff;
  * - 10,000 handoffs on one tracked Task.
  *
- * Another case times `task.queryLegs` on the legs of 50 handoffs (a page of
+ * Two more cases time `task.queryLegs` on the legs of 50 handoffs (a page of
  * Done signals): each on its own Task of 100 handoffs and 100 runs, and one
- * with 200 re-runs, half of them a chain of re-runs of re-runs.
+ * with 200 re-runs, half of them a chain of re-runs of re-runs; and all 50 on
+ * one Task of 10,000 handoffs, because finding a handoff and the one after it
+ * must not walk the Task's handoffs.
  *
  * What it guards is an order of magnitude: the read looks up each tracked
  * Task's newest runs and newest handoffs, so its time follows the number of
@@ -546,5 +548,77 @@ describe.runIf(SPEED_TESTS_ENABLED)("the legs read", () => {
     expect(result.legs[1]).toMatchObject({ rerunCount: 0 });
     expect(result.legs.every((leg) => leg.next !== undefined)).toBe(true);
     expect(result.queryLegs).toBeLessThan(LEGS_CEILING_MS);
+  });
+});
+
+/** The handoffs of the one Task of the long-history case, each with a run of its own. */
+const LONG_TASK_HANDOFFS = 10_000;
+
+/** The most time `task.queryLegs` may take on the long-history case, in milliseconds. */
+const LONG_TASK_LEGS_CEILING_MS = 10;
+
+/**
+ * Writes one Task with `LONG_TASK_HANDOFFS` handoffs, a run for every
+ * handoff. In SQL, in one transaction. The Task and its runs take the ids of
+ * Task 1.
+ */
+const seedLongTask = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
+    INSERT INTO tasks (id, title, description, status, priority, labels, created_at, updated_at,
+                       status_changed_at)
+    SELECT unhex(printf('%08x000070008000%012x', 1, 0)), 'Task 1', '', 'in-progress', 'normal', '[]',
+           '2026-10-20T10:00:00.000Z', '2026-10-20T10:00:00.000Z', '2026-10-20T10:00:00.000Z'`;
+  yield* sql`
+    WITH RECURSIVE m(k) AS (SELECT 1 UNION ALL SELECT k + 1 FROM m WHERE k < ${LONG_TASK_HANDOFFS})
+    INSERT INTO task_provenance (id, task_id, run_id, signal_id, at, actor)
+    SELECT randomblob(16), unhex(printf('%08x000070008000%012x', 1, 0)),
+           unhex(printf('%08x000070008001%012x', 1, k)), randomblob(16),
+           strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-20', '+' || k || ' seconds'), 'user'
+    FROM m`;
+  yield* sql`
+    WITH RECURSIVE m(k) AS (SELECT 1 UNION ALL SELECT k + 1 FROM m WHERE k < ${LONG_TASK_HANDOFFS})
+    INSERT INTO runs (id, plan, inputs, origin, task_id, status, created_at, started_at, finished_at)
+    SELECT unhex(printf('%08x000070008001%012x', 1, k)), '{"name":"Implement"}', '{}',
+           '{"kind":"manual","actor":"user"}', unhex(printf('%08x000070008000%012x', 1, 0)),
+           'completed', strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-20', '+' || k || ' seconds'),
+           strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-20', '+' || k || ' seconds'),
+           strftime('%Y-%m-%dT%H:%M:%fZ', '2026-10-20', '+' || k || ' seconds')
+    FROM m`;
+}).pipe(inTransaction);
+
+describe.runIf(SPEED_TESTS_ENABLED)("the legs read on a long history", () => {
+  it("with 50 handoffs on one Task of 10,000 handoffs, finds each handoff and the next without walking the Task", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedLongTask;
+        const tracking = yield* TaskTracking;
+        // Every 200th handoff's run, so the asked handoffs are spread over the Task's whole history.
+        const askedRunIds = Array.from(
+          { length: MAX_LEG_QUERY_RUNS },
+          (_, index) =>
+            `00000001-0000-7000-8001-${((index + 1) * (LONG_TASK_HANDOFFS / MAX_LEG_QUERY_RUNS)).toString(16).padStart(12, "0")}`,
+        );
+        const { legs } = yield* tracking.queryLegs(askedRunIds);
+        return { legs, queryLegs: yield* measureMedian(tracking.queryLegs(askedRunIds)) };
+      }).pipe(
+        Effect.provideService(CurrentActor, USER),
+        Effect.provide(
+          TaskTrackingLayer.pipe(
+            Layer.provideMerge(TaskTrackingRunsLayer),
+            Layer.provideMerge(TestDatabase),
+          ),
+        ),
+      ),
+    );
+
+    process.stderr.write(
+      `task.queryLegs with ${String(MAX_LEG_QUERY_RUNS)} handoffs on one Task of ${String(LONG_TASK_HANDOFFS)} handoffs, ` +
+        `median of ${String(RUNS)}: ${result.queryLegs.toFixed(2)} ms\n`,
+    );
+    expect(result.legs).toHaveLength(MAX_LEG_QUERY_RUNS);
+    // Every asked handoff but the Task's newest has a next one.
+    expect(result.legs.filter((leg) => leg.next === undefined)).toHaveLength(1);
+    expect(result.queryLegs).toBeLessThan(LONG_TASK_LEGS_CEILING_MS);
   });
 });

@@ -11,7 +11,7 @@ export {
   TaskTracking,
   TaskTrackingLayer,
   TaskTrackingRuns,
-  type LegRoot,
+  type HandoffRun,
   type LegRuns,
   type TrackedRunHistory,
   type TrackedRuns,

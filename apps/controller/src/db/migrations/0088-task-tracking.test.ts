@@ -71,11 +71,14 @@ describe("the task tracking migration", () => {
         "CREATE INDEX task_provenance_handoff ON task_provenance (task_id, at) WHERE signal_id IS NOT NULL",
       ],
     ]);
-    // The partial index holds only the entries that name a signal, so the
-    // subquery walks those and not the whole provenance table.
-    expect(handedOffPlan.map((step) => step.detail)).toContain(
-      "SCAN task_provenance USING INDEX task_provenance_handoff",
-    );
+    // The partial indexes hold only the entries that name a signal, so the
+    // subquery walks one of them (`task_provenance_handoff`, or a later partial
+    // index with the same prefix) and not the whole provenance table.
+    expect(
+      handedOffPlan.some((step) =>
+        step.detail.startsWith("SCAN task_provenance USING INDEX task_provenance_handoff"),
+      ),
+    ).toBe(true);
     // One lookup per task id, then a sort, because the rows of several tasks
     // are not in order across the ids.
     expect(runsByTaskPlan.map((step) => step.detail)).toEqual([

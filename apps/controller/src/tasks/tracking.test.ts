@@ -109,6 +109,7 @@ const runTracking = <A, E>(
               readRunHistory: () => Effect.succeed(history),
               readTaskIds: () => Effect.succeed(new Map()),
               readLegRuns: () => Effect.succeed([]),
+              readWorkflowNames: () => Effect.succeed(new Map()),
               readWorkflowName: (runId) =>
                 Effect.succeed(Option.fromNullishOr(WORKFLOW_NAMES.get(runId))),
               readLatestRuns: (taskIds) =>
@@ -283,6 +284,33 @@ describe("task.queryTracking", () => {
     );
   });
 
+  it("orders handoffs that share a time by the order they were appended, newest first", async () => {
+    const rows = await runTracking(
+      USER,
+      [],
+      Effect.gen(function* () {
+        const repository = yield* taskRepository;
+        yield* inTransaction(
+          repository.insert({
+            ...NEW_TASK,
+            title: "handed twice at once",
+            provenance: [
+              { signalId: SIGNAL_A, runId: RUN_A },
+              { signalId: SIGNAL_B, runId: RUN_B },
+            ],
+          }),
+        );
+        const tracking = yield* TaskTracking;
+        return (yield* tracking.query()).rows;
+      }),
+    );
+
+    expect(rows[0]!.handoffs).toEqual([
+      { signalId: SIGNAL_B, runId: RUN_B, at: AT },
+      { signalId: SIGNAL_A, runId: RUN_A, at: AT },
+    ]);
+  });
+
   it("leaves out a Task that has no run", async () => {
     const rows = await Effect.runPromise(
       Effect.gen(function* () {
@@ -305,6 +333,7 @@ describe("task.queryTracking", () => {
                 readRunHistory: () => Effect.succeed(NO_HISTORY),
                 readTaskIds: () => Effect.succeed(new Map()),
                 readLegRuns: () => Effect.succeed([]),
+                readWorkflowNames: () => Effect.succeed(new Map()),
                 readWorkflowName: () => Effect.succeed(Option.none()),
               }),
             ),

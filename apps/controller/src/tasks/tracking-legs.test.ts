@@ -5,7 +5,7 @@
  *
  * - which runs a leg holds: re-runs of re-runs, never by time, never another
  *   Task's runs;
- * - the Task's next handoff, in append order;
+ * - the Task's next handoff, by time then append order;
  * - which ids are left out, the order of the legs, and duplicates;
  * - the newest run of a leg, why it failed, and the cap on its live runs;
  * - who may read it;
@@ -180,7 +180,7 @@ describe("task.queryLegs", () => {
     ]);
   });
 
-  it("gives the next handoff in append order, whatever the entries' times", async () => {
+  it("gives the next handoff by time, then by the order appended", async () => {
     const { legs } = await runLegs(
       Effect.gen(function* () {
         yield* insertTask(TASK, [
@@ -191,24 +191,33 @@ describe("task.queryLegs", () => {
         yield* insertRun({ id: 1, task: TASK, at: minute(1) });
         yield* insertRun({ id: 2, task: TASK, at: minute(2), workflow: "Review PR" });
         yield* insertRun({ id: 3, task: TASK, at: minute(3), workflow: "Ship" });
-        // The first entry now has the latest time; the other two share a time.
+        // The first entry now has the latest time; the other two share an earlier time.
         const sql = yield* SqlClient.SqlClient;
         yield* inTransaction(
           sql`UPDATE task_provenance SET at = '2026-10-21T10:00:00.000Z'
               WHERE run_id = ${uuidFromString(buildId("run", 1))}`,
         );
-        // Asked for only the first and the last, so the next of the first is not asked for.
-        return yield* queryLegs([1, 3]);
+        return yield* queryLegs([1, 2, 3]);
       }),
     );
 
-    expect(legs[0]!.next).toEqual({
-      signalId: buildId("signal", 2),
-      runId: buildId("run", 2),
+    // The first entry is the newest by time, so it has no next. The second
+    // shares its time with the third, which was appended after it. The third
+    // is followed by the first, which has a later time though it was appended
+    // before.
+    expect(legs[0]!.next).toBeUndefined();
+    expect(legs[1]!.next).toEqual({
+      signalId: buildId("signal", 3),
+      runId: buildId("run", 3),
       at: AT,
-      workflowName: "Review PR",
+      workflowName: "Ship",
     });
-    expect(legs[1]!.next).toBeUndefined();
+    expect(legs[2]!.next).toEqual({
+      signalId: buildId("signal", 1),
+      runId: buildId("run", 1),
+      at: "2026-10-21T10:00:00.000Z",
+      workflowName: "Implement",
+    });
   });
 
   it("leaves out ids that are not the run of a handoff of a Task that exists, keeps the order asked, and gives a repeated id once", async () => {
@@ -314,22 +323,24 @@ describe("the query plans of task.queryLegs", () => {
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
 
-  it("finds a handoff by its Task on task_provenance_handoff, and its next entry on the same index", async () => {
+  it("finds a handoff by its run on task_provenance_handoff_run and its next entry by a seek on task_provenance_handoff", async () => {
     const plan = await planOf(
       Effect.flatMap(taskRepository, (tasks) =>
         tasks.listLegHandoffs([{ runId: buildId("run", 1), taskId: TASK }]),
       ),
     );
 
+    expect(plan).toContain(
+      "SEARCH p USING INDEX task_provenance_handoff_run (run_id=? AND task_id=?)",
+    );
     expect(plan).toContain("SEARCH t USING INDEX sqlite_autoindex_tasks_1 (id=?)");
-    // Once for the entry of the run, once inside the subquery for the next entry.
-    expect(
-      plan.filter((step) => step.endsWith("USING INDEX task_provenance_handoff (task_id=?)")),
-    ).toHaveLength(2);
+    // The next entry starts just after the handoff in time: a seek, never a walk of the Task's range.
+    expect(plan).toContain("SEARCH s USING INDEX task_provenance_handoff (task_id=? AND at>?)");
     expect(plan.some((step) => step.startsWith("SCAN task_provenance"))).toBe(false);
+    expect(plan.some((step) => step.includes("TEMP B-TREE"))).toBe(false);
   });
 
-  it("walks the roots by key and each run's re-runs on runs_original_run_id", async () => {
+  it("walks the handoff runs by key and each run's re-runs on runs_original_run_id", async () => {
     const plan = await planOf(
       Effect.flatMap(runRepository, (runs) =>
         runs.listLegs([{ runId: buildId("run", 1), taskId: TASK }], MAX_LEG_LIVE_RUNS),
