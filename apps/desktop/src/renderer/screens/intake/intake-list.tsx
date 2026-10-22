@@ -18,11 +18,12 @@ import {
   formatClock,
   isBackFromSnooze,
   SIGNAL_MOVE_LABELS,
+  type HandoffTrip,
   type IntakeSection,
   type PluginIdentity,
+  type Pose,
   type SignalMove,
   type SignalRaiserNames,
-  type TrackingRow,
 } from "@hercule/client-core";
 import { assistantsQuery, workflowsQuery } from "../../app/queries";
 import { useTrackingRows, useYourWork } from "../../app/tracking";
@@ -131,8 +132,8 @@ const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<
  * started a run is led by the face of the agent it went to, and its second
  * line is the trip of that handoff, read from `legs` (the legs of the Done
  * pages, by the run each started) and Tracking's rows. Each row is given the
- * values it draws from, which keep their identity until they change, so a
- * change to one signal's Your work or leg draws only that signal's row again.
+ * plain values it draws, so a change to one signal's Your work or trip draws
+ * only that signal's row again.
  */
 export const IntakeList = memo(function IntakeList({
   view,
@@ -237,15 +238,21 @@ export const IntakeList = memo(function IntakeList({
     const work = describeYourWorkOnRow(yourWork.get(item.signal.id)?.tasks ?? [], trackingRows);
     const runId = item.signal.resolution?.runId;
     const leg = view === "done" && runId !== undefined ? legs.get(runId) : undefined;
+    const trip =
+      leg === undefined
+        ? null
+        : describeHandoffTrip(item.signal, leg, trackingRowsByTask.get(leg.taskId));
     return (
       <SignalRow
         key={item.key}
         view={view}
         signal={item.signal}
         lastInSection={item.lastInSection}
-        yourWorkFaceSeed={work.faceSeed}
-        leg={leg}
-        trackingRow={leg === undefined ? undefined : trackingRowsByTask.get(leg.taskId)}
+        faceSeed={trip === null ? work.faceSeed : trip.faceSeed}
+        facePose={trip === null ? "done" : trip.pose}
+        tripSteps={trip === null ? null : trip.steps.join(HANDOFF_TRIP_SEPARATOR)}
+        tripEnd={trip === null ? null : trip.end.text}
+        tripTone={trip === null ? null : trip.end.tone}
         yourWorkTitle={item.inNow ? work.leadTaskTitle : null}
         plugins={plugins}
         raisers={raisers}
@@ -332,12 +339,11 @@ const readDoneLineText = (signal: Signal): string | undefined =>
 /**
  * Renders one signal's row: its source's mark, its title, the line under
  * it, and at its end what the view shows of it. A signal about a tracked Task
- * is led by that agent's face, drawn from `yourWorkFaceSeed`, and its source's
- * mark moves to the start of the second line. A Now row with Your work (`yourWorkTitle`) leads
- * the second line with the Task in place of who asks. A Done row whose
- * `leg` tells a trip, with the help of the `trackingRow` of the leg's Task, is
- * led by the face of the agent it went to, 22px, and its second line is the
- * trip in place of the outcome.
+ * is led by that agent's face, `faceSeed`, and its source's mark moves to the
+ * start of the second line. A Now row with Your work (`yourWorkTitle`) leads
+ * the second line with the Task in place of who asks. A Done row with a trip
+ * (`tripSteps` and `tripEnd`) is led by the face of the agent it went to, in
+ * `facePose`, 22px, and its second line is the trip in place of the outcome.
  *
  * At its end, the view shows:
  *
@@ -356,9 +362,11 @@ const SignalRow = memo(function SignalRow({
   view,
   signal,
   lastInSection,
-  yourWorkFaceSeed,
-  leg,
-  trackingRow,
+  faceSeed,
+  facePose,
+  tripSteps,
+  tripEnd,
+  tripTone,
   yourWorkTitle,
   plugins,
   raisers,
@@ -376,11 +384,15 @@ const SignalRow = memo(function SignalRow({
   readonly signal: Signal;
   readonly lastInSection: boolean;
   /** The text the face of the agent on the signal's tracked Task is drawn from, or `null` when no tracked Task is Your work. */
-  readonly yourWorkFaceSeed: string | null;
-  /** The leg of the handoff that resolved the signal, on Done, when it is read. */
-  readonly leg: HandoffLeg | undefined;
-  /** The row of Tracking of the leg's Task, when it has one. */
-  readonly trackingRow: TrackingRow | undefined;
+  readonly faceSeed: string | null;
+  /** The pose of the face. */
+  readonly facePose: Pose;
+  /** The steps of the Done row's trip, joined, or `null` when the row has no trip. */
+  readonly tripSteps: string | null;
+  /** The last step of the trip, which `tripSteps` leaves out, or `null` when the row has no trip. */
+  readonly tripEnd: string | null;
+  /** How the trip's last step is coloured, or `null` when it is not coloured or the row has no trip. */
+  readonly tripTone: HandoffTrip["end"]["tone"];
   /** The title of the first Task of Your work, on a Now row that has Your work, else `null`. */
   readonly yourWorkTitle: string | null;
   readonly plugins: ReadonlyArray<PluginIdentity>;
@@ -397,8 +409,7 @@ const SignalRow = memo(function SignalRow({
   readonly onRowAction: (signalId: string, action: SignalRowAction) => void;
 }): JSX.Element {
   const controls = decideSignalRowControls(signal, view);
-  const trip = leg === undefined ? null : describeHandoffTrip(signal, leg, trackingRow);
-  const faceSeed = trip === null ? yourWorkFaceSeed : trip.faceSeed;
+  const hasTrip = tripSteps !== null && tripEnd !== null;
   const kindAndPlace = describeSignalKindAndPlace(signal);
   const line =
     yourWorkTitle === null ? (
@@ -452,14 +463,10 @@ const SignalRow = memo(function SignalRow({
         ) : (
           <span
             className={
-              trip === null ? "ask-mark ask-mark--face" : "ask-mark ask-mark--face ask-mark--trip"
+              hasTrip ? "ask-mark ask-mark--face ask-mark--trip" : "ask-mark ask-mark--face"
             }
           >
-            <Face
-              look={buildLook(faceSeed)}
-              pose={trip === null ? "done" : trip.pose}
-              size={trip === null ? 24 : 22}
-            />
+            <Face look={buildLook(faceSeed)} pose={facePose} size={hasTrip ? 22 : 24} />
           </span>
         )}
         <span className="ask-text">
@@ -473,12 +480,8 @@ const SignalRow = memo(function SignalRow({
                 <SignalMark signal={signal} plugins={plugins} size={12} />
               </span>
             )}
-            {trip !== null ? (
-              <HandoffTripLine
-                steps={trip.steps.join(HANDOFF_TRIP_SEPARATOR)}
-                end={trip.end.text}
-                tone={trip.end.tone}
-              />
+            {hasTrip ? (
+              <HandoffTripLine steps={tripSteps} end={tripEnd} tone={tripTone} />
             ) : view === "done" ? (
               describeDoneRowOutcome(signal)
             ) : view === "to-do" && isBackFromSnooze(signal) ? (
