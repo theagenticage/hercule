@@ -934,6 +934,19 @@
   justify-self: start;
   margin-top: 10px;
 }
+/* When a Done signal's trip could not be read: the failure and its Try again
+   button, in the outcome's text column where the trip's button would be. */
+.ad-outcome-failure {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ad-outcome-failure .ad-err {
+  margin: 0;
+}
 .ad-mark {
   display: grid;
   flex: none;

@@ -2802,8 +2802,11 @@ describe("Done with handed-off signals", () => {
   // The legs the controller knows. A test changes them to stand for the
   // controller's answer after something happened to a Task.
   let knownLegs = LEGS;
+  // Set by a test to make the controller refuse the legs read.
+  let legsRefused = false;
   beforeEach(() => {
     knownLegs = LEGS;
+    legsRefused = false;
   });
 
   const waitForPane = () =>
@@ -2830,6 +2833,18 @@ describe("Done with handed-off signals", () => {
           },
         }),
         "GET /api/v1/tasks/legs": (call): Answer => {
+          if (legsRefused) {
+            return {
+              status: 403,
+              body: {
+                error: {
+                  code: "forbidden",
+                  message: "You may not read Tasks.",
+                  details: { grant: "task.read" },
+                },
+              },
+            };
+          }
           const asked = new URLSearchParams(call.search)
             .getAll("runIds")
             .flatMap((ids) => ids.split(","));
@@ -2942,6 +2957,26 @@ describe("Done with handed-off signals", () => {
     const pane = await waitForPane();
     await within(pane).findByRole("button", { name: "Open the run" });
     expect(pane.querySelector(".ad-outcome")?.textContent).toContain("Handed to Implement → done");
+  });
+
+  it("says when the leg of an off-page signal could not be read, and shows the trip after Try again", async () => {
+    legsRefused = true;
+    const { calls } = await openDone(`/intake?view=done&signal=${CLOSED_DONE.id}`, [PLAIN_SIGNAL]);
+    const pane = await waitForPane();
+    const failure = await within(pane).findByRole("alert");
+    expect(failure.textContent).toBe(
+      "Couldn't read where this handoff stands. You may not read Tasks.",
+    );
+    expect(pane.querySelector(".ad-outcome")?.textContent).not.toContain("→");
+    expect(within(pane).queryByRole("button", { name: "Open the run" })).toBeNull();
+    // A refusal is the controller's answer, so it is not asked again by itself.
+    expect(calls.filter((call) => call.path === "/api/v1/tasks/legs")).toHaveLength(1);
+
+    legsRefused = false;
+    await userEvent.click(within(pane).getByRole("button", { name: "Try again" }));
+    await within(pane).findByRole("button", { name: "Open the run" });
+    expect(pane.querySelector(".ad-outcome")?.textContent).toContain("Handed to Implement → done");
+    expect(within(pane).queryByRole("alert")).toBeNull();
   });
 
   it("tells no trip in the pane on To do of a signal whose leg the Done pages still hold", async () => {

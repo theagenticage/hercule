@@ -247,7 +247,10 @@ function SignalDetail({
     ...handoffLegQuery(client, runId ?? ""),
     enabled: runId !== undefined && legOnPages === undefined,
   });
-  const leg = legOnPages ?? readLeg.data ?? undefined;
+  // A failed read is checked before its data: after a failed refresh, the
+  // data it kept is not known to be current, so no trip is drawn from it.
+  const legReadFailed = legOnPages === undefined && readLeg.isError;
+  const leg = legOnPages ?? (legReadFailed ? undefined : (readLeg.data ?? undefined));
   const trip = describeHandoffTrip(
     signal,
     leg,
@@ -483,6 +486,23 @@ function SignalDetail({
                   >
                     {trip.destination.kind === "tracking" ? "Go to Tracking" : "Open the run"}
                   </button>
+                )}
+                {legReadFailed && (
+                  <div className="ad-outcome-failure">
+                    <p className="ad-err" role="alert">
+                      {`Couldn't read where this handoff stands. ${readErrorMessage(readLeg.error)}`}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn btn--sm"
+                      disabled={readLeg.isFetching}
+                      onClick={() => {
+                        void readLeg.refetch();
+                      }}
+                    >
+                      {readLeg.isFetching ? "Trying again…" : "Try again"}
+                    </button>
+                  </div>
                 )}
               </div>
               {resolvedElsewhere !== null && <p className="ad-outcome-desc">{resolvedElsewhere}</p>}

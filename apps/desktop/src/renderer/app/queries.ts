@@ -839,6 +839,7 @@ export const handoffLegQuery = (client: HerculeClient, runId: string) =>
       const { legs } = await client.task.queryLegs({ query: { runIds: [runId] } });
       return legs[0] ?? null;
     },
+    retry: isWorthRetrying,
     ...LIVE_KEPT_READ_OPTIONS,
   });
 
