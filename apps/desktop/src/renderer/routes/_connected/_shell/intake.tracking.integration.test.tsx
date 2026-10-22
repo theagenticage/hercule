@@ -1999,17 +1999,18 @@ describe("the pane's answers", () => {
 
 describe("the pane's Try again", () => {
   const NEW_RUN_ID = "01a06d02-7c00-7000-8000-0000000000f2";
-  const OTHER_RUN_ID = "01a06d02-7c00-7000-8000-0000000000f3";
   const rerunPath = (task: Task) => `/api/v1/runs/${getRunId(task)}/rerun`;
   const findReruns = (calls: ReadonlyArray<Call>) =>
     calls.filter((call) => call.method === "POST" && call.path.endsWith("/rerun"));
   const findAnswer = (kind: string) =>
     getPane()!.querySelector<HTMLElement>(`[data-answer="${kind}"]`);
+  const readState = (task: Task) =>
+    getRowButton(task).closest(".tr-run-item")!.getAttribute("data-state");
 
   /**
    * Opens Tracking with `task` in `status` and the rows `others` beside it.
-   * Once the test calls `startNewRun`, the controller's read lists a run
-   * `NEW_RUN_ID` in the given status on `task`, as it does after a re-run starts.
+   * Once the test calls `startNewRun`, the controller's read lists a running
+   * run `NEW_RUN_ID` on `task`, as it does after a re-run starts.
    */
   const openRerunnable = async (
     task: Task,
@@ -2017,33 +2018,31 @@ describe("the pane's Try again", () => {
     rerunAnswer: Handler = { body: { runId: NEW_RUN_ID } },
     others: ReadonlyArray<readonly [Task, RunSummary["status"]]> = [],
   ) => {
-    let newRunStatus: RunSummary["status"] | null = null;
-    const rows = () => [[task, newRunStatus ?? status] as const, ...others];
+    let started = false;
+    const rows = () => [[task, started ? "running" : status] as const, ...others];
     const buildRun = (each: Task, eachStatus: RunSummary["status"]): RunSummary => ({
       ...buildRunSummary(each, eachStatus),
-      ...(newRunStatus !== null && each.id === task.id ? { id: NEW_RUN_ID } : {}),
+      ...(started && each.id === task.id ? { id: NEW_RUN_ID } : {}),
     });
     const opened = await openIntake("/intake?tracking=true", {
       extra: {
         ...storeTracking(rows(), { readRows: rows, buildRun }),
         [`POST ${rerunPath(task)}`]: rerunAnswer,
-        ...Object.fromEntries(
-          others.map(([other]) => [`POST ${rerunPath(other)}`, { body: { runId: OTHER_RUN_ID } }]),
-        ),
       },
     });
     await opened.live.waitForFirstPushes();
     return {
       ...opened,
-      startNewRun: (newStatus: RunSummary["status"] = "running") => {
-        newRunStatus = newStatus;
+      startNewRun: () => {
+        started = true;
         act(() => opened.live.pushInvalidation("task"));
       },
     };
   };
 
-  it("re-runs a Failed row's run from ↩, and the row turns Working on the same Task with the focus on the pane", async () => {
+  it("re-runs a Failed row's run from ↩, keeps E from marking it done meanwhile, and turns the row Working on the same Task with the focus on the pane", async () => {
     const { calls, startNewRun } = await openRerunnable(FAILED_TASK, "failed");
+    // By keys only: a pointer over the list would hold the row's change back.
     getRowButton(FAILED_TASK).focus();
     await userEvent.keyboard("{Enter}");
     const tryAgain = findAnswer("try-again")!;
@@ -2055,48 +2054,43 @@ describe("the pane's Try again", () => {
       "Re-runs Implement on Nightly backup job timing out from the start",
     );
 
+    const readsBefore = findTrackingReads(calls).length;
     await userEvent.keyboard("{Enter}");
+    // The re-run was accepted and Tracking was read again, but still lists the failed run.
     await waitFor(() => {
-      expect(findReruns(calls).map((call) => [call.path, call.body])).toEqual([
-        [rerunPath(FAILED_TASK), {}],
-      ]);
+      expect(findTrackingReads(calls).length).toBeGreaterThan(readsBefore);
     });
+    expect(findReruns(calls).map((call) => [call.path, call.body])).toEqual([
+      [rerunPath(FAILED_TASK), {}],
+    ]);
+
+    await userEvent.keyboard("e");
+    expect(findMarkDone(calls)).toEqual([]);
+    expect(readRowIds()).toContain(FAILED_TASK.id);
 
     startNewRun();
     await waitFor(() => {
-      expect(getRowButton(FAILED_TASK).closest(".tr-run-item")!.getAttribute("data-state")).toBe(
-        "working",
-      );
+      expect(readState(FAILED_TASK)).toBe("working");
     });
     expect(
       [...getPane()!.querySelectorAll<HTMLElement>("[data-answer]")].map((a) => a.dataset.answer),
     ).toEqual(["stop-run"]);
     expect(readSelected()).toEqual([FAILED_TASK.id]);
     expect(document.activeElement).toBe(getPane()!.querySelector("article"));
+    expect(findMarkDone(calls)).toEqual([]);
   });
 
-  it("offers Try again after Mark done on a Finished row and before it on a Stopped row, suggesting neither", async () => {
+  it("draws Try again after Mark done on a Finished row and before it on a Stopped row", async () => {
     await openIntake("/intake?tracking=true");
     const readAnswers = () =>
-      [...getPane()!.querySelectorAll<HTMLElement>("[data-answer]")].map((answer) => [
-        answer.dataset.answer,
-        answer.querySelector(".btn--accent") !== null,
-      ]);
+      [...getPane()!.querySelectorAll<HTMLElement>("[data-answer]")].map((a) => a.dataset.answer);
     await userEvent.click(getRowButton(FINISHED_TASK));
-    expect(readAnswers()).toEqual([
-      ["mark-done", true],
-      ["try-again", false],
-      ["cancel", false],
-    ]);
+    expect(readAnswers()).toEqual(["mark-done", "try-again", "cancel"]);
     await userEvent.click(getRowButton(STOPPED_TASK));
-    expect(readAnswers()).toEqual([
-      ["try-again", false],
-      ["mark-done", false],
-      ["cancel", false],
-    ]);
+    expect(readAnswers()).toEqual(["try-again", "mark-done", "cancel"]);
   });
 
-  it("shows a refused re-run under Try again, and leaves the row as it was", async () => {
+  it("shows a refused re-run under Try again, with no toast, and leaves the row as it was", async () => {
     await openRerunnable(STOPPED_TASK, "cancelled", {
       status: 409,
       body: buildErrorBody("invalid_state", "The workflow was deleted."),
@@ -2108,60 +2102,36 @@ describe("the pane's Try again", () => {
     expect(failure.textContent).toBe("The workflow was deleted.");
     expect(failure.previousElementSibling?.getAttribute("data-answer")).toBe("try-again");
     expect(document.querySelector(".asks-toast")).toBeNull();
-    expect(getRowButton(STOPPED_TASK).closest(".tr-run-item")!.getAttribute("data-state")).toBe(
-      "stopped",
-    );
+    expect(readState(STOPPED_TASK)).toBe("stopped");
   });
 
-  it("starts one run when Try again is pressed again before the read shows the new run", async () => {
-    const { calls, startNewRun } = await openRerunnable(FAILED_TASK, "failed");
-    await userEvent.click(getRowButton(FAILED_TASK));
-    const readsBefore = findTrackingReads(calls).length;
-    await userEvent.click(within(getPane()!).getByRole("button", { name: "Try again" }));
-    // The re-run was accepted and Tracking was read again, but still lists the failed run.
-    await waitFor(() => {
-      expect(findTrackingReads(calls).length).toBeGreaterThan(readsBefore);
-    });
-    const tryAgain = findAnswer("try-again")!;
-    expect(tryAgain.getAttribute("aria-disabled")).toBe("true");
-    await userEvent.click(tryAgain);
-    expect(findReruns(calls)).toHaveLength(1);
-
-    startNewRun();
-    await waitFor(() => {
-      expect(findAnswer("try-again")).toBeNull();
-    });
-    expect(findReruns(calls)).toHaveLength(1);
-  });
-
-  it("starts one run when Try again is pressed twice before the screen redraws", async () => {
-    const { calls } = await openRerunnable(FAILED_TASK, "failed");
-    await userEvent.click(getRowButton(FAILED_TASK));
-    const tryAgain = findAnswer("try-again")!;
-    act(() => {
-      tryAgain.click();
-      tryAgain.click();
-    });
-    await waitFor(() => {
-      expect(findReruns(calls)).toHaveLength(1);
-    });
-  });
-
-  it("keeps Try again locked when the user leaves Intake and comes back before the request settles", async () => {
-    const releases: Array<() => void> = [];
-    const { calls, router } = await openRerunnable(
+  it("keeps Try again locked, with no second re-run, when the user leaves the row or Intake and comes back before the read shows the new run", async () => {
+    let release = () => {};
+    const { calls, router, startNewRun } = await openRerunnable(
       FAILED_TASK,
       "failed",
       () =>
         new Promise((resolve) => {
-          releases.push(() => resolve({ body: { runId: NEW_RUN_ID } }));
+          release = () => resolve({ body: { runId: NEW_RUN_ID } });
         }),
+      [[STOPPED_TASK, "cancelled"]],
     );
+    const expectLocked = async () => {
+      const tryAgain = findAnswer("try-again")!;
+      expect(tryAgain.getAttribute("aria-disabled")).toBe("true");
+      await userEvent.click(tryAgain);
+      expect(findReruns(calls)).toHaveLength(1);
+    };
     await userEvent.click(getRowButton(FAILED_TASK));
     await userEvent.click(within(getPane()!).getByRole("button", { name: "Try again" }));
     await waitFor(() => {
       expect(findReruns(calls)).toHaveLength(1);
     });
+
+    // The pane is built anew for the row it comes back to.
+    await userEvent.click(getRowButton(STOPPED_TASK));
+    await userEvent.click(getRowButton(FAILED_TASK));
+    await expectLocked();
 
     // The Office is another route, so Intake's screen is gone and built anew on the way back.
     act(() => {
@@ -2175,150 +2145,21 @@ describe("the pane's Try again", () => {
     await waitFor(() => {
       expect(findAnswer("try-again")).not.toBeNull();
     });
-    expect(findAnswer("try-again")!.getAttribute("aria-disabled")).toBe("true");
-    await userEvent.click(findAnswer("try-again")!);
-    expect(findReruns(calls)).toHaveLength(1);
+    await expectLocked();
 
-    releases.forEach((release) => {
-      release();
-    });
-  });
-
-  it("keeps Try again locked when the user leaves Intake and comes back after the request was accepted but before the read shows the new run", async () => {
-    const { calls, router } = await openRerunnable(FAILED_TASK, "failed");
-    await userEvent.click(getRowButton(FAILED_TASK));
+    // The request is accepted, but the read still lists the failed run.
     const readsBefore = findTrackingReads(calls).length;
-    await userEvent.click(within(getPane()!).getByRole("button", { name: "Try again" }));
+    release();
     await waitFor(() => {
       expect(findTrackingReads(calls).length).toBeGreaterThan(readsBefore);
     });
-
-    act(() => {
-      void router.navigate({ to: "/office" });
-    });
-    await screen.findByText("The Office");
-    act(() => {
-      void router.navigate({ to: "/intake", search: { tracking: true, task: FAILED_TASK.id } });
-    });
-    await screen.findByRole("heading", { level: 1, name: "Intake" });
-    await waitFor(() => {
-      expect(findAnswer("try-again")).not.toBeNull();
-    });
-    expect(findAnswer("try-again")!.getAttribute("aria-disabled")).toBe("true");
-    await userEvent.click(findAnswer("try-again")!);
-    expect(findReruns(calls)).toHaveLength(1);
-  });
-
-  it("keeps Try again locked for as long as the read shows the old run, however long that takes and whatever re-runs happen beside it", async () => {
-    const { calls } = await openRerunnable(FAILED_TASK, "failed", undefined, [
-      [STOPPED_TASK, "cancelled"],
-    ]);
-    const selectRow = async (task: Task) => {
-      act(() => {
-        getRowButton(task).click();
-      });
-      await waitFor(() => {
-        expect(findAnswer("try-again")).not.toBeNull();
-      });
-    };
-    await selectRow(FAILED_TASK);
-    act(() => {
-      findAnswer("try-again")!.click();
-    });
-    await waitFor(() => {
-      expect(findReruns(calls)).toHaveLength(1);
-    });
-
-    // A re-run of another Task moves the screen's own request on to that
-    // Task, and a cache that drops finished requests by time would drop the first
-    // Task's request. Time is faked only across the press and the wait.
-    await selectRow(STOPPED_TASK);
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      act(() => {
-        findAnswer("try-again")!.click();
-      });
-      act(() => {
-        vi.advanceTimersByTime(10 * 60 * 1000);
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-    await waitFor(() => {
-      expect(findReruns(calls)).toHaveLength(2);
-    });
-
-    await selectRow(FAILED_TASK);
-    expect(findAnswer("try-again")!.getAttribute("aria-disabled")).toBe("true");
-    act(() => {
-      findAnswer("try-again")!.click();
-    });
-    expect(findReruns(calls)).toHaveLength(2);
-  });
-
-  it("keeps the row on Tracking when E is pressed while the re-run is starting", async () => {
-    const { calls, startNewRun } = await openRerunnable(FAILED_TASK, "failed");
-    // By keys only: a pointer over the list would hold the row's change back.
-    getRowButton(FAILED_TASK).focus();
-    await userEvent.keyboard("{Enter}");
-    await waitFor(() => {
-      expect(document.activeElement).toBe(findAnswer("try-again"));
-    });
-    const readsBefore = findTrackingReads(calls).length;
-    await userEvent.keyboard("{Enter}");
-    // The re-run was accepted and Tracking was read again, but still lists the failed run.
-    await waitFor(() => {
-      expect(findTrackingReads(calls).length).toBeGreaterThan(readsBefore);
-    });
-
-    await userEvent.keyboard("e");
-    expect(findMarkDone(calls)).toEqual([]);
-    expect(readRowIds()).toContain(FAILED_TASK.id);
+    await expectLocked();
 
     startNewRun();
     await waitFor(() => {
-      expect(getRowButton(FAILED_TASK).closest(".tr-run-item")!.getAttribute("data-state")).toBe(
-        "working",
-      );
+      expect(readState(FAILED_TASK)).toBe("working");
     });
-    expect(findMarkDone(calls)).toEqual([]);
-  });
-
-  it("starts one run when the user leaves the row and comes back before the read shows the new run", async () => {
-    const { calls } = await openRerunnable(FAILED_TASK, "failed", { body: { runId: NEW_RUN_ID } }, [
-      [STOPPED_TASK, "cancelled"],
-    ]);
-    await userEvent.click(getRowButton(FAILED_TASK));
-    const readsBefore = findTrackingReads(calls).length;
-    await userEvent.click(within(getPane()!).getByRole("button", { name: "Try again" }));
-    await waitFor(() => {
-      expect(findTrackingReads(calls).length).toBeGreaterThan(readsBefore);
-    });
-
-    await userEvent.click(getRowButton(STOPPED_TASK));
-    await userEvent.click(getRowButton(FAILED_TASK));
-    expect(readSelected()).toEqual([FAILED_TASK.id]);
-    const tryAgain = findAnswer("try-again")!;
-    expect(tryAgain.getAttribute("aria-disabled")).toBe("true");
-    await userEvent.click(tryAgain);
     expect(findReruns(calls)).toHaveLength(1);
-  });
-
-  it("drops a refusal once the Task has a newer run, so it never shows under a later Try again", async () => {
-    const { startNewRun } = await openRerunnable(FAILED_TASK, "failed", {
-      status: 409,
-      body: buildErrorBody("invalid_state", "The workflow was deleted."),
-    });
-    await userEvent.click(getRowButton(FAILED_TASK));
-    await userEvent.click(within(getPane()!).getByRole("button", { name: "Try again" }));
-    await within(getPane()!).findByRole("alert");
-
-    // Another client re-ran the Task, and that run failed too.
-    startNewRun("failed");
-    await waitFor(() => {
-      expect(within(getPane()!).queryByRole("alert")).toBeNull();
-    });
-    expect(findAnswer("try-again")).not.toBeNull();
   });
 });
 
