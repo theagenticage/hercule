@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
+  HandoffLeg,
   PluginDetail,
   Run,
   RunSummary,
@@ -2734,5 +2735,293 @@ describe("a face for a run of a workflow sent with the request", () => {
       }),
     });
     expect(getRowButton(FINISHED_TASK).textContent).toContain("Sent finished");
+  });
+});
+
+describe("Done with handed-off signals", () => {
+  /** Builds `task`'s handoff signal as Done lists it: resolved by the handoff, which started the Task's run. */
+  const buildDoneSignal = (task: Task): Signal => ({
+    ...buildHandoffSignal(task),
+    title: task.title,
+    status: "resolved",
+    resolution: {
+      kind: "decided",
+      actionId: `hand-to:${WORKFLOW_ID}`,
+      runId: getRunId(task),
+      outcome: "Handed to Implement",
+      actor: "user",
+      origin: "web",
+      at: task.createdAt,
+    },
+  });
+
+  /** Builds the leg of the handoff of `task`, whose run ended as `status`. */
+  const buildLeg = (
+    task: Task,
+    status: RunSummary["status"],
+    taskStatus: HandoffLeg["taskStatus"],
+  ): HandoffLeg => ({
+    runId: getRunId(task),
+    signalId: getHandoffSignalId(task),
+    taskId: task.id,
+    taskStatus,
+    workflowId: WORKFLOW_ID,
+    workflowName: "Implement",
+    rerunCount: 0,
+    latestRun: buildTrackingRun(buildRunSummary(task, status)),
+    liveRunIds: [],
+  });
+
+  /** A signal resolved by hand, which started no run. */
+  const PLAIN_SIGNAL: Signal = {
+    ...buildSignal("01a06d02-7a00-7000-8000-0000000000a1", "Merge 4 dependency bumps"),
+    status: "resolved",
+    resolution: {
+      kind: "decided",
+      outcome: "Done, nothing sent",
+      actor: "user",
+      origin: "web",
+      at: at(30),
+    },
+  };
+
+  /** The Task of a handoff that was marked done, so Tracking no longer lists it. */
+  const CLOSED_TASK = buildTask(
+    "01a06d02-7b00-7000-8000-0000000000c1",
+    "Discount codes ignore letter case",
+    5,
+  );
+
+  const OPEN_DONE = buildDoneSignal(FINISHED_TASK);
+  const CLOSED_DONE = buildDoneSignal(CLOSED_TASK);
+  const LEGS = [
+    buildLeg(FINISHED_TASK, "completed", "in-progress"),
+    buildLeg(CLOSED_TASK, "completed", "done"),
+  ];
+
+  // The legs the controller knows. A test changes them to stand for the
+  // controller's answer after something happened to a Task.
+  let knownLegs = LEGS;
+  // Set by a test to make the controller refuse the legs read.
+  let legsRefused = false;
+  beforeEach(() => {
+    knownLegs = LEGS;
+    legsRefused = false;
+  });
+
+  const waitForPane = () =>
+    waitFor(() => {
+      const pane = getPane();
+      expect(pane).not.toBeNull();
+      return pane!;
+    });
+
+  /**
+   * Opens Done with `listed`, Tracking's rows, and the legs the controller
+   * answers for the runs it is asked about.
+   */
+  const openDone = (
+    path = "/intake?view=done",
+    listed = [OPEN_DONE, CLOSED_DONE, PLAIN_SIGNAL],
+  ) => {
+    return openIntake(path, {
+      extra: {
+        ...storeTracking(),
+        "GET /api/v1/signals": (call): Answer => ({
+          body: {
+            items: new URLSearchParams(call.search).get("view") === "done" ? listed : [],
+          },
+        }),
+        "GET /api/v1/tasks/legs": (call): Answer => {
+          if (legsRefused) {
+            return {
+              status: 403,
+              body: {
+                error: {
+                  code: "forbidden",
+                  message: "You may not read Tasks.",
+                  details: { grant: "task.read" },
+                },
+              },
+            };
+          }
+          const asked = new URLSearchParams(call.search)
+            .getAll("runIds")
+            .flatMap((ids) => ids.split(","));
+          return { body: { legs: knownLegs.filter((leg) => asked.includes(leg.runId)) } };
+        },
+        [`GET /api/v1/signals/${OPEN_DONE.id}`]: () => ({ body: OPEN_DONE }),
+        [`GET /api/v1/signals/${CLOSED_DONE.id}`]: () => ({ body: CLOSED_DONE }),
+      },
+    });
+  };
+
+  it("leads a handed-off row with the agent's face and its trip, and a row with no run keeps its outcome", async () => {
+    await openDone();
+    const row = await waitFor(() => {
+      const found = getSignalRow(OPEN_DONE);
+      expect(found.querySelector(".ask-mark--face .cr")).not.toBeNull();
+      return found;
+    });
+    expect(row.querySelector(".ask-sub")?.textContent).toBe("Handed to Implement → finished");
+    expect(row.querySelector(".ask-sub .ask-src svg")).not.toBeNull();
+    expect(row.querySelector(".trip-end--finished")?.textContent).toBe("finished");
+    expect(getSignalRow(CLOSED_DONE).querySelector(".ask-sub")?.textContent).toBe(
+      "Handed to Implement → done",
+    );
+    const plain = getSignalRow(PLAIN_SIGNAL);
+    expect(plain.querySelector(".cr")).toBeNull();
+    expect(plain.querySelector(".ask-sub")?.textContent).toBe("Done, nothing sent");
+  });
+
+  it("offers Go to Tracking for a Task still in Tracking, which opens Tracking on its row", async () => {
+    const { router } = await openDone(`/intake?view=done&signal=${OPEN_DONE.id}`);
+    const pane = await waitFor(() => {
+      const found = getPane()!;
+      expect(within(found).getByRole("button", { name: "Go to Tracking" })).toBeTruthy();
+      return found;
+    });
+    expect(pane.querySelector(".ad-outcome")?.textContent).toContain(
+      "Handed to Implement → finished",
+    );
+    expect(pane.querySelector(".ad-keys")?.textContent).toContain("go to Tracking");
+    await userEvent.click(within(pane).getByRole("button", { name: "Go to Tracking" }));
+    await waitFor(() => {
+      expect(isOpen()).toBe(true);
+    });
+    // Tracking belongs to To do, so the view Done leaves with the signal.
+    expect(router.latestLocation.search).not.toHaveProperty("signal");
+    expect(router.latestLocation.search).not.toHaveProperty("view");
+    expect(readSelected()).toEqual([FINISHED_TASK.id]);
+  });
+
+  it("offers Open the run for a Task that left Tracking, from the button and from O", async () => {
+    const { router } = await openDone(`/intake?view=done&signal=${CLOSED_DONE.id}`);
+    const pane = await waitFor(() => {
+      const found = getPane()!;
+      expect(within(found).getByRole("button", { name: "Open the run" })).toBeTruthy();
+      return found;
+    });
+    expect(pane.querySelector(".ad-keys")?.textContent).toContain("open the run");
+    await userEvent.click(within(pane).getByRole("button", { name: "Open the run" }));
+    await waitFor(() => {
+      expect(router.latestLocation.pathname).toBe(`/runs/${getRunId(CLOSED_TASK)}`);
+    });
+
+    await router.navigate({ to: "/intake", search: { view: "done", signal: CLOSED_DONE.id } });
+    await screen.findByRole("heading", { level: 1, name: "Intake" });
+    getSignalRow(CLOSED_DONE).focus();
+    await userEvent.keyboard("o");
+    await waitFor(() => {
+      expect(router.latestLocation.pathname).toBe(`/runs/${getRunId(CLOSED_TASK)}`);
+    });
+  });
+
+  it("moves the focus to the pane when the trip goes while its button has the focus", async () => {
+    const { live } = await openDone(`/intake?view=done&signal=${CLOSED_DONE.id}`);
+    const button = await within(await waitForPane()).findByRole("button", { name: "Open the run" });
+    button.focus();
+
+    // The Task was deleted, so the controller no longer knows the leg.
+    knownLegs = [];
+    act(() => live.pushInvalidation("task", [CLOSED_TASK.id]));
+    await waitFor(() => {
+      expect(within(getPane()!).queryByRole("button", { name: "Open the run" })).toBeNull();
+    });
+    expect(getPane()!.contains(document.activeElement)).toBe(true);
+    // The keys of the screen still work from there.
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(getPane()!.hasAttribute("inert")).toBe(true);
+    });
+  });
+
+  it("presses the trip button with a second Enter after the first moved the focus onto it", async () => {
+    await openDone();
+    await waitFor(() => {
+      expect(getSignalRow(OPEN_DONE).querySelector(".ask-mark--face .cr")).not.toBeNull();
+    });
+    getSignalRow(OPEN_DONE).focus();
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(document.activeElement?.textContent).toBe("Go to Tracking");
+    });
+    await userEvent.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(isOpen()).toBe(true);
+    });
+  });
+
+  it("shows the trip of a signal that is on no loaded page, read when the pane opens", async () => {
+    await openDone(`/intake?view=done&signal=${CLOSED_DONE.id}`, [PLAIN_SIGNAL]);
+    const pane = await waitForPane();
+    await within(pane).findByRole("button", { name: "Open the run" });
+    expect(pane.querySelector(".ad-outcome")?.textContent).toContain("Handed to Implement → done");
+  });
+
+  it("says when the leg of an off-page signal could not be read, and shows the trip after Try again", async () => {
+    legsRefused = true;
+    const { calls } = await openDone(`/intake?view=done&signal=${CLOSED_DONE.id}`, [PLAIN_SIGNAL]);
+    const pane = await waitForPane();
+    const failure = await within(pane).findByRole("alert");
+    expect(failure.textContent).toBe(
+      "Couldn't read where this handoff stands. You may not read Tasks.",
+    );
+    expect(pane.querySelector(".ad-outcome")?.textContent).not.toContain("→");
+    expect(within(pane).queryByRole("button", { name: "Open the run" })).toBeNull();
+    // A refusal is the controller's answer, so it is not asked again by itself.
+    expect(calls.filter((call) => call.path === "/api/v1/tasks/legs")).toHaveLength(1);
+
+    legsRefused = false;
+    await userEvent.click(within(pane).getByRole("button", { name: "Try again" }));
+    await within(pane).findByRole("button", { name: "Open the run" });
+    expect(pane.querySelector(".ad-outcome")?.textContent).toContain("Handed to Implement → done");
+    expect(within(pane).queryByRole("alert")).toBeNull();
+  });
+
+  it("moves the focus to the trip's button when Try again succeeds while it has the focus", async () => {
+    legsRefused = true;
+    await openDone(`/intake?view=done&signal=${CLOSED_DONE.id}`, [PLAIN_SIGNAL]);
+    const pane = await waitForPane();
+    const retry = await within(pane).findByRole("button", { name: "Try again" });
+    retry.focus();
+
+    legsRefused = false;
+    await userEvent.keyboard("{Enter}");
+    const tripButton = await within(pane).findByRole("button", { name: "Open the run" });
+    expect(within(pane).queryByRole("alert")).toBeNull();
+    expect(document.activeElement).toBe(tripButton);
+  });
+
+  it("tells no trip in the pane on To do of a signal whose leg the Done pages still hold", async () => {
+    const { router } = await openDone();
+    await waitFor(() => {
+      expect(getSignalRow(CLOSED_DONE).querySelector(".ask-mark--face .cr")).not.toBeNull();
+    });
+
+    await router.navigate({ to: "/intake", search: { signal: CLOSED_DONE.id } });
+    const pane = await waitForPane();
+    await waitFor(() => {
+      expect(pane.querySelector(".ad-outcome")).not.toBeNull();
+    });
+    expect(pane.querySelector(".ad-outcome")?.textContent).not.toContain("→");
+    expect(within(pane).queryByRole("button", { name: "Open the run" })).toBeNull();
+  });
+
+  it("ends a row's trip with done once the Task is ticked off and its push arrives", async () => {
+    const { live } = await openDone();
+    await waitFor(() => {
+      expect(getSignalRow(OPEN_DONE).querySelector(".ask-sub")?.textContent).toBe(
+        "Handed to Implement → finished",
+      );
+    });
+
+    knownLegs = [{ ...LEGS[0]!, taskStatus: "done" }, LEGS[1]!];
+    act(() => live.pushInvalidation("task", [FINISHED_TASK.id]));
+    await waitFor(() => {
+      expect(getSignalRow(OPEN_DONE).querySelector(".ask-sub")?.textContent).toBe(
+        "Handed to Implement → done",
+      );
+    });
   });
 });

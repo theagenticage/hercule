@@ -1054,7 +1054,7 @@ describe("a start for a session this machine tore down when it exited", () => {
 describe("a session that ended while the socket was down", () => {
   it("is started afresh rather than taken for one that is still running", async () => {
     const fake = createFake();
-    const { supervisor, sent } = buildConnection(fake);
+    const { supervisor, sent, machine } = buildConnection(fake);
 
     await runConnected(
       fake,
@@ -1067,6 +1067,16 @@ describe("a session that ended while the socket was down", () => {
     // entry, but the exit reaches no controller, and nothing sends it again,
     // because there is no outbox.
     await Effect.runPromise(fake.adapter.stopSession(SESSION, "stopped"));
+    // The watch handles the exit on its own fiber. Until the watch has removed
+    // the entry, which also removes the session's directory, it can still send
+    // the exit to the next connection, which would then receive it as an extra
+    // event.
+    await Effect.runPromise(
+      waitUntil(
+        "removed the ended session's directory",
+        () => !existsSync(join(machine.scratchDir, SESSION)),
+      ),
+    );
     await runConnected(
       fake,
       supervisor,

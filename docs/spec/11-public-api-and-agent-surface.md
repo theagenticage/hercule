@@ -143,6 +143,7 @@ Semantics: [./09-tasks.md](./09-tasks.md).
 |---|---|---|---|
 | `task.query` | `TaskFilter` (below) | `task.read` | `GET /tasks` |
 | `task.queryTracking` (*added 2026-10-20, [#801](https://github.com/theagenticage/hercule/issues/801)*) | none -> `{ rows: TrackingTask[] }`, below | `task.read` and `run.read` | `GET /tasks/tracking` |
+| `task.queryLegs` (*added 2026-10-22, [#805](https://github.com/theagenticage/hercule/issues/805)*) | `{ runIds: string[] }` (1 to 50) -> `{ legs: HandoffLeg[] }`, below | `task.read` and `run.read` | `GET /tasks/legs?runIds=...` |
 | `task.readTracking` (*added 2026-10-21, [#803](https://github.com/theagenticage/hercule/issues/803)*) | `{ taskId }` -> `TrackingDetail`, below | `task.read` and `run.read` | `GET /tasks/{id}/tracking` |
 | `task.read` | `{ taskId }` | `task.read` | `GET /tasks/{id}` |
 | `task.create` | `{ title, description, priority?, labels?, projectId?, provenance? }` | `task.create` | `POST /tasks` |
@@ -193,6 +194,28 @@ interface TrackingRun {
 - **How it reads.** The tasks domain declares a read port for the runs, `TaskTrackingRuns`, and the controller daemon answers it from the runs repository, because the runs domain depends on the tasks domain (ADR 0033). It opens no transaction, so it reads on the read-only connection and never waits for a writer. The newest run of each Task is one lookup per Task on `runs_task_id`, and the live runs come from `runs_unfinished`, so no Task's history is read. The Tasks are the in-progress Tasks on the status index, each probed once for its newest handoffs on `task_provenance_handoff`, so the read does not touch the handoffs of Tasks that are done.
 - Its CLI row is `hercule task tracking`. Purpose: "Lists the work handed off from Intake that is still followed." It takes no field. *(Amended 2026-10-21, [#802](https://github.com/theagenticage/hercule/issues/802).)* Its help text also names the ids of all the Task's live runs.
 - `task.query`'s `handedOff` filter stays: it is a general read of Tasks that other callers may use. `run.query` has no Task filter: Tracking is the only reader that asks for runs by Task, and `task.queryTracking` answers it.
+
+*(Added 2026-10-22, [#805](https://github.com/theagenticage/hercule/issues/805).)* **`task.queryLegs`** returns, for each given run that is the run of a handoff, where the work that handoff started stands, so a client draws "handed to X, tried again twice, finished" for a page of Done signals without reading any Task's history. It is owned by the tasks domain, like `task.queryTracking`:
+
+```ts
+interface HandoffLeg {
+  runId: string; signalId: string; taskId: string
+  taskStatus: TaskStatus                                    // the Task's status now
+  workflowId: string | null; workflowName: string          // of the handoff's run, as when it started
+  rerunCount: number                                        // the runs of the leg other than the handoff's run
+  latestRun: { id: string; status: RunStatus }              // the newest run of the leg, by createdAt, then id
+  liveRunIds: string[]                                      // the leg's pending and running runs, newest first, at most 20
+  next?: { signalId: string; runId: string; at: string; workflowName: string }
+}
+```
+
+- **Which legs.** One per distinct given run id that is the run of a handoff entry (a provenance entry with a `signalId`) of a Task that is not deleted. Any other id is left out of the reply, which may then hold fewer legs than ids: an unknown run, a run of no Task, a run of a deleted Task, a run that only re-runs a handoff's run, and a run whose own Task is not the Task of the entry that names it. The legs come in the order of the ids, and a repeated id gives one leg. At most `MAX_LEG_QUERY_RUNS` (50, the size of a page) ids, and at least one, else `validation`.
+- **What a leg holds.** The handoff's run, and every run that can be reached from it through `originalRunId` (a re-run, a re-run of a re-run, and so on) and has the same `taskId`. Time never decides it: a re-run of an earlier handoff's run that started after a later handoff stays in the earlier leg. `rerunCount` and `latestRun` come from the whole leg. `latestRun` is only the run's id and status, which is all a client reads: the status says how the leg stands, and the id opens the run. It carries no failure cause, so the read opens no failure message and no step record.
+- **`next`.** The Task's handoff entry that follows this one by time, then by the order it was appended, among all the Task's handoff entries and not only the requested ones, with the workflow name of its run. Absent for the Task's newest handoff. The order is `at`, then the order of appending, because two entries may share a time; it is the order `task.readTracking` uses for the Task's first handoff and `task.queryTracking` (reversed) for a row's handoffs, so every read of a Task's handoffs agrees.
+- **Bounds.** Each leg is a fixed size, so the reply does not grow with a Task's history. `liveRunIds` is a sample, capped at `MAX_LEG_LIVE_RUNS` (20): a leg with more runs going at once is not expected.
+- **Grants.** As `task.queryTracking`: the operation's row names `task.read`, the service also checks `run.read`, and a caller that lacks one is refused with `forbidden` naming it.
+- **How it reads.** The same port, `TaskTrackingRuns`, with three more methods (`readTaskIds`, `readWorkflowNames`, `readLegRuns`) that the controller daemon answers from the runs repository. It opens no transaction. Each step is one statement for all the ids: the runs' Tasks by primary key; for each (run, Task), the handoff entry of that run on `task_provenance_handoff_run`, a partial index on `(run_id, task_id)` of the entries that name a signal (migration 90), then the Task by key, and the next entry by seeking `task_provenance_handoff` just after the entry by `(at, rowid)`, which reads one entry; one recursive statement that walks the legs from the handoffs' runs on the primary key and on `runs_original_run_id`, so it reads the runs of the legs and never a Task's other runs; and the workflow names of the next handoffs' runs by primary key. A handoff's run always exists, because runs are never deleted. The cost follows the size of the legs asked for (a wide fan-out of re-runs is linear) and does not follow the Task's number of handoffs. `tracking.speed.test.ts` measures it: 50 handoffs of Tasks with 100 handoffs and one leg of 200 re-runs took 1.6 ms (9.9 ms before the index), and 50 handoffs on one Task of 10,000 handoffs took 1.1 ms (140 ms before, when the Task's handoffs were walked once per handoff).
+- Its CLI row is `hercule task legs --run <id>...`.
 
 *(Added 2026-10-21, [#803](https://github.com/theagenticage/hercule/issues/803).)* **`task.readTracking`** returns what the Tracking pane of one Task draws, in one read, so the pane needs no read per run and no read of a session's transcript. It is owned by the tasks domain, like `task.queryTracking`:
 

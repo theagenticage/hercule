@@ -6,10 +6,27 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { buildQueryKeys, queryKeys, type Live, type TrackingRead } from "@hercule/client-core";
-import type { TrackingRun } from "@hercule/contract";
+import {
+  InfiniteQueryObserver,
+  QueryClient,
+  QueryObserver,
+  type InfiniteData,
+} from "@tanstack/react-query";
+import {
+  buildQueryKeys,
+  queryKeys,
+  type HerculeClient,
+  type Live,
+  type TrackingRead,
+} from "@hercule/client-core";
+import type { HandoffLeg, TrackingRun } from "@hercule/contract";
 import { invalidateForPush, useSubagentsLive } from "./live";
+import {
+  handoffLegQuery,
+  signalsClearedTodayQuery,
+  signalsDoneQuery,
+  type DoneSignalPage,
+} from "./queries";
 
 /** What a subscription to a topic like `subagent` is called with on each push. */
 type InvalidateHandler = (keys: ReadonlyArray<ReadonlyArray<unknown>>) => void;
@@ -198,5 +215,195 @@ describe("invalidateForPush", () => {
     });
     expect(isStale(queryKeys.trackingDetail("t-1"))).toBe(true);
     expect(isStale(queryKeys.trackingDetail("t-2"))).toBe(false);
+  });
+});
+
+/**
+ * Returns a client whose `signal.query` answers one handed-off signal and whose
+ * `task.queryLegs` answers `answerLegs()`. The reads are counted in `reads`,
+ * and `holdNextLegRead` makes the next leg read wait until the returned
+ * function is called.
+ */
+const buildFakeDoneClient = (answerLegs: () => ReadonlyArray<HandoffLeg>) => {
+  const reads = { signals: 0, legs: 0 };
+  let release: (() => void) | undefined;
+  let hold = false;
+  const client = {
+    signal: {
+      query: () => {
+        reads.signals += 1;
+        return Promise.resolve({ items: [{ id: "s-1", resolution: { runId: "r-first" } }] });
+      },
+    },
+    task: {
+      queryLegs: async () => {
+        reads.legs += 1;
+        const legs = answerLegs();
+        if (hold) {
+          hold = false;
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+        return { legs };
+      },
+    },
+  } as unknown as HerculeClient;
+  return {
+    client,
+    reads,
+    holdNextLegRead: () => {
+      hold = true;
+    },
+    releaseHeldLegRead: () => release?.(),
+  };
+};
+
+/** The leg `s-1` of the Task `t-1` has, with a live newest run `r-new` and a live run `r-live`. */
+const HELD_LEG: HandoffLeg = {
+  runId: "r-first",
+  signalId: "s-1",
+  taskId: "t-1",
+  taskStatus: "in-progress",
+  workflowId: null,
+  workflowName: "Implement",
+  rerunCount: 2,
+  latestRun: { id: "r-new", status: "running" },
+  liveRunIds: ["r-live"],
+};
+
+/**
+ * Returns a query client holding two Done lists, the "all" tab with one leg
+ * (newest run `r-new`, live run `r-live`) and the tab of the plugin "github"
+ * with none, the cleared-today list, and the leg of the run `r-solo` a pane
+ * read on its own. All are fresh.
+ */
+const buildCachedDoneLists = () => {
+  const queryClient = new QueryClient();
+  const client = {} as HerculeClient;
+  const setPages = (queryKey: ReadonlyArray<unknown>, legs: ReadonlyArray<HandoffLeg>) => {
+    queryClient.setQueryData(queryKey, {
+      pages: [{ items: [], legs } satisfies DoneSignalPage],
+      pageParams: [undefined],
+    });
+  };
+  const all = signalsDoneQuery(client).queryKey;
+  const github = signalsDoneQuery(client, "github").queryKey;
+  const clearedToday = signalsClearedTodayQuery(client).queryKey;
+  const solo = handoffLegQuery(client, "r-solo").queryKey;
+  setPages(all, [HELD_LEG]);
+  setPages(github, []);
+  queryClient.setQueryData(clearedToday, { pages: [{ items: [] }], pageParams: [undefined] });
+  queryClient.setQueryData(solo, null);
+  const isStale = (queryKey: ReadonlyArray<unknown>): boolean =>
+    queryClient.getQueryState(queryKey)?.isInvalidated === true;
+  return { queryClient, isStale, all, github, clearedToday, solo };
+};
+
+describe("invalidateForPush for Intake's Done lists", () => {
+  it("marks every Done list out of date for a task push naming a held leg's Task, and not the cleared-today list", () => {
+    const { queryClient, isStale, all, github, clearedToday } = buildCachedDoneLists();
+    invalidateForPush(queryClient, "task", buildQueryKeys("task", ["t-1"]), {
+      ids: ["t-1"],
+      kind: "updated",
+    });
+    expect(isStale(all)).toBe(true);
+    expect(isStale(github)).toBe(true);
+    expect(isStale(clearedToday)).toBe(false);
+  });
+
+  it("leaves the Done lists alone for a task push naming an unrelated Task", () => {
+    const { queryClient, isStale, all, github } = buildCachedDoneLists();
+    invalidateForPush(queryClient, "task", buildQueryKeys("task", ["t-other"]), {
+      ids: ["t-other"],
+      kind: "updated",
+    });
+    expect(isStale(all)).toBe(false);
+    expect(isStale(github)).toBe(false);
+  });
+
+  it("leaves the Done lists alone for a run push that names an unrelated run", () => {
+    const { queryClient, isStale, all, github } = buildCachedDoneLists();
+    invalidateForPush(queryClient, "run", [], { ids: ["r-cron"], kind: "updated" });
+    expect(isStale(all)).toBe(false);
+    expect(isStale(github)).toBe(false);
+  });
+
+  it.each([["r-new"], ["r-live"]])(
+    "marks every Done list out of date for a run push that names the held leg's run %s",
+    (runId) => {
+      const { queryClient, isStale, all, github, clearedToday } = buildCachedDoneLists();
+      invalidateForPush(queryClient, "run", [], { ids: [runId], kind: "updated" });
+      expect(isStale(all)).toBe(true);
+      expect(isStale(github)).toBe(true);
+      expect(isStale(clearedToday)).toBe(false);
+    },
+  );
+
+  it("marks the Done lists out of date for a run that was created", () => {
+    const { queryClient, isStale, all } = buildCachedDoneLists();
+    invalidateForPush(queryClient, "run", [], { ids: ["r-other"], kind: "created" });
+    expect(isStale(all)).toBe(true);
+  });
+
+  it("looks at the legs of every held Done list, not only the visible tab", () => {
+    const { queryClient, isStale, all, github } = buildCachedDoneLists();
+    // Only the "github" tab holds the leg this time.
+    const held = queryClient.getQueryData(all);
+    queryClient.setQueryData(github, held);
+    queryClient.setQueryData(all, { pages: [{ items: [], legs: [] }], pageParams: [undefined] });
+    invalidateForPush(queryClient, "run", [], { ids: ["r-live"], kind: "updated" });
+    expect(isStale(all)).toBe(true);
+    expect(isStale(github)).toBe(true);
+  });
+
+  it("never takes the cleared-today read for a Done list, even when its legs would be affected", () => {
+    const { queryClient, isStale, clearedToday } = buildCachedDoneLists();
+    // A push that names no ids affects any leg. The cleared-today pages hold
+    // no `legs`; reading them as a Done list's would throw.
+    expect(() => {
+      invalidateForPush(queryClient, "run", [], { ids: [], kind: "updated" });
+    }).not.toThrow();
+    expect(isStale(clearedToday)).toBe(false);
+  });
+
+  it("marks the leg a pane read on its own out of date for a run push naming its run", () => {
+    const { queryClient, isStale, solo } = buildCachedDoneLists();
+    queryClient.setQueryData<HandoffLeg>(solo, {
+      ...HELD_LEG,
+      runId: "r-solo",
+      liveRunIds: ["r-solo-live"],
+    });
+    invalidateForPush(queryClient, "run", [], { ids: ["r-solo-live"], kind: "updated" });
+    expect(isStale(solo)).toBe(true);
+  });
+
+  it("reads a Done list again when a task push arrives during its first read, whatever the push names", async () => {
+    let status: HandoffLeg["taskStatus"] = "in-progress";
+    const fake = buildFakeDoneClient(() => [{ ...HELD_LEG, taskStatus: status }]);
+    const queryClient = new QueryClient();
+    const options = signalsDoneQuery(fake.client);
+    fake.holdNextLegRead();
+    observers.push(new InfiniteQueryObserver(queryClient, options).subscribe(() => {}));
+    await waitFor(() => {
+      expect(fake.reads.legs).toBe(1);
+    });
+
+    // The Task closes after the first read was answered, before it was stored.
+    status = "done";
+    invalidateForPush(queryClient, "task", buildQueryKeys("task", ["t-other"]), {
+      ids: ["t-other"],
+      kind: "updated",
+    });
+    fake.releaseHeldLegRead();
+
+    await waitFor(() => {
+      expect(fake.reads.legs).toBe(2);
+      expect(
+        queryClient.getQueryData<InfiniteData<DoneSignalPage>>(options.queryKey),
+      ).toMatchObject({
+        pages: [{ legs: [{ taskStatus: "done" }] }],
+      });
+    });
   });
 });

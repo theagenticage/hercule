@@ -103,6 +103,19 @@ export interface TrackedHandoff {
   readonly at: string;
 }
 
+/**
+ * One handoff entry of a non-deleted Task, found by the run it started, with
+ * the Task's status and the handoff entry appended right after it.
+ */
+export interface LegHandoff {
+  readonly runId: string;
+  readonly signalId: string;
+  readonly taskId: string;
+  readonly taskStatus: TaskStatus;
+  /** The Task's next handoff entry, by time then append order. Absent for the Task's newest handoff. */
+  readonly next?: TrackedHandoff;
+}
+
 /** An open Task and one External Ref its provenance carries. */
 export interface OpenTaskOnRef {
   readonly ref: ExternalRef;
@@ -274,8 +287,9 @@ const make = Effect.gen(function* () {
       clauses.push(sql`tasks.project_id = ${uuidFromString(filter.projectId)}`);
     }
     if (filter.handedOff !== undefined) {
-      // `task_provenance_handoff` holds exactly the entries that name a
-      // signal, so both forms read that index alone. `task_id` is never NULL,
+      // `task_provenance_handoff` and `task_provenance_handoff_run` hold exactly
+      // the entries that name a signal and the Task, so both forms read one of
+      // them alone. `task_id` is never NULL,
       // so NOT IN cannot match nothing by mistake.
       clauses.push(
         filter.handedOff
@@ -415,10 +429,79 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns, for each `{ runId, taskId }` pair, the handoff entry of the
+     * Task `taskId` that started the run `runId`, with the Task's status and the
+     * Task's next handoff entry. A pair whose Task is deleted, or has no
+     * handoff entry for that run, is left out. The next handoff entry is the
+     * one that follows this one by time, then by the order it was appended
+     * (`at`, then `rowid`): the same order `readFirstHandoff` and `listTracked`
+     * use. It is looked for among all the Task's handoff entries.
+     *
+     * One statement, and its work follows the pairs, never the handoffs of
+     * their Tasks. Each pair finds its entry by the run and the Task on
+     * `task_provenance_handoff_run`, then its Task by key, then the next entry
+     * by seeking `task_provenance_handoff` (task, then time) just after the
+     * entry, which reads one entry however long the Task's history is. The
+     * pairs reach SQLite as one JSON text, so the statement does not grow
+     * with the number of pairs.
+     */
+    listLegHandoffs: (
+      pairs: ReadonlyArray<{ readonly runId: string; readonly taskId: string }>,
+    ): Effect.Effect<ReadonlyArray<LegHandoff>, SqlError> =>
+      pairs.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{
+              readonly run_id: Uint8Array;
+              readonly signal_id: Uint8Array;
+              readonly task_id: Uint8Array;
+              readonly status: TaskStatus;
+              readonly next_run_id: Uint8Array | null;
+              readonly next_signal_id: Uint8Array | null;
+              readonly next_at: string | null;
+            }>`
+              SELECT p.run_id, p.signal_id, t.id AS task_id, t.status,
+                     n.run_id AS next_run_id, n.signal_id AS next_signal_id, n.at AS next_at
+              FROM json_each(${JSON.stringify(
+                pairs.map((pair) => [
+                  pair.runId.replaceAll("-", ""),
+                  pair.taskId.replaceAll("-", ""),
+                ]),
+              )}) j
+              CROSS JOIN task_provenance p ON p.run_id = unhex(json_extract(j.value, '$[0]'))
+                                          AND p.signal_id IS NOT NULL
+                                          AND p.task_id = unhex(json_extract(j.value, '$[1]'))
+              CROSS JOIN tasks t ON t.id = p.task_id AND t.deleted_at IS NULL
+              LEFT JOIN task_provenance n ON n.rowid = (
+                SELECT s.rowid FROM task_provenance s
+                WHERE s.task_id = p.task_id AND s.signal_id IS NOT NULL
+                  AND (s.at, s.rowid) > (p.at, p.rowid)
+                ORDER BY s.at, s.rowid LIMIT 1)`,
+            (rows) =>
+              rows.map((row) => ({
+                runId: uuidToString(row.run_id),
+                signalId: uuidToString(row.signal_id),
+                taskId: uuidToString(row.task_id),
+                taskStatus: row.status,
+                // A handoff entry always names the run it started.
+                ...(row.next_run_id === null || row.next_signal_id === null || row.next_at === null
+                  ? {}
+                  : {
+                      next: {
+                        signalId: uuidToString(row.next_signal_id),
+                        runId: uuidToString(row.next_run_id),
+                        at: row.next_at,
+                      },
+                    }),
+              })),
+          ),
+
+    /**
      * Returns every in-progress task that has a handoff entry, the most
      * recently updated task first. Each task holds its newest handoff entries,
-     * at most `MAX_TRACKING_HANDOFFS`, newest first. A deleted task is left
-     * out.
+     * at most `MAX_TRACKING_HANDOFFS`, newest first: by time, then by the
+     * order they were appended, as in `readFirstHandoff` and
+     * `listLegHandoffs`. A deleted task is left out.
      *
      * One statement, and its work follows the in-progress tasks, not the
      * handoffs ever made. It walks the in-progress tasks on the status index,
@@ -437,17 +520,24 @@ const make = Effect.gen(function* () {
           readonly signal_id: Uint8Array;
           readonly run_id: Uint8Array | null;
           readonly at: string;
+          readonly appended: number;
         }>`
-          SELECT t.id AS task_id, t.title, t.updated_at, p.signal_id, p.run_id, p.at
+          SELECT t.id AS task_id, t.title, t.updated_at, p.signal_id, p.run_id, p.at,
+                 p.rowid AS appended
           FROM tasks t CROSS JOIN task_provenance p ON p.rowid IN (
             SELECT rowid FROM task_provenance
             WHERE task_id = t.id AND signal_id IS NOT NULL
-            ORDER BY at DESC LIMIT ${MAX_TRACKING_HANDOFFS})
+            ORDER BY at DESC, rowid DESC LIMIT ${MAX_TRACKING_HANDOFFS})
           WHERE t.status = 'in-progress' AND t.deleted_at IS NULL`,
         (rows) => {
           const byTask = new Map<
             string,
-            { id: string; title: string; updatedAt: string; handoffs: Array<TrackedHandoff> }
+            {
+              id: string;
+              title: string;
+              updatedAt: string;
+              handoffs: Array<TrackedHandoff & { readonly appended: number }>;
+            }
           >();
           for (const row of rows) {
             // A handoff entry always names the run it started.
@@ -458,6 +548,7 @@ const make = Effect.gen(function* () {
               signalId: uuidToString(row.signal_id),
               runId: uuidToString(row.run_id),
               at: row.at,
+              appended: row.appended,
             };
             if (task === undefined) {
               byTask.set(id, {
@@ -475,7 +566,9 @@ const make = Effect.gen(function* () {
             .map(({ id, title, handoffs }) => ({
               id,
               title,
-              handoffs: handoffs.toSorted((a, b) => b.at.localeCompare(a.at)),
+              handoffs: handoffs
+                .toSorted((a, b) => b.at.localeCompare(a.at) || b.appended - a.appended)
+                .map(({ signalId, runId, at }) => ({ signalId, runId, at })),
             }));
         },
       ),

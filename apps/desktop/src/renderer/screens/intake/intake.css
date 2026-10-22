@@ -212,6 +212,19 @@
 .ask-mark--face .cr {
   display: block;
 }
+/* A Done row's face is 22px, 2px less than a To do row's, so it overflows the
+   lead column by 1px on each side and its centre stays 20px from the left. */
+.ask-mark--trip {
+  margin-inline: -1px;
+}
+/* The last step of a Done row's trip when it is not plain: marigold where the
+   user is waited on, the book's green ink where the work finished. */
+.trip-end--waits {
+  color: var(--you-ink);
+}
+.trip-end--finished {
+  color: var(--ok);
+}
 /* The source's mark at the start of the second line, on a row led by a face. */
 .ask-src {
   display: inline-grid;
@@ -410,6 +423,10 @@
 }
 .asks-rows--quiet .ask-mark {
   opacity: 0.55;
+}
+/* ... but only the marks: the face of the agent keeps its full colour. */
+.asks-rows--quiet .ask-mark--face {
+  opacity: 1;
 }
 /* When a snoozed signal comes back, on Later. */
 .ask-until {
@@ -889,9 +906,10 @@
   gap: 12px;
 }
 .ad-outcome-top {
-  display: flex;
+  display: grid;
+  grid-template-columns: 28px 1fr;
   align-items: center;
-  gap: 12px;
+  column-gap: 12px;
 }
 .ad-outcome-desc {
   margin: 0;
@@ -902,6 +920,32 @@
 .ad-outcome-desc b {
   color: var(--ink);
   font-weight: var(--w-medium);
+}
+/* The first step of a Done signal's trip is the outcome's bold line; the
+   rest of the trip runs on in the regular weight. */
+.ad-outcome-trip {
+  color: var(--ink);
+  font-size: var(--t-14);
+}
+/* The button of a Done signal's trip sits under the outcome's lines, in their
+   column, 10px below them: the pane's gap between stacked blocks. */
+.ad-outcome-button {
+  grid-column: 2;
+  justify-self: start;
+  margin-top: 10px;
+}
+/* When a Done signal's trip could not be read: the failure and its Try again
+   button, in the outcome's text column where the trip's button would be. */
+.ad-outcome-failure {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ad-outcome-failure .ad-err {
+  margin: 0;
 }
 .ad-mark {
   display: grid;
@@ -1269,7 +1313,7 @@
 .b-work-text b {
   font-size: var(--t-14);
 }
-.b-work-text span:last-child {
+.b-work-text > span:last-child {
   color: var(--muted);
 }
 /* Your work under the signal's blocks keeps the blocks' distance from them. */
@@ -1277,7 +1321,7 @@
   margin-top: 18px;
 }
 /* Your work on a Task whose row waits on the user: its state word, in your colour. */
-.b-work-text span:last-child b {
+.b-work-text > span:last-child b {
   color: var(--you-ink);
   font-size: inherit;
 }

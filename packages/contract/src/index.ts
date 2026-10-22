@@ -453,8 +453,12 @@ export {
   RunnerWatermark,
 } from "./groups/runner";
 export {
+  HandoffLeg,
+  HandoffLegs,
   Label,
   MAX_FILTER_VALUES,
+  MAX_LEG_LIVE_RUNS,
+  MAX_LEG_QUERY_RUNS,
   MAX_LABEL_LENGTH,
   MAX_PROVENANCE_APPEND,
   MAX_SEARCH_TEXT_LENGTH,
@@ -485,8 +489,8 @@ export {
   TaskTracking,
   TrackingDetail,
   TrackingDetailRun,
-  TrackingFirstHandoff,
   TrackingHandoff,
+  TrackingHandoffWithWorkflow,
   TrackingOutput,
   TrackingOutputField,
   TrackingOutputValue,

@@ -115,7 +115,8 @@ const isCheckable = (signal: Signal | undefined, view: SignalView): signal is Si
  * - `E` marks the checked rows done, or the selected row when none is.
  * - `H` opens the snooze menu, `U` unsnoozes on Later.
  * - `↩` on a row opens the pane on the suggested answer, `R` opens the
- *   Reply box, and `O` opens the signal on its source.
+ *   Reply box, and `O` opens the signal on its source, or
+ *   the run of a handed-off signal on Done that has no Task in Tracking.
  * - Esc clears the checks, and then steps back.
  * - `T` opens and closes Tracking. While it is open, `J`/`K` and `↓`/`↑` walk
  *   only its rows, `↩` on a row shows its pane, `E` marks the selected row
@@ -208,12 +209,28 @@ export function IntakeScreen({
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
-  // Later and Done are read page by page, for the tab shown. On To do this
-  // read is off, and its data unused.
-  const paged = useInfiniteQuery({
-    ...(view === "done" ? signalsDoneQuery : signalsLaterQuery)(client, pluginId ?? undefined),
-    enabled: view !== "to-do",
+  // Later and Done are read page by page, for the tab shown. Each is read
+  // only on its own view, and the unused one's data is never looked at. The
+  // Done pages also hold the leg of each handoff on them.
+  const laterPaged = useInfiniteQuery({
+    ...signalsLaterQuery(client, pluginId ?? undefined),
+    enabled: view === "later",
   });
+  const donePaged = useInfiniteQuery({
+    ...signalsDoneQuery(client, pluginId ?? undefined),
+    enabled: view === "done",
+  });
+  const paged = view === "done" ? donePaged : laterPaged;
+  // The legs of the handoffs on the Done pages as last read, by the run each
+  // started. The list and the pane look their signal's trip up here, and not
+  // in the held signals, which can be older than the legs.
+  const legs = useMemo(
+    () =>
+      new Map(
+        donePaged.data?.pages.flatMap((page) => page.legs.map((leg) => [leg.runId, leg] as const)),
+      ),
+    [donePaged.data],
+  );
   // The signals of the view and the tab as last read, in the list's order.
   // Later and Done are read in that order already.
   const listed = useMemo(
@@ -533,7 +550,7 @@ export function IntakeScreen({
         return;
       case "o":
         event.preventDefault();
-        if (paneShown) paneRef.current?.openOnSource();
+        if (paneShown) paneRef.current?.openRunOrSource();
         return;
       case "Escape":
         event.preventDefault();
@@ -639,6 +656,7 @@ export function IntakeScreen({
                 view={view}
                 inert={trackingOpen}
                 scope={listScope}
+                legs={legs}
                 sections={sections}
                 plugins={plugins}
                 selectedId={selectedId}
@@ -763,7 +781,11 @@ export function IntakeScreen({
                     onFocusedSuggested={() => {
                       setFocusPaneFor(null);
                     }}
+                    legs={legs}
                     onShowInTracking={tracking.showTaskInTracking}
+                    onOpenRun={(runId) => {
+                      openDestination({ kind: "run", runId });
+                    }}
                     ref={paneRef}
                   />
                 )

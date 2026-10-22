@@ -23,6 +23,7 @@
  */
 import {
   HAND_TO_ACTION_PREFIX,
+  type HandoffLeg,
   type Session,
   type Signal,
   type TrackingDetail,
@@ -52,6 +53,7 @@ export const TASK_IDS = {
   refunds: "01a0ec64-7a00-7000-9000-000000000006",
   sdk: "01a0ec64-7a00-7000-9000-000000000007",
   fixCheckout: "01a0ec64-7a00-7000-9000-000000000008",
+  discountCodes: "01a0ec64-7a00-7000-9000-000000000009",
 } as const;
 
 /**
@@ -436,4 +438,153 @@ export const NEEDS_YOU_RECORDS: Partial<SidebarRecords> = {
   yourWorkTasks: [REFUNDS_TASK],
   trackingDetails: TRACKING_DETAILS,
   handedSignals: HANDED_SIGNALS,
+};
+
+/**
+ * Builds the leg of the handoff that started `task`'s newest run, as
+ * `task.queryLegs` returns it for a Task that is still in Tracking.
+ */
+const buildTrackedLeg = (task: TrackingTask): HandoffLeg => {
+  const handoff = task.handoffs[task.handoffs.length - 1]!;
+  return {
+    runId: handoff.runId,
+    signalId: handoff.signalId,
+    taskId: task.taskId,
+    taskStatus: "in-progress",
+    workflowId: task.latestRun.workflowId,
+    workflowName: task.latestRun.workflowName,
+    rerunCount: 0,
+    latestRun: task.latestRun,
+    liveRunIds: task.liveRunIds,
+  };
+};
+
+const CHECKOUT_HANDED_SIGNAL = buildHandedSignal(CHECKOUT, 57, 63, {
+  kind: "github/assigned",
+  asker: "Marta",
+  place: "webshop #1280",
+  text: "Split the checkout page into address, shipping and payment steps.",
+});
+
+/** Builds a run of the Task Discount codes ignore letter case, which two handoffs worked on. */
+const buildDiscountRun = (
+  id: string,
+  workflowName: string,
+  createdMinutes: number,
+  finishedMinutes: number,
+): TrackingRun =>
+  buildRun(id, workflowName, createdMinutes, {
+    status: "completed",
+    startedAt: minutesAgo(createdMinutes),
+    finishedAt: minutesAgo(finishedMinutes),
+  });
+
+/**
+ * Builds a signal handed to the Task Discount codes ignore letter case, which
+ * the user marked done afterwards, so it has no row in Tracking. `number` is
+ * the signal's, `handedMinutes` is when it was handed off.
+ */
+const buildDiscountSignal = (
+  number: number,
+  handedMinutes: number,
+  runId: string,
+  workflowName: string,
+  signal: Pick<Signal, "kind" | "asker" | "place">,
+): Signal =>
+  buildSignal(number, handedMinutes + 20, {
+    ...signal,
+    title: "Discount codes ignore letter case",
+    status: "resolved",
+    resolution: {
+      kind: "decided",
+      actionId: `${HAND_TO_ACTION_PREFIX}${WORKFLOW_SEEDS[workflowName] ?? workflowName}`,
+      runId,
+      outcome: `Handed to ${workflowName}`,
+      actor: "user",
+      origin: "web",
+      at: minutesAgo(handedMinutes),
+    },
+  });
+
+const DISCOUNT_FIRST_SIGNAL = buildDiscountSignal(60, 103, "run-t-205-1", "Implement", {
+  kind: "linear/assigned",
+  asker: "Pieter",
+  place: "PAY-205",
+});
+const DISCOUNT_SECOND_SIGNAL = buildDiscountSignal(61, 57, "run-t-205-2", "Fix bug", {
+  kind: "github/checks-failed",
+  asker: "GitHub Actions",
+  place: "webshop #1291",
+});
+
+/**
+ * What a Done scene with handed-off signals holds, beside the Tracking rows
+ * and the signals of `NEEDS_YOU_RECORDS`: the Done list of the Tracking
+ * drawing at 09:41, newest first, and the leg of each handoff on it.
+ *
+ * - Seven signals went to Tasks that are still in Tracking, so their lines end
+ *   with the row's state.
+ * - Discount codes ignore letter case was handed on twice and is done: its first
+ *   signal's leg continued into the second, whose Fix bug run was tried again once.
+ * - The last signal started no run, so its row keeps its outcome line.
+ *
+ * The drawing's Split checkout into steps line ends "waiting for checks"; the
+ * app's Tracking row for it reads "working" (see the notes at the top).
+ */
+export const DONE_TRIP_RECORDS: Pick<SidebarRecords, "done" | "doneLegs"> = {
+  done: [
+    HANDED_SIGNALS[4]!,
+    HANDED_SIGNALS[1]!,
+    HANDED_SIGNALS[3]!,
+    HANDED_SIGNALS[0]!,
+    CHECKOUT_HANDED_SIGNAL,
+    DISCOUNT_SECOND_SIGNAL,
+    HANDED_SIGNALS[5]!,
+    HANDED_SIGNALS[2]!,
+    DISCOUNT_FIRST_SIGNAL,
+    buildSignal(62, 140, {
+      kind: "github/review-requested",
+      title: "Merge 4 dependency bumps",
+      asker: "Dependabot",
+      place: "payments-api #1299",
+      status: "resolved",
+      resolution: {
+        kind: "decided",
+        outcome: "Done, nothing sent",
+        actor: "user",
+        origin: "web",
+        at: minutesAgo(120),
+      },
+    }),
+  ],
+  doneLegs: [SKU, SDK, BACKUP, RATE_LIMIT, CHECKOUT, PDF, REFUNDS].map(buildTrackedLeg).concat([
+    {
+      runId: "run-t-205-1",
+      signalId: DISCOUNT_FIRST_SIGNAL.id,
+      taskId: TASK_IDS.discountCodes,
+      taskStatus: "done",
+      workflowId: "Implement",
+      workflowName: "Implement",
+      rerunCount: 0,
+      latestRun: buildDiscountRun("run-t-205-1", "Implement", 103, 81),
+      liveRunIds: [],
+      next: {
+        signalId: DISCOUNT_SECOND_SIGNAL.id,
+        runId: "run-t-205-2",
+        at: minutesAgo(57),
+        workflowName: "Fix bug",
+      },
+    },
+    {
+      runId: "run-t-205-2",
+      signalId: DISCOUNT_SECOND_SIGNAL.id,
+      taskId: TASK_IDS.discountCodes,
+      taskStatus: "done",
+      workflowId: WORKFLOW_SEEDS["Fix bug"]!,
+      workflowName: "Fix bug",
+      rerunCount: 1,
+      latestRun: buildDiscountRun("run-t-205-3", "Fix bug", 48, 39),
+      liveRunIds: [],
+    },
+  ]),
 };

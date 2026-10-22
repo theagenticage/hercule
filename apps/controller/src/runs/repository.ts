@@ -215,6 +215,28 @@ interface RunRow {
   readonly finished_at: string | null;
 }
 
+/**
+ * The leg that starts at a handoff's run: the run and every run that re-runs
+ * it, however many re-runs deep, on the same Task.
+ */
+export interface RunLeg {
+  /** The handoff's run. */
+  readonly runId: string;
+  /** The workflow id of the handoff's run. */
+  readonly workflowId: string | null;
+  /** The name of the workflow of the handoff's run, as it was when that run started. */
+  readonly workflowName: string;
+  /** The runs of the leg other than the handoff's run. */
+  readonly rerunCount: number;
+  /**
+   * The newest run of the leg, the handoff's run included. It is only the id
+   * and the status, which is all a leg reports of it.
+   */
+  readonly latestRun: { readonly id: string; readonly status: RunStatus };
+  /** The leg's pending and running runs, newest first, capped. */
+  readonly liveRunIds: ReadonlyArray<string>;
+}
+
 /** One page of the run list: how many, where to start, and the filters. */
 export interface RunPageRequest extends PageRequest, RunFilter {}
 
@@ -959,6 +981,145 @@ const make = Effect.gen(function* () {
           FROM runs WHERE id = ${uuidFromString(runId)}`,
         (rows) => Option.fromNullishOr(rows[0]?.workflow_name),
       ),
+
+    /**
+     * Returns the Task each run of `runIds` works on, by run id. A run that
+     * works on no Task, or does not exist, is left out. One lookup of each run
+     * by its id.
+     */
+    listTaskIds: (
+      runIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      runIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly id: Uint8Array; readonly task_id: Uint8Array }>`
+              SELECT id, task_id FROM runs
+              WHERE id IN ${sql.in(runIds.map((id) => uuidFromString(id)))}
+                AND task_id IS NOT NULL`,
+            (rows) =>
+              new Map(
+                rows.map((row) => [uuidToString(row.id), uuidToString(row.task_id)] as const),
+              ),
+          ),
+
+    /**
+     * Returns the name of the workflow of each run of `runIds`, as it was when
+     * the run started, by run id. A run that does not exist is left out. One
+     * lookup of each run by its id.
+     */
+    listWorkflowNames: (
+      runIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      runIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly id: Uint8Array; readonly workflow_name: string }>`
+              SELECT id, json_extract(plan, '$.name') AS workflow_name FROM runs
+              WHERE id IN ${sql.in(runIds.map((id) => uuidFromString(id)))}`,
+            (rows) =>
+              new Map(rows.map((row) => [uuidToString(row.id), row.workflow_name] as const)),
+          ),
+
+    /**
+     * Returns, for each handoff's run `{ runId, taskId }`, the leg that starts
+     * at that run: the run and every run reachable from it through
+     * `original_run_id` (a re-run, a re-run of a re-run, and so on) that works
+     * on the same Task. `taskId` must be the Task the run itself works on, as
+     * `listTaskIds` reads it. A run that does not exist is left out. For each
+     * leg it returns:
+     *
+     * - the workflow id and name of the handoff's run;
+     * - the number of runs that re-run it (the leg without the handoff's run);
+     * - the newest run of the leg, the handoff's run included (latest
+     *   `created_at`, then greatest id), as its id and status;
+     * - the ids of the leg's pending or running runs, newest first, at most
+     *   `maxLiveRunIds`.
+     *
+     * One recursive statement for all the handoff runs. It walks them on the
+     * primary key and each run's re-runs on `runs_original_run_id`, so its
+     * work follows the runs of the legs asked for, never the Task's other
+     * runs. A wide fan-out of re-runs is therefore linear in its size. The
+     * unary `+` on the Task check keeps SQLite from walking `runs_task_id`,
+     * the Task's whole history, once for every run of a leg. It ranks the runs
+     * of each leg in memory (SQLite window functions) and reads the columns of
+     * only the handoff's run, the newest run and the capped live runs of each
+     * leg. The handoff runs reach SQLite as one JSON text, so the statement
+     * does not grow with their number.
+     */
+    listLegs: (
+      handoffRuns: ReadonlyArray<{ readonly runId: string; readonly taskId: string }>,
+      maxLiveRunIds: number,
+    ): Effect.Effect<ReadonlyArray<RunLeg>, SqlError> =>
+      Effect.gen(function* () {
+        if (handoffRuns.length === 0) return [];
+        const hexHandoffRuns = JSON.stringify(
+          handoffRuns.map((handoffRun) => [
+            handoffRun.runId.replaceAll("-", ""),
+            handoffRun.taskId.replaceAll("-", ""),
+          ]),
+        );
+        const rows = yield* sql<{
+          readonly id: Uint8Array;
+          readonly status: RunStatus;
+          readonly workflow_id: Uint8Array | null;
+          readonly workflow_name: string;
+          readonly handoff_run_id: Uint8Array;
+          readonly size: number;
+          readonly newest_rank: number;
+          readonly live_rank: number | null;
+          readonly is_handoff_run: number;
+        }>`
+          WITH RECURSIVE
+            handoff_runs(run_id, task_id) AS (
+              SELECT unhex(json_extract(value, '$[0]')), unhex(json_extract(value, '$[1]'))
+              FROM json_each(${hexHandoffRuns})),
+            members(handoff_run_id, member_id, task_id, created_at, is_live) AS (
+              SELECT handoff_runs.run_id, runs.id, handoff_runs.task_id, runs.created_at,
+                     runs.status IN ('pending', 'running')
+              FROM handoff_runs CROSS JOIN runs ON runs.id = handoff_runs.run_id
+              UNION ALL
+              SELECT members.handoff_run_id, runs.id, members.task_id, runs.created_at,
+                     runs.status IN ('pending', 'running')
+              FROM members CROSS JOIN runs ON runs.original_run_id = members.member_id
+                                          AND +runs.task_id = members.task_id),
+            ranked AS (
+              SELECT handoff_run_id, member_id, is_live,
+                     count(*) OVER (PARTITION BY handoff_run_id) AS size,
+                     row_number() OVER (PARTITION BY handoff_run_id
+                                        ORDER BY created_at DESC, member_id DESC) AS newest_rank,
+                     CASE WHEN is_live THEN
+                       row_number() OVER (PARTITION BY handoff_run_id, is_live
+                                          ORDER BY created_at DESC, member_id DESC) END AS live_rank
+              FROM members)
+          SELECT handoff_run_id, size, newest_rank, live_rank, member_id = handoff_run_id AS is_handoff_run,
+                 id, status, workflow_id, json_extract(plan, '$.name') AS workflow_name
+          FROM ranked CROSS JOIN runs ON runs.id = member_id
+          WHERE newest_rank = 1 OR member_id = handoff_run_id OR live_rank <= ${maxLiveRunIds}`;
+        const byHandoffRun = new Map<string, Array<(typeof rows)[number]>>();
+        for (const row of rows) {
+          const runId = uuidToString(row.handoff_run_id);
+          const ofLeg = byHandoffRun.get(runId);
+          if (ofLeg === undefined) byHandoffRun.set(runId, [row]);
+          else ofLeg.push(row);
+        }
+        return [...byHandoffRun].map(([runId, ofLeg]): RunLeg => {
+          const handoffRun = ofLeg.find((row) => row.is_handoff_run === 1)!;
+          const newest = ofLeg.find((row) => row.newest_rank === 1)!;
+          return {
+            runId,
+            workflowId:
+              handoffRun.workflow_id === null ? null : uuidToString(handoffRun.workflow_id),
+            workflowName: handoffRun.workflow_name,
+            rerunCount: handoffRun.size - 1,
+            latestRun: { id: uuidToString(newest.id), status: newest.status },
+            liveRunIds: ofLeg
+              .filter((row) => row.live_rank !== null && row.live_rank <= maxLiveRunIds)
+              .toSorted((a, b) => a.live_rank! - b.live_rank!)
+              .map((row) => uuidToString(row.id)),
+          };
+        });
+      }),
 
     /**
      * Returns the session of each run's step record that started last and has

@@ -164,6 +164,20 @@ Each handed-off signal's Done row is led by the face of the agent it went to. It
 
 The pane draws the leg as Round Trip's trip: one line per step, with its time and who took it. Under it: "Go to Tracking", which opens Tracking on the Task while it is open, or "Open the run" once it is closed.
 
+*(Amended 2026-10-22, [#805](https://github.com/theagenticage/hercule/issues/805).)* Slice 5 builds Done's trip, and the app knowingly differs from the drawing in these places:
+- The pane has no "This handoff" step timeline and no foot line ("Each signal you hand off shows its own leg ..."). It draws the trip in the outcome instead (see below). The reads hold no actor for a stop or a tick-off, and the ticket asks for the line and where opening it goes. A later ticket can add the timeline.
+- A Working row that only waits on a signal trigger ends its line with "working", not "waiting for checks" (the drawing's d-checkout). The leg and the Tracking rows do not carry the awaited trigger, and slice 1 already draws that row's line as "waiting for *ids*" in Tracking.
+- "Go to Tracking" shows whenever the Task is in progress and has a row in Tracking, for every leg of it, the earlier ones too. "Open the run" shows once the Task is done or cancelled, or has no row, and opens the leg's newest run. Opening Tracking from Done shows To do.
+- A Tracking row ends a trip when it is for the leg's Task, its newest handoff is this leg's, and the leg has no next. Tracking's word is the Task's latest observed standing, so an earlier leg's live run or a re-run of an earlier leg does not hide it. Done and Tracking are read separately and can disagree for a moment while one refreshes; both are read again on the same pushes, so it converges. Otherwise the line ends on the leg's own standing, uncoloured.
+- The pane's differences from the drawing:
+  - The pane's outcome block is one block: label "What you did", the trip as its bold-then-regular headline ("Handed to Fix bug → tried again once → done"), the moment line, then the button in the text column. The drawing has the trip in the subtitle under the title and the timeline below it.
+  - The pane's header line reads "GitHub · Checks failed" / "<asker> asks in <place> · <time>" (the app's own pane header, same as To do), not the drawing's "GitHub · webshop #1291" with the trip as subtitle.
+  - The Split checkout row reads "working" where the drawing says "waiting for checks", as the second difference above says.
+  - Investigate's face (the Nightly backup row) is the app's own face for that workflow id, not the drawing's.
+  - The section heading counts its rows: "Today 10" (the app's existing count chip).
+  - The app's pane foot also lists "Esc close"; the drawing's foot has no Esc entry. The app's foot is the same on every pane.
+  - Window chrome, sidebar contents and counts differ (the specimen's own sidebar fixture). The Done list's rows beyond the first three have the same text and faces as the drawing.
+
 ## Keys
 
 | Key | Does |

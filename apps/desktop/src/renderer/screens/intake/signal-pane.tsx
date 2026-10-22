@@ -22,12 +22,18 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
-import { DONE_ACTION_ID, type IgnoreRuleCreateInput, type Signal } from "@hercule/contract";
+import {
+  DONE_ACTION_ID,
+  type HandoffLeg,
+  type IgnoreRuleCreateInput,
+  type Signal,
+} from "@hercule/contract";
 import {
   buildSignalAnswers,
   canIgnoreSignal,
   describeAnswerKey,
   describeBuildFailure,
+  describeHandoffTrip,
   describeNotScreened,
   describeOfferedRuleMatchCount,
   describeResolvedElsewhere,
@@ -51,6 +57,7 @@ import {
 import {
   assistantsQuery,
   eventQuery,
+  handoffLegQuery,
   pluginsQuery,
   signalQuery,
   workflowsQuery,
@@ -59,6 +66,7 @@ import { AlarmIcon } from "../../icons/alarm";
 import { ExternalIcon } from "../../icons/external";
 import { useTrackingRows, useYourWork } from "../../app/tracking";
 import { Mark } from "../../marks";
+import { HandoffTripHeadline } from "./handoff-trip-line";
 import { IgnoreDialog } from "./ignore-dialog";
 import { SignalAnswers, type AnswerFailure } from "./signal-answers";
 import { SignalBlocks } from "./signal-blocks";
@@ -73,8 +81,12 @@ import { useIntakeMoves } from "./use-signal-moves";
 export interface SignalPaneHandle {
   /** Opens the first Reply box and puts the focus in it. Does nothing when the signal has none. */
   readonly openReply: () => void;
-  /** Opens the signal on its source, in the default browser. Does nothing when its address is not known. */
-  readonly openOnSource: () => void;
+  /**
+   * Does what `O` does: opens the run of a handed-off signal whose trip leads
+   * to a run, else the signal on its source, in the default browser. Does
+   * nothing when its address is not known.
+   */
+  readonly openRunOrSource: () => void;
 }
 
 /**
@@ -88,7 +100,10 @@ export interface SignalPaneHandle {
  * `focusSuggestedOnOpen` puts the focus on the suggested answer as soon as
  * the pane shows the signal, then calls `onFocusedSuggested`. `ref` gives
  * the screen's keys the pane's moves. `onShowInTracking` is called with a
- * Task's id when the user asks to see the Task's row in Tracking.
+ * Task's id when the user asks to see the Task's row in Tracking, and
+ * `onOpenRun` with a run's id when the user asks to open the run's page.
+ * `legs` are the legs of the handoffs on the Done pages, by the run each
+ * started, which tell a resolved signal's trip.
  */
 export function SignalPane({
   signalId,
@@ -97,7 +112,9 @@ export function SignalPane({
   shown,
   focusSuggestedOnOpen,
   onFocusedSuggested,
+  legs,
   onShowInTracking,
+  onOpenRun,
   ref,
 }: {
   readonly signalId: string;
@@ -106,7 +123,9 @@ export function SignalPane({
   readonly shown: boolean;
   readonly focusSuggestedOnOpen: boolean;
   readonly onFocusedSuggested: () => void;
+  readonly legs: ReadonlyMap<string, HandoffLeg>;
   readonly onShowInTracking: (taskId: string) => void;
+  readonly onOpenRun: (runId: string) => void;
   readonly ref: Ref<SignalPaneHandle>;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
@@ -120,7 +139,9 @@ export function SignalPane({
           timezone={timezone}
           focusSuggestedOnOpen={focusSuggestedOnOpen}
           onFocusedSuggested={onFocusedSuggested}
+          legs={legs}
           onShowInTracking={onShowInTracking}
+          onOpenRun={onOpenRun}
           ref={ref}
         />
       ) : read.isError ? (
@@ -148,14 +169,18 @@ function SignalDetail({
   timezone,
   focusSuggestedOnOpen,
   onFocusedSuggested,
+  legs,
   onShowInTracking,
+  onOpenRun,
   ref,
 }: {
   readonly signal: Signal;
   readonly timezone: string;
   readonly focusSuggestedOnOpen: boolean;
   readonly onFocusedSuggested: () => void;
+  readonly legs: ReadonlyMap<string, HandoffLeg>;
   readonly onShowInTracking: (taskId: string) => void;
+  readonly onOpenRun: (runId: string) => void;
   readonly ref: Ref<SignalPaneHandle>;
 }): JSX.Element {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
@@ -212,6 +237,26 @@ function SignalDetail({
   const yourWorkTasks = useYourWork().get(signal.id)?.tasks ?? [];
   const trackingRows = useTrackingRows();
   const yourWork = describeYourWork(yourWorkTasks, trackingRows);
+  // Only Done tells a trip. A signal resolved elsewhere while it shows on To
+  // do or Later keeps its plain outcome, even when the Done pages know its leg.
+  const runId = moves.view === "done" ? signal.resolution?.runId : undefined;
+  // A signal whose run is on no loaded Done page, such as one reached by a
+  // link to the second page, reads its leg alone.
+  const legOnPages = runId === undefined ? undefined : legs.get(runId);
+  const readLeg = useQuery({
+    ...handoffLegQuery(client, runId ?? ""),
+    enabled: runId !== undefined && legOnPages === undefined,
+  });
+  // A failed read is checked before its data: after a failed refresh, the
+  // data it kept is not known to be current, so no trip is drawn from it.
+  const legReadFailed = legOnPages === undefined && readLeg.isError;
+  const leg = legOnPages ?? (legReadFailed ? undefined : (readLeg.data ?? undefined));
+  const trip = describeHandoffTrip(
+    signal,
+    leg,
+    trackingRows.find((row) => row.task.taskId === leg?.taskId),
+  );
+  const tripRun = trip?.destination.kind === "run" ? trip.destination.runId : null;
   const origin = signal.origin;
   // Only a signal raised from an event has an event to read, so the list of
   // reads is empty for any other signal.
@@ -238,7 +283,12 @@ function SignalDetail({
   };
 
   const focusSuggested = (): void => {
-    if (suggested === undefined || signal.status !== "open") return;
+    // A resolved signal takes no answer. Its trip's button is what `↩` presses.
+    if (signal.status !== "open") {
+      rootRef.current?.querySelector<HTMLElement>("[data-trip-button]")?.focus();
+      return;
+    }
+    if (suggested === undefined) return;
     if (suggested.style === "reply") {
       focusReply(suggested.action.id);
       return;
@@ -255,8 +305,9 @@ function SignalDetail({
     openReply: () => {
       if (reply !== undefined && signal.status === "open") focusReply(reply.action.id);
     },
-    openOnSource: () => {
-      sourceLinkRef.current?.click();
+    openRunOrSource: () => {
+      if (tripRun !== null) onOpenRun(tripRun);
+      else sourceLinkRef.current?.click();
     },
   }));
 
@@ -301,6 +352,25 @@ function SignalDetail({
     const focused = document.activeElement;
     if (focused === null || focused === document.body) rootRef.current?.focus();
   }, [openedOpen, resolved]);
+
+  // The trip's button goes when its leg leaves the read, as when the Task is
+  // deleted. The failure line and its "Try again" button go when the read
+  // succeeds. If either had the focus, the focus falls to the page's body and
+  // the screen's keys stop working. It moves to the trip's button when there is
+  // one, the natural next step after a successful retry, and to the pane
+  // otherwise.
+  const hasTrip = trip !== null;
+  const hadControlsRef = useRef({ trip: false, failure: false });
+  useLayoutEffect(() => {
+    const had = hadControlsRef.current;
+    hadControlsRef.current = { trip: hasTrip, failure: legReadFailed };
+    const lostControl = (had.trip && !hasTrip) || (had.failure && !legReadFailed);
+    if (!lostControl) return;
+    const focused = document.activeElement;
+    if (focused !== null && focused !== document.body) return;
+    const tripButton = rootRef.current?.querySelector<HTMLElement>("[data-trip-button]");
+    (tripButton ?? rootRef.current)?.focus();
+  }, [hasTrip, legReadFailed]);
 
   return (
     <>
@@ -406,9 +476,40 @@ function SignalDetail({
                 </span>
                 <span className="b-work-text">
                   <span className="b-work-label">{outcome.label}</span>
-                  <b>{outcome.outcome}</b>
+                  {trip === null ? <b>{outcome.outcome}</b> : <HandoffTripHeadline trip={trip} />}
                   <span>{outcomeMoment}</span>
                 </span>
+                {trip !== null && (
+                  <button
+                    type="button"
+                    className="btn btn--sm ad-outcome-button"
+                    data-trip-button
+                    onClick={() => {
+                      if (trip.destination.kind === "tracking") {
+                        onShowInTracking(trip.destination.taskId);
+                      } else onOpenRun(trip.destination.runId);
+                    }}
+                  >
+                    {trip.destination.kind === "tracking" ? "Go to Tracking" : "Open the run"}
+                  </button>
+                )}
+                {legReadFailed && (
+                  <div className="ad-outcome-failure">
+                    <p className="ad-err" role="alert">
+                      {`Couldn't read where this handoff stands. ${readErrorMessage(readLeg.error)}`}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn btn--sm"
+                      disabled={readLeg.isFetching}
+                      onClick={() => {
+                        void readLeg.refetch();
+                      }}
+                    >
+                      {readLeg.isFetching ? "Trying again…" : "Try again"}
+                    </button>
+                  </div>
+                )}
               </div>
               {resolvedElsewhere !== null && <p className="ad-outcome-desc">{resolvedElsewhere}</p>}
             </section>
@@ -445,6 +546,7 @@ function SignalDetail({
           canSnooze
           later={moves.view === "later"}
           canOpen={sourceUrl !== null}
+          tripDestination={null}
         />
       ) : (
         <PaneKeys
@@ -454,6 +556,7 @@ function SignalDetail({
           canSnooze={false}
           later={false}
           canOpen={sourceUrl !== null}
+          tripDestination={trip?.destination.kind ?? null}
         />
       )}
     </>
@@ -487,7 +590,9 @@ function OfferedRuleMatchCount({
  * Renders the keys at the foot of the pane, each with what it does for this
  * signal. `later` is set when the pane shows a signal on Later, which `U`
  * puts back on To do. A resolved signal takes no answer and no move, so its
- * foot keeps only J K, O and Esc.
+ * foot keeps only J K, O and Esc. `tripDestination` is where the trip of a
+ * handed-off signal on Done leads: `↩` goes to Tracking, and `O` opens the run
+ * in place of the source.
  */
 function PaneKeys({
   suggestedKey,
@@ -496,6 +601,7 @@ function PaneKeys({
   canSnooze,
   later,
   canOpen,
+  tripDestination,
 }: {
   readonly suggestedKey: string | null;
   readonly replyKey: string | null;
@@ -503,6 +609,7 @@ function PaneKeys({
   readonly canSnooze: boolean;
   readonly later: boolean;
   readonly canOpen: boolean;
+  readonly tripDestination: "tracking" | "run" | null;
 }): JSX.Element {
   return (
     <div className="ad-keys" aria-hidden="true">
@@ -513,6 +620,11 @@ function PaneKeys({
       {suggestedKey !== null && (
         <span>
           <kbd>↩</kbd> {suggestedKey}
+        </span>
+      )}
+      {tripDestination === "tracking" && (
+        <span>
+          <kbd>↩</kbd> go to Tracking
         </span>
       )}
       {replyKey !== null && (
@@ -535,10 +647,16 @@ function PaneKeys({
           <kbd>U</kbd> unsnooze
         </span>
       )}
-      {canOpen && (
+      {tripDestination === "run" ? (
         <span>
-          <kbd>O</kbd> open
+          <kbd>O</kbd> open the run
         </span>
+      ) : (
+        canOpen && (
+          <span>
+            <kbd>O</kbd> open
+          </span>
+        )
       )}
       <span>
         <kbd>Esc</kbd> close

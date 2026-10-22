@@ -1,7 +1,8 @@
 /**
  * Task Tracking Runs: answers, for `task.queryTracking`, the newest run, the
  * newest live run and all the live runs of each tracked Task, and for
- * `task.readTracking`, the newest runs of one Task and how the newest ended.
+ * `task.readTracking`, the newest runs of one Task and how the newest ended,
+ * and for `task.queryLegs`, the runs of each handoff's leg.
  *
  * It lives in the controller daemon because the port belongs to the tasks
  * domain and is answered from the runs repository, and the runs domain
@@ -13,13 +14,20 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import {
   describeFailureCause,
+  MAX_LEG_LIVE_RUNS,
   MAX_TRACKING_DETAIL_RUNS,
   MAX_TRACKING_FAILURE_CAUSE,
   type RunSummary,
   type TrackingRun,
 } from "@hercule/contract";
 import { runRepository } from "../../runs";
-import { cutText, TaskTrackingRuns, type TrackedRunHistory, type TrackedRuns } from "../../tasks";
+import {
+  cutText,
+  TaskTrackingRuns,
+  type HandoffRun,
+  type TrackedRunHistory,
+  type TrackedRuns,
+} from "../../tasks";
 
 /**
  * Converts a run summary into the run facts Tracking reads, with
@@ -96,6 +104,10 @@ export const TaskTrackingRunsLayer: Layer.Layer<TaskTrackingRuns, never, SqlClie
           };
         }),
       readWorkflowName: runs.readWorkflowName,
+      readWorkflowNames: runs.listWorkflowNames,
+      readTaskIds: runs.listTaskIds,
+      readLegRuns: (handoffRuns: ReadonlyArray<HandoffRun>) =>
+        runs.listLegs(handoffRuns, MAX_LEG_LIVE_RUNS),
       readLatestRuns: (taskIds: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           const { latest, live } = yield* runs.listLatestOfTasks(taskIds);
