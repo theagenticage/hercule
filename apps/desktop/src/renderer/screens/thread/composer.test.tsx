@@ -684,6 +684,36 @@ describe("the composer", () => {
     ]);
   });
 
+  it("remembers the model a message was sent with, and keeps a model picked while it was on its way", async () => {
+    const user = userEvent.setup();
+    const held = holdAnswer();
+    const { calls, pendingSubmissions } = await renderComposer(IDLE, {
+      handlers: { [buildInputOperation(IDLE)]: held.handler },
+    });
+    const sessionId = IDLE.session.id;
+
+    act(() => {
+      pendingSubmissions.writePicks(sessionId, { model: "claude-opus-5" });
+    });
+    await user.type(readField(), "Think harder{Enter}");
+    await waitFor(() => {
+      expect(readSent(calls, IDLE)).toHaveLength(1);
+    });
+    act(() => {
+      pendingSubmissions.writePicks(sessionId, { model: "claude-sonnet-4" });
+    });
+    held.answer(OPENED);
+
+    await waitFor(() => {
+      expect(readText()).toBe("");
+    });
+    expect(readRecentModels(CONTROLLER_URL)).toEqual([
+      { instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" },
+    ]);
+    expect(pendingSubmissions.read(sessionId).picks).toEqual({ model: "claude-sonnet-4" });
+    expect(readSent(calls, IDLE)).toEqual([{ text: "Think harder", model: "claude-opus-5" }]);
+  });
+
   it("keeps the thread's unsent text in the pending submissions, so it outlives the composer", async () => {
     const user = userEvent.setup();
     const { pendingSubmissions } = await renderComposer(IDLE);

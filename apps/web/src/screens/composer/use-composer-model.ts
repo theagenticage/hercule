@@ -3,12 +3,10 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   addFilesToShelf,
-  addWorkspacePicks,
-  applyPicks,
+  applyThreadChoice,
   buildComposerFields,
   buildComposerPlaceholder,
   buildRecentModel,
-  computeEffectiveConfig,
   applyUploadOutcome,
   describeSendBlock,
   findExpiredShelfKeys,
@@ -19,10 +17,9 @@ import {
   queryKeys,
   findResumeBlockedReason,
   buildSubmission,
-  readThreadConfig,
   removeShelfItem,
+  resolveThreadConfig,
   type ComposerFields,
-  type ComposerPick,
   type HerculeClient,
   type ImageFile,
   type MessageDraft,
@@ -30,7 +27,8 @@ import {
   type ShelfItem,
   type Thread,
   type ThreadCatalogs,
-  type ThreadConfig,
+  type ResolvedThread,
+  type ThreadChoice,
   type ThreadKind,
   type ThreadPicks,
   type UploadQueue,
@@ -63,7 +61,8 @@ const writeRecent = (recent: readonly RecentModel[]): void => {
 };
 export interface ComposerModel {
   readonly kind: ThreadKind;
-  readonly config: ThreadConfig;
+  /** What the thread runs with now, the picks included. */
+  readonly resolved: ResolvedThread;
   /** Every lock, blocker and resolved pick the composer renders. */
   readonly fields: ComposerFields;
   readonly picks: ThreadPicks;
@@ -89,7 +88,7 @@ export interface ComposerModel {
   readonly attachFiles: (files: readonly ImageFile[]) => void;
   readonly removeAttachment: (key: string) => void;
   readonly retryAttachment: (key: string) => void;
-  readonly pick: (...steps: readonly ComposerPick[]) => void;
+  readonly recordThreadChoice: (choice: ThreadChoice) => void;
   readonly submit: () => void;
   readonly stop: () => void;
 }
@@ -151,12 +150,11 @@ export function useComposerModel(
   };
 
   const session = thread.kind === "active" ? thread.session : null;
-  const base = readThreadConfig(thread);
-  const config = computeEffectiveConfig(catalogs, base, picks);
-  const fields = buildComposerFields(catalogs, config, thread.kind);
-  // Recent is updated only after a successful send.
-  const rememberRecentModel = (): void => {
-    const pair = buildRecentModel(picks, config.instanceId);
+  const resolved = resolveThreadConfig(catalogs, thread, picks);
+  const fields = buildComposerFields(catalogs, resolved);
+  // Recent is updated only after a successful send, with the model that
+  // send carried (see `submit`), not with the picks as they are by then.
+  const rememberRecentModel = (pair: RecentModel | null): void => {
     if (pair === null) return;
     const next = pushRecent(recent, pair);
     setRecent(next);
@@ -173,9 +171,10 @@ export function useComposerModel(
     mutationFn: (sent: {
       readonly payload: SessionSpawnInput;
       readonly shelf: readonly ShelfItem[];
+      readonly recent: RecentModel | null;
     }) => client.session.spawn({ payload: sent.payload }),
     onSuccess: (created, sent) => {
-      rememberRecentModel();
+      rememberRecentModel(sent.recent);
       clearSentShelf(sent.shelf);
       void navigate({ to: "/threads/$sessionId", params: { sessionId: created.id } });
     },
@@ -189,9 +188,12 @@ export function useComposerModel(
       readonly id: string;
       readonly payload: SessionInputPayload;
       readonly shelf: readonly ShelfItem[];
+      /** The picks the request was built from, compared by reference when the send returns. */
+      readonly picks: ThreadPicks;
+      readonly recent: RecentModel | null;
     }) => client.session.input({ params: { id: sent.id }, payload: sent.payload }),
     onSuccess: async (_answer, sent) => {
-      rememberRecentModel();
+      rememberRecentModel(sent.recent);
       // Clear the picks only after the updated session is in the cache, so the
       // composer never falls back to the old configuration in between.
       await queryClient.invalidateQueries({ queryKey: queryKeys.session(sent.id) });
@@ -202,7 +204,8 @@ export function useComposerModel(
           ...draft.message,
           text: draft.message.text === sent.payload.text ? "" : draft.message.text,
         },
-        picks: {},
+        // Picks made while the message was in flight belong to the next one.
+        picks: draft.picks === sent.picks ? {} : draft.picks,
       }));
       clearSentShelf(sent.shelf);
       void queryClient.invalidateQueries({ queryKey: queryKeys.inputs(sent.id) });
@@ -219,7 +222,7 @@ export function useComposerModel(
 
   return {
     kind: thread.kind,
-    config,
+    resolved,
     fields,
     picks,
     recent,
@@ -264,33 +267,31 @@ export function useComposerModel(
       changeShelf((shelf) => markShelfItemUploading(shelf, key));
       startUpload(item);
     },
-    // Each pick is compared with the thread's own configuration, not with
-    // earlier picks, so picking the configured value again clears the pick.
-    pick: (...steps) => {
-      changeDraft((draft) => ({
-        ...draft,
-        picks: applyPicks(catalogs, base, draft.picks, steps),
-      }));
+    recordThreadChoice: (choice) => {
+      changeDraft((draft) => ({ ...draft, picks: applyThreadChoice(draft.picks, choice) }));
     },
     submit: () => {
       // A second Enter or click before the first send settles is ignored, so
       // one message is never sent twice.
       if (sendingRef.current || spawn.isPending || input.isPending) return;
-      const sent = buildSubmission(
-        catalogs,
-        thread,
-        thread.kind === "draft"
-          ? addWorkspacePicks(picks, fields.workspace.value, catalogs.workspaces ?? [])
-          : picks,
-        message,
-      );
+      const sent = buildSubmission(resolved, message);
       sendingRef.current = true;
       const shelf = message.attachments;
+      // Taken from the picks and the resolved thread this send was built
+      // from, so a pick made while the send runs does not change what Recent
+      // remembers.
+      const recent = buildRecentModel(picks, resolved);
       switch (sent.kind) {
         case "spawn":
-          return spawn.mutate({ payload: sent.input, shelf });
+          return spawn.mutate({ payload: sent.input, shelf, recent });
         case "input":
-          return input.mutate({ id: sent.sessionId, payload: sent.payload, shelf });
+          return input.mutate({
+            id: sent.sessionId,
+            payload: sent.payload,
+            shelf,
+            picks,
+            recent,
+          });
       }
     },
     stop: () => {

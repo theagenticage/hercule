@@ -6,14 +6,10 @@
 import type { Profile, SettingsState, Workspace } from "@hercule/contract";
 import { buildBranchField, type BranchField } from "./branch-menu";
 import { buildComposerFields, type ComposerFields } from "./composer-fields";
-import {
-  computeEffectiveConfig,
-  type ThreadCatalogs,
-  type ThreadConfig,
-  type ThreadPicks,
-} from "./config";
+import type { ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
 import { decideDraftPlaceForPick, type DraftPlace } from "./groups";
 import { buildThreadPlaceLabel } from "./project-rows";
+import { resolveThreadConfig, type ResolvedDraft } from "./resolve-thread";
 import { buildDraftConfig } from "./thread-defaults";
 import { buildWorkspaceMenu, type WorkspaceMenu } from "./workspace-menu";
 import {
@@ -44,8 +40,12 @@ export interface DraftView {
   readonly catalogs: Required<ThreadCatalogs>;
   /** What the draft runs with before the user picks anything. Each pick is compared with it. */
   readonly base: ThreadConfig;
-  /** What the draft runs with, the user's picks included. */
-  readonly config: ThreadConfig;
+  /**
+   * What the draft runs with, the user's picks included: its config, the
+   * workspace it joins, and the runner, snapshot and model it resolves to.
+   * Send it with `buildSubmission`.
+   */
+  readonly resolved: ResolvedDraft;
   readonly fields: ComposerFields;
   readonly workspaceMenu: WorkspaceMenu;
   /** The workspace the draft joins, or `undefined` when it starts in a workspace of its own or in none. */
@@ -94,8 +94,8 @@ export const buildDraftView = (
     thisMacRunnerId,
     ...address,
   });
-  const config = computeEffectiveConfig(reads, base, picks);
-  const fields = buildComposerFields(reads, config, "draft");
+  const resolved = resolveThreadConfig(reads, { kind: "draft", config: base }, picks);
+  const fields = buildComposerFields(reads, resolved);
   const pick = fields.workspace.value;
   // The menus use the machine the fields settled on, not the raw pick. Before
   // anything is picked the two differ, and the raw pick would make the menu
@@ -109,8 +109,7 @@ export const buildDraftView = (
     runnerId,
     pick,
   });
-  const joined =
-    pick.kind === "existing" ? workspaces.find((each) => each.id === pick.workspaceId) : undefined;
+  const { joined } = resolved;
   // The menu labels a main workspace it has no row for with its repo and its
   // machine, so the label stands alone. The lip shows the machine on its
   // right, so it names the workspace as a started thread's lip does.
@@ -127,7 +126,7 @@ export const buildDraftView = (
   return {
     catalogs: reads,
     base,
-    config,
+    resolved,
     fields,
     workspaceMenu,
     joinedWorkspace: joined,

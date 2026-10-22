@@ -1,11 +1,10 @@
 import type { JSX, ReactNode, Ref } from "react";
 import {
-  buildWorkspacePicks,
   formatAccessMode,
   setWorkspaceStartingRevision,
-  type ComposerPick,
   type DraftView,
   type RecentModel,
+  type ThreadChoice,
 } from "@hercule/client-core";
 import { BranchIcon } from "../../icons/branch";
 import { LaptopIcon } from "../../icons/laptop";
@@ -87,9 +86,11 @@ function DraftPick({
  * any, the model, Dictate and Send; then the lip under it, with the
  * workspace, the branch when there is one to pick, and the machine.
  *
- * Every pick is passed to `onPick`, which the caller applies to the draft.
- * Picking an existing workspace also picks its machine. A starting revision
- * applies only to a new workspace and never switches an existing checkout.
+ * Every selector makes one choice, which is passed to `onChoose`, and the
+ * caller records it in the draft's picks. Joining an existing workspace sets
+ * the machine too, because the draft is resolved to the workspace's machine.
+ * A starting revision applies only to a new workspace and never switches an
+ * existing checkout.
  *
  * ⏎ in the field calls `onSubmit`, and ⇧⏎ starts a new line. Send, and ⏎,
  * do nothing while `canSend` is false. `attachments` and `notice` are the
@@ -110,7 +111,7 @@ export function DraftComposer({
   readRecent,
   fieldRef,
   onTextChange,
-  onPick,
+  onChoose,
   onSubmit,
   onOpenWorkspaceMenu,
 }: {
@@ -128,11 +129,12 @@ export function DraftComposer({
   readonly readRecent: () => readonly RecentModel[];
   readonly fieldRef: Ref<HTMLElement>;
   readonly onTextChange: (text: string) => void;
-  readonly onPick: (steps: readonly ComposerPick[]) => void;
+  readonly onChoose: (choice: ThreadChoice) => void;
   readonly onSubmit: () => void;
   readonly onOpenWorkspaceMenu: () => void;
 }): JSX.Element {
-  const { catalogs, config, fields, workspaceMenu, branch, workspaceLabel, machineLabel } = view;
+  const { catalogs, resolved, fields, workspaceMenu, branch, workspaceLabel, machineLabel } = view;
+  const { config } = resolved;
   const { pill } = fields.model;
   const descriptors = fields.options;
   const workspace = fields.workspace.value;
@@ -166,7 +168,7 @@ export function DraftComposer({
                   value={fields.accessMode.value}
                   rows={fields.accessMode.rows}
                   onPick={(mode) => {
-                    onPick([{ kind: "accessMode", value: mode }]);
+                    onChoose({ kind: "accessMode", value: mode });
                     close();
                   }}
                 />
@@ -178,7 +180,7 @@ export function DraftComposer({
                 selected={config.options}
                 modelName={pill.name}
                 disabled={false}
-                onPick={onPick}
+                onChoose={onChoose}
               />
             )}
           </>
@@ -191,7 +193,7 @@ export function DraftComposer({
             kind="draft"
             disabled={false}
             readRecent={readRecent}
-            onPick={onPick}
+            onChoose={onChoose}
           />
         }
         fieldRef={fieldRef}
@@ -218,7 +220,7 @@ export function DraftComposer({
             <WorkspaceMenuContent
               menu={workspaceMenu}
               onPick={(picked) => {
-                onPick(buildWorkspacePicks(picked, catalogs.workspaces));
+                onChoose({ kind: "workspace", workspace: picked });
                 close();
               }}
             />
@@ -239,9 +241,10 @@ export function DraftComposer({
               <BranchMenuContent
                 field={branch}
                 onPick={(picked) => {
-                  onPick([
-                    { kind: "workspace", value: setWorkspaceStartingRevision(workspace, picked) },
-                  ]);
+                  onChoose({
+                    kind: "workspace",
+                    workspace: setWorkspaceStartingRevision(workspace, picked),
+                  });
                   close();
                 }}
               />
@@ -262,7 +265,7 @@ export function DraftComposer({
             <MachineMenuContent
               rows={fields.machine.rows}
               onPick={(runnerId) => {
-                onPick([{ kind: "runnerId", value: runnerId }]);
+                onChoose({ kind: "runner", runnerId });
                 close();
               }}
             />

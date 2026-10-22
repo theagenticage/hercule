@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import type { StartingRevision } from "@hercule/contract";
 import { buildBranchField } from "./branch-menu";
 import type { ThreadCatalogs } from "./config";
+import { resolveThreadConfig } from "./resolve-thread";
 import { buildSubmission } from "./submission";
 import { buildThreadWorkspaceLabel } from "./thread-workspace";
 import { buildWorkspaceMenu } from "./workspace-menu";
@@ -83,12 +84,10 @@ it("keeps the actual main branch when a Thread shares its files", () => {
     expect(field.locked).not.toBeNull();
   }
   expect(
-    buildSubmission(
-      NO_CATALOGS,
-      draft,
-      { workspace: pick },
-      { text: "Share these files", attachments: [] },
-    ).input.workspace,
+    buildSubmission(resolveThreadConfig(NO_CATALOGS, draft, { workspace: pick }), {
+      text: "Share these files",
+      attachments: [],
+    }).input.workspace,
   ).toEqual(pick);
 });
 
@@ -102,12 +101,10 @@ it.each<StartingRevision>([
     checkouts: [{ resourceId: WEBSHOP.id, startingRevision }],
   };
   expect(
-    buildSubmission(
-      NO_CATALOGS,
-      draft,
-      { workspace },
-      { text: "Use the chosen revision", attachments: [] },
-    ).input.workspace,
+    buildSubmission(resolveThreadConfig(NO_CATALOGS, draft, { workspace }), {
+      text: "Use the chosen revision",
+      attachments: [],
+    }).input.workspace,
   ).toEqual(workspace);
 });
 

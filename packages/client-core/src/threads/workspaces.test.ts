@@ -18,7 +18,6 @@ import {
   buildPickKey,
   findReadyPrimary,
   formatRepoName,
-  findRunnerForPick,
   setWorkspaceStartingRevision,
   joinLabelText,
   formatWorkspaceLabel,
@@ -197,19 +196,6 @@ describe("setWorkspaceStartingRevision", () => {
       workspaceId: THREAD_3F1.id,
     });
     expect(setWorkspaceStartingRevision({ kind: "none" }, "main")).toEqual({ kind: "none" });
-  });
-});
-
-describe("findRunnerForPick", () => {
-  it("returns the runner of the workspace a thread joins, which never moves", () => {
-    expect(findRunnerForPick({ kind: "existing", workspaceId: THREAD_3F1.id }, [THREAD_3F1])).toBe(
-      MOSS.id,
-    );
-  });
-
-  it("returns null for a pick that is not an existing workspace", () => {
-    expect(findRunnerForPick({ kind: "primary", resourceId: WEBSHOP.id }, [PRIMARY])).toBeNull();
-    expect(findRunnerForPick({ kind: "existing", workspaceId: "ws-gone" }, [PRIMARY])).toBeNull();
   });
 });
 

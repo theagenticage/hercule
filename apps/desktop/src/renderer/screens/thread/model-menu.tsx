@@ -1,13 +1,12 @@
 import { Fragment, useState, type JSX } from "react";
 import {
   buildModelMenu,
-  buildModelPicks,
   describeAccountRow,
   describeModelRow,
-  type ComposerPick,
   type ModelMenu as ModelMenuModel,
   type RecentModel,
   type ThreadCatalogs,
+  type ThreadChoice,
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
@@ -36,8 +35,7 @@ type ModelRow = ModelMenuModel["current"]["rows"][number];
  *
  * `readRecent` returns the Recent list as the app stores it, and `config`
  * is what the thread runs with, picks included, so the check marks the model
- * the next message will use. `onPick` receives the picks a row makes, in
- * order.
+ * the next message will use. `onChoose` receives the one choice a row makes.
  *
  * The filter's text and whether the older models show are held here, so
  * they start afresh each time the menu opens. The Recent list is read once,
@@ -48,13 +46,13 @@ export function ModelMenu({
   config,
   kind,
   readRecent,
-  onPick,
+  onChoose,
 }: {
   readonly catalogs: ThreadCatalogs;
   readonly config: ThreadConfig;
   readonly kind: ThreadKind;
   readonly readRecent: () => readonly RecentModel[];
-  readonly onPick: (picks: readonly ComposerPick[]) => void;
+  readonly onChoose: (choice: ThreadChoice) => void;
 }): JSX.Element {
   const [filter, setFilter] = useState("");
   const [older, setOlder] = useState(false);
@@ -70,7 +68,7 @@ export function ModelMenu({
       detail={describeModelRow(row)}
       current={row.current}
       onPick={() => {
-        onPick(buildModelPicks(config, row.instanceId, row.slug));
+        onChoose({ kind: "model", instanceId: row.instanceId, model: row.slug });
       }}
     />
   );
@@ -106,7 +104,7 @@ export function ModelMenu({
               current={false}
               inert={row.dimmed !== null}
               onPick={() => {
-                onPick(buildModelPicks(config, row.instanceId, row.model));
+                onChoose({ kind: "model", instanceId: row.instanceId, model: row.model });
               }}
             />
           ))}
@@ -152,7 +150,7 @@ export function ModelMenu({
                 chevron={instance.dimmed === null}
                 inert={instance.dimmed !== null}
                 onPick={() => {
-                  onPick([{ kind: "instanceId", value: instance.instanceId }]);
+                  onChoose({ kind: "account", instanceId: instance.instanceId });
                 }}
               />
             ),

@@ -95,7 +95,7 @@ describe("buildDraftView", () => {
     );
 
     expect(view.base.workspace).toBeNull();
-    expect(view.config.workspace).toEqual({
+    expect(view.resolved.config.workspace).toEqual({
       kind: "ephemeral",
       checkouts: [{ resourceId: WEBSHOP.id }],
     });

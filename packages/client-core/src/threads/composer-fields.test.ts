@@ -1,5 +1,5 @@
 /**
- * Tests `buildComposerFields(catalogs, config, kind)`, which decides every
+ * Tests `composeDraft(catalogs, config, kind)`, which decides every
  * lock, dimmed state and blocker the composer shows, so no component holds a
  * reason string. The tests check that:
  *
@@ -28,6 +28,8 @@ import {
   describeMachineRow,
   type MachineRow,
 } from "./composer-fields";
+import type { ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
+import { resolveThreadConfig } from "./resolve-thread";
 import { joinPhraseText } from "./workspaces";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
@@ -89,7 +91,7 @@ const buildCatalogs = (instances: readonly ProviderInstance[]) => ({
   thisMacRunnerId: LOCAL.id,
 });
 
-const buildConfig = (overrides: Record<string, unknown> = {}) => ({
+const buildConfig = (overrides: Partial<ThreadConfig> = {}): ThreadConfig => ({
   instanceId: CLAUDE.id,
   model: SONNET.slug,
   accessMode: "approval-required" as const,
@@ -99,9 +101,20 @@ const buildConfig = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+/** Returns the fields of a draft that starts from `config` and holds `picks`. */
+const composeDraft = (catalogs: ThreadCatalogs, config: ThreadConfig, picks: ThreadPicks = {}) =>
+  buildComposerFields(catalogs, resolveThreadConfig(catalogs, { kind: "draft", config }, picks));
+
+/** Returns the fields of a thread that has started as `session`. */
+const composeActive = (catalogs: ThreadCatalogs, session: Session, picks: ThreadPicks = {}) =>
+  buildComposerFields(catalogs, resolveThreadConfig(catalogs, { kind: "active", session }, picks));
+
 describe("buildComposerFields", () => {
   it("locks the access mode, the workspace and the runner on an active thread", () => {
-    const fields = buildComposerFields(buildCatalogs([CLAUDE]), buildConfig(), "active");
+    const fields = composeActive(buildCatalogs([CLAUDE]), {
+      ...buildThread("s1", "A thread"),
+      workspaceId: null,
+    });
 
     expect(fields.accessMode.locked).toBe("Create a new thread to change the access mode");
     expect(fields.workspace.locked).toBe("Create a new thread to change the workspace");
@@ -109,7 +122,7 @@ describe("buildComposerFields", () => {
   });
 
   it("locks nothing a draft can still change", () => {
-    const fields = buildComposerFields(buildCatalogs([CLAUDE]), buildConfig(), "draft");
+    const fields = composeDraft(buildCatalogs([CLAUDE]), buildConfig());
 
     expect(fields.accessMode.locked).toBeNull();
     expect(fields.machine.locked).toBeNull();
@@ -120,30 +133,24 @@ describe("buildComposerFields", () => {
   });
 
   it("tells the user to add a repository when the project has none", () => {
-    const fields = buildComposerFields(
-      FULL,
-      buildDraftConfig({ projectId: EMPTY_PROJECT.id }),
-      "draft",
-    );
+    const fields = composeDraft(FULL, buildDraftConfig({ projectId: EMPTY_PROJECT.id }));
 
     expect(fields.workspace.locked).toBe("Add a repository to the project to work in one");
   });
 
   it("blocks a draft with no provider instance set up", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       buildCatalogs([]),
       buildConfig({ instanceId: null, model: null, runnerId: null }),
-      "draft",
     );
 
     expect(fields.blocked).toMatchObject({ reason: "No provider instance is set up" });
   });
 
   it("blocks a draft when no runner is connected", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       { instances: [CLAUDE], runners: [], thisMacRunnerId: null },
       buildConfig({ runnerId: null }),
-      "draft",
     );
 
     expect(fields.blocked).toEqual({ reason: "No machine is connected", login: null });
@@ -151,10 +158,9 @@ describe("buildComposerFields", () => {
 
   it("blocks a draft whose only runner is retired, as if no runner were connected", () => {
     const retired = buildRunner({ id: "r-gone", name: "atlas", lifecycle: "retired" });
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       { instances: [CLAUDE], runners: [retired], thisMacRunnerId: null },
       buildConfig({ runnerId: null }),
-      "draft",
     );
 
     expect(fields.blocked).toEqual({ reason: "No machine is connected", login: null });
@@ -162,20 +168,18 @@ describe("buildComposerFields", () => {
   });
 
   it("blocks a draft whose instance is not on the runner it would run on", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       buildCatalogs([NOT_HERE]),
       buildConfig({ instanceId: NOT_HERE.id, model: null, runnerId: null }),
-      "draft",
     );
 
     expect(fields.blocked).toEqual({ reason: "Claude Code is not on moss", login: null });
   });
 
   it("blocks a draft whose instance is not logged in, naming the runner and including the login target", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       buildCatalogs([LOGGED_OUT]),
       buildConfig({ instanceId: LOGGED_OUT.id, model: null, runnerId: null }),
-      "draft",
     );
 
     expect(fields.blocked).toEqual({
@@ -185,17 +189,14 @@ describe("buildComposerFields", () => {
   });
 
   it("blocks nothing when the instance is logged in", () => {
-    expect(buildComposerFields(buildCatalogs([CLAUDE]), buildConfig(), "draft").blocked).toBeNull();
+    expect(composeDraft(buildCatalogs([CLAUDE]), buildConfig()).blocked).toBeNull();
   });
 
   it("has no options when the current model declares none, and has them when it does", () => {
     expect(
-      buildComposerFields(buildCatalogs([CLAUDE]), buildConfig({ model: HAIKU.slug }), "draft")
-        .options,
+      composeDraft(buildCatalogs([CLAUDE]), buildConfig({ model: HAIKU.slug })).options,
     ).toBeNull();
-    expect(
-      buildComposerFields(buildCatalogs([CLAUDE]), buildConfig(), "draft").options,
-    ).not.toBeNull();
+    expect(composeDraft(buildCatalogs([CLAUDE]), buildConfig()).options).not.toBeNull();
   });
 
   it("says whether the selected model takes images, and fails closed on a model it cannot find", () => {
@@ -205,8 +206,7 @@ describe("buildComposerFields", () => {
         buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, TEXT_ONLY] }),
       ]),
     ]);
-    const readModel = (model: string) =>
-      buildComposerFields(catalogs, buildConfig({ model }), "draft").model;
+    const readModel = (model: string) => composeDraft(catalogs, buildConfig({ model })).model;
 
     expect(readModel(SONNET.slug)).toMatchObject({
       imageInput: { maxBytes: null },
@@ -220,20 +220,17 @@ describe("buildComposerFields", () => {
   });
 
   it("names no account in the pill when the provider has one instance", () => {
-    expect(buildComposerFields(buildCatalogs([CLAUDE]), buildConfig(), "draft").model.pill).toEqual(
-      {
-        providerId: "claude-code",
-        account: null,
-        name: "Claude Sonnet 5",
-      },
-    );
+    expect(composeDraft(buildCatalogs([CLAUDE]), buildConfig()).model.pill).toEqual({
+      providerId: "claude-code",
+      account: null,
+      name: "Claude Sonnet 5",
+    });
   });
 
   it("names the instance in the pill when the provider has more than one", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       buildCatalogs([WORK, PERSONAL]),
       buildConfig({ instanceId: PERSONAL.id }),
-      "draft",
     );
 
     expect(fields.model.pill).toEqual({
@@ -246,7 +243,7 @@ describe("buildComposerFields", () => {
 
 describe("buildComposerFields: the access mode", () => {
   it("returns the current mode and the four rows the menu offers", () => {
-    const fields = buildComposerFields(buildCatalogs([CLAUDE]), buildConfig(), "draft");
+    const fields = composeDraft(buildCatalogs([CLAUDE]), buildConfig());
 
     expect(fields.accessMode.value).toBe("approval-required");
     expect(fields.accessMode.rows.map((row) => row.mode)).toEqual([
@@ -258,11 +255,7 @@ describe("buildComposerFields: the access mode", () => {
   });
 
   it("offers no modes while no instance is set up, because there is no provider to ask", () => {
-    const fields = buildComposerFields(
-      buildCatalogs([]),
-      buildConfig({ instanceId: null }),
-      "draft",
-    );
+    const fields = composeDraft(buildCatalogs([]), buildConfig({ instanceId: null }));
 
     expect(fields.accessMode.rows).toEqual([]);
   });
@@ -270,13 +263,11 @@ describe("buildComposerFields: the access mode", () => {
 
 describe("buildComposerFields: the runner", () => {
   it("names the runner the thread would be placed on", () => {
-    expect(buildComposerFields(buildCatalogs([CLAUDE]), buildConfig(), "draft").machine.label).toBe(
-      "moss",
-    );
+    expect(composeDraft(buildCatalogs([CLAUDE]), buildConfig()).machine.label).toBe("moss");
   });
 
   it("returns every runner as a row, marking the current one", () => {
-    const fields = buildComposerFields(buildCatalogs([CLAUDE]), buildConfig(), "draft");
+    const fields = composeDraft(buildCatalogs([CLAUDE]), buildConfig());
 
     expect(fields.machine.rows.map((row) => row.runnerId)).toEqual([LOCAL.id]);
     expect(fields.machine.rows.filter((row) => row.current).map((row) => row.runnerId)).toEqual([
@@ -285,10 +276,9 @@ describe("buildComposerFields: the runner", () => {
   });
 
   it("adds the reason the current runner is dimmed to its label", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       buildCatalogs([LOGGED_OUT]),
       buildConfig({ instanceId: LOGGED_OUT.id }),
-      "draft",
     );
 
     expect(fields.machine.label).toBe("moss · not logged in");
@@ -296,10 +286,9 @@ describe("buildComposerFields: the runner", () => {
 
   it("blocks a draft on a runner that was retired after the user picked it, and says so in its label", () => {
     const retired = { ...LOCAL, lifecycle: "retired" as const, connectivity: "offline" as const };
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       { instances: [CLAUDE], runners: [retired], thisMacRunnerId: null },
       buildConfig({ runnerId: retired.id }),
-      "draft",
     );
 
     expect(fields.blocked).toEqual({ reason: "moss is retired", login: null });
@@ -307,40 +296,112 @@ describe("buildComposerFields: the runner", () => {
   });
 
   it("shows no machine when there are no runners", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       { instances: [CLAUDE], runners: [], thisMacRunnerId: null },
       buildConfig({ runnerId: null }),
-      "draft",
     );
 
     expect(fields.machine.label).toBe("no machine");
   });
 });
 
+describe("buildComposerFields: a runner the user picked", () => {
+  const COVE = buildRunner({ id: "r-cove", name: "cove" });
+  const both = (instance: ProviderInstance, cove: Runner = COVE) => ({
+    instances: [instance],
+    runners: [LOCAL, cove],
+    thisMacRunnerId: LOCAL.id,
+  });
+  const onCove: ThreadPicks = { runnerId: COVE.id };
+  const INSTALLED = buildInstance("claude-code", "Claude Code", [
+    buildSnapshot({ runnerId: LOCAL.id, models: [SONNET] }),
+    buildSnapshot({ runnerId: COVE.id, models: [SONNET] }),
+  ]);
+
+  it.each([
+    ["offline", { connectivity: "offline" as const }],
+    ["unreachable", { connectivity: "unreachable" as const }],
+    ["draining", { lifecycle: "draining" as const }],
+  ])("stays the runner while it is %s, and the blocker names it", (state, overrides) => {
+    const fields = composeDraft(both(INSTALLED, { ...COVE, ...overrides }), buildConfig(), onCove);
+
+    expect(fields.machine.runnerId).toBe(COVE.id);
+    expect(fields.machine.label).toBe(`cove · ${state}`);
+    expect(fields.blocked).toEqual({ reason: `cove is ${state}`, login: null });
+  });
+
+  it("stays the runner when the account picked is installed there but logged out, and offers the login", () => {
+    const loggedOutOnCove = buildInstance("claude-code", "Claude Code", [
+      buildSnapshot({ runnerId: LOCAL.id, models: [SONNET] }),
+      buildSnapshot({ runnerId: COVE.id, auth: { status: "unauthenticated" }, models: [] }),
+    ]);
+    const fields = composeDraft(both(loggedOutOnCove), buildConfig(), {
+      ...onCove,
+      instanceId: loggedOutOnCove.id,
+    });
+
+    expect(fields.machine.runnerId).toBe(COVE.id);
+    expect(fields.blocked).toEqual({
+      reason: "Claude Code is on cove but not logged in",
+      login: { instanceId: loggedOutOnCove.id, runnerId: COVE.id, subject: "Claude Code on cove" },
+    });
+  });
+
+  it("gives way to the account's default runner when the account is not installed on the picked one", () => {
+    const onLocalOnly = buildInstance("claude-code", "Claude Code", [
+      buildSnapshot({ runnerId: LOCAL.id, models: [SONNET] }),
+    ]);
+    const fields = composeDraft(both(onLocalOnly), buildConfig(), onCove);
+
+    expect(fields.machine.runnerId).toBe(LOCAL.id);
+    expect(fields.blocked).toBeNull();
+  });
+});
+
 describe("buildComposerFields: the lead", () => {
   it("returns the draft's lead sentence, and none for an active thread", () => {
+    expect(joinPhraseText(composeDraft(buildCatalogs([CLAUDE]), buildConfig()).lead ?? [])).toBe(
+      "It works without a checkout.",
+    );
     expect(
-      joinPhraseText(
-        buildComposerFields(buildCatalogs([CLAUDE]), buildConfig(), "draft").lead ?? [],
-      ),
-    ).toBe("It works without a checkout.");
-    expect(buildComposerFields(buildCatalogs([CLAUDE]), buildConfig(), "active").lead).toBeNull();
+      composeActive(buildCatalogs([CLAUDE]), {
+        ...buildThread("s1", "A thread"),
+        workspaceId: null,
+      }).lead,
+    ).toBeNull();
   });
 });
 
 describe("buildPendingModelNote", () => {
+  const catalogs = buildCatalogs([CLAUDE]);
+  const session = { ...buildThread("s1", "A thread"), workspaceId: null };
+  const resolve = (picks: ThreadPicks) =>
+    resolveThreadConfig(catalogs, { kind: "active", session }, picks);
+
   it("says the change applies on send while an active thread has an unsent model pick", () => {
-    expect(buildPendingModelNote("active", { model: "claude-opus-5" })).toBe(
+    expect(buildPendingModelNote(resolve({ model: HAIKU.slug }))).toBe(
       "model change applies on send",
     );
   });
 
+  it("returns null when the picked model is the one the thread runs", () => {
+    expect(buildPendingModelNote(resolve({ model: SONNET.slug }))).toBeNull();
+  });
+
   it("returns null for a draft, whose picks are sent with its first message", () => {
-    expect(buildPendingModelNote("draft", { model: "claude-opus-5" })).toBeNull();
+    expect(
+      buildPendingModelNote(
+        resolveThreadConfig(
+          catalogs,
+          { kind: "draft", config: buildConfig() },
+          { model: HAIKU.slug },
+        ),
+      ),
+    ).toBeNull();
   });
 
   it("returns null when only the options were picked, because the model is not changing", () => {
-    expect(buildPendingModelNote("active", { options: { effort: "high" } })).toBeNull();
+    expect(buildPendingModelNote(resolve({ options: { effort: "high" } }))).toBeNull();
   });
 });
 
@@ -357,7 +418,7 @@ describe("buildPendingModelNote", () => {
  *   `{ kind: "none" }` for a thread with no checkout. `null` means the user has
  *   picked nothing and the default applies. `preferredWorkspace` is the stored
  *   `thread.workspace` setting, or `null` when it is unset.
- * - `buildComposerFields(...).workspace.value` is the pick that actually
+ * - `composeDraft(...).workspace.value` is the pick that actually
  *   applies: the config's pick when it has one, and the default otherwise.
  * - A repo's short name is the last segment of its `canonicalRemote`; every
  *   sentence and row below uses it.
@@ -542,11 +603,7 @@ const buildDraftConfig = (overrides: Record<string, unknown> = {}) =>
 
 describe("buildComposerFields: the workspace a draft defaults to", () => {
   it("uses separate files in a project with one repo", () => {
-    const fields = buildComposerFields(
-      FULL,
-      buildDraftConfig({ projectId: WEBSHOP_PROJECT.id }),
-      "draft",
-    );
+    const fields = composeDraft(FULL, buildDraftConfig({ projectId: WEBSHOP_PROJECT.id }));
 
     expect(fields.workspace.value).toEqual({
       kind: "ephemeral",
@@ -555,11 +612,7 @@ describe("buildComposerFields: the workspace a draft defaults to", () => {
   });
 
   it("uses a worktree of each repo in a project with several repos", () => {
-    const fields = buildComposerFields(
-      FULL,
-      buildDraftConfig({ projectId: OPS_PROJECT.id }),
-      "draft",
-    );
+    const fields = composeDraft(FULL, buildDraftConfig({ projectId: OPS_PROJECT.id }));
 
     expect(fields.workspace.value).toEqual({
       kind: "ephemeral",
@@ -568,10 +621,9 @@ describe("buildComposerFields: the workspace a draft defaults to", () => {
   });
 
   it("follows the stored thread.workspace setting over the repo count", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       FULL,
       buildDraftConfig({ projectId: WEBSHOP_PROJECT.id, preferredWorkspace: "ephemeral" }),
-      "draft",
     );
 
     expect(fields.workspace.value).toEqual({
@@ -582,10 +634,9 @@ describe("buildComposerFields: the workspace a draft defaults to", () => {
 
   // A stored `none` is ignored: a project with a repo uses the default rule.
   it("ignores a stored none in a project with a repo", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       FULL,
       buildDraftConfig({ projectId: WEBSHOP_PROJECT.id, preferredWorkspace: "none" }),
-      "draft",
     );
 
     expect(fields.workspace.value).toEqual({
@@ -595,43 +646,36 @@ describe("buildComposerFields: the workspace a draft defaults to", () => {
   });
 
   it("works without a checkout when the stored setting is none and there is no repo", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       FULL,
       buildDraftConfig({ projectId: EMPTY_PROJECT.id, preferredWorkspace: "none" }),
-      "draft",
     );
 
     expect(fields.workspace.value).toEqual({ kind: "none" });
   });
 
   it("works without a checkout in a project with no repo, whatever the setting", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       FULL,
       buildDraftConfig({ projectId: EMPTY_PROJECT.id, preferredWorkspace: "primary" }),
-      "draft",
     );
 
     expect(fields.workspace.value).toEqual({ kind: "none" });
   });
 
   it("works without a checkout for a draft with no project", () => {
-    const fields = buildComposerFields(
-      FULL,
-      buildDraftConfig({ preferredWorkspace: "primary" }),
-      "draft",
-    );
+    const fields = composeDraft(FULL, buildDraftConfig({ preferredWorkspace: "primary" }));
 
     expect(fields.workspace.value).toEqual({ kind: "none" });
   });
 
   it("keeps the pick the user made over the default", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       FULL,
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
         workspace: { kind: "existing", workspaceId: THREAD_3F1.id },
       }),
-      "draft",
     );
 
     expect(fields.workspace.value).toEqual({ kind: "existing", workspaceId: THREAD_3F1.id });
@@ -649,14 +693,13 @@ describe("buildComposerFields: every field uses the same runner", () => {
       instances: [LOGGED_OUT],
       workspaces: [PRIMARY],
     };
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       catalogs,
       buildDraftConfig({
         instanceId: LOGGED_OUT.id,
         runnerId: null,
         projectId: WEBSHOP_PROJECT.id,
       }),
-      "draft",
     );
 
     expect(fields.machine.runnerId).toBe(LOCAL.id);
@@ -671,13 +714,12 @@ describe("buildComposerFields: every field uses the same runner", () => {
 
 describe("buildComposerFields: the runner of a joined workspace", () => {
   it("names the workspace that decides the runner, while the draft can still change", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       FULL,
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
         workspace: { kind: "existing", workspaceId: THREAD_3F1.id },
       }),
-      "draft",
     );
 
     expect(fields.machine.label).toBe("set by the workspace hercule/thread-3f1");
@@ -690,27 +732,19 @@ describe("buildComposerFields: the runner of a joined workspace", () => {
     ["deleted", "The workspace it joins was deleted"],
     ["lost", "The workspace it joins was lost when its machine was retired"],
   ] as const)("blocks a draft that joins a workspace that is %s, saying why", (status, reason) => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       withRepos(FULL.projects, FULL.resources, [PRIMARY, { ...THREAD_3F1, status }]),
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
         workspace: { kind: "existing", workspaceId: THREAD_3F1.id },
       }),
-      "draft",
     );
 
     expect(fields.blocked).toEqual({ reason, login: null });
   });
 
   it("names the runner on an active thread, locked because the thread started", () => {
-    const fields = buildComposerFields(
-      FULL,
-      buildDraftConfig({
-        projectId: WEBSHOP_PROJECT.id,
-        workspace: { kind: "existing", workspaceId: THREAD_3F1.id },
-      }),
-      "active",
-    );
+    const fields = composeActive(FULL, buildThread("s-flaky", "Fix flaky webhook tests"));
 
     expect(fields.machine.label).toBe("moss");
     expect(fields.machine.locked).toBe("Create a new thread to change the machine");
@@ -719,13 +753,12 @@ describe("buildComposerFields: the runner of a joined workspace", () => {
 
 describe("buildComposerFields: the lead sentence follows the workspace", () => {
   it("names the repo, the runner and the branch for the main workspace", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       FULL,
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
         workspace: { kind: "primary", resourceId: WEBSHOP.id, branch: "release/2.4" },
       }),
-      "draft",
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe(
@@ -734,13 +767,12 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
   });
 
   it("uses the main workspace's current branch when the draft has picked none", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       FULL,
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
         workspace: { kind: "primary", resourceId: WEBSHOP.id },
       }),
-      "draft",
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe(
@@ -749,7 +781,7 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
   });
 
   it("names the repo and the base branch for a new worktree", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       FULL,
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
@@ -758,7 +790,6 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
           checkouts: [{ resourceId: WEBSHOP.id, baseBranch: "release/2.4" }],
         },
       }),
-      "draft",
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe(
@@ -767,13 +798,12 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
   });
 
   it("falls back to the repo's default branch as the base when the draft has picked none", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       FULL,
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
         workspace: { kind: "ephemeral", checkouts: [{ resourceId: WEBSHOP.id }] },
       }),
-      "draft",
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe(
@@ -783,13 +813,12 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
 
   // The lead names the threads the draft joins, not the workspace's name.
   it("names the threads the draft joins, and what joining them means", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       FULL,
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
         workspace: { kind: "existing", workspaceId: THREAD_3F1.id },
       }),
-      "draft",
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe(
@@ -800,13 +829,12 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
   // At most two titles; the rest are counted.
   it("counts the threads past the second rather than naming them all", () => {
     const three = { ...THREAD_3F1, sessionIds: ["s-flaky", "s-runbook", "s-third"] };
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       withRepos([WEBSHOP_PROJECT], [WEBSHOP], [PRIMARY, three]),
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
         workspace: { kind: "existing", workspaceId: three.id },
       }),
-      "draft",
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe(
@@ -817,13 +845,12 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
   // A workspace with no threads has none to name, so the lead names the workspace.
   it("names the workspace itself when it has no threads yet", () => {
     const empty = { ...THREAD_3F1, sessionIds: [] };
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       withRepos([WEBSHOP_PROJECT], [WEBSHOP], [PRIMARY, empty]),
       buildDraftConfig({
         projectId: WEBSHOP_PROJECT.id,
         workspace: { kind: "existing", workspaceId: empty.id },
       }),
-      "draft",
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe(
@@ -833,10 +860,9 @@ describe("buildComposerFields: the lead sentence follows the workspace", () => {
 
   // A thread works without a checkout when the project has no repo.
   it("says a thread with no checkout works without one", () => {
-    const fields = buildComposerFields(
+    const fields = composeDraft(
       FULL,
       buildDraftConfig({ projectId: EMPTY_PROJECT.id, preferredWorkspace: "none" }),
-      "draft",
     );
 
     expect(joinPhraseText(fields.lead ?? [])).toBe("It works without a checkout.");

@@ -7,9 +7,8 @@ import { lazy, Suspense, useRef, useState, useSyncExternalStore, type JSX } from
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
-  addWorkspacePicks,
   appendToMessage,
-  applyPicks,
+  applyThreadChoice,
   buildComposerPlaceholder,
   buildRecentModel,
   buildSubmission,
@@ -23,9 +22,10 @@ import {
   markShelfItemsExpired,
   queryKeys,
   readErrorMessage,
-  type ComposerPick,
   type LoginTarget,
+  type RecentModel,
   type ShelfItem,
+  type ThreadChoice,
   type ThreadPicks,
 } from "@hercule/client-core";
 import type { SessionSpawnInput, Workspace } from "@hercule/contract";
@@ -55,9 +55,13 @@ interface SentDraft {
   readonly input: SessionSpawnInput;
   readonly text: string;
   readonly attachments: readonly ShelfItem[];
+  /**
+   * The picks the request was built from. They are compared by reference with
+   * the picks held when the start returns, so picks made meanwhile are kept.
+   */
   readonly picks: ThreadPicks;
-  /** The account the thread runs on, which a picked model is remembered with. */
-  readonly instanceId: string | null;
+  /** The model this start picked, to remember in Recent once it succeeds, or `null` when it picked none. */
+  readonly recent: RecentModel | null;
 }
 
 /**
@@ -143,8 +147,7 @@ export function DraftScreen({
       queryClient.setQueryData(queryKeys.session(session.id), session);
       void queryClient.invalidateQueries({ queryKey: threadsQuery(client).queryKey });
       pendingSubmissions.clearSent(key, sent);
-      const recent = buildRecentModel(sent.picks, sent.instanceId);
-      if (recent !== null) rememberRecentModel(controller.url, recent);
+      if (sent.recent !== null) rememberRecentModel(controller.url, sent.recent);
     },
     // Kept in the draft rather than read from `spawn.error`: a screen mounted
     // again, after the user left and came back, has a mutation of its own,
@@ -179,20 +182,13 @@ export function DraftScreen({
     !images.sendBlocked &&
     holdsMessageContent(pending.message);
 
-  // Each pick is compared with the draft's own configuration, not with the
-  // picks before it, so picking the configured value again removes the pick.
-  const pick = (steps: readonly ComposerPick[]): void => {
+  const recordThreadChoice = (choice: ThreadChoice): void => {
     const { picks } = pendingSubmissions.read(key);
-    pendingSubmissions.writePicks(key, applyPicks(catalogs, view.base, picks, steps));
+    pendingSubmissions.writePicks(key, applyThreadChoice(picks, choice));
   };
   const submit = (): void => {
     if (!canSend || isMutationRunning(queryClient, startKey)) return;
-    const submission = buildSubmission(
-      catalogs,
-      { kind: "draft", config: view.base },
-      addWorkspacePicks(pending.picks, workspace, workspaces),
-      pending.message,
-    );
+    const submission = buildSubmission(view.resolved, pending.message);
     pendingSubmissions.clearFailure(key);
     images.clearRefusal();
     spawn.mutate(
@@ -201,7 +197,7 @@ export function DraftScreen({
         text: pending.message.text,
         attachments: pending.message.attachments,
         picks: pending.picks,
-        instanceId: view.config.instanceId,
+        recent: buildRecentModel(pending.picks, view.resolved),
       },
       {
         onSuccess: (session) => {
@@ -284,7 +280,7 @@ export function DraftScreen({
             onTextChange={(text) => {
               pendingSubmissions.writeText(key, text);
             }}
-            onPick={pick}
+            onChoose={recordThreadChoice}
             onSubmit={submit}
             onOpenWorkspaceMenu={() => {
               if (inspection.isPending) return;

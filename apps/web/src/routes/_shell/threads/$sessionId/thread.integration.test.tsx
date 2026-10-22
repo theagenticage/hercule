@@ -2558,6 +2558,59 @@ describe("Thread: model options are sent with the submission", () => {
     ).toBe(false);
   });
 
+  it("brings a picked option back when the model that offers it is picked again", async () => {
+    const user = userEvent.setup();
+    const [snapshot] = INSTANCE_OPTIONS.snapshots;
+    // A third model that offers no options.
+    const withPlainModel: ProviderInstance = {
+      ...INSTANCE_OPTIONS,
+      snapshots: [
+        {
+          ...snapshot!,
+          models: [
+            ...snapshot!.models,
+            {
+              slug: "claude-haiku-4",
+              name: "Claude Haiku 4",
+              imageInput: { maxBytes: null },
+              options: [],
+            },
+          ],
+        },
+      ],
+    };
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
+      "GET /api/v1/providers": { body: [withPlainModel] },
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
+        body: { inputId: INPUT_ID, result: "opened" },
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Medium" }));
+    await user.click(await screen.findByRole("radio", { name: "High" }));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
+    await pickRow(user, /claude haiku 4/i);
+    // Haiku 4 offers no options, so the selector is gone while it is picked.
+    expect(screen.queryByRole("button", { name: "High" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /claude haiku 4/i }));
+    await pickRow(user, /claude sonnet 5/i);
+    expect(screen.getByRole("button", { name: "High" })).toBeDefined();
+
+    await user.type(screen.getByRole("textbox"), "Also check the logs");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    const call = await waitFor(() => {
+      const found = api.calls.find(
+        (each) => each.method === "POST" && each.path === `/api/v1/sessions/${SESSION_ID}/input`,
+      );
+      if (found === undefined) throw new Error("input not sent yet");
+      return found;
+    });
+    // Sonnet 5 is the session's own model again, so only the option travels.
+    expect(call.body).toEqual({ text: "Also check the logs", options: { effort: "high" } });
+  });
+
   it("keeps the stored options when the newly picked model offers them", async () => {
     const user = userEvent.setup();
     await openApp(
@@ -2627,6 +2680,63 @@ describe("Thread: model options are sent with the submission", () => {
       return found[1];
     });
     expect(second?.body).toEqual({ text: "And the metrics" });
+  });
+
+  it("keeps an option picked while the message is on its way, and clears only the picks it carried", async () => {
+    const user = userEvent.setup();
+    let stored: Record<string, string> = {};
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let holding = false;
+    const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
+      "GET /api/v1/providers": providers,
+      // The session read that follows the input is held back, so the user
+      // can pick again while the send has not finished.
+      [`GET /api/v1/sessions/${SESSION_ID}`]: async () => {
+        if (holding) await held;
+        return {
+          body: buildSession({
+            status: "idle",
+            modelSelection: { model: "claude-sonnet-5", options: stored },
+          }),
+        };
+      },
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: (call) => {
+        stored = { ...stored, ...(call.body as { options: Record<string, string> }).options };
+        holding = true;
+        return { body: { inputId: INPUT_ID, result: "opened" } };
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Medium" }));
+    await user.click(await screen.findByRole("radio", { name: "High" }));
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByRole("textbox"), "Also check the logs");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+    await waitFor(() => {
+      expect(
+        api.calls.some(
+          (each) => each.method === "POST" && each.path === `/api/v1/sessions/${SESSION_ID}/input`,
+        ),
+      ).toBe(true);
+    });
+
+    await user.click(screen.getByRole("button", { name: "High" }));
+    await user.click(await screen.findByRole("radio", { name: "Low" }));
+    await user.keyboard("{Escape}");
+    await act(async () => {
+      release();
+      await held;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("");
+    });
+    // The stored session says high, so only the pick made after the send can
+    // make the selector say low.
+    expect(screen.getByRole("button", { name: "Low" })).toBeDefined();
   });
 
   it("keeps the picks until the session is read again, so the next send uses the stored session", async () => {

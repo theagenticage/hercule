@@ -22,22 +22,11 @@ import type {
   WorkspaceStatus,
 } from "@hercule/contract";
 import { buildAccessModeMenu, type AccessModeMenuItem } from "./access-modes";
-import { findAccountName, buildLoginTarget, findSnapshotOn, type LoginTarget } from "./catalog";
+import { findAccountName, buildLoginTarget, type LoginTarget } from "./catalog";
+import type { ThreadCatalogs, ThreadKind } from "./config";
+import { buildRunnerMenu, findDimmedReason, type RunnerMenuRow } from "./runner-menu";
+import type { ResolvedThread } from "./resolve-thread";
 import {
-  findJoinedWorkspace,
-  type ThreadCatalogs,
-  type ThreadConfig,
-  type ThreadKind,
-  type ThreadPicks,
-} from "./config";
-import {
-  buildRunnerMenu,
-  findDimmedReason,
-  findReferenceRunner,
-  type RunnerMenuRow,
-} from "./runner-menu";
-import {
-  decideDefaultWorkspacePick,
   NO_PROJECT_REASON,
   NO_WORKSPACE_REASON,
   listProjectRepos,
@@ -133,7 +122,7 @@ export interface ComposerFields {
      * The runner every other field reads from. It is not always
      * `config.runnerId`: when no runner is selectable, the draft has picked
      * none, and this falls back to the runner it would really be placed on
-     * (`findReferenceRunner`). Anything that checks whether the repo is cloned
+     * (the resolved thread's `diagnosticRunner`). Anything that checks whether the repo is cloned
      * must check this runner, or the lead sentence and the menu below it would
      * refer to two different runners.
      */
@@ -165,7 +154,7 @@ const UNREADY_WORKSPACE_REASONS: Readonly<Record<Exclude<WorkspaceStatus, "ready
  *
  * - the workspace it joins, if it joins one, which must be ready;
  * - a provider instance to run it with;
- * - a runner to run it on, which must not be retired;
+ * - a runner to run it on, which must not be retired, offline or draining;
  * - a login for the instance on that runner.
  *
  * Only the last one can be fixed with a button from here.
@@ -181,6 +170,11 @@ const findBlocker = (
   if (instance === undefined) return { reason: "No provider instance is set up", login: null };
   if (runner === undefined) return { reason: "No machine is connected", login: null };
   if (runner.lifecycle === "retired") return { reason: `${runner.name} is retired`, login: null };
+  // A runner the user picked stays the draft's runner while it is away, so
+  // the draft says why it cannot start rather than moving to another runner.
+  if (runner.connectivity !== "online")
+    return { reason: `${runner.name} is ${runner.connectivity}`, login: null };
+  if (runner.lifecycle === "draining") return { reason: `${runner.name} is draining`, login: null };
   if (snapshot === undefined)
     return { reason: `${instance.displayName} is not on ${runner.name}`, login: null };
   if (snapshot.auth.status !== "ok")
@@ -194,78 +188,30 @@ const findBlocker = (
 const findLockedReason = (kind: ThreadKind, field: string): string | null =>
   kind === "active" ? `Create a new thread to change the ${field}` : null;
 
-/** Where a config's model is found: the runner it runs on, and that runner's catalog for it. */
-interface ModelLocation {
-  readonly runner: Runner | undefined;
-  readonly snapshot: CapabilitySnapshot | undefined;
-  /** The model's descriptor, or `undefined` for a slug the snapshot does not list. */
-  readonly descriptor: ModelDescriptor | undefined;
-}
-
 /**
- * Returns the runner `config` runs on, the instance's snapshot on that runner,
- * and the descriptor of `config.model` in it. A catalog belongs to one
- * instance on one runner, so the model is looked up there and nowhere else.
- *
- * An existing workspace is on one runner and never moves, so a thread that
- * joins one (`joined`) uses that runner. A runner the user picked is already
- * in `config.runnerId`.
+ * Returns everything the composer shows for a resolved thread. It reads the
+ * runner, snapshot and descriptor from `resolved`, never from the catalogs
+ * again, so every field refers to the same runner.
  */
-const locateModel = (
-  catalogs: ThreadCatalogs,
-  config: ThreadConfig,
-  joined: Workspace | undefined,
-): ModelLocation => {
-  const instance = catalogs.instances.find((each) => each.id === config.instanceId);
-  const runner = findReferenceRunner(
-    catalogs.runners,
-    joined?.runnerId ?? config.runnerId,
-    catalogs.thisMacRunnerId,
-  );
-  const snapshot = instance === undefined ? undefined : findSnapshotOn(instance, runner?.id);
-  return {
-    runner,
-    snapshot,
-    descriptor: snapshot?.models.find((model) => model.slug === config.model),
-  };
-};
-
-/**
- * Returns the descriptor of the model `config` runs with, on the runner it
- * runs on, or `undefined` when the instance has no snapshot there or the
- * snapshot does not list the model (a custom slug). A thread that has started
- * runs on the runner of its workspace, so joining the workspace first gives
- * the same runner as `config.runnerId` does.
- */
-export const findModelDescriptor = (
-  catalogs: ThreadCatalogs,
-  config: ThreadConfig,
-): ModelDescriptor | undefined =>
-  locateModel(catalogs, config, findJoinedWorkspace(catalogs, config)).descriptor;
-
-/** Returns everything the composer shows for a thread's config. */
 export const buildComposerFields = (
   catalogs: ThreadCatalogs,
-  config: ThreadConfig,
-  kind: ThreadKind,
+  resolved: ResolvedThread,
 ): ComposerFields => {
+  const { config, kind, snapshot, descriptor } = resolved;
   const instance = catalogs.instances.find((each) => each.id === config.instanceId);
   const resources = catalogs.resources ?? [];
   const workspaces = catalogs.workspaces ?? [];
   const projectId = config.projectId ?? null;
   const repos = listProjectRepos(resources, projectId);
-  // Use the user's pick if there is one; otherwise the default, which follows
-  // the stored setting and the project's repos.
-  const pick =
-    config.workspace ?? decideDefaultWorkspacePick(repos, config.preferredWorkspace ?? null);
-  // Only read for a draft. A started thread is locked because it started,
-  // which is what its tooltip must say, and its label names its own runner
-  // rather than the workspace that chose it.
-  const joined =
-    kind === "draft" && pick.kind === "existing"
-      ? workspaces.find((each) => each.id === pick.workspaceId)
-      : undefined;
-  const { runner, snapshot, descriptor } = locateModel(catalogs, config, joined);
+  const pick = config.workspace;
+  // Only a draft joins a workspace. A started thread is locked because it
+  // started, which is what its tooltip must say, and its label names its own
+  // runner rather than the workspace that chose it.
+  const joined = resolved.kind === "draft" ? resolved.joined : undefined;
+  // A draft with no operational runner still names the runner it would be
+  // placed on, to say why it cannot start.
+  const runner =
+    resolved.kind === "draft" ? (resolved.runner ?? resolved.diagnosticRunner) : resolved.runner;
 
   // The label's name and dimmed reason come from the same runner. A runner
   // shown with another runner's reason would send the user to fix the wrong
@@ -362,8 +308,12 @@ export const buildComposerFields = (
 
 /**
  * Returns the note the composer shows after a model pick on an active thread,
- * until the pick is sent. The picks travel with the next message, in
+ * until the pick is sent. The change travels with the next message, in
  * `session.input`, so until then the thread keeps running its current model.
+ * Returns `null` for a draft and for an active thread whose model does not
+ * change.
  */
-export const buildPendingModelNote = (kind: ThreadKind, picks: ThreadPicks): string | null =>
-  kind === "active" && picks.model !== undefined ? "model change applies on send" : null;
+export const buildPendingModelNote = (resolved: ResolvedThread): string | null =>
+  resolved.kind === "active" && resolved.outgoing.model !== undefined
+    ? "model change applies on send"
+    : null;

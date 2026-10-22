@@ -271,19 +271,6 @@ export const setWorkspaceStartingRevision = (
       };
 };
 
-/**
- * Returns the runner a pick requires, or `null` when the pick leaves the runner
- * free. An existing workspace is on one runner and never moves, so joining it
- * means running on that runner.
- */
-export const findRunnerForPick = (
-  pick: WorkspacePick,
-  workspaces: readonly Workspace[],
-): string | null =>
-  pick.kind === "existing"
-    ? (workspaces.find((each) => each.id === pick.workspaceId)?.runnerId ?? null)
-    : null;
-
 /** What a draft's heading names, and which project's identity hue it uses. */
 export interface DraftSubject {
   readonly label: string;

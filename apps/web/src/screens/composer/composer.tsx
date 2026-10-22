@@ -11,7 +11,6 @@ import {
   queryKeys,
   setWorkspaceStartingRevision,
   buildWorkspaceMenu,
-  buildWorkspacePicks,
   type Thread,
   readErrorMessage,
 } from "@hercule/client-core";
@@ -86,7 +85,8 @@ export function Composer({
   const [preview, setPreview] = useState<number | null>(null);
   const model = useComposerModel(thread, catalogs, client, uploads, onSend);
   const fields = model.fields;
-  const pending = buildPendingModelNote(model.kind, model.picks);
+  const { config } = model.resolved;
+  const pending = buildPendingModelNote(model.resolved);
   const login = buildLoginSlot(client, live, () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
   });
@@ -99,9 +99,9 @@ export function Composer({
   // The model menu is built only while it is open.
   const models =
     open === "model"
-      ? buildModelMenu(catalogs, model.config, { kind: model.kind, filter, recent: model.recent })
+      ? buildModelMenu(catalogs, config, { kind: model.kind, filter, recent: model.recent })
       : null;
-  const projectId = model.config.projectId ?? null;
+  const projectId = config.projectId ?? null;
   const pick = fields.workspace.value;
   const menu = buildWorkspaceMenu({
     repos: listProjectRepos(resources, projectId),
@@ -191,7 +191,7 @@ export function Composer({
                 handleOpenChange("accessMode", next);
               }}
               onPick={(mode) => {
-                model.pick({ kind: "accessMode", value: mode });
+                model.recordThreadChoice({ kind: "accessMode", value: mode });
               }}
             />
             {pending === null ? null : (
@@ -201,8 +201,8 @@ export function Composer({
               {fields.options === null ? null : (
                 <ModelOptionsSelector
                   descriptors={fields.options}
-                  selected={model.config.options}
-                  label={buildOptionsLabel(fields.options, model.config.options)}
+                  selected={config.options}
+                  label={buildOptionsLabel(fields.options, config.options)}
                   modelName={fields.model.pill.name}
                   disabled={model.readOnly !== null}
                   open={open === "options"}
@@ -210,7 +210,7 @@ export function Composer({
                     handleOpenChange("options", next);
                   }}
                   onPick={(id, value) => {
-                    model.pick({ kind: "option", id, value });
+                    model.recordThreadChoice({ kind: "option", id, value });
                   }}
                 />
               )}
@@ -225,7 +225,7 @@ export function Composer({
                   onOpenChange={(next) => {
                     handleOpenChange("model", next);
                   }}
-                  onPick={model.pick}
+                  onChoose={model.recordThreadChoice}
                   loginSlot={login}
                 />
               </span>
@@ -268,13 +268,16 @@ export function Composer({
         open={open === "workspace" || open === "branch" || open === "machine" ? open : null}
         onOpenChange={handleOpenChange}
         onPickWorkspace={(picked) => {
-          model.pick(...buildWorkspacePicks(picked, workspaces));
+          model.recordThreadChoice({ kind: "workspace", workspace: picked });
         }}
         onPickBranch={(picked) => {
-          model.pick({ kind: "workspace", value: setWorkspaceStartingRevision(pick, picked) });
+          model.recordThreadChoice({
+            kind: "workspace",
+            workspace: setWorkspaceStartingRevision(pick, picked),
+          });
         }}
         onPickRunner={(runnerId) => {
-          model.pick({ kind: "runnerId", value: runnerId });
+          model.recordThreadChoice({ kind: "runner", runnerId });
         }}
       />
     </div>

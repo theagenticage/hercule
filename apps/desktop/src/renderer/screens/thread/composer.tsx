@@ -8,14 +8,13 @@ import {
 } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  applyPicks,
+  applyThreadChoice,
   buildComposerFields,
   buildComposerPlaceholder,
   buildPendingModelNote,
   buildRecentModel,
   buildSubmission,
   buildThreadWorkspaceLabel,
-  computeEffectiveConfig,
   findExpiredShelfKeys,
   findResumeBlockedReason,
   holdsMessageContent,
@@ -24,10 +23,11 @@ import {
   markShelfItemsExpired,
   queryKeys,
   readErrorMessage,
-  readThreadConfig,
-  type ComposerPick,
+  resolveThreadConfig,
+  type RecentModel,
   type ShelfItem,
   type ThreadCatalogs,
+  type ThreadChoice,
   type ThreadPicks,
 } from "@hercule/client-core";
 import type { SessionInputPayload } from "@hercule/contract";
@@ -61,9 +61,13 @@ import { WorkspaceDetailsTrigger } from "../workspace/details-trigger";
 interface SentSubmission {
   readonly payload: SessionInputPayload;
   readonly attachments: readonly ShelfItem[];
+  /**
+   * The picks the request was built from. They are compared by reference with
+   * the picks held when the send returns, so picks made meanwhile are kept.
+   */
   readonly picks: ThreadPicks;
-  /** The account the thread runs on, which a picked model is remembered with. */
-  readonly instanceId: string | null;
+  /** The model this send picked, to remember in Recent once it succeeds, or `null` when it picked none. */
+  readonly recent: RecentModel | null;
 }
 
 /**
@@ -155,9 +159,9 @@ export function ThreadComposer({
     sessions: threads,
   };
   const thread = { kind: "active", session } as const;
-  const base = readThreadConfig(thread);
-  const config = computeEffectiveConfig(catalogs, base, pending.picks);
-  const fields = buildComposerFields(catalogs, config, "active");
+  const resolved = resolveThreadConfig(catalogs, thread, pending.picks);
+  const { config } = resolved;
+  const fields = buildComposerFields(catalogs, resolved);
   const readOnly = findResumeBlockedReason(session);
   const busy = session.status === "busy";
   const workspaceLabel = buildThreadWorkspaceLabel(session, workspaces);
@@ -170,7 +174,7 @@ export function ThreadComposer({
   });
   const { pill } = fields.model;
   const descriptors = fields.options;
-  const note = buildPendingModelNote("active", pending.picks);
+  const note = buildPendingModelNote(resolved);
 
   const input = useMutation({
     mutationKey: sendKey,
@@ -188,8 +192,7 @@ export function ThreadComposer({
         picks: sent.picks,
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.inputs(sessionId) });
-      const recent = buildRecentModel(sent.picks, sent.instanceId);
-      if (recent !== null) rememberRecentModel(controller.url, recent);
+      if (sent.recent !== null) rememberRecentModel(controller.url, sent.recent);
     },
     // Kept in the pending submission rather than read from `input.error`: a
     // composer mounted again, after the user left and came back, has a
@@ -224,15 +227,13 @@ export function ThreadComposer({
   const canSend =
     readOnly === null && !sending && !images.sendBlocked && holdsMessageContent(pending.message);
 
-  // Each pick is compared with the thread's own configuration, not with the
-  // picks before it, so picking the configured value again removes the pick.
-  const pick = (steps: readonly ComposerPick[]): void => {
+  const recordThreadChoice = (choice: ThreadChoice): void => {
     const { picks } = pendingSubmissions.read(sessionId);
-    pendingSubmissions.writePicks(sessionId, applyPicks(catalogs, base, picks, steps));
+    pendingSubmissions.writePicks(sessionId, applyThreadChoice(picks, choice));
   };
   const submit = (): void => {
     if (!canSend || isMutationRunning(queryClient, sendKey)) return;
-    const submission = buildSubmission(catalogs, thread, pending.picks, pending.message);
+    const submission = buildSubmission(resolved, pending.message);
     pendingSubmissions.clearFailure(sessionId);
     if (stopAgent.error !== null) stopAgent.reset();
     images.clearRefusal();
@@ -240,7 +241,7 @@ export function ThreadComposer({
       payload: submission.payload,
       attachments: pending.message.attachments,
       picks: pending.picks,
-      instanceId: config.instanceId,
+      recent: buildRecentModel(pending.picks, resolved),
     });
     scrollTranscriptToBottom();
   };
@@ -287,7 +288,7 @@ export function ThreadComposer({
               selected={config.options}
               modelName={pill.name}
               disabled={readOnly !== null}
-              onPick={pick}
+              onChoose={recordThreadChoice}
             />
           )}
         </>
@@ -301,7 +302,7 @@ export function ThreadComposer({
           kind="active"
           disabled={readOnly !== null}
           readRecent={() => readRecentModels(controller.url)}
-          onPick={pick}
+          onChoose={recordThreadChoice}
         />
       }
       above={
