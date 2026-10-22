@@ -50,7 +50,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { currentStamp, currentStampOrSystem, requireGrant } from "../../actor";
+import { CurrentActor, currentStamp, currentStampOrSystem, requireGrant } from "../../actor";
 import { agentRepository } from "../../agents";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
@@ -1021,21 +1021,30 @@ const make = Effect.gen(function* () {
      * cancel. Then, after the commit:
      *
      * - an idle session with no input on the wire is sent the input here;
-     * - a busy session, when `steer` is true, gets the input in its running
+     * - a busy session, when the input is steered, gets it in its running
      *   turn (`steerInto`), as `input.steer` would do for a queued input. The
      *   result is `queued` when the provider does not steer natively, when
      *   the flush at the turn's end sent the input first, or when the steer
      *   did not go through (see below);
      * - a session with any other status, or an idle one whose earlier input
      *   is still on the wire, keeps the input queued, whatever `steer` says;
+     *   this holds for the default as well;
      * - an exited session that this input resumed is dispatched, which places
      *   it like a spawn. The start frame carries the session's oldest
      *   waiting input, like a spawn's prompt.
      *
-     * With `steer` true the caller also needs the grant `input.steer` needs,
-     * checked before anything is stored, so a caller refused the steer is
-     * refused the input as well. Today that is `session.steer`, the same
-     * grant `session.input` itself needs.
+     * When `steer` is left out, the input is steered if another session sends
+     * it, and queued for any other caller. A session that sends a message to
+     * a peer wants it read while it still matters, and a queue of messages
+     * the peer reads minutes late is worse than an interruption. A session
+     * that sends to itself queues: on a provider that cannot steer natively,
+     * steering interrupts the running turn, which would cut off the command
+     * that sent the message. An explicit `steer` always wins.
+     *
+     * When the input is steered, the caller also needs the grant
+     * `input.steer` needs, checked before anything is stored, so a caller
+     * refused the steer is refused the input as well. Today that is
+     * `session.steer`, the same grant `session.input` itself needs.
      *
      * A steer that fails for any reason (the runner refused it, is not
      * connected, or did not answer in time) is logged, and the result is
@@ -1057,17 +1066,19 @@ const make = Effect.gen(function* () {
       InputError
     > =>
       Effect.gen(function* () {
-        if (steer === true) yield* requireGrant("input.steer");
+        const actor = yield* CurrentActor;
+        const steered = steer ?? (actor._tag === "session" && actor.sessionId !== input.id);
+        if (steered) yield* requireGrant("input.steer");
         const { session, row } = yield* storeInput(input);
         // Outside the transaction: dispatch may send a frame to the runner,
         // and a transaction never waits on anything outside the database.
         if (session.status === "exited") yield* dispatch(session.runnerId);
         if (row.sentAt !== null) return yield* deliverClaimed(row);
         // Only a busy session has a running turn to steer the input into; on
-        // any other status the input is handled as without `steer`.
+        // any other status the input is handled as if it were not steered.
         // `steerInto` claims the input before it sends it, so the flush at
         // the turn's end can never send it a second time.
-        if (steer === true && session.status === "busy") {
+        if (steered && session.status === "busy") {
           const outcome = yield* steerInto(session, row).pipe(
             Effect.catch((error) =>
               sessions.queuedInput(session.id, row.id).pipe(

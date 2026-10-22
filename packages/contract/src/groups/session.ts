@@ -551,7 +551,12 @@ export type SessionUpdateInput = Schema.Schema.Type<typeof SessionUpdateInput>;
  * With `steer: true`, a busy session gets the input in its running turn, as
  * `input.steer` would do for a queued input. A session in any other status
  * takes the input as if the flag were absent, because the sender cannot know
- * the status at the moment its call lands. Queueing stays the default.
+ * the status at the moment its call lands.
+ *
+ * When `steer` is left out, the input is steered if the caller is another
+ * session, and queued for any other caller. A session sending to itself
+ * queues, because steering could interrupt the command that sent it.
+ * `steer: false` always queues.
  */
 export const SessionInputPayload = closedStruct({
   ...SESSION_INPUT_FIELDS,
