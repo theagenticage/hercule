@@ -551,14 +551,25 @@ const arePropsEqual = <Props extends object>(previous: Props, next: Props): bool
     );
   });
 
+/** The least width of the dots button, which is also the width of a button with one dot. */
+const MIN_DOTS_BUTTON_WIDTH = 22;
+
 /**
  * Returns the width line 2 of a group row leaves free at its end for the
- * dots button, in pixels: 11 for each dot and its gap, 20 for the "+n" and
- * its gap and margin, 7 for each digit of n, and the button's own padding.
- * Generous on purpose, so a cut question never runs under the dots.
+ * dots button and the chevron that shows beside it, in pixels. The button is
+ * 11 for each dot and its gap, 20 for the "+n" and its gap and margin, 7 for
+ * each digit of n, and 4 for its padding, but never under
+ * `MIN_DOTS_BUTTON_WIDTH`. The chevron sits 14px to the button's left and
+ * line 2 already ends 4px before the button's right edge, so 8 more keeps a
+ * 2px gap between the end of line 2 and the chevron, with 4 more in the
+ * stylesheet. Generous on purpose, so a cut question never runs under the
+ * dots.
  */
 const measureDotsWidth = (dotCount: number, hiddenCount: number): number =>
-  dotCount * 11 + (hiddenCount > 0 ? 13 + 7 * String(hiddenCount).length : 0) + 10;
+  Math.max(
+    MIN_DOTS_BUTTON_WIDTH,
+    dotCount * 11 + (hiddenCount > 0 ? 13 + 7 * String(hiddenCount).length : 0) + 4,
+  ) + 8;
 
 /**
  * Renders the mark of a session in a group, in the sidebar's rows and in the
@@ -583,8 +594,9 @@ export function SessionMark({
 
 /**
  * Renders the agent of a session of a group: its provider's mark, then the
- * name of its model, which is cut short with an ellipsis before the session's
- * own name is. Both sit in the faint ink of a row's second line.
+ * name of its model, which is left out whole, never cut short, when it has no
+ * room, before the session's own name is. Both sit in the faint ink of a row's
+ * second line.
  */
 export function AgentLabel({
   providerId,
@@ -596,7 +608,7 @@ export function AgentLabel({
   return (
     <span className="side-agent">
       {providerId === null ? null : <ProviderLogo providerId={providerId} size={11} />}
-      <span className="side-agent-model">{model}</span>
+      <span>{model}</span>
     </span>
   );
 }

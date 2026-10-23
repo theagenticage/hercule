@@ -1870,7 +1870,6 @@ describe("the sidebar's groups of sessions", () => {
       await userEvent.click(dots);
       expect(dots.getAttribute("aria-expanded")).toBe("true");
       expect(dots.getAttribute("aria-label")).toBe("3 sessions: 2 done, 1 ended. Fold");
-      await userEvent.click(within(nav).getByRole("button", { name: "3 quiet" }));
       expect(
         [...nav.querySelectorAll(".side-member a")].map((line) => line.getAttribute("aria-label")),
       ).toEqual(["Thread 1, done", "Thread 2, done", expect.stringMatching(/^review, /)]);
@@ -1891,7 +1890,7 @@ describe("the sidebar's groups of sessions", () => {
       expect(fireEvent.keyDown(row, { key: "ArrowLeft" })).toBe(true);
       expect(fireEvent.keyDown(row, { key: "ArrowRight" })).toBe(false);
       await waitFor(() => {
-        expect(nav.querySelectorAll(".side-m")).toHaveLength(1);
+        expect(nav.querySelectorAll(".side-member")).toHaveLength(3);
       });
       expect(within(nav).getByRole("button", { name: "Reopen" })).toBeTruthy();
       expect(row.textContent).toMatch(/^Thread 12 threads · done /);

@@ -370,8 +370,10 @@ export interface GroupLines {
 /**
  * Returns the lines an unfolded row draws, one per session in the group's
  * order, with the quiet ones folded into one "n quiet" line when more than
- * two are quiet. A session is quiet when it neither waits nor works; a Done
- * Thread and an ended Agent session are quiet.
+ * two are quiet and at least one other line would still show. A session is
+ * quiet when it neither waits nor works; a Done Thread and an ended Agent
+ * session are quiet. A group whose sessions are all quiet shows every line,
+ * because a lone "n quiet" line would only make the user press again.
  *
  * - `selectedId` is the open session. It always has a line of its own and is
  *   not counted among the quiet ones.
@@ -390,7 +392,10 @@ export const listGroupLines = (
       .filter((member) => member.dot === "quiet" && member.sessionId !== selectedId)
       .map((member) => member.sessionId),
   );
-  if (quiet.size <= 2 || quietShown) return { lines: row.members, foldedQuietCount: 0 };
+  const hasOtherLine = quiet.size < row.members.length;
+  if (quiet.size <= 2 || quietShown || !hasOtherLine) {
+    return { lines: row.members, foldedQuietCount: 0 };
+  }
   return {
     lines: row.members.filter((member) => !quiet.has(member.sessionId)),
     foldedQuietCount: quiet.size,

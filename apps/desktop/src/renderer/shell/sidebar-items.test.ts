@@ -927,23 +927,23 @@ describe("buildSidebar groups", () => {
       expect(findItem(items, "done:session:s-solo")).toMatchObject({ summary: null });
     });
 
-    it("draws the lines of an unfolded group, and folds its quiet sessions into one line", () => {
-      const unfoldedGroups = new Set([PRIMARY_GROUP]);
-      const items = buildItems({ threads: DONE_CREW, doneShelfLimit: 10, unfoldedGroups });
-
-      expect(listKeys(items)).toEqual(["header:done", DONE_ROW, "quiet:workspace:ws-primary"]);
-      expect(findItem(items, DONE_ROW)).toMatchObject({ unfolded: true });
-      expect(findItem(items, "quiet:workspace:ws-primary")).toMatchObject({ count: 3, last: true });
-
-      const shown = buildItems({
+    it("draws every line of an unfolded group, because all its sessions are quiet", () => {
+      const items = buildItems({
         threads: DONE_CREW,
         doneShelfLimit: 10,
-        unfoldedGroups,
-        quietShownGroups: new Set([PRIMARY_GROUP]),
+        unfoldedGroups: new Set([PRIMARY_GROUP]),
       });
-      expect(listKeys(shown).slice(2)).toEqual(["line:s-lead", "line:s-second", "line:s-review"]);
-      expect(findItem(shown, "line:s-lead")).toMatchObject({ done: true, section: "done" });
-      expect(findItem(shown, "line:s-review")).toMatchObject({ label: "review", done: false });
+
+      expect(listKeys(items)).toEqual([
+        "header:done",
+        DONE_ROW,
+        "line:s-lead",
+        "line:s-second",
+        "line:s-review",
+      ]);
+      expect(findItem(items, DONE_ROW)).toMatchObject({ unfolded: true });
+      expect(findItem(items, "line:s-lead")).toMatchObject({ done: true, section: "done" });
+      expect(findItem(items, "line:s-review")).toMatchObject({ label: "review", done: false });
     });
 
     it("spaces a row after the lines like a row after the lines of a group in a project", () => {
@@ -957,7 +957,9 @@ describe("buildSidebar groups", () => {
       expect(items.map(({ key, leading }) => [key, leading])).toEqual([
         ["header:done", 8],
         [DONE_ROW, 1],
-        ["quiet:workspace:ws-primary", 1],
+        ["line:s-lead", 1],
+        ["line:s-second", 1],
+        ["line:s-review", 1],
         ["done:session:s-other", 6],
       ]);
     });
@@ -1271,9 +1273,7 @@ describe("pickFocusFallback", () => {
     });
     const after = buildItems({ threads, doneShelfLimit: 10 });
 
-    expect(pickFocusFallback("quiet:workspace:ws-primary", before, after)).toBe(
-      "done:workspace:ws-primary",
-    );
+    expect(pickFocusFallback("line:s-review", before, after)).toBe("done:workspace:ws-primary");
   });
 
   it("picks the first line a pressed quiet line brought into view", () => {

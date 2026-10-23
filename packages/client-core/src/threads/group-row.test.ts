@@ -11,7 +11,7 @@
  *   urgent and "+n", with words that describe every session, Done and ended
  *   ones included;
  * - an unfolded row folds more than two quiet sessions into one line, except
- *   the open one.
+ *   the open one, and only while another line still shows.
  */
 import type { OpenRequest, ProviderInstance, Session } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
@@ -467,6 +467,34 @@ describe("listGroupLines", () => {
   it("draws two quiet sessions as lines, and folds three or more into one", () => {
     expect(ids(buildRow(2))).toEqual({ lines: ["s-lead", "s-q0", "s-q1"], foldedQuietCount: 0 });
     expect(ids(buildRow(3))).toEqual({ lines: ["s-lead"], foldedQuietCount: 3 });
+  });
+
+  it("draws every line of a group whose sessions are all quiet, so the quiet line is never alone", () => {
+    const idle = [
+      thread("s-lead"),
+      thread("s-q0", { createdAt: at(1) }),
+      thread("s-q1", { createdAt: at(2) }),
+      thread("s-q2", { createdAt: at(3) }),
+    ];
+    const shelf = idle.map((session, index) => ({ ...session, ...done(10 + index) }));
+
+    for (const sessions of [idle, shelf]) {
+      expect(ids(describeOnly(sessions))).toEqual({
+        lines: ["s-lead", "s-q0", "s-q1", "s-q2"],
+        foldedQuietCount: 0,
+      });
+    }
+  });
+
+  it("folds the quiet sessions when the open one is the only other line", () => {
+    const row = describeOnly([
+      thread("s-lead"),
+      thread("s-q0", { createdAt: at(1) }),
+      thread("s-q1", { createdAt: at(2) }),
+      thread("s-q2", { createdAt: at(3) }),
+    ]);
+
+    expect(ids(row, "s-q2")).toEqual({ lines: ["s-q2"], foldedQuietCount: 3 });
   });
 
   it("counts a Done Thread and an ended Agent session among the quiet ones", () => {
