@@ -26,7 +26,9 @@
  *    "Question" or "Working", where the book draws a state mark, and keeps
  *    the book's age for an idle thread. The second line is the provider's
  *    mark and the thread's machine, where the book's is a branch and a
- *    machine: every fixture thread is in no workspace;
+ *    machine: every fixture thread is in no workspace. While the thread
+ *    waits on the user, the machine gives way to the open Request's
+ *    question, in the colour of a question to the user;
  * 6. draws New thread, Search and the Office in one row, as the app's
  *    sidebar.css lays them out: the book draws New thread and Search as two
  *    rows and has no Office button. Search becomes a 30px icon button with
@@ -73,6 +75,22 @@ function readStatusWord(thread: (typeof SPECIMEN_THREADS)[number]): string | nul
   const request = thread.openRequests[0];
   if (request !== undefined) return request.kind === "question" ? "Question" : "Approval";
   return thread.status === "busy" ? "Working" : null;
+}
+
+/**
+ * Returns the question the app's second line shows while `thread` waits, or
+ * `null` when it waits on nothing: "Run git push?" for a command's approval,
+ * a question's first line as asked. Fails for any other kind of Request,
+ * which the sidebar fixture has none of.
+ */
+function readQuestionText(thread: (typeof SPECIMEN_THREADS)[number]): string | null {
+  const request = thread.openRequests[0];
+  if (request === undefined) return null;
+  if (request.kind === "command_approval") return `Run ${request.detail.command}?`;
+  if (request.kind === "question") return request.detail.questions[0].question;
+  throw new Error(
+    `The sidebar fixture holds a ${request.kind} Request, which this page cannot word.`,
+  );
 }
 
 /** Returns a `b` element holding `count`, with the class `className` when one is given. */
@@ -143,7 +161,9 @@ for (const row of side.querySelectorAll('[data-pane="threads"] .side-row')) {
   glyph.append(drawBookBrand(thread.model.instanceId === "i-codex" ? "openai" : "claude", 12));
   const machine = document.createElement("span");
   Object.assign(machine.style, { overflow: "hidden", textOverflow: "ellipsis" });
-  machine.textContent = STUDIO_MAC.name;
+  const question = readQuestionText(thread);
+  machine.textContent = question ?? STUDIO_MAC.name;
+  if (question !== null) machine.style.color = "var(--you-ink)";
   const detail = findElement(row, ".side-meta") as HTMLElement;
   detail.className = "side-detail";
   detail.replaceChildren(glyph, machine);
