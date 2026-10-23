@@ -1,6 +1,6 @@
 # Domain model
 
-This document pins the shape of every Hercule domain entity: the fields the design tickets fixed, the relationships between entities and which of them are optional, the one fixed status axis each entity carries, the identity rules (Hercule ids versus provider-native and external ids), and the platform events each entity emits. Where another document owns a record's field list (Run, Step record, Notification, SessionSpec, Trigger, event envelope, memory documents, permission profiles), this document keeps purpose, relationships, status axis and identity and links the owner for the fields. Behaviour belongs to the owning subsystem document and is only pointed at here. The vocabulary is the glossary in [CONTEXT.md](../../CONTEXT.md); this document does not restate definitions.
+This document pins the shape of every Hercule domain entity: the fields the design tickets fixed, the relationships between entities and which of them are optional, the one fixed status axis each entity carries, the identity rules (Hercule ids versus provider-native and external ids), and the platform events each entity emits. Where another document owns a record's field list (Run, Step record, Notification, SessionSpec, Trigger, event envelope, memory documents, permission profiles), this document keeps purpose, relationships, status axis and identity and links the owner for the fields. Behaviour belongs to the owning subsystem document and is only pointed at here. The vocabulary is the glossary in [GLOSSARY.md](../../GLOSSARY.md); this document does not restate definitions.
 
 ## Model-wide rules
 
@@ -247,7 +247,7 @@ Fields (from the normalized stream, [06-providers.md](./06-providers.md)): `id` 
 
 *(Added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355); decided by [#350](https://github.com/theagenticage/hercule/issues/350), [#352](https://github.com/theagenticage/hercule/issues/352), [#377](https://github.com/theagenticage/hercule/issues/377); [ADR 0038](../adr/0038-a-subagent-is-part-of-its-session-not-a-session.md).)*
 
-Purpose: an agent a session's harness delegated work to while the session runs ([CONTEXT.md](../../CONTEXT.md) Subagent). It works inside its session's process and settings and is owned by its session the way a Turn is. It is not a Session: it is never resumed, forked or placed on its own, has no token or access mode of its own, and does not outlive its session's process.
+Purpose: an agent a session's harness delegated work to while the session runs ([GLOSSARY.md](../../GLOSSARY.md) Subagent). It works inside its session's process and settings and is owned by its session the way a Turn is. It is not a Session: it is never resumed, forked or placed on its own, has no token or access mode of its own, and does not outlive its session's process.
 
 Fields, all written at ingest in the transaction that appends the event they come from ([06-providers.md](./06-providers.md) section 13.2):
 

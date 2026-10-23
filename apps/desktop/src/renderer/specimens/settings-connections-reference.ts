@@ -14,7 +14,7 @@
  * 2. removes the Channels section, and the strip's count of channels: chat
  *    channels are not Connections the app lists yet;
  * 3. removes the Cron row: in Hercule the core emits a cron trigger's ticks
- *    and no Connection carries them (CONTEXT.md, Event Source and Core
+ *    and no Connection carries them (GLOSSARY.md, Event Source and Core
  *    Kind), so the app lists no such row;
  * 4. writes the strip's counts from the fixture: its events, its
  *    Connections, and its failing Connections, where the book counts

@@ -87,7 +87,7 @@ The flow of work, which is the heart of the product:
 The five identity features: one binary, self-hosted; work triaged before you see it; decisions
 answered anywhere (bound actions); assistants with memory; any provider on any of your machines.
 
-Vocabulary is fixed (`CONTEXT.md`). Use the words exactly and respect its "Avoid" lists:
+Vocabulary is fixed (`GLOSSARY.md`). Use the words exactly and respect its "Avoid" lists:
 Intake (never "inbox", "dashboard", "command center"), Task (never "ticket"/"issue" for Hercule's
 own concept - a GitHub issue is still a GitHub issue), Proposal, Offer, Request, Session, Thread,
 Run, Workflow, Step, Assistant (never "persona"), Conversation (never "chat" as the noun for the
@@ -97,7 +97,7 @@ Profile, Grant, Spawn Bound, Provenance, "made from". Presence words for assista
 asleep, can't be reached.
 
 Read for depth (skim, then look things up as you need them):
-- `CONTEXT.md` - the glossary.
+- `GLOSSARY.md` - the glossary.
 - `docs/design-language.md` - today's visual system *and its semantics*. The semantics are gold:
   decisions phrased as questions; answers as a ledger whose describe line says what the click does;
   provenance-first attention; aggregation by default ("6 runs today · all ✓"); "made from" marks;

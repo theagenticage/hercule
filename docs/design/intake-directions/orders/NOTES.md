@@ -98,10 +98,10 @@ phone; `.editor-cols`, `.editor-tools` on the web.
 
 ## Departures
 
-- **Departs from CONTEXT.md because "standing order" is not a CONTEXT.md word.** Underneath it is
+- **Departs from GLOSSARY.md because "standing order" is not a GLOSSARY.md word.** Underneath it is
   exactly a start Trigger (Event Selector or Schedule, inputs, Spawn Bound) on a workflow. The
   editor's subtitle and the describe line say "start trigger". If this direction is chosen,
-  CONTEXT.md gets the word, or the UI says "start trigger" everywhere.
+  GLOSSARY.md gets the word, or the UI says "start trigger" everywhere.
 - **Departs from spec 10 §2.5 ("Tasks are the buffer"; triage is the only doorway) because an order
   acts without a click, which is its point.**
   - An order made from a Proposal's Start answer listens on `task.created` for proposed Tasks in

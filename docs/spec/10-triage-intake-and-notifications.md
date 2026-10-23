@@ -119,7 +119,7 @@ The **window** is the run's frozen `since` / `until`. Events that arrive during 
 
 ## 4. Proposal and Topic
 
-Both are vocabulary over existing primitives, not entities ([../../CONTEXT.md](../../CONTEXT.md)).
+Both are vocabulary over existing primitives, not entities ([../../GLOSSARY.md](../../GLOSSARY.md)).
 
 ~~**Proposal** = a Task labelled `proposed` (plus a topic label) together with its open `triage.proposal` Notification, joined by the notification's `subject`.~~ *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392).)* **Proposal** = a `proposal` Signal (Section 9.3). Its `task` holds the Task that Accept creates, topic label included. ~~Enrichment is the task description (markdown): the why, the grouping, the links, in prose. "Made from" is the provenance (`{eventId}` per source event, `{ref}` per external ref). The proactive link is a provenance `{ref}` or a link in the description to an existing task. The user's answers are Accept, Start *X* and Dismiss (Section 2.4). A Task still labelled `proposed` whose notification is resolved is not a Proposal and is not shown in Intake - it can only arise when a custom producer resolves the notification without touching the task, and the Tasks screen shows it like any open task.~~ The enrichment is the description in `task`: the why, the grouping, the links, in prose. Its Sources are its `eventIds`, and the Task's provenance after Accept. The user's answers are Accept and Dismiss (Section 2.4).
 
@@ -1032,4 +1032,4 @@ ADRs:
 - [ADR 0027 - A decision resolves when its question is answered, wherever](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)
 - [ADR 0040 - Intake holds signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md) *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*
 
-Design language: [../design-language.md](../design-language.md) (Intake semantics, Monitoring semantics). Glossary: [../../CONTEXT.md](../../CONTEXT.md) (Intake, Proposal, Offer, Topic, Spawn Bound, Notification, Bound Action, Provenance, External Ref; and, *added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395)*, Signal, Ignore Rule, Handling, Screening, Screener, Block, Snooze).
+Design language: [../design-language.md](../design-language.md) (Intake semantics, Monitoring semantics). Glossary: [../../GLOSSARY.md](../../GLOSSARY.md) (Intake, Proposal, Offer, Topic, Spawn Bound, Notification, Bound Action, Provenance, External Ref; and, *added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395)*, Signal, Ignore Rule, Handling, Screening, Screener, Block, Snooze).

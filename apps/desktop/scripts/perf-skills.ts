@@ -59,7 +59,7 @@ function writeSkillFolder(parent: string, name: string): void {
       "## Steps",
       "",
       "1. Check that the tests cover the change.",
-      "2. Check the names against `CONTEXT.md`.",
+      "2. Check the names against `GLOSSARY.md`.",
       "3. Write one comment per finding, and say why it matters.",
       "",
       "See [the checklist](references/checklist.md) for the details.",

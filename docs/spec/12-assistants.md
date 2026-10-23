@@ -4,7 +4,7 @@ An Assistant is an Agent with persistent Memory and Channel Bindings, oriented t
 
 ## 1. Assistant
 
-An Assistant is a specialization of Agent, not a separate concept ([../../CONTEXT.md](../../CONTEXT.md)). It is:
+An Assistant is a specialization of Agent, not a separate concept ([../../GLOSSARY.md](../../GLOSSARY.md)). It is:
 
 - an Agent (controller-owned identity: prompt, provider, permission profile - see [./02-domain-model.md](./02-domain-model.md)),
 - plus zero or more Channel Bindings (section 3),

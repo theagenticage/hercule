@@ -282,7 +282,7 @@ const make = Effect.gen(function* () {
      * active, and not reserved.
      *
      * Leaving out reserved runners is what makes this the fallback list rather
-     * than a plain list (see Reserved in CONTEXT.md: the placement fallback
+     * than a plain list (see Reserved in GLOSSARY.md: the placement fallback
      * never chooses a reserved runner). The disk watermark is not checked
      * here: placement picks the runner, and dispatch decides when a session
      * placed on it actually starts.

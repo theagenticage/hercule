@@ -16,7 +16,7 @@ Test placement was equally undecided, and it interacts: a mirrored `tests/` tree
 
 ## Decision
 
-Source under an app or package is organized **by domain**, one folder per domain, named with the CONTEXT.md word for it. A domain folder's `index.ts` is its boundary: it exports what other domains consume and nothing more. Cross-domain imports go through that `index.ts`, never at a file inside another domain.
+Source under an app or package is organized **by domain**, one folder per domain, named with the GLOSSARY.md word for it. A domain folder's `index.ts` is its boundary: it exports what other domains consume and nothing more. Cross-domain imports go through that `index.ts`, never at a file inside another domain.
 
 - **`db/` and `config/` are the exceptions**: infrastructure every domain sits on, named for what they are. Adding a third is a deliberate decision, recorded by amending this ADR.
 - **Migrations stay in `db/`.** One migration spans domains - a single statement list that creates tables for all of them - so it cannot live in any one of them.
@@ -32,7 +32,7 @@ Source under an app or package is organized **by domain**, one folder per domain
 
 - Cohesion: a folder maps to a spec section, and deleting a feature is one `rm -r`.
 - Tests survive refactoring, and an unpaired `x.test.ts` is a visible signal that `x.ts` went away.
-- Domain boundaries must be known before writing code. When a new area has no obvious domain word, that is a CONTEXT.md gap to close first, not a folder to invent.
+- Domain boundaries must be known before writing code. When a new area has no obvious domain word, that is a GLOSSARY.md gap to close first, not a folder to invent.
 - Cross-domain imports need discipline: reaching past an `index.ts` compiles fine, so review has to catch it.
 - Unit and integration tests are told apart by name, not by directory. In practice the distinction is thin here: spec 04 forbids mock repositories, so most controller tests are small integration tests against a ~~`:memory:` database~~ temporary database file *(amended 2026-10-18, [#109](https://github.com/theagenticage/hercule/issues/109); see [ADR 0004](./0004-controller-state-lives-in-one-sqlite-database.md))* already.
 
@@ -58,7 +58,7 @@ Recorded by [The controller daemon (#208)](https://github.com/theagenticage/herc
 
 Recorded by [Split the controller daemon into one folder per concern (#247)](https://github.com/theagenticage/hercule/issues/247). One flat folder of use cases stopped scaling at about fifteen files: a reader asking "where does a session get placed?" had to scan the whole list.
 
-- **The controller daemon's use cases are grouped in one folder per concern**, named with the CONTEXT.md word for what they act on:
+- **The controller daemon's use cases are grouped in one folder per concern**, named with the GLOSSARY.md word for what they act on:
   - `sessions/`: placement, dispatch, the operations that reach a live session, the sweep of lost runners' sessions, and the resume check they share;
   - `events/`: the event router, the pipeline, enrichment, and `events/routing/` with the routing tables and deliveries;
   - `workspaces/`: provisioning, disposal and the workspace sweep;
@@ -75,7 +75,7 @@ Recorded by [Split the controller daemon into one folder per concern (#247)](htt
 
 ## Amendment: a domain owns what happens; the controller daemon owns where and how it runs (2026-09-25)
 
-Recorded by [The run engine moves into the runs domain (#253)](https://github.com/theagenticage/hercule/issues/253). The 2026-09-17 amendment defined a controller daemon use case as "anything that sequences a write set across domains together with a message to a runner", and said a write that crosses a domain "comes from above". CONTEXT.md read it more widely still: "every piece of work that spans more than one domain". Under that reading, any rule that touched a second domain moved up into the controller daemon, and the domains kept their rows and little else. The run engine is the standing example: it sends nothing to a runner, and most of it is the run's own lifecycle.
+Recorded by [The run engine moves into the runs domain (#253)](https://github.com/theagenticage/hercule/issues/253). The 2026-09-17 amendment defined a controller daemon use case as "anything that sequences a write set across domains together with a message to a runner", and said a write that crosses a domain "comes from above". GLOSSARY.md read it more widely still: "every piece of work that spans more than one domain". Under that reading, any rule that touched a second domain moved up into the controller daemon, and the domains kept their rows and little else. The run engine is the standing example: it sends nothing to a runner, and most of it is the run's own lifecycle.
 
 - **A domain owns what happens: its rows, the rules of their lifecycle, and the orchestration that carries those rules out.** The runs domain holds the whole run engine: starting a run, executing it step by step, routing, cancelling, and which runs to resume at boot.
 - **A domain is infrastructure-agnostic.** It describes its work as effects and never decides where they run: no long-lived fibers, no process lifetime, no sockets. When its work must run apart from the request, it owns a port that says so in its own words (`RunExecutor`: "execute this run", "stop these runs"), and the controller daemon implements that port.

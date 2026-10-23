@@ -73,7 +73,7 @@ export type InputStatus = Schema.Schema.Type<typeof InputStatus>;
 
 /**
  * One input a session was given, whatever became of it. Queued Input is only
- * the rows still `queued` (CONTEXT.md), which is a state of this row and not a
+ * the rows still `queued` (GLOSSARY.md), which is a state of this row and not a
  * kind of its own.
  */
 export const Input = Schema.Struct({

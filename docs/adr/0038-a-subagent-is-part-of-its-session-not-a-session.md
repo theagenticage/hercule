@@ -44,6 +44,6 @@ t3code shows these costs in practice:
 
 ## Consequences
 
-- Session keeps its CONTEXT.md meaning: one run of a provider-backed agent, with its own process and transcript, resumable and forkable. Turn widens to cover a subagent's episodes, and a session's status follows its own agent's turns only.
+- Session keeps its GLOSSARY.md meaning: one run of a provider-backed agent, with its own process and transcript, resumable and forkable. Turn widens to cover a subagent's episodes, and a session's status follows its own agent's turns only.
 - A subagent can make many events, and they all land in its parent session's stream. So the attribution is stored where reading the main transcript can skip it cheaply, and a client watching the main transcript is not sent a subagent's events.
 - A future Hercule session spawned by another session would be a real Session with a "spawned by" link of its own. It is not a Subagent and not a fork (`parentSessionId` stays fork lineage). A session's list of subagents may later show such sessions too. That future link is left open here, and so is whether it is needed at all.
