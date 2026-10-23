@@ -75,9 +75,14 @@ export interface Ran {
  * kernel cannot give the controller an ephemeral port, and probing one by
  * binding and closing it would only move the race. `startController` treats a
  * bind failure as an ordinary outcome and picks another number instead.
+ *
+ * The number stays below the range the kernel hands out for the source port
+ * of an outgoing connection (32768 and up on Linux). On a busy machine those
+ * ports are taken and released all the time, so a port picked from that range
+ * can be gone again between two starts of a controller on the same port.
  */
-function pickCandidatePort(): number {
-  return 20_000 + Math.floor(Math.random() * 40_000);
+export function pickCandidatePort(): number {
+  return 20_000 + Math.floor(Math.random() * 12_768);
 }
 
 /** A controller process that is running and responding. */

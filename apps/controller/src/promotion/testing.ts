@@ -14,13 +14,14 @@
  * - helpers to create promotion tokens, request transfers and find a free port.
  */
 import { writeFileSync } from "node:fs";
-import { createServer, type AddressInfo } from "node:net";
+import { createServer } from "node:net";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import type * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { HomePaths } from "@hercule/home";
+import { pickCandidatePort } from "../../../../scripts/controller-process";
 import { post, type ServerOptions } from "../http/testing";
 import { AuditLogLayer } from "../events";
 import { ControllerIdentity } from "../identity";
@@ -222,13 +223,20 @@ export const sealController = async (base: string, promotionToken: string): Prom
     throw new Error(`the switch answered ${String(response.status)}: ${await response.text()}`);
 };
 
-/** Returns a port on 127.0.0.1 that nothing listened on a moment ago. */
-export const findFreePort = (): Promise<number> =>
-  new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const port = (server.address() as AddressInfo).port;
-      server.close(() => resolve(port));
+/**
+ * Returns a port on 127.0.0.1 that nothing listened on a moment ago. The port
+ * is picked below the range the kernel uses for outgoing connections, so
+ * that, between this check and the moment a test's child process binds the
+ * port, only a process that deliberately listens there can take it.
+ */
+export const findFreePort = async (): Promise<number> => {
+  for (;;) {
+    const port = pickCandidatePort();
+    const isFree = await new Promise<boolean>((resolve) => {
+      const server = createServer();
+      server.once("error", () => resolve(false));
+      server.listen(port, "127.0.0.1", () => server.close(() => resolve(true)));
     });
-  });
+    if (isFree) return port;
+  }
+};
