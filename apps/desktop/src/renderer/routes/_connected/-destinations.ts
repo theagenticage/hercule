@@ -91,9 +91,12 @@ export function useOpenDestination(): (destination: Destination) => void {
       switch (destination.kind) {
         case "thread": {
           const { sessionId } = destination;
-          const seated =
-            readPresentation().seatedIds.has(sessionId) ||
-            isSeatedByCachedRecord(queryClient, controller.client, sessionId);
+          const { sessions, seatedIds } = readPresentation();
+          // A session the presentation holds has its answer, also when it is
+          // "not seated"; only one it does not hold is asked from the cache.
+          const seated = sessions.some((each) => each.id === sessionId)
+            ? seatedIds.has(sessionId)
+            : isSeatedByCachedRecord(queryClient, controller.client, sessionId);
           if (officeOpen && seated) {
             void navigate({ to: "/office", search: { session: sessionId } });
           } else {

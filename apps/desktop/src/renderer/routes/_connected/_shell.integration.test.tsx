@@ -12,7 +12,7 @@ import { onlineManager, type QueryClient } from "@tanstack/react-query";
 import { invalidateWithoutCancelling } from "@hercule/client-core";
 import type { OpenRequest, Session, SessionRequest } from "@hercule/contract";
 import { ageClock } from "../../app/age-clock";
-import { projectsQuery, threadAndAgentSessionsQuery } from "../../app/queries";
+import { projectsQuery, sessionQuery, threadAndAgentSessionsQuery } from "../../app/queries";
 import {
   buildErrorBody,
   buildFixtureAssistant,
@@ -554,7 +554,7 @@ describe("Go > Office", () => {
     });
     const working = buildAgentSession("01a06d02-7b00-7000-8000-0000000000a1", { status: "busy" });
     const ended = buildAgentSession("01a06d02-7b00-7000-8000-0000000000a2", { status: "exited" });
-    const { fake, router } = await startShell({
+    const { context, fake, router } = await startShell({
       path: "/office",
       handlers: buildSidebarHandlers({
         ...SIDEBAR_FIXTURE,
@@ -568,6 +568,13 @@ describe("Go > Office", () => {
     });
     expect(router.state.location.pathname).toBe("/office");
 
+    // The session's own cached record is older than the list and still says
+    // it works. The list is the newer answer, so the record must not seat it.
+    const client = context.controller!.client;
+    context.queryClient.setQueryData(sessionQuery(client, ended.id).queryKey, {
+      ...ended,
+      status: "busy",
+    });
     fake.openDestination({ kind: "thread", sessionId: ended.id });
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`/threads/${ended.id}`);

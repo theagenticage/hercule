@@ -256,7 +256,7 @@ const summarizeMembers = (members: readonly GroupMember[]): GroupSummary => {
  *
  * Each session's status is decided here from its runner. Its pose and
  * whether it is seated come from `poses` and `seatedIds`, decided once for
- * every session, so the row agrees with the foot and the Go menu.
+ * every session, so the row's pose agrees with the foot and the Go menu.
  */
 export const describeGroupRows = ({
   groups,

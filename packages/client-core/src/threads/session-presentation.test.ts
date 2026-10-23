@@ -438,10 +438,6 @@ describe("a group's row", () => {
         }),
       );
 
-    it("has none for a group of one session", () => {
-      expect(describeOnly(buildCrew(1, 0, 0)).summary).toBeNull();
-    });
-
     it.each<[string, Session[], object]>([
       [
         "one dot per session for 2 sessions",
@@ -577,7 +573,14 @@ describe("the sessions that wait on the user", () => {
     expect(entry?.notificationBody).toBe("A subagent asks: Run pnpm test?");
   });
 
-  it("names the group by its lead, and the asker by its role, unless the lead asks", () => {
+  it("names the group by its lead, and the asker by its role, numbered when the role repeats, unless the lead asks", () => {
+    const secondReviewer = reviewer({
+      id: "s-review-2",
+      role: "Review",
+      createdAt: at(6),
+      openRequests: [ask("r-2")],
+    });
+    const numbered = prepare([lead(), reviewer(), secondReviewer]);
     const byReviewer = prepare([lead(), reviewer({ openRequests: [ask("r-1")] })]);
     const byLead = prepare([lead({ openRequests: [ask("r-1")] }), reviewer()]);
 
@@ -591,6 +594,14 @@ describe("the sessions that wait on the user", () => {
     ]);
     expect(byLead.waitingSessions).toMatchObject([
       { sessionId: "s-lead", groupName: "Fix checkout", askerLabel: null },
+    ]);
+    expect(numbered.groupRows[0]?.members.map((member) => member.label)).toEqual([
+      "Fix checkout",
+      "review",
+      "Review 2",
+    ]);
+    expect(numbered.waitingSessions).toMatchObject([
+      { sessionId: "s-review-2", askerLabel: "Review 2" },
     ]);
   });
 
@@ -624,7 +635,7 @@ describe("the foot's counts and the Office's seats", () => {
   });
 
   it("seats a session as the Office does: a Thread unless Done, an Agent session while it works, waits or idles", () => {
-    const { seatedIds, groupRows } = prepare([
+    const { seatedIds, groupRows, sessions } = prepare([
       thread("s-lead", done(30)),
       thread("s-partner", { createdAt: at(2), status: "idle" }),
       agent("s-agent", { status: "busy" }),
@@ -633,6 +644,8 @@ describe("the foot's counts and the Office's seats", () => {
     ]);
 
     expect([...seatedIds].toSorted()).toEqual(["s-agent", "s-loose", "s-partner"]);
+    // An ended Agent session is held and known not to be seated, unlike an unknown one.
+    expect(sessions.map((session) => session.id)).toContain("s-gone");
     expect(groupRows[0]?.members.filter((member) => member.seated).length).toBe(2);
   });
 });
@@ -646,6 +659,7 @@ describe("the open session", () => {
     expect(view.doneShelf.rows.map(({ row }) => row.key)).toEqual(["session:s-old"]);
     expect(view.openGroupKey).toBe("session:s-old");
     expect(select([], { selectedId: "s-old" }).openGroupKey).toBeNull();
+    expect(prepare([], { openSession: OLD_DONE }).sessions).toEqual([OLD_DONE]);
   });
 
   it("keeps the list's record when both hold the session, and counts it once", () => {

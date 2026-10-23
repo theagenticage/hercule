@@ -81,8 +81,6 @@ export function SessionPresentationProvider({
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const instances = useSuspenseQuery(providersQuery(client)).data;
-  useRelatedReads(listedSessions, projects, workspaces);
-
   const presentation = useMemo(
     () =>
       prepareSessionPresentation({
@@ -96,6 +94,7 @@ export function SessionPresentationProvider({
       }),
     [listedSessions, openSession, projects, workspaces, resources, runners, instances],
   );
+  useRelatedReads(presentation.sessions, projects, workspaces);
   const latest = useRef(presentation);
   useEffect(() => {
     latest.current = presentation;

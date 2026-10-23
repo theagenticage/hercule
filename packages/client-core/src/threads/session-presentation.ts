@@ -34,6 +34,13 @@ export interface SessionCounts {
 
 /** Everything the app shows about the user's Threads and Agent sessions. */
 export interface SessionPresentation {
+  /**
+   * The Threads and Agent sessions the presentation describes: the listed
+   * sessions, and the open session when the list lacks it. A session in this
+   * list that is not in `seatedIds` is known not to be seated, unlike a
+   * session this list does not hold, whose seat is unknown.
+   */
+  readonly sessions: readonly Session[];
   /** One row per group of sessions, newest `lastStartedAt` first. */
   readonly groupRows: readonly GroupRow[];
   /**
@@ -50,7 +57,7 @@ export interface SessionPresentation {
    * working and one idle Thread is both.
    */
   readonly counts: SessionCounts;
-  /** The ids of the sessions with a colleague in the Office (`isSessionSeated`). */
+  /** The ids of the sessions of `sessions` with a colleague in the Office (`isSessionSeated`). */
   readonly seatedIds: ReadonlySet<string>;
   /** The ids of the listed projects, which tell the project of a draft from a deleted one. */
   readonly listedProjectIds: ReadonlySet<string>;
@@ -67,8 +74,10 @@ export interface SessionPresentation {
  *   over `openSession`. A session that is not a Thread or an Agent's is never
  *   added.
  *
- * Every session's pose is decided once, and the rows, the counts and the
- * seats all use it. The result does not depend on the user's choices, on the
+ * Every session's pose is decided once here, and the rows' poses, the counts
+ * and the seats all use it. (A row's status is decided from the session and
+ * its runner by `decideThreadRowStatus`, which reads the pose rules itself.)
+ * The result does not depend on the user's choices, on the
  * time, or on a session's streamed text.
  */
 export const prepareSessionPresentation = ({
@@ -118,6 +127,7 @@ export const prepareSessionPresentation = ({
     instances,
   });
   return {
+    sessions,
     groupRows,
     waitingSessions: listWaitingSessions(sessions, groupRows),
     counts,
