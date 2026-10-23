@@ -88,10 +88,20 @@
 .thread-tabs > .ptab {
   flex: none;
 }
-/* The work's name, as the drawing's `.b2-bench-name`. Not in the drawing:
-   it has no padding, so that it can shrink to zero width and leave only the
-   project's tile. Its 2px of space before the text is an indent, and the 6px
-   after it is the separator's. */
+/* The work's name, as the drawing's `.b2-bench-name`, with the "/" before it
+   as its own first character, so the slash goes with the name when the name
+   shrinks away and only the project's tile is left. The crumb before it draws
+   no slash and no right padding then. The slash keeps its place, 8px after
+   the project (the crumb's 6px gap and 2px margin in the drawing, here the
+   pill's 2px gap and 6px of margin), and the 8px after it are the 4px
+   padding, 2px gap and 2px indent the crumb and the name had in the drawing. Not in the drawing: the name has no padding, so that it can shrink
+   to zero width. */
+.thread-tabs > .pill-crumb:has(+ .work-name) {
+  padding-right: 0;
+}
+.thread-tabs > .pill-crumb:has(+ .work-name)::after {
+  content: none;
+}
 .thread-tabs > .work-name {
   flex: 0 1 auto;
   min-width: 0;
@@ -99,8 +109,13 @@
   overflow: hidden;
   color: var(--ink);
   font-weight: var(--w-bold);
-  text-indent: 2px;
   text-overflow: ellipsis;
+}
+.thread-tabs > .work-name::before {
+  content: "/";
+  margin: 0 8px 0 6px;
+  color: var(--faint);
+  font-weight: var(--w-regular);
 }
 /* The drawing's `.b2-sep`: a 1px line, 18px high, with 8px before it and 6px
    after it. The space is padding, not margin, because the fit measures the
