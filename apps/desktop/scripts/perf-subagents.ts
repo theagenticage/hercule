@@ -274,7 +274,7 @@ export async function measureSubagentLaunch(
 ): Promise<SubagentLaunch> {
   const { call } = fixture;
   const idle = (
-    await call<{ readonly items: readonly Session[] }>("GET", "/sessions?thread=true&limit=500")
+    await call<{ readonly items: readonly Session[] }>("GET", "/sessions?kind=thread&limit=500")
   ).items.filter((thread) => thread.status === "idle" && thread.id !== longThreadId);
   const [open, other] = idle;
   if (open === undefined || other === undefined) {

@@ -81,7 +81,7 @@ const listItemProjectIds = (
  *   in `items`, and items keep the order of `items`.
  *
  * `items` are newest first, as the listing's pages return them. `projectOrder`
- * is `orderProjectIdsByNewestThread`'s result. Entries are keyed by their
+ * is `orderProjectIdsByNewestGroup`'s result. Entries are keyed by their
  * group and their own id, so appending an older page keeps the keys and the
  * order of what was already listed.
  */

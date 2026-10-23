@@ -2,6 +2,7 @@
  * Reads what waits on the user, for Waiting on you, the Go menu, the dock
  * badge and the notifications.
  */
+import { useMemo } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
@@ -11,18 +12,27 @@ import {
   type WaitingRunSession,
 } from "@hercule/client-core";
 import { useAssistantRows } from "./assistant-rows";
-import { liveAgentSessionsQuery, threadsQuery } from "./queries";
+import { liveAgentSessionsQuery } from "./queries";
+import { useSessionPresentation } from "./session-presentation";
 
 /**
- * Returns the threads and the assistants waiting on the user, most recently
- * active first, as `listWaiting` builds them from the thread list and
- * `useAssistantRows`. Every place that shows what waits reads it here, so
+ * Returns the Threads, the Agents' sessions and the assistants waiting on the
+ * user, most recently active first, as `listWaiting` builds them from the
+ * session presentation's waiting sessions and `useAssistantRows`. The open
+ * session is among the sessions, so a Done Thread marked Done long ago still
+ * shows while it asks. Every place that shows what waits reads it here, so
  * they always agree.
+ *
+ * The assistants are added here, not in the presentation, so a change in an
+ * assistant does not prepare the sessions again.
  */
 export function useWaiting(): Waiting[] {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const threads = useSuspenseQuery(threadsQuery(client)).data;
-  return listWaiting(threads, useAssistantRows());
+  const { waitingSessions } = useSessionPresentation();
+  const assistantRows = useAssistantRows();
+  return useMemo(
+    () => listWaiting(waitingSessions, assistantRows),
+    [waitingSessions, assistantRows],
+  );
 }
 
 /**

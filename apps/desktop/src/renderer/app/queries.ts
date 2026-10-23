@@ -177,19 +177,65 @@ const SHELL_READ_OPTIONS = {
 // nothing would say so, and the workspace list grows with every thread that
 // gets a worktree of its own.
 
+/** How long a Thread stays in the sidebar's read after it is marked Done. */
+const DONE_THREAD_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
+const doneSinceByClient = new WeakMap<HerculeClient, string>();
+
 /**
- * Reads every thread: every session no Agent spawned. The sidebar lists all
- * of them, so the read follows the cursor to the last page. Its key sits
- * under the `sessions` prefix, so a push on the `session` topic invalidates
- * it.
+ * Returns the time before which a Thread marked Done leaves the sidebar's
+ * read: 14 days before `client` first asks.
+ *
+ * The answer is kept per client, not worked out on each call. The time is
+ * part of the query key, so a new time on each call would be a new key, and
+ * every render would start a new read. A window left open for days keeps its
+ * first cutoff, so the Threads marked Done since then stay in the read
+ * instead of dropping out under the user. The next sign-in makes a new client
+ * and a fresh cutoff.
  */
-export const threadsQuery = (client: HerculeClient) =>
-  queryOptions({
-    queryKey: queryKeys.sessions({ thread: true }),
-    queryFn: () =>
-      readEveryPage((page) => client.session.query({ query: { thread: true, ...page } })),
+const readDoneSince = (client: HerculeClient): string => {
+  const held = doneSinceByClient.get(client);
+  if (held !== undefined) return held;
+  const doneSince = new Date(Date.now() - DONE_THREAD_WINDOW_MS).toISOString();
+  doneSinceByClient.set(client, doneSince);
+  return doneSince;
+};
+
+/**
+ * Reads the sidebar's sessions: the Threads and the Agent sessions outside
+ * runs and assistants, except the Threads marked Done more than 14 days ago.
+ * The 14 days are fixed. Reading every Thread ever was about 500 KB of JSON
+ * for 292 Threads, and every change read all of it again. The read follows
+ * the cursor to the last page. Its key sits under the `sessions` prefix, so
+ * a push on the `session` topic invalidates it.
+ *
+ * A component that wants the Threads alone reads `threadsQuery`, which shares
+ * this read. The Done moves write their guesses into this one.
+ */
+export const threadAndAgentSessionsQuery = (client: HerculeClient) => {
+  const filter = { kind: ["thread", "agent"], doneSince: readDoneSince(client) } as const;
+  return queryOptions({
+    queryKey: queryKeys.sessions(filter),
+    queryFn: () => readEveryPage((page) => client.session.query({ query: { ...filter, ...page } })),
     ...SHELL_READ_OPTIONS,
   });
+};
+
+/** Keeps the Threads among the sessions of `threadAndAgentSessionsQuery`. */
+const selectThreads = (sessions: readonly Session[]): readonly Session[] =>
+  sessions.filter((session) => session.kind === "thread");
+
+/**
+ * Reads the Threads the sidebar holds: those of `threadAndAgentSessionsQuery`,
+ * so not the ones marked Done more than 14 days ago. It shares that read's
+ * cache entry and narrows it with `select`. The result keeps its identity
+ * while the Threads stay equal, even when a turn of an Agent session reads the
+ * whole list again.
+ */
+export const threadsQuery = (client: HerculeClient) => ({
+  ...threadAndAgentSessionsQuery(client),
+  select: selectThreads,
+});
 
 /**
  * Reads every live session an Agent spawned: the sessions of runs'
@@ -201,7 +247,7 @@ export const threadsQuery = (client: HerculeClient) =>
  * on the `session` topic invalidates it.
  */
 export const liveAgentSessionsQuery = (client: HerculeClient) => {
-  const filter = { thread: false, status: LIVE_SESSION_STATUSES } as const;
+  const filter = { kind: ["agent", "run", "assistant"], status: LIVE_SESSION_STATUSES } as const;
   return queryOptions({
     queryKey: queryKeys.sessions(filter),
     queryFn: () => readEveryPage((page) => client.session.query({ query: { ...filter, ...page } })),
@@ -1162,7 +1208,7 @@ export interface EndedWorkRecords {
  * world the Office opens on: a colleague whose work ended in that time may
  * still be walking out. It reads the runs that finished in that time with
  * their sessions, and the Agents' sessions that exited in that time. The
- * Threads marked Done are in `threadsQuery` already.
+ * Threads marked Done in the last 14 days are in `threadsQuery` already.
  *
  * The data never goes stale on its own, and no push reads it again: only
  * the Office's first world reads it. `ensureOfficeData` reads it afresh
@@ -1177,7 +1223,12 @@ export const endedWorkQuery = (client: HerculeClient) =>
         readEveryPage((page) => client.run.query({ query: { activeSince: since, ...page } })),
         readEveryPage((page) =>
           client.session.query({
-            query: { thread: false, status: "exited", activeSince: since, ...page },
+            query: {
+              kind: ["agent", "run", "assistant"],
+              status: "exited",
+              activeSince: since,
+              ...page,
+            },
           }),
         ),
       ]);
@@ -1899,7 +1950,7 @@ export const ensureShellData = async (
   client: HerculeClient,
 ): Promise<void> => {
   await Promise.all([
-    queryClient.ensureQueryData(threadsQuery(client)),
+    queryClient.ensureQueryData(threadAndAgentSessionsQuery(client)),
     queryClient.ensureQueryData(liveAgentSessionsQuery(client)),
     queryClient.ensureQueryData(projectsQuery(client)),
     queryClient.ensureQueryData(workspacesQuery(client)),
@@ -2163,7 +2214,9 @@ export const readSenders = (
   waitForOptionalReads([
     (async () => {
       const lists = await Promise.all([
-        queryClient.ensureQueryData(threadsQuery(client)).catch((): readonly Session[] => []),
+        queryClient
+          .ensureQueryData(threadAndAgentSessionsQuery(client))
+          .catch((): readonly Session[] => []),
         queryClient
           .ensureQueryData(liveAgentSessionsQuery(client))
           .catch((): readonly Session[] => []),

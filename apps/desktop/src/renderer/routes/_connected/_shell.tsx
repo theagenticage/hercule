@@ -5,6 +5,7 @@ import { listUrgentSignals } from "@hercule/client-core";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
+import { SessionPresentationProvider } from "../../app/session-presentation";
 import { SnoozeTimer } from "../../app/snooze-timer";
 import { ensureShellData, pluginsQuery, signalsToDoQuery } from "../../app/queries";
 import { useWaiting } from "../../app/waiting";
@@ -58,7 +59,19 @@ export const Route = createFileRoute("/_connected/_shell")({
   component: ShellLayout,
 });
 
+/**
+ * Prepares the session presentation for everything in the shell, which reads
+ * it with `useSessionPresentation`.
+ */
 function ShellLayout(): JSX.Element {
+  return (
+    <SessionPresentationProvider>
+      <ShellScreen />
+    </SessionPresentationProvider>
+  );
+}
+
+function ShellScreen(): JSX.Element {
   const { bridge, controller, queryClient } = Route.useRouteContext();
   const navigate = useNavigate();
   useLiveConnection(controller.live, queryClient);

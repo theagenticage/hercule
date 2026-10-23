@@ -244,6 +244,8 @@ describe("assistant.delete", () => {
                        WHERE id = unhex(${hex(session.id)})`;
               yield* sql`UPDATE copied SET id = unhex(${hex(OLDER_SESSION)}), token_hash = NULL,
                          created_at = '2000-01-01T00:00:00.000Z'`;
+              // `kind` is computed by the sessions table, so it cannot be inserted.
+              yield* sql`ALTER TABLE copied DROP COLUMN kind`;
               yield* sql`INSERT INTO sessions SELECT * FROM copied`;
               yield* sql`DROP TABLE copied`;
             }),

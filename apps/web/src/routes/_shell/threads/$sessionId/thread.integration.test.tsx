@@ -3826,6 +3826,7 @@ const ADA: Assistant = {
 const buildAssistantSession = (overrides: Partial<Session> = {}): Session =>
   buildSession({
     title: "Answer Ada's conversation",
+    kind: "assistant",
     agentId: ADA.id,
     conversationId: "01a06d02-c000-7000-8000-000000000001",
     ...overrides,

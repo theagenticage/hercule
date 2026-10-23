@@ -106,6 +106,50 @@ describe("the thread header", () => {
     expect(tab.querySelector("svg")).not.toBeNull();
   });
 
+  it("labels a thread with a role by it, names the tab starting with the role, and keeps the title as its tooltip", async () => {
+    const { finished } = THREAD_FIXTURES;
+    await renderThreadPart(HeaderOfThread, {
+      thread: { ...finished, session: { ...finished.session, role: "review" } },
+    });
+
+    const tab = within(readTabStrip()).getByRole("link", {
+      name: "review, Bump the Bun pin, idle",
+    });
+    const text = tab.querySelector(".ptab-title");
+    expect(text?.textContent).toBe("review");
+    expect(text?.getAttribute("title")).toBe("Bump the Bun pin");
+  });
+
+  it("numbers a role among every session of the workspace, an exited one included, as the sidebar does", async () => {
+    const { waiting } = THREAD_FIXTURES;
+    const open = { ...waiting.session, role: "review" };
+    // The workspace no longer lists it, so it is no tab, yet it was the first "review".
+    const earlier = buildSession({
+      ...waiting.session,
+      id: "01a06d02-7400-7000-8000-0000000000ff",
+      title: "Review the webhook change",
+      role: "review",
+      status: "exited",
+      createdAt: "2026-09-10T09:00:00.000Z",
+    });
+    await renderThreadPart(HeaderOfThread, {
+      thread: { ...waiting, session: open },
+      handlers: buildSidebarHandlers({
+        ...SIDEBAR_FIXTURE,
+        threads: [
+          earlier,
+          ...SIDEBAR_FIXTURE.threads.map((each) => (each.id === open.id ? open : each)),
+        ],
+      }),
+    });
+
+    expect(readLinkNames()).toEqual([
+      "Fix flaky webhook tests, working",
+      "review 2, Write the retry runbook, waiting on you",
+      "New thread in this workspace",
+    ]);
+  });
+
   it("ends a tab in a word when the thread's sidebar row would", async () => {
     const { finished } = THREAD_FIXTURES;
     await renderThreadPart(HeaderOfThread, {
@@ -186,6 +230,8 @@ describe("a step session's header", () => {
     permissionProfileId,
     instanceId,
     id: PLAN_ID,
+    kind: "run",
+    agentId: AGENT_ID,
     title: "Ticket to pull request · plan",
     runId: RUN_ID,
     stepId: "plan",
@@ -198,6 +244,8 @@ describe("a step session's header", () => {
     permissionProfileId,
     instanceId,
     id: IMPLEMENT_ID,
+    kind: "run",
+    agentId: AGENT_ID,
     title: "Ticket to pull request · implement",
     status: "busy",
     runId: RUN_ID,
@@ -259,7 +307,7 @@ describe("a step session's header", () => {
     const answerSessions = sidebar["GET /api/v1/sessions"] as (call: Call) => unknown;
     return {
       "GET /api/v1/sessions": (call) =>
-        new URLSearchParams(call.search).get("thread") === "false"
+        !new URLSearchParams(call.search).getAll("kind").includes("thread")
           ? { body: { items: [PLAN_SESSION, IMPLEMENT_SESSION] } }
           : (answerSessions(call) as { body: unknown }),
       "GET /api/v1/workspaces": {
@@ -407,7 +455,7 @@ describe("a step session's header", () => {
       handlers: {
         ...buildRunHandlers(),
         "GET /api/v1/sessions": (call) =>
-          new URLSearchParams(call.search).get("thread") === "false"
+          !new URLSearchParams(call.search).getAll("kind").includes("thread")
             ? { body: { items: [stepInThreadWorkspace] } }
             : (
                 buildSidebarHandlers(SIDEBAR_FIXTURE)["GET /api/v1/sessions"] as (call: Call) => {

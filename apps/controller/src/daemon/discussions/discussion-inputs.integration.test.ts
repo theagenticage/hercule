@@ -445,8 +445,8 @@ describe("a session that cannot receive a Discussion Input", () => {
       await arrangeEntry(arranged, first.session.id, second.session.id);
       const marked = await post(
         arranged.harness.base,
-        `/api/v1/sessions/${first.session.id}/mark-done`,
-        {},
+        "/api/v1/sessions/mark-done",
+        { sessionIds: [first.session.id] },
         arranged.token,
       );
       expect(marked.status, await marked.clone().text()).toBe(200);

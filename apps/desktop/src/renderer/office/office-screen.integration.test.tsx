@@ -59,7 +59,7 @@ import {
   THREAD_FIXTURES,
   type AssistantRecords,
 } from "../app/testing";
-import { transcriptQuery } from "../app/queries";
+import { threadAndAgentSessionsQuery, transcriptQuery } from "../app/queries";
 import type { mountOfficeScene as MountOfficeScene } from "./office-scene";
 import { readOffice, setOffice } from "./office-store";
 
@@ -515,6 +515,7 @@ describe("the sessions of runs", () => {
     ...runbook,
     id,
     title: `Review · ${stepId}`,
+    kind: "run",
     agentId: "01a06d02-7b00-7000-8000-000000000001",
     runId,
     stepId,
@@ -705,8 +706,13 @@ describe("the sessions of runs", () => {
     // list learns of the Done mark at once. Nothing tells the Office's
     // cached live runs that the run finished.
     live.pushInvalidation("session", [doneThread.id]);
+    // Waiting for the cached list itself, not for `isFetching()` to reach 0:
+    // that holds before the push has started the read.
     await waitFor(() => {
-      expect(context.queryClient.isFetching()).toBe(0);
+      const threads = context.queryClient.getQueryData(
+        threadAndAgentSessionsQuery(context.controller!.client).queryKey,
+      );
+      expect(threads?.find((thread) => thread.id === doneThread.id)?.done?.at).toBe(doneAt);
     });
     await act(() => router.navigate({ to: "/office" }));
     await screen.findByRole("group", { name: "Who is doing what" });

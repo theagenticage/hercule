@@ -12,7 +12,7 @@ import kotlinx.serialization.Serializable
 
 /** What the app knows now that the alerts are decided from. */
 data class AlertSnapshot(
-    /** Every thread session (`session.query {thread: true}`). Run sessions are left out here if any slip in. */
+    /** Every thread session (`session.query {kind: "thread"}`). Run sessions are left out here if any slip in. */
     val threads: List<Session>,
     val assistants: List<AssistantAlertSource>,
     /**

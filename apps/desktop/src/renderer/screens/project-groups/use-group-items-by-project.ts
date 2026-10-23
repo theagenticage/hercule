@@ -1,12 +1,12 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { orderProjectIdsByNewestThread, type HerculeClient } from "@hercule/client-core";
+import { orderProjectIdsByNewestGroup, type HerculeClient } from "@hercule/client-core";
 import {
   groupByProject,
   type ProjectGroupEntry,
   type RepositoryRecord,
 } from "@hercule/client-core/project-groups";
 import type { Project } from "@hercule/contract";
-import { projectsQuery, resourcesQuery, threadsQuery } from "../../app/queries";
+import { projectsQuery, resourcesQuery, threadAndAgentSessionsQuery } from "../../app/queries";
 
 /**
  * Reads the projects, the repositories and the threads that order the
@@ -25,8 +25,8 @@ export const useGroupItemsByProject = <Item extends RepositoryRecord>(
   const { data: resources } = useSuspenseQuery(resourcesQuery(client));
   const { data: projects } = useSuspenseQuery(projectsQuery(client));
   const { data: projectOrder } = useSuspenseQuery({
-    ...threadsQuery(client),
-    select: orderProjectIdsByNewestThread,
+    ...threadAndAgentSessionsQuery(client),
+    select: orderProjectIdsByNewestGroup,
   });
   return { entries: groupByProject({ items, resources, projects, projectOrder }), projects };
 };

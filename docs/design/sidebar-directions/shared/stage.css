@@ -1,0 +1,309 @@
+/* PROTOTYPE - the stage every sidebar direction draws on. It brings the book's sidebar (system.css)
+   to what the desktop app draws today (apps/desktop/src/renderer/shell/sidebar.css, spec 17
+   §The sidebar): the shared New thread row, the 52px two-line thread row with its status word,
+   the project header's "n need you", the pinned assistants. A direction reuses these classes for
+   a thread that is alone, so a lone thread looks exactly like today's row.
+
+   Load after ../../crew-bureau-2/tokens.css and system.css. A direction's own stylesheet scopes
+   every rule under its root class (Stage.direction({ rootClass })). */
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ---------- the sidebar's fixed parts ---------- */
+
+.stage .side-actions {
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+}
+.stage .side-actions .nav-row {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+.stage .side-actions .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+.stage .seg--side .count {
+  min-width: 18px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  vertical-align: 1px;
+}
+.stage-list {
+  padding-top: 0;
+}
+.stage-assistants {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 0 8px;
+}
+.stage-assistants .side-row--who {
+  min-height: 30px;
+}
+
+/* ---------- today's thread row (spec 17, #626): two lines, 52px ---------- */
+
+.st-thread {
+  position: relative;
+  transition: opacity var(--dur-1);
+}
+.st-thread > .side-row {
+  height: 52px;
+  min-height: 0;
+  padding: 6px 8px 6px 10px;
+  box-sizing: border-box;
+}
+.st-thread .side-text {
+  gap: 6px;
+  line-height: normal;
+}
+.st-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 18px;
+  font-size: var(--t-13);
+  line-height: 18px;
+}
+.st-line .side-name {
+  flex: 1;
+  min-width: 0;
+}
+.st-line .side-end {
+  min-width: 48px;
+}
+.st-end--working {
+  color: var(--accent-ink);
+}
+.st-end--approval,
+.st-end--question {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+.st-thread.is-receded {
+  opacity: 0.72;
+}
+.st-thread:hover,
+.st-thread:focus-within {
+  opacity: 1;
+}
+.st-detail {
+  display: flex;
+  align-items: center;
+  height: 16px;
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.st-glyph {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  color: var(--faint);
+}
+.st-glyph svg {
+  width: 12px;
+  height: 12px;
+}
+.st-glyph .pi {
+  font-size: 12px !important;
+  line-height: 1;
+}
+.st-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.st-keep {
+  flex: none;
+  white-space: pre;
+}
+
+/* The project header's count of threads that need the user (spec 17, #626). */
+.st-need {
+  flex: none;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.st-more {
+  min-height: 28px;
+  padding-left: 10px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* ---------- the main pane ---------- */
+
+.stage-main .top .pill {
+  background: color-mix(in oklab, var(--raised) 88%, transparent);
+  box-shadow: 0 0 0 1px var(--line-soft), var(--shadow-1);
+  backdrop-filter: blur(14px) saturate(1.4);
+}
+.stage-tx {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: var(--header-clearance, 64px) 0 380px;
+}
+.stage-tx .msg-meta {
+  color: var(--faint);
+  font-size: var(--t-12);
+  margin-bottom: 3px;
+}
+.stage-waiting-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 46px;
+  color: var(--you-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.stage-result {
+  margin-left: 46px;
+  margin-top: -12px;
+}
+.stage-live b {
+  color: var(--accent-ink);
+}
+.stage-stop {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+/* A message between two threads, in a transcript: who sent it, to whom, and the text. A message
+   this thread received sits on the agent's side; one it sent sits on Rogier's side, because it
+   speaks for this thread, as Rogier's messages do. */
+.stage-x {
+  margin-left: 46px;
+  max-width: 560px;
+  padding: 10px 14px 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.stage-x--out {
+  align-self: flex-end;
+  margin-left: 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.stage-x-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.stage-x-dir {
+  flex: none;
+}
+.stage-x-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stage-x-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.stage-x-role {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  line-height: 17px;
+}
+.stage-x-at {
+  flex: none;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.stage-x-text {
+  margin: 6px 0 0;
+  color: var(--ink);
+  font-size: var(--t-13);
+  line-height: 1.5;
+}
+
+/* ---------- the toast, as the app's Done toast (apps/desktop/src/renderer/shell/sidebar.css) ---------- */
+
+.stage-side {
+  position: relative;
+}
+.stage-toast {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 194px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 12px;
+  border-radius: var(--r-md);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: var(--t-12);
+  box-shadow: var(--shadow-2);
+}
+.stage-toast .side-toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stage-toast button {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: inherit;
+  font: inherit;
+  font-weight: var(--w-medium);
+  transition: background var(--dur-1);
+}
+.stage-toast button:hover {
+  background: color-mix(in oklab, var(--surface) 14%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .stage-toast.is-new {
+    animation: stage-toast-rise var(--dur-2) var(--ease-out);
+  }
+}
+@keyframes stage-toast-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

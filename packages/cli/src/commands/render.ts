@@ -1481,8 +1481,10 @@ const VALUE_RENDERERS: Partial<
   "session.respondToQuestion": (value) => renderSession(value as Session),
   "session.stop": (value) => renderSession(value as Session),
   "session.continue": (value) => renderSession(value as Session),
-  "session.markDone": (value) => renderSession(value as Session),
-  "session.reopen": (value) => renderSession(value as Session),
+  // Both return the Threads they moved, as a table like `session list`.
+  "session.markDone": (value) =>
+    renderTable((value as ReadonlyArray<Session>).map(summarizeSession)),
+  "session.reopen": (value) => renderTable((value as ReadonlyArray<Session>).map(summarizeSession)),
   "controller.createPromotionToken": (value, controllerUrl) =>
     renderPromotionToken(value as MintedPromotionToken, controllerUrl),
 };

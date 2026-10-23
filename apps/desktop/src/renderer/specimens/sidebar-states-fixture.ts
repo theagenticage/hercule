@@ -1,11 +1,13 @@
 /**
- * The records of the sidebar states specimen (sidebar-states.tsx): five
+ * The records of the sidebar states specimen (sidebar-states.tsx): twelve
  * scenes that draw the sidebar states the Bureau book never draws, for a
  * check by eye. `node scripts/capture-sidebar-states.ts` captures each scene
  * in both themes.
  *
  * Every thread row is 52px tall, so each scene holds only as many rows as
- * fit the capture's window.
+ * fit the capture's window. The threads of one workspace are one row, so
+ * scenes 1 to 5 give each thread a workspace of its own, or none, to draw
+ * rows of a single thread; scenes 6 to 12 draw groups.
  *
  * - Scene 1 has an open thread and three projects:
  *   - webshop, whose threads work in a worktree, in the main workspace and in
@@ -35,6 +37,18 @@
  *   also in Waiting on you. webshop keeps a working thread, which recedes, an
  *   idle one and one that asks a question.
  *
+ * - Scene 6 is a morning: a lead whose partner "review" asks a question, so
+ *   the row's second line and Waiting on you both name the asker, beside
+ *   rows of a single thread.
+ * - Scene 7 is a group of three, unfolded, with the lead open.
+ * - Scene 8 is a group of ten, folded: three dots and "+7". Scene 9 is the
+ *   same group unfolded: the four sessions that wait or work, and "6 quiet".
+ * - Scene 10 has the Done shelf open, with a group of three Threads that was
+ *   marked Done together.
+ * - Scene 11 is scene 8 with the card of the group of ten on show.
+ * - Scene 12 is scene 10 with the group on the Done shelf unfolded: its three
+ *   Threads and the Agent session that ended, folded into the "4 quiet" line.
+ *
  * The threads run on the sidebar specimen's runner and models
  * (sidebar-fixture.ts), except the one on build-box, a runner that is
  * offline.
@@ -49,11 +63,13 @@ import {
 } from "@hercule/client-core/threads/testing";
 import {
   buildSpecimenSession,
+  CLAUDE_OPUS,
   CLAUDE_SONNET,
   GPT,
   SPECIMEN_INSTANCES,
   SPECIMEN_NOW,
   STUDIO_MAC,
+  type SpecimenModel,
 } from "./sidebar-fixture";
 import type { SidebarFace } from "../shell/sidebar-face";
 import { FAILED_CONNECTION } from "./settings-assistants-fixture";
@@ -100,23 +116,39 @@ const THREAD_IDS = {
 } as const;
 
 /**
- * The workspaces: a worktree of webshop, then the main workspaces of webshop
- * and of the long-named project, all on studio-mac.
+ * Returns a worktree of `repo` on a branch of its own, on studio-mac, for the
+ * sessions `sessionIds`.
  */
-const WORKSPACES = [
+const buildWorktree = (
+  id: string,
+  repo: typeof WEBSHOP_REPO,
+  branch: string,
+  sessionIds: readonly string[],
+) =>
   buildWorkspace({
-    id: "ws-thread-3f1",
+    id,
     runnerId: STUDIO_MAC.id,
     kind: "ephemeral",
-    checkouts: [{ ...buildCheckout(WEBSHOP_REPO.id, "hercule/thread-3f1"), form: "worktree" }],
-    sessionIds: [THREAD_IDS.flakyTest, THREAD_IDS.applePay],
-  }),
+    checkouts: [{ ...buildCheckout(repo.id, branch), form: "worktree" }],
+    sessionIds: [...sessionIds],
+  });
+
+/**
+ * The workspaces of scenes 1 to 5: a worktree of webshop for each of two
+ * threads, the main workspaces of webshop and of the long-named project, and
+ * a worktree of each group of scenes 6 to 11. All on studio-mac. Each of
+ * scene 1's threads has a workspace of its own, because the threads of one
+ * workspace are one row.
+ */
+const WORKSPACES = [
+  buildWorktree("ws-thread-3f1", WEBSHOP_REPO, "hercule/thread-3f1", [THREAD_IDS.flakyTest]),
+  buildWorktree("ws-thread-9d2", WEBSHOP_REPO, "hercule/thread-9d2", [THREAD_IDS.applePay]),
   buildWorkspace({
     id: "ws-webshop-main",
     runnerId: STUDIO_MAC.id,
     kind: "primary",
     checkouts: [buildCheckout(WEBSHOP_REPO.id, "main", ["main", "hercule/thread-3f1"])],
-    sessionIds: [THREAD_IDS.stripeBump, THREAD_IDS.altText],
+    sessionIds: [THREAD_IDS.stripeBump],
   }),
   buildWorkspace({
     id: "ws-onboarding-main",
@@ -151,7 +183,7 @@ const SCENE_1_THREADS: ReadonlyArray<Session> = [
     id: THREAD_IDS.applePay,
     title: "Add Apple Pay to express checkout",
     projectId: "p-webshop",
-    workspaceId: "ws-thread-3f1",
+    workspaceId: "ws-thread-9d2",
     status: "idle",
     minutesAgo: 180,
     model: GPT,
@@ -169,7 +201,6 @@ const SCENE_1_THREADS: ReadonlyArray<Session> = [
     id: THREAD_IDS.altText,
     title: "Tidy product image alt text",
     projectId: "p-webshop",
-    workspaceId: "ws-webshop-main",
     status: "idle",
     minutesAgo: 40,
     model: CLAUDE_SONNET,
@@ -217,7 +248,7 @@ const SCENE_1_THREADS: ReadonlyArray<Session> = [
 /**
  * payments-api's seven threads, in no workspace: three waiting, two working
  * and two that are neither. Capped, it shows the waiting and the working
- * ones, and "2 more threads".
+ * ones, and "2 more".
  */
 const PAYMENTS_THREADS: ReadonlyArray<Session> = [
   buildSpecimenSession({
@@ -371,7 +402,6 @@ const SCENE_5_THREADS: ReadonlyArray<Session> = [
     id: THREAD_IDS.altText,
     title: "Tidy product image alt text",
     projectId: "p-webshop",
-    workspaceId: "ws-webshop-main",
     status: "idle",
     minutesAgo: 40,
     model: CLAUDE_SONNET,
@@ -412,7 +442,7 @@ const SCENE_5_THREADS: ReadonlyArray<Session> = [
       id: THREAD_IDS.applePay,
       title: "Add Apple Pay to express checkout",
       projectId: "p-webshop",
-      workspaceId: "ws-thread-3f1",
+      workspaceId: "ws-thread-9d2",
       status: "idle",
       minutesAgo: 300,
       model: GPT,
@@ -457,12 +487,313 @@ const SCENE_5_THREADS: ReadonlyArray<Session> = [
   ),
 ];
 
-/** Returns every list the sidebar reads, holding `threads` and every scene's projects, workspaces and runners. */
+/** The request a session waits on when it asks `question`, in the agent's own words. */
+const buildQuestionRequest = (id: string, question: string): Session["openRequests"][number] => ({
+  requestId: `rq-${id}`,
+  itemId: `it-${id}`,
+  kind: "question",
+  detail: {
+    questions: [
+      {
+        question,
+        header: "Question",
+        options: [
+          { label: "Return the error", description: "Pass the failure to the caller." },
+          { label: "Retry once", description: "Try the request again, then fail." },
+        ],
+        multiSelect: false,
+      },
+    ],
+  },
+});
+
+/** The worktree where the group of scenes 6, 8, 9 and 11 works. */
+const RESULT_WORKSPACE = buildWorktree("ws-result", WEBSHOP_REPO, "rogier/result-error-shape", []);
+
+/**
+ * The lead and the partner of scene 6, whose partner "review" asks a
+ * question: two sessions in one workspace. The lead was created first.
+ */
+const RESULT_PAIR: ReadonlyArray<Session> = [
+  buildSpecimenSession({
+    id: "s-result-lead",
+    title: "Migrate the unmigrated payout endpoints to the Result error shape",
+    projectId: "p-payments-api",
+    workspaceId: RESULT_WORKSPACE.id,
+    status: "busy",
+    minutesAgo: 95,
+    model: CLAUDE_OPUS,
+  }),
+  buildSpecimenSession({
+    id: "s-result-review",
+    title: "Review the Result migration",
+    role: "review",
+    projectId: "p-payments-api",
+    workspaceId: RESULT_WORKSPACE.id,
+    status: "busy",
+    minutesAgo: 4,
+    model: GPT,
+    openRequests: [buildQuestionRequest("result-review", "409 from Stripe: error or retry?")],
+  }),
+];
+
+/** An idle thread in payments-api, in scenes 6 and 8. */
+const IDEAL_NOTES = buildSpecimenSession({
+  id: "s-ideal-notes",
+  title: "Add iDEAL research",
+  projectId: "p-payments-api",
+  status: "idle",
+  minutesAgo: 180,
+  model: GPT,
+});
+
+/** A working thread in ops, in scenes 6 and 8. */
+const ROTATE_STAGING = buildSpecimenSession({
+  id: "s-rotate-staging",
+  title: "Rotate staging secrets",
+  projectId: "p-ops",
+  status: "busy",
+  minutesAgo: 14,
+  model: CLAUDE_SONNET,
+});
+
+/**
+ * Scene 6's rows of a single thread: a working one and an idle one in
+ * payments-api, one in ops and one in webshop.
+ */
+const SCENE_6_SINGLES: ReadonlyArray<Session> = [
+  buildSpecimenSession({
+    id: "s-invoice-numbers",
+    title: "Backfill missing invoice numbers",
+    projectId: "p-payments-api",
+    status: "busy",
+    minutesAgo: 120,
+    model: GPT,
+  }),
+  IDEAL_NOTES,
+  ROTATE_STAGING,
+  buildSpecimenSession({
+    id: "s-cart-totals",
+    title: "Refactor cart totals",
+    projectId: "p-webshop",
+    status: "busy",
+    minutesAgo: 8,
+    model: CLAUDE_SONNET,
+  }),
+];
+
+/** The worktree of scene 7's group of three. */
+const THREE_DS_WORKSPACE = buildWorktree("ws-3ds", WEBSHOP_REPO, "fix/3ds-eu-cards", []);
+
+/**
+ * Scene 7's group of three: the lead waits on an approval, "research" is
+ * idle and "review" works.
+ */
+const THREE_DS_GROUP: ReadonlyArray<Session> = [
+  buildSpecimenSession({
+    id: "s-3ds-lead",
+    title: "Fix 3-D Secure checkout for EU cards",
+    projectId: "p-webshop",
+    workspaceId: THREE_DS_WORKSPACE.id,
+    status: "busy",
+    minutesAgo: 75,
+    model: CLAUDE_OPUS,
+    openRequests: [
+      {
+        requestId: "rq-3ds-lead",
+        itemId: "it-3ds-lead",
+        kind: "command_approval",
+        decisions: ["allow", "deny"],
+        detail: { command: "git push -u origin fix/3ds-eu-cards" },
+      },
+    ],
+  }),
+  buildSpecimenSession({
+    id: "s-3ds-research",
+    title: "Research how Stripe reports processing states",
+    role: "research",
+    projectId: "p-webshop",
+    workspaceId: THREE_DS_WORKSPACE.id,
+    status: "idle",
+    minutesAgo: 20,
+    model: CLAUDE_SONNET,
+  }),
+  buildSpecimenSession({
+    id: "s-3ds-review",
+    title: "Try to break the 3-D Secure fix",
+    role: "review",
+    projectId: "p-webshop",
+    workspaceId: THREE_DS_WORKSPACE.id,
+    status: "busy",
+    minutesAgo: 12,
+    model: GPT,
+  }),
+];
+
+/**
+ * Scene 7's rows of a single thread: one in webshop that is idle, and one
+ * in ops.
+ */
+const SCENE_7_SINGLES: ReadonlyArray<Session> = [
+  buildSpecimenSession({
+    id: "s-screen-readers",
+    title: "Audit checkout for screen readers",
+    projectId: "p-webshop",
+    status: "idle",
+    minutesAgo: 45,
+    model: CLAUDE_SONNET,
+  }),
+  buildSpecimenSession({
+    id: "s-grafana-folder",
+    title: "Move the dashboards into the new folder",
+    projectId: "p-ops",
+    status: "busy",
+    minutesAgo: 30,
+    model: CLAUDE_SONNET,
+  }),
+];
+
+/** The six idle partners of the group of ten: role, title, minutes since last active, and model. */
+const IDLE_PARTNERS: ReadonlyArray<readonly [string, string, number, SpecimenModel]> = [
+  ["inventory", "Count the endpoints left to migrate", 50, CLAUDE_SONNET],
+  ["benchmark", "Benchmark the Result wrapper", 45, GPT],
+  ["mobile check", "Check the mobile clients for the old error shape", 40, GPT],
+  ["refunds review", "Review the refunds endpoints", 35, CLAUDE_OPUS],
+  ["lint", "Add a lint rule against throwing in handlers", 30, CLAUDE_SONNET],
+  ["changelog", "Draft the changelog entry", 25, CLAUDE_SONNET],
+];
+
+/**
+ * Scene 8's group of ten, which scenes 9 and 11 draw too: the lead and
+ * "tests" and "API docs" work, "review" waits, and six partners are idle.
+ * It shows three dots and "+7", and unfolded, four lines and "6 quiet".
+ */
+const RESULT_CREW: ReadonlyArray<Session> = [
+  ...RESULT_PAIR,
+  buildSpecimenSession({
+    id: "s-result-tests",
+    title: "Write the tests for the Result endpoints",
+    role: "tests",
+    projectId: "p-payments-api",
+    workspaceId: RESULT_WORKSPACE.id,
+    status: "busy",
+    minutesAgo: 60,
+    model: GPT,
+  }),
+  buildSpecimenSession({
+    id: "s-result-docs",
+    title: "Update the API docs for the new error shape",
+    role: "API docs",
+    projectId: "p-payments-api",
+    workspaceId: RESULT_WORKSPACE.id,
+    status: "busy",
+    minutesAgo: 55,
+    model: CLAUDE_SONNET,
+  }),
+  ...IDLE_PARTNERS.map(([role, title, minutesAgo, model]) =>
+    buildSpecimenSession({
+      id: `s-result-${role.replace(" ", "-")}`,
+      title,
+      role,
+      projectId: "p-payments-api",
+      workspaceId: RESULT_WORKSPACE.id,
+      status: "idle",
+      minutesAgo,
+      model,
+    }),
+  ),
+];
+
+/** Scene 8's rows of a single thread, beside the group of ten. */
+const SCENE_8_SINGLES: ReadonlyArray<Session> = [
+  buildSpecimenSession({
+    id: "s-payout-sept",
+    title: "Payout report for September",
+    projectId: "p-payments-api",
+    status: "busy",
+    minutesAgo: 10,
+    model: GPT,
+    openRequests: [
+      {
+        requestId: "rq-payout-sept",
+        itemId: "it-payout-sept",
+        kind: "command_approval",
+        decisions: ["allow", "deny"],
+        detail: { command: "pnpm run payouts:dry-run --month 2026-09" },
+      },
+    ],
+  }),
+  IDEAL_NOTES,
+  ROTATE_STAGING,
+];
+
+/**
+ * Scene 10's group of three Threads and an Agent session that ended, all Done
+ * together, 20 minutes ago.
+ */
+const THREE_DS_DONE_GROUP: ReadonlyArray<Session> = [
+  ...THREE_DS_GROUP.map((session) =>
+    markDoneBefore({ ...session, openRequests: [], status: "idle" }, 20),
+  ),
+  buildSpecimenSession({
+    id: "s-3ds-lint-agent",
+    title: "Lint the checkout changes",
+    agentId: "a-linter",
+    projectId: "p-webshop",
+    workspaceId: THREE_DS_WORKSPACE.id,
+    status: "exited",
+    exitedAt: buildTimeBefore(22),
+    minutesAgo: 22,
+    model: CLAUDE_SONNET,
+  }),
+];
+
+/**
+ * Scene 10's threads: a Thread that works and one that is idle, a lone
+ * Thread marked Done earlier, and the group of three marked Done 20 minutes
+ * ago.
+ */
+const SCENE_10_THREADS: ReadonlyArray<Session> = [
+  ...THREE_DS_DONE_GROUP,
+  markDoneBefore(
+    buildSpecimenSession({
+      id: THREAD_IDS.stripeBump,
+      title: "Bump the Stripe SDK to v14",
+      projectId: "p-webshop",
+      workspaceId: "ws-webshop-main",
+      status: "idle",
+      minutesAgo: 400,
+      model: CLAUDE_SONNET,
+    }),
+    180,
+  ),
+  buildSpecimenSession({
+    id: "s-cart-totals",
+    title: "Refactor cart totals",
+    projectId: "p-webshop",
+    status: "busy",
+    minutesAgo: 8,
+    model: CLAUDE_SONNET,
+  }),
+  buildSpecimenSession({
+    id: "s-screen-readers",
+    title: "Audit checkout for screen readers",
+    projectId: "p-webshop",
+    status: "idle",
+    minutesAgo: 45,
+    model: CLAUDE_SONNET,
+  }),
+];
+
+/**
+ * Returns every list the sidebar reads, holding `threads` and every scene's
+ * projects, workspaces and runners, and the group worktrees of scenes 6 to 11.
+ */
 const buildSceneRecords = (threads: ReadonlyArray<Session>): SidebarRecords => ({
   threads,
   assistants: [],
   projects: PROJECTS,
-  workspaces: WORKSPACES,
+  workspaces: [...WORKSPACES, RESULT_WORKSPACE, THREE_DS_WORKSPACE],
   resources: [WEBSHOP_REPO, ONBOARDING_REPO],
   runners: [STUDIO_MAC, BUILD_BOX],
   instances: SPECIMEN_INSTANCES,
@@ -482,50 +813,97 @@ export interface SidebarScene {
   readonly unsentThreadIds: readonly string[];
   /** The face the page switches the sidebar to once it is drawn, as a press on the switch would. */
   readonly face: SidebarFace;
+  /** The title of the group whose dots the page presses once the sidebar is drawn, to unfold it, or `null` to press none. */
+  readonly unfoldGroup: string | null;
+  /** The title of the group whose card the page shows once the sidebar is drawn, as the pointer resting on its row would, or `null` to show none. */
+  readonly showCardOf: string | null;
 }
+
+/** The title of scene 8's group of ten. */
+const RESULT_GROUP_TITLE = "Migrate the unmigrated payout endpoints to the Result error shape";
+
+/** The fields a scene leaves at their default unless it sets them. */
+const SCENE_DEFAULTS = {
+  pressMore: null,
+  openDoneShelf: false,
+  unsentThreadIds: [],
+  face: "threads",
+  unfoldGroup: null,
+  showCardOf: null,
+} as const satisfies Omit<SidebarScene, "records" | "path">;
 
 /** The scenes, in order: `?scene=1` is the first. */
 export const SIDEBAR_SCENES: ReadonlyArray<SidebarScene> = [
   {
+    ...SCENE_DEFAULTS,
     records: buildSceneRecords(SCENE_1_THREADS),
     path: `/threads/${THREAD_IDS.applePay}`,
-    pressMore: null,
-    openDoneShelf: false,
     unsentThreadIds: [THREAD_IDS.altText],
-    face: "threads",
   },
   {
+    ...SCENE_DEFAULTS,
     records: buildSceneRecords(SCENE_2_THREADS),
     path: "/threads/s-playwright-flake",
-    pressMore: null,
-    openDoneShelf: false,
-    unsentThreadIds: [],
-    face: "threads",
   },
   {
+    ...SCENE_DEFAULTS,
     records: buildSceneRecords(PAYMENTS_THREADS),
     // One of the five threads the project shows, so the "more" row still
     // counts two hidden threads.
     path: "/threads/s-refund-webhooks",
-    pressMore: "2 more threads",
-    openDoneShelf: false,
-    unsentThreadIds: [],
-    face: "threads",
+    pressMore: "2 more",
   },
   {
+    ...SCENE_DEFAULTS,
     records: { ...buildSceneRecords(SCENE_2_THREADS), connections: [FAILED_CONNECTION] },
     path: "/",
-    pressMore: null,
-    openDoneShelf: false,
-    unsentThreadIds: [],
     face: "orchestration",
   },
   {
+    ...SCENE_DEFAULTS,
     records: buildSceneRecords(SCENE_5_THREADS),
     path: `/threads/${THREAD_IDS.flakyTest}`,
-    pressMore: null,
     openDoneShelf: true,
-    unsentThreadIds: [],
-    face: "threads",
+  },
+  {
+    ...SCENE_DEFAULTS,
+    records: buildSceneRecords([...RESULT_PAIR, ...SCENE_6_SINGLES]),
+    path: "/threads/s-ideal-notes",
+  },
+  {
+    ...SCENE_DEFAULTS,
+    records: buildSceneRecords([...THREE_DS_GROUP, ...SCENE_7_SINGLES]),
+    path: "/threads/s-3ds-lead",
+    unfoldGroup: "Fix 3-D Secure checkout for EU cards",
+  },
+  {
+    ...SCENE_DEFAULTS,
+    records: buildSceneRecords([...RESULT_CREW, ...SCENE_8_SINGLES]),
+    path: "/threads/s-ideal-notes",
+  },
+  {
+    ...SCENE_DEFAULTS,
+    records: buildSceneRecords([...RESULT_CREW, ...SCENE_8_SINGLES]),
+    path: "/threads/s-ideal-notes",
+    unfoldGroup: RESULT_GROUP_TITLE,
+  },
+  {
+    ...SCENE_DEFAULTS,
+    records: buildSceneRecords(SCENE_10_THREADS),
+    path: "/threads/s-cart-totals",
+    openDoneShelf: true,
+  },
+  {
+    ...SCENE_DEFAULTS,
+    records: buildSceneRecords([...RESULT_CREW, ...SCENE_8_SINGLES]),
+    path: "/threads/s-ideal-notes",
+    showCardOf: RESULT_GROUP_TITLE,
+  },
+  {
+    ...SCENE_DEFAULTS,
+    records: buildSceneRecords(SCENE_10_THREADS),
+    path: "/threads/s-cart-totals",
+    openDoneShelf: true,
+    unfoldGroup: "Fix 3-D Secure checkout for EU cards",
   },
 ];

@@ -1,7 +1,7 @@
 /**
  * Tests `buildLanes(sessions)`, which groups sessions into the five lanes in
- * their fixed order with a thread that has an open Request in the waiting
- * lane only, `buildHeadline(sessions, now)`, which summarizes the
+ * their fixed order with a Thread or an Agent's session that has an open
+ * Request in the waiting lane only, `buildHeadline(sessions, now)`, which summarizes the
  * same groups in one sentence, and the functions that sum up, describe and
  * list the step sessions, which sit in no lane.
  */
@@ -20,6 +20,7 @@ const RUN_ID = "01a06d02-c111-7a0e-8b3d-9c1f1f3a9c2e";
 const BASE: Session = {
   id: "s0",
   title: "Fix the login bug",
+  kind: "thread",
   role: null,
   status: "idle",
   resumable: false,
@@ -115,11 +116,24 @@ describe("buildLanes", () => {
   });
 
   it("places every session that answers a conversation in the assistants lane and in no other", () => {
-    const busy = buildSession({ id: "busy", status: "busy", agentId: "ada", conversationId: "c" });
-    const idle = buildSession({ id: "idle", status: "idle", agentId: "ada", conversationId: "c" });
+    const busy = buildSession({
+      id: "busy",
+      status: "busy",
+      kind: "assistant",
+      agentId: "ada",
+      conversationId: "c",
+    });
+    const idle = buildSession({
+      id: "idle",
+      status: "idle",
+      kind: "assistant",
+      agentId: "ada",
+      conversationId: "c",
+    });
     const exited = buildSession({
       id: "exited",
       status: "exited",
+      kind: "assistant",
       agentId: "ada",
       conversationId: "c",
     });
@@ -156,6 +170,7 @@ describe("buildLanes", () => {
     const answering = buildSession({
       id: "answering",
       status: "busy",
+      kind: "assistant",
       agentId: "ada",
       conversationId: "c",
       openRequests: [REQUEST],
@@ -163,6 +178,7 @@ describe("buildLanes", () => {
     const step = buildSession({
       id: "step",
       status: "busy",
+      kind: "run",
       agentId: "ada",
       runId: RUN_ID,
       openRequests: [REQUEST],
@@ -177,13 +193,32 @@ describe("buildLanes", () => {
 
   it("places a step session in no lane, whatever its status", () => {
     const started = (["busy", "idle", "exited"] as const).map((status) =>
-      buildSession({ id: `step-${status}`, status, agentId: "ada", runId: RUN_ID }),
+      buildSession({ id: `step-${status}`, status, kind: "run", agentId: "ada", runId: RUN_ID }),
     );
     const thread = buildSession({ id: "thread", status: "busy" });
 
     const lanes = buildLanes([...started, thread]);
 
     expect(lanes.flatMap((lane) => lane.sessions.map((s) => s.id))).toEqual(["thread"]);
+  });
+
+  it("places an Agent's session outside a run or a conversation in the lanes, as a Thread is", () => {
+    const partner = buildSession({ id: "partner", status: "busy", kind: "agent", agentId: "ada" });
+    const asking = buildSession({
+      id: "asking",
+      status: "idle",
+      kind: "agent",
+      agentId: "ada",
+      openRequests: [REQUEST],
+    });
+    const gone = buildSession({ id: "gone", status: "exited", kind: "agent", agentId: "ada" });
+
+    const lanes = buildLanes([partner, asking, gone]);
+    const byKind = Object.fromEntries(lanes.map((lane) => [lane.kind, lane.sessions]));
+
+    expect(byKind.running!.map((s: Session) => s.id)).toEqual(["partner"]);
+    expect(byKind.waiting!.map((s: Session) => s.id)).toEqual(["asking"]);
+    expect(byKind.settled!.map((s: Session) => s.id)).toEqual(["gone"]);
   });
 });
 
@@ -254,8 +289,20 @@ describe("buildHeadline", () => {
 
   it("counts a session that answers a conversation by its status, as it counts a thread", () => {
     const sessions = [
-      buildSession({ id: "a1", status: "busy", agentId: "ada", conversationId: "c" }),
-      buildSession({ id: "a2", status: "idle", agentId: "bob", conversationId: "d" }),
+      buildSession({
+        id: "a1",
+        status: "busy",
+        kind: "assistant",
+        agentId: "ada",
+        conversationId: "c",
+      }),
+      buildSession({
+        id: "a2",
+        status: "idle",
+        kind: "assistant",
+        agentId: "bob",
+        conversationId: "d",
+      }),
       buildSession({ id: "t1", status: "busy" }),
     ];
 
@@ -282,7 +329,7 @@ describe("buildHeadline", () => {
 
   it("does not count step sessions", () => {
     const sessions = [
-      buildSession({ id: "w1", status: "busy", agentId: "ada", runId: RUN_ID }),
+      buildSession({ id: "w1", status: "busy", kind: "run", agentId: "ada", runId: RUN_ID }),
       buildSession({ id: "t1", status: "idle" }),
     ];
 
@@ -290,6 +337,15 @@ describe("buildHeadline", () => {
     // Sessions exist, so the screen is not empty, but none of them is a thread
     // or an assistant's session.
     expect(buildHeadline(sessions.slice(0, 1), now)).toBe("No threads active this week");
+  });
+
+  it("counts an Agent's session outside a run or a conversation by its status, as it counts a thread", () => {
+    const sessions = [
+      buildSession({ id: "p1", status: "busy", kind: "agent", agentId: "ada" }),
+      buildSession({ id: "t1", status: "idle" }),
+    ];
+
+    expect(buildHeadline(sessions, now)).toBe("1 running · 1 idle");
   });
 });
 
@@ -304,6 +360,7 @@ describe("step sessions", () => {
       status,
       createdAt,
       lastActivityAt: createdAt,
+      kind: "run",
       agentId: "ada",
       runId: RUN_ID,
       stepId: "implement",

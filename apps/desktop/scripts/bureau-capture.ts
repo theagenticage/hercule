@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares thirty-eight pairs of
+ * For each theme, Whitehaven and Orient Express, it compares thirty-nine pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -19,6 +19,10 @@
  * region of an app specimen drawn from a fixture:
  * - the sidebar (x 0-272) of session-active.html: the book's page edited by
  *   specimens/sidebar-reference.ts, and the sidebar specimen (sidebar.html);
+ * - the sidebar rows: the sidebar (x 0-272) of the Workbench, refined
+ *   drawing's `?state=rows`, which draws one row each for 1, 2, 3 and 10
+ *   Threads, edited by specimens/sidebar-rows-reference.ts, and the sidebar
+ *   rows specimen (sidebar-rows.html);
  * - the thread (x 272-1440, the main pane) of session-active.html: the
  *   book's page edited by specimens/thread-reference.ts, and the thread
  *   specimen (thread.html);
@@ -269,6 +273,43 @@ const SIDEBAR_PARTS = [
   ".side-me > .side-name",
   ".side-me > .icon-btn",
   ".side-me > .icon-btn > svg",
+];
+
+// Every part of the sidebar rows whose box is compared, as a selector inside
+// `aside.side`. The Workbench, refined drawing names the parts of a group's
+// row with its own classes, so a part that the two pages name differently is
+// one selector that lists both names: the app's, then the drawing's.
+const SIDEBAR_ROWS_PARTS = [
+  ".side-top > .icon-btn",
+  ".seg--side",
+  ".seg--side > button",
+  ".side-actions > .nav-row",
+  ".side-actions > .icon-btn",
+  ".side-scroll",
+  ".side-h",
+  ".side-h > .count",
+  ".side-h > .proj",
+  ".side-h > .proj > span",
+  ".side-h > .side-need, .side-h > .st-need",
+  ".side-h > .icon-btn",
+  ".side-row",
+  ".side-row > svg",
+  ".side-row .side-name",
+  ".side-row .side-ask",
+  ".side-row .side-asker, .side-row .b2-asker",
+  ".side-row .side-end",
+  ".side-thread, .st-thread",
+  ".side-line, .st-line",
+  ".side-detail, .st-detail",
+  ".side-glyph, .st-glyph",
+  ".side-detail-clip, .st-clip",
+  ".side-dots, .b2-dots",
+  ".side-dot, .b2-dot",
+  ".side-dots-more, .b2-more",
+  ".side-foot",
+  ".side-sum",
+  ".side-sum > b",
+  ".side-me",
 ];
 
 // Every part of the thread screen whose box is compared, as a selector
@@ -1198,6 +1239,16 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
     region: SIDEBAR_REGION,
     scope: "aside.side",
     parts: SIDEBAR_PARTS,
+  },
+  {
+    name: "sidebar-rows",
+    bookPage: "sidebar-directions/workbench-refined/desktop.html",
+    referenceModule: "sidebar-rows-reference.ts",
+    specimenPage: "sidebar-rows.html",
+    state: "rows",
+    region: SIDEBAR_REGION,
+    scope: "aside.side",
+    parts: SIDEBAR_ROWS_PARTS,
   },
   {
     name: "thread",

@@ -261,7 +261,7 @@ export const buildThreadGroups = ({
   // The sidebar lists Threads only. A session an Agent runs belongs to that
   // Agent: an assistant's session shows under Assistants, and a workflow
   // step's session under its run.
-  const threads = sessions.filter((session) => session.agentId === null);
+  const threads = sessions.filter((session) => session.kind === "thread");
   const rows = buildThreadRows(threads, mode, runners, instances);
   const sessionsById = new Map(threads.map((session) => [session.id, session]));
   const listedProjectIds = new Set(projects.map((each) => each.id));

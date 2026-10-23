@@ -177,6 +177,8 @@ const summarize = (run: Run): RunSummary =>
 /** The review step's session, which asks the user to approve a command. */
 const ASKING: Session = buildSession({
   id: SESSION_ID,
+  kind: "run",
+  agentId: "01a06d02-7b00-7000-8000-000000000001",
   runId: RUN_ID,
   stepId: "review",
   runnerId: RUNNER_ID,

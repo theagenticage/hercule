@@ -12,7 +12,7 @@ import { onlineManager, type QueryClient } from "@tanstack/react-query";
 import { invalidateWithoutCancelling } from "@hercule/client-core";
 import type { OpenRequest, Session, SessionRequest } from "@hercule/contract";
 import { ageClock } from "../../app/age-clock";
-import { projectsQuery, threadsQuery } from "../../app/queries";
+import { projectsQuery, sessionQuery, threadAndAgentSessionsQuery } from "../../app/queries";
 import {
   buildErrorBody,
   buildFixtureAssistant,
@@ -57,7 +57,7 @@ const countReads = (calls: readonly Call[], path: string): number =>
 const readsThreads = (call: Call): boolean =>
   call.method === "GET" &&
   call.path === "/api/v1/sessions" &&
-  new URLSearchParams(call.search).get("thread") === "true";
+  new URLSearchParams(call.search).getAll("kind").includes("thread");
 
 /** Counts the reads of the thread list among `calls`. */
 const countThreadReads = (calls: readonly Call[]): number => calls.filter(readsThreads).length;
@@ -170,12 +170,12 @@ describe("the shell's loader", () => {
       expect(countReads(calls, path), path).toBeGreaterThan(0);
     }
     const client = context.controller!.client;
-    expect(context.queryClient.getQueryData(threadsQuery(client).queryKey)).toHaveLength(
-      SIDEBAR_FIXTURE.threads.length,
-    );
+    expect(
+      context.queryClient.getQueryData(threadAndAgentSessionsQuery(client).queryKey),
+    ).toHaveLength(SIDEBAR_FIXTURE.threads.length);
   });
 
-  it("reads only threads, and follows the cursor to the last page", async () => {
+  it("reads the Threads and the Agent sessions of the last 14 days, and follows the cursor to the last page", async () => {
     const [first, ...rest] = SIDEBAR_FIXTURE.threads;
     const { calls, context } = await startShell({
       handlers: {
@@ -188,21 +188,30 @@ describe("the shell's loader", () => {
       },
     });
     const client = context.controller!.client;
-    expect(context.queryClient.getQueryData(threadsQuery(client).queryKey)).toEqual(
+    expect(context.queryClient.getQueryData(threadAndAgentSessionsQuery(client).queryKey)).toEqual(
       SIDEBAR_FIXTURE.threads,
     );
-    const reads = calls.filter(readsThreads);
-    expect(
-      reads.slice(0, 2).map((call) => Object.fromEntries(new URLSearchParams(call.search))),
-    ).toEqual([
-      { thread: "true", limit: "500" },
-      { thread: "true", limit: "500", cursor: "page-2" },
+    const reads = calls.filter(readsThreads).slice(0, 2);
+    expect(reads.map((call) => new URLSearchParams(call.search).getAll("kind"))).toEqual([
+      ["thread", "agent"],
+      ["thread", "agent"],
     ]);
+    expect(reads.map((call) => new URLSearchParams(call.search).get("cursor"))).toEqual([
+      null,
+      "page-2",
+    ]);
+    // One cutoff for both pages, 14 days before the app first asked.
+    const [firstRead, secondRead] = reads.map((call) =>
+      new URLSearchParams(call.search).get("doneSince"),
+    );
+    expect(secondRead).toBe(firstRead);
+    expect(Date.now() - Date.parse(firstRead!)).toBeGreaterThanOrEqual(14 * 24 * 60 * 60 * 1000);
     // The shell also reads the live sessions that are not threads, for "From runs".
     const agentRead = calls.find(
       (call) =>
         call.path === "/api/v1/sessions" &&
-        new URLSearchParams(call.search).get("thread") === "false",
+        !readsThreads(call) &&
+        new URLSearchParams(call.search).getAll("kind").includes("agent"),
     );
     expect(new URLSearchParams(agentRead?.search).getAll("status")).toEqual([
       "queued",
@@ -248,7 +257,9 @@ describe("the shell's loader", () => {
     // The other reads succeeded before the controller rejected the token.
     // Kept, they would show as the sidebar of whoever signs in next.
     const client = context.controller!.client;
-    expect(context.queryClient.getQueryData(threadsQuery(client).queryKey)).toBeUndefined();
+    expect(
+      context.queryClient.getQueryData(threadAndAgentSessionsQuery(client).queryKey),
+    ).toBeUndefined();
   });
 });
 
@@ -308,7 +319,7 @@ describe("the shell's live connection", () => {
       handlers: { "GET /api/v1/sessions": answerThreads },
     });
     const queryClient = context.queryClient;
-    const threadsKey = threadsQuery(context.controller!.client).queryKey;
+    const threadsKey = threadAndAgentSessionsQuery(context.controller!.client).queryKey;
     holdReads = true;
     const before = countThreadReads(calls);
 
@@ -530,6 +541,45 @@ describe("Go > Office", () => {
       expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.backupsKey}`);
     });
   });
+
+  it("opens an Agent's session that works in the Office's drawer, and one that has ended on its own screen", async () => {
+    const bunPin = SIDEBAR_FIXTURE.threads.find((each) => each.id === FIXTURE_THREAD_IDS.bunPin)!;
+    const buildAgentSession = (id: string, over: Partial<Session>): Session => ({
+      ...bunPin,
+      id,
+      title: "Reviewer",
+      kind: "agent",
+      agentId: "01a06d02-7c00-7000-8000-000000000001",
+      ...over,
+    });
+    const working = buildAgentSession("01a06d02-7b00-7000-8000-0000000000a1", { status: "busy" });
+    const ended = buildAgentSession("01a06d02-7b00-7000-8000-0000000000a2", { status: "exited" });
+    const { context, fake, router } = await startShell({
+      path: "/office",
+      handlers: buildSidebarHandlers({
+        ...SIDEBAR_FIXTURE,
+        agentSessions: [working, ended],
+      }),
+    });
+
+    fake.openDestination({ kind: "thread", sessionId: working.id });
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ session: working.id });
+    });
+    expect(router.state.location.pathname).toBe("/office");
+
+    // The session's own cached record is older than the list and still says
+    // it works. The list is the newer answer, so the record must not seat it.
+    const client = context.controller!.client;
+    context.queryClient.setQueryData(sessionQuery(client, ended.id).queryKey, {
+      ...ended,
+      status: "busy",
+    });
+    fake.openDestination({ kind: "thread", sessionId: ended.id });
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${ended.id}`);
+    });
+  });
 });
 
 describe("Go > Workflows", () => {
@@ -697,6 +747,45 @@ describe("the threads and assistants waiting on the user", () => {
     });
     expect(fake.waitingLists).toEqual([[RUNBOOK_WAITING]]);
   });
+
+  it("includes the open Done thread the sidebar's read leaves out, while it still asks", async () => {
+    // A Thread marked Done 40 days ago is older than the sidebar's 14 days,
+    // so only the thread screen's own read of the session holds it.
+    const old: Session = {
+      ...THREAD_FIXTURES.finished.session,
+      id: "01a06d02-7400-7000-8000-0000000009d0",
+      title: "Retire the old queue",
+      status: "busy",
+      done: { at: "2026-08-01T09:00:00.000Z", by: "user" },
+      openRequests: [
+        {
+          requestId: "req-old",
+          itemId: "tool-old",
+          kind: "command_approval",
+          decisions: ["allow", "deny"],
+          detail: { command: "git push" },
+        },
+      ],
+    };
+    // The thread screen opens its own live subscriptions, which `startShell`
+    // does not expect, so the app is rendered here.
+    stubApi({
+      ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+      ...buildThreadHandlers({ ...THREAD_FIXTURES.finished, session: old }),
+    });
+    const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+    await renderApp(fake, { path: `/threads/${old.id}` });
+
+    await waitFor(() => {
+      expect(fake.waitingLists.at(-1)).toContainEqual({
+        destination: { kind: "thread", sessionId: old.id },
+        requestId: "req-old",
+        openRequestIds: ["req-old"],
+        title: "Retire the old queue",
+        body: "Run git push?",
+      });
+    });
+  });
 });
 
 /** Returns the Go menu item that opens the thread `sessionId`, titled `title`. */
@@ -705,14 +794,18 @@ const buildThreadItem = (sessionId: string, title: string) => ({
   title,
 });
 
+// The runbook and flaky threads share one workspace, so they are one row named
+// after its lead, "Fix flaky webhook tests". Waiting on you lists the waiting
+// runbook thread under that row name, and the row itself follows it. The Go
+// menu lists the group once, where it shows first, so it opens the runbook
+// thread that asks.
 describe("the Go menu", () => {
   it("sends main the sidebar's threads, top to bottom, once", async () => {
     const { fake } = await startShell();
 
     expect(fake.goMenus).toEqual([
       [
-        buildThreadItem(FIXTURE_THREAD_IDS.runbook, "Write the retry runbook"),
-        buildThreadItem(FIXTURE_THREAD_IDS.flaky, "Fix flaky webhook tests"),
+        buildThreadItem(FIXTURE_THREAD_IDS.runbook, "Fix flaky webhook tests"),
         buildThreadItem(FIXTURE_THREAD_IDS.bunPin, "Bump the Bun pin"),
         buildThreadItem(FIXTURE_THREAD_IDS.backupsKey, "Rotate the backups key"),
         buildThreadItem(FIXTURE_THREAD_IDS.pricingPage, "Sketch the pricing page"),
@@ -724,9 +817,9 @@ describe("the Go menu", () => {
     const { fake } = await startShell({ handlers: WITH_ADA });
 
     expect(fake.goMenus.at(-1)?.slice(0, 3)).toEqual([
-      buildThreadItem(FIXTURE_THREAD_IDS.runbook, "Write the retry runbook"),
+      buildThreadItem(FIXTURE_THREAD_IDS.runbook, "Fix flaky webhook tests"),
       { destination: { kind: "assistant", assistantId: ADA.id }, title: "Ada" },
-      buildThreadItem(FIXTURE_THREAD_IDS.flaky, "Fix flaky webhook tests"),
+      buildThreadItem(FIXTURE_THREAD_IDS.bunPin, "Bump the Bun pin"),
     ]);
   });
 
@@ -749,7 +842,6 @@ describe("the Go menu", () => {
       expect(fake.goMenus).toHaveLength(2);
     });
     expect(fake.goMenus[1]?.map((item) => item.title)).toEqual([
-      "Write the retry runbook",
       "Fix flaky webhook tests",
       "Bump the Bun pin to 1.3",
       "Rotate the backups key",

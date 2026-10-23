@@ -15,6 +15,8 @@
  * The focused item is always mounted, even when it scrolls far out of view,
  * so keyboard focus is never lost to the page. When the focused item leaves
  * the list, focus moves to the item the caller's `pickFocusFallback` picks.
+ * When a control inside the focused item goes and the item stays, focus moves
+ * to the item's first element that carries its `data-key`.
  */
 import {
   useCallback,
@@ -53,6 +55,12 @@ const NO_FOCUS: Focus = { key: null, restore: false };
 /** Returns the `data-key` of the item that contains `element`, or `null` when no item does. */
 const findItemKey = (element: Element): string | null =>
   element.closest("[data-key]")?.getAttribute("data-key") ?? null;
+
+/** Focuses the first element in `list` that carries `key` as its `data-key`, if the list is mounted and holds one. */
+const focusItem = (list: HTMLElement | null, key: string): void => {
+  const elements = list?.querySelectorAll<HTMLElement>("[data-key]") ?? [];
+  [...elements].find((element) => element.dataset.key === key)?.focus();
+};
 
 /**
  * Renders `items` virtualized in a `nav` that scrolls, with `head` above them
@@ -194,9 +202,17 @@ export function VirtualList<Item extends { readonly key: string }>({
 
   useLayoutEffect(() => {
     if (!focus.restore || focus.key === null) return;
-    const elements = scrollRef.current?.querySelectorAll<HTMLElement>("[data-key]") ?? [];
-    [...elements].find((element) => element.dataset.key === focus.key)?.focus();
+    focusItem(scrollRef.current, focus.key);
   }, [focus, scrollRef]);
+
+  // A control inside the focused item can go while the item stays, such as a
+  // row's Done button once nothing is left to mark. React sends no blur for
+  // it, and the browser moves focus to the page, so the item takes focus
+  // back. An item that left the list is handled above, by `restore`.
+  useLayoutEffect(() => {
+    if (focus.key === null || focus.restore || document.activeElement !== document.body) return;
+    focusItem(scrollRef.current, focus.key);
+  });
 
   const noteFocus = (event: FocusEvent<HTMLElement>): void => {
     setFocus({ key: findItemKey(event.target), restore: false });

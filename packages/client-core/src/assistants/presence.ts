@@ -32,7 +32,7 @@ export const findNewestConversationSession = (
 ): Session | null => {
   let newest: Session | null = null;
   for (const session of sessions) {
-    if (session.agentId !== assistantId || session.conversationId === null) continue;
+    if (session.kind !== "assistant" || session.agentId !== assistantId) continue;
     if (newest === null || session.createdAt > newest.createdAt) newest = session;
   }
   return newest;

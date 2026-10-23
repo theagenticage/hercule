@@ -20,6 +20,7 @@ const BASE: ThreadConfig = {
 const SESSION: Session = {
   id: "s1",
   title: "Fix the login bug",
+  kind: "thread",
   role: null,
   status: "idle",
   resumable: false,

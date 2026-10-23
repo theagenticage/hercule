@@ -149,11 +149,11 @@ export const chooseMessageStamps = (
 /**
  * Returns the id of the assistant a session answered, or null when the
  * session is not part of a conversation. A session that runs an agent outside
- * a conversation (a workflow step, say) also has an `agentId`, so the
- * `conversationId` is what marks a session as an assistant's.
+ * a conversation (a workflow step, say) also has an `agentId`, so the session's
+ * kind is what marks it as an assistant's.
  */
 export const findAnsweredAssistantId = (session: Session): string | null =>
-  session.conversationId === null ? null : session.agentId;
+  session.kind === "assistant" ? session.agentId : null;
 
 /**
  * Checks whether the session view offers Steer and Cancel on the session's
@@ -164,4 +164,4 @@ export const findAnsweredAssistantId = (session: Session): string | null =>
  * corrects one by sending another message in the conversation instead.
  */
 export const canSteerOrCancelQueuedInputs = (session: Session): boolean =>
-  session.conversationId === null;
+  session.kind !== "assistant";

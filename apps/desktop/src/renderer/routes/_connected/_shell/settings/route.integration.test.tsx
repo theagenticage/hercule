@@ -110,9 +110,9 @@ describe("the way into Settings", () => {
     await userEvent.click(within(await findSettingsList()).getByRole("link", { name: "System" }));
     await screen.findByRole("heading", { level: 1, name: "System" });
 
-    await userEvent.click(screen.getByRole("link", { name: /Fix flaky webhook tests/ }));
+    await userEvent.click(screen.getByRole("link", { name: "Bump the Bun pin, idle" }));
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
+      expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.bunPin}`);
     });
     expect(screen.queryByRole("navigation", { name: "Settings" })).toBeNull();
     expect(screen.getByRole("link", { name: "Settings" }).classList.contains("is-on")).toBe(false);

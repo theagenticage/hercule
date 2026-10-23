@@ -461,8 +461,8 @@ const RESOLVES: Record<string, string> = {
   "session.respondToQuestion id": "session.query",
   "session.stop id": "session.query",
   "session.continue id": "session.query",
-  "session.markDone id": "session.query",
-  "session.reopen id": "session.query",
+  "session.markDone sessionIds": "session.query",
+  "session.reopen sessionIds": "session.query",
 
   "input.query id": "session.query",
   "input.update id": "session.query",

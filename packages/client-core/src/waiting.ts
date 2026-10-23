@@ -1,7 +1,7 @@
 /**
- * What waits on the user: the threads and the assistants whose session has
- * an open Request, whichever of its agents asked. Answering the last one,
- * wherever it is answered, ends the wait.
+ * What waits on the user: the Threads, the Agents' sessions and the
+ * assistants whose session has an open Request, whichever of its agents
+ * asked. Answering the last one, wherever it is answered, ends the wait.
  *
  * The desktop app counts these on its dock badge, shows a notification for
  * each, lists them in Waiting on you and in its Go menu. All of them read
@@ -22,12 +22,13 @@
  */
 import type { Session, SessionRequest } from "@hercule/contract";
 import type { AssistantRow } from "./assistants/rows";
+import type { GroupRow } from "./threads/group-row";
 import { findOldestOpenRequest } from "./threads/oldest-request";
 import { compareNewestFirst } from "./threads/rows";
 import { formatRequestQuestion } from "./threads/request-question";
 
 /** The fields every entry has, read from the session that waits and its open Requests. */
-interface WaitingSession {
+interface WaitingRequestFields {
   /**
    * The session that asks: the thread's own, or the current session of the
    * assistant's main conversation.
@@ -53,21 +54,39 @@ interface WaitingSession {
   readonly activityAt: string;
 }
 
-/** A thread waiting on the user, and the Requests it waits on. */
-export interface WaitingThread extends WaitingSession {
-  readonly kind: "thread";
+/**
+ * A Thread or an Agent's session waiting on the user, and the Requests it
+ * waits on. Both open as a thread, so both are entries of this kind.
+ */
+export interface WaitingSession extends WaitingRequestFields {
+  readonly kind: "session";
+  /** The session's own title. */
   readonly title: string;
+  /** The name of the sidebar row that holds the session: the title of its group's lead. */
+  readonly groupName: string;
+  /**
+   * The key of the group that holds the session (`GroupRow.key`), or
+   * `session:<id>` with the session's own id when no group holds it, so a
+   * session in no group is its own group.
+   */
+  readonly groupKey: string;
+  /**
+   * What the session is called in its group, such as "review", or `null`
+   * when it is the lead or alone in its group, so nothing needs telling
+   * apart.
+   */
+  readonly askerLabel: string | null;
 }
 
 /** An assistant waiting on the user, and the Requests its session waits on. */
-export interface WaitingAssistant extends WaitingSession {
+export interface WaitingAssistant extends WaitingRequestFields {
   readonly kind: "assistant";
   readonly assistantId: string;
   readonly name: string;
 }
 
-/** A thread or an assistant waiting on the user. */
-export type Waiting = WaitingThread | WaitingAssistant;
+/** A Thread, an Agent's session or an assistant waiting on the user. */
+export type Waiting = WaitingSession | WaitingAssistant;
 
 /**
  * Returns the text of the notification about `newest`, the newest open
@@ -95,7 +114,7 @@ const formatNotificationBody = (newest: SessionRequest, others: number): string 
  * Returns the parts of an entry that come from `session` and its open
  * Requests, or null when it has none and so does not wait on the user.
  */
-const buildRequestFields = (session: Session): WaitingSession | null => {
+const buildRequestFields = (session: Session): WaitingRequestFields | null => {
   const oldest = findOldestOpenRequest(session);
   const newest = session.openRequests.at(-1);
   if (oldest === null || newest === undefined) return null;
@@ -111,23 +130,60 @@ const buildRequestFields = (session: Session): WaitingSession | null => {
 };
 
 /**
- * Returns every thread in `threads` and every assistant in `assistantRows`
- * whose session has an open Request, each with its open Requests. An
- * assistant's session is the one on its row; an assistant with no session
- * waits on nothing.
+ * Returns every Thread and Agent session in `sessions` that has an open
+ * Request, each with its open Requests. `sessions` holds each session once.
  *
- * The list is sorted with the most recently active first, threads and
+ * - `rows` are the sidebar's rows of those sessions. A session's entry names
+ *   the row that holds it, and what the session is called there. A session no
+ *   row holds, such as an Agent's session in a workspace where no Thread
+ *   works, is named by its own title and keyed by its own id.
+ * - A Thread marked Done is listed while it waits, because a question must
+ *   never hide.
+ *
+ * The entries are in the order of `sessions`; `listWaiting` sorts them.
+ */
+export const listWaitingSessions = (
+  sessions: readonly Session[],
+  rows: readonly GroupRow[],
+): WaitingSession[] => {
+  const asking = sessions.flatMap((session) => {
+    const fields = buildRequestFields(session);
+    return fields === null ? [] : [{ session, fields }];
+  });
+  if (asking.length === 0) return [];
+  const places = new Map(
+    rows.flatMap((row) =>
+      row.members.map((member) => [member.sessionId, { row, member }] as const),
+    ),
+  );
+  return asking.map(({ session, fields }) => {
+    const place = places.get(session.id);
+    return {
+      kind: "session",
+      title: session.title,
+      groupKey: place?.row.key ?? `session:${session.id}`,
+      groupName: place?.row.title ?? session.title,
+      askerLabel: place?.member.askerLabel ?? null,
+      ...fields,
+    };
+  });
+};
+
+/**
+ * Returns `waitingSessions` and every assistant in `assistantRows` whose
+ * session has an open Request, each with its open Requests. An assistant's
+ * session is the one on its row; an assistant with no session waits on
+ * nothing.
+ *
+ * The list is sorted with the most recently active first, sessions and
  * assistants mixed, and two entries active at the same moment by session id.
  */
 export const listWaiting = (
-  threads: readonly Session[],
+  waitingSessions: readonly WaitingSession[],
   assistantRows: readonly AssistantRow[],
 ): Waiting[] =>
   [
-    ...threads.flatMap((session): Waiting[] => {
-      const fields = buildRequestFields(session);
-      return fields === null ? [] : [{ kind: "thread", title: session.title, ...fields }];
-    }),
+    ...waitingSessions,
     ...assistantRows.flatMap((row): Waiting[] => {
       const fields = row.session === null ? null : buildRequestFields(row.session);
       return fields === null
@@ -170,7 +226,8 @@ export const listWaitingRunSessions = (sessions: readonly Session[]): WaitingRun
   sessions
     .flatMap((session): WaitingRunSession[] => {
       const oldest = findOldestOpenRequest(session);
-      return session.runId === null || oldest === null
+      // A run's session always has its run's id; the check narrows the type.
+      return session.kind !== "run" || session.runId === null || oldest === null
         ? []
         : [
             {

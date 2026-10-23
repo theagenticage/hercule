@@ -142,6 +142,17 @@ export function drawBookBrand(name: string, size: number): Element {
 }
 
 /**
+ * Returns the icon crew.js draws for `name` at `size` pixels, as an element.
+ * crew.js returns an icon only as a string of markup, so the icon is parsed
+ * from it.
+ */
+export function drawBookIcon(name: string, size: number): Element {
+  const template = document.createElement("template");
+  template.innerHTML = readCrew().icon(name, size);
+  return template.content.firstElementChild!;
+}
+
+/**
  * Holds a Bureau book page still for a capture: stops every animation, so a
  * waiting face shows the frame the app draws, and hides the traffic-light
  * placeholders (`.tl`), where macOS draws the real ones over the app's

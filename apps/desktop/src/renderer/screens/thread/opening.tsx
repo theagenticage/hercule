@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { liveAgentSessionsQuery, threadsQuery } from "../../app/queries";
+import { liveAgentSessionsQuery, threadAndAgentSessionsQuery } from "../../app/queries";
 import { ThreadHeader } from "./thread-header";
 import "./opening.css";
 
@@ -21,10 +21,10 @@ import "./opening.css";
 export function ThreadOpening({ sessionId }: { readonly sessionId: string }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  const threads = useSuspenseQuery(threadsQuery(client)).data;
+  const sidebarSessions = useSuspenseQuery(threadAndAgentSessionsQuery(client)).data;
   const agentSessions = useSuspenseQuery(liveAgentSessionsQuery(client)).data;
   const session =
-    threads.find((each) => each.id === sessionId) ??
+    sidebarSessions.find((each) => each.id === sessionId) ??
     agentSessions.find((each) => each.id === sessionId);
 
   return (

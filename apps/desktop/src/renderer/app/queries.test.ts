@@ -15,7 +15,10 @@
  * that `forgetGoneThread` reads the session before it deletes the copy; that
  * `showThreadCopy` starts the read the copy needs; and that `signalsDoneQuery`
  * reads the legs of a page's handoffs in one request, and
- * `signalsClearedTodayQuery` reads none.
+ * `signalsClearedTodayQuery` reads none. Tests that the sidebar's session
+ * read asks for the Threads and Agent sessions of the last 14 days under a
+ * key that does not change while the app runs, and that `threadsQuery` keeps
+ * the Threads of it.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InfiniteQueryObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
@@ -30,6 +33,7 @@ import {
 } from "@hercule/client-core";
 import type { HandoffLeg, Signal, TranscriptRow } from "@hercule/contract";
 import { createApiStub } from "@hercule/client-core/testing";
+import { buildSession } from "@hercule/client-core/threads/testing";
 import {
   ensureShellData,
   forgetGoneThread,
@@ -43,6 +47,8 @@ import {
   signalsDoneQuery,
   storeNewestMessages,
   storeSentMessage,
+  threadAndAgentSessionsQuery,
+  threadsQuery,
   transcriptQuery,
 } from "./queries";
 import { answerTranscriptRead, readTranscriptReads } from "./testing-transcript";
@@ -266,6 +272,67 @@ describe("ensureShellData", () => {
       .map((query) => [JSON.stringify(query.queryKey), query.gcTime]);
     expect(kept.length).toBeGreaterThan(0);
     expect(kept).toEqual(kept.map(([key]) => [key, Infinity]));
+  });
+});
+
+describe("threadAndAgentSessionsQuery", () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const NOW = new Date("2026-10-23T12:00:00.000Z");
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("asks for the Threads and Agent sessions, minus the Threads marked Done more than 14 days ago", async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    const { fetch, calls } = createApiStub({ "GET /api/v1/sessions": { body: { items: [] } } });
+    const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
+
+    await new QueryClient().fetchQuery(threadAndAgentSessionsQuery(client));
+
+    const search = new URLSearchParams(calls[0]!.search);
+    expect(search.getAll("kind")).toEqual(["thread", "agent"]);
+    expect(search.get("doneSince")).toBe(new Date(NOW.getTime() - 14 * DAY_MS).toISOString());
+  });
+
+  it("keeps its key while the app runs, so a render days later reads nothing new", () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    const { fetch } = createApiStub({});
+    const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
+    const first = threadAndAgentSessionsQuery(client).queryKey;
+
+    vi.setSystemTime(NOW.getTime() + 3 * DAY_MS);
+
+    expect(threadAndAgentSessionsQuery(client).queryKey).toEqual(first);
+    expect(threadsQuery(client).queryKey).toEqual(first);
+  });
+
+  it("gives a client made later a fresh cutoff", () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    const { fetch } = createApiStub({});
+    const first = threadAndAgentSessionsQuery(createClient({ baseUrl: CONTROLLER_URL, fetch }));
+
+    vi.setSystemTime(NOW.getTime() + DAY_MS);
+    const later = threadAndAgentSessionsQuery(createClient({ baseUrl: CONTROLLER_URL, fetch }));
+
+    expect(later.queryKey).not.toEqual(first.queryKey);
+  });
+
+  it("is narrowed to the Threads by threadsQuery, from the same cached read", () => {
+    const { fetch } = createApiStub({});
+    const client = createClient({ baseUrl: CONTROLLER_URL, fetch });
+    const queryClient = new QueryClient();
+    const thread = buildSession({ id: "thread" });
+    const partner = buildSession({ id: "partner", agentId: "ada" });
+    queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, [thread, partner]);
+
+    const narrowed = new QueryObserver(queryClient, threadsQuery(client)).getCurrentResult();
+
+    expect(narrowed.data).toEqual([thread]);
+    expect(queryClient.getQueryData(threadAndAgentSessionsQuery(client).queryKey)).toEqual([
+      thread,
+      partner,
+    ]);
   });
 });
 

@@ -36,6 +36,7 @@ const buildShellRoutes = (user: Record<string, unknown> = {}): Readonly<Record<s
 const BASE_SESSION: Session = {
   id: "01a06d02-2000-7000-8000-000000000001",
   title: "Fix the login bug",
+  kind: "thread",
   role: null,
   status: "idle",
   resumable: false,
@@ -805,6 +806,7 @@ const ADA_SESSION = buildSession({
   id: "01a06d02-2000-7000-8000-00000000000a",
   title: "Answer Ada's conversation",
   status: "busy",
+  kind: "assistant",
   agentId: ADA.id,
   conversationId: "01a06d02-c000-7000-8000-000000000001",
   lastActivityAt: "2026-09-06T11:00:00.000Z",
@@ -817,6 +819,7 @@ const BOB_SESSION = buildSession({
   status: "exited",
   resumable: true,
   nativeSessionId: "native-bob",
+  kind: "assistant",
   agentId: BOB.id,
   conversationId: "01a06d02-c000-7000-8000-000000000002",
   lastActivityAt: "2026-09-05T11:00:00.000Z",

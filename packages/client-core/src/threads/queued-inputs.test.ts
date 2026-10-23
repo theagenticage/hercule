@@ -78,6 +78,7 @@ describe("canSteerQueuedInputs", () => {
     const conversation = buildSession({
       id: SESSION_ID,
       status: "busy",
+      kind: "assistant",
       conversationId: "01a12f36-0000-7000-8000-000000000001",
     });
     expect(canSteerQueuedInputs(conversation)).toBe(false);

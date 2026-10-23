@@ -78,12 +78,78 @@ export const listWorkspaceSessionTabs = (
 };
 
 /**
- * Returns the text of `session`'s tab: the id of the step for a run's step
- * session, whose title starts with the workflow's name that the header's
- * crumb already shows, and the title for any other session.
+ * Returns each session's label among the sessions shown together, one
+ * workspace's: a map from session id to label.
+ *
+ * - A run's step session is labelled with its step id, because its title
+ *   starts with the workflow's name, which the header's crumb already shows.
+ * - Any other session is labelled with its role, when it has one. Sessions
+ *   that share a role, ignoring case, are numbered by `createdAt` (ties by
+ *   session id, so the order of `sessions` never changes a label): `review`,
+ *   `review 2`, `review 3`. Each keeps its own spelling.
+ * - A session with no role is labelled with its full title, which the screen
+ *   cuts short. Titles are not numbered.
+ *
+ * The header's tabs and the sidebar's rows both call this, so they name a
+ * session the same way, as long as they pass the same Threads and Agent
+ * sessions. A run's step session and an assistant's session have no role, so
+ * they never change another session's number.
+ *
+ * - The header passes every session of the workspace that it holds
+ *   (`listSessionsOfWorkspace`), exited Agent sessions included.
+ * - The sidebar passes the sessions of a group (`SessionGroup.sessions`):
+ *   the workspace's Threads and Agent sessions that it holds.
+ *
+ * Both read the sidebar's sessions, so both lack the same Threads, those
+ * marked Done long ago, and they number alike.
+ *
+ * A list that lacks one of those sessions can number differently.
  */
-export const labelSessionTab = (session: Session): string =>
-  session.stepId === null ? session.title : session.stepId;
+export const labelWorkspaceSessions = (
+  sessions: readonly Session[],
+): ReadonlyMap<string, string> => {
+  const labels = new Map<string, string>();
+  const rolesSeen = new Map<string, number>();
+  const oldestFirst = sessions.toSorted(
+    (a, b) =>
+      Date.parse(a.createdAt) - Date.parse(b.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+  for (const session of oldestFirst) {
+    const role = session.role?.trim() ?? "";
+    if (session.kind === "run" && session.stepId !== null) {
+      labels.set(session.id, session.stepId);
+    } else if (role === "") {
+      labels.set(session.id, session.title);
+    } else {
+      const roleKey = role.toLowerCase();
+      const number = (rolesSeen.get(roleKey) ?? 0) + 1;
+      rolesSeen.set(roleKey, number);
+      labels.set(session.id, number === 1 ? role : `${role} ${number}`);
+    }
+  }
+  return labels;
+};
+
+/**
+ * Returns the sessions of `sessions` that work in the workspace
+ * `workspaceId`, each id once and in the order `sessions` first holds it.
+ * `sessions` is the sessions of several reads put together, so a session that
+ * two of them hold is returned once.
+ *
+ * Unlike a workspace's `sessionIds`, this keeps the sessions that have exited
+ * and the Agent sessions, which is what `labelWorkspaceSessions` needs to
+ * number a role the same way everywhere.
+ */
+export const listSessionsOfWorkspace = (
+  workspaceId: string,
+  sessions: readonly Session[],
+): readonly Session[] => {
+  const byId = new Map<string, Session>();
+  for (const session of sessions) {
+    if (session.workspaceId === workspaceId && !byId.has(session.id)) byId.set(session.id, session);
+  }
+  return [...byId.values()];
+};
 
 /**
  * Returns the threads of `workspace`, in the workspace's thread order, taken

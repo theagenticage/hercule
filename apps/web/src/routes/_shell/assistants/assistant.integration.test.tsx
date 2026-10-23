@@ -75,6 +75,7 @@ const SESSION_ID = "01a06d02-b100-7000-8000-000000000001";
 const buildConversationSession = (overrides: Partial<Session>): Session => ({
   id: SESSION_ID,
   title: "Answer Ada's conversation",
+  kind: "assistant",
   role: null,
   status: "idle",
   resumable: true,

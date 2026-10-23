@@ -6172,18 +6172,35 @@ describe("session.spawn into a workspace", () => {
   });
 });
 
-/** Marks a session Done over HTTP, as the user unless a token is given. */
-const markDone = (arranged: Arranged, id: string, token = arranged.token): Promise<Response> =>
-  send("POST", arranged.harness.base, `/api/v1/sessions/${id}/mark-done`, { token });
+/** Marks sessions Done over HTTP, as the user unless a token is given. */
+const markDone = (
+  arranged: Arranged,
+  ids: ReadonlyArray<string>,
+  token = arranged.token,
+): Promise<Response> =>
+  send("POST", arranged.harness.base, "/api/v1/sessions/mark-done", {
+    token,
+    body: { sessionIds: ids },
+  });
 
-/** Reopens a session over HTTP, as the user. */
-const reopen = (arranged: Arranged, id: string): Promise<Response> =>
-  send("POST", arranged.harness.base, `/api/v1/sessions/${id}/reopen`, { token: arranged.token });
+/** Reopens sessions over HTTP, as the user. */
+const reopen = (arranged: Arranged, ids: ReadonlyArray<string>): Promise<Response> =>
+  send("POST", arranged.harness.base, "/api/v1/sessions/reopen", {
+    token: arranged.token,
+    body: { sessionIds: ids },
+  });
 
-/** Returns the session in a 200 response, and fails the test on any other status. */
-const readSessionResponse = async (response: Response): Promise<Session> => {
+/** Returns the sessions in a 200 response, and fails the test on any other status. */
+const readSessionsResponse = async (response: Response): Promise<ReadonlyArray<Session>> => {
   expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as Session;
+  return (await response.json()) as ReadonlyArray<Session>;
+};
+
+/** Returns the one session in a 200 response to a list of one id. */
+const readSessionResponse = async (response: Response): Promise<Session> => {
+  const sessions = await readSessionsResponse(response);
+  expect(sessions).toHaveLength(1);
+  return sessions[0]!;
 };
 
 describe("session.markDone and session.reopen", () => {
@@ -6191,12 +6208,12 @@ describe("session.markDone and session.reopen", () => {
     await withFleet(async (arranged) => {
       const thread = await startIdleSession(arranged, "hello");
 
-      const marked = await readSessionResponse(await markDone(arranged, thread.id));
+      const marked = await readSessionResponse(await markDone(arranged, [thread.id]));
       expect(marked.done?.by).toBe("user");
       expect(typeof marked.done?.at).toBe("string");
       expect("reopenedAt" in marked).toBe(false);
 
-      const reopened = await readSessionResponse(await reopen(arranged, thread.id));
+      const reopened = await readSessionResponse(await reopen(arranged, [thread.id]));
       expect("done" in reopened).toBe(false);
       expect(typeof reopened.reopenedAt).toBe("string");
       expect(await readSession(arranged, thread.id)).toEqual(reopened);
@@ -6216,15 +6233,15 @@ describe("session.markDone and session.reopen", () => {
     await withFleet(async (arranged) => {
       const thread = await startIdleSession(arranged, "hello");
 
-      const neverDone = await readSessionResponse(await reopen(arranged, thread.id));
+      const neverDone = await readSessionResponse(await reopen(arranged, [thread.id]));
       expect("reopenedAt" in neverDone).toBe(false);
 
-      const first = await readSessionResponse(await markDone(arranged, thread.id));
-      const second = await readSessionResponse(await markDone(arranged, thread.id));
+      const first = await readSessionResponse(await markDone(arranged, [thread.id]));
+      const second = await readSessionResponse(await markDone(arranged, [thread.id]));
       expect(second.done).toEqual(first.done);
 
-      const reopened = await readSessionResponse(await reopen(arranged, thread.id));
-      const again = await readSessionResponse(await reopen(arranged, thread.id));
+      const reopened = await readSessionResponse(await reopen(arranged, [thread.id]));
+      const again = await readSessionResponse(await reopen(arranged, [thread.id]));
       expect(again.reopenedAt).toBe(reopened.reopenedAt);
 
       expect(await arranged.harness.audit("session.markedDone")).toHaveLength(1);
@@ -6236,7 +6253,7 @@ describe("session.markDone and session.reopen", () => {
     await withFleet(async (arranged) => {
       const done = await startIdleSession(arranged, "finished");
       const open = await spawnSessionOrFail(arranged, { prompt: "still going" });
-      await readSessionResponse(await markDone(arranged, done.id));
+      await readSessionResponse(await markDone(arranged, [done.id]));
 
       const listIds = async (query: string): Promise<ReadonlyArray<string>> => {
         const response = await get(
@@ -6255,7 +6272,8 @@ describe("session.markDone and session.reopen", () => {
       // Each of these filters matches only sessions spawned from an Agent.
       const someId = "01890a5d-ac96-774b-bcce-b302099a8057";
       for (const filter of [
-        "thread=false",
+        "kind=agent",
+        "kind=run&kind=assistant",
         `agentId=${someId}`,
         `runId=${someId}`,
         // Several runs, as repeated keys.
@@ -6276,31 +6294,159 @@ describe("session.markDone and session.reopen", () => {
     });
   });
 
-  it("refuses a session spawned from an Agent and writes no audit entry", async () => {
+  /** Spawns a session from a new Agent, which is never a Thread. */
+  const spawnAgentSession = async (arranged: Arranged): Promise<Session> => {
+    const worker = await readProfileNamed(arranged, "worker");
+    const created = await post(
+      arranged.harness.base,
+      "/api/v1/agents",
+      {
+        name: "assessor",
+        systemPrompt: "You assess tasks.",
+        instanceId: findInstanceId(arranged, "full-provider"),
+        permissionProfileId: worker.id,
+      },
+      arranged.token,
+    );
+    expect(created.status, await created.clone().text()).toBe(200);
+    const agent = (await created.json()) as { readonly id: string };
+    return spawnSessionOrFail(arranged, { agentId: agent.id, prompt: "assess" });
+  };
+
+  it("moves a list of Threads in one call, in the order given, with one audit entry for each", async () => {
     await withFleet(async (arranged) => {
-      const worker = await readProfileNamed(arranged, "worker");
-      const created = await post(
+      const first = await startIdleSession(arranged, "one");
+      const second = await startIdleSession(arranged, "two");
+      const ids = [second.id, first.id];
+
+      const marked = await readSessionsResponse(await markDone(arranged, ids));
+      expect(marked.map((one) => one.id)).toEqual(ids);
+      // One call is one moment: every Thread has the same time.
+      expect(new Set(marked.map((one) => one.done?.at)).size).toBe(1);
+      expect(marked.every((one) => one.done?.by === "user")).toBe(true);
+
+      const reopened = await readSessionsResponse(await reopen(arranged, ids));
+      expect(reopened.map((one) => one.id)).toEqual(ids);
+      expect(reopened.every((one) => !("done" in one))).toBe(true);
+      expect(new Set(reopened.map((one) => one.reopenedAt)).size).toBe(1);
+
+      for (const kind of ["session.markedDone", "session.reopened"] as const) {
+        const entries = await arranged.harness.audit(kind);
+        expect(entries.map((one) => [one.actor, one.payload])).toEqual(
+          expect.arrayContaining(ids.map((id) => ["user", { sessionId: id }])),
+        );
+        expect(entries).toHaveLength(ids.length);
+      }
+    });
+  });
+
+  it("leaves a Thread that is already Done as it was, and moves the rest of the list", async () => {
+    await withFleet(async (arranged) => {
+      const early = await startIdleSession(arranged, "early");
+      const late = await startIdleSession(arranged, "late");
+      const [alreadyDone] = await readSessionsResponse(await markDone(arranged, [early.id]));
+
+      const marked = await readSessionsResponse(await markDone(arranged, [early.id, late.id]));
+
+      expect(marked[0]?.done).toEqual(alreadyDone?.done);
+      expect(marked[1]?.done?.by).toBe("user");
+      expect(await arranged.harness.audit("session.markedDone")).toHaveLength(2);
+    });
+  });
+
+  it("marks and reopens nothing when one id is not a Thread, or not a session", async () => {
+    await withFleet(async (arranged) => {
+      const thread = await startIdleSession(arranged, "hello");
+      const agentSession = await spawnAgentSession(arranged);
+      const unknown = "01890a5d-ac96-774b-bcce-b302099a8057";
+
+      const notAThread = await markDone(arranged, [thread.id, agentSession.id]);
+      expect(notAThread.status).toBe(409);
+      const notAThreadBody = await readErrorBody(notAThread);
+      expect(notAThreadBody.code).toBe("invalid_state");
+      expect(notAThreadBody.message).toContain(agentSession.id);
+      expect(notAThreadBody.message).not.toContain(thread.id);
+      const notFound = await markDone(arranged, [thread.id, unknown]);
+      expect(notFound.status).toBe(404);
+      const notFoundBody = await readErrorBody(notFound);
+      expect(notFoundBody.code).toBe("not_found");
+      expect(notFoundBody.message).toContain(unknown);
+      expect("done" in (await readSession(arranged, thread.id))).toBe(false);
+      expect(await arranged.harness.audit("session.markedDone")).toHaveLength(0);
+
+      // The same holds for a reopen: the Done Thread stays Done.
+      await readSessionResponse(await markDone(arranged, [thread.id]));
+      expect((await reopen(arranged, [thread.id, agentSession.id])).status).toBe(409);
+      expect((await reopen(arranged, [thread.id, unknown])).status).toBe(404);
+      expect("done" in (await readSession(arranged, thread.id))).toBe(true);
+      expect(await arranged.harness.audit("session.reopened")).toHaveLength(0);
+    });
+  });
+
+  it("lists sessions by one kind or several, and by when they were marked Done", async () => {
+    await withFleet(async (arranged) => {
+      const done = await startIdleSession(arranged, "finished");
+      const open = await startIdleSession(arranged, "still going");
+      const agentSession = await spawnAgentSession(arranged);
+      const [marked] = await readSessionsResponse(await markDone(arranged, [done.id]));
+      expect([open.kind, agentSession.kind]).toEqual(["thread", "agent"]);
+
+      const listIds = async (query: string): Promise<ReadonlyArray<string>> => {
+        const response = await get(
+          arranged.harness.base,
+          `/api/v1/sessions?${query}&sort=createdAt:asc`,
+          arranged.token,
+        );
+        expect(response.status, await response.clone().text()).toBe(200);
+        return ((await response.json()) as { items: ReadonlyArray<Session> }).items.map(
+          (one) => one.id,
+        );
+      };
+      expect(await listIds("kind=thread")).toEqual([done.id, open.id]);
+      expect(await listIds("kind=agent")).toEqual([agentSession.id]);
+      expect(await listIds("kind=agent&kind=thread")).toEqual([done.id, open.id, agentSession.id]);
+
+      // A Thread marked Done after the cutoff, or at it, is kept; a cutoff after it drops the
+      // Thread but keeps the rest.
+      const doneAt = Date.parse(marked!.done!.at);
+      const before = encodeURIComponent(new Date(doneAt - 1).toISOString());
+      expect(await listIds(`doneSince=${before}`)).toEqual([done.id, open.id, agentSession.id]);
+      const cutoff = encodeURIComponent(marked!.done!.at);
+      expect(await listIds(`doneSince=${cutoff}`)).toEqual([done.id, open.id, agentSession.id]);
+      const later = encodeURIComponent(new Date(doneAt + 1).toISOString());
+      expect(await listIds(`doneSince=${later}`)).toEqual([open.id, agentSession.id]);
+    });
+  });
+
+  it("refuses the removed thread filter and says to ask for kind=thread", async () => {
+    await withFleet(async (arranged) => {
+      await startIdleSession(arranged, "hello");
+
+      const response = await get(
         arranged.harness.base,
-        "/api/v1/agents",
-        {
-          name: "assessor",
-          systemPrompt: "You assess tasks.",
-          instanceId: findInstanceId(arranged, "full-provider"),
-          permissionProfileId: worker.id,
-        },
+        "/api/v1/sessions?thread=true",
         arranged.token,
       );
-      expect(created.status, await created.clone().text()).toBe(200);
-      const agent = (await created.json()) as { readonly id: string };
-      const session = await spawnSessionOrFail(arranged, { agentId: agent.id, prompt: "assess" });
+      expect(response.status).toBe(400);
+      const body = await readErrorBody(response);
+      expect(body.code).toBe("validation");
+      expect(JSON.stringify(body)).toContain("kind=thread");
+    });
+  });
 
-      const markRefusal = await readErrorBody(await markDone(arranged, session.id));
-      const reopenRefusal = await readErrorBody(await reopen(arranged, session.id));
+  it("refuses a session spawned from an Agent and writes no audit entry", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawnAgentSession(arranged);
+
+      const markRefusal = await readErrorBody(await markDone(arranged, [session.id]));
+      const reopenRefusal = await readErrorBody(await reopen(arranged, [session.id]));
       expect(markRefusal.code).toBe("invalid_state");
+      expect(markRefusal.message).toContain(session.id);
       expect(markRefusal.message).toContain("session.stop");
       // A session that can never be Done has nothing to reopen, so stopping
       // it is no answer to a reopen.
       expect(reopenRefusal.code).toBe("invalid_state");
+      expect(reopenRefusal.message).toContain(session.id);
       expect(reopenRefusal.message).toContain("nothing to reopen");
       expect(reopenRefusal.message).not.toContain("session.stop");
       expect("done" in (await readSession(arranged, session.id))).toBe(false);
@@ -6312,7 +6458,7 @@ describe("session.markDone and session.reopen", () => {
   it("reopens a Done Thread when it receives input, and names the input in the audit entry", async () => {
     await withFleet(async (arranged) => {
       const thread = await startIdleSession(arranged, "hello");
-      await readSessionResponse(await markDone(arranged, thread.id));
+      await readSessionResponse(await markDone(arranged, [thread.id]));
 
       const sent = await sendInput(arranged, thread.id, { text: "one more thing" });
       expect(sent.status, await sent.clone().text()).toBe(200);
@@ -6334,14 +6480,16 @@ describe("session.markDone and session.reopen", () => {
       const reader = await spawnThreadWithGrants(arranged, "reader", ["session.read"]);
       const steerer = await spawnThreadWithGrants(arranged, "steerer", ["session.steer"]);
 
-      const refused = await markDone(arranged, thread.id, reader.token);
+      const refused = await markDone(arranged, [thread.id], reader.token);
       expect(refused.status).toBe(403);
       expect(await readErrorBody(refused)).toMatchObject({
         code: "forbidden",
         grant: "session.steer",
       });
 
-      const marked = await readSessionResponse(await markDone(arranged, thread.id, steerer.token));
+      const marked = await readSessionResponse(
+        await markDone(arranged, [thread.id], steerer.token),
+      );
       expect(marked.done?.by).toBe(`session:${steerer.session.id}`);
       const entries = await arranged.harness.audit("session.markedDone");
       expect(entries.map((one) => one.actor)).toEqual([`session:${steerer.session.id}`]);
@@ -6360,7 +6508,7 @@ describe("session.markDone and session.reopen", () => {
           yield* Effect.promise(() => waitForLiveToSettle());
 
           yield* Effect.promise(async () =>
-            readSessionResponse(await markDone(arranged, thread.id)),
+            readSessionResponse(await markDone(arranged, [thread.id])),
           );
 
           const heard = yield* Effect.promise(() =>

@@ -501,13 +501,13 @@ describe("listing sessions by what spawned them", () => {
       expect((await listSessions(arranged, `agentId=${other.id}`)).map((one) => one.id)).toEqual([
         theirs.id,
       ]);
-      expect((await listSessions(arranged, "thread=true")).map((one) => one.id)).toEqual([
+      expect((await listSessions(arranged, "kind=thread")).map((one) => one.id)).toEqual([
         thread.id,
       ]);
     });
   });
 
-  it("rejects a listing that names an agent and also asks for threads", async () => {
+  it("rejects a listing that names an agent and also asks for the kind thread", async () => {
     await withFleet(async (arranged) => {
       const agent = await createAgentForInstance(
         arranged,
@@ -516,7 +516,7 @@ describe("listing sessions by what spawned them", () => {
 
       const response = await get(
         arranged.harness.base,
-        `/api/v1/sessions?agentId=${agent.id}&thread=true`,
+        `/api/v1/sessions?agentId=${agent.id}&kind=thread`,
         arranged.token,
       );
 

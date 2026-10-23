@@ -25,6 +25,7 @@ import {
   type NotFound,
   type Passage,
   type PermissionRequest,
+  type SessionKind,
   type SessionRequest,
   type SessionStatus,
   type SortDirection,
@@ -84,6 +85,7 @@ export interface DiscussionReceivability {
 /** A session as it is stored. `resumable` is computed on read; see above. */
 export interface StoredSession {
   readonly id: string;
+  readonly kind: SessionKind;
   readonly title: string;
   /** The session's one- or two-word name for its job; `null` when it has none. */
   readonly role: string | null;
@@ -227,16 +229,19 @@ export interface SessionPageRequest {
   readonly conversationId: string | undefined;
   /** Only the sessions these runs' agent steps started. */
   readonly runId: string | ReadonlyArray<string> | undefined;
-  /** `true` lists the sessions with no agent behind them; `false` lists the rest. */
-  readonly thread: boolean | undefined;
+  /** Only the sessions of these kinds. */
+  readonly kind: SessionKind | ReadonlyArray<SessionKind> | undefined;
   /** `true` lists only the Threads marked Done; `false` lists every session that is not. */
   readonly done: boolean | undefined;
   /** Only the sessions that are not exited, or that exited at or after this instant. */
   readonly activeSince: string | undefined;
+  /** Only the sessions not marked Done, and those marked Done at or after this instant. */
+  readonly doneSince: string | undefined;
 }
 
 interface SessionRow {
   readonly id: Uint8Array;
+  readonly kind: string;
   readonly title: string;
   readonly role: string | null;
   readonly permission_profile_id: Uint8Array;
@@ -292,7 +297,7 @@ interface SessionRow {
  * that depends only on which domain was imported first.
  */
 const buildColumnList = (): string =>
-  "id, title, role, permission_profile_id, agent_id, conversation_id, run_id, step_id, instance_id, runner_id, " +
+  "id, kind, title, role, permission_profile_id, agent_id, conversation_id, run_id, step_id, instance_id, runner_id, " +
   "workspace_id, project_id, " +
   "github_connection_id, requested_access_mode, " +
   // Both are read to compute `unenforced`: the provider behind the instance,
@@ -325,6 +330,7 @@ export const parseUsage = (column: string | null): StoredTokenUsage | undefined 
 
 const toSession = (row: SessionRow): StoredSession => ({
   id: uuidToString(row.id),
+  kind: row.kind as SessionKind,
   title: row.title,
   role: row.role,
   permissionProfileId: uuidToString(row.permission_profile_id),
@@ -749,11 +755,18 @@ const make = Effect.gen(function* () {
               : sql`run_id IN ${sql.in(request.runId.map(uuidFromString))}`,
           );
         }
-        if (request.thread !== undefined) {
-          clauses.push(request.thread ? sql`agent_id IS NULL` : sql`agent_id IS NOT NULL`);
+        if (request.kind !== undefined) {
+          clauses.push(
+            typeof request.kind === "string"
+              ? sql`kind = ${request.kind}`
+              : sql`kind IN ${sql.in(request.kind)}`,
+          );
         }
         if (request.done !== undefined) {
           clauses.push(request.done ? sql`done_at IS NOT NULL` : sql`done_at IS NULL`);
+        }
+        if (request.doneSince !== undefined) {
+          clauses.push(sql`(done_at IS NULL OR done_at >= ${request.doneSince})`);
         }
         const source =
           request.activeSince === undefined
@@ -1541,13 +1554,14 @@ export const sessionRepository = make;
 /** The session repository's methods. */
 export type SessionRows = Effect.Success<typeof make>;
 
-/** The error message every caller uses for a session id that matches no row. */
-const NO_SUCH_SESSION = "no such session";
+/** Returns the error message every caller uses for a session id that matches no row. */
+const describeNoSuchSession = (id: string): string =>
+  `no session has the id ${id}; check the id, then try again`;
 
 /**
  * Returns a function that reads one session by id from the given repository.
- * It fails with `NotFound` when there is no such session, with the same
- * message wherever it is used.
+ * It fails with `NotFound` when there is no such session, with a message that
+ * names the id, the same wherever it is used.
  */
 export const readSessionOrFail =
   (rows: SessionRows) =>
@@ -1555,7 +1569,7 @@ export const readSessionOrFail =
     Effect.flatMap(
       rows.one(id),
       Option.match({
-        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_SESSION)),
+        onNone: () => Effect.fail(createNotFoundError(describeNoSuchSession(id))),
         onSome: Effect.succeed,
       }),
     );

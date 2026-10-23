@@ -11,7 +11,7 @@ import {
   decideThreadRowEnd,
   describePose,
   isAbsentPose,
-  labelSessionTab,
+  labelWorkspaceSessions,
 } from "@hercule/client-core";
 import type { Project, Runner, Session } from "@hercule/contract";
 import { MoreIcon } from "../../icons/more";
@@ -72,12 +72,16 @@ export function ProjectCrumb({
  * - `className` adds classes to the nav, such as the one that styles a run's
  *   crumbs.
  * - Each tab's pose is drawn with the runner it names in `runners`.
+ * - `workspaceSessions` is every session of the workspace, exited ones and
+ *   Agent sessions too, not only the tabs. A tab's label is numbered among
+ *   them, so it reads as it does in the sidebar.
  */
 export function ThreadTabsPill({
   label,
   className,
   crumbs,
   tabs,
+  workspaceSessions,
   runners,
   children,
 }: {
@@ -85,10 +89,12 @@ export function ThreadTabsPill({
   readonly className?: string | undefined;
   readonly crumbs: ReactNode;
   readonly tabs: readonly Session[];
+  readonly workspaceSessions: readonly Session[];
   readonly runners: readonly Runner[];
   readonly children?: ReactNode;
 }): JSX.Element {
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
+  const labels = labelWorkspaceSessions(workspaceSessions);
   return (
     <nav
       className={className === undefined ? "pill thread-tabs" : `pill thread-tabs ${className}`}
@@ -99,6 +105,7 @@ export function ThreadTabsPill({
         <ThreadTab
           key={tab.id}
           session={tab}
+          label={labels.get(tab.id) ?? tab.title}
           runner={tab.runnerId === null ? undefined : runnersById.get(tab.runnerId)}
         />
       ))}
@@ -109,18 +116,24 @@ export function ThreadTabsPill({
 
 /**
  * Renders one session of the workspace as a tab: the mark of its pose, when
- * the pose has one, its label (`labelSessionTab`), and, when its sidebar row would not end in a
+ * the pose has one, its label, and, when its sidebar row would not end in a
  * mark, the word or the age that row ends in.
  *
- * The tab is named "<title>, <pose words>", as the session's sidebar row is,
- * and described by the word or the age in words, such as "20 minutes ago".
- * The mark says the pose, which the name already holds, so it is hidden.
+ * The tab is named "<title>, <pose words>", as the session's sidebar row is.
+ * When the label is the session's role, the name starts with it, "review 2,
+ * <title>, <pose words>", so someone who speaks the tab's name can say what
+ * they see. The tooltip keeps the full title. The tab is described by the
+ * word or the age in words, such as "20 minutes ago". The mark says the pose,
+ * which the name already holds, so it is hidden.
  */
 function ThreadTab({
   session,
+  label,
   runner,
 }: {
   readonly session: Session;
+  /** The tab's text, as `labelWorkspaceSessions` returns it for the workspace's sessions. */
+  readonly label: string;
   readonly runner: Runner | undefined;
 }): JSX.Element {
   const endId = useId();
@@ -132,12 +145,16 @@ function ThreadTab({
       params={{ sessionId: session.id }}
       className="ptab"
       activeProps={SELECTED_TAB_PROPS}
-      aria-label={`${session.title}, ${describePose(pose)}`}
+      aria-label={
+        session.kind !== "run" && label !== session.title
+          ? `${label}, ${session.title}, ${describePose(pose)}`
+          : `${session.title}, ${describePose(pose)}`
+      }
       aria-describedby={end.kind === "mark" ? undefined : endId}
     >
       {isAbsentPose(pose) ? null : <Mark state={pose} />}
       <span className="ptab-title" title={session.title}>
-        {labelSessionTab(session)}
+        {label}
       </span>
       {end.kind === "mark" ? null : end.kind === "word" ? (
         <small id={endId}>{end.word}</small>

@@ -252,8 +252,8 @@ describe("Edit Overlaps", () => {
       reportEdit(arranged, done, web, DATABASE);
       const marked = await post(
         arranged.harness.base,
-        `/api/v1/sessions/${done}/mark-done`,
-        {},
+        "/api/v1/sessions/mark-done",
+        { sessionIds: [done] },
         arranged.token,
       );
       expect(marked.status, await marked.clone().text()).toBe(200);
@@ -265,8 +265,8 @@ describe("Edit Overlaps", () => {
 
       const reopened = await post(
         arranged.harness.base,
-        `/api/v1/sessions/${done}/reopen`,
-        {},
+        "/api/v1/sessions/reopen",
+        { sessionIds: [done] },
         arranged.token,
       );
       expect(reopened.status, await reopened.clone().text()).toBe(200);
