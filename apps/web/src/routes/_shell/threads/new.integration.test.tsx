@@ -191,6 +191,7 @@ const PROFILE_WORKER: Profile = {
 const NEW_SESSION: Session = {
   id: "01a06d02-4000-7000-8000-000000000001",
   title: "Fix the login bug",
+  kind: "thread",
   role: null,
   status: "starting",
   resumable: false,

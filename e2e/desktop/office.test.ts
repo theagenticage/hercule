@@ -279,7 +279,7 @@ describe("the Office", () => {
     await waitForStatus(thread!.id, "busy");
     runner.endSession(thread!.id, "crash");
     await waitForStatus(thread!.id, "exited");
-    await client.session.markDone({ params: { id: thread!.id } });
+    await client.session.markDone({ payload: { sessionIds: [thread!.id] } });
     const { app, page } = await openSignedIn(url);
 
     await chooseMenuItem(app, "Go", "Office");

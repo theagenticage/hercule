@@ -77,10 +77,11 @@ const make = Effect.gen(function* () {
                 agentId: undefined,
                 permissionProfileId: input.id,
                 conversationId: undefined,
-                thread: undefined,
+                kind: undefined,
                 done: undefined,
                 runId: undefined,
                 activeSince: undefined,
+                doneSince: undefined,
               }),
             );
             if (live.items.length > 0) {

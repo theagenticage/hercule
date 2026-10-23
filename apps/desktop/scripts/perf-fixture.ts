@@ -341,7 +341,7 @@ export async function runWithThreadFixture<T>(
         (
           await call<{ readonly items: readonly Session[] }>(
             "GET",
-            `/sessions?thread=true&limit=${String(THREAD_PAGE)}`,
+            `/sessions?kind=thread&limit=${String(THREAD_PAGE)}`,
           )
         ).items;
 

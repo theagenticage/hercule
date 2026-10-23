@@ -72,6 +72,7 @@ import {
   type Input,
   type Passage,
   type Session,
+  type SessionIdsInput,
   type SessionRequest,
   type SessionStatus,
   type Subagent,
@@ -1539,23 +1540,24 @@ const make = Effect.gen(function* () {
           permissionProfileId,
           conversationId,
           runId,
-          thread,
+          kind,
           done,
           activeSince,
+          doneSince,
         } = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
+        const kinds = kind === undefined ? undefined : [kind].flat();
         // A Thread is a session with no Agent behind it. `agentId` filters for
-        // the sessions of one Agent, and `thread` filters for the sessions
-        // with no Agent, so no session can match both. A query with both would
-        // return an empty page, which looks like "there are none" instead of
-        // "the query is wrong".
-        if (agentId !== undefined && thread !== undefined) {
+        // the sessions of one Agent, so it can match none of the sessions in a
+        // query for Threads alone. Such a query would return an empty page,
+        // which looks like "there are none" instead of "the query is wrong".
+        if (agentId !== undefined && kinds?.every((each) => each === "thread")) {
           return yield* Effect.fail(
             createValidationError([
               {
-                path: ["thread"],
+                path: ["kind"],
                 message:
                   "a Thread is a session with no agent, so a query cannot ask for both: " +
-                  "send agentId to list one agent's sessions, or thread to list the " +
+                  "send agentId to list one agent's sessions, or kind=thread to list the " +
                   "sessions that have no agent",
               },
             ]),
@@ -1568,7 +1570,7 @@ const make = Effect.gen(function* () {
         if (
           done === true &&
           (agentId !== undefined ||
-            thread === false ||
+            kinds?.every((each) => each !== "thread") ||
             runId !== undefined ||
             conversationId !== undefined)
         ) {
@@ -1578,8 +1580,8 @@ const make = Effect.gen(function* () {
                 path: ["done"],
                 message:
                   "only a Thread can be Done, and agentId, runId, conversationId and " +
-                  "thread=false match only sessions spawned from an Agent: drop those " +
-                  "filters, or drop done",
+                  "a kind without thread match only sessions spawned from an Agent: drop " +
+                  "those filters, or drop done",
               },
             ]),
           );
@@ -1595,9 +1597,10 @@ const make = Effect.gen(function* () {
             permissionProfileId,
             conversationId,
             runId,
-            thread,
+            kind,
             done,
             activeSince,
+            doneSince,
           }),
         );
         const composeRecord = yield* recordComposer;
@@ -1631,59 +1634,83 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Marks a Thread Done, stamped with the caller, and returns the Thread.
-     * A Thread that is already Done is returned as it is, and nothing is
-     * written. Marking changes only how the Thread is filed: a running
-     * Thread keeps running.
+     * Marks Threads Done, stamped with the caller, all at one time, and
+     * returns the Threads in the order given. A Thread that is already Done is
+     * returned as it is, and nothing is written for it. Marking changes only
+     * how a Thread is filed: a running Thread keeps running.
      *
-     * Fails with `NotFound` when there is no such session, and with
-     * `InvalidState` when the session is not a Thread.
+     * The list is applied all or nothing, in one transaction: when one id
+     * fails, no Thread is marked.
+     *
+     * Fails with `NotFound` when an id is not a session, and with
+     * `InvalidState` when a session is not a Thread.
      */
     markDone: (
-      id: Id,
-    ): Effect.Effect<Session, Exclude<ReadError | NotFound | InvalidState, Validation>> =>
+      input: SessionIdsInput,
+    ): Effect.Effect<
+      ReadonlyArray<Session>,
+      Exclude<ReadError | NotFound | InvalidState, Validation>
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("session.markDone");
         const actor = yield* currentStamp;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const session = yield* readThread(id, MARK_DONE_NOT_A_THREAD);
             const at = yield* nowIso;
-            if (yield* sessions.markDone(id, actor, at)) {
-              yield* audit.append({
-                kind: "session.markedDone",
-                actor,
-                record: { topic: "session", id, conversationId: session.conversationId },
-                payload: { sessionId: id },
-                at,
-              });
+            for (const id of input.sessionIds) {
+              const session = yield* readThread(id, MARK_DONE_NOT_A_THREAD);
+              if (yield* sessions.markDone(id, actor, at)) {
+                yield* audit.append({
+                  kind: "session.markedDone",
+                  actor,
+                  record: { topic: "session", id, conversationId: session.conversationId },
+                  payload: { sessionId: id },
+                  at,
+                });
+              }
             }
-            return (yield* recordComposer)(yield* readSession(id));
+            const composeRecord = yield* recordComposer;
+            return yield* Effect.forEach(input.sessionIds, (id) =>
+              Effect.map(readSession(id), composeRecord),
+            );
           }),
         );
       }),
 
     /**
-     * Takes the Done mark off a Thread, as the caller, and returns the
-     * Thread. A Thread that is not Done is returned as it is, and nothing is
-     * written, so its `reopenedAt` does not move.
+     * Takes the Done mark off Threads, as the caller, all at one time, and
+     * returns the Threads in the order given. A Thread that is not Done is
+     * returned as it is, and nothing is written for it, so its `reopenedAt`
+     * does not move.
      *
-     * Fails with `NotFound` when there is no such session, and with
-     * `InvalidState` when the session is not a Thread.
+     * The list is applied all or nothing, in one transaction: when one id
+     * fails, no Thread is reopened.
+     *
+     * Fails with `NotFound` when an id is not a session, and with
+     * `InvalidState` when a session is not a Thread.
      */
     reopen: (
-      id: Id,
-    ): Effect.Effect<Session, Exclude<ReadError | NotFound | InvalidState, Validation>> =>
+      input: SessionIdsInput,
+    ): Effect.Effect<
+      ReadonlyArray<Session>,
+      Exclude<ReadError | NotFound | InvalidState, Validation>
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("session.reopen");
         const actor = yield* currentStamp;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* readThread(id, REOPEN_NOT_A_THREAD);
-            yield* reopenThread(id, actor, yield* nowIso, undefined);
-            return (yield* recordComposer)(yield* readSession(id));
+            const at = yield* nowIso;
+            for (const id of input.sessionIds) {
+              yield* readThread(id, REOPEN_NOT_A_THREAD);
+              yield* reopenThread(id, actor, at, undefined);
+            }
+            const composeRecord = yield* recordComposer;
+            return yield* Effect.forEach(input.sessionIds, (id) =>
+              Effect.map(readSession(id), composeRecord),
+            );
           }),
         );
       }),

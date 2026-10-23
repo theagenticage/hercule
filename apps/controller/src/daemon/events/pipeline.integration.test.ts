@@ -87,12 +87,10 @@ describe("the event pipeline's tick", () => {
     await withPipeline(async (arranged) => {
       const thread = await spawnSubscriber(arranged, "subscribers");
       const subscriptionId = await subscribeThread(arranged, thread, REF);
-      const marked = await send(
-        "POST",
-        arranged.harness.base,
-        `/api/v1/sessions/${thread.session.id}/mark-done`,
-        { token: arranged.token },
-      );
+      const marked = await send("POST", arranged.harness.base, "/api/v1/sessions/mark-done", {
+        token: arranged.token,
+        body: { sessionIds: [thread.session.id] },
+      });
       expect(marked.status, await marked.clone().text()).toBe(200);
 
       await emitManualEvent(arranged, [REF], "The lid does not close");

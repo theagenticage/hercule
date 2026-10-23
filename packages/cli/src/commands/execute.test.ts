@@ -209,6 +209,28 @@ describe("a positional whose row resolves tails", () => {
     });
   });
 
+  it("resolves each tail of the sessions that session done and session reopen take", async () => {
+    const sessions = [buildSession("ccccccc3"), buildSession("ddddddd4")];
+    for (const verb of ["done", "reopen"]) {
+      const { fetch, client } = stubClient((request) =>
+        request.method === "GET" ? { items: sessions } : [],
+      );
+      const command = lookUpCommand("session", verb);
+      const args = await parseArguments(command, ["0ccccccc3", "0ddddddd4"], refuseStdinRead);
+
+      await execute(client, command, args);
+
+      expect(fetch.calls).toMatchObject([
+        { method: "GET", path: "/api/v1/sessions" },
+        {
+          method: "POST",
+          path: verb === "done" ? "/api/v1/sessions/mark-done" : "/api/v1/sessions/reopen",
+          body: { sessionIds: [sessions[0]!.id, sessions[1]!.id] },
+        },
+      ]);
+    }
+  });
+
   it("fails with not_found for a tail no listed signal has, and sends nothing", async () => {
     const { fetch, client } = stubClient(() => ({ items: [buildSignal("ccccccc3")] }));
     const command = lookUpCommand("signal", "done");

@@ -194,7 +194,7 @@ const RESOURCE_BUFFER_SIZE = 10_000;
 /** The path every run read goes to. */
 const RUNS_PATH = "/api/v1/runs";
 
-/** The path every session read goes to; "From runs" reads it with `thread=false`. */
+/** The path every session read goes to; "From runs" reads it with `kind=agent&kind=run&kind=assistant`. */
 const SESSIONS_PATH = "/api/v1/sessions";
 
 /**
@@ -458,7 +458,7 @@ const LIVE_RUN_READS = 2;
  * - or anything else.
  */
 function classifyRead(url: URL): ReadKind {
-  if (url.pathname === SESSIONS_PATH && url.searchParams.get("thread") === "false") {
+  if (url.pathname === SESSIONS_PATH && url.searchParams.getAll("kind").includes("agent")) {
     return "liveSessions";
   }
   if (url.pathname !== RUNS_PATH) return "other";
@@ -879,7 +879,7 @@ export async function measureWorkflowWork(
       liveSessionReads: countReadsOfKind(launchReads, "liveSessions"),
       threadListReads: launchReads.filter((read) => {
         const url = new URL(read.url);
-        return url.pathname === SESSIONS_PATH && url.searchParams.get("thread") === "true";
+        return url.pathname === SESSIONS_PATH && url.searchParams.get("kind") === "thread";
       }).length,
       firstStripsFromSpawnMs: firstStripsAnsweredAt - spawnedAt,
       firstStripsFromPageStartMs: firstStripsAnsweredAt - pageStart,

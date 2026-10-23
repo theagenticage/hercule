@@ -903,7 +903,7 @@ async function measureNudges(
       expression: `performance.getEntriesByType("resource").filter((entry) => {
         const url = new URL(entry.name);
         return entry.startTime >= ${String(readsFrom)} &&
-          url.pathname === "/api/v1/sessions" && url.searchParams.get("thread") === "true";
+          url.pathname === "/api/v1/sessions" && url.searchParams.get("kind") === "thread";
       }).length`,
       returnByValue: true,
     })) as number;

@@ -93,10 +93,10 @@ class ControllerApi(
     suspend fun createWsTicket(): WsTicket =
         send("POST", buildUrl("auth/ws-ticket"), EMPTY_OBJECT, WsTicket.serializer())
 
-    /** Lists every thread (`session.query` with `thread=true`), reading every page. */
+    /** Lists every thread (`session.query` with `kind=thread`), reading every page. */
     suspend fun listThreadSessions(): List<Session> = readAllPages(Session.serializer()) { cursor ->
         buildUrl("sessions") {
-            addQueryParameter("thread", "true")
+            addQueryParameter("kind", "thread")
             addQueryParameter("limit", PAGE_LIMIT)
             if (cursor != null) addQueryParameter("cursor", cursor)
         }

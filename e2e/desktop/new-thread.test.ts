@@ -70,7 +70,7 @@ describe("a new thread", () => {
         hasText: "Write up the release notes",
       })
       .waitFor();
-    const { items } = await client.session.query({ query: { thread: true, limit: 10 } });
+    const { items } = await client.session.query({ query: { kind: "thread", limit: 10 } });
     expect(
       items.map(({ runnerId, projectId, workspaceId }) => ({ runnerId, projectId, workspaceId })),
     ).toEqual([{ runnerId: runner.runnerId, projectId: notes.id, workspaceId: null }]);

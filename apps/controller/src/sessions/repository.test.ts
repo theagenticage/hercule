@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Statement from "effect/unstable/sql/Statement";
-import { LIVE_SESSION_STATUSES } from "@hercule/contract";
+import { LIVE_SESSION_STATUSES, type SessionKind } from "@hercule/contract";
 import type { ProviderEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
@@ -35,11 +35,13 @@ const mintId = () => uuidToString(mintUuid());
 
 /**
  * Inserts a session row on the given profile, with default values for the
- * rest. `step` makes it the session of a run's agent step.
+ * rest. `step` makes it the session of a run's agent step. `origin` names the
+ * Agent behind the session and the conversation it answers.
  */
 const insertSession = (
   permissionProfileId: string,
   step: { readonly runId: string; readonly stepId: string } | undefined = undefined,
+  origin: { readonly agentId?: string; readonly conversationId?: string } = {},
 ) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
@@ -52,8 +54,8 @@ const insertSession = (
       title: "a session",
       role: undefined,
       permissionProfileId,
-      agentId: undefined,
-      conversationId: undefined,
+      agentId: origin.agentId,
+      conversationId: origin.conversationId,
       step,
       instanceId: mintId(),
       runnerId: mintId(),
@@ -538,6 +540,147 @@ describe("storing a generated role", () => {
   });
 });
 
+describe("the kind of a session", () => {
+  /** Lists every session of `kind`, oldest first; with no `kind`, every session. */
+  const listKinds = (kind: SessionKind | ReadonlyArray<SessionKind> | undefined) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const page = yield* sessions.list({
+        limit: 10,
+        cursor: undefined,
+        direction: "asc",
+        status: undefined,
+        runnerId: undefined,
+        agentId: undefined,
+        permissionProfileId: undefined,
+        kind,
+        done: undefined,
+        runId: undefined,
+        conversationId: undefined,
+        activeSince: undefined,
+        doneSince: undefined,
+      });
+      return page.items.map((one) => one.id);
+    });
+
+  /** Inserts one session of each kind, and a Thread that a run's step started. */
+  const insertOneOfEachKind = Effect.gen(function* () {
+    const profileId = mintId();
+    const runStep = { runId: mintId(), stepId: "build" };
+    return {
+      thread: yield* insertSession(profileId),
+      // A Thread started from a run's step is still a Thread: no Agent is behind it.
+      stepThread: yield* insertSession(profileId, runStep),
+      agent: yield* insertSession(profileId, undefined, { agentId: mintId() }),
+      run: yield* insertSession(profileId, runStep, { agentId: mintId() }),
+      assistant: yield* insertSession(profileId, undefined, {
+        agentId: mintId(),
+        conversationId: mintId(),
+      }),
+    };
+  });
+
+  it("is a thread without an Agent, a run for a run's agent step, an assistant for a conversation's session, and an agent for any other", async () => {
+    const { ids, kinds } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const ids = yield* insertOneOfEachKind;
+        const kinds: Record<string, string | undefined> = {};
+        for (const [name, id] of Object.entries(ids)) {
+          kinds[name] = Option.getOrUndefined(yield* sessions.one(id))?.kind;
+        }
+        return { ids, kinds };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(Object.keys(ids)).toEqual(Object.keys(kinds));
+    expect(kinds).toEqual({
+      thread: "thread",
+      stepThread: "thread",
+      agent: "agent",
+      run: "run",
+      assistant: "assistant",
+    });
+  });
+
+  it("lists the sessions of one kind, or of several, and no others", async () => {
+    const { ids, threads, runs, several } = await run(
+      Effect.gen(function* () {
+        const ids = yield* insertOneOfEachKind;
+        return {
+          ids,
+          threads: yield* listKinds("thread"),
+          runs: yield* listKinds("run"),
+          several: yield* listKinds(["agent", "assistant"]),
+        };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(threads).toEqual([ids.thread, ids.stepThread]);
+    expect(runs).toEqual([ids.run]);
+    expect(several).toEqual([ids.agent, ids.assistant]);
+  });
+
+  it("is looked up through the index on kind", async () => {
+    const plan = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+        yield* listKinds("thread").pipe(
+          Effect.provideService(Statement.CurrentTransformer, (statement) => {
+            statements.push(statement.compile());
+            return Effect.succeed(statement);
+          }),
+        );
+        const [text, params] = statements.find(([text]) => text.includes("kind"))!;
+        return yield* sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${text}`, params);
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    const details = plan.map((step) => step.detail);
+    expect(details).toContain("SEARCH sessions USING INDEX sessions_kind (kind=?)");
+    expect(details.some((detail) => detail.startsWith("SCAN sessions"))).toBe(false);
+  });
+});
+
+describe("listing the sessions marked Done since an instant", () => {
+  const instant = "2026-09-07T12:00:00.000Z";
+
+  it("keeps sessions not marked Done and sessions marked Done at or after the instant", async () => {
+    const { open, atInstant, after, listed } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const profileId = mintId();
+        const open = yield* insertSession(profileId);
+        const before = yield* insertSession(profileId);
+        const atInstant = yield* insertSession(profileId);
+        const after = yield* insertSession(profileId);
+        yield* sessions.markDone(before, "user", "2026-09-07T11:59:59.999Z");
+        yield* sessions.markDone(atInstant, "user", instant);
+        yield* sessions.markDone(after, "user", "2026-09-07T12:00:00.001Z");
+        const page = yield* sessions.list({
+          limit: 10,
+          cursor: undefined,
+          direction: "asc",
+          status: undefined,
+          runnerId: undefined,
+          agentId: undefined,
+          permissionProfileId: profileId,
+          kind: undefined,
+          done: undefined,
+          runId: undefined,
+          conversationId: undefined,
+          activeSince: undefined,
+          doneSince: instant,
+        });
+        return { open, atInstant, after, listed: page.items.map((one) => one.id) };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(listed).toEqual([open, atInstant, after]);
+  });
+});
+
 describe("listing the sessions on one profile", () => {
   it("returns that profile's live sessions and no other rows", async () => {
     const { listed, profileId, live } = await run(
@@ -557,11 +700,12 @@ describe("listing the sessions on one profile", () => {
           runnerId: undefined,
           agentId: undefined,
           permissionProfileId: profileId,
-          thread: undefined,
+          kind: undefined,
           done: undefined,
           runId: undefined,
           conversationId: undefined,
           activeSince: undefined,
+          doneSince: undefined,
         });
         return { listed: page.items, profileId, live };
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
@@ -585,11 +729,12 @@ describe("listing the sessions of runs", () => {
         runnerId: undefined,
         agentId: undefined,
         permissionProfileId: undefined,
-        thread: undefined,
+        kind: undefined,
         done: undefined,
         runId,
         conversationId: undefined,
         activeSince: undefined,
+        doneSince: undefined,
       });
       return page.items.map((one) => one.id);
     });
@@ -621,8 +766,8 @@ describe("listing the sessions active since an instant", () => {
   const instant = "2026-09-07T12:00:00.000Z";
 
   /**
-   * Inserts a session spawned from an Agent, so `thread: false` keeps it,
-   * and returns its id. `exits` lists the instants it exits at, in order;
+   * Inserts a session spawned from an Agent, so a kind filter for Agent
+   * sessions keeps it, and returns its id. `exits` lists the instants it exits at, in order;
    * `resumed` puts it back on the queue after the last exit.
    */
   const insertAgentSession = (exits: ReadonlyArray<string>, resumed: boolean) =>
@@ -637,10 +782,10 @@ describe("listing the sessions active since an instant", () => {
     });
 
   /**
-   * Lists the sessions active since `instant` that `thread` keeps, oldest
+   * Lists the sessions active since `instant` that `kind` keeps, oldest
    * first, reading one session per page so the cursor is followed too.
    */
-  const listAll = (thread: boolean | undefined) =>
+  const listAll = (kind: ReadonlyArray<SessionKind> | undefined) =>
     Effect.gen(function* () {
       const sessions = yield* sessionRepository;
       const ids: Array<string> = [];
@@ -654,11 +799,12 @@ describe("listing the sessions active since an instant", () => {
           runnerId: undefined,
           agentId: undefined,
           permissionProfileId: undefined,
-          thread,
+          kind,
           done: undefined,
           runId: undefined,
           conversationId: undefined,
           activeSince: instant,
+          doneSince: undefined,
         });
         ids.push(...page.items.map((one) => one.id));
         cursor = page.nextCursor;
@@ -676,13 +822,13 @@ describe("listing the sessions active since an instant", () => {
         yield* insertAgentSession(["2026-09-07T11:59:59.999Z"], false);
         const exitedAtInstant = yield* insertAgentSession([instant], false);
         const exitedAfter = yield* insertAgentSession(["2026-09-07T13:00:00.000Z"], false);
-        // A Thread, which `thread: false` leaves out.
+        // A Thread, which a filter for Agent sessions leaves out.
         const threadId = yield* insertSession(mintId());
         return {
           expected: [live, resumed, exitedAtInstant, exitedAfter],
           threadId,
           all: yield* listAll(undefined),
-          agentsOnly: yield* listAll(false),
+          agentsOnly: yield* listAll(["agent", "run", "assistant"]),
         };
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
@@ -707,11 +853,12 @@ describe("listing the sessions active since an instant", () => {
             runnerId: undefined,
             agentId: undefined,
             permissionProfileId: undefined,
-            thread: false,
+            kind: ["agent", "run", "assistant"],
             done: undefined,
             runId: undefined,
             conversationId: undefined,
             activeSince: instant,
+            doneSince: undefined,
           })
           .pipe(
             Effect.provideService(Statement.CurrentTransformer, (statement) => {
