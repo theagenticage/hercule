@@ -70,10 +70,16 @@
 /* "Syncing…" fills the room the pill leaves, so it takes no part in the fit.
    Elsewhere it sits against the pills on the right (sync-marker.css). Here it
    follows the pill instead, 12px after it, where the eye is, and the room
-   clips it before it reaches the buttons. */
+   clips it before it reaches the buttons. The 12px is the word's margin and
+   not the slot's padding: padding is a width the slot cannot give up, and it
+   would take 12px of the room from the pill, which the fit counts as its
+   own. */
 .thread-tabs-room > .sync-slot {
   justify-content: flex-start;
-  padding: 0 0 0 12px;
+  padding: 0;
+}
+.thread-tabs-room > .sync-slot > .sync-status {
+  margin-left: 12px;
 }
 /* The pill's parts keep their natural size, so the fit can add them up: the
    work's name is the one that shrinks, down to nothing, and only when the
@@ -112,6 +118,13 @@
    at 160px, as the drawing cuts it. */
 .thread-tabs .ptab-title.is-title {
   max-width: 160px;
+}
+/* Not in the drawing. In a pill too narrow for the open tab, the fit sets
+   the width the tab may take (`--open-tab-max-width`, `useTabOverflow`), so
+   its label ellipsizes and "+n" and "+" stay in view. The tab never shrinks
+   otherwise, so the fit can add up the tabs' widths. */
+.thread-tabs > .ptab.is-on {
+  max-width: var(--open-tab-max-width, none);
 }
 /* A tab the fit hides stays in the pill, out of flow and invisible, so it
    can still be measured (see `useTabOverflow`). */

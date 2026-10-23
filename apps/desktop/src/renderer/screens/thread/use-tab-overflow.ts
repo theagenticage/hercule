@@ -153,6 +153,7 @@ function pickHiddenTabKeys(
   }
   // `openKey` can name a tab the pill does not draw (yet), which is no open tab.
   const openTabPosition = openKey === null ? -1 : tabKeys.indexOf(openKey);
+  const roomWidth = room.getBoundingClientRect().width;
   const hiddenIndexes = pickHiddenTabs({
     tabWidths,
     openIndex: openTabPosition === -1 ? null : openTabPosition,
@@ -160,7 +161,55 @@ function pickHiddenTabKeys(
     fixedWidth,
     nameWidth,
     overflowWidth,
-    room: room.getBoundingClientRect().width,
+    room: roomWidth,
+  });
+  limitOpenTab(nav, {
+    openIndex: openTabPosition,
+    tabWidths,
+    hiddenIndexes,
+    gap,
+    otherWidth: fixedWidth + (hiddenIndexes.size > 0 ? overflowWidth : 0),
+    fits: fixedWidth + nameWidth + tabWidths.reduce((sum, width) => sum + width, 0) <= roomWidth,
+    room: roomWidth,
   });
   return new Set([...hiddenIndexes].map((index) => tabKeys[index]!));
+}
+
+/**
+ * Sets `--open-tab-max-width` on `nav`: the width the open tab may take, so
+ * that a pill too narrow for the open tab shortens it rather than pushing the
+ * "+n" button and the buttons after it out. The open tab never hides, so this
+ * is the only way the pill keeps them in view. The stylesheet applies it as
+ * the open tab's `max-width`, and its label ellipsizes.
+ *
+ * The width is what the room leaves after every other part of the pill, with
+ * the work's name counted as nothing, since it shrinks first. It is removed
+ * while everything fits, so a tab is only ever shortened when it has to be.
+ * The open tab's natural width never enters the fit when it is shortened:
+ * `pickHiddenTabs` then sees the width set here, which is what it needs to
+ * place the other tabs.
+ */
+function limitOpenTab(
+  nav: HTMLElement,
+  layout: {
+    readonly openIndex: number;
+    readonly tabWidths: readonly number[];
+    readonly hiddenIndexes: ReadonlySet<number>;
+    readonly gap: number;
+    /** The width of the pill's parts that are not tabs, the name excepted, with the "+n" button when it shows. */
+    readonly otherWidth: number;
+    readonly fits: boolean;
+    readonly room: number;
+  },
+): void {
+  const { openIndex, tabWidths, hiddenIndexes, gap, otherWidth, fits, room } = layout;
+  if (fits || openIndex === -1) {
+    nav.style.removeProperty("--open-tab-max-width");
+    return;
+  }
+  const otherTabsWidth = tabWidths
+    .filter((_, index) => index !== openIndex && !hiddenIndexes.has(index))
+    .reduce((sum, width) => sum + width, 0);
+  const width = Math.max(0, room - otherWidth - otherTabsWidth - gap);
+  nav.style.setProperty("--open-tab-max-width", `${String(width)}px`);
 }
