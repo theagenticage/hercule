@@ -3527,6 +3527,9 @@ export const CLI = {
         flag: "kind",
         help: "Only sessions of this kind; repeat the flag to list several kinds together. thread: no Agent behind it, the kind a person drives by hand. agent: spawned from an Agent, outside runs and assistants. run: started by a run's agent step. assistant: answers an assistant's conversation.",
       },
+      // The removed filter that `--kind thread` replaced. The API refuses it so an
+      // old client is told; the command line never offered it.
+      thread: { hidden: true },
       done: {
         flag: "done",
         help: "true for only the Threads marked Done, false for every session that is not; mark one with `hercule session done`.",
@@ -3932,11 +3935,12 @@ export const CLI = {
         placeholder: "session-id",
         help: "A Thread's id, or a tail of eight or more characters; find it with `hercule session list --kind thread`. Give several to mark them done in one call.",
         resolves: "session.query",
+        resolvesQuery: { kind: "thread" },
       },
     },
     errors: {
       invalid_state:
-        "one session is not a Thread: it was spawned from an Agent, and only a Thread can be marked Done; stop it with `hercule session stop` instead. None of the list was marked",
+        "one session is not a Thread: it was spawned from an Agent, by a run or by an assistant, and only a Thread can be marked Done; the message names its id. Stop it with `hercule session stop` instead, or leave it out of the list. None of the list was marked",
     },
   },
   "session.reopen": {
@@ -3949,11 +3953,12 @@ export const CLI = {
         placeholder: "session-id",
         help: "A Thread's id, or a tail of eight or more characters; find it with `hercule session list --done true`. Give several to reopen them in one call.",
         resolves: "session.query",
+        resolvesQuery: { kind: "thread" },
       },
     },
     errors: {
       invalid_state:
-        "one session is not a Thread: it was spawned from an Agent, so it is never Done and there is nothing to reopen. None of the list was reopened",
+        "one session is not a Thread: it was spawned from an Agent, by a run or by an assistant, so it is never Done and there is nothing to reopen; the message names its id. Leave it out of the list. None of the list was reopened",
     },
   },
 

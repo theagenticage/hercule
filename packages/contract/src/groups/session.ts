@@ -789,6 +789,17 @@ export const SessionFilter = Schema.Struct({
   doneSince: Schema.optionalKey(Timestamp),
 });
 
+/**
+ * The removed `thread` filter of `session.query`. Decoding fails for any value,
+ * because an unknown query key is dropped without a word, and an older client
+ * that still sends `thread=true` would otherwise get every session back.
+ */
+const RemovedThreadFilter = Schema.Never.annotate({
+  description: "removed; use kind",
+  message:
+    "The thread filter was replaced by kind. Send kind=thread to list only Threads, or remove the field.",
+});
+
 export const SESSION_SORT_FIELDS = ["createdAt"] as const;
 
 /**
@@ -840,6 +851,7 @@ export const session = HttpApiGroup.make("session")
     HttpApiEndpoint.get("query", "/sessions", {
       query: Schema.Struct({
         ...SessionFilter.fields,
+        thread: Schema.optionalKey(RemovedThreadFilter),
         ...pageParams(SESSION_SORT_FIELDS).fields,
       }),
       success: page(Session),

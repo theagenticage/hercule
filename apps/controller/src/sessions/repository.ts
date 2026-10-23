@@ -1554,13 +1554,14 @@ export const sessionRepository = make;
 /** The session repository's methods. */
 export type SessionRows = Effect.Success<typeof make>;
 
-/** The error message every caller uses for a session id that matches no row. */
-const NO_SUCH_SESSION = "no such session";
+/** Returns the error message every caller uses for a session id that matches no row. */
+const describeNoSuchSession = (id: string): string =>
+  `no session has the id ${id}; check the id, then try again`;
 
 /**
  * Returns a function that reads one session by id from the given repository.
- * It fails with `NotFound` when there is no such session, with the same
- * message wherever it is used.
+ * It fails with `NotFound` when there is no such session, with a message that
+ * names the id, the same wherever it is used.
  */
 export const readSessionOrFail =
   (rows: SessionRows) =>
@@ -1568,7 +1569,7 @@ export const readSessionOrFail =
     Effect.flatMap(
       rows.one(id),
       Option.match({
-        onNone: () => Effect.fail(createNotFoundError(NO_SUCH_SESSION)),
+        onNone: () => Effect.fail(createNotFoundError(describeNoSuchSession(id))),
         onSome: Effect.succeed,
       }),
     );

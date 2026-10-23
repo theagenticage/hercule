@@ -6362,10 +6362,15 @@ describe("session.markDone and session.reopen", () => {
 
       const notAThread = await markDone(arranged, [thread.id, agentSession.id]);
       expect(notAThread.status).toBe(409);
-      expect((await readErrorBody(notAThread)).code).toBe("invalid_state");
+      const notAThreadBody = await readErrorBody(notAThread);
+      expect(notAThreadBody.code).toBe("invalid_state");
+      expect(notAThreadBody.message).toContain(agentSession.id);
+      expect(notAThreadBody.message).not.toContain(thread.id);
       const notFound = await markDone(arranged, [thread.id, unknown]);
       expect(notFound.status).toBe(404);
-      expect((await readErrorBody(notFound)).code).toBe("not_found");
+      const notFoundBody = await readErrorBody(notFound);
+      expect(notFoundBody.code).toBe("not_found");
+      expect(notFoundBody.message).toContain(unknown);
       expect("done" in (await readSession(arranged, thread.id))).toBe(false);
       expect(await arranged.harness.audit("session.markedDone")).toHaveLength(0);
 
@@ -6409,6 +6414,22 @@ describe("session.markDone and session.reopen", () => {
     });
   });
 
+  it("refuses the removed thread filter and says to ask for kind=thread", async () => {
+    await withFleet(async (arranged) => {
+      await startIdleSession(arranged, "hello");
+
+      const response = await get(
+        arranged.harness.base,
+        "/api/v1/sessions?thread=true",
+        arranged.token,
+      );
+      expect(response.status).toBe(400);
+      const body = await readErrorBody(response);
+      expect(body.code).toBe("validation");
+      expect(JSON.stringify(body)).toContain("kind=thread");
+    });
+  });
+
   it("refuses a session spawned from an Agent and writes no audit entry", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnAgentSession(arranged);
@@ -6416,10 +6437,12 @@ describe("session.markDone and session.reopen", () => {
       const markRefusal = await readErrorBody(await markDone(arranged, [session.id]));
       const reopenRefusal = await readErrorBody(await reopen(arranged, [session.id]));
       expect(markRefusal.code).toBe("invalid_state");
+      expect(markRefusal.message).toContain(session.id);
       expect(markRefusal.message).toContain("session.stop");
       // A session that can never be Done has nothing to reopen, so stopping
       // it is no answer to a reopen.
       expect(reopenRefusal.code).toBe("invalid_state");
+      expect(reopenRefusal.message).toContain(session.id);
       expect(reopenRefusal.message).toContain("nothing to reopen");
       expect(reopenRefusal.message).not.toContain("session.stop");
       expect("done" in (await readSession(arranged, session.id))).toBe(false);

@@ -73,6 +73,7 @@ import {
   type Passage,
   type Session,
   type SessionIdsInput,
+  type SessionKind,
   type SessionRequest,
   type SessionStatus,
   type Subagent,
@@ -489,13 +490,21 @@ const INPUT_DIRECTION: SortDirection = "asc";
 
 const NO_SUCH_INPUT = "no such input on that session";
 
-/** The refusal of `markDone` for a session that is not a Thread. */
-const MARK_DONE_NOT_A_THREAD =
-  "only a Thread can be marked Done, and this session was spawned from an Agent; stop it with session.stop instead";
+/**
+ * Returns the refusal of `markDone` for the session `id`, which is not a
+ * Thread. The whole call changed nothing, so the message says which id to
+ * remove.
+ */
+const describeMarkDoneRefusal = (id: string, kind: SessionKind): string =>
+  `${id} is not a Thread (its kind is ${kind}), and only a Thread can be marked Done; stop it with session.stop instead. Nothing was marked Done, so remove that id and try again`;
 
-/** The refusal of `reopen` for a session that is not a Thread. */
-const REOPEN_NOT_A_THREAD =
-  "only a Thread can be reopened, and this session was spawned from an Agent, so it is never Done and there is nothing to reopen";
+/**
+ * Returns the refusal of `reopen` for the session `id`, which is not a
+ * Thread. The whole call changed nothing, so the message says which id to
+ * remove.
+ */
+const describeReopenRefusal = (id: string, kind: SessionKind): string =>
+  `${id} is not a Thread (its kind is ${kind}), so it is never Done and there is nothing to reopen. Nothing was reopened, so remove that id and try again`;
 
 const NO_SUCH_SUBAGENT =
   "no such subagent on that session; list the session's subagents to find their ids";
@@ -750,17 +759,17 @@ const make = Effect.gen(function* () {
   /**
    * Reads the session `id` and checks that it is a Thread. Fails with
    * `NotFound` when there is no such session, and with `InvalidState`
-   * carrying `refusal` as its message when the session was spawned from an
-   * Agent.
+   * carrying `describeRefusal(id, kind)` as its message when the session is not a
+   * Thread.
    */
   const readThread = (
     id: string,
-    refusal: string,
+    describeRefusal: (id: string, kind: SessionKind) => string,
   ): Effect.Effect<StoredSession, NotFound | InvalidState | SqlError> =>
     Effect.flatMap(readSession(id), (session) =>
-      session.agentId === null
+      session.kind === "thread"
         ? Effect.succeed(session)
-        : Effect.fail(createInvalidStateError(refusal)),
+        : Effect.fail(createInvalidStateError(describeRefusal(id, session.kind))),
     );
 
   /**
@@ -1659,7 +1668,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             for (const id of input.sessionIds) {
-              const session = yield* readThread(id, MARK_DONE_NOT_A_THREAD);
+              const session = yield* readThread(id, describeMarkDoneRefusal);
               if (yield* sessions.markDone(id, actor, at)) {
                 yield* audit.append({
                   kind: "session.markedDone",
@@ -1704,7 +1713,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             for (const id of input.sessionIds) {
-              yield* readThread(id, REOPEN_NOT_A_THREAD);
+              yield* readThread(id, describeReopenRefusal);
               yield* reopenThread(id, actor, at, undefined);
             }
             const composeRecord = yield* recordComposer;
