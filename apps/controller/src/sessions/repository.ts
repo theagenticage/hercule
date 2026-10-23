@@ -85,6 +85,8 @@ export interface DiscussionReceivability {
 export interface StoredSession {
   readonly id: string;
   readonly title: string;
+  /** The session's one- or two-word name for its job; `null` when it has none. */
+  readonly role: string | null;
   readonly permissionProfileId: string;
   /** The Agent the session was spawned from; `null` for a Thread. */
   readonly agentId: string | null;
@@ -174,6 +176,8 @@ export interface NewSession {
    */
   readonly id: string;
   readonly title: string;
+  /** The role the spawn gave; `undefined` when it gave none. */
+  readonly role: string | undefined;
   readonly permissionProfileId: string;
   /** The Agent the session was spawned from; `undefined` for a Thread. */
   readonly agentId: string | undefined;
@@ -234,6 +238,7 @@ export interface SessionPageRequest {
 interface SessionRow {
   readonly id: Uint8Array;
   readonly title: string;
+  readonly role: string | null;
   readonly permission_profile_id: Uint8Array;
   readonly agent_id: Uint8Array | null;
   readonly conversation_id: Uint8Array | null;
@@ -287,7 +292,7 @@ interface SessionRow {
  * that depends only on which domain was imported first.
  */
 const buildColumnList = (): string =>
-  "id, title, permission_profile_id, agent_id, conversation_id, run_id, step_id, instance_id, runner_id, " +
+  "id, title, role, permission_profile_id, agent_id, conversation_id, run_id, step_id, instance_id, runner_id, " +
   "workspace_id, project_id, " +
   "github_connection_id, requested_access_mode, " +
   // Both are read to compute `unenforced`: the provider behind the instance,
@@ -321,6 +326,7 @@ export const parseUsage = (column: string | null): StoredTokenUsage | undefined 
 const toSession = (row: SessionRow): StoredSession => ({
   id: uuidToString(row.id),
   title: row.title,
+  role: row.role,
   permissionProfileId: uuidToString(row.permission_profile_id),
   agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
   conversationId: row.conversation_id === null ? null : uuidToString(row.conversation_id),
@@ -589,13 +595,14 @@ const make = Effect.gen(function* () {
           session.conversationId === undefined ? null : uuidFromString(session.conversationId);
         const run = session.step === undefined ? null : uuidFromString(session.step.runId);
         yield* sql`
-          INSERT INTO sessions (id, title, permission_profile_id, agent_id, conversation_id,
+          INSERT INTO sessions (id, title, role, permission_profile_id, agent_id, conversation_id,
                                 run_id, step_id, instance_id, runner_id,
                                 workspace_id, project_id, checkout_branch, github_connection_id,
                                 requested_access_mode, access_mode, spec,
                                 model_selection, parent_session_id, status,
                                 created_by, created_at, last_activity_at)
-          VALUES (${id}, ${session.title}, ${uuidFromString(session.permissionProfileId)}, ${agent},
+          VALUES (${id}, ${session.title}, ${session.role ?? null},
+                  ${uuidFromString(session.permissionProfileId)}, ${agent},
                   ${conversation}, ${run}, ${session.step?.stepId ?? null},
                   ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
                   ${workspace}, ${project}, ${session.checkoutBranch ?? null}, ${connection},
@@ -1277,17 +1284,33 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Replaces the session's title with a generated one, and stores whether
-     * the model judged that title too vague (`needs_refinement`). The column
-     * is never read back yet: it is the mark that a title was generated.
+     * Stores what a title generation answered, and writes only the parts that
+     * are given:
+     *
+     * - A `title` replaces the session's title, and `needs_refinement` is
+     *   written with it (whether the model judged that title too vague). The
+     *   column is never read back yet: it is the mark that a title was
+     *   generated.
+     * - A `role` is stored only when the session has none. A role given at
+     *   spawn, or generated earlier, is kept. The check is part of the
+     *   statement, so no read and write can interleave.
+     *
+     * With neither part, it changes nothing.
      */
-    setGeneratedTitle: (
+    setGeneratedTitleAndRole: (
       sessionId: string,
-      title: string,
-      needsRefinement: boolean,
+      answer: {
+        readonly title: string | undefined;
+        readonly needsRefinement: boolean;
+        readonly role: string | undefined;
+      },
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE sessions SET title = ${title}, needs_refinement = ${needsRefinement ? 1 : 0}
+        UPDATE sessions SET
+          title = COALESCE(${answer.title ?? null}, title),
+          needs_refinement = CASE WHEN ${answer.title ?? null} IS NULL
+                                  THEN needs_refinement ELSE ${answer.needsRefinement ? 1 : 0} END,
+          role = COALESCE(role, ${answer.role ?? null})
         WHERE id = ${uuidFromString(sessionId)}
       `),
 

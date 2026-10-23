@@ -50,6 +50,7 @@ const insertSession = (
     yield* sessions.insert({
       id,
       title: "a session",
+      role: undefined,
       permissionProfileId,
       agentId: undefined,
       conversationId: undefined,
@@ -769,6 +770,7 @@ const insertResumableSession = Effect.gen(function* () {
   yield* sessions.insert({
     id: sessionId,
     title: "a session",
+    role: undefined,
     permissionProfileId: mintId(),
     agentId: undefined,
     conversationId: undefined,

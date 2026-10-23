@@ -9,6 +9,7 @@ import { findResumeBlockedReason } from "@hercule/client-core";
 const BASE: Session = {
   id: "s0",
   title: "Fix the login bug",
+  role: null,
   status: "idle",
   resumable: false,
   resumeHeld: false,

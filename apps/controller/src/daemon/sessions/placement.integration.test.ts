@@ -29,11 +29,13 @@ import {
   createProfile,
   readSession,
   readSessionToken,
+  reportEvent,
   spawnSession,
   spawnSessionOrFail,
   waitForSession,
   waitForStartFrames,
   waitUntil,
+  at,
   WAIT_DEADLINE_MS,
   withFleet as sharedWithFleet,
   type Arranged,
@@ -935,7 +937,12 @@ describe("placeSession for a session's spawn: where it runs", () => {
 
 /** What the fake runner does when the controller asks it for a title. */
 type TitleBehaviour =
-  | { readonly kind: "answers"; readonly title: string; readonly needsRefinement: boolean }
+  | {
+      readonly kind: "answers";
+      readonly title: string;
+      readonly needsRefinement: boolean;
+      readonly role: string;
+    }
   | { readonly kind: "fails" }
   | { readonly kind: "never-answers" };
 
@@ -945,7 +952,11 @@ const decideTitleAnswer = (behaviour: TitleBehaviour): TextGenerationOutcome | u
     case "answers":
       return {
         outcome: "ok",
-        value: { title: behaviour.title, needsRefinement: behaviour.needsRefinement },
+        value: {
+          title: behaviour.title,
+          needsRefinement: behaviour.needsRefinement,
+          role: behaviour.role,
+        },
         usage: null,
       };
     case "fails":
@@ -1005,6 +1016,7 @@ describe("placeSession generates a Thread title", () => {
     kind: "answers",
     title: "Fix the login redirect",
     needsRefinement: true,
+    role: "fix",
   } as const;
 
   it("replaces the cut-short title with the generated one and keeps the refinement flag", async () => {
@@ -1020,6 +1032,57 @@ describe("placeSession generates a Thread title", () => {
       expect(renamed.status).not.toBe("exited");
       expect(await readNeedsRefinement(arranged, session.id)).toBe(1);
       expect(requests()).toHaveLength(1);
+    });
+  });
+
+  it("asks for a role beside the title, as a required string with no length limit", async () => {
+    await withTitles(answers, async (arranged, requests) => {
+      await spawnSessionOrFail(arranged, { prompt: "login redirect is broken" });
+
+      await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
+      const schema = requests()[0]?.spec.outputSchema as {
+        readonly required: ReadonlyArray<string>;
+        readonly properties: Record<string, Record<string, unknown>>;
+      };
+      expect(schema.required).toContain("role");
+      expect(schema.properties.role).toEqual({ type: "string" });
+    });
+  });
+
+  it("stores a generated role on a Thread spawned without one", async () => {
+    await withTitles(answers, async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "login redirect is broken" });
+
+      expect(session.role).toBeNull();
+      const generated = await waitForSession(arranged, session.id, (one) => one.role !== null);
+      expect(generated.role).toBe("fix");
+    });
+  });
+
+  it("keeps the role spawn gave, and still generates the title", async () => {
+    await withTitles(answers, async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, {
+        prompt: "login redirect is broken",
+        role: "review",
+      });
+
+      expect(session.role).toBe("review");
+      const renamed = await waitForSession(
+        arranged,
+        session.id,
+        (one) => one.title === "Fix the login redirect",
+      );
+      expect(renamed.role).toBe("review");
+      expect((await readSession(arranged, session.id)).role).toBe("review");
+    });
+  });
+
+  it("refuses a role that is blank or over 24 characters", async () => {
+    await withTitles(answers, async (arranged) => {
+      for (const role of [" ", "x".repeat(25), " padded "]) {
+        const response = await spawnSession(arranged, { prompt: "hello", role });
+        expect(response.status, role).toBe(400);
+      }
     });
   });
 
@@ -1081,6 +1144,88 @@ describe("placeSession generates a Thread title", () => {
       const after = await readSession(arranged, session.id);
       expect(after.title).toBe("title will fail");
       expect(await readNeedsRefinement(arranged, session.id)).toBeNull();
+    });
+  });
+
+  /** Spawns a session, lets it start, then ends it with a native id, so it can be forked. */
+  const spawnAndEnd = async (arranged: Arranged, body: unknown): Promise<Session> => {
+    const session = await spawnSessionOrFail(arranged, body);
+    await waitForStartFrames(arranged, session.id, 1);
+    reportEvent(arranged.wire, 1, {
+      eventId: crypto.randomUUID(),
+      sessionId: session.id,
+      at,
+      _tag: "session.started",
+    });
+    await waitForSession(arranged, session.id, (one) => one.status === "busy");
+    arranged.wire.send({
+      _tag: "sessionsReport",
+      sessions: [
+        { sessionId: session.id, nativeSessionId: "native-1", instanceId: session.instanceId },
+      ],
+    });
+    await waitForSession(arranged, session.id, (one) => one.nativeSessionId !== null);
+    reportEvent(arranged.wire, 2, {
+      eventId: crypto.randomUUID(),
+      sessionId: session.id,
+      at,
+      _tag: "session.exited",
+      reason: "stopped",
+    });
+    return await waitForSession(arranged, session.id, (one) => one.status === "exited");
+  };
+
+  const fork = (arranged: Arranged, parentId: string, prompt: string): Promise<Response> =>
+    post(
+      arranged.harness.base,
+      `/api/v1/sessions/${parentId}/continue`,
+      { mode: "fork", prompt },
+      arranged.token,
+    );
+
+  it("generates a title and a role for a fork of a Thread, and takes no role from its parent", async () => {
+    await withTitles(answers, async (arranged, requests) => {
+      const parent = await spawnAndEnd(arranged, { prompt: "start the work", role: "review" });
+      await waitUntil("asked for the parent's title", () =>
+        requests().length === 1 ? true : undefined,
+      );
+
+      const response = await fork(arranged, parent.id, "now do the tests");
+      expect(response.status, await response.clone().text()).toBe(200);
+      const child = (await response.json()) as Session;
+
+      expect(child.role).toBeNull();
+      const generated = await waitForSession(arranged, child.id, (one) => one.role !== null);
+      expect(generated.role).toBe("fix");
+      expect(generated.title).toBe("Fix the login redirect");
+      expect(requests().map((request) => request.spec.input)).toEqual([
+        "start the work",
+        "now do the tests",
+      ]);
+      expect((await readSession(arranged, parent.id)).role).toBe("review");
+    });
+  });
+
+  it("asks for no title or role for a fork of an agent's session", async () => {
+    await withTitles(answers, async (arranged, requests) => {
+      const profile = await readProfileNamed(arranged, "worker");
+      const agent = await createAgent(arranged, {
+        name: "forked",
+        systemPrompt: "You assess tasks.",
+        instanceId: findInstanceId(arranged, "alpha-provider"),
+        permissionProfileId: profile.id,
+        accessMode: "auto-accept-edits",
+        model: "fast",
+      });
+      const parent = await spawnAndEnd(arranged, { agentId: agent.id, prompt: "assess this" });
+      const response = await fork(arranged, parent.id, "assess it again");
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      // A Thread spawned last: when its request has arrived, the fork above
+      // had its chance to ask first.
+      await spawnSessionOrFail(arranged, { prompt: "a real message" });
+      await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
+      expect(requests().map((request) => request.spec.input)).toEqual(["a real message"]);
     });
   });
 });

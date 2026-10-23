@@ -27,6 +27,7 @@ const buildSession = (status: SessionStatus): Session => {
   return {
     id: `01a06d02-2000-7000-8000-00000000000${String(next)}`,
     title: "Fix the login bug",
+    role: null,
     status,
     resumable: false,
     resumeHeld: false,

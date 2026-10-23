@@ -42,7 +42,7 @@ import { SessionSkillList } from "./session-skill";
 import { Branch } from "./workspace";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { atMost, bounded } from "../strings";
+import { atMost, bounded, nonBlankLine } from "../strings";
 
 /**
  * The request, subagent and usage vocabulary comes from the runner protocol;
@@ -168,6 +168,19 @@ export type ThreadDone = Schema.Schema.Type<typeof ThreadDone>;
  */
 export const THREAD_BRANCH_PREFIX = "hercule/thread-";
 
+/** The most characters a session's role may hold. */
+export const MAX_ROLE_LENGTH = 24;
+
+/**
+ * A session's role: its one- or two-word name for its job, such as "review",
+ * "tests" or "migration". One line, with no whitespace at either end, and at
+ * most `MAX_ROLE_LENGTH` characters. A role names what the session does; it is
+ * not a permission.
+ */
+export const SessionRole = nonBlankLine(MAX_ROLE_LENGTH).check(
+  Schema.isTrimmed({ message: "must not start or end with whitespace" }),
+);
+
 export const Session = Schema.Struct({
   id: Id,
   /**
@@ -181,6 +194,14 @@ export const Session = Schema.Struct({
    * generated title was judged too vague is stored but not exposed here.
    */
   title: Schema.String,
+  /**
+   * The session's one- or two-word name for its job, such as "review". It is
+   * the role given at spawn; else, for a Thread, the one generated with its
+   * title; else null. Clients show the role, or the title cut short when it
+   * is null. An agent session has only the role given at spawn. A fork takes
+   * none from its parent. A role never changes after spawn.
+   */
+  role: Schema.NullOr(Schema.String),
   status: SessionStatus,
   /**
    * Computed when the session is read, never stored. True when all of these hold:
@@ -464,6 +485,11 @@ export const SessionSpawnInput = closedStruct({
   prompt: PromptText,
   /** Ids from `attachment.create`; the prompt's images. */
   attachments: PromptAttachments,
+  /**
+   * The session's role, its name for its job. A role never changes after spawn. A
+   * Thread spawned without one gets a generated role, when that succeeds.
+   */
+  role: Schema.optionalKey(SessionRole),
   /**
    * The Agent to spawn from. Its fields take the place of the Thread's
    * defaults, with the same precedence. `instanceId` and `permissionProfileId`

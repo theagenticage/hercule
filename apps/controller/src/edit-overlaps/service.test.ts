@@ -112,6 +112,7 @@ const insertThread = (repositories: ReadonlyArray<string>, toldable = true) =>
       yield* sessions.insert({
         id,
         title: "a session",
+        role: undefined,
         permissionProfileId: profileId,
         agentId: undefined,
         conversationId: undefined,

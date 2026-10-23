@@ -106,7 +106,7 @@ const decodeContinue = Schema.decodeUnknownEffect(ContinueInput);
  */
 const MAX_TITLE_INPUT_LENGTH = 4000;
 
-/** What the model is told when it writes a Thread's title. */
+/** What the model is told when it writes a Thread's title and role. */
 const THREAD_TITLE_INSTRUCTIONS =
   "The input is the first message a user sent to a coding assistant. " +
   "Write a short title for the conversation it starts.\n" +
@@ -114,21 +114,36 @@ const THREAD_TITLE_INSTRUCTIONS =
   "- Write the title in the language of the message.\n" +
   "- Name the task or the topic. Do not address the assistant, and do not use quotes or a final period.\n" +
   "- Set needsRefinement to true when the message is too vague or too short to title well, " +
-  'such as a greeting or "help me". Still write your best title.';
-
-/** The answer the model gives for a Thread's title. */
-const ThreadTitle = Schema.Struct({ title: Schema.String, needsRefinement: Schema.Boolean });
+  'such as a greeting or "help me". Still write your best title.\n' +
+  "- Set role to the job of the conversation in a word or two, " +
+  'such as "migration", "fix", "feature", "review", "tests" or "API docs".\n' +
+  "- Write the role in lowercase, unless it is a name, and in the language of the message.\n" +
+  "- Leave role empty when the message is too vague to name a job.";
 
 /**
- * `ThreadTitle` as the JSON Schema a text generation sends to the harness.
- * It is derived once, when this module loads: it never changes, so a schema
- * that did not fit a request frame would fail every test that loads it.
+ * The answer the model gives for a Thread's title and role.
+ *
+ * `role` has no length limit here, like `title`. A `maxLength` may be outside
+ * the strict JSON Schema subset every provider shares, and an answer that
+ * misses the schema fails the whole call as `invalid-output`, which would lose
+ * a good title over a long role. The service drops a role that is too long.
  */
-const THREAD_TITLE_OUTPUT_SCHEMA = Schema.decodeUnknownSync(OutputSchema)(
-  deriveCatalogJsonSchema(ThreadTitle),
+const ThreadTitleAndRole = Schema.Struct({
+  title: Schema.String,
+  needsRefinement: Schema.Boolean,
+  role: Schema.String,
+});
+
+/**
+ * `ThreadTitleAndRole` as the JSON Schema a text generation sends to the
+ * harness. It is derived once, when this module loads: it never changes, so a
+ * schema that did not fit a request frame would fail every test that loads it.
+ */
+const THREAD_TITLE_AND_ROLE_OUTPUT_SCHEMA = Schema.decodeUnknownSync(OutputSchema)(
+  deriveCatalogJsonSchema(ThreadTitleAndRole),
 );
 
-const decodeThreadTitle = Schema.decodeUnknownEffect(ThreadTitle);
+const decodeThreadTitleAndRole = Schema.decodeUnknownEffect(ThreadTitleAndRole);
 
 const NO_SUCH_PROFILE = "no such permission profile";
 
@@ -316,6 +331,8 @@ interface Placing {
   readonly attachments: ReadonlyArray<string>;
   /** The session's title, or undefined to take it from the prompt. */
   readonly title: string | undefined;
+  /** The session's role, or undefined for none. */
+  readonly role: string | undefined;
   readonly kind: "session.spawned" | "session.continued";
   /** The audit entry's payload, beyond the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
@@ -355,18 +372,19 @@ const make = Effect.gen(function* () {
   const forkAfterCommit = yield* makeForkAfterCommit;
 
   /**
-   * Starts writing a title for a new Thread on a background fiber, from its
-   * first message, and returns at once. The turn never waits for the title
-   * and never fails because of it: when the generation fails, the service has
-   * already recorded why, and the Thread keeps the cut-short title it was
-   * given from the message.
+   * Starts writing a title and a role for a new Thread on a background fiber,
+   * from its first message, and returns at once. The turn never waits for
+   * them and never fails because of them: when the generation fails, the
+   * service has already recorded why, and the Thread keeps the cut-short
+   * title it was given from the message, and the role it was spawned with, if
+   * any.
    */
   const startThreadTitle = (sessionId: string, firstMessage: string): Effect.Effect<void> =>
     forkAfterCommit(
       "Generating a Thread title failed",
       Effect.gen(function* () {
         // The service checks the answer against the JSON Schema, and
-        // `ThreadTitle` has no check that JSON Schema leaves out, so the
+        // `ThreadTitleAndRole` has no check that JSON Schema leaves out, so the
         // answer always decodes. Either failure keeps the cut-short title.
         const answer = yield* Effect.option(
           textGeneration
@@ -375,16 +393,15 @@ const make = Effect.gen(function* () {
               purpose: "thread.title",
               instructions: THREAD_TITLE_INSTRUCTIONS,
               input: firstMessage.slice(0, MAX_TITLE_INPUT_LENGTH),
-              outputSchema: THREAD_TITLE_OUTPUT_SCHEMA,
+              outputSchema: THREAD_TITLE_AND_ROLE_OUTPUT_SCHEMA,
               // A title is only worth having soon; the Thread keeps its
               // cut-short title instead.
               whenNoRunner: "fail",
             })
-            .pipe(Effect.flatMap(decodeThreadTitle)),
+            .pipe(Effect.flatMap(decodeThreadTitleAndRole)),
         );
         if (Option.isNone(answer)) return;
-        const { title, needsRefinement } = answer.value;
-        yield* promotion.whenServing(sessions.setGeneratedTitle(sessionId, title, needsRefinement));
+        yield* promotion.whenServing(sessions.setGeneratedTitleAndRole(sessionId, answer.value));
       }),
     );
 
@@ -775,6 +792,7 @@ const make = Effect.gen(function* () {
             prompt: open.prompt,
             attachments: open.attachments,
             title: open.title,
+            role: open.role,
             kind: open.kind,
             payload: open.payload,
             projectId: open.projectId,
@@ -931,6 +949,7 @@ const make = Effect.gen(function* () {
           prompt: request.text,
           attachments: [],
           title: undefined,
+          role: undefined,
           kind: "session.spawned",
           projectId: undefined,
           workspace: undefined,
@@ -1041,6 +1060,7 @@ const make = Effect.gen(function* () {
           prompt: request.prompt,
           attachments: [],
           title: request.title,
+          role: undefined,
           kind: "session.spawned",
           projectId: undefined,
           workspace: undefined,
@@ -1243,6 +1263,7 @@ const make = Effect.gen(function* () {
           prompt: decoded.prompt,
           attachments: decoded.attachments ?? [],
           title: undefined,
+          role: decoded.role,
           kind: "session.spawned",
           projectId,
           workspace,
@@ -1257,9 +1278,10 @@ const make = Effect.gen(function* () {
             ...(projectId === undefined ? {} : { projectId }),
           },
         });
-        // Only a Thread gets a generated title: a session spawned from an Agent
-        // is titled by its caller's work, and a message with only images has
-        // no text to title.
+        // Only a Thread gets a generated title and role: a session spawned from
+        // an Agent is titled by its caller's work, and a message with only
+        // images has no text to title. The call also runs when spawn gave a
+        // role, because the title still needs it.
         if (agent === undefined && decoded.prompt.trim() !== "") {
           yield* startThreadTitle(session.id, decoded.prompt);
         }
@@ -1318,7 +1340,7 @@ const make = Effect.gen(function* () {
         yield* resolved(parent.instanceId);
         const nativeSessionId = yield* resumableNativeSession(parent);
 
-        return yield* place({
+        const fork = yield* place({
           permissionProfileId: parent.permissionProfileId,
           // The fork is the same piece of work under the same configuration,
           // so it carries the same lineage as its parent.
@@ -1345,6 +1367,9 @@ const make = Effect.gen(function* () {
           prompt,
           attachments: attachments ?? [],
           title: undefined,
+          // A fork takes no role from its parent: a fork of a Thread gets a
+          // generated one, like any Thread.
+          role: undefined,
           kind: "session.continued",
           projectId: parent.projectId ?? undefined,
           workspace: undefined,
@@ -1352,6 +1377,13 @@ const make = Effect.gen(function* () {
           checkoutBranch: undefined,
           payload: { parentSessionId: parent.id, mode },
         });
+        // A fork of a Thread is a Thread, so it gets a generated title and
+        // role from its first message, as a spawn does. A fork of an Agent's
+        // session does not.
+        if (parent.agentId === null && prompt.trim() !== "") {
+          yield* startThreadTitle(fork.id, prompt);
+        }
+        return fork;
       }),
   };
 });

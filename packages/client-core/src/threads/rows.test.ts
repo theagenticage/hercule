@@ -28,6 +28,7 @@ type Mark = "working" | "idle" | "exited";
 const BASE: Session = {
   id: "s0",
   title: "Fix the login bug",
+  role: null,
   status: "idle",
   resumable: false,
   resumeHeld: false,

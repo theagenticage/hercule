@@ -96,6 +96,7 @@ const insertSession = (workspaceId: string | null = null, permissionProfileId = 
       sessions.insert({
         id,
         title: "a session",
+        role: undefined,
         permissionProfileId,
         agentId: undefined,
         conversationId: undefined,
