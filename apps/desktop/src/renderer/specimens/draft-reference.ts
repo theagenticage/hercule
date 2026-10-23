@@ -21,7 +21,7 @@
  *    shows the name the provider's catalog gives the model, and shows the
  *    provider by its logo, as the thread's composer does;
  * 2. sets the lip's workspace to client-core's words: "New workspace" for
- *    the book's "New worktree", because CONTEXT.md keeps "worktree" for the
+ *    the book's "New worktree", because GLOSSARY.md keeps "worktree" for the
  *    git mechanism and the lip names the workspace the thread will work in
  *    (spec 17 §Design system, A new thread), and "No workspace" for the
  *    book's "No checkout", the name the workspace menu gives that pick. The

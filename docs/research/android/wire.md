@@ -938,7 +938,7 @@ Errors:
 
 ---
 
-#### 6. Concepts (CONTEXT.md words)
+#### 6. Concepts (GLOSSARY.md words)
 
 - **Assistant**: an agent with persistent memory, oriented toward delegating work. It is reachable through channel bindings and directly in the app. Different personas are different assistants.
 - **Conversation**: one continuous exchange with an assistant inside one platform container. On the web channel, each assistant has exactly one conversation (`mainConversationId`, `channel: "web"`, `containerKey: null`).
@@ -1819,7 +1819,7 @@ Related: `PATCH /api/v1/sessions/{id}/inputs/{inputId}` (`{ text, attachments? }
 
 ---
 
-#### 3. Vocabulary (from `CONTEXT.md`)
+#### 3. Vocabulary (from `GLOSSARY.md`)
 
 - **Session**: one run of a provider-backed agent: process, context and transcript. Resumable in place (same id) by the next input while its transcript is on its runner; forking mints a new session. Copies config from an Agent at spawn, or has no Agent and is a Thread.
 - **Thread**: a session the user starts and drives by hand, with no Agent behind it (`agentId == null`; `session.query?thread=true`).

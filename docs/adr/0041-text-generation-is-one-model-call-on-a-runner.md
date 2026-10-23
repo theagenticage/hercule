@@ -30,7 +30,7 @@ Three facts shaped the design:
 This decision contradicts two earlier texts, on purpose:
 
 - **Contradicts ADR 0007**, which defines the adapter as a probe plus session methods behind a normalized event stream. A text generation is neither: it has no session and no event stream. The adapter gains a one-shot method for it.
-- **Contradicts CONTEXT.md**, which defined a Provider as an adapter wrapping an *interactive* coding harness. A text generation drives the same harness non-interactively, for one answer. The Provider entry is amended, and the terms Text Generation, text generation model and Purpose are added.
+- **Contradicts GLOSSARY.md**, which defined a Provider as an adapter wrapping an *interactive* coding harness. A text generation drives the same harness non-interactively, for one answer. The Provider entry is amended, and the terms Text Generation, text generation model and Purpose are added.
 
 ## Decision
 

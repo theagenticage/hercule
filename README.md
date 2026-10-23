@@ -103,7 +103,7 @@ If A is gone and a runner never heard the announcement, re-point it by hand: `he
 |---|---|
 | [docs/spec/](docs/spec/README.md) | The normative v1 spec: one document per subsystem, buildable without opening the tickets |
 | [docs/adr/](docs/adr/) | Architecture decision records - the "why" behind the spec |
-| [CONTEXT.md](CONTEXT.md) | The ubiquitous language: every domain term, with the synonyms to avoid |
+| [GLOSSARY.md](GLOSSARY.md) | The ubiquitous language: every domain term, with the synonyms to avoid |
 | [docs/design-language.md](docs/design-language.md) | The visual language and pinned UI semantics for all surfaces |
 | [AGENTS.md](AGENTS.md) | Instructions for coding agents working in this repo |
 

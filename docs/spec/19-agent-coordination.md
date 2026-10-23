@@ -15,7 +15,7 @@ This document covers:
 - the desktop app's two read-only screens;
 - what the build tickets take from it, and the limits it accepts.
 
-The words are defined in [CONTEXT.md](../../CONTEXT.md): **Edit Overlap**, **Discussion**, **Post**, **Discussion Input**, **Wiki**, **Wiki Page**.
+The words are defined in [GLOSSARY.md](../../GLOSSARY.md): **Edit Overlap**, **Discussion**, **Post**, **Discussion Input**, **Wiki**, **Wiki Page**.
 
 **Status:** locked 2026-10-14 for [Agent coordination: spec 19, ADR and glossary (#665)](https://github.com/theagenticage/hercule/issues/665), from the decisions of [Agent coordination: design decisions (#663)](https://github.com/theagenticage/hercule/issues/663) and the findings of [Agent coordination: prior art and research (#664)](https://github.com/theagenticage/hercule/issues/664). Four build tickets build it: [Discussions (#666)](https://github.com/theagenticage/hercule/issues/666), [Wiki (#667)](https://github.com/theagenticage/hercule/issues/667), [Edit Overlaps (#668)](https://github.com/theagenticage/hercule/issues/668) and [desktop Discussions and Wiki screens (#669)](https://github.com/theagenticage/hercule/issues/669).
 

@@ -12,7 +12,7 @@ Three roles ship in one self-contained Bun binary: the **controller** (always-on
 
 Before writing code:
 
-1. **`CONTEXT.md`** - the vocabulary. Use its terms exactly, in code identifiers too, and respect the "Avoid" lists.
+1. **`GLOSSARY.md`** - the vocabulary. Use its terms exactly, in code identifiers too, and respect the "Avoid" lists.
 2. **The spec document that owns your area** - `docs/spec/` (map in `docs/spec/README.md`). Normative text you can build from.
 3. **The ADRs that touch your area** - `docs/adr/`. The "why" behind the spec.
 4. **For UI work**: `docs/design-language.md` for the web app; for the desktop app, `docs/spec/17-desktop-app.md` and the Crew Bureau pages it names.
@@ -35,7 +35,7 @@ The test: would a senior engineer call this overcomplicated? Then it is.
 
 **Names carry their own context.**
 
-1. A type or a field is named for what it stands for, in the project's vocabulary (a CONTEXT.md word where one exists; CONTEXT.md holds the application's concepts, not every module's details), qualified when look-alikes exist. Never for how it is encoded or transported, or for which caller uses it.
+1. A type or a field is named for what it stands for, in the project's vocabulary (a GLOSSARY.md word where one exists; GLOSSARY.md holds the application's concepts, not every module's details), qualified when look-alikes exist. Never for how it is encoded or transported, or for which caller uses it.
 2. A function is named for what it does and to what: verb plus object (`excludeSecretFields(schema)`), or for a pure query, the question it answers about its argument (`requiresApproval(mode, toolName)`). The verb tells the truth about the work: `get` reads something that already exists, `compute`, `build` and `parse` produce something, and a boolean query reads as its question. `getHash` is wrong for a function that computes one. A name with no verb, or no subject, is not a name yet. The `<thing>Of(x)` shape (`resultOf`, `specOf`, `recordOf`) has no verb and is not a name: say what is done (`readSpec`, `buildRecord`, `decideResult`). The one exception is a method on a service or repository whose name already supplies the subject: `agents.list(request)` and `agents.delete(id)` read as verb plus object at the call site, and the method name alone is enough.
 3. A name is read without the file, the folder or the call site. Bare nouns, bare adjectives or gerunds, and nicknames a comment invented fail this. `one`, `said`, `deepest`, `ends`, `normalizing` are not function names.
 4. One concept has one spelling in every package it crosses. The owner of a shared contract names it once; callers import that name and never alias it.
@@ -46,7 +46,7 @@ The test: would a senior engineer call this overcomplicated? Then it is.
 
 1. A function's docstring starts with a verb that says what the function does: "Parses...", "Returns...", "Checks that...". It says what the function returns and when it fails. A reader who sees only the signature and the docstring can use the function without reading its body.
 2. After that, say why, if the reason is not obvious. Inline comments only explain why, and never repeat what a line does.
-3. Use the ordinary words of programming: returns, parses, validates, converts, fails, error, schema. Use CONTEXT.md words for domain concepts. Never invent a phrase to avoid a common word.
+3. Use the ordinary words of programming: returns, parses, validates, converts, fails, error, schema. Use GLOSSARY.md words for domain concepts. Never invent a phrase to avoid a common word.
 4. Things do not talk. Text does not "say" and a list does not "answer". Write what actually happens: "the YAML parses to", "the list is sorted by".
 5. Use short sentences and active voice. If there are three or more rules or cases, write a bullet list, not one long sentence.
 6. Each "it", "this" and "that" must be obvious. If the reader has to look back to find what it refers to, name the thing.
@@ -117,7 +117,7 @@ One pnpm workspace. Every package is `@hercule/*`, `"type": "module"`, and expor
 
 ### Source layout
 
-Source is organized **by domain**, not by type: one folder per domain, named with the CONTEXT.md word for it, and its `index.ts` is the boundary other domains import through. `db/` and `config/` are the two infrastructure exceptions, sitting under every domain; in the controller, `daemon/` - the controller daemon - is the one layer above the domains, holding the wire to runners, the execution behind the ports domains declare, the drivers and boot, and the rare operation that breaks a cycle in the domain graph. The controller daemon has one folder per concern (`sessions/`, `events/`, `workspaces/`, `runners/`, `permissions/`, `connections/`, `workflows/`, `runs/`), each with an `index.ts` the rest of the controller daemon imports it through; its top level keeps only `boot.ts`, `index.ts`, `testing.ts` and the helpers more than one folder uses. A new use case goes in the folder of its concern. Tests sit next to the code they test and are told apart by name: a unit test is `foo.test.ts` beside `foo.ts`, and an integration test - one that drives several modules together through a single entry point, an HTTP transport or the whole rendered app - is `<entry>.integration.test.ts` beside the module it enters. End-to-end tests run against the compiled binary and live in `e2e/` at the repository root. See [ADR 0033](docs/adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md).
+Source is organized **by domain**, not by type: one folder per domain, named with the GLOSSARY.md word for it, and its `index.ts` is the boundary other domains import through. `db/` and `config/` are the two infrastructure exceptions, sitting under every domain; in the controller, `daemon/` - the controller daemon - is the one layer above the domains, holding the wire to runners, the execution behind the ports domains declare, the drivers and boot, and the rare operation that breaks a cycle in the domain graph. The controller daemon has one folder per concern (`sessions/`, `events/`, `workspaces/`, `runners/`, `permissions/`, `connections/`, `workflows/`, `runs/`), each with an `index.ts` the rest of the controller daemon imports it through; its top level keeps only `boot.ts`, `index.ts`, `testing.ts` and the helpers more than one folder uses. A new use case goes in the folder of its concern. Tests sit next to the code they test and are told apart by name: a unit test is `foo.test.ts` beside `foo.ts`, and an integration test - one that drives several modules together through a single entry point, an HTTP transport or the whole rendered app - is `<entry>.integration.test.ts` beside the module it enters. End-to-end tests run against the compiled binary and live in `e2e/` at the repository root. See [ADR 0033](docs/adr/0033-source-is-organized-by-domain-and-tests-are-colocated.md).
 
 #### Web app layout
 

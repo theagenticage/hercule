@@ -6,7 +6,7 @@ Hercule is a self-hosted agent orchestration platform: one always-on controller,
 
 Hercule orchestrates agents doing work on the user's behalf. Agents are configured identities (prompt, provider, capabilities) owned by the controller. They do their work in sessions on runners, driven by interactive coding harnesses (Claude Code, Codex, pi) behind provider adapters. Work enters the system as events (a GitHub issue labelled, a mail received, a cron tick, a manual trigger), is triaged and shaped by agents before the user sees it, and is executed by workflows: stored, editable definitions of triggers, steps, and routing. Between the user and the agents sits one public API; the web app, the `hercule` CLI, and the agents themselves are all clients of it.
 
-Hercule is the successor to old agentick (Python). Old agentick is a quarry for ideas, never a constraint. Its product name is Hercule; "agentick" and "agentick-next" are retired labels (see [CONTEXT.md](../../CONTEXT.md)).
+Hercule is the successor to old agentick (Python). Old agentick is a quarry for ideas, never a constraint. Its product name is Hercule; "agentick" and "agentick-next" are retired labels (see [GLOSSARY.md](../../GLOSSARY.md)).
 
 ## Identity features of v1
 
@@ -156,7 +156,7 @@ Four items are neither in nor out; they sharpen with dogfooding and are tracked 
 
 The spec is ~~seventeen~~ ~~eighteen~~ nineteen documents under `docs/spec/`, one per subsystem, listed with what each owns in [README.md](./README.md). *(Amended 2026-10-13, [#630](https://github.com/theagenticage/hercule/issues/630); amended 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Read them in number order for a first pass; each document is self-contained enough to build from, and states any constraint a neighbour handed to it. Open questions, verify-at-build-time notes, and post-v1 items from every document are collected in [16-open-items.md](./16-open-items.md).
 
-The vocabulary is [CONTEXT.md](../../CONTEXT.md). Every document uses its terms exactly and respects its "Avoid" lists. The visual language for all UI is [design-language.md](../design-language.md).
+The vocabulary is [GLOSSARY.md](../../GLOSSARY.md). Every document uses its terms exactly and respects its "Avoid" lists. The visual language for all UI is [design-language.md](../design-language.md).
 
 Rationale lives in the ADRs, not in the spec documents. All of them:
 
