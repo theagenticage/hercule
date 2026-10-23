@@ -148,17 +148,15 @@ describe("TabOverflowMenu", () => {
     expect(screen.getByRole("button", { name: "1 more thread" })).toBeTruthy();
   });
 
-  it("starts the button with the waiting mark only while a hidden tab waits", async () => {
+  it("tells a hidden question by the waiting mark and in the button's name", async () => {
     await renderMenu([REVIEW, WAITING]);
-    expect(
-      screen.getByRole("button", { name: "2 more threads" }).querySelector(".mark--waiting"),
-    ).not.toBeNull();
+    const button = screen.getByRole("button", { name: "2 more threads, 1 waiting on you" });
+    expect(button.querySelector(".mark--waiting")).not.toBeNull();
     cleanup();
 
     await renderMenu([REVIEW]);
-    expect(
-      screen.getByRole("button", { name: "1 more thread" }).querySelector(".mark--waiting"),
-    ).toBeNull();
+    const quiet = screen.getByRole("button", { name: "1 more thread" });
+    expect(quiet.querySelector(".mark--waiting")).toBeNull();
   });
 
   it("lists each hidden tab with its label, model and state, and a title-only label lighter", async () => {

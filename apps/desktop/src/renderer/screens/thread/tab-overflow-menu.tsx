@@ -17,7 +17,8 @@ import "./tab-overflow-menu.css";
  * - The button carries `data-tab-overflow`, which the header's fitting finds
  *   it by (`useTabOverflow`).
  * - While a hidden tab waits on the user, the button starts with the waiting
- *   mark, so a question never hides without a sign.
+ *   mark and its name says how many wait, so a question never hides without a
+ *   sign.
  * - With no tab in `tabs` the button is drawn as "+1", out of flow and
  *   invisible, so the fitting can measure the room it needs. It takes no
  *   focus and is hidden from assistive technology then.
@@ -41,7 +42,7 @@ export function TabOverflowMenu({
   const [open, setOpen] = useState(false);
   const idle = tabs.length === 0;
   const count = tabs.length;
-  const hasWaiting = tabs.some((tab) => tab.pose === "waiting");
+  const waitingCount = tabs.filter((tab) => tab.pose === "waiting").length;
   const hiddenIds = tabs.map((tab) => tab.sessionId).join(" ");
 
   const closeForNewList = useEffectEvent(() => {
@@ -72,10 +73,10 @@ export function TabOverflowMenu({
         data-tab-overflow=""
         {...triggerProps}
         aria-expanded={open}
-        aria-label={`${count} more ${count === 1 ? "thread" : "threads"}`}
+        aria-label={describeButton(count, waitingCount)}
         {...(idle ? { "aria-hidden": true, tabIndex: -1 } : {})}
       >
-        {hasWaiting ? <Mark state="waiting" /> : null}
+        {waitingCount > 0 ? <Mark state="waiting" /> : null}
         <span>+{idle ? 1 : count}</span>
         <span className="tab-overflow-chevron">
           <ChevronRightIcon size={12} />
@@ -109,6 +110,16 @@ export function TabOverflowMenu({
     </>
   );
 }
+
+/**
+ * Returns the accessible name of the "+n" button: "1 more thread", or "6 more
+ * threads", followed by ", 1 waiting on you" when `waitingCount` is not zero,
+ * so a question that hides behind the button is still announced.
+ */
+const describeButton = (count: number, waitingCount: number): string => {
+  const more = `${count} more ${count === 1 ? "thread" : "threads"}`;
+  return waitingCount === 0 ? more : `${more}, ${waitingCount} waiting on you`;
+};
 
 /**
  * Renders one hidden tab as a row of the menu: its mark, its label, its
