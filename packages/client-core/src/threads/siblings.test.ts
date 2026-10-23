@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSiblingTabs,
   labelWorkspaceSessions,
+  listSessionsOfWorkspace,
   listWorkspaceSessionTabs,
   listWorkspaceThreads,
 } from "./siblings";
@@ -142,13 +143,12 @@ describe("labelWorkspaceSessions", () => {
     expect(labelsOf(sessions)).toEqual(["Review 2", "review", "tests", "REVIEW 3"]);
   });
 
-  it("numbers sessions created at the same moment in list order", () => {
-    const sessions = [
-      buildSession({ id: "s-b", role: "review", createdAt: at(1) }),
-      buildSession({ id: "s-a", role: "review", createdAt: at(1) }),
-    ];
+  it("numbers sessions created at the same moment by session id, whatever the list order", () => {
+    const first = buildSession({ id: "s-a", role: "review", createdAt: at(1) });
+    const second = buildSession({ id: "s-b", role: "review", createdAt: at(1) });
 
-    expect(labelsOf(sessions)).toEqual(["review", "review 2"]);
+    expect(labelsOf([second, first])).toEqual(["review 2", "review"]);
+    expect(labelsOf([first, second])).toEqual(["review", "review 2"]);
   });
 
   it("labels a session with no role by its full title, and does not number titles", () => {
@@ -183,5 +183,21 @@ describe("listWorkspaceThreads", () => {
     const workspace = { ...THREAD_3F1, sessionIds: ["s-flaky", "s-gone", "s-runbook"] };
 
     expect(listWorkspaceThreads(workspace, SESSIONS)).toEqual([SESSIONS[1], SESSIONS[0]]);
+  });
+});
+
+describe("listSessionsOfWorkspace", () => {
+  it("keeps the sessions of the workspace, exited ones too, and drops the others", () => {
+    const live = buildSession({ id: "s-live", workspaceId: "w-1" });
+    const exited = buildSession({ id: "s-exited", workspaceId: "w-1", status: "exited" });
+    const elsewhere = buildSession({ id: "s-elsewhere", workspaceId: "w-2" });
+
+    expect(listSessionsOfWorkspace("w-1", [live, elsewhere, exited])).toEqual([live, exited]);
+  });
+
+  it("returns a session that two reads hold once", () => {
+    const partner = buildSession({ id: "s-partner", workspaceId: "w-1", kind: "agent" });
+
+    expect(listSessionsOfWorkspace("w-1", [partner, partner])).toEqual([partner]);
   });
 });

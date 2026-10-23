@@ -865,6 +865,7 @@ export {
 export {
   buildSiblingTabs,
   labelWorkspaceSessions,
+  listSessionsOfWorkspace,
   listWorkspaceSessionTabs,
   listWorkspaceThreads,
   type ThreadTab,

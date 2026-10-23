@@ -72,12 +72,16 @@ export function ProjectCrumb({
  * - `className` adds classes to the nav, such as the one that styles a run's
  *   crumbs.
  * - Each tab's pose is drawn with the runner it names in `runners`.
+ * - `workspaceSessions` is every session of the workspace, exited ones and
+ *   Agent sessions too, not only the tabs. A tab's label is numbered among
+ *   them, so it reads as it does in the sidebar.
  */
 export function ThreadTabsPill({
   label,
   className,
   crumbs,
   tabs,
+  workspaceSessions,
   runners,
   children,
 }: {
@@ -85,11 +89,12 @@ export function ThreadTabsPill({
   readonly className?: string | undefined;
   readonly crumbs: ReactNode;
   readonly tabs: readonly Session[];
+  readonly workspaceSessions: readonly Session[];
   readonly runners: readonly Runner[];
   readonly children?: ReactNode;
 }): JSX.Element {
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
-  const labels = labelWorkspaceSessions(tabs);
+  const labels = labelWorkspaceSessions(workspaceSessions);
   return (
     <nav
       className={className === undefined ? "pill thread-tabs" : `pill thread-tabs ${className}`}

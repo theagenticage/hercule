@@ -1,7 +1,7 @@
 /**
  * Tests `buildLanes(sessions)`, which groups sessions into the five lanes in
- * their fixed order with a thread that has an open Request in the waiting
- * lane only, `buildHeadline(sessions, now)`, which summarizes the
+ * their fixed order with a Thread or an Agent's session that has an open
+ * Request in the waiting lane only, `buildHeadline(sessions, now)`, which summarizes the
  * same groups in one sentence, and the functions that sum up, describe and
  * list the step sessions, which sit in no lane.
  */
@@ -202,13 +202,23 @@ describe("buildLanes", () => {
     expect(lanes.flatMap((lane) => lane.sessions.map((s) => s.id))).toEqual(["thread"]);
   });
 
-  it("places an Agent's session outside a run or a conversation in no lane, as it is not a Thread", () => {
+  it("places an Agent's session outside a run or a conversation in the lanes, as a Thread is", () => {
     const partner = buildSession({ id: "partner", status: "busy", kind: "agent", agentId: "ada" });
-    const thread = buildSession({ id: "thread", status: "busy" });
+    const asking = buildSession({
+      id: "asking",
+      status: "idle",
+      kind: "agent",
+      agentId: "ada",
+      openRequests: [REQUEST],
+    });
+    const gone = buildSession({ id: "gone", status: "exited", kind: "agent", agentId: "ada" });
 
-    const lanes = buildLanes([partner, thread]);
+    const lanes = buildLanes([partner, asking, gone]);
+    const byKind = Object.fromEntries(lanes.map((lane) => [lane.kind, lane.sessions]));
 
-    expect(lanes.flatMap((lane) => lane.sessions.map((s) => s.id))).toEqual(["thread"]);
+    expect(byKind.running!.map((s: Session) => s.id)).toEqual(["partner"]);
+    expect(byKind.waiting!.map((s: Session) => s.id)).toEqual(["asking"]);
+    expect(byKind.settled!.map((s: Session) => s.id)).toEqual(["gone"]);
   });
 });
 
@@ -329,13 +339,13 @@ describe("buildHeadline", () => {
     expect(buildHeadline(sessions.slice(0, 1), now)).toBe("No threads active this week");
   });
 
-  it("does not count an Agent's session outside a run or a conversation", () => {
+  it("counts an Agent's session outside a run or a conversation by its status, as it counts a thread", () => {
     const sessions = [
       buildSession({ id: "p1", status: "busy", kind: "agent", agentId: "ada" }),
       buildSession({ id: "t1", status: "idle" }),
     ];
 
-    expect(buildHeadline(sessions, now)).toBe("1 idle");
+    expect(buildHeadline(sessions, now)).toBe("1 running · 1 idle");
   });
 });
 

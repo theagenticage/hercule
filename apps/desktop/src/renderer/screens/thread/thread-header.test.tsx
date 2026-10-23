@@ -120,6 +120,36 @@ describe("the thread header", () => {
     expect(text?.getAttribute("title")).toBe("Bump the Bun pin");
   });
 
+  it("numbers a role among every session of the workspace, an exited one included, as the sidebar does", async () => {
+    const { waiting } = THREAD_FIXTURES;
+    const open = { ...waiting.session, role: "review" };
+    // The workspace no longer lists it, so it is no tab, yet it was the first "review".
+    const earlier = buildSession({
+      ...waiting.session,
+      id: "01a06d02-7400-7000-8000-0000000000ff",
+      title: "Review the webhook change",
+      role: "review",
+      status: "exited",
+      createdAt: "2026-09-10T09:00:00.000Z",
+    });
+    await renderThreadPart(HeaderOfThread, {
+      thread: { ...waiting, session: open },
+      handlers: buildSidebarHandlers({
+        ...SIDEBAR_FIXTURE,
+        threads: [
+          earlier,
+          ...SIDEBAR_FIXTURE.threads.map((each) => (each.id === open.id ? open : each)),
+        ],
+      }),
+    });
+
+    expect(readLinkNames()).toEqual([
+      "Fix flaky webhook tests, working",
+      "review 2, Write the retry runbook, waiting on you",
+      "New thread in this workspace",
+    ]);
+  });
+
   it("ends a tab in a word when the thread's sidebar row would", async () => {
     const { finished } = THREAD_FIXTURES;
     await renderThreadPart(HeaderOfThread, {

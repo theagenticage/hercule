@@ -85,13 +85,15 @@ export const listWorkspaceSessionTabs = (
  *   starts with the workflow's name, which the header's crumb already shows.
  * - Any other session is labelled with its role, when it has one. Sessions
  *   that share a role, ignoring case, are numbered by `createdAt` (ties by
- *   their order in `sessions`): `review`, `review 2`, `review 3`. Each keeps
- *   its own spelling.
+ *   session id, so the order of `sessions` never changes a label): `review`,
+ *   `review 2`, `review 3`. Each keeps its own spelling.
  * - A session with no role is labelled with its full title, which the screen
  *   cuts short. Titles are not numbered.
  *
  * The header's tabs and the sidebar's unfolded list both call this, so they
- * name a session the same way.
+ * name a session the same way, as long as they pass the same sessions: every
+ * session of the workspace, exited ones and Agent sessions included
+ * (`listSessionsOfWorkspace`). A shorter list can number differently.
  */
 export const labelWorkspaceSessions = (
   sessions: readonly Session[],
@@ -99,7 +101,8 @@ export const labelWorkspaceSessions = (
   const labels = new Map<string, string>();
   const rolesSeen = new Map<string, number>();
   const oldestFirst = sessions.toSorted(
-    (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
+    (a, b) =>
+      Date.parse(a.createdAt) - Date.parse(b.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   );
   for (const session of oldestFirst) {
     const role = session.role?.trim() ?? "";
@@ -115,6 +118,27 @@ export const labelWorkspaceSessions = (
     }
   }
   return labels;
+};
+
+/**
+ * Returns the sessions of `sessions` that work in the workspace
+ * `workspaceId`, each id once and in the order `sessions` first holds it.
+ * `sessions` is the sessions of several reads put together, so a session that
+ * two of them hold is returned once.
+ *
+ * Unlike a workspace's `sessionIds`, this keeps the sessions that have exited
+ * and the Agent sessions, which is what `labelWorkspaceSessions` needs to
+ * number a role the same way everywhere.
+ */
+export const listSessionsOfWorkspace = (
+  workspaceId: string,
+  sessions: readonly Session[],
+): readonly Session[] => {
+  const byId = new Map<string, Session>();
+  for (const session of sessions) {
+    if (session.workspaceId === workspaceId && !byId.has(session.id)) byId.set(session.id, session);
+  }
+  return [...byId.values()];
 };
 
 /**

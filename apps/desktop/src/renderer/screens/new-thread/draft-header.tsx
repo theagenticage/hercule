@@ -13,17 +13,21 @@ import "../thread/thread-header.css";
  *
  * `projectId` is `null` for a draft in no project, which the crumb calls "No
  * project"; `projects` is the project list the crumb finds it in. `tabs` is
- * empty unless the draft joins a workspace with threads.
+ * empty unless the draft joins a workspace with threads. `workspaceSessions`
+ * is every session of that workspace, which the tabs' labels are numbered
+ * among.
  */
 export function DraftHeader({
   projectId,
   projects,
   tabs,
+  workspaceSessions,
   runners,
 }: {
   readonly projectId: string | null;
   readonly projects: readonly Project[];
   readonly tabs: readonly Session[];
+  readonly workspaceSessions: readonly Session[];
   readonly runners: readonly Runner[];
 }): JSX.Element {
   return (
@@ -32,6 +36,7 @@ export function DraftHeader({
         label="Threads in this workspace"
         crumbs={<ProjectCrumb projectId={projectId} projects={projects} />}
         tabs={tabs}
+        workspaceSessions={workspaceSessions}
         runners={runners}
       >
         <span className="ptab is-on" aria-current="page">

@@ -1,12 +1,18 @@
 import { lazy, Suspense, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
-import { isJoinable, listWorkspaceSessionTabs, toggleSidePane } from "@hercule/client-core";
+import {
+  isJoinable,
+  listSessionsOfWorkspace,
+  listWorkspaceSessionTabs,
+  toggleSidePane,
+} from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import {
   liveAgentSessionsQuery,
   projectsQuery,
   runnersQuery,
+  threadAndAgentSessionsQuery,
   threadsQuery,
   workspacesQuery,
 } from "../../app/queries";
@@ -64,6 +70,7 @@ export function ThreadHeader({ session }: { readonly session: Session }): JSX.El
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const threads = useSuspenseQuery(threadsQuery(client)).data;
+  const threadsAndPartners = useSuspenseQuery(threadAndAgentSessionsQuery(client)).data;
   const agentSessions = useSuspenseQuery(liveAgentSessionsQuery(client)).data;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
@@ -80,6 +87,16 @@ export function ThreadHeader({ session }: { readonly session: Session }): JSX.El
     isStepSession ? [...threads, ...agentSessions] : threads,
     workspaces,
   );
+  // Labels are numbered among every session of the workspace, as the sidebar
+  // does: the exited ones and the Agent sessions too, which no tab shows.
+  const workspaceSessions =
+    session.workspaceId === null
+      ? [session]
+      : listSessionsOfWorkspace(session.workspaceId, [
+          session,
+          ...threadsAndPartners,
+          ...agentSessions,
+        ]);
   const canStartThread = !isStepSession && workspace !== undefined && isJoinable(workspace);
 
   return (
@@ -98,6 +115,7 @@ export function ThreadHeader({ session }: { readonly session: Session }): JSX.El
           )
         }
         tabs={tabs}
+        workspaceSessions={workspaceSessions}
         runners={runners}
       >
         {canStartThread ? (
