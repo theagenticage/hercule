@@ -22,7 +22,12 @@ import type { Pose, ThreadRowStatus } from "./pose";
 import { buildThreadPlaceLabel } from "./project-rows";
 import { formatRequestQuestion } from "./request-question";
 import { buildGroupKey, buildWorkspaceGroupKey, type SessionGroup } from "./session-groups";
-import { describeSessionTab, labelWorkspaceSessions } from "./siblings";
+import {
+  describeSessionTab,
+  formatSessionCount,
+  labelWorkspaceSessions,
+  type SessionTab,
+} from "./siblings";
 import { describeThreadPlace } from "./thread-place";
 import { buildWorkspaceLabelParts, type WorkspaceLabel } from "./workspaces";
 
@@ -36,13 +41,14 @@ const MAX_DOTS = 3;
  */
 export type SessionDot = "waiting" | "working" | "quiet";
 
-/** One session of a group, with what the row's dots and unfolded lines show about it. */
-export interface GroupMember {
-  readonly sessionId: string;
-  /** A Thread, or an Agent's session. */
+/**
+ * One session of a group: what the header's tab shows of it (`SessionTab`,
+ * labelled among the group's sessions), and what the row's dots and unfolded
+ * lines add.
+ */
+export interface GroupMember extends SessionTab {
+  /** A Thread, or an Agent's session: the only kinds a group holds. */
   readonly kind: "thread" | "agent";
-  /** What the session is called inside its group, as `labelWorkspaceSessions` returns it. */
-  readonly label: string;
   /**
    * `label` when the name tells the session apart from the others, and
    * `null` for the lead, which the row's name already stands for, and so for
@@ -50,25 +56,13 @@ export interface GroupMember {
    * an asking session with this.
    */
   readonly askerLabel: string | null;
-  /** The session's full title, for a tooltip. */
-  readonly title: string;
-  readonly pose: Pose;
-  readonly status: ThreadRowStatus;
-  /** When the session was last active, which an `age` status counts from. */
-  readonly activityAt: string;
   /** Whether the session counts toward the row's status, dots and waiting. */
   readonly counted: boolean;
   /** Whether the Office seats the session at work, as `isSessionSeated` decides it. */
   readonly seated: boolean;
-  /** Whether the session is a Thread marked Done. */
-  readonly done: boolean;
   readonly dot: SessionDot;
   /** The oldest open Request's question, or `null` when nothing waits in this session. */
   readonly question: string | null;
-  /** The provider of the session's instance, such as `claude-code`, or `null` when the instance is unknown. */
-  readonly providerId: string | null;
-  /** The display name of the model the session runs on. */
-  readonly model: string;
 }
 
 /** What waits on the user in a group, as the row's second line shows it. */
@@ -231,12 +225,11 @@ const summarizeMembers = (members: readonly GroupMember[]): GroupSummary => {
   ]
     .filter(([count]) => count !== 0)
     .map(([count, words]) => `${String(count)} ${words}`);
-  const noun = members.every((member) => member.kind === "thread") ? "threads" : "sessions";
   return {
     dots: shown.map((member) => member.dot),
     hiddenCount: counted.length - shown.length,
     membersByUrgency,
-    label: `${String(members.length)} ${noun}: ${parts.join(", ")}`,
+    label: `${formatSessionCount(members)}: ${parts.join(", ")}`,
   };
 };
 

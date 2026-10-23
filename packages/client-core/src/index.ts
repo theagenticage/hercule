@@ -855,7 +855,8 @@ export {
 } from "./threads/sidebar-sections";
 export {
   buildSiblingTabs,
-  labelWorkspaceSessions,
+  describeHiddenTabs,
+  isWaitingOnUser,
   listWorkspaceSessionTabs,
   type SessionTab,
   type ThreadTab,

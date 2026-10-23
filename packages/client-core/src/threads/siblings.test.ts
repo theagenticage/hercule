@@ -6,15 +6,28 @@
  */
 import type { ProviderInstance, Session, Workspace } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
+import type { Pose } from "./pose";
 import {
   buildSiblingTabs,
+  describeHiddenTabs,
+  describeSessionTab,
+  isWaitingOnUser,
   labelWorkspaceSessions,
   listSessionsOfWorkspace,
   listWorkspaceSessionTabs,
-  listWorkspaceThreads,
+  listWorkspaceSessions,
   type SessionTab,
 } from "./siblings";
 import { AT, MOSS, THREAD_3F1, buildSession } from "./workspaces.testing";
+
+const tabOf = (over: Partial<Session> & { id: string }, pose: Pose = "idle"): SessionTab =>
+  describeSessionTab({
+    session: buildSession(over),
+    label: "x",
+    pose,
+    runner: undefined,
+    instance: undefined,
+  });
 
 const SESSIONS = [
   buildSession({ id: "s-runbook", title: "Write the retry runbook", status: "busy" }),
@@ -115,8 +128,11 @@ describe("listWorkspaceSessionTabs", () => {
     expect(listWorkspaceSessionTabs(open, [finished], reads([workspace]))).toEqual([
       {
         sessionId: "s-open",
+        kind: "thread",
         label: "Open",
         title: "Open",
+        hasRoleLabel: false,
+        accessibleName: "Open, working",
         pose: "working",
         status: "working",
         activityAt: AT,
@@ -252,15 +268,15 @@ describe("labelWorkspaceSessions", () => {
   });
 });
 
-describe("listWorkspaceThreads", () => {
-  it("has no threads when there is no workspace", () => {
-    expect(listWorkspaceThreads(undefined, SESSIONS)).toEqual([]);
+describe("listWorkspaceSessions", () => {
+  it("has no sessions when there is no workspace", () => {
+    expect(listWorkspaceSessions(undefined, SESSIONS)).toEqual([]);
   });
 
-  it("keeps the workspace's order, and skips a thread that is not in the thread list", () => {
+  it("keeps the workspace's order, and skips a session that is not in the session list", () => {
     const workspace = { ...THREAD_3F1, sessionIds: ["s-flaky", "s-gone", "s-runbook"] };
 
-    expect(listWorkspaceThreads(workspace, SESSIONS)).toEqual([SESSIONS[1], SESSIONS[0]]);
+    expect(listWorkspaceSessions(workspace, SESSIONS)).toEqual([SESSIONS[1], SESSIONS[0]]);
   });
 });
 
@@ -277,5 +293,111 @@ describe("listSessionsOfWorkspace", () => {
     const partner = buildSession({ id: "s-partner", workspaceId: "w-1", kind: "agent" });
 
     expect(listSessionsOfWorkspace("w-1", [partner, partner])).toEqual([partner]);
+  });
+});
+
+describe("describeSessionTab", () => {
+  const describeTab = (
+    over: Partial<Session> & { id: string },
+    label: string,
+    pose: Pose = "idle",
+  ) =>
+    describeSessionTab({
+      session: buildSession(over),
+      label,
+      pose,
+      runner: undefined,
+      instance: undefined,
+    });
+
+  it("reads a role from the session, and a title that repeats the label as no role", () => {
+    expect(describeTab({ id: "s-1", role: "review", title: "Check" }, "review").hasRoleLabel).toBe(
+      true,
+    );
+    expect(describeTab({ id: "s-2", role: "  ", title: "Same" }, "Same").hasRoleLabel).toBe(false);
+    expect(describeTab({ id: "s-3", role: null, title: "Same" }, "Same").hasRoleLabel).toBe(false);
+  });
+
+  it("does not mistake a role for the title when the two are spelled alike", () => {
+    expect(describeTab({ id: "s-1", role: "build", title: "build" }, "build").hasRoleLabel).toBe(
+      true,
+    );
+  });
+
+  it("counts a run's step id as a role", () => {
+    const tab = describeTab(
+      {
+        id: "s-step",
+        kind: "run",
+        runId: "r-1",
+        stepId: "implement",
+        title: "Flow \u00b7 implement",
+      },
+      "implement",
+      "working",
+    );
+
+    expect(tab).toMatchObject({
+      kind: "run",
+      hasRoleLabel: true,
+      accessibleName: "implement, Flow \u00b7 implement, working",
+    });
+  });
+
+  it("names a session with a role by label, title and state", () => {
+    expect(
+      describeTab({ id: "s-1", role: "review", title: "Check the diff" }, "review 2", "waiting")
+        .accessibleName,
+    ).toBe("review 2, Check the diff, waiting on you");
+  });
+
+  it("names a session with no role by title and state", () => {
+    expect(
+      describeTab({ id: "s-1", title: "Fix tests" }, "Fix tests", "asleep").accessibleName,
+    ).toBe("Fix tests, asleep");
+  });
+
+  it("says done for a Thread marked Done, whatever its pose", () => {
+    const tab = describeTab(
+      { id: "s-1", title: "Fix tests", done: { at: AT, by: "user" } },
+      "Fix tests",
+      "idle",
+    );
+
+    expect(tab).toMatchObject({ done: true, accessibleName: "Fix tests, done" });
+  });
+
+  it("keeps the session's kind", () => {
+    expect(describeTab({ id: "s-1", kind: "agent", agentId: "a-1" }, "x").kind).toBe("agent");
+  });
+});
+
+describe("isWaitingOnUser", () => {
+  it("is true for the waiting pose, a Thread marked Done included", () => {
+    const done = { at: AT, by: "user" } as const;
+
+    expect(isWaitingOnUser(tabOf({ id: "s-1", done }, "waiting"))).toBe(true);
+    expect(isWaitingOnUser(tabOf({ id: "s-2" }, "working"))).toBe(false);
+  });
+});
+
+describe("describeHiddenTabs", () => {
+  const threads = (count: number, pose: Pose = "idle") =>
+    Array.from({ length: count }, (_, index) => tabOf({ id: `s-${String(index)}` }, pose));
+  const agent = tabOf({ id: "s-agent", kind: "agent", agentId: "a-1" }, "idle");
+
+  it("counts one Thread in the singular", () => {
+    expect(describeHiddenTabs(threads(1))).toBe("1 more thread");
+  });
+
+  it("counts Threads and says how many wait on the user", () => {
+    expect(describeHiddenTabs([...threads(5), tabOf({ id: "s-ask" }, "waiting")])).toBe(
+      "6 more threads, 1 waiting on you",
+    );
+  });
+
+  it("says sessions as soon as one hidden tab is not a Thread", () => {
+    expect(describeHiddenTabs([...threads(2), agent])).toBe("3 more sessions");
+    expect(describeHiddenTabs([agent])).toBe("1 more session");
   });
 });
