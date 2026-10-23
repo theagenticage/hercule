@@ -1194,9 +1194,12 @@ Either way, a call that ends writes its record even when its caller is interrupt
 Thread titles are the first use. The title rules are in [./02-domain-model.md](./02-domain-model.md) (the Session's `title`). For the call itself:
 
 - **Caller and purpose:** `core:sessions`, `thread.title`.
-- **When:** at a Thread's first submission, in the background, beside the turn rather than after it.
+- **When:** at a Thread's first submission, in the background, beside the turn rather than after it. *(Amended 2026-10-23, [#827](https://github.com/theagenticage/hercule/issues/827).)* A fork of a Thread gets the call too, on its first message (its continuation prompt), so its title and role are generated like any Thread's. A session spawned from an Agent, an agent step session and an assistant session get no call.
 - **Input:** the first message only.
-- **Output:** `{ title, needsRefinement }`. `needsRefinement` is true when the subject is still unclear from the first message alone, such as "pick this up" with an issue URL, or "fix this".
+- **Output:** `{ title, needsRefinement, role }`. `needsRefinement` is true when the subject is still unclear from the first message alone, such as "pick this up" with an issue URL, or "fix this". *(Amended 2026-10-23, [#827](https://github.com/theagenticage/hercule/issues/827).)* `role` is the Thread's job in a word or two, such as "migration", "fix", "feature" or "review". The prompt allows an empty `role` when the message is too vague to name a job.
+  - **No length limit in the schema.** The `role` schema, like `title`'s, has no `maxLength`. `maxLength` may be outside the strict subset every provider shares (section 7), and a schema miss fails the whole call as `invalid-output`, which would lose a good title over a long role.
+  - **The controller cleans the role like the title:** line breaks and runs of spaces become one space, and control and format characters are removed. It then drops the role when it is empty, longer than 24 characters (`MAX_ROLE_LENGTH`, counted as Unicode code points), or when the Thread already has one from spawn. It never cuts a role, because a cut role reads as a broken phrase. A dropped role leaves `role` null, and clients show the title instead.
+  - **Title and role are accepted on their own.** A valid role is stored even when the title is empty after cleaning, and the other way round.
 - **On failure:** the cut-short title stays. The failure shows in the setting's status and in the record, never as an error in the Thread.
 
 ## Post-v1

@@ -40,6 +40,10 @@ _Avoid_: execution, chat, conversation (reserved for an assistant's exchange in 
 A session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. Nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
 _Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
 
+**Role**:
+A session's one- or two-word name for what it does, such as review, tests or migration. Not a permission. It is given at spawn, or generated with a Thread's title; clients show it in place of the title.
+_Avoid_: permission (a Role grants nothing)
+
 **Subagent**:
 An agent a session's harness delegated work to while the session runs. It works inside that session's process and settings, has turns and a transcript of its own within the session's, and may start subagents of its own. It is not a Session: it is never resumed or forked on its own, and it does not outlive its session's process.
 _Avoid_: task (Task is a unit of human intent, not Claude Code's word for a subagent), child session, sub-session, collab agent, child agent
