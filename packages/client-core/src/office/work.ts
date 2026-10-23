@@ -9,7 +9,15 @@
  * the controller has no such record. Each kind of work has its own rule for
  * when it is over, and those rules live here and nowhere else.
  */
-import type { Project, Resource, RunSummary, Runner, Session, Workspace } from "@hercule/contract";
+import type {
+  Project,
+  Resource,
+  RunSummary,
+  Runner,
+  Session,
+  SessionKind,
+  Workspace,
+} from "@hercule/contract";
 import { decideGroupProjectId } from "../threads/groups";
 import { decideThreadPose, isAbsentPose, type Pose, type SessionPose } from "../threads/pose";
 import { isMarkedDone } from "../threads/status";
@@ -20,18 +28,8 @@ import { isMarkedDone } from "../threads/status";
  */
 export type OfficePose = SessionPose | "done";
 
-/**
- * Where a session came from:
- *
- * - `thread`: a Thread, driven by hand;
- * - `run`: a run's agent step;
- * - `agent`: an Agent, outside any run and any assistant's conversation;
- * - `assistant`: an assistant's conversation.
- */
-export type SessionOrigin = "thread" | "run" | "agent" | "assistant";
-
 /** The kinds of work: a Thread, a Run, or an Agent's session outside a run. */
-export type WorkKind = Exclude<SessionOrigin, "assistant">;
+export type WorkKind = Exclude<SessionKind, "assistant">;
 
 /** A session doing a piece of work, and the pose its character shows. */
 export interface Worker {
@@ -68,13 +66,6 @@ export interface Work {
  */
 export const isRestingPose = (pose: OfficePose): boolean =>
   pose === "idle" || pose === "done" || isAbsentPose(pose);
-
-/** Returns where `session` came from, from the fields that record its origin. */
-const decideSessionOrigin = (session: Session): SessionOrigin => {
-  if (session.agentId === null) return "thread";
-  if (session.runId !== null) return "run";
-  return session.conversationId === null ? "agent" : "assistant";
-};
 
 /** The poses an Agent's session outside a run is at work in. */
 const AT_WORK_POSES: ReadonlySet<Pose> = new Set<Pose>(["working", "waiting", "idle"]);
@@ -132,7 +123,7 @@ const decideWorkProjectId = (
   resourcesById: ReadonlyMap<string, Resource>,
 ): string | null => {
   const listed = new Set(projects.map((project) => project.id));
-  if (session.projectId !== null || session.agentId === null) {
+  if (session.projectId !== null || session.kind === "thread") {
     return decideGroupProjectId(session.projectId, listed);
   }
   const workspace =
@@ -241,7 +232,7 @@ export const listWork = ({
   const runWorkers = new Map<string, Worker[]>();
   for (const session of sessions) {
     const runner = runnersById.get(session.runnerId);
-    switch (decideSessionOrigin(session)) {
+    switch (session.kind) {
       case "thread": {
         const pose = decideThreadPose(session, runner);
         const doneAt = session.done?.at;

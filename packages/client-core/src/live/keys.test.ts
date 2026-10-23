@@ -249,7 +249,10 @@ describe("the desktop workflow list's keys", () => {
   });
 
   it("reaches the live sessions of runs on a session push", () => {
-    const live = queryKeys.sessions({ kind: ["agent", "run", "assistant"], status: LIVE_SESSION_STATUSES });
+    const live = queryKeys.sessions({
+      kind: ["agent", "run", "assistant"],
+      status: LIVE_SESSION_STATUSES,
+    });
     assert.isTrue(buildQueryKeys("session", ["s1"]).some((key) => isPrefixOf(key, live)));
   });
 });

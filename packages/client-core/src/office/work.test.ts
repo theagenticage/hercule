@@ -158,6 +158,14 @@ describe("listWork with Agents and assistants", () => {
     ).toEqual([["agent", "s-at-work", [["s-at-work", "idle"]]]]);
   });
 
+  it("lists a Thread that a run's step started as a Thread, because only its kind says what it is", () => {
+    expect(
+      describeWork([
+        buildSession({ id: "s-from-step", kind: "thread", runId: "run-1", status: "busy" }),
+      ]),
+    ).toEqual([["thread", "s-from-step", [["s-from-step", "working"]]]]);
+  });
+
   it("lists no assistant's session", () => {
     expect(describeWork([buildAssistantSession("a-wren", { status: "busy" })])).toEqual([]);
   });

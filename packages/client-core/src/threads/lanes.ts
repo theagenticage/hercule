@@ -10,7 +10,8 @@
  *
  * A step session is the session an agent step of a workflow run started. It
  * is not a thread: the run drives it, not the user. So it is in no lane and
- * not in the headline, only behind the fold.
+ * not in the headline, only behind the fold. The same goes for an Agent's
+ * session outside a run (kind `agent`): only a Thread is in a lane or counted.
  */
 import { toIdTail, type Runner, type Session } from "@hercule/contract";
 import { isSameDay } from "../time-context";
@@ -32,16 +33,9 @@ export interface Lane {
 const takesInput = (session: Session): boolean =>
   !WORKING_STATUSES.has(session.status) && !isSettled(session);
 
-/** Checks whether a session is a step session: an agent step of a workflow run started it. */
-const isStepSession = (session: Session): boolean => session.runId !== null;
-
-/** Checks whether a session is a thread: neither a step session nor an assistant's conversation session. */
-const isThread = (session: Session): boolean =>
-  !isStepSession(session) && session.conversationId === null;
-
 /** Checks whether a thread waits on the user: one of its agents has an open Request. */
 const waitsOnUser = (session: Session): boolean =>
-  isThread(session) && session.openRequests.length > 0;
+  session.kind === "thread" && session.openRequests.length > 0;
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -50,14 +44,13 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
  * open Request goes in the waiting lane and in no other. A session that
  * answers an assistant's conversation goes in the assistants lane whatever its
  * status, and in no other lane: the user talks to it on the conversation
- * screen, not in the lanes. A step session goes in no lane.
+ * screen, not in the lanes. A step session and any other Agent session go in
+ * no lane.
  */
 export const buildLanes = (sessions: readonly Session[]): readonly Lane[] => {
-  const assistants = sessions.filter(
-    (session) => !isStepSession(session) && session.conversationId !== null,
-  );
+  const assistants = sessions.filter((session) => session.kind === "assistant");
   const waiting = sessions.filter(waitsOnUser);
-  const threads = sessions.filter((session) => isThread(session) && !waitsOnUser(session));
+  const threads = sessions.filter((session) => session.kind === "thread" && !waitsOnUser(session));
   const running = threads.filter((session) => WORKING_STATUSES.has(session.status));
   const idle = threads.filter(takesInput);
   const settled = threads.filter(isSettled);
@@ -76,8 +69,9 @@ export const buildLanes = (sessions: readonly Session[]): readonly Lane[] => {
  * how many sessions are running, how many are idle and how many settled in
  * the seven days before `now`, such as "1 waiting on you · 1 running · 2 idle
  * · 3 settled this week". A count of zero is left out. A thread that waits on
- * the user is counted as waiting only, as its lane shows it. Step sessions are
- * not counted: they are summed up by the fold below the lanes instead.
+ * the user is counted as waiting only, as its lane shows it. Only the sessions
+ * in a lane are counted. A step session is summed up by the fold below the
+ * lanes instead, and any other Agent session is in neither.
  *
  * Returns "No sessions yet" when there are no sessions at all, and "No
  * threads active this week" when every count is zero. The second wording is
@@ -87,7 +81,10 @@ export const buildLanes = (sessions: readonly Session[]): readonly Lane[] => {
  */
 export const buildHeadline = (sessions: readonly Session[], now: Date): string => {
   const waiting = sessions.filter(waitsOnUser).length;
-  const counted = sessions.filter((session) => !isStepSession(session) && !waitsOnUser(session));
+  const counted = sessions.filter(
+    (session) =>
+      (session.kind === "thread" || session.kind === "assistant") && !waitsOnUser(session),
+  );
   const running = counted.filter((session) => WORKING_STATUSES.has(session.status)).length;
   const idle = counted.filter(takesInput).length;
   const settled = counted.filter(
@@ -112,7 +109,7 @@ export const buildHeadline = (sessions: readonly Session[], now: Date): string =
 
 /** Returns the step sessions among `sessions`, in their order. */
 const listStepSessions = (sessions: readonly Session[]): readonly Session[] =>
-  sessions.filter(isStepSession);
+  sessions.filter((session) => session.kind === "run");
 
 /**
  * Sums up the step sessions, for the fold that hides them on All sessions:

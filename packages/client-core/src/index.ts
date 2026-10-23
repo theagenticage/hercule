@@ -616,7 +616,6 @@ export {
   isThreadSeated,
   listWork,
   type OfficePose,
-  type SessionOrigin,
   type Work,
   type WorkKind,
   type Worker,
