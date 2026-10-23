@@ -69,9 +69,10 @@ const readThreadsAgain = (
 };
 
 /**
- * Replaces the cached record of each of `sessionIds` with what `update`
- * returns for it. An id with no cached record is left alone. The sidebar
- * draws an open Done Thread that is too old for its list from such a record.
+ * Replaces each of `sessionIds` with what `update` returns for it, in the
+ * cached thread list and in the session's own cached record. A session with
+ * no cached record is left alone, in both places. The sidebar draws an open
+ * Done Thread that is too old for its list from such a record.
  */
 const updateCachedSessions = (
   queryClient: QueryClient,
@@ -79,6 +80,10 @@ const updateCachedSessions = (
   sessionIds: readonly string[],
   update: (session: Session) => Session,
 ): void => {
+  const moved = new Set(sessionIds);
+  queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, (sessions) =>
+    sessions?.map((session) => (moved.has(session.id) ? update(session) : session)),
+  );
   for (const id of sessionIds) {
     queryClient.setQueryData(sessionQuery(client, id).queryKey, (cached) =>
       cached === undefined ? undefined : update(cached),
@@ -168,12 +173,6 @@ export const useDoneMoves = (
         ),
       ]);
       const at = new Date().toISOString();
-      const moved = new Set(sessionIds);
-      queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, (sessions) =>
-        sessions?.map((session) =>
-          moved.has(session.id) ? applyDoneMove(session, move, at) : session,
-        ),
-      );
       updateCachedSessions(queryClient, client, sessionIds, (session) =>
         applyDoneMove(session, move, at),
       );
@@ -184,20 +183,23 @@ export const useDoneMoves = (
     onSuccess: (answered, { sessionIds }) => {
       if (!isLastDoneMove(queryClient)) return;
       const answers = new Map(answered.map((session) => [session.id, session]));
-      queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, (sessions) =>
-        sessions?.map((session) => answers.get(session.id) ?? session),
+      updateCachedSessions(
+        queryClient,
+        client,
+        sessionIds,
+        (session) => answers.get(session.id) ?? session,
       );
-      updateCachedSessions(queryClient, client, sessionIds, (s) => answers.get(s.id) ?? s);
-      readThreadsAgain(queryClient, client, movedSinceRead.current);
-      movedSinceRead.current.clear();
     },
     onError: (error, { sessionIds, move }, context) => {
-      if (isLastDoneMove(queryClient)) {
-        readThreadsAgain(queryClient, client, movedSinceRead.current);
-        movedSinceRead.current.clear();
-      }
       const text = describeDoneMove(move, sessionIds.length, true);
       toasts.showFailure(`${text}: ${readErrorMessage(error)}`, context?.toastSerial ?? null);
+    },
+    // Runs after the answer or the error, for a move that succeeded and for
+    // one that failed alike.
+    onSettled: () => {
+      if (!isLastDoneMove(queryClient)) return;
+      readThreadsAgain(queryClient, client, movedSinceRead.current);
+      movedSinceRead.current.clear();
     },
   });
 
