@@ -2,7 +2,7 @@
  * Marking threads done from the sidebar, and reopening them (spec 17
  * §Sidebar, the Done shelf).
  */
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   invalidateWithoutCancelling,
@@ -10,7 +10,7 @@ import {
   type HerculeClient,
 } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
-import { threadAndAgentSessionsQuery } from "../app/queries";
+import { sessionQuery, threadAndAgentSessionsQuery } from "../app/queries";
 import type { DoneMove, DoneToastStore, DoneUndo } from "./done-toast";
 
 /**
@@ -53,9 +53,37 @@ interface DoneRequest {
 /** Returns the move that reverses `move`. */
 const reverseDoneMove = (move: DoneMove): DoneMove => (move === "markDone" ? "reopen" : "markDone");
 
-/** Reads the thread list again, without cancelling a read that is running. */
-const readThreadsAgain = (queryClient: QueryClient, client: HerculeClient): void => {
+/**
+ * Reads the thread list, and the record of each of `sessionIds` that is
+ * cached, again, without cancelling a read that is running.
+ */
+const readThreadsAgain = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  sessionIds: Iterable<string>,
+): void => {
   invalidateWithoutCancelling(queryClient, threadAndAgentSessionsQuery(client).queryKey);
+  for (const id of sessionIds) {
+    invalidateWithoutCancelling(queryClient, sessionQuery(client, id).queryKey);
+  }
+};
+
+/**
+ * Replaces the cached record of each of `sessionIds` with what `update`
+ * returns for it. An id with no cached record is left alone. The sidebar
+ * draws an open Done Thread that is too old for its list from such a record.
+ */
+const updateCachedSessions = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  sessionIds: readonly string[],
+  update: (session: Session) => Session,
+): void => {
+  for (const id of sessionIds) {
+    queryClient.setQueryData(sessionQuery(client, id).queryKey, (cached) =>
+      cached === undefined ? undefined : update(cached),
+    );
+  }
 };
 
 /** The key every Done move runs under, so the moves can be counted. */
@@ -84,14 +112,19 @@ const isLastDoneMove = (queryClient: QueryClient): boolean =>
  *   that toast. It shows no toast of its own.
  * - A move that fails reads the thread list again, so the rows go back to
  *   where the controller has them, and shows the error in the toast as an
- *   alert.
+ *   alert. While the toast shows the Undo of a newer move, the error waits
+ *   until that toast goes, so a failure never takes away an Undo that still
+ *   works.
+ * - The record of a moved Thread that the sidebar holds on its own, because
+ *   the Thread is too old for the list, follows the move and the answer the
+ *   same way the list does.
  *
  * The moves are sent one at a time, in the order the user made them, so a
  * quick Undo always reaches the controller after the Done it undoes. While a
  * later move is still pending, a move's answer is not written to the list:
  * the list already shows the later move, and the answer would briefly put
  * the rows back where the user just moved them from. The last move to finish
- * reads the list again.
+ * reads the list, and the Threads moved since the last read, again.
  *
  * The three functions keep their identity across renders, so the memoized
  * rows that take them do not draw again.
@@ -105,6 +138,9 @@ export const useDoneMoves = (
   readonly undo: (undo: DoneUndo) => void;
 } => {
   const queryClient = useQueryClient();
+  // The Threads moved since the last time no move was pending. The last move
+  // to finish reads their records again.
+  const movedSinceRead = useRef(new Set<string>());
 
   const { mutate } = useMutation({
     mutationKey: DONE_MOVES_KEY,
@@ -118,7 +154,13 @@ export const useDoneMoves = (
     onMutate: async ({ sessionIds, move, announce }) => {
       // A read that started before the move would answer without it and
       // put the rows back, so it is cancelled; the last move reads again.
-      await queryClient.cancelQueries({ queryKey: threadAndAgentSessionsQuery(client).queryKey });
+      for (const id of sessionIds) movedSinceRead.current.add(id);
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: threadAndAgentSessionsQuery(client).queryKey }),
+        ...sessionIds.map((id) =>
+          queryClient.cancelQueries({ queryKey: sessionQuery(client, id).queryKey }),
+        ),
+      ]);
       const at = new Date().toISOString();
       const moved = new Set(sessionIds);
       queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, (sessions) =>
@@ -126,23 +168,30 @@ export const useDoneMoves = (
           moved.has(session.id) ? applyDoneMove(session, move, at) : session,
         ),
       );
-      if (announce) {
-        const text = describeDoneMove(move, sessionIds.length, false);
-        toasts.show(text, false, { move: reverseDoneMove(move), sessionIds });
-      }
+      updateCachedSessions(queryClient, client, sessionIds, (session) =>
+        applyDoneMove(session, move, at),
+      );
+      if (!announce) return { toastSerial: null };
+      const text = describeDoneMove(move, sessionIds.length, false);
+      return { toastSerial: toasts.show(text, { move: reverseDoneMove(move), sessionIds }) };
     },
-    onSuccess: (answered) => {
+    onSuccess: (answered, { sessionIds }) => {
       if (!isLastDoneMove(queryClient)) return;
       const answers = new Map(answered.map((session) => [session.id, session]));
       queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, (sessions) =>
         sessions?.map((session) => answers.get(session.id) ?? session),
       );
-      readThreadsAgain(queryClient, client);
+      updateCachedSessions(queryClient, client, sessionIds, (s) => answers.get(s.id) ?? s);
+      readThreadsAgain(queryClient, client, movedSinceRead.current);
+      movedSinceRead.current.clear();
     },
-    onError: (error, { sessionIds, move }) => {
-      if (isLastDoneMove(queryClient)) readThreadsAgain(queryClient, client);
+    onError: (error, { sessionIds, move }, context) => {
+      if (isLastDoneMove(queryClient)) {
+        readThreadsAgain(queryClient, client, movedSinceRead.current);
+        movedSinceRead.current.clear();
+      }
       const text = describeDoneMove(move, sessionIds.length, true);
-      toasts.show(`${text}: ${readErrorMessage(error)}`, true, null);
+      toasts.showFailure(`${text}: ${readErrorMessage(error)}`, context?.toastSerial ?? null);
     },
   });
 

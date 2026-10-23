@@ -14,7 +14,7 @@ import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { createClient, type HerculeClient } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import { createQueryClient } from "../app/query-client";
-import { threadAndAgentSessionsQuery } from "../app/queries";
+import { sessionQuery, threadAndAgentSessionsQuery } from "../app/queries";
 import {
   buildErrorBody,
   CONTROLLER_URL,
@@ -72,12 +72,30 @@ const buildController = (initial: readonly Session[]) => {
 };
 
 /**
- * Draws each Thread of the sidebar's read as "<title>: done" or "<title>:
- * open", with a button for each move a test makes, and the toast the moves
- * show. "Done Threads 1-3" marks those three Done in one call, "Done Thread 1"
- * marks the first alone, and the two Reopen buttons reopen those lists.
+ * Draws a Thread by its own record, as the sidebar draws an open Done Thread
+ * too old for its list, as "Open <title>: done" or "Open <title>: open".
+ * The record is read from the cache, as the thread screen keeps it there.
  */
-function Harness({ client }: { readonly client: HerculeClient }) {
+function OpenThread({ client, id }: { readonly client: HerculeClient; readonly id: string }) {
+  const { data } = useQuery(sessionQuery(client, id));
+  return data === undefined ? null : <p>{`Open ${data.title}: ${data.done ? "done" : "open"}`}</p>;
+}
+
+/**
+ * Draws each Thread of the sidebar's read as "<title>: done" or "<title>:
+ * open", each Thread of `openIds` by its own record (`OpenThread`), with a
+ * button for each move a test makes, and the toast the moves show. "Done
+ * Threads 1-3" marks those three Done in one call, "Done Thread 1" and "Done
+ * Thread 2" mark one alone, and the Reopen buttons reopen those lists and
+ * "Reopen Thread 5".
+ */
+function Harness({
+  client,
+  openIds,
+}: {
+  readonly client: HerculeClient;
+  readonly openIds: readonly string[];
+}) {
   const [toasts] = useState(createDoneToastStore);
   const { markDone, reopen, undo } = useDoneMoves(client, toasts);
   const { data = [] } = useQuery(threadAndAgentSessionsQuery(client));
@@ -108,6 +126,25 @@ function Harness({ client }: { readonly client: HerculeClient }) {
       <button
         type="button"
         onClick={() => {
+          markDone(idsOf([2]));
+        }}
+      >
+        Done Thread 2
+      </button>
+      {openIds.map((id) => (
+        <OpenThread key={id} client={client} id={id} />
+      ))}
+      <button
+        type="button"
+        onClick={() => {
+          reopen(idsOf([5]));
+        }}
+      >
+        Reopen Thread 5
+      </button>
+      <button
+        type="button"
+        onClick={() => {
           reopen(idsOf([1, 2, 3]));
         }}
       >
@@ -129,25 +166,36 @@ function Harness({ client }: { readonly client: HerculeClient }) {
 /**
  * Renders the harness against a controller that holds `threads`, with
  * `handlers` answering the operations they name instead of the controller,
- * and waits until the Threads are drawn. Returns the calls the controller
+ * and waits until the Threads are drawn. The records of `openThreads` are in
+ * the cache of their own reads, and drawn from there. Returns the calls the controller
  * received and a function listing the Done moves among them.
  */
 const startHarness = async (
   controller: ReturnType<typeof buildController>,
   handlers: Readonly<Record<string, Handler>> = {},
+  openThreads: readonly Session[] = [],
 ) => {
   const calls = stubApi({
     "GET /api/v1/sessions": () => ({ body: { items: controller.readThreads() } }),
     [MARK_DONE]: controller.markDone,
     [REOPEN]: controller.reopen,
+    ...Object.fromEntries(
+      openThreads.map((thread) => [
+        `GET /api/v1/sessions/${thread.id}`,
+        () => ({ body: controller.readThreads().find((session) => session.id === thread.id) }),
+      ]),
+    ),
     ...handlers,
   });
   const client = createClient({ baseUrl: CONTROLLER_URL, token: "bearer" });
   const queryClient = createQueryClient();
   await queryClient.ensureQueryData(threadAndAgentSessionsQuery(client));
+  for (const thread of openThreads) {
+    queryClient.setQueryData(sessionQuery(client, thread.id).queryKey, thread);
+  }
   render(
     <QueryClientProvider client={queryClient}>
-      <Harness client={client} />
+      <Harness client={client} openIds={openThreads.map((thread) => thread.id)} />
     </QueryClientProvider>,
   );
   return {
@@ -329,5 +377,116 @@ describe("the Done moves on a list of Threads", () => {
     });
     for (const number of [1, 2, 3])
       expect(screen.getByText(`Thread ${String(number)}: open`)).toBeTruthy();
+  });
+});
+
+describe("an older Done move that fails while a newer one is pending", () => {
+  it("keeps the newer move's Undo, then shows the older move's error once that toast goes", async () => {
+    const heldFirst = holdAnswer();
+    const controller = buildController(OPEN_THREADS);
+    let sent = 0;
+    const { readMoves } = await startHarness(controller, {
+      [MARK_DONE]: (call) => {
+        sent += 1;
+        return sent === 1 ? heldFirst.handler() : controller.markDone(call);
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Done Thread 1" }));
+    await userEvent.click(screen.getByRole("button", { name: "Done Thread 2" }));
+    heldFirst.answer({
+      status: 409,
+      body: buildErrorBody("invalid_state", "The thread is busy."),
+    });
+
+    // The newer move is sent once the older one has failed, and succeeds.
+    await waitFor(() => {
+      expect(readMoves()).toEqual([
+        expectMove(MARK_DONE_PATH, [1]),
+        expectMove(MARK_DONE_PATH, [2]),
+      ]);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Thread 1: open")).toBeTruthy();
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    const toast = screen.getByText("Marked done").parentElement!;
+    expect(screen.getByText("Thread 2: done")).toBeTruthy();
+
+    await userEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Couldn't mark the thread done: The thread is busy.",
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Thread 2: open")).toBeTruthy();
+    });
+    expect(readMoves()).toEqual([
+      expectMove(MARK_DONE_PATH, [1]),
+      expectMove(MARK_DONE_PATH, [2]),
+      expectMove(REOPEN_PATH, [2]),
+    ]);
+  });
+
+  it("replaces the toast of the move that failed with its own error", async () => {
+    const controller = buildController(OPEN_THREADS);
+    await startHarness(controller, {
+      [MARK_DONE]: { status: 409, body: buildErrorBody("invalid_state", "The thread is busy.") },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Done Thread 1" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Couldn't mark the thread done: The thread is busy.");
+    expect(screen.queryByText("Marked done")).toBeNull();
+  });
+});
+
+describe("the Done moves on a Thread the sidebar holds by its own record", () => {
+  /** A Done Thread too old for the sidebar's list: the controller has it, the list leaves it out. */
+  const OLD_DONE = buildThread(5, true);
+  const LISTED = [1, 2, 3, 4].map((number) => buildThread(number));
+  const readListed = (controller: ReturnType<typeof buildController>) => () => ({
+    body: {
+      items: controller.readThreads().filter((session) => session.id !== OLD_DONE.id),
+    },
+  });
+
+  it("reopens it before the controller answers, and keeps it open from the answer", async () => {
+    const held = holdAnswer();
+    const controller = buildController([...LISTED, OLD_DONE]);
+    await startHarness(
+      controller,
+      { [REOPEN]: held.handler, "GET /api/v1/sessions": readListed(controller) },
+      [OLD_DONE],
+    );
+    expect(screen.getByText("Open Thread 5: done")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Reopen Thread 5" }));
+
+    expect(screen.getByText("Open Thread 5: open")).toBeTruthy();
+    held.answer(controller.reopen({ body: { sessionIds: [OLD_DONE.id] } }));
+    await waitFor(() => {
+      expect(screen.getByText("Open Thread 5: open")).toBeTruthy();
+    });
+  });
+
+  it("shows it done again when the controller refuses to reopen it", async () => {
+    const controller = buildController([...LISTED, OLD_DONE]);
+    await startHarness(
+      controller,
+      {
+        [REOPEN]: { status: 409, body: buildErrorBody("invalid_state", "Not now.") },
+        "GET /api/v1/sessions": readListed(controller),
+      },
+      [OLD_DONE],
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Reopen Thread 5" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Not now.");
+    await waitFor(() => {
+      expect(screen.getByText("Open Thread 5: done")).toBeTruthy();
+    });
   });
 });

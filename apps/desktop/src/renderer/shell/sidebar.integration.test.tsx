@@ -749,6 +749,48 @@ describe("the sidebar's Done moves", () => {
     expect(within(nav).queryByRole("button", { name: /^Done/ })).toBeNull();
   });
 
+  it("moves focus to the row's link when Done takes the row's Done button away but the row stays", async () => {
+    const controller = buildDoneController(buildLoneThreads(false));
+    const bunPin = controller.readThreads().find((each) => each.id === FIXTURE_THREAD_IDS.bunPin)!;
+    // A busy Agent in the Thread's workspace keeps the group's row after the
+    // Thread is Done, with no Thread left to mark.
+    const helper: Session = {
+      ...bunPin,
+      id: "01a06d02-7b00-7000-8000-000000000001",
+      title: "Helper",
+      kind: "agent",
+      agentId: "01a06d02-7c00-7000-8000-000000000001",
+      status: "busy",
+      openRequests: [],
+    };
+    const { nav } = await startSidebar({
+      records: {
+        ...SINGLE_THREADS_FIXTURE,
+        workspaces: SINGLE_THREADS_FIXTURE.workspaces.map((each) =>
+          each.id === bunPin.workspaceId
+            ? { ...each, sessionIds: [...each.sessionIds, helper.id] }
+            : each,
+        ),
+      },
+      readThreads: () => [...controller.readThreads(), helper],
+      handlers: { [MARK_DONE]: controller.handleMarkDone },
+    });
+    const row = within(nav).getByRole("link", { name: /^Bump the Bun pin, / });
+
+    findRowButton(row, "Mark done").focus();
+    await userEvent.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(
+        within(row.closest<HTMLElement>(".side-item")!).queryByRole("button", {
+          name: "Mark done",
+        }),
+      ).toBeNull();
+    });
+    expect(within(nav).getByRole("link", { name: /^Bump the Bun pin, / })).toBe(row);
+    expect(document.activeElement).toBe(row);
+  });
+
   it("sends an Undo pressed before the Done is answered only after that answer, and keeps the row in its project throughout", async () => {
     const controller = buildDoneController(buildLoneThreads(false));
     const heldDone = holdAnswer();
@@ -1272,6 +1314,7 @@ describe(`the sidebar's "From runs"`, () => {
       status: "busy",
       openRequests: [APPROVAL],
       kind: "run",
+      agentId: "01a06d02-7b00-7000-8000-000000000001",
       runId: "01a06d02-7900-7000-8000-000000000001",
     }).map((session) => ({
       ...session,
