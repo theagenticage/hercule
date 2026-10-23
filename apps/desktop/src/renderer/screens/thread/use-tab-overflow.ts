@@ -24,6 +24,8 @@ const NO_TABS: ReadonlySet<string> = new Set();
  *   for one hidden tab, so there is a width to reserve when one must hide.
  * - `data-work-name`: the work's name. It counts at its natural width, up
  *   to 280 px, and the stylesheet shrinks it when pinned tabs need the room.
+ * - A child with a `popover` attribute, such as the "+n" button's menu,
+ *   takes no room and is not counted.
  * - Any other child counts at its own width.
  *
  * A hidden tab stays in the DOM, out of flow, with `position: absolute;
@@ -124,7 +126,9 @@ function pickHiddenTabKeys(
 ): ReadonlySet<string> {
   const style = getComputedStyle(nav);
   const gap = Number.parseFloat(style.columnGap) || 0;
-  const padding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+  // Without a layout, as in jsdom, the computed padding is empty and parses to NaN.
+  const padding =
+    (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
   // Each item below adds its width and one gap; n items have n - 1 gaps.
   let fixedWidth = padding - gap;
   let nameWidth = 0;
@@ -132,7 +136,8 @@ function pickHiddenTabKeys(
   const tabKeys: string[] = [];
   const tabWidths: number[] = [];
   for (const child of nav.children) {
-    if (!(child instanceof HTMLElement)) continue;
+    // The "+n" button's menu sits in the pill but opens in the top layer, so it takes no room.
+    if (!(child instanceof HTMLElement) || child.hasAttribute("popover")) continue;
     const width = child.getBoundingClientRect().width;
     if (child.dataset.tab !== undefined) {
       tabKeys.push(child.dataset.tab);
