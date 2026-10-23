@@ -62,6 +62,26 @@ import { pollUntil } from "./poll.ts";
 /** The projects the threads are spread over, in the order they are created. */
 const PROJECT_NAMES = ["Webshop", "Payments", "Ops", "Docs"] as const;
 
+/**
+ * The groups of sessions `growGroups` makes, as the sessions of one workspace:
+ * one group of `LARGE_GROUP_SIZE`, `TRIO_COUNT` groups of three, and
+ * `PAIR_COUNT` groups of two. The other threads of the 500 stay alone.
+ */
+const LARGE_GROUP_SIZE = 10;
+const TRIO_COUNT = 12;
+const PAIR_COUNT = 39;
+
+/** How many of the groups of three also hold an Agent session. */
+const GROUPS_WITH_AGENT_SESSION = 5;
+
+/** How many of the threads that stay alone `growGroups` marks Done recently, and how many Done more than 14 days ago. */
+const RECENT_DONE_COUNT = 60;
+const OLD_DONE_COUNT = 40;
+
+/** How many threads that stay alone `growGroups` leaves busy and waiting on a Request; the rest are idle. */
+const LONE_BUSY_COUNT = 10;
+const LONE_WAITING_COUNT = 5;
+
 /** The assistants the fixture creates. Setup creates a fifth, "Hercule". */
 const ASSISTANT_NAMES = ["Ada", "Milo", "Juno", "Rex"] as const;
 
@@ -78,15 +98,23 @@ const HEARTBEAT_OFF: Heartbeat = {
 };
 
 /**
- * The most threads each runner holds. An idle thread keeps its slot, so the
- * two runners together hold the 500 threads the script measures at most.
+ * The most sessions each runner holds. An idle thread keeps its slot, so the
+ * two runners together hold the 500 threads the script measures at most, and
+ * the Agent sessions `growGroups` adds to them.
  */
-const RUNNER_CAPACITY = 250;
+const RUNNER_CAPACITY = 260;
 
 /** The most threads one read of the thread list returns, which the controller allows. */
 const THREAD_PAGE = 500;
 
 const HOUR_MS = 3_600_000;
+
+/**
+ * How far back `growGroups`'s old Done threads are marked Done (see
+ * `backdateDone`): the first this far back, and each one after it a day
+ * further, so every one is more than the sidebar's 14 days back.
+ */
+const OLD_DONE_BACK_MS = 15 * 24 * HOUR_MS;
 
 /**
  * How many different whole hours the idle threads' ages spread over. The
@@ -223,6 +251,14 @@ export interface RunSpread {
   readonly to: Date;
 }
 
+/** What `growGroups` made, for the sidebar's groups scenario to find. */
+export interface GroupedThreads {
+  /** The workspace the group of ten shares: its row's `data-key` is `group:workspace:` and this id. */
+  readonly largeGroupWorkspaceId: string;
+  /** How many sessions the sidebar's one read returns: every thread but the old Done ones, and every Agent session. */
+  readonly sidebarSessionCount: number;
+}
+
 /** A controller full of threads, and what the perf script does to it between launches. */
 export interface ThreadFixture {
   /** The controller's URL. It stays the same when the controller restarts. */
@@ -256,6 +292,19 @@ export interface ThreadFixture {
     readonly connections?: boolean;
     readonly signalsAboutThreads?: number;
   }) => Promise<void>;
+  /**
+   * Spawns the 500 threads of the sidebar's groups scenario instead of
+   * `growTo`'s, and returns what the scenario needs to find in them. They are
+   * arranged in groups, where `growTo`'s have no workspace: one group of ten
+   * threads sharing a workspace, `TRIO_COUNT` groups of three,
+   * `PAIR_COUNT` groups of two, and the rest alone, in no workspace. Five of
+   * the groups of three also hold an Agent session. Most threads are idle;
+   * some work and some wait on a Request, the group of ten has one of each,
+   * and some of the lone idle threads are marked Done, `OLD_DONE_COUNT` of
+   * them more than 14 days ago, which `prepareLaunch` sets in the database.
+   * The group of ten's lead is the thread `nudge` moves.
+   */
+  readonly growGroups: () => Promise<GroupedThreads>;
   /**
    * Moves the first project's busy thread to idle, or back to busy, which
    * makes the controller push one change to the app.
@@ -357,6 +406,8 @@ export async function runWithThreadFixture<T>(
       const openRequests = new Map<string, string>();
       let nudgedIsBusy = true;
       let threadCount = 0;
+      /** The threads `growGroups` marked Done that `prepareLaunch` sets more than 14 days back. */
+      const oldDoneIds: string[] = [];
 
       const growTo = async (count: number): Promise<void> => {
         const perProject = (count - threadCount) / projects.length;
@@ -404,6 +455,121 @@ export async function runWithThreadFixture<T>(
             threads.filter((thread) => thread.status === "idle").length === count - staying.size,
           `${String(count - staying.size)} threads idle`,
         );
+      };
+
+      /** Marks `ids` Done in one call, which ends none of them: they are idle already. */
+      const markDone = (ids: readonly string[]) =>
+        call("POST", "/sessions/mark-done", { sessionIds: ids });
+
+      const growGroups = async (): Promise<GroupedThreads> => {
+        const pinTo = (runner: ScriptedRunner, threads: readonly Session[]) => {
+          for (const thread of threads) runnerBySessionId.set(thread.id, runner);
+        };
+        const groupSizes = [
+          LARGE_GROUP_SIZE,
+          ...Array.from({ length: TRIO_COUNT }, () => 3),
+          ...Array.from({ length: PAIR_COUNT }, () => 2),
+        ];
+        const loneCount = 500 - groupSizes.reduce((total, size) => total + size, 0);
+        const groups: Session[][] = [];
+        for (const [index, size] of groupSizes.entries()) {
+          // The first group, the large one, goes to the first project, which the sidebar lists first.
+          const runner = runners[index % 2]!;
+          const projectId = projects[index % projects.length]!.id;
+          const [lead] = await fleet.spawnThreads(1, {
+            runner,
+            projectId,
+            workspace: { kind: "ephemeral", checkouts: [] },
+          });
+          // A thread starts once its workspace is ready, and a session cannot join one before.
+          await waitFor(
+            async () => (await call<Session>("GET", `/sessions/${lead!.id}`)).status === "busy",
+            `the lead of group ${String(index)} busy`,
+          );
+          const partners = await fleet.spawnThreads(size - 1, {
+            runner,
+            projectId,
+            workspace: { kind: "existing", workspaceId: lead!.workspaceId! },
+          });
+          groups.push([lead!, ...partners]);
+          pinTo(runner, groups[index]!);
+        }
+        const lone: Session[] = [];
+        for (const runner of runners) {
+          for (const project of projects) {
+            const share = loneCount / (runners.length * projects.length);
+            const threads = await fleet.spawnThreads(share, { runner, projectId: project.id });
+            pinTo(runner, threads);
+            lone.push(...threads);
+          }
+        }
+        threadCount = lone.length + groups.flat().length;
+
+        // The Agent sessions join the first groups of three, in their workspaces.
+        const largeGroup = groups[0]!;
+        const trios = groups.slice(1, 1 + TRIO_COUNT);
+        const [first] = trios[0]!;
+        const agent = await call<{ readonly id: string }>("POST", "/agents", {
+          name: "perf-group-agent",
+          systemPrompt: "Review the change.",
+          instanceId: first!.instanceId,
+          permissionProfileId: first!.permissionProfileId,
+        });
+        for (const trio of trios.slice(0, GROUPS_WITH_AGENT_SESSION)) {
+          await call("POST", "/sessions", {
+            prompt: "Review the change.",
+            agentId: agent.id,
+            runnerId: runnerBySessionId.get(trio[0]!.id)!.runnerId,
+            workspace: { kind: "existing", workspaceId: trio[0]!.workspaceId! },
+          });
+        }
+
+        // Which threads stay busy and which wait on a Request. The large
+        // group's lead comes first in each list, so `nudge` moves it and its
+        // review, the newest Request, is the one Waiting on you lists first.
+        const pairs = groups.slice(1 + TRIO_COUNT);
+        busyIds.push(
+          largeGroup[0]!.id,
+          largeGroup[2]!.id,
+          largeGroup[3]!.id,
+          ...trios.map((trio) => trio[0]!.id),
+          ...pairs.filter((_, index) => index % 5 === 0).map((pair) => pair[0]!.id),
+          ...lone.slice(0, LONE_BUSY_COUNT).map((thread) => thread.id),
+        );
+        waitingIds.push(
+          largeGroup[1]!.id,
+          ...trios.slice(0, 3).map((trio) => trio[1]!.id),
+          ...lone.slice(LONE_BUSY_COUNT, LONE_BUSY_COUNT + LONE_WAITING_COUNT).map((t) => t.id),
+        );
+
+        const everyThread = [...groups.flat(), ...lone];
+        const spawnedIds = new Set(everyThread.map((thread) => thread.id));
+        await waitForThreads(
+          listThreads,
+          (threads) =>
+            threads.filter((thread) => spawnedIds.has(thread.id) && thread.status === "busy")
+              .length === spawnedIds.size,
+          `all ${String(spawnedIds.size)} new threads busy`,
+        );
+        const staying = new Set([...busyIds, ...waitingIds]);
+        for (const id of spawnedIds)
+          if (!staying.has(id)) runnerBySessionId.get(id)!.completeTurn(id);
+        await waitForThreads(
+          listThreads,
+          (threads) =>
+            threads.filter((thread) => thread.status === "idle").length ===
+            spawnedIds.size - staying.size,
+          `${String(spawnedIds.size - staying.size)} threads idle`,
+        );
+
+        // Done: the lone idle threads after the busy and the waiting ones.
+        const done = lone.slice(LONE_BUSY_COUNT + LONE_WAITING_COUNT).map((thread) => thread.id);
+        await markDone(done.slice(0, RECENT_DONE_COUNT + OLD_DONE_COUNT));
+        oldDoneIds.push(...done.slice(RECENT_DONE_COUNT, RECENT_DONE_COUNT + OLD_DONE_COUNT));
+        return {
+          largeGroupWorkspaceId: largeGroup[0]!.workspaceId!,
+          sidebarSessionCount: threadCount - OLD_DONE_COUNT + GROUPS_WITH_AGENT_SESSION,
+        };
       };
 
       const prepareLaunch = async ({
@@ -454,6 +620,7 @@ export async function runWithThreadFixture<T>(
           // The busy and waiting threads of every project but the first.
           [...busyIds.slice(1), ...waitingIds.slice(1)],
         );
+        backdateDone(home, oldDoneIds);
         backdateOpenSignals(home);
         if (signalsAboutThreads > 0) makeSignalsAboutThreads(home, signalsAboutThreads);
         backdateTrackedRuns(home);
@@ -558,6 +725,7 @@ export async function runWithThreadFixture<T>(
       return await use({
         url,
         growTo,
+        growGroups,
         prepareLaunch,
         nudge,
         readControllerPid,
@@ -904,6 +1072,34 @@ function backdateThreads(
     for (const id of otherProjectIds) {
       const { changes } = updateCreation.run(
         new Date(now - OTHER_PROJECTS_BACK_MS).toISOString(),
+        id,
+      );
+      if (changes !== 1) throw new Error(`the database has no session ${id}`);
+    }
+    database.exec("COMMIT");
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Sets the time the threads `ids` were marked Done in the stopped
+ * controller's database in the Home `home`: the thread at position `i` is
+ * `OLD_DONE_BACK_MS` and `i` more days back, so each is more than the
+ * sidebar's 14 days back. The controller stamps a Done mark with its own
+ * clock, and no operation sets it. Fails when a thread is not found.
+ */
+function backdateDone(home: string, ids: readonly string[]): void {
+  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
+  try {
+    const update = database.prepare(
+      "UPDATE sessions SET done_at = ? WHERE hex(id) = upper(replace(?, '-', ''))",
+    );
+    const now = Date.now();
+    database.exec("BEGIN");
+    for (const [index, id] of ids.entries()) {
+      const { changes } = update.run(
+        new Date(now - OLD_DONE_BACK_MS - index * 24 * HOUR_MS).toISOString(),
         id,
       );
       if (changes !== 1) throw new Error(`the database has no session ${id}`);

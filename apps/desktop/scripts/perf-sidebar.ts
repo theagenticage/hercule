@@ -14,6 +14,9 @@
  * Style and layout are added up per frame, from one frame's animation frame
  * callbacks to the next frame's, because rule 2's bar is per frame.
  *
+ * `measureSidebarGroups` measures the sidebar of groups of sessions: a launch
+ * on 500 threads arranged in groups (see `growGroups` in `perf-fixture.ts`).
+ *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
  */
@@ -27,6 +30,8 @@ import {
   stopPlainApp,
   type Inspector,
 } from "./packaged-app.ts";
+import { startCollector } from "./perf-collector.ts";
+import type { GroupedThreads, ThreadFixture } from "./perf-fixture.ts";
 import {
   findRendererMainTasks,
   readTrace,
@@ -269,22 +274,24 @@ async function measureArrowKey(page: Inspector): Promise<SidebarCost> {
   await page.evaluate("Runtime.evaluate", {
     expression: `document.querySelector(".side-handle").focus()`,
   });
-  const press = async (key: string, keyCode: number) => {
-    for (const type of ["rawKeyDown", "keyUp"]) {
-      await page.send("Input.dispatchKeyEvent", {
-        type,
-        key,
-        code: key,
-        windowsVirtualKeyCode: keyCode,
-      });
-    }
-  };
   const cost = await traceFrames(page, SHORT_RECORD_MS, "", null, async () => {
-    await press("ArrowRight", 39);
+    await pressKey(page, "ArrowRight", 39);
     await sleep(SHORT_RECORD_MS);
   });
-  await press("ArrowLeft", 37);
+  await pressKey(page, "ArrowLeft", 37);
   return cost;
+}
+
+/** Presses and releases the key `key`, whose Windows virtual key code is `keyCode`, on the focused element. */
+async function pressKey(page: Inspector, key: string, keyCode: number): Promise<void> {
+  for (const type of ["rawKeyDown", "keyUp"]) {
+    await page.send("Input.dispatchKeyEvent", {
+      type,
+      key,
+      code: key,
+      windowsVirtualKeyCode: keyCode,
+    });
+  }
 }
 
 /**
@@ -439,6 +446,270 @@ export function reportSidebarWork(measured: SidebarWork): void {
           decideVerdict(measured.press),
         ],
         ["→ on the edge", formatCost(measured.arrowKey), decideVerdict(measured.arrowKey)],
+      ],
+    ),
+  );
+}
+
+/** How long an unfold records frames, in milliseconds: the group's lines slide in, and a frame or two of rest after. */
+const UNFOLD_RECORD_MS = 600;
+
+/** How long a live push records frames, in milliseconds: the controller's 50 ms window, the page's wait before its read, the read, and the redraw. */
+const PUSH_RECORD_MS = 1_000;
+
+/** How long the page must be free of requests before a read counts as finished, in milliseconds. */
+const QUIET_READS_MS = 400;
+
+/** What the sidebar's one read of sessions cost, from the page's network. */
+interface SessionRead {
+  /** How many requests the read took: one per page of sessions. */
+  readonly requests: number;
+  /** The size of the answers' bodies after decompression, in bytes. */
+  readonly bytes: number;
+  /** From the first request to the end of the last answer, in milliseconds. */
+  readonly ms: number;
+  /** How many sessions the read returned. */
+  readonly sessions: number;
+}
+
+/** What the sidebar's groups scenario measured. */
+export interface SidebarGroupsWork {
+  /** The machine's load average over the minute before the app was spawned. */
+  readonly loadAtSpawn: number;
+  readonly read: SessionRead;
+  /** How many sessions the read should return, which the fixture counts. */
+  readonly expectedSessions: number;
+  /** How many items and how many rows of a group or a lone thread the list mounts at rest. */
+  readonly mountedAtRest: { readonly items: number; readonly rows: number };
+  /** How many items the list mounts with the group of ten unfolded. */
+  readonly itemsUnfolded: number;
+  readonly unfoldByDots: SidebarCost;
+  readonly unfoldByKey: SidebarCost;
+  /** What the push of one session's status change cost the frames, and how many mounted items changed their DOM. */
+  readonly push: SidebarCost & { readonly itemsChanged: number };
+}
+
+/** Counts the items and the group rows the sidebar's list has mounted now. */
+async function countMountedItems(page: Inspector): Promise<{ items: number; rows: number }> {
+  return (await page.evaluate("Runtime.evaluate", {
+    expression: `({
+      items: document.querySelectorAll(".side-scroll .side-item").length,
+      rows: document.querySelectorAll(".side-scroll .side-thread").length,
+    })`,
+    returnByValue: true,
+  })) as { items: number; rows: number };
+}
+
+/**
+ * Measures the sidebar of groups of sessions in a plain launch of the app on
+ * `userDataDir`, whose controller `fixture` fills with `grouped`'s threads
+ * (see `growGroups`). It measures, in this order:
+ *
+ * - the sidebar's one read of sessions, from the page's network when the page
+ *   reloads: its requests, bytes, time, and how many sessions it returns;
+ * - how many items and rows the list mounts at rest;
+ * - unfolding the group of ten by its dots button, and by → on its focused
+ *   row, then folding it again: the frames, as the other changes of this file;
+ * - the push of one session's status changing: the frames, and how many of
+ *   the mounted items changed their DOM, which a mutation observer counts.
+ *   React may render an item again and change nothing in the DOM, which the
+ *   observer does not see.
+ *
+ * Fails when no row shows within 15 s, when the push causes no read of the
+ * sessions, when a group does not unfold, or when the app does not quit
+ * cleanly afterwards.
+ */
+export async function measureSidebarGroups(
+  userDataDir: string,
+  fixture: ThreadFixture,
+  grouped: GroupedThreads,
+): Promise<SidebarGroupsWork> {
+  const loadAtSpawn = loadavg()[0]!;
+  const app = await launchPlainApp(userDataDir);
+  let measured: SidebarGroupsWork;
+  try {
+    const pageSocketUrl = await waitForPageSocketUrl(app.endpoint);
+    const page = await connectInspector(pageSocketUrl);
+    try {
+      const evaluate = (expression: string) =>
+        page.evaluate("Runtime.evaluate", { expression, returnByValue: true });
+      const key = `group:workspace:${grouped.largeGroupWorkspaceId}`;
+      const dots = `document.querySelector('.side-dots[data-key="${key}"]')`;
+      const row = `document.querySelector('.side-row[data-key="${key}"]')`;
+      const waitForRows = () =>
+        pollUntil(
+          async () =>
+            (await evaluate(`document.querySelector(".side-scroll .side-thread") !== null`))
+              ? true
+              : undefined,
+          { timeoutMs: 15_000, intervalMs: 50, timeoutMessage: "the sidebar drew no row" },
+        ).then(() => undefined);
+
+      const read = await measureSessionRead(page, pageSocketUrl, fixture, waitForRows);
+      await sleep(LAUNCH_SETTLE_MS);
+      const mountedAtRest = await countMountedItems(page);
+      if ((await evaluate(`${dots} === null`)) === true) {
+        throw new Error(
+          "the sidebar has no dots for the group of ten: its row is not mounted at the top of the list",
+        );
+      }
+
+      const unfoldByDots = await traceFrames(page, UNFOLD_RECORD_MS, `${dots}.click()`, null, () =>
+        sleep(UNFOLD_RECORD_MS + 300),
+      );
+      if ((await evaluate(`${dots}.getAttribute("aria-expanded")`)) !== "true") {
+        throw new Error("the dots did not unfold the group of ten");
+      }
+      const itemsUnfolded = (await countMountedItems(page)).items;
+      await evaluate(`${dots}.click()`);
+      await sleep(STEP_SETTLE_MS);
+      await evaluate(`${row}.focus()`);
+      const unfoldByKey = await traceFrames(page, UNFOLD_RECORD_MS, "", null, async () => {
+        await pressKey(page, "ArrowRight", 39);
+        await sleep(UNFOLD_RECORD_MS + 300);
+      });
+      if ((await evaluate(`${dots}.getAttribute("aria-expanded")`)) !== "true") {
+        throw new Error("→ did not unfold the group of ten");
+      }
+      await pressKey(page, "ArrowLeft", 37);
+      await sleep(STEP_SETTLE_MS);
+
+      // Watches every mounted item for a change of its DOM, then moves one
+      // session's status: the group of ten's lead goes idle.
+      await evaluate(`(() => {
+        const changed = new Set();
+        globalThis.sidebarChangedItems = changed;
+        new MutationObserver((records) => {
+          for (const record of records) {
+            const target = record.target instanceof Element ? record.target : record.target.parentElement;
+            const item = target?.closest(".side-item");
+            if (item !== null && item !== undefined) changed.add(item);
+          }
+        }).observe(document.querySelector(".side-scroll"), {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          characterData: true,
+        });
+      })()`);
+      const pushCost = await traceFrames(page, PUSH_RECORD_MS, "", null, async () => {
+        fixture.nudge();
+        await sleep(PUSH_RECORD_MS + 300);
+      });
+      const itemsChanged = (await evaluate("globalThis.sidebarChangedItems.size")) as number;
+      fixture.nudge();
+      measured = {
+        loadAtSpawn,
+        read,
+        expectedSessions: grouped.sidebarSessionCount,
+        mountedAtRest,
+        itemsUnfolded,
+        unfoldByDots,
+        unfoldByKey,
+        push: { ...pushCost, itemsChanged },
+      };
+    } finally {
+      page.close();
+    }
+  } finally {
+    await stopPlainApp(app);
+  }
+  assertExitedCleanly(app.process);
+  return measured;
+}
+
+/**
+ * Reloads the page with a collector watching its network, waits until
+ * `waitForRows` returns and the reads have finished, and returns what the
+ * sidebar's read of sessions cost: the requests that carry `doneSince`, which
+ * only that read sends. The sessions are counted by asking the controller for
+ * the same pages. Fails when the reload makes no such request.
+ */
+async function measureSessionRead(
+  page: Inspector,
+  pageSocketUrl: string,
+  fixture: ThreadFixture,
+  waitForRows: () => Promise<void>,
+): Promise<SessionRead> {
+  // The page made its first reads before the collector was on, so it loads again with the collector watching.
+  const collector = await startCollector(pageSocketUrl);
+  try {
+    await page.send("Page.enable");
+    const from = collector.checkpoint();
+    await page.send("Page.reload");
+    await page.waitForEvent("Page.loadEventFired");
+    await waitForRows();
+    await collector.waitForQuietReads(QUIET_READS_MS);
+    const reads = collector
+      .since(from)
+      .requests.filter(
+        ({ method, url }) =>
+          method === "GET" &&
+          url.pathname.endsWith("/sessions") &&
+          url.searchParams.has("doneSince"),
+      );
+    const first = reads[0];
+    if (first === undefined)
+      throw new Error("the page's reload made no read of the sidebar's sessions");
+    const startedAt = Math.min(...reads.map((each) => each.startedAtMs));
+    const endedAt = Math.max(...reads.map((each) => each.startedAtMs + (each.durationMs ?? 0)));
+    let sessions = 0;
+    const url = new URL(first.url);
+    for (;;) {
+      const answer = await fixture.call<{
+        readonly items: readonly unknown[];
+        readonly nextCursor?: string;
+      }>("GET", `${url.pathname.replace(/^\/api\/v1/, "")}${url.search}`);
+      sessions += answer.items.length;
+      if (answer.nextCursor === undefined) break;
+      url.searchParams.set("cursor", answer.nextCursor);
+    }
+    return {
+      requests: reads.length,
+      bytes: reads.reduce((total, each) => total + each.bodyBytes, 0),
+      ms: endedAt - startedAt,
+      sessions,
+    };
+  } finally {
+    collector.close();
+  }
+}
+
+/** Prints what the sidebar's groups scenario measured, as a table, and whether each change keeps rule 2. */
+export function reportSidebarGroupsWork(measured: SidebarGroupsWork): void {
+  console.log(
+    `\n### The sidebar of groups, 500 threads (load ${measured.loadAtSpawn.toFixed(1)})\n`,
+  );
+  const { read, mountedAtRest } = measured;
+  const decideVerdict = (cost: SidebarCost) =>
+    keepsEveryFrame(cost) && cost.longestFrameWorkMs <= 2 ? "passes" : "FAILS";
+  console.log(
+    formatTable(
+      ["What", "Measured", "Rule 2: no dropped frame, at most 2 ms of style and layout"],
+      [
+        [
+          "The read of sessions at load",
+          `${String(read.sessions)} sessions (${String(measured.expectedSessions)} expected), ` +
+            `${String(read.requests)} requests, ${String(read.bytes)} bytes, ${read.ms.toFixed(0)} ms`,
+          "",
+        ],
+        [
+          "Mounted at rest",
+          `${String(mountedAtRest.items)} items, ${String(mountedAtRest.rows)} rows`,
+          "",
+        ],
+        [
+          "Unfolding by the dots",
+          formatCost(measured.unfoldByDots),
+          decideVerdict(measured.unfoldByDots),
+        ],
+        ["Unfolding by →", formatCost(measured.unfoldByKey), decideVerdict(measured.unfoldByKey)],
+        ["Mounted with the group of ten unfolded", `${String(measured.itemsUnfolded)} items`, ""],
+        [
+          "A push that changes one session's status",
+          `${formatCost(measured.push)}; ${String(measured.push.itemsChanged)} of ${String(mountedAtRest.items)} mounted items changed their DOM`,
+          decideVerdict(measured.push),
+        ],
       ],
     ),
   );
