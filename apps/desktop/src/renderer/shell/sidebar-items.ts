@@ -1,24 +1,31 @@
 /**
  * Builds what the sidebar draws from the lists it reads: the flat list of
- * items the virtualized list draws (section headers, rows and "more" rows,
- * each with a fixed height and the space the book puts above it), and the
- * thread counts in the foot.
+ * items the virtualized list draws (section headers, group rows and their
+ * lines, and "more" rows, each with a fixed height and the space the book
+ * puts above it), and the session counts in the foot.
  *
- * Which threads are shown, in which order, and in what pose is decided in
- * client-core. This file only lays the result out in Bureau's geometry.
+ * Which groups of sessions are shown, in which order, and in what pose is
+ * decided in client-core. This file only lays the result out in Bureau's
+ * geometry.
  */
 import {
-  buildDoneShelf,
-  buildSidebarSections,
-  buildThreadGroups,
+  buildGroupSidebar,
+  buildSessionGroups,
   countThreadsByPose,
   DONE_SHELF_STEP,
   decideThreadPose,
+  isThreadSeated,
+  listGroupLines,
+  type DoneGroupRow,
   type DraftPlace,
+  type ExpandedSections,
   type GroupAsk,
+  type GroupDoneShelf,
+  type GroupRow,
   type GroupSummary,
-  type SessionDot,
   type Pose,
+  type ProjectGroupSection,
+  type SessionDot,
   type ThreadCounts,
   type ThreadRowStatus,
   type Waiting,
@@ -234,6 +241,8 @@ export type SidebarItemContent =
       readonly unsent: boolean;
       /** The ids of every Thread of the group: what the row's Reopen button reopens. */
       readonly reopenIds: readonly string[];
+      /** What the card shows while the pointer rests on the row: every session of the group, Agent sessions too. */
+      readonly details: ThreadHoverDetails;
     }
   | { readonly kind: "more"; readonly key: string; readonly label: string };
 
@@ -262,11 +271,11 @@ export type SidebarItemKind = SidebarItem["kind"];
  * - a "more" row (`.side-row--more`, in the book's swarm state) is 28.
  *
  * The book's thread row (`.side-row`) is 35, with two tight lines. This
- * app's thread row is 52, so two lines read apart at a glance (spec 17 §The
+ * app's group row is 52, so two lines read apart at a glance (spec 17 §The
  * sidebar): 6px of padding above and below, the 13px title on an 18px line,
  * 6px, then the 12px second line on a 16px line. The draft's row and a done
- * thread's row are drawn the same way. The Done shelf's heading is a section
- * header.
+ * group's row are drawn the same way. The Done shelf's heading is a section
+ * header. A line of an unfolded group, and the "n quiet" line, are 32.
  */
 export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
   "waiting-header": 24,
@@ -284,6 +293,7 @@ export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
   more: 28,
 };
 
+
 /** The space above a section's first item: the book's `.side-sec { padding-top: 8px }`. */
 const SECTION_LEADING = 8;
 
@@ -291,11 +301,18 @@ const SECTION_LEADING = 8;
 const ITEM_LEADING = 1;
 
 /**
- * The space between two tall rows, each a thread's, a draft's or a done
- * thread's: 2px, where the book has 1px, because two tall rows that touch on
+ * The space between two tall rows, each a group's, a draft's or a done
+ * group's: 2px, where the book has 1px, because two tall rows that touch on
  * hover read as one. Under a header, a row keeps the book's 1px.
  */
 const THREAD_ROW_LEADING = 2;
+
+/**
+ * The space an unfolded group adds below its last line, on top of the usual
+ * space above the next item: the 4px bottom padding of the list of lines. The
+ * lines sit 1px apart, and the first one 1px under its row.
+ */
+const AFTER_LINES_LEADING = 4;
 
 /**
  * The space above "From runs": the section's 1px gap plus the book's
@@ -321,33 +338,35 @@ const buildHeaderKey = (section: SectionKey): string => `header:${section}`;
 /** Returns the key of a section's "more" row. */
 const buildMoreRowKey = (section: SectionKey): string => `more:${section}`;
 
+/** Returns the key of the row of the group `groupKey`. */
+const buildGroupRowKey = (groupKey: string): string => `group:${groupKey}`;
+
 /**
- * Returns which sections are expanded, in the shape `buildSidebarSections`
+ * Returns which sections are expanded, in the shape `buildGroupSidebar`
  * takes, from the keys of the sections whose "more" row the user pressed.
  */
-const buildExpandedSections = (
-  expanded: ReadonlySet<SectionKey>,
-  groups: readonly ProjectGroup[],
-): ExpandedSections => ({
+const buildExpandedSections = (expanded: ReadonlySet<SectionKey>): ExpandedSections => ({
   waiting: expanded.has("waiting"),
   projectIds: new Set(
-    groups
-      .map((group) => group.projectId)
-      .filter((projectId) => expanded.has(buildProjectSectionKey(projectId))),
+    [...expanded].flatMap((key) => {
+      if (!key.startsWith("project:")) return [];
+      const projectId = key.slice("project:".length);
+      return [projectId === "none" ? null : projectId];
+    }),
   ),
 });
 
 /**
  * Returns the text of a section's "more" row, such as "27 more waiting on
- * you", "1 more thread", or "Show 25 more" on the Done shelf, which shows
- * at most `DONE_SHELF_STEP` more on each press.
+ * you", "3 more" (groups, which have no noun of their own), or "Show 25 more"
+ * on the Done shelf, which shows at most `DONE_SHELF_STEP` more on each press.
  */
 const formatMoreLabel = (section: "waiting" | "project" | "done", hidden: number): string => {
   switch (section) {
     case "waiting":
       return `${String(hidden)} more waiting on you`;
     case "project":
-      return `${String(hidden)} more ${hidden === 1 ? "thread" : "threads"}`;
+      return `${String(hidden)} more`;
     case "done":
       return `Show ${String(Math.min(hidden, DONE_SHELF_STEP))} more`;
   }
@@ -361,7 +380,8 @@ const buildWaitingRow = (waiting: Waiting): SidebarItemContent => {
         kind: "waiting-thread-row",
         key: `waiting:${buildDestinationKey({ kind: "thread", sessionId: waiting.sessionId })}`,
         sessionId: waiting.sessionId,
-        title: waiting.title,
+        title: waiting.groupName,
+        askerLabel: waiting.askerLabel,
         question: waiting.question,
       };
     case "assistant":
@@ -384,37 +404,32 @@ const buildWaitingRunRow = (run: WaitingRunSession): SidebarItemContent => ({
   question: run.question,
 });
 
-/** What the items need to know about the threads, beyond the sections. */
+/** What the items need to know beyond the sidebar `buildGroupSidebar` decided. */
 interface SidebarItemSources {
-  readonly sections: SidebarSections;
+  readonly groupSidebar: ReturnType<typeof buildGroupSidebar>;
   /** The runs' sessions waiting on the user, newest activity first. */
   readonly waitingRunSessions: readonly WaitingRunSession[];
   /** Whether the user expanded Waiting on you, so it shows every run's session too. */
   readonly waitingExpanded: boolean;
-  /** The Done shelf, and whether the user opened it. */
-  readonly doneShelf: DoneShelf;
   readonly doneShelfOpen: boolean;
-  readonly sessions: ReadonlyMap<string, Session>;
-  /** Each thread's pose and its row's status, by session id. */
-  readonly poses: ReadonlyMap<string, Pose>;
-  readonly statuses: ReadonlyMap<string, ThreadRowStatus>;
   /** The project list in its own order, which decides each project's tint. */
   readonly projects: readonly Project[];
-  /** The lists a row names its workspace, machine, branch and provider from. */
-  readonly workspaces: readonly Workspace[];
-  readonly resources: readonly Resource[];
-  readonly runners: readonly Runner[];
-  readonly instances: readonly ProviderInstance[];
-  /** The session ids of the threads whose composer holds unsent work. */
+  /** The session ids of the sessions whose composer holds unsent work. */
   readonly unsentKeys: ReadonlySet<string>;
   /**
    * The draft's second line, while a Draft Thread is open, or `null`. The
-   * draft's row is drawn first in the project the sections mark as holding
+   * draft's row is drawn first in the project the sidebar marks as holding
    * the draft.
    */
   readonly draftPlaceLabel: WorkspaceLabel | null;
-  /** The session id of the open thread, whose row never recedes, or `null`. */
+  /** The session id of the open session, which no group row recedes for, or `null`. */
   readonly selectedId: string | null;
+  /** The keys of the groups the user unfolded. */
+  readonly unfoldedGroups: ReadonlySet<string>;
+  /** The keys of the groups whose quiet sessions the user showed. */
+  readonly quietShownGroups: ReadonlySet<string>;
+  /** The session last open in each group, by the group's key. */
+  readonly lastOpen: ReadonlyMap<string, string>;
 }
 
 /** Returns a section's items: its contents, each given the section and the space above it. */
@@ -428,17 +443,26 @@ const placeInSection = (
     leading: index === 0 ? SECTION_LEADING : pickLeading(content.kind, contents[index - 1]?.kind),
   }));
 
-/** Checks whether an item of `kind` is a tall thread row: a thread's, a draft's or a Done thread's. */
+/** Checks whether an item of `kind` is a tall row: a group's, a draft's or a done group's. */
 const isTallRow = (kind: SidebarItemKind | undefined): boolean =>
-  kind === "thread-row" || kind === "draft-row" || kind === "done-row";
+  kind === "group-row" || kind === "draft-row" || kind === "done-group-row";
+
+/** Checks whether an item of `kind` is a line of an unfolded group. */
+const isLine = (kind: SidebarItemKind | undefined): boolean =>
+  kind === "group-line" || kind === "quiet-line";
 
 /**
  * Returns the space above an item of `kind` that is not its section's first,
- * when the item above it is of `previous` kind.
+ * when the item above it is of `previous` kind. The lines of a group sit 1px
+ * apart, and what follows the last line is spaced as if it followed the
+ * group's row, plus the room below the lines.
  */
 const pickLeading = (kind: SidebarItemKind, previous: SidebarItemKind | undefined): number => {
   if (kind === "waiting-runs-label") return RUNS_LABEL_LEADING;
-  return isTallRow(kind) && isTallRow(previous) ? THREAD_ROW_LEADING : ITEM_LEADING;
+  if (isLine(kind)) return ITEM_LEADING;
+  const followsTallRow = isTallRow(previous) || isLine(previous);
+  const leading = isTallRow(kind) && followsTallRow ? THREAD_ROW_LEADING : ITEM_LEADING;
+  return isLine(previous) ? leading + AFTER_LINES_LEADING : leading;
 };
 
 /**
@@ -488,35 +512,147 @@ const buildWaitingContents = (
 };
 
 /**
+ * Returns the id of the session a click on the row of `row` opens: the open
+ * session when the group holds it, else the session last open in the group
+ * while the group still holds it, else the group's lead.
+ */
+const pickOpenId = (
+  row: GroupRow,
+  selectedId: string | null,
+  lastOpen: ReadonlyMap<string, string>,
+): string =>
+  [selectedId, lastOpen.get(row.key)].find(
+    (id): id is string => id != null && row.members.some((member) => member.sessionId === id),
+  ) ?? row.leadId;
+
+/**
+ * Returns what the card shows for the group of `row`. A group of one session
+ * lists no members: its card shows the lead's model instead.
+ */
+const buildHoverDetails = (
+  row: GroupRow,
+  place: { readonly projectName: string; readonly tint: ProjectTint | null },
+): ThreadHoverDetails => {
+  const lead = row.members.find((member) => member.sessionId === row.leadId);
+  return {
+    title: row.title,
+    projectName: place.projectName,
+    tint: place.tint,
+    machine: row.machine,
+    branch: row.branch,
+    model: lead?.model ?? null,
+    providerId: lead?.providerId ?? null,
+    members: row.summary === null ? [] : row.members,
+  };
+};
+
+/**
+ * Returns the items of one group of the project list: its row, then, while
+ * the group is unfolded, a line for each session it shows, then the "n
+ * quiet" line when quiet sessions are folded away.
+ */
+const buildGroupContents = (
+  row: GroupRow,
+  {
+    unsentKeys,
+    selectedId,
+    unfoldedGroups,
+    quietShownGroups,
+    lastOpen,
+  }: SidebarItemSources,
+  place: { readonly projectName: string; readonly tint: ProjectTint | null },
+): SidebarItemContent[] => {
+  const openId = pickOpenId(row, selectedId, lastOpen);
+  const opened = row.members.find((member) => member.sessionId === openId);
+  const holdsOpen = row.members.some((member) => member.sessionId === selectedId);
+  const unfolded = row.summary !== null && unfoldedGroups.has(row.key);
+  const contents: SidebarItemContent[] = [
+    {
+      kind: "group-row",
+      key: buildGroupRowKey(row.key),
+      groupKey: row.key,
+      openId,
+      title: row.title,
+      pose: row.pose,
+      seated: opened !== undefined && isThreadSeated(opened.pose, opened.done),
+      status: row.status,
+      receded: row.status === "working" && !holdsOpen,
+      activityAt: row.status === "age" ? row.activityAt : "",
+      ask: row.ask,
+      placeClip: row.placeLabel.clip,
+      placeKeep: row.placeLabel.keep,
+      providerId: row.providerId,
+      placeDescription: row.placeDescription,
+      unsent: row.members.some((member) => unsentKeys.has(member.sessionId)),
+      summary: row.summary,
+      unfolded,
+      holdsOpen,
+      doneIds: row.members
+        .filter((member) => member.kind === "thread" && !member.done)
+        .map((member) => member.sessionId),
+      details: buildHoverDetails(row, place),
+    },
+  ];
+  if (!unfolded) return contents;
+  const { lines, foldedQuietCount } = listGroupLines(row, {
+    selectedId,
+    quietShown: quietShownGroups.has(row.key),
+  });
+  contents.push(
+    ...lines.map(
+      (member, index): SidebarItemContent => ({
+        kind: "group-line",
+        key: `line:${member.sessionId}`,
+        groupKey: row.key,
+        groupTitle: row.title,
+        sessionId: member.sessionId,
+        label: member.label,
+        title: member.title,
+        pose: member.pose,
+        seated: isThreadSeated(member.pose, member.done),
+        status: member.status,
+        activityAt: member.status === "age" ? member.activityAt : "",
+        dot: member.dot,
+        done: member.done,
+        providerId: member.providerId,
+        model: member.model,
+        last: foldedQuietCount === 0 && index === lines.length - 1,
+      }),
+    ),
+  );
+  if (foldedQuietCount > 0) {
+    contents.push({
+      kind: "quiet-line",
+      key: `quiet:${row.key}`,
+      groupKey: row.key,
+      groupTitle: row.title,
+      count: foldedQuietCount,
+      last: true,
+    });
+  }
+  return contents;
+};
+
+/**
  * Returns what a project's section draws: its header, then the draft's row
- * when the project holds the Draft Thread, then its shown threads in one
- * list, the most recently started or reopened first, then its "more" row when it hides some.
- * The threads in no project are headed "No project".
+ * when the project holds the Draft Thread, then its shown groups, the most
+ * recently started or reopened first, each followed by its lines while
+ * unfolded, then its "more" row when it hides some groups. The groups in no
+ * project are headed "No project".
  *
  * The draft's row is first because the draft is the newest thread of its
- * project. Workspaces have no group of their own: each row names its
- * branch, its workspace or its machine on its second line.
+ * project. Groups have no heading of their own: each row names its branch,
+ * its workspace or its machine on its second line.
  */
 const buildProjectContents = (
-  project: ProjectSection,
-  {
-    sessions,
-    poses,
-    statuses,
-    projects,
-    workspaces,
-    resources,
-    runners,
-    instances,
-    unsentKeys,
-    draftPlaceLabel,
-    selectedId,
-  }: SidebarItemSources,
+  project: ProjectGroupSection,
+  sources: SidebarItemSources,
 ): SidebarItemContent[] => {
   const section = buildProjectSectionKey(project.projectId);
   // Only the group of the threads in no project has no name.
   const projectName = project.name ?? "No project";
-  const tint = project.projectId === null ? null : pickProjectTint(project.projectId, projects);
+  const tint =
+    project.projectId === null ? null : pickProjectTint(project.projectId, sources.projects);
   const contents: SidebarItemContent[] = [
     {
       kind: "project-header",
@@ -527,50 +663,16 @@ const buildProjectContents = (
       waitingCount: project.waitingCount,
     },
   ];
-  if (draftPlaceLabel !== null && holdsDraft(project)) {
+  if (sources.draftPlaceLabel !== null && project.holdsDraft) {
     contents.push({
       kind: "draft-row",
       key: "draft",
-      placeClip: draftPlaceLabel.clip,
-      placeKeep: draftPlaceLabel.keep,
+      placeClip: sources.draftPlaceLabel.clip,
+      placeKeep: sources.draftPlaceLabel.keep,
     });
   }
-  const rows = listProjectRows({
-    group: project,
-    sessions,
-    workspaces,
-    resources,
-    runners,
-    instances,
-  });
-  for (const row of rows) {
-    const pose = poses.get(row.id);
-    const status = statuses.get(row.id);
-    if (pose === undefined || status === undefined) continue;
-    contents.push({
-      kind: "thread-row",
-      key: `thread:${row.id}`,
-      sessionId: row.id,
-      title: row.title,
-      pose,
-      status,
-      receded: status === "working" && row.id !== selectedId,
-      activityAt: status === "age" ? row.activityAt : "",
-      placeClip: row.placeLabel.clip,
-      placeKeep: row.placeLabel.keep,
-      providerId: row.providerId,
-      placeDescription: row.placeDescription,
-      unsent: unsentKeys.has(row.id),
-      details: {
-        title: row.title,
-        projectName,
-        tint,
-        machine: row.machine,
-        branch: row.branch,
-        model: row.secondLine,
-        providerId: row.providerId,
-      },
-    });
+  for (const row of project.rows) {
+    contents.push(...buildGroupContents(row, sources, { projectName, tint }));
   }
   if (project.hiddenCount > 0) {
     contents.push({
@@ -582,43 +684,48 @@ const buildProjectContents = (
   return contents;
 };
 
+/** Returns the content of a group's row on the Done shelf. */
+const buildDoneGroupRow = (
+  row: DoneGroupRow,
+  { selectedId, lastOpen, unsentKeys, projects }: SidebarItemSources,
+): SidebarItemContent => ({
+  kind: "done-group-row",
+  key: `done:${row.key}`,
+  groupKey: row.key,
+  openId: pickOpenId(row, selectedId, lastOpen),
+  title: row.title,
+  pose: row.pose,
+  threadCount: row.threadIds.length,
+  doneAt: row.doneAt,
+  providerId: row.providerId,
+  unsent: row.members.some((member) => unsentKeys.has(member.sessionId)),
+  reopenIds: row.threadIds,
+  details: buildHoverDetails(row, {
+    projectName: projects.find((project) => project.id === row.projectId)?.name ?? "No project",
+    tint: row.projectId === null ? null : pickProjectTint(row.projectId, projects),
+  }),
+});
+
 /**
- * Returns what the Done shelf draws, or nothing when no thread is marked
- * done: its heading with the count, then, while it is open or holds the
- * selected thread, its rows, most recently marked Done first, then its
- * "more" row when the open shelf hides some.
+ * Returns what the Done shelf draws, or nothing when no group is done: its
+ * heading with the count, then, while it is open or holds the open session,
+ * its rows, most recently done first, then its "more" row when the open
+ * shelf hides some.
  */
-const buildDoneContents = ({
-  doneShelf,
-  doneShelfOpen,
-  poses,
-  instances,
-  unsentKeys,
-}: SidebarItemSources): SidebarItemContent[] => {
+const buildDoneContents = (
+  doneShelf: GroupDoneShelf,
+  sources: SidebarItemSources,
+): SidebarItemContent[] => {
   if (doneShelf.count === 0) return [];
-  const providers = new Map(instances.map((each) => [each.id, each.providerId]));
   const contents: SidebarItemContent[] = [
     {
       kind: "done-header",
       key: buildHeaderKey("done"),
       count: doneShelf.count,
-      open: doneShelfOpen,
+      open: sources.doneShelfOpen,
     },
+    ...doneShelf.rows.map((row) => buildDoneGroupRow(row, sources)),
   ];
-  for (const session of doneShelf.threads) {
-    const pose = poses.get(session.id);
-    if (pose === undefined || session.done === undefined) continue;
-    contents.push({
-      kind: "done-row",
-      key: `done:${session.id}`,
-      sessionId: session.id,
-      title: session.title,
-      pose,
-      doneAt: session.done.at,
-      providerId: providers.get(session.instanceId) ?? null,
-      unsent: unsentKeys.has(session.id),
-    });
-  }
   if (doneShelf.hiddenCount > 0) {
     contents.push({
       kind: "more",
@@ -630,47 +737,38 @@ const buildDoneContents = ({
 };
 
 /**
- * Returns `groups` without the workspace groups that hold no thread and not
- * the draft, and without the projects left with no workspace group. The
- * desktop sidebar lists threads, so a workspace no thread uses, kept or
- * failed, is not shown in it (spec 17 §The sidebar).
- */
-const dropEmptyWorkspaceGroups = (groups: readonly ProjectGroup[]): readonly ProjectGroup[] =>
-  groups.flatMap((group) => {
-    const workspaces = group.workspaces.filter((lane) => lane.rows.length > 0 || lane.draft);
-    return workspaces.length === 0 ? [] : [{ ...group, workspaces }];
-  });
-
-/**
  * Returns the sidebar's items, top to bottom: Waiting on you when a thread,
  * an assistant or a run's session is waiting, then each project's section in
- * the order of `sections.projects`, then the Done shelf when a thread is
- * marked Done.
- *
- * A thread row whose session is missing from `sessions`, `poses` or
- * `statuses` is left out. All of them are built from one read of the thread list, so
- * this does not happen.
+ * the order of `groupSidebar.projects`, then the Done shelf when a group is
+ * done.
  */
 const buildSidebarItems = (sources: SidebarItemSources): readonly SidebarItem[] => {
-  const { sections, waitingRunSessions, waitingExpanded } = sources;
+  const { groupSidebar, waitingRunSessions, waitingExpanded } = sources;
   return [
     ...placeInSection(
       "waiting",
-      buildWaitingContents(sections.waiting, waitingRunSessions, waitingExpanded),
+      buildWaitingContents(groupSidebar.waiting, waitingRunSessions, waitingExpanded),
     ),
-    ...sections.projects.flatMap((project) =>
+    ...groupSidebar.projects.flatMap((project) =>
       placeInSection(
         buildProjectSectionKey(project.projectId),
         buildProjectContents(project, sources),
       ),
     ),
-    ...placeInSection("done", buildDoneContents(sources)),
+    ...placeInSection("done", buildDoneContents(groupSidebar.doneShelf, sources)),
   ];
 };
 
 /** What the sidebar is built from: the lists it reads, the open draft, and the user's choices. */
 export interface SidebarSources {
-  readonly threads: readonly Session[];
+  /** The Threads and Agent sessions the sidebar's read holds. */
+  readonly sessions: readonly Session[];
+  /**
+   * The open session's own record, or `null`. The read leaves out a Thread
+   * marked Done more than 14 days ago, so an open one is added from here, and
+   * its group keeps a row on the Done shelf. A record the read holds wins.
+   */
+  readonly openSession: Session | null;
   /** The threads and the assistants waiting on the user, as `listWaiting` returns them. */
   readonly waiting: readonly Waiting[];
   /**
@@ -683,7 +781,7 @@ export interface SidebarSources {
   readonly workspaces: readonly Workspace[];
   readonly resources: readonly Resource[];
   readonly runners: readonly Runner[];
-  /** The instances whose catalogs give a row its model name. */
+  /** The instances whose catalogs give a session its model name. */
   readonly instances: readonly ProviderInstance[];
   /**
    * The open Draft Thread, or `null`: the group it will join, and its row's
@@ -698,33 +796,40 @@ export interface SidebarSources {
   /** The keys of the project sections, and Waiting on you, whose "more" row the user pressed. */
   readonly expanded: ReadonlySet<SectionKey>;
   /**
-   * How many Done threads the Done shelf shows, or `null` while it is
-   * closed: `DONE_SHELF_LIMIT` when opened, and `DONE_SHELF_STEP` more for
-   * each press of its "more" row.
+   * How many done groups the Done shelf shows, or `null` while it is closed:
+   * `DONE_SHELF_LIMIT` when opened, and `DONE_SHELF_STEP` more for each press
+   * of its "more" row.
    */
   readonly doneShelfLimit: number | null;
-  /** The session id of the open thread, which its section always shows, or `null`. */
+  /** The session id of the open session, whose group its section always shows, or `null`. */
   readonly selectedId: string | null;
+  /** The keys of the groups the user unfolded. */
+  readonly unfoldedGroups: ReadonlySet<string>;
+  /** The keys of the groups whose quiet sessions the user showed. */
+  readonly quietShownGroups: ReadonlySet<string>;
+  /** The session last open in each group, by the group's key. */
+  readonly lastOpen: ReadonlyMap<string, string>;
 }
 
-/** What the sidebar draws: the items of its list, and the thread counts in its foot. */
+/** What the sidebar draws: the items of its list, and the session counts in its foot. */
 export interface Sidebar {
   readonly items: readonly SidebarItem[];
   readonly counts: ThreadCounts;
+  /** The key of the group that holds the open session, shown or not, or `null` when it is in none. */
+  readonly openGroupKey: string | null;
 }
 
 /**
  * Returns what the sidebar draws from `sources`: its items, top to bottom,
- * and how many threads are working, waiting and idle.
+ * and how many sessions are working, waiting and idle.
  *
- * Each thread's pose and its row's status are decided once, here. The pose
- * serves the order of the sections, the rows' names and the counts. A thread
- * marked Done leaves its project for the Done shelf, and counts toward no
- * project's cap and in none of the foot's counts, but Waiting on you still
- * lists it while it waits, because `waiting` comes from every thread.
+ * Each session's pose is decided here for the counts. A Thread marked Done
+ * counts in none of the foot's counts, but Waiting on you still lists it
+ * while it waits, because `waiting` comes from every session.
  */
 export const buildSidebar = ({
-  threads,
+  sessions: listed,
+  openSession,
   waiting,
   waitingRunSessions,
   projects,
@@ -737,55 +842,56 @@ export const buildSidebar = ({
   expanded,
   doneShelfLimit,
   selectedId,
+  unfoldedGroups,
+  quietShownGroups,
+  lastOpen,
 }: SidebarSources): Sidebar => {
-  const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
-  const findRunner = (session: Session): Runner | undefined =>
-    session.runnerId === null ? undefined : runnersById.get(session.runnerId);
-  const poses = new Map(
-    threads.map((session) => [session.id, decideThreadPose(session, findRunner(session))]),
-  );
-  const statuses = new Map(
-    threads.map((session) => [session.id, decideThreadRowStatus(session, findRunner(session))]),
-  );
-  const sessions = new Map(threads.map((session) => [session.id, session]));
-  const groupedThreads = buildThreadGroups({
-    sessions: threads.filter((session) => !isMarkedDone(session)),
+  const mergeOpenSession =
+    openSession !== null &&
+    (openSession.kind === "thread" || openSession.kind === "agent") &&
+    !listed.some((session) => session.id === openSession.id);
+  const sessions = mergeOpenSession ? [...listed, openSession] : listed;
+  const groups = buildSessionGroups(sessions);
+  const groupSidebar = buildGroupSidebar({
+    groups,
     projects,
     workspaces,
     resources,
     runners,
     instances,
-    mode: "meta",
-    draft: draft?.place ?? null,
-  });
-  const groups = sortProjectsByNewestThread(dropEmptyWorkspaceGroups(groupedThreads), sessions);
-  const sections = buildSidebarSections({
-    groups,
-    sessions,
     waiting,
-    poses,
-    expanded: buildExpandedSections(expanded, groups),
+    draft: draft?.place ?? null,
+    expanded: buildExpandedSections(expanded),
+    doneShelfLimit,
     selectedId,
   });
   const items = buildSidebarItems({
-    sections,
+    groupSidebar,
     waitingRunSessions,
     waitingExpanded: expanded.has("waiting"),
-    doneShelf: buildDoneShelf({ threads, limit: doneShelfLimit, selectedId }),
     doneShelfOpen: doneShelfLimit !== null,
-    sessions,
-    poses,
-    statuses,
     projects,
-    workspaces,
-    resources,
-    runners,
-    instances,
     unsentKeys,
     draftPlaceLabel: draft?.rowPlaceLabel ?? null,
     selectedId,
+    unfoldedGroups,
+    quietShownGroups,
+    lastOpen,
   });
-  return { items, counts: countThreadsByPose(threads, poses) };
+  const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
+  const poses = new Map(
+    sessions.map((session) => [
+      session.id,
+      decideThreadPose(session, runnersById.get(session.runnerId)),
+    ]),
+  );
+  return {
+    items,
+    counts: countThreadsByPose(sessions, poses),
+    openGroupKey:
+      groups.find((group) => group.sessions.some((session) => session.id === selectedId))?.key ??
+      null,
+  };
 };
 
 /** How many items the Go menu lists: one per shortcut, ⌘1 to ⌘9. */
@@ -793,16 +899,18 @@ const GO_MENU_LIMIT = 9;
 
 /**
  * Returns the Go menu item of a sidebar item that opens a thread or an
- * assistant, or `null` for any other item. A run's session's row is not
- * listed: the Go menu stays about the user's own threads and assistants
- * (spec 17, "From runs" in Waiting on you). A Done thread's row is not
- * listed either, because the user put the thread away.
+ * assistant, or `null` for any other item. A group's row opens the session
+ * its click opens. A line of an unfolded group is not listed, nor a run's
+ * session's row: the Go menu stays about the user's own work and assistants
+ * (spec 17, "From runs" in Waiting on you). A group on the Done shelf is not
+ * listed either, because the user put it away.
  */
 const buildGoMenuItem = (item: SidebarItem): GoMenuItem | null => {
   switch (item.kind) {
     case "waiting-thread-row":
-    case "thread-row":
       return { destination: { kind: "thread", sessionId: item.sessionId }, title: item.title };
+    case "group-row":
+      return { destination: { kind: "thread", sessionId: item.openId }, title: item.title };
     case "waiting-assistant-row":
       return {
         destination: { kind: "assistant", assistantId: item.assistantId },
@@ -812,9 +920,11 @@ const buildGoMenuItem = (item: SidebarItem): GoMenuItem | null => {
     case "waiting-runs-label":
     case "waiting-header":
     case "project-header":
+    case "group-line":
+    case "quiet-line":
     case "draft-row":
     case "done-header":
-    case "done-row":
+    case "done-group-row":
     case "more":
       return null;
   }
@@ -822,10 +932,11 @@ const buildGoMenuItem = (item: SidebarItem): GoMenuItem | null => {
 
 /**
  * Returns the first nine threads and assistants the sidebar's list shows,
- * top to bottom, for the Go menu. A waiting thread shows twice, under Waiting
- * on you and in its project, and is listed once, where it shows first. An
- * assistant is listed only while Waiting on you shows it: the Assistants
- * section is not part of the list. A run's session is not listed.
+ * top to bottom, for the Go menu. A waiting session shows twice, under
+ * Waiting on you and in its group's row when it is the session the row
+ * opens, and is listed once, where it shows first. An assistant is listed
+ * only while Waiting on you shows it: the Assistants section is not part of
+ * the list. A run's session is not listed.
  */
 export const listGoMenuItems = (items: readonly SidebarItem[]): GoMenuItem[] => {
   const listed = new Map<string, GoMenuItem>();
@@ -846,8 +957,12 @@ export const listGoMenuItems = (items: readonly SidebarItem[]): GoMenuItem[] => 
  * of these that exists wins:
  *
  * - when a "more" row leaves, because its section expanded: the first row
- *   of a thread, an assistant or a run's session that the section now shows
+ *   of a group, an assistant or a run's session that the section now shows
  *   and did not show before;
+ * - when a "n quiet" line leaves, because its sessions are now shown: the
+ *   first line of its group that is new;
+ * - when a line leaves, because its group folded or its quiet sessions are
+ *   shown: the group's row;
  * - the section's "more" row;
  * - the section's header;
  * - the item that now sits where the gone item sat, or the last item when the
@@ -864,19 +979,32 @@ export const pickFocusFallback = (
   const index = before.findIndex((item) => item.key === goneKey);
   const gone = before[index];
   if (gone !== undefined) {
+    const shownBefore = new Set(before.map((item) => item.key));
     if (gone.kind === "more") {
-      const shownBefore = new Set(before.map((item) => item.key));
       const shown = after.find(
         (item) =>
           item.section === gone.section &&
           (item.kind === "waiting-thread-row" ||
             item.kind === "waiting-assistant-row" ||
             item.kind === "waiting-run-row" ||
-            item.kind === "thread-row" ||
-            item.kind === "done-row") &&
+            item.kind === "group-row" ||
+            item.kind === "done-group-row") &&
           !shownBefore.has(item.key),
       );
       if (shown !== undefined) return shown.key;
+    }
+    if (gone.kind === "quiet-line") {
+      const shown = after.find(
+        (item) =>
+          item.kind === "group-line" &&
+          item.groupKey === gone.groupKey &&
+          !shownBefore.has(item.key),
+      );
+      if (shown !== undefined) return shown.key;
+    }
+    if (gone.kind === "group-line" || gone.kind === "quiet-line") {
+      const rowKey = buildGroupRowKey(gone.groupKey);
+      if (after.some((item) => item.key === rowKey)) return rowKey;
     }
     for (const key of [buildMoreRowKey(gone.section), buildHeaderKey(gone.section)]) {
       if (after.some((item) => item.key === key)) return key;

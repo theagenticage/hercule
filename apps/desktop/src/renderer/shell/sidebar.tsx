@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useId, useMemo, useState, type JSX } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { DONE_SHELF_LIMIT, DONE_SHELF_STEP } from "@hercule/client-core";
 import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useAssistantRows } from "../app/assistant-rows";
@@ -10,7 +10,8 @@ import {
   providersQuery,
   resourcesQuery,
   runnersQuery,
-  threadsQuery,
+  sessionQuery,
+  threadAndAgentSessionsQuery,
   userQuery,
   workspacesQuery,
 } from "../app/queries";
@@ -46,14 +47,17 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *   and Search as two rows and has no Office button;
  * - the list: Waiting on you, with the threads and the assistants that wait
  *   on the user, then the face's own rows.
- *   - On the threads face, the threads of each project, the most recently
- *     opened (created or reopened) first, with the Draft Thread's row, while
- *     one is open, first in its project. A row whose composer holds unsent
- *     work is tinted. A thread's Done button marks it Done: it leaves its
- *     project at once, and the toast over the list's bottom edge says
- *     "Marked done" with Undo. Then the Done shelf, closed until its heading
- *     is pressed. Then the Assistants section, pinned under the list, while
- *     there is an assistant.
+ *   - On the threads face, the groups of each project, the most recently
+ *     started (created or reopened) first, with the Draft Thread's row, while
+ *     one is open, first in its project. A group is the Threads and Agent
+ *     sessions that work in one workspace. A group of several unfolds into a
+ *     line for each session, by its dots or the arrow keys. A row whose
+ *     composer holds unsent work is tinted. A row's Done button marks the
+ *     group's Threads Done: the group leaves its project at once, and the
+ *     toast over the list's bottom edge says "Marked done" with Undo. Then
+ *     the Done shelf, closed until its heading is pressed. Then the
+ *     Assistants section, pinned under the list, while there is an
+ *     assistant.
  *   - On the Hercule face, the System section;
  * - the foot: the thread counts, the signed-in user and the Settings button.
  *
@@ -67,8 +71,12 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  * marked the same way while the Office is open, and the Settings button
  * while Settings is open.
  *
- * While the Office is open, the row of a thread with a colleague in the
- * Office opens the thread in the Office's drawer instead of on its own
+ * A group's row opens the session last open in the group, else its lead.
+ * Which groups are unfolded, and which session was last open in each, are
+ * kept in memory only.
+ *
+ * While the Office is open, the row of a session with a colleague in the
+ * Office opens the session in the Office's drawer instead of on its own
  * screen, so the user stays in the Office. Every thread not marked Done has
  * a colleague, asleep and away ones too; a Done thread has none, so its row
  * still opens its own screen. A run's waiting session,
@@ -90,7 +98,7 @@ export const Sidebar = memo(function Sidebar({
 }): JSX.Element {
   const { bridge, controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  const threads = useSuspenseQuery(threadsQuery(client)).data;
+  const sessions = useSuspenseQuery(threadAndAgentSessionsQuery(client)).data;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
@@ -101,7 +109,7 @@ export const Sidebar = memo(function Sidebar({
   const waiting = useWaiting();
   const waitingRunSessions = useWaitingRunSessions();
   const unsentKeys = useUnsentKeys(controller.pendingSubmissions);
-  useRelatedReads(threads, projects, workspaces);
+  useRelatedReads(sessions, projects, workspaces);
   // The Draft Thread the new-thread screen shows, while that screen is open.
   // Its row reads the draft as the screen does, see `useDraftThread`.
   const draftSearch = useMatch({ from: "/_connected/_shell/", shouldThrow: false })?.search;
@@ -121,6 +129,12 @@ export const Sidebar = memo(function Sidebar({
   const officeOpen = officeMatch !== undefined;
   const selectedId = threadMatch?.params.sessionId ?? officeMatch?.search.session ?? null;
   const listId = useId();
+  // The open session's own record, read from the cache the thread screen
+  // filled and never fetched here, for an open Thread marked Done long ago,
+  // which the sidebar's read leaves out. The empty id of no open session
+  // names no record.
+  const openSession =
+    useQuery({ ...sessionQuery(client, selectedId ?? ""), enabled: false }).data ?? null;
 
   // The face is set again each time a screen with a face of its own opens,
   // while rendering, so the sidebar never draws the old face beside the new
@@ -150,6 +164,26 @@ export const Sidebar = memo(function Sidebar({
   // The Done shelf's length, or `null` while it is closed. Like the
   // sections, it is kept only while the window is open.
   const [doneShelfLimit, setDoneShelfLimit] = useState<number | null>(null);
+  // The groups the user unfolded, the groups whose quiet sessions the user
+  // showed, and the session last open in each group. Kept only while the
+  // window is open. Opening a session never unfolds its group.
+  const [unfoldedGroups, setUnfoldedGroups] = useState<ReadonlySet<string>>(() => new Set());
+  const [quietShownGroups, setQuietShownGroups] = useState<ReadonlySet<string>>(() => new Set());
+  const [lastOpen, setLastOpen] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const toggleGroup = useCallback((groupKey: string, unfold: boolean) => {
+    setUnfoldedGroups((current) => {
+      if (current.has(groupKey) === unfold) return current;
+      const next = new Set(current);
+      if (unfold) next.add(groupKey);
+      else next.delete(groupKey);
+      return next;
+    });
+  }, []);
+  const showQuiet = useCallback((groupKey: string) => {
+    setQuietShownGroups((current) =>
+      current.has(groupKey) ? current : new Set(current).add(groupKey),
+    );
+  }, []);
   const expandSection = useCallback((section: SectionKey) => {
     if (section === "done") {
       setDoneShelfLimit((limit) => (limit ?? DONE_SHELF_LIMIT) + DONE_SHELF_STEP);
@@ -163,19 +197,22 @@ export const Sidebar = memo(function Sidebar({
   // Kept for the sidebar's life. The toast reads it on its own, so showing,
   // fading or dismissing a toast does not draw the sidebar again.
   const [toasts] = useState(createDoneToastStore);
-  const { markDone, reopen } = useDoneMoves(client, toasts);
+  const { markDone, reopen, undo } = useDoneMoves(client, toasts);
   const listActions = useMemo(
     () => ({
       onExpand: expandSection,
       onMarkDone: markDone,
       onReopen: reopen,
       onToggleDoneShelf: toggleDoneShelf,
+      onToggleGroup: toggleGroup,
+      onShowQuiet: showQuiet,
     }),
-    [expandSection, markDone, reopen, toggleDoneShelf],
+    [expandSection, markDone, reopen, toggleDoneShelf, toggleGroup, showQuiet],
   );
 
-  const { items, counts } = buildSidebar({
-    threads,
+  const { items, counts, openGroupKey } = buildSidebar({
+    sessions,
+    openSession,
     waiting,
     waitingRunSessions,
     projects,
@@ -188,7 +225,21 @@ export const Sidebar = memo(function Sidebar({
     expanded,
     doneShelfLimit,
     selectedId,
+    unfoldedGroups,
+    quietShownGroups,
+    lastOpen,
   });
+  // The row of a group opens the session last open in it, however that was
+  // opened. The row already opens the open session while the group holds it,
+  // so this only remembers it for after the user opens something else.
+  useEffect(() => {
+    if (selectedId === null || openGroupKey === null) return;
+    setLastOpen((current) =>
+      current.get(openGroupKey) === selectedId
+        ? current
+        : new Map(current).set(openGroupKey, selectedId),
+    );
+  }, [selectedId, openGroupKey]);
   useSendOnChange(listGoMenuItems(items), bridge.goMenu.set, "Could not update the Go menu:");
 
   return (
@@ -244,7 +295,7 @@ export const Sidebar = memo(function Sidebar({
           items.length === 0 && <p className="side-meta side-empty">No threads yet</p>
         )}
       </SidebarList>
-      <SidebarDoneToast store={toasts} onUndo={reopen} />
+      <SidebarDoneToast store={toasts} onUndo={undo} />
       {face === "threads" && <AssistantsSection rows={assistantRows} officeOpen={officeOpen} />}
       <SidebarFoot
         working={counts.working}
