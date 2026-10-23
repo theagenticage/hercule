@@ -564,12 +564,19 @@ const MIN_DOTS_BUTTON_WIDTH = 22;
  * 2px gap between the end of line 2 and the chevron, with 4 more in the
  * stylesheet. Generous on purpose, so a cut question never runs under the
  * dots.
+ *
+ * A button with no dots holds its chevron inside, so line 2 only has to
+ * end before the button itself: the button's right edge lies 4px past
+ * line 2's, so the width less 4 leaves a 4px gap, with 4 more in the
+ * stylesheet.
  */
 const measureDotsWidth = (dotCount: number, hiddenCount: number): number =>
-  Math.max(
-    MIN_DOTS_BUTTON_WIDTH,
-    dotCount * 11 + (hiddenCount > 0 ? 13 + 7 * String(hiddenCount).length : 0) + 4,
-  ) + 8;
+  dotCount === 0
+    ? MIN_DOTS_BUTTON_WIDTH - 4
+    : Math.max(
+        MIN_DOTS_BUTTON_WIDTH,
+        dotCount * 11 + (hiddenCount > 0 ? 13 + 7 * String(hiddenCount).length : 0) + 4,
+      ) + 8;
 
 /**
  * Renders the mark of a session in a group, in the sidebar's rows and in the
@@ -619,7 +626,9 @@ export function AgentLabel({
  * the rest (`hiddenCount`). Pressing it unfolds the group or, when it is
  * already unfolded, folds it: `onToggle` is called with whether to unfold.
  * A chevron shows beside the dots while the pointer is on the row or the
- * button has focus, and turns down while the group is unfolded.
+ * button has focus, and turns down while the group is unfolded. With no dots
+ * (`dots` is empty) the button is only the chevron's target, and the chevron
+ * sits inside it.
  *
  * It is named by `label`, which describes all the group's sessions, then
  * "Unfold" or "Fold", and it has `aria-expanded`. It carries the row's
@@ -646,7 +655,11 @@ function DotsButton({
   return (
     <button
       type="button"
-      className={unfolded ? "side-dots is-open" : "side-dots"}
+      className={[
+        "side-dots",
+        ...(dots.length === 0 ? ["has-no-dots"] : []),
+        ...(unfolded ? ["is-open"] : []),
+      ].join(" ")}
       data-key={itemKey}
       aria-expanded={unfolded}
       aria-label={`${label}. ${unfolded ? "Fold" : "Unfold"}`}

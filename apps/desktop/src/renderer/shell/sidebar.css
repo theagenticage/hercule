@@ -430,6 +430,14 @@
 .side-dots:hover {
   background: var(--hover);
 }
+/* With no dots, the button is only the chevron's target: the chevron sits
+   inside it, in its centre, instead of beside it. */
+.side-dots.has-no-dots {
+  justify-content: center;
+}
+.side-dots.has-no-dots .side-dots-chevron {
+  position: static;
+}
 .side-dots:focus-visible {
   outline-offset: 0;
 }
