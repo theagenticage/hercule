@@ -7,8 +7,9 @@
  *   ended Agent session is not counted, but stays among the members;
  * - the second line is the question of the session that asked first, named by
  *   its label unless the lead asks, and the place otherwise;
- * - the dots are one per session up to three, then the three most urgent and
- *   "+n", with words that describe them all;
+ * - the dots are one per counted session up to three, then the three most
+ *   urgent and "+n", with words that describe every session, Done and ended
+ *   ones included;
  * - an unfolded row folds more than two quiet sessions into one line, except
  *   the open one.
  */
@@ -167,7 +168,7 @@ describe("describeGroupRows: the status", () => {
 
     expect(row).toMatchObject({ status: "age", ask: null });
     expect(row.members[0]).toMatchObject({ done: true, pose: "waiting", dot: "quiet" });
-    expect(row.summary?.dots).toEqual(["quiet", "quiet"]);
+    expect(row.summary?.dots).toEqual(["quiet"]);
   });
 
   it("does not count an Agent session that has ended, and keeps it among the members", () => {
@@ -308,17 +309,55 @@ describe("describeGroupRows: the dots", () => {
     });
   });
 
-  it("counts queued as working, and a Done Thread and an ended Agent session as quiet", () => {
+  it("counts queued as working, and draws no dot for a Done Thread or an ended Agent session", () => {
     const summary = describeOnly([
       thread("s-1", { status: "queued" }),
       thread("s-2", { ...done(30), createdAt: at(2) }),
       agent("s-agent", { status: "exited", exitedAt: at(5) }),
     ]).summary;
 
-    expect(summary).toMatchObject({
-      dots: ["working", "quiet", "quiet"],
-      label: "3 sessions: 1 working, 2 quiet",
+    expect(summary).toEqual({
+      dots: ["working"],
+      hiddenCount: 0,
+      label: "3 sessions: 1 working, 1 done, 1 ended",
     });
+  });
+
+  it("draws one quiet dot, and names the done Thread in words, for a Done lead and one idle partner", () => {
+    const summary = describeOnly([
+      thread("s-lead", { ...done(30), openRequests: [ask("r-1")] }),
+      thread("s-partner", { createdAt: at(2), status: "idle" }),
+    ]).summary;
+
+    expect(summary).toEqual({
+      dots: ["quiet"],
+      hiddenCount: 0,
+      label: "2 threads: 1 quiet, 1 done",
+    });
+  });
+
+  it("does not let Done Threads inflate the +n", () => {
+    const summary = describeOnly([
+      ...buildCrew(4, 3, 0),
+      ...[5, 6, 7].map((index) =>
+        thread(`s-${String(index)}`, { ...done(30), createdAt: at(index) }),
+      ),
+    ]).summary;
+
+    expect(summary).toMatchObject({
+      dots: ["working", "working", "working"],
+      hiddenCount: 1,
+      label: "7 threads: 3 working, 1 quiet, 3 done",
+    });
+  });
+
+  it("keeps a summary with no dot for a group with nothing counted, so the row still unfolds", () => {
+    const summary = describeOnly([
+      thread("s-1", done(30)),
+      thread("s-2", { ...done(31), createdAt: at(2) }),
+    ]).summary;
+
+    expect(summary).toEqual({ dots: [], hiddenCount: 0, label: "2 threads: 2 done" });
   });
 });
 

@@ -75,13 +75,26 @@ export interface GroupAsk {
   readonly question: string;
 }
 
-/** The dots of a group of 2 or more sessions, and the words that describe them to assistive technology. */
+/**
+ * The dots of a group of 2 or more sessions, and the words that describe them
+ * to assistive technology. The dots button also unfolds the row, so a group
+ * of 2 or more always has a summary, even when it has no dot to draw.
+ */
 export interface GroupSummary {
-  /** At most three dots, the most urgent first. */
+  /**
+   * One dot per counted session, the most urgent first, at most three. A Done
+   * Thread and an ended Agent session get none, so a group with one counted
+   * session shows one dot and a group with none (on the Done shelf) shows none.
+   */
   readonly dots: readonly SessionDot[];
-  /** How many sessions the dots leave out: the "+n" after them, or 0 for none. */
+  /** How many counted sessions the dots leave out: the "+n" after them, or 0 for none. */
   readonly hiddenCount: number;
-  /** All the group's sessions in words, such as "10 threads: 1 waiting on you, 3 working, 6 quiet". */
+  /**
+   * Every session of the group in words, the Done and ended ones as parts of
+   * their own: "10 threads: 1 waiting on you, 3 working, 4 quiet, 2 done", or
+   * "3 sessions: 1 working, 1 done, 1 ended". It says "threads" when every
+   * session is a Thread, and "sessions" when an Agent session is among them.
+   */
   readonly label: string;
 }
 
@@ -121,7 +134,7 @@ export interface GroupRow {
   readonly members: readonly GroupMember[];
   /** The Threads of the group, in the group's order, whether Done or not. */
   readonly threadIds: readonly string[];
-  /** The dots after the row's name, or `null` for a group of one session. */
+  /** The dots after the row's name, or `null` for a group of one session, which has no dots and does not unfold. */
   readonly summary: GroupSummary | null;
   /** When the group last started, as `SessionGroup.lastStartedAt` says. */
   readonly lastStartedAt: string;
@@ -172,22 +185,30 @@ const decideDot = (counted: boolean, pose: Pose): SessionDot => {
   return pose;
 };
 
-/** Returns the dots of `members`, as `GroupSummary` describes them. */
+/**
+ * Returns the dots and the words for `members`, as `GroupSummary` describes
+ * them. Only counted members get a dot; every member is in the words.
+ */
 const summarizeMembers = (members: readonly GroupMember[]): GroupSummary => {
-  const sorted = members.toSorted((a, b) => rankDot(a.dot) - rankDot(b.dot));
-  const shown = members.length > MAX_DOTS ? sorted.slice(0, MAX_DOTS) : sorted;
-  const countOf = (dot: SessionDot): number => members.filter((each) => each.dot === dot).length;
+  const counted = members
+    .filter((member) => member.counted)
+    .toSorted((a, b) => rankDot(a.dot) - rankDot(b.dot));
+  const shown = counted.slice(0, MAX_DOTS);
+  const countOf = (dot: SessionDot): number =>
+    counted.filter((member) => member.dot === dot).length;
   const parts = [
     [countOf("waiting"), "waiting on you"],
     [countOf("working"), "working"],
     [countOf("quiet"), "quiet"],
+    [members.filter((member) => member.done).length, "done"],
+    [members.filter((member) => member.kind === "agent" && !member.counted).length, "ended"],
   ]
     .filter(([count]) => count !== 0)
     .map(([count, words]) => `${String(count)} ${words}`);
   const noun = members.every((member) => member.kind === "thread") ? "threads" : "sessions";
   return {
     dots: shown.map((member) => member.dot),
-    hiddenCount: members.length - shown.length,
+    hiddenCount: counted.length - shown.length,
     label: `${String(members.length)} ${noun}: ${parts.join(", ")}`,
   };
 };
