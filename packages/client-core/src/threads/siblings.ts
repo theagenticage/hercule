@@ -78,12 +78,44 @@ export const listWorkspaceSessionTabs = (
 };
 
 /**
- * Returns the text of `session`'s tab: the id of the step for a run's step
- * session, whose title starts with the workflow's name that the header's
- * crumb already shows, and the title for any other session.
+ * Returns each session's label among the sessions shown together, one
+ * workspace's: a map from session id to label.
+ *
+ * - A run's step session is labelled with its step id, because its title
+ *   starts with the workflow's name, which the header's crumb already shows.
+ * - Any other session is labelled with its role, when it has one. Sessions
+ *   that share a role, ignoring case, are numbered by `createdAt` (ties by
+ *   their order in `sessions`): `review`, `review 2`, `review 3`. Each keeps
+ *   its own spelling.
+ * - A session with no role is labelled with its full title, which the screen
+ *   cuts short. Titles are not numbered.
+ *
+ * The header's tabs and the sidebar's unfolded list both call this, so they
+ * name a session the same way.
  */
-export const labelSessionTab = (session: Session): string =>
-  session.stepId === null ? session.title : session.stepId;
+export const labelWorkspaceSessions = (
+  sessions: readonly Session[],
+): ReadonlyMap<string, string> => {
+  const labels = new Map<string, string>();
+  const rolesSeen = new Map<string, number>();
+  const oldestFirst = sessions.toSorted(
+    (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt),
+  );
+  for (const session of oldestFirst) {
+    const role = session.role?.trim() ?? "";
+    if (session.kind === "run" && session.stepId !== null) {
+      labels.set(session.id, session.stepId);
+    } else if (role === "") {
+      labels.set(session.id, session.title);
+    } else {
+      const roleKey = role.toLowerCase();
+      const number = (rolesSeen.get(roleKey) ?? 0) + 1;
+      rolesSeen.set(roleKey, number);
+      labels.set(session.id, number === 1 ? role : `${role} ${number}`);
+    }
+  }
+  return labels;
+};
 
 /**
  * Returns the threads of `workspace`, in the workspace's thread order, taken

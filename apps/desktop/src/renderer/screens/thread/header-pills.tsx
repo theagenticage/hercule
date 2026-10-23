@@ -11,7 +11,7 @@ import {
   decideThreadRowEnd,
   describePose,
   isAbsentPose,
-  labelSessionTab,
+  labelWorkspaceSessions,
 } from "@hercule/client-core";
 import type { Project, Runner, Session } from "@hercule/contract";
 import { MoreIcon } from "../../icons/more";
@@ -89,6 +89,7 @@ export function ThreadTabsPill({
   readonly children?: ReactNode;
 }): JSX.Element {
   const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
+  const labels = labelWorkspaceSessions(tabs);
   return (
     <nav
       className={className === undefined ? "pill thread-tabs" : `pill thread-tabs ${className}`}
@@ -99,6 +100,7 @@ export function ThreadTabsPill({
         <ThreadTab
           key={tab.id}
           session={tab}
+          label={labels.get(tab.id) ?? tab.title}
           runner={tab.runnerId === null ? undefined : runnersById.get(tab.runnerId)}
         />
       ))}
@@ -109,8 +111,7 @@ export function ThreadTabsPill({
 
 /**
  * Renders one session of the workspace as a tab: the mark of its pose, when
- * the pose has one, its label (`labelSessionTab`), and, when its sidebar row would not end in a
- * mark, the word or the age that row ends in.
+ * the pose has one, its label, and, when its sidebar row would not end in a mark, the word or the age that row ends in.
  *
  * The tab is named "<title>, <pose words>", as the session's sidebar row is,
  * and described by the word or the age in words, such as "20 minutes ago".
@@ -118,9 +119,12 @@ export function ThreadTabsPill({
  */
 function ThreadTab({
   session,
+  label,
   runner,
 }: {
   readonly session: Session;
+  /** The tab's text, as `labelWorkspaceSessions` returns it for the workspace's sessions. */
+  readonly label: string;
   readonly runner: Runner | undefined;
 }): JSX.Element {
   const endId = useId();
@@ -137,7 +141,7 @@ function ThreadTab({
     >
       {isAbsentPose(pose) ? null : <Mark state={pose} />}
       <span className="ptab-title" title={session.title}>
-        {labelSessionTab(session)}
+        {label}
       </span>
       {end.kind === "mark" ? null : end.kind === "word" ? (
         <small id={endId}>{end.word}</small>

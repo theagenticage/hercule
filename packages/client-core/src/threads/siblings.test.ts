@@ -2,11 +2,13 @@
  * Tests the tab strip above a thread. It appears only when there is something
  * to switch between, it keeps the workspace's thread order rather than
  * sorting by activity, and a draft that joins the workspace is the last tab.
+ * It also tests the label each tab shows: a role, numbered when it repeats.
  */
+import type { Session } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   buildSiblingTabs,
-  labelSessionTab,
+  labelWorkspaceSessions,
   listWorkspaceSessionTabs,
   listWorkspaceThreads,
 } from "./siblings";
@@ -107,20 +109,68 @@ describe("listWorkspaceSessionTabs", () => {
   });
 });
 
-describe("labelSessionTab", () => {
-  it("is a thread's title", () => {
-    expect(labelSessionTab(SESSIONS[1]!)).toBe("Fix flaky webhook tests");
+describe("labelWorkspaceSessions", () => {
+  const at = (minute: number): string => `2026-09-10T09:${String(minute).padStart(2, "0")}:00.000Z`;
+  const labelsOf = (sessions: readonly Session[]): string[] => {
+    const labels = labelWorkspaceSessions(sessions);
+    return sessions.map((session) => labels.get(session.id) ?? "missing");
+  };
+
+  it("labels a session with its role", () => {
+    expect(
+      labelsOf([buildSession({ id: "s-1", role: "review", title: "Check the diff" })]),
+    ).toEqual(["review"]);
   });
 
-  it("is a step session's step id, not its title, which starts with the workflow's name", () => {
+  it("labels the first Thread with its role too", () => {
+    expect(
+      labelsOf([
+        buildSession({ id: "s-lead", kind: "thread", role: "build", createdAt: at(0) }),
+        buildSession({ id: "s-partner", kind: "thread", role: "tests", createdAt: at(1) }),
+      ]),
+    ).toEqual(["build", "tests"]);
+  });
+
+  it("numbers a role that repeats, ignoring case, by when each session was created", () => {
+    const sessions = [
+      buildSession({ id: "s-late", role: "Review", createdAt: at(3) }),
+      buildSession({ id: "s-first", role: "review", createdAt: at(1) }),
+      buildSession({ id: "s-other", role: "tests", createdAt: at(2) }),
+      buildSession({ id: "s-third", role: "REVIEW", createdAt: at(4) }),
+    ];
+
+    expect(labelsOf(sessions)).toEqual(["Review 2", "review", "tests", "REVIEW 3"]);
+  });
+
+  it("numbers sessions created at the same moment in list order", () => {
+    const sessions = [
+      buildSession({ id: "s-b", role: "review", createdAt: at(1) }),
+      buildSession({ id: "s-a", role: "review", createdAt: at(1) }),
+    ];
+
+    expect(labelsOf(sessions)).toEqual(["review", "review 2"]);
+  });
+
+  it("labels a session with no role by its full title, and does not number titles", () => {
+    const sessions = [
+      buildSession({ id: "s-1", role: null, title: "Fix flaky webhook tests" }),
+      buildSession({ id: "s-2", role: "  ", title: "Fix flaky webhook tests" }),
+    ];
+
+    expect(labelsOf(sessions)).toEqual(["Fix flaky webhook tests", "Fix flaky webhook tests"]);
+  });
+
+  it("labels a run's step session by its step id, not its title or role", () => {
     const step = buildSession({
       id: "s-step",
-      title: "Ticket to pull request · implement",
+      kind: "run",
+      title: "Ticket to pull request \u00b7 implement",
+      role: "review",
       runId: "r-1",
       stepId: "implement",
     });
 
-    expect(labelSessionTab(step)).toBe("implement");
+    expect(labelsOf([step])).toEqual(["implement"]);
   });
 });
 

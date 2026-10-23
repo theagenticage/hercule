@@ -833,6 +833,7 @@ export {
   sortProjectsByNewestThread,
   type ProjectRow,
 } from "./threads/project-rows";
+export { buildSessionGroups, type SessionGroup } from "./threads/session-groups";
 export {
   buildDoneShelf,
   buildSidebarSections,
@@ -846,7 +847,7 @@ export {
 } from "./threads/sidebar-sections";
 export {
   buildSiblingTabs,
-  labelSessionTab,
+  labelWorkspaceSessions,
   listWorkspaceSessionTabs,
   listWorkspaceThreads,
   type ThreadTab,
