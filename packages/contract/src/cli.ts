@@ -3488,9 +3488,10 @@ export const CLI = {
     examples: [
       { args: [] },
       { args: ["--status", "busy", "--status", "idle"] },
-      { args: ["--thread", "true"] },
+      { args: ["--kind", "thread"] },
       { args: ["--conversation", "7b41d0a5", "--limit", "1"] },
-      { args: ["--thread", "false", "--active-since", "2026-10-09T12:00:00.000Z"] },
+      { args: ["--kind", "agent", "--kind", "run", "--active-since", "2026-10-09T12:00:00.000Z"] },
+      { args: ["--kind", "thread", "--done-since", "2026-10-09T12:00:00.000Z"] },
     ],
     fields: {
       status: {
@@ -3522,9 +3523,9 @@ export const CLI = {
         help: "Only the sessions carrying this Permission Profile, by its id or a tail of eight or more characters; use it to find which sessions stop a profile from being deleted.",
         resolves: "profile.query",
       },
-      thread: {
-        flag: "thread",
-        help: "true for the sessions with no Agent behind them - the ones a person drives by hand - and false for the rest.",
+      kind: {
+        flag: "kind",
+        help: "Only sessions of this kind; repeat the flag to list several kinds together. thread: no Agent behind it, the kind a person drives by hand. agent: spawned from an Agent, outside runs and assistants. run: started by a run's agent step. assistant: answers an assistant's conversation.",
       },
       done: {
         flag: "done",
@@ -3533,6 +3534,10 @@ export const CLI = {
       activeSince: {
         flag: "active-since",
         help: "Only sessions that had not exited before this UTC instant, with milliseconds: sessions that are not exited, and sessions that exited at or after it.",
+      },
+      doneSince: {
+        flag: "done-since",
+        help: "Only sessions not marked Done, and the ones marked Done at or after this UTC instant, with milliseconds. Sessions that are not Threads are kept, because none is ever Done.",
       },
     },
   },
@@ -3919,34 +3924,36 @@ export const CLI = {
   },
   "session.markDone": {
     command: "session done",
-    help: "Marks a Thread Done, as you: it leaves the project lists and waits on the Done shelf. Nothing about the Thread itself changes - a running Thread keeps running. Marking a Thread that is already Done changes nothing. Undo it with `hercule session reopen`; new input to the Thread reopens it too.",
-    examples: [{ args: ["1f3a9c2e"] }],
+    help: "Marks Threads Done, as you: each leaves the project lists and waits on the Done shelf. Nothing about a Thread itself changes - a running Thread keeps running. The list is applied all or nothing: if one id is unknown or is not a Thread, none is marked. Marking a Thread that is already Done changes nothing. Undo it with `hercule session reopen`; new input to a Thread reopens it too.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "7b41d0a5"] }],
     fields: {
-      id: {
+      sessionIds: {
         positional: true,
-        help: "The Thread's id, or a tail of eight or more characters; find it with `hercule session list --thread true`.",
+        placeholder: "session-id",
+        help: "A Thread's id, or a tail of eight or more characters; find it with `hercule session list --kind thread`. Give several to mark them done in one call.",
         resolves: "session.query",
       },
     },
     errors: {
       invalid_state:
-        "the session is not a Thread: it was spawned from an Agent, and only a Thread can be marked Done; stop it with `hercule session stop` instead",
+        "one session is not a Thread: it was spawned from an Agent, and only a Thread can be marked Done; stop it with `hercule session stop` instead. None of the list was marked",
     },
   },
   "session.reopen": {
     command: "session reopen",
-    help: "Takes a Thread off the Done shelf, as you, and puts it back at the top of its project's list. Reopening a Thread that is not Done changes nothing.",
-    examples: [{ args: ["1f3a9c2e"] }],
+    help: "Takes Threads off the Done shelf, as you, and puts each back at the top of its project's list. The list is applied all or nothing: if one id is unknown or is not a Thread, none is reopened. Reopening a Thread that is not Done changes nothing.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "7b41d0a5"] }],
     fields: {
-      id: {
+      sessionIds: {
         positional: true,
-        help: "The Thread's id, or a tail of eight or more characters; find it with `hercule session list --done true`.",
+        placeholder: "session-id",
+        help: "A Thread's id, or a tail of eight or more characters; find it with `hercule session list --done true`. Give several to reopen them in one call.",
         resolves: "session.query",
       },
     },
     errors: {
       invalid_state:
-        "the session is not a Thread: it was spawned from an Agent, so it is never Done and there is nothing to reopen",
+        "one session is not a Thread: it was spawned from an Agent, so it is never Done and there is nothing to reopen. None of the list was reopened",
     },
   },
 

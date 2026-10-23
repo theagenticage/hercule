@@ -708,16 +708,17 @@ const TABLE = {
   },
   // Marking a Thread Done or reopening it changes how the Thread is filed,
   // not what it runs, but it is still a change to a session someone drives,
-  // so it takes the same grant as stopping one.
+  // so it takes the same grant as stopping one. Both take a list of ids, so
+  // their paths are the collection's plus the verb.
   "session.markDone": {
     requires: "session.steer",
     method: "POST",
-    path: "/api/v1/sessions/:id/mark-done",
+    path: "/api/v1/sessions/mark-done",
   },
   "session.reopen": {
     requires: "session.steer",
     method: "POST",
-    path: "/api/v1/sessions/:id/reopen",
+    path: "/api/v1/sessions/reopen",
   },
 
   // Owned sub-resources of a session: the id in the path is the session's, and

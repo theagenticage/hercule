@@ -346,6 +346,8 @@ describe("the placeholders a usage line shows", () => {
     "signal snooze": "<signal-id>...",
     "signal unsnooze": "<signal-id>...",
     "signal lower-priority": "<signal-id>...",
+    "session done": "<session-id>...",
+    "session reopen": "<session-id>...",
     "ignore-rule create": "<kind>",
     "discussion read": "<discussion-id>",
     "discussion post": "<discussion-id>",

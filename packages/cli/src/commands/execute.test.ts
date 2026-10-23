@@ -28,6 +28,7 @@ const joinToken = (tail: string) => ({
 /** Returns a session, as `session list` returns it. */
 const buildSession = (tail: string) => ({
   id: buildId(tail),
+  kind: "thread",
   role: null,
   title: "a thread",
   status: "idle",

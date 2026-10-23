@@ -104,7 +104,16 @@ export const buildWorkspace = (over: Partial<Workspace> & { id: string }): Works
   ...over,
 });
 
+/** Returns the kind a session with these origin ids has, as the controller computes it. */
+const decideFixtureKind = (ids: Partial<Session>): Session["kind"] => {
+  if (ids.agentId === undefined || ids.agentId === null) return "thread";
+  if (ids.runId !== undefined && ids.runId !== null) return "run";
+  if (ids.conversationId !== undefined && ids.conversationId !== null) return "assistant";
+  return "agent";
+};
+
 export const buildSession = (over: Partial<Session> & { id: string }): Session => ({
+  kind: decideFixtureKind(over),
   title: "A thread",
   role: null,
   status: "idle",

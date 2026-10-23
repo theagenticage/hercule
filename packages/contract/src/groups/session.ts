@@ -40,7 +40,7 @@ import { AttachmentId, MAX_ATTACHMENTS_PER_INPUT } from "./attachment";
 import { PermissionRequest } from "./permission";
 import { SessionSkillList } from "./session-skill";
 import { Branch } from "./workspace";
-import { page, pageParams } from "../pagination";
+import { MAX_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { atMost, bounded, nonBlankLine } from "../strings";
 
@@ -189,8 +189,30 @@ export const SessionRole = nonBlankLine(MAX_ROLE_LENGTH).check(
   ),
 );
 
+/**
+ * What a session is, which every session has exactly one of:
+ *
+ * - `thread`: no Agent is behind it. A Thread that a run's step or an
+ *   assistant started is still a `thread`;
+ * - `run`: an Agent session that a run's agent step started;
+ * - `assistant`: an Agent session that answers an assistant's conversation;
+ * - `agent`: any other Agent session, such as one a Thread or another
+ *   session spawned from an Agent.
+ */
+export const SESSION_KINDS = ["thread", "agent", "run", "assistant"] as const;
+
+export const SessionKind = Schema.Literals(SESSION_KINDS);
+
+export type SessionKind = Schema.Schema.Type<typeof SessionKind>;
+
 export const Session = Schema.Struct({
   id: Id,
+  /**
+   * What the session is. Computed from `agentId`, `runId` and `conversationId`,
+   * which stay as the records the session came from. Clients read `kind`
+   * instead of testing those ids for null.
+   */
+  kind: SessionKind,
   /**
    * The session's title, capped at 80 characters. For an agent step's session
    * it is the run's workflow name and the step's id, as
@@ -727,6 +749,13 @@ export const SessionStatusFilter = Schema.Union([
  */
 export const SessionRunFilter = Schema.Union([Id, Schema.NonEmptyArray(Id)]);
 
+/**
+ * One kind, or several. The desktop sidebar reads its Threads and Agent
+ * sessions in one read. The query string carries several as repeated `kind`
+ * keys.
+ */
+export const SessionKindFilter = Schema.Union([SessionKind, Schema.NonEmptyArray(SessionKind)]);
+
 export const SessionFilter = Schema.Struct({
   status: Schema.optionalKey(SessionStatusFilter),
   runnerId: Schema.optionalKey(Id),
@@ -738,8 +767,8 @@ export const SessionFilter = Schema.Struct({
   conversationId: Schema.optionalKey(Id),
   /** Only the sessions these runs' agent steps started. */
   runId: Schema.optionalKey(SessionRunFilter),
-  /** `true` lists the sessions with no Agent behind them; `false` lists the rest. */
-  thread: Schema.optionalKey(Schema.Boolean),
+  /** Only the sessions of these kinds. */
+  kind: Schema.optionalKey(SessionKindFilter),
   /**
    * `true` lists only the Threads marked Done; `false` lists only the
    * sessions that are not, which is every session that is not a Thread too.
@@ -752,6 +781,12 @@ export const SessionFilter = Schema.Struct({
    * session is kept whatever its `exitedAt` says.
    */
   activeSince: Schema.optionalKey(Timestamp),
+  /**
+   * Only sessions not marked Done, and the ones marked Done at or after this
+   * instant. Every session that is not a Thread is kept, because none is ever
+   * Done.
+   */
+  doneSince: Schema.optionalKey(Timestamp),
 });
 
 export const SESSION_SORT_FIELDS = ["createdAt"] as const;
@@ -789,6 +824,16 @@ export const SkillsPreviewFilter = Schema.Struct({
 );
 
 export type SkillsPreviewFilter = Schema.Schema.Type<typeof SkillsPreviewFilter>;
+
+/** The most Threads one call of `session.markDone` or `session.reopen` names. */
+export const MAX_SESSION_IDS = MAX_PAGE_LIMIT;
+
+/** The payload of `session.markDone` and `session.reopen`: the Threads to move, in one call. */
+export const SessionIdsInput = Schema.Struct({
+  sessionIds: atMost(Id, MAX_SESSION_IDS).check(Schema.isMinLength(1)),
+});
+
+export type SessionIdsInput = Schema.Schema.Type<typeof SessionIdsInput>;
 
 export const session = HttpApiGroup.make("session")
   .add(
@@ -871,14 +916,14 @@ export const session = HttpApiGroup.make("session")
       success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
-    HttpApiEndpoint.post("markDone", "/sessions/:id/mark-done", {
-      params: { id: Id },
-      success: Session,
+    HttpApiEndpoint.post("markDone", "/sessions/mark-done", {
+      payload: SessionIdsInput,
+      success: Schema.Array(Session),
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
-    HttpApiEndpoint.post("reopen", "/sessions/:id/reopen", {
-      params: { id: Id },
-      success: Session,
+    HttpApiEndpoint.post("reopen", "/sessions/reopen", {
+      payload: SessionIdsInput,
+      success: Schema.Array(Session),
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )

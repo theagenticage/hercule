@@ -20,6 +20,7 @@ const RUN_ID = "01a06d02-c111-7a0e-8b3d-9c1f1f3a9c2e";
 const BASE: Session = {
   id: "s0",
   title: "Fix the login bug",
+  kind: "thread",
   role: null,
   status: "idle",
   resumable: false,
