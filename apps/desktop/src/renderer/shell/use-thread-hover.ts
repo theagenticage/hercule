@@ -203,6 +203,6 @@ export const useThreadHover = (
       : null;
   const details = hoveredGroup?.details ?? null;
   // Only a group of several sessions unfolds, on the Done shelf too.
-  const unfolds = hoveredGroup !== null && hoveredGroup.summary !== null;
+  const unfolds = hoveredGroup !== null && hoveredGroup.row.summary !== null;
   return { listHandlers, placement: details === null ? null : placement, details, unfolds };
 };

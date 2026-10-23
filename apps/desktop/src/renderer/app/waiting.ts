@@ -13,22 +13,25 @@ import {
 } from "@hercule/client-core";
 import { useAssistantRows } from "./assistant-rows";
 import { liveAgentSessionsQuery } from "./queries";
-import { useSessionGroups } from "./session-groups";
+import { useSessionPresentation } from "./session-presentation";
 
 /**
  * Returns the Threads, the Agents' sessions and the assistants waiting on the
  * user, most recently active first, as `listWaiting` builds them from the
- * sidebar's groups (`useSessionGroups`) and `useAssistantRows`. The open
+ * session presentation's waiting sessions and `useAssistantRows`. The open
  * session is among the sessions, so a Done Thread marked Done long ago still
  * shows while it asks. Every place that shows what waits reads it here, so
  * they always agree.
+ *
+ * The assistants are added here, not in the presentation, so a change in an
+ * assistant does not prepare the sessions again.
  */
 export function useWaiting(): Waiting[] {
-  const { sessions, groups } = useSessionGroups();
+  const { waitingSessions } = useSessionPresentation();
   const assistantRows = useAssistantRows();
   return useMemo(
-    () => listWaiting(sessions, groups, assistantRows),
-    [sessions, groups, assistantRows],
+    () => listWaiting(waitingSessions, assistantRows),
+    [waitingSessions, assistantRows],
   );
 }
 

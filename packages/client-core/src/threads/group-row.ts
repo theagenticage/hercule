@@ -1,7 +1,7 @@
 /**
  * Decides everything the desktop sidebar shows for one group of sessions
- * (`SessionGroup`): the row's status, its second line, its dots, and the
- * lines it unfolds into. The sidebar only lays the result out.
+ * (`SessionGroup`): the row's status, its second line, its dots, and what
+ * each session of the group is. The sidebar only lays the result out.
  *
  * A group's *counted* sessions are its Threads not marked Done and its Agent
  * sessions that have not ended. They alone decide the row's status, its dots
@@ -16,14 +16,13 @@ import type {
   Session,
   Workspace,
 } from "@hercule/contract";
-import { isSessionSeated } from "../office/work";
 import { decideGroupProjectId } from "./groups";
 import { findModelName } from "./model-name";
 import { findOldestOpenRequest } from "./oldest-request";
-import { decideThreadPose, decideThreadRowStatus, type Pose, type ThreadRowStatus } from "./pose";
+import { decideThreadRowStatus, type Pose, type ThreadRowStatus } from "./pose";
 import { buildThreadPlaceLabel } from "./project-rows";
 import { formatRequestQuestion } from "./request-question";
-import { decideAskerLabel, type SessionGroup } from "./session-groups";
+import type { SessionGroup } from "./session-groups";
 import { labelWorkspaceSessions } from "./siblings";
 import { describeThreadPlace } from "./thread-place";
 import { buildWorkspaceLabelParts, type WorkspaceLabel } from "./workspaces";
@@ -45,6 +44,13 @@ export interface GroupMember {
   readonly kind: "thread" | "agent";
   /** What the session is called inside its group, as `labelWorkspaceSessions` returns it. */
   readonly label: string;
+  /**
+   * `label` when the name tells the session apart from the others, and
+   * `null` for the lead, which the row's name already stands for, and so for
+   * the only session of a group. The second line and Waiting on you both name
+   * an asking session with this.
+   */
+  readonly askerLabel: string | null;
   /** The session's full title, for a tooltip. */
   readonly title: string;
   readonly pose: Pose;
@@ -162,6 +168,10 @@ export interface GroupRow {
 /** The records a group's rows are described from. */
 export interface GroupRowSources {
   readonly groups: readonly SessionGroup[];
+  /** The pose of every session of `groups`, by session id. */
+  readonly poses: ReadonlyMap<string, Pose>;
+  /** The ids of the sessions with a colleague in the Office. */
+  readonly seatedIds: ReadonlySet<string>;
   /** The project list, for each row's project and its name in the place description. */
   readonly projects: readonly Project[];
   readonly workspaces: readonly Workspace[];
@@ -244,11 +254,14 @@ const summarizeMembers = (members: readonly GroupMember[]): GroupSummary => {
  * - the project, resolved so that a deleted project, and a lead with none,
  *   give `null`.
  *
- * Each session's pose and status are decided here from its runner, so no
- * caller computes them for the sidebar.
+ * Each session's status is decided here from its runner. Its pose and
+ * whether it is seated come from `poses` and `seatedIds`, decided once for
+ * every session, so the row agrees with the foot and the Go menu.
  */
 export const describeGroupRows = ({
   groups,
+  poses,
+  seatedIds,
   projects,
   workspaces,
   resources,
@@ -265,19 +278,21 @@ export const describeGroupRows = ({
     const labels = labelWorkspaceSessions(group.sessions);
     const describeMember = (session: Session): GroupMember => {
       const runner = runnersById.get(session.runnerId);
-      const pose = decideThreadPose(session, runner);
+      const pose = poses.get(session.id)!;
       const counted = isCounted(session);
       const oldest = findOldestOpenRequest(session);
+      const label = labels.get(session.id) ?? session.title;
       return {
         sessionId: session.id,
         kind: session.kind === "agent" ? "agent" : "thread",
-        label: labels.get(session.id) ?? session.title,
+        label,
+        askerLabel: session.id === group.lead.id ? null : label,
         title: session.title,
         pose,
         status: decideThreadRowStatus(session, runner),
         activityAt: session.lastActivityAt,
         counted,
-        seated: isSessionSeated(session, pose),
+        seated: seatedIds.has(session.id),
         done: session.done !== undefined,
         dot: decideDot(counted, pose),
         question: oldest === null ? null : formatRequestQuestion(oldest),
@@ -328,7 +343,7 @@ export const describeGroupRows = ({
         asker === undefined
           ? null
           : {
-              askerLabel: decideAskerLabel(group, asker.member.sessionId, asker.member.label),
+              askerLabel: asker.member.askerLabel,
               question: asker.question,
             },
       providerId: (asker?.member ?? lead).providerId,
@@ -357,47 +372,4 @@ export const describeGroupRows = ({
       doneAt: group.doneAt,
     };
   });
-};
-
-/** The lines an unfolded row draws, and how many sessions it folded into one "n quiet" line. */
-export interface GroupLines {
-  /** One line per session shown, in the group's order. */
-  readonly lines: readonly GroupMember[];
-  /** How many quiet sessions the "n quiet" line after `lines` stands for, or 0 when it is not drawn. */
-  readonly foldedQuietCount: number;
-}
-
-/**
- * Returns the lines an unfolded row draws, one per session in the group's
- * order, with the quiet ones folded into one "n quiet" line when more than
- * two are quiet and at least one other line would still show. A session is
- * quiet when it neither waits nor works; a Done Thread and an ended Agent
- * session are quiet. A group whose sessions are all quiet shows every line,
- * because a lone "n quiet" line would only make the user press again.
- *
- * - `selectedId` is the open session. It always has a line of its own and is
- *   not counted among the quiet ones.
- * - `quietShown` is true when the user opened the "n quiet" line, which
- *   shows every session.
- *
- * Returns no lines for a row of one session, which does not unfold.
- */
-export const listGroupLines = (
-  row: GroupRow,
-  { selectedId, quietShown }: { readonly selectedId: string | null; readonly quietShown: boolean },
-): GroupLines => {
-  if (row.members.length < 2) return { lines: [], foldedQuietCount: 0 };
-  const quiet = new Set(
-    row.members
-      .filter((member) => member.dot === "quiet" && member.sessionId !== selectedId)
-      .map((member) => member.sessionId),
-  );
-  const hasOtherLine = quiet.size < row.members.length;
-  if (quiet.size <= 2 || quietShown || !hasOtherLine) {
-    return { lines: row.members, foldedQuietCount: 0 };
-  }
-  return {
-    lines: row.members.filter((member) => !quiet.has(member.sessionId)),
-    foldedQuietCount: quiet.size,
-  };
 };

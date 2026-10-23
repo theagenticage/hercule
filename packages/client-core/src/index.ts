@@ -728,7 +728,6 @@ export {
   type ModelPill,
 } from "./threads/composer-fields";
 export { holdsMessageContent, readThreadConfig } from "./threads/config";
-export { countSessionsByPose, type SessionCounts } from "./threads/counts";
 export { buildDraftView, type DraftAddress, type DraftView } from "./threads/draft-view";
 export type {
   MessageDraft,
@@ -825,13 +824,13 @@ export {
   type ProjectGroup,
   type WorkspaceGroup,
 } from "./threads/groups";
+export { orderProjectIdsByNewestGroup } from "./threads/session-groups";
 export {
-  buildSessionGroups,
-  orderProjectIdsByNewestGroup,
-  type SessionGroup,
-} from "./threads/session-groups";
+  prepareSessionPresentation,
+  type SessionCounts,
+  type SessionPresentation,
+} from "./threads/session-presentation";
 export {
-  listGroupLines,
   type GroupAsk,
   type GroupMember,
   type GroupRow,
@@ -839,14 +838,17 @@ export {
   type SessionDot,
 } from "./threads/group-row";
 export {
-  buildSidebarSections,
   DONE_SHELF_LIMIT,
   DONE_SHELF_STEP,
+  selectSidebar,
   type DoneShelf,
   type DoneShelfRow,
   type ExpandedSections,
   type ProjectSection,
-  type SidebarSections,
+  type SidebarChoices,
+  type SidebarLine,
+  type SidebarRow,
+  type SidebarView,
   type WaitingSection,
 } from "./threads/sidebar-sections";
 export {

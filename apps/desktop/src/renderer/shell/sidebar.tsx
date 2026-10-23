@@ -5,17 +5,9 @@ import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-ro
 import { useAssistantRows } from "../app/assistant-rows";
 import { useDraftThread } from "../app/draft-thread";
 import { useUnsentKeys } from "../app/pending-submissions";
-import {
-  projectsQuery,
-  providersQuery,
-  resourcesQuery,
-  runnersQuery,
-  userQuery,
-  workspacesQuery,
-} from "../app/queries";
-import { useRelatedReads } from "../app/related-reads";
+import { projectsQuery, userQuery } from "../app/queries";
 import { useSendOnChange } from "../app/send-on-change";
-import { useOpenSessionId, useSessionGroups } from "../app/session-groups";
+import { useOpenSessionId, useSessionPresentation } from "../app/session-presentation";
 import { useWaiting, useWaitingRunSessions } from "../app/waiting";
 import { ComposeIcon } from "../icons/compose";
 import { OfficeIcon } from "../icons/office";
@@ -100,18 +92,13 @@ export const Sidebar = memo(function Sidebar({
 }): JSX.Element {
   const { bridge, controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  const { sessions, groups } = useSessionGroups();
+  const presentation = useSessionPresentation();
   const projects = useSuspenseQuery(projectsQuery(client)).data;
-  const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
-  const resources = useSuspenseQuery(resourcesQuery(client)).data;
-  const runners = useSuspenseQuery(runnersQuery(client)).data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
   const { username } = useSuspenseQuery(userQuery(client)).data;
   const assistantRows = useAssistantRows();
   const waiting = useWaiting();
   const waitingRunSessions = useWaitingRunSessions();
   const unsentKeys = useUnsentKeys(controller.pendingSubmissions);
-  useRelatedReads(sessions, projects, workspaces);
   // The Draft Thread the new-thread screen shows, while that screen is open.
   // Its row reads the draft as the screen does, see `useDraftThread`.
   const draftSearch = useMatch({ from: "/_connected/_shell/", shouldThrow: false })?.search;
@@ -159,11 +146,11 @@ export const Sidebar = memo(function Sidebar({
   // The groups the user unfolded, the groups whose quiet sessions the user
   // showed, and the session last open in each group. Kept only while the
   // window is open. Opening a session never unfolds its group.
-  const [unfoldedGroups, setUnfoldedGroups] = useState<ReadonlySet<string>>(() => new Set());
-  const [quietShownGroups, setQuietShownGroups] = useState<ReadonlySet<string>>(() => new Set());
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
+  const [quietShown, setQuietShown] = useState<ReadonlySet<string>>(() => new Set());
   const [lastOpen, setLastOpen] = useState<ReadonlyMap<string, string>>(() => new Map());
   const toggleGroup = useCallback((groupKey: string, unfold: boolean) => {
-    setUnfoldedGroups((current) => {
+    setUnfolded((current) => {
       if (current.has(groupKey) === unfold) return current;
       const next = new Set(current);
       if (unfold) next.add(groupKey);
@@ -172,9 +159,7 @@ export const Sidebar = memo(function Sidebar({
     });
   }, []);
   const showQuiet = useCallback((groupKey: string) => {
-    setQuietShownGroups((current) =>
-      current.has(groupKey) ? current : new Set(current).add(groupKey),
-    );
+    setQuietShown((current) => (current.has(groupKey) ? current : new Set(current).add(groupKey)));
   }, []);
   const expandSection = useCallback((section: SectionKey) => {
     if (section === "done") {
@@ -202,23 +187,18 @@ export const Sidebar = memo(function Sidebar({
     [expandSection, markDone, reopen, toggleDoneShelf, toggleGroup, showQuiet],
   );
 
-  const { items, counts, openGroupKey } = buildSidebar({
-    sessions,
-    groups,
+  const { items, openGroupKey } = buildSidebar({
+    presentation,
     waiting,
     waitingRunSessions,
     projects,
-    workspaces,
-    resources,
-    runners,
-    instances,
     draft,
     unsentKeys,
     expanded,
     doneShelfLimit,
     selectedId,
-    unfoldedGroups,
-    quietShownGroups,
+    unfolded,
+    quietShown,
     lastOpen,
   });
   // The row of a group opens the session last open in it, however that was
@@ -290,9 +270,9 @@ export const Sidebar = memo(function Sidebar({
       <SidebarDoneToast store={toasts} onUndo={undo} />
       {face === "threads" && <AssistantsSection rows={assistantRows} officeOpen={officeOpen} />}
       <SidebarFoot
-        working={counts.working}
-        waiting={counts.waiting}
-        idle={counts.idle}
+        working={presentation.counts.working}
+        waiting={presentation.counts.waiting}
+        idle={presentation.counts.idle}
         username={username}
       />
     </aside>

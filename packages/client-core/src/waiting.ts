@@ -22,11 +22,10 @@
  */
 import type { Session, SessionRequest } from "@hercule/contract";
 import type { AssistantRow } from "./assistants/rows";
+import type { GroupRow } from "./threads/group-row";
 import { findOldestOpenRequest } from "./threads/oldest-request";
 import { compareNewestFirst } from "./threads/rows";
 import { formatRequestQuestion } from "./threads/request-question";
-import { decideAskerLabel, type SessionGroup } from "./threads/session-groups";
-import { labelWorkspaceSessions } from "./threads/siblings";
 
 /** The fields every entry has, read from the session that waits and its open Requests. */
 interface WaitingRequestFields {
@@ -66,7 +65,7 @@ export interface WaitingSession extends WaitingRequestFields {
   /** The name of the sidebar row that holds the session: the title of its group's lead. */
   readonly groupName: string;
   /**
-   * The key of the group that holds the session (`SessionGroup.key`), or
+   * The key of the group that holds the session (`GroupRow.key`), or
    * `session:<id>` with the session's own id when no group holds it, so a
    * session in no group is its own group.
    */
@@ -130,88 +129,61 @@ const buildRequestFields = (session: Session): WaitingRequestFields | null => {
   };
 };
 
-/** Where a waiting session sits in the sidebar: the row that holds it, and what it is called there. */
-interface GroupNames {
-  readonly groupKey: string;
-  readonly groupName: string;
-  readonly askerLabel: string | null;
-}
-
 /**
- * Returns the names of the group that holds each session of `waitingIds`
- * (a session id set), by session id. A session no group holds, such as an
- * Agent's session in a workspace where no Thread works, has no entry.
+ * Returns every Thread and Agent session in `sessions` that has an open
+ * Request, each with its open Requests. `sessions` holds each session once.
  *
- * Only a group that holds a waiting session is labelled, so a list where
- * nothing waits costs one pass over the groups' sessions.
+ * - `rows` are the sidebar's rows of those sessions. A session's entry names
+ *   the row that holds it, and what the session is called there. A session no
+ *   row holds, such as an Agent's session in a workspace where no Thread
+ *   works, is named by its own title and keyed by its own id.
+ * - A Thread marked Done is listed while it waits, because a question must
+ *   never hide.
+ *
+ * The entries are in the order of `sessions`; `listWaiting` sorts them.
  */
-const mapWaitingToGroupNames = (
-  waitingIds: ReadonlySet<string>,
-  groups: readonly SessionGroup[],
-): ReadonlyMap<string, GroupNames> => {
-  const names = new Map<string, GroupNames>();
-  for (const group of groups) {
-    if (!group.sessions.some((session) => waitingIds.has(session.id))) continue;
-    const labels = labelWorkspaceSessions(group.sessions);
-    for (const session of group.sessions) {
-      if (!waitingIds.has(session.id)) continue;
-      names.set(session.id, {
-        groupKey: group.key,
-        groupName: group.lead.title,
-        askerLabel: decideAskerLabel(group, session.id, labels.get(session.id) ?? session.title),
-      });
-    }
-  }
-  return names;
+export const listWaitingSessions = (
+  sessions: readonly Session[],
+  rows: readonly GroupRow[],
+): WaitingSession[] => {
+  const asking = sessions.flatMap((session) => {
+    const fields = buildRequestFields(session);
+    return fields === null ? [] : [{ session, fields }];
+  });
+  if (asking.length === 0) return [];
+  const places = new Map(
+    rows.flatMap((row) =>
+      row.members.map((member) => [member.sessionId, { row, member }] as const),
+    ),
+  );
+  return asking.map(({ session, fields }) => {
+    const place = places.get(session.id);
+    return {
+      kind: "session",
+      title: session.title,
+      groupKey: place?.row.key ?? `session:${session.id}`,
+      groupName: place?.row.title ?? session.title,
+      askerLabel: place?.member.askerLabel ?? null,
+      ...fields,
+    };
+  });
 };
 
 /**
- * Returns every Thread and Agent session in `sessions`, and every assistant
- * in `assistantRows`, whose session has an open Request, each with its open
- * Requests. An assistant's session is the one on its row; an assistant with
- * no session waits on nothing.
- *
- * - `groups` are the sidebar's rows of those sessions, as
- *   `buildSessionGroups` returns them. The caller passes the groups it
- *   already built for the sidebar, so a session's entry names the row the
- *   sidebar draws. They should be built from the same `sessions`.
- * - Sessions of other kinds are ignored. When `sessions` holds a session
- *   twice, the last read wins.
- * - A Thread marked Done is listed while it waits, because a question must
- *   never hide.
- * - A session's entry names its group, the sidebar row that holds it, and
- *   what the session is called in it. A session with no group is named by its
- *   own title and keyed by its own id.
+ * Returns `waitingSessions` and every assistant in `assistantRows` whose
+ * session has an open Request, each with its open Requests. An assistant's
+ * session is the one on its row; an assistant with no session waits on
+ * nothing.
  *
  * The list is sorted with the most recently active first, sessions and
  * assistants mixed, and two entries active at the same moment by session id.
  */
 export const listWaiting = (
-  sessions: readonly Session[],
-  groups: readonly SessionGroup[],
+  waitingSessions: readonly WaitingSession[],
   assistantRows: readonly AssistantRow[],
-): Waiting[] => {
-  const latestReads = new Map(sessions.map((session) => [session.id, session]));
-  const waitingSessions = [...latestReads.values()].flatMap((session) => {
-    if (session.kind !== "thread" && session.kind !== "agent") return [];
-    const fields = buildRequestFields(session);
-    return fields === null ? [] : [{ session, fields }];
-  });
-  const groupNames = mapWaitingToGroupNames(
-    new Set(waitingSessions.map(({ session }) => session.id)),
-    groups,
-  );
-  return [
-    ...waitingSessions.map(({ session, fields }): Waiting => ({
-      kind: "session",
-      title: session.title,
-      ...(groupNames.get(session.id) ?? {
-        groupKey: `session:${session.id}`,
-        groupName: session.title,
-        askerLabel: null,
-      }),
-      ...fields,
-    })),
+): Waiting[] =>
+  [
+    ...waitingSessions,
     ...assistantRows.flatMap((row): Waiting[] => {
       const fields = row.session === null ? null : buildRequestFields(row.session);
       return fields === null
@@ -224,7 +196,6 @@ export const listWaiting = (
       { activityAt: b.activityAt, id: b.sessionId },
     ),
   );
-};
 
 /** A run's session waiting on the user: an agent step that asks something. */
 export interface WaitingRunSession {

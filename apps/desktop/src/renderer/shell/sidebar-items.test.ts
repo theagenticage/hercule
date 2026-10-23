@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   listWaiting,
   listWaitingRunSessions,
+  prepareSessionPresentation,
   type AssistantRow,
   type DraftPlace,
 } from "@hercule/client-core";
@@ -17,9 +18,8 @@ import {
   WEBSHOP,
   WEBSHOP_PROJECT,
 } from "@hercule/client-core/threads/testing";
-import type { OpenRequest, Project, Runner, Session, Workspace } from "@hercule/contract";
+import type { OpenRequest, Project, Session, Workspace } from "@hercule/contract";
 import type { GoMenuItem } from "../../ipc/contract";
-import { groupSidebarSessions } from "../app/session-groups";
 import {
   buildSidebar,
   listGoMenuItems,
@@ -86,7 +86,6 @@ const buildFixtureSidebar = ({
   threads,
   assistantRows = [],
   runSessions = [],
-  runners = [MOSS],
   projects = [WEBSHOP_PROJECT, OPS_PROJECT],
   workspaces = [PRIMARY, THREAD_3F1],
   expanded = new Set(),
@@ -94,15 +93,13 @@ const buildFixtureSidebar = ({
   draft = null,
   unsentKeys = new Set(),
   doneShelfLimit = null,
-  openSession = null,
-  unfoldedGroups = new Set(),
-  quietShownGroups = new Set(),
+  unfolded = new Set(),
+  quietShown = new Set(),
   lastOpen = new Map(),
 }: {
   readonly threads: readonly Session[];
   readonly assistantRows?: readonly AssistantRow[];
   readonly runSessions?: readonly Session[];
-  readonly runners?: readonly Runner[];
   readonly projects?: readonly Project[];
   readonly workspaces?: readonly Workspace[];
   readonly expanded?: ReadonlySet<SectionKey>;
@@ -110,25 +107,27 @@ const buildFixtureSidebar = ({
   readonly draft?: DraftPlace | null;
   readonly unsentKeys?: ReadonlySet<string>;
   readonly doneShelfLimit?: number | null;
-  readonly openSession?: Session | null;
-  readonly unfoldedGroups?: ReadonlySet<string>;
-  readonly quietShownGroups?: ReadonlySet<string>;
+  readonly unfolded?: ReadonlySet<string>;
+  readonly quietShown?: ReadonlySet<string>;
   readonly lastOpen?: ReadonlyMap<string, string>;
 }): Sidebar => {
-  const { sessions, groups } = groupSidebarSessions(threads, openSession);
-  return buildSidebar({
-    sessions,
-    groups,
-    unfoldedGroups,
-    quietShownGroups,
-    lastOpen,
-    waiting: listWaiting(sessions, groups, assistantRows),
-    waitingRunSessions: listWaitingRunSessions(runSessions),
+  const presentation = prepareSessionPresentation({
+    listedSessions: threads,
+    openSession: null,
     projects,
     workspaces,
     resources: [WEBSHOP, INFRA, RUNBOOKS],
-    runners,
+    runners: [MOSS],
     instances: [],
+  });
+  return buildSidebar({
+    presentation,
+    unfolded,
+    quietShown,
+    lastOpen,
+    waiting: listWaiting(presentation.waitingSessions, assistantRows),
+    waitingRunSessions: listWaitingRunSessions(runSessions),
+    projects,
     draft:
       draft === null
         ? null
@@ -213,7 +212,7 @@ describe("buildSidebar", () => {
     ]);
   });
 
-  it("lists a waiting thread twice: in Waiting on you with its question, and in its project as an approval, counted on the project's header", () => {
+  it("lists a waiting thread twice: in Waiting on you under its group's name with its question, and in its project, counted on the project's header", () => {
     const items = buildItems({ threads: WORLD_THREADS });
 
     expect(findItem(items, "header:waiting")).toMatchObject({ count: 1 });
@@ -223,13 +222,8 @@ describe("buildSidebar", () => {
       askerLabel: null,
       question: "Run git push?",
     });
-    expect(findItem(items, "group:session:s-runbook")).toMatchObject({
-      openId: "s-runbook",
-      pose: "waiting",
-      status: "approval",
-    });
+    expect(findItem(items, "group:session:s-runbook")).toMatchObject({ kind: "group-row" });
     expect(findItem(items, "header:project:p-webshop")).toMatchObject({ waitingCount: 1 });
-    expect(findItem(items, "header:project:p-ops")).toMatchObject({ waitingCount: 0 });
   });
 
   it("gives each project the tint of its place in the project list", () => {
@@ -252,77 +246,11 @@ describe("buildSidebar", () => {
     ]);
   });
 
-  it("sorts a project's threads by when they last started or were reopened, newest first, not by their latest activity", () => {
+  it("gives the card of a row the project, machine and branch of the row", () => {
     const items = buildItems({
-      threads: [
-        // Created first, but the most recently active.
-        thread("s-old", 1, { projectId: OPS_PROJECT.id, lastActivityAt: at(9) }),
-        thread("s-new", 3, { projectId: OPS_PROJECT.id, lastActivityAt: at(4) }),
-        thread("s-middle", 2, { projectId: OPS_PROJECT.id, lastActivityAt: at(5) }),
-        // Created before the others, but reopened after them all.
-        thread("s-reopened", 0, { projectId: OPS_PROJECT.id, reopenedAt: at(6) }),
-      ],
+      threads: [thread("s-primary", 2, { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id })],
     });
 
-    expect(listKeys(items)).toEqual([
-      "header:project:p-ops",
-      "group:session:s-reopened",
-      "group:session:s-new",
-      "group:session:s-middle",
-      "group:session:s-old",
-    ]);
-  });
-
-  it("gives a thread row that shows its age the time of its last activity, and a working row no time, so it does not draw again as it works", () => {
-    const items = buildItems({
-      threads: [
-        thread("s-old", 1, { projectId: OPS_PROJECT.id, lastActivityAt: at(9) }),
-        thread("s-busy", 2, { projectId: OPS_PROJECT.id, status: "busy", lastActivityAt: at(8) }),
-      ],
-    });
-
-    expect(findItem(items, "group:session:s-old")).toMatchObject({
-      status: "age",
-      activityAt: at(9),
-    });
-    expect(findItem(items, "group:session:s-busy")).toMatchObject({
-      status: "working",
-      activityAt: "",
-    });
-  });
-
-  it("sorts the projects by their newest thread's creation time, not by their latest activity", () => {
-    const items = buildItems({
-      threads: [
-        thread("s-webshop", 1, { projectId: WEBSHOP_PROJECT.id, lastActivityAt: at(9) }),
-        thread("s-ops", 2, { projectId: OPS_PROJECT.id, lastActivityAt: at(3) }),
-      ],
-    });
-
-    expect(items.flatMap((item) => (item.kind === "project-header" ? [item.name] : []))).toEqual([
-      "ops",
-      "webshop",
-    ]);
-  });
-
-  it(`names on each thread's second line the branch a person chose, else the machine for a generated branch or no workspace`, () => {
-    const items = buildItems({
-      threads: [
-        thread("s-worktree", 3, { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id }),
-        thread("s-primary", 2, { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id }),
-        thread("s-bare", 1, { projectId: WEBSHOP_PROJECT.id }),
-      ],
-    });
-
-    expect(
-      items.flatMap((item) =>
-        item.kind === "group-row" ? [[item.key, item.placeClip, item.placeKeep]] : [],
-      ),
-    ).toEqual([
-      ["group:workspace:ws-thread-3f1", "moss", ""],
-      ["group:workspace:ws-primary", "", "main"],
-      ["group:session:s-bare", "moss", ""],
-    ]);
     expect(findItem(items, "group:workspace:ws-primary")).toMatchObject({
       details: { projectName: "webshop", machine: "moss", branch: "main" },
     });
@@ -338,52 +266,30 @@ describe("buildSidebar", () => {
     expect(findItem(items, "group:session:s-sent")).toMatchObject({ unsent: false });
   });
 
-  it("puts the draft's row first in its project, and its project first, whatever workspace it joins", () => {
+  it("puts the draft's row first in the project that holds it", () => {
     const threads = [
       thread("s-worktree", 3, { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id }),
-      thread("s-primary", 2, { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id }),
       // ops has the newest thread, so it would come first without the draft.
       thread("s-ops", 4, { projectId: OPS_PROJECT.id }),
     ];
-    const expected = [
-      "header:project:p-webshop",
-      "draft",
-      "group:workspace:ws-thread-3f1",
-      "group:workspace:ws-primary",
-      "header:project:p-ops",
-      "group:session:s-ops",
-    ];
 
-    const joined = buildItems({
+    const items = buildItems({
       threads,
       draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id, createsWorkspace: false },
     });
-    expect(listKeys(joined)).toEqual(expected);
-    expect(findItem(joined, "draft")).toMatchObject({
+
+    expect(listKeys(items)).toEqual([
+      "header:project:p-webshop",
+      "draft",
+      "group:workspace:ws-thread-3f1",
+      "header:project:p-ops",
+      "group:session:s-ops",
+    ]);
+    expect(findItem(items, "draft")).toMatchObject({
       kind: "draft-row",
       placeClip: "draft workspace",
       placeKeep: " · draft machine",
     });
-    const ownWorkspace = buildItems({
-      threads,
-      draft: { projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true },
-    });
-    expect(listKeys(ownWorkspace)).toEqual(expected);
-  });
-
-  it(`puts a draft in no project first under "No project", which stays last`, () => {
-    const items = buildItems({
-      threads: [thread("s-ops", 1, { projectId: OPS_PROJECT.id }), thread("s-none", 2)],
-      draft: { projectId: null, workspaceId: null, createsWorkspace: false },
-    });
-
-    expect(listKeys(items)).toEqual([
-      "header:project:p-ops",
-      "group:session:s-ops",
-      "header:project:none",
-      "draft",
-      "group:session:s-none",
-    ]);
   });
 
   it(`heads the threads in no project "No project", with no tint and no project to start a thread in`, () => {
@@ -405,33 +311,6 @@ describe("buildSidebar", () => {
     ]);
   });
 
-  it.each<[string, Partial<Session>, Runner, string, string]>([
-    ["a busy thread", { status: "busy" }, MOSS, "working", "working"],
-    ["a starting thread", { status: "starting" }, MOSS, "working", "working"],
-    ["a queued thread", { status: "queued" }, MOSS, "working", "queued"],
-    ["an idle thread", {}, MOSS, "idle", "age"],
-    ["a resumable exited thread", { status: "exited", resumable: true }, MOSS, "asleep", "age"],
-    ["an exited thread", { status: "exited" }, MOSS, "away", "age"],
-    [
-      "an idle thread on an offline runner",
-      {},
-      { ...MOSS, connectivity: "offline" },
-      "away",
-      "offline",
-    ],
-    [
-      "an exited thread on an offline runner",
-      { status: "exited", resumable: true },
-      { ...MOSS, connectivity: "offline" },
-      "away",
-      "age",
-    ],
-  ])("draws %s with its pose and its status", (_name, over, runner, pose, status) => {
-    const items = buildItems({ threads: [thread("s-a", 1, over)], runners: [runner] });
-
-    expect(findItem(items, "group:session:s-a")).toMatchObject({ pose, status });
-  });
-
   it("shows the 3 newest waiting threads, and counts the rest on a more row", () => {
     const threads = [1, 2, 3, 4, 5].map((minutes) => waiting(`s-${String(minutes)}`, minutes));
     const items = buildItems({ threads }).filter((item) => item.section === "waiting");
@@ -447,18 +326,10 @@ describe("buildSidebar", () => {
     expect(findItem(items, "more:waiting")).toMatchObject({ label: "2 more waiting on you" });
   });
 
-  it("draws a waiting assistant in Waiting on you by its name and question, newest first among the threads", () => {
-    const items = buildItems({
-      threads: [waiting("s-old", 1), waiting("s-new", 5)],
-      assistantRows: [waitingAssistant("ada", 3)],
-    }).filter((item) => item.section === "waiting");
+  it("draws a waiting assistant in Waiting on you by its name and question", () => {
+    const items = buildItems({ threads: [], assistantRows: [waitingAssistant("ada", 3)] });
 
-    expect(listKeys(items)).toEqual([
-      "header:waiting",
-      "waiting:thread:s-new",
-      "waiting:assistant:ada",
-      "waiting:thread:s-old",
-    ]);
+    expect(listKeys(items)).toEqual(["header:waiting", "waiting:assistant:ada"]);
     expect(findItem(items, "waiting:assistant:ada")).toMatchObject({
       kind: "waiting-assistant-row",
       assistantId: "ada",
@@ -466,33 +337,6 @@ describe("buildSidebar", () => {
       question: "Run git push?",
       leading: 1,
     });
-  });
-
-  it("caps Waiting on you at 3 rows, threads and assistants together", () => {
-    const items = buildItems({
-      threads: [waiting("s-1", 1), waiting("s-2", 2)],
-      assistantRows: [waitingAssistant("ada", 3), waitingAssistant("milo", 4)],
-    }).filter((item) => item.section === "waiting");
-
-    expect(listKeys(items)).toEqual([
-      "header:waiting",
-      "waiting:assistant:milo",
-      "waiting:assistant:ada",
-      "waiting:thread:s-2",
-      "more:waiting",
-    ]);
-    expect(findItem(items, "header:waiting")).toMatchObject({ count: 4 });
-    expect(findItem(items, "more:waiting")).toMatchObject({ label: "1 more waiting on you" });
-  });
-
-  it("draws Waiting on you for a waiting assistant when no thread waits", () => {
-    const items = buildItems({
-      threads: [],
-      workspaces: [],
-      assistantRows: [waitingAssistant("ada", 3)],
-    });
-
-    expect(listKeys(items)).toEqual(["header:waiting", "waiting:assistant:ada"]);
   });
 
   it(`draws the runs' waiting sessions under "From runs", below the threads, 7px below them`, () => {
@@ -535,7 +379,7 @@ describe("buildSidebar", () => {
     expect(findItem(items, "label:waiting-runs")).toMatchObject({ leading: 7 });
   });
 
-  it("caps the runs' sessions at 3 apart from the threads, and counts the hidden ones on the more row and in the header", () => {
+  it("caps the runs' sessions at 3 apart from the threads, counts the hidden ones on the more row and in the header, and shows them all once expanded", () => {
     const threads = [1, 2, 3, 4].map((minutes) => waiting(`s-${String(minutes)}`, minutes));
     const runSessions = [11, 12, 13, 14, 15].map((minutes) =>
       waitingRunSession(`step-${String(minutes)}`, minutes),
@@ -555,29 +399,13 @@ describe("buildSidebar", () => {
     ]);
     expect(findItem(items, "header:waiting")).toMatchObject({ count: 9 });
     expect(findItem(items, "more:waiting")).toMatchObject({ label: "3 more waiting on you" });
+
+    const expanded = buildItems({ threads: [], runSessions, expanded: new Set(["waiting"]) });
+    expect(expanded.filter((item) => item.kind === "waiting-run-row")).toHaveLength(5);
+    expect(listKeys(expanded)).not.toContain("more:waiting");
   });
 
-  it("shows every run's waiting session once Waiting on you is expanded", () => {
-    const runSessions = [1, 2, 3, 4, 5].map((minutes) =>
-      waitingRunSession(`step-${String(minutes)}`, minutes),
-    );
-    const items = buildItems({ threads: [], runSessions, expanded: new Set(["waiting"]) });
-
-    expect(items.filter((item) => item.kind === "waiting-run-row")).toHaveLength(5);
-    expect(listKeys(items)).not.toContain("more:waiting");
-  });
-
-  it("shows every waiting thread once Waiting on you is expanded", () => {
-    const threads = [1, 2, 3, 4, 5].map((minutes) => waiting(`s-${String(minutes)}`, minutes));
-    const items = buildItems({ threads, expanded: new Set(["waiting"]) }).filter(
-      (item) => item.section === "waiting",
-    );
-
-    expect(items.filter((item) => item.kind === "waiting-thread-row")).toHaveLength(5);
-    expect(listKeys(items)).not.toContain("more:waiting");
-  });
-
-  it("shows 5 threads of a project and counts the rest, keeping the selected thread in view", () => {
+  it("counts the groups a project hides on its more row, and draws them all once the section is expanded", () => {
     const threads = [1, 2, 3, 4, 5, 6, 7].map((minutes) =>
       thread(`s-${String(minutes)}`, minutes, { projectId: OPS_PROJECT.id }),
     );
@@ -585,10 +413,6 @@ describe("buildSidebar", () => {
     const capped = buildItems({ threads });
     expect(capped.filter((item) => item.kind === "group-row")).toHaveLength(5);
     expect(findItem(capped, "more:project:p-ops")).toMatchObject({ label: "2 more" });
-
-    const selected = buildItems({ threads, selectedId: "s-1" });
-    expect(listKeys(selected)).toContain("group:session:s-1");
-    expect(findItem(selected, "more:project:p-ops")).toMatchObject({ label: "1 more" });
 
     const expanded = buildItems({ threads, expanded: new Set(["project:p-ops"]) });
     expect(expanded.filter((item) => item.kind === "group-row")).toHaveLength(7);
@@ -625,16 +449,13 @@ describe("buildSidebar", () => {
     expect(findItem(open, "done:session:s-done")).toMatchObject({ doneAt: at(4), leading: 1 });
   });
 
-  it("keeps the open thread's row on the closed Done shelf, and counts what the open shelf hides", () => {
+  it("counts what the open Done shelf hides on a more row", () => {
     const threads = [1, 2, 3].map((minutes) =>
       thread(`s-${String(minutes)}`, minutes, { done: { at: at(minutes), by: "user" } }),
     );
 
-    expect(listKeys(buildItems({ threads, selectedId: "s-1" }))).toEqual([
-      "header:done",
-      "done:session:s-1",
-    ]);
     const open = buildItems({ threads, doneShelfLimit: 2 });
+
     expect(listKeys(open)).toEqual([
       "header:done",
       "done:session:s-3",
@@ -644,137 +465,90 @@ describe("buildSidebar", () => {
     expect(findItem(open, "more:done")).toMatchObject({ label: "Show 1 more" });
   });
 
-  it("keeps a done thread with an open request in Waiting on you", () => {
-    const items = buildItems({
-      threads: [
-        waiting("s-asks", 1, { projectId: OPS_PROJECT.id, done: { at: at(2), by: "user" } }),
-      ],
-    });
+  it("recedes a working row, but never the row of the group that holds the open session", () => {
+    const threads = [
+      ...WORLD_THREADS,
+      lead("s-lead", 6),
+      partner("s-review", 7, { status: "busy" }),
+    ];
+    const isReceded = (key: string, selectedId: string | null = null): boolean => {
+      const item = findItem(buildItems({ threads, selectedId }), key);
+      return item.kind === "group-row" && item.receded;
+    };
 
-    expect(listKeys(items)).toEqual(["header:waiting", "waiting:thread:s-asks", "header:done"]);
-  });
-
-  it("recedes a working thread's row, but never the open thread's", () => {
-    expect(findItem(buildItems({ threads: WORLD_THREADS }), "group:session:s-flaky")).toMatchObject(
-      {
-        status: "working",
-        receded: true,
-      },
-    );
-    expect(
-      findItem(
-        buildItems({ threads: WORLD_THREADS, selectedId: "s-flaky" }),
-        "group:session:s-flaky",
-      ),
-    ).toMatchObject({ status: "working", receded: false });
-    expect(findItem(buildItems({ threads: WORLD_THREADS }), "group:session:s-bun")).toMatchObject({
-      receded: false,
-    });
-  });
-
-  it("counts the threads working, waiting on the user and idle, from the poses their rows show", () => {
-    const { items, counts } = buildFixtureSidebar({ threads: WORLD_THREADS });
-
-    expect(counts).toEqual({ working: 1, waiting: 1, idle: 2 });
-    expect(findItem(items, "group:session:s-flaky")).toMatchObject({ pose: "working" });
-    expect(findItem(items, "group:session:s-keys")).toMatchObject({ pose: "asleep" });
+    expect(isReceded("group:session:s-flaky")).toBe(true);
+    expect(isReceded("group:session:s-bun")).toBe(false);
+    expect(isReceded("group:session:s-flaky", "s-flaky")).toBe(false);
+    // The open session may be a partner in a working group.
+    expect(isReceded(PRIMARY_ROW)).toBe(true);
+    expect(isReceded(PRIMARY_ROW, "s-lead")).toBe(false);
+    expect(buildFixtureSidebar({ threads, selectedId: "s-lead" }).openGroupKey).toBe(PRIMARY_GROUP);
   });
 });
 
 describe("buildSidebar groups", () => {
-  it("draws a lone thread as one group row with no dots and no lines", () => {
-    const items = buildItems({
-      threads: [lead("s-lead", 1)],
-      unfoldedGroups: new Set([PRIMARY_GROUP]),
-    });
-
-    expect(listKeys(items)).toEqual(["header:project:p-webshop", PRIMARY_ROW]);
-    expect(findItem(items, PRIMARY_ROW)).toMatchObject({
-      kind: "group-row",
-      groupKey: "workspace:ws-primary",
-      openId: "s-lead",
-      title: "s-lead",
-      summary: null,
-      unfolded: false,
-      doneIds: ["s-lead"],
-      details: { members: [] },
-    });
-  });
-
-  it("draws a group of several sessions as one row with dots, the Threads' Done ids and its members for the card", () => {
-    const items = buildItems({
-      threads: [lead("s-lead", 1), lead("s-second", 2), partner("s-review", 3, { status: "busy" })],
-    });
+  it("draws a group of several sessions as one row that carries its record, and a lone thread's row with no members for the card", () => {
+    const crew = [
+      lead("s-lead", 1),
+      lead("s-second", 2),
+      partner("s-review", 3, { status: "busy" }),
+    ];
+    const items = buildItems({ threads: crew });
 
     expect(listKeys(items)).toEqual(["header:project:p-webshop", PRIMARY_ROW]);
     const row = findItem(items, PRIMARY_ROW);
     expect(row).toMatchObject({
       kind: "group-row",
-      title: "s-lead",
-      status: "working",
-      receded: true,
+      row: { key: PRIMARY_GROUP, title: "s-lead", doneIds: ["s-lead", "s-second"] },
+      openId: "s-lead",
       unfolded: false,
-      doneIds: ["s-lead", "s-second"],
-      summary: { dots: ["working", "quiet", "quiet"], hiddenCount: 0 },
     });
-    // The card lists the working session first, then the quiet ones in the group's order.
     expect(row.kind === "group-row" && row.details.members.map((m) => m.sessionId)).toEqual([
       "s-review",
       "s-lead",
       "s-second",
     ]);
-  });
-
-  it("does not recede the row of the group that holds the open session", () => {
-    const threads = [lead("s-lead", 1), partner("s-review", 2, { status: "busy" })];
-
-    expect(findItem(buildItems({ threads }), PRIMARY_ROW)).toMatchObject({ receded: true });
-    expect(findItem(buildItems({ threads, selectedId: "s-lead" }), PRIMARY_ROW)).toMatchObject({
-      receded: false,
+    expect(findItem(buildItems({ threads: [lead("s-solo", 1)] }), PRIMARY_ROW)).toMatchObject({
+      details: { members: [] },
     });
   });
 
-  it("draws the lines of an unfolded group and folds the quiet sessions into one line", () => {
-    const items = buildItems({ threads: CREW, unfoldedGroups: new Set([PRIMARY_GROUP]) });
+  it("draws the lines of an unfolded group, the last one ending it, and the quiet line while it folds them", () => {
+    const folded = buildItems({ threads: CREW, unfolded: new Set([PRIMARY_GROUP]) });
 
-    expect(listKeys(items)).toEqual([
+    expect(listKeys(folded)).toEqual([
       "header:project:p-webshop",
       PRIMARY_ROW,
       "line:s-review",
       "quiet:workspace:ws-primary",
     ]);
-    expect(findItem(items, PRIMARY_ROW)).toMatchObject({ unfolded: true });
-    expect(findItem(items, "line:s-review")).toMatchObject({
+    expect(findItem(folded, PRIMARY_ROW)).toMatchObject({ unfolded: true });
+    expect(findItem(folded, "line:s-review")).toMatchObject({
       kind: "group-line",
-      groupKey: "workspace:ws-primary",
+      groupKey: PRIMARY_GROUP,
       groupTitle: "s-lead",
-      label: "review",
-      dot: "working",
-      done: false,
+      member: { sessionId: "s-review", label: "review", dot: "working" },
       last: false,
     });
-    expect(findItem(items, "quiet:workspace:ws-primary")).toMatchObject({
+    expect(findItem(folded, "quiet:workspace:ws-primary")).toMatchObject({
       kind: "quiet-line",
       groupTitle: "s-lead",
       count: 3,
       last: true,
     });
-  });
 
-  it("draws a line for every session once the quiet ones are shown, the last line ending the group", () => {
-    const items = buildItems({
+    const shown = buildItems({
       threads: CREW,
-      unfoldedGroups: new Set([PRIMARY_GROUP]),
-      quietShownGroups: new Set(["workspace:ws-primary"]),
+      unfolded: new Set([PRIMARY_GROUP]),
+      quietShown: new Set([PRIMARY_GROUP]),
     });
-
-    expect(listKeys(items).slice(2)).toEqual([
+    expect(listKeys(shown).slice(2)).toEqual([
       "line:s-lead",
       "line:s-review",
       "line:s-lint",
       "line:s-docs",
     ]);
-    expect(items.flatMap((item) => (item.kind === "group-line" ? [item.last] : []))).toEqual([
+    expect(shown.flatMap((item) => (item.kind === "group-line" ? [item.last] : []))).toEqual([
       false,
       false,
       false,
@@ -785,7 +559,7 @@ describe("buildSidebar groups", () => {
   it("spaces lines 1px apart and adds 4px after the last line to the space the next item usually has", () => {
     const items = buildItems({
       threads: [...CREW, thread("s-other", 0, { projectId: WEBSHOP_PROJECT.id })],
-      unfoldedGroups: new Set([PRIMARY_GROUP]),
+      unfolded: new Set([PRIMARY_GROUP]),
     });
 
     expect(items.map(({ key, leading }) => [key, leading])).toEqual([
@@ -797,108 +571,19 @@ describe("buildSidebar groups", () => {
     ]);
   });
 
-  it("draws a line for the open session even when it is quiet, and does not count it among the folded ones", () => {
-    const items = buildItems({
-      threads: [...CREW, partner("s-ci", 5)],
-      selectedId: "s-docs",
-      unfoldedGroups: new Set([PRIMARY_GROUP]),
-    });
-
-    expect(listKeys(items)).toContain("line:s-docs");
-    expect(findItem(items, "quiet:workspace:ws-primary")).toMatchObject({ count: 3 });
-  });
-
-  it("opens the session last open in the group, else the lead, and the open session while it is in the group", () => {
-    const threads = [lead("s-lead", 1), partner("s-review", 2)];
-    const openId = (over: Parameters<typeof buildItems>[0]): unknown =>
-      (findItem(buildItems(over), PRIMARY_ROW) as { openId: string }).openId;
-
-    expect(openId({ threads })).toBe("s-lead");
-    expect(openId({ threads, lastOpen: new Map([["workspace:ws-primary", "s-review"]]) })).toBe(
-      "s-review",
-    );
-    // A session no longer in the group is not opened.
-    expect(openId({ threads, lastOpen: new Map([["workspace:ws-primary", "s-gone"]]) })).toBe(
-      "s-lead",
-    );
-    expect(
-      openId({
-        threads,
-        selectedId: "s-lead",
-        lastOpen: new Map([["workspace:ws-primary", "s-review"]]),
-      }),
-    ).toBe("s-lead");
-  });
-
-  it("decides whether a click opens in the Office from the session it opens, and each line from its own session", () => {
-    const threads = [
-      lead("s-lead", 1, { done: { at: at(5), by: "user" } }),
-      partner("s-review", 2, { status: "busy" }),
-    ];
-    const items = buildItems({
-      threads,
-      lastOpen: new Map([["workspace:ws-primary", "s-lead"]]),
-      unfoldedGroups: new Set([PRIMARY_GROUP]),
-    });
-
-    expect(findItem(items, PRIMARY_ROW)).toMatchObject({ openId: "s-lead", seated: false });
-    expect(findItem(items, "line:s-lead")).toMatchObject({ done: true, seated: false });
-    expect(findItem(items, "line:s-review")).toMatchObject({ seated: true });
-  });
-
-  it("names a waiting session by its group and tells who asks", () => {
-    const items = buildItems({
-      threads: [
-        lead("s-lead", 1),
-        partner("s-review", 2, { status: "busy", openRequests: [APPROVAL] }),
-      ],
-    });
-
-    expect(findItem(items, "waiting:thread:s-review")).toMatchObject({
-      title: "s-lead",
-      askerLabel: "review",
-      question: "Run git push?",
-    });
-    expect(findItem(items, PRIMARY_ROW)).toMatchObject({
-      status: "approval",
-      ask: { askerLabel: "review", question: "Run git push?" },
-    });
-  });
-
-  it('shows 5 groups of a project and counts the rest as "3 more", keeping the group of the open session', () => {
-    const threads = [1, 2, 3, 4, 5, 6, 7, 8].map((minutes) =>
-      thread(`s-${String(minutes)}`, minutes, { projectId: OPS_PROJECT.id }),
-    );
-
-    const capped = buildItems({ threads });
-    expect(capped.filter((item) => item.kind === "group-row")).toHaveLength(5);
-    expect(findItem(capped, "more:project:p-ops")).toMatchObject({ label: "3 more" });
-    expect(
-      findItem(buildItems({ threads, selectedId: "s-1" }), "more:project:p-ops"),
-    ).toMatchObject({ label: "2 more" });
-  });
-
-  it("keeps a group with a live Agent session in its project until every Thread is done, and puts it on the shelf once both are", () => {
+  it("draws a group on the Done shelf as one row with the group's Threads to reopen", () => {
     const done = { at: at(5), by: "user" } as const;
-    const partlyDone = [lead("s-lead", 1, { done }), partner("s-review", 2, { status: "busy" })];
-    expect(listKeys(buildItems({ threads: partlyDone }))).toEqual([
-      "header:project:p-webshop",
-      PRIMARY_ROW,
-    ]);
-    expect(findItem(buildItems({ threads: partlyDone }), PRIMARY_ROW)).toMatchObject({
-      doneIds: [],
+    const items = buildItems({
+      threads: [lead("s-lead", 1, { done }), partner("s-review", 2, { status: "exited" })],
+      doneShelfLimit: 10,
     });
 
-    const allDone = [lead("s-lead", 1, { done }), partner("s-review", 2, { status: "exited" })];
-    const items = buildItems({ threads: allDone, doneShelfLimit: 10 });
     expect(listKeys(items)).toEqual(["header:done", "done:workspace:ws-primary"]);
     expect(findItem(items, "done:workspace:ws-primary")).toMatchObject({
       kind: "done-group-row",
+      row: { key: PRIMARY_GROUP, title: "s-lead", threadIds: ["s-lead"] },
       openId: "s-lead",
-      title: "s-lead",
-      threadCount: 1,
       doneAt: at(5),
-      reopenIds: ["s-lead"],
       details: { projectName: "webshop", members: [expect.anything(), expect.anything()] },
     });
   });
@@ -913,25 +598,11 @@ describe("buildSidebar groups", () => {
     ];
     const DONE_ROW = "done:workspace:ws-primary";
 
-    it("gives a group of several sessions a dots button with no dot, and a lone Thread none", () => {
-      const items = buildItems({
-        threads: [...DONE_CREW, thread("s-solo", 9, { done })],
-        doneShelfLimit: 10,
-      });
-
-      expect(findItem(items, DONE_ROW)).toMatchObject({
-        kind: "done-group-row",
-        unfolded: false,
-        summary: { dots: [], hiddenCount: 0, label: "3 sessions: 2 done, 1 ended" },
-      });
-      expect(findItem(items, "done:session:s-solo")).toMatchObject({ summary: null });
-    });
-
     it("draws every line of an unfolded group, because all its sessions are quiet", () => {
       const items = buildItems({
         threads: DONE_CREW,
         doneShelfLimit: 10,
-        unfoldedGroups: new Set([PRIMARY_GROUP]),
+        unfolded: new Set([PRIMARY_GROUP]),
       });
 
       expect(listKeys(items)).toEqual([
@@ -942,8 +613,7 @@ describe("buildSidebar groups", () => {
         "line:s-review",
       ]);
       expect(findItem(items, DONE_ROW)).toMatchObject({ unfolded: true });
-      expect(findItem(items, "line:s-lead")).toMatchObject({ done: true, section: "done" });
-      expect(findItem(items, "line:s-review")).toMatchObject({ label: "review", done: false });
+      expect(findItem(items, "line:s-lead")).toMatchObject({ section: "done" });
     });
 
     it("spaces a row after the lines like a row after the lines of a group in a project", () => {
@@ -951,7 +621,7 @@ describe("buildSidebar groups", () => {
       const items = buildItems({
         threads: [...DONE_CREW, other],
         doneShelfLimit: 10,
-        unfoldedGroups: new Set([PRIMARY_GROUP]),
+        unfolded: new Set([PRIMARY_GROUP]),
       });
 
       expect(items.map(({ key, leading }) => [key, leading])).toEqual([
@@ -963,101 +633,6 @@ describe("buildSidebar groups", () => {
         ["done:session:s-other", 6],
       ]);
     });
-
-    it("decides whether a click opens in the Office from the session the row opens", () => {
-      const asks = lead("s-second", 2, {
-        done,
-        status: "busy",
-        openRequests: [APPROVAL],
-      });
-      const threads = [lead("s-lead", 1, { done }), asks];
-
-      expect(findItem(buildItems({ threads, doneShelfLimit: 10 }), DONE_ROW)).toMatchObject({
-        openId: "s-lead",
-        seated: false,
-      });
-      expect(
-        findItem(
-          buildItems({
-            threads,
-            doneShelfLimit: 10,
-            lastOpen: new Map([[PRIMARY_GROUP, "s-second"]]),
-          }),
-          DONE_ROW,
-        ),
-      ).toMatchObject({ openId: "s-second", seated: true });
-    });
-  });
-
-  it("counts every Thread and Agent session that is not done in the foot", () => {
-    const { counts } = buildFixtureSidebar({
-      threads: [
-        lead("s-lead", 1),
-        partner("s-review", 2, { status: "busy" }),
-        partner("s-asks", 3, { status: "busy", openRequests: [APPROVAL] }),
-        thread("s-done", 4, { done: { at: at(5), by: "user" } }),
-      ],
-    });
-
-    expect(counts).toEqual({ working: 1, waiting: 1, idle: 1 });
-  });
-});
-
-describe("buildSidebar with the open session", () => {
-  const OLD_DONE = thread("s-old", 1, {
-    projectId: OPS_PROJECT.id,
-    done: { at: at(2), by: "user" },
-  });
-
-  it("gives an old Done thread the read left out its row on the closed Done shelf while it is open", () => {
-    const sidebar = buildFixtureSidebar({
-      threads: [],
-      selectedId: "s-old",
-      openSession: OLD_DONE,
-    });
-
-    expect(listKeys(sidebar.items)).toEqual(["header:done", "done:session:s-old"]);
-    expect(sidebar.openGroupKey).toBe("session:s-old");
-    expect(listKeys(buildItems({ threads: [], selectedId: "s-old" }))).toEqual([]);
-  });
-
-  it("keeps the list's record when both hold the session, and counts the session once", () => {
-    const reopened = thread("s-old", 1, { projectId: OPS_PROJECT.id, reopenedAt: at(9) });
-    const sidebar = buildFixtureSidebar({
-      threads: [reopened],
-      selectedId: "s-old",
-      openSession: OLD_DONE,
-    });
-
-    expect(listKeys(sidebar.items)).toEqual(["header:project:p-ops", rowOf("s-old")]);
-    expect(sidebar.counts).toEqual({ working: 0, waiting: 0, idle: 1 });
-  });
-
-  it("lists an open Done thread that still asks in Waiting on you, as the sidebar's read does not hold it", () => {
-    const asking = thread("s-old", 1, {
-      projectId: OPS_PROJECT.id,
-      status: "busy",
-      openRequests: [APPROVAL],
-      done: { at: at(2), by: "user" },
-    });
-    const items = buildItems({ threads: [], selectedId: "s-old", openSession: asking });
-
-    expect(listKeys(items)).toEqual([
-      "header:waiting",
-      "waiting:thread:s-old",
-      "header:done",
-      "done:session:s-old",
-    ]);
-    // Without the open session's own record, nothing in the list holds the question.
-    expect(listKeys(buildItems({ threads: [], selectedId: "s-old" }))).toEqual([]);
-  });
-
-  it("ignores an open session that is no Thread or Agent session", () => {
-    const run = waitingRunSession("approve", 2);
-
-    expect(
-      buildFixtureSidebar({ threads: [], selectedId: "approve", openSession: run }).items,
-    ).toEqual([]);
   });
 });
 
@@ -1140,7 +715,7 @@ describe("listGoMenuItems", () => {
   it("lists one entry per group row, titled with the group and opening the session the row opens, and no line", () => {
     const items = buildItems({
       threads: CREW,
-      unfoldedGroups: new Set([PRIMARY_GROUP]),
+      unfolded: new Set([PRIMARY_GROUP]),
       lastOpen: new Map([["workspace:ws-primary", "s-review"]]),
     });
 
@@ -1252,7 +827,7 @@ describe("pickFocusFallback", () => {
   });
 
   it("picks the group's row when a line leaves because the group folded", () => {
-    const before = buildItems({ threads: CREW, unfoldedGroups: new Set([PRIMARY_GROUP]) });
+    const before = buildItems({ threads: CREW, unfolded: new Set([PRIMARY_GROUP]) });
     const after = buildItems({ threads: CREW });
 
     expect(pickFocusFallback("line:s-review", before, after)).toBe(PRIMARY_ROW);
@@ -1269,7 +844,7 @@ describe("pickFocusFallback", () => {
     const before = buildItems({
       threads,
       doneShelfLimit: 10,
-      unfoldedGroups: new Set([PRIMARY_GROUP]),
+      unfolded: new Set([PRIMARY_GROUP]),
     });
     const after = buildItems({ threads, doneShelfLimit: 10 });
 
@@ -1277,12 +852,12 @@ describe("pickFocusFallback", () => {
   });
 
   it("picks the first line a pressed quiet line brought into view", () => {
-    const unfoldedGroups = new Set([PRIMARY_GROUP]);
-    const before = buildItems({ threads: CREW, unfoldedGroups });
+    const unfolded = new Set([PRIMARY_GROUP]);
+    const before = buildItems({ threads: CREW, unfolded });
     const after = buildItems({
       threads: CREW,
-      unfoldedGroups,
-      quietShownGroups: new Set(["workspace:ws-primary"]),
+      unfolded,
+      quietShown: new Set([PRIMARY_GROUP]),
     });
 
     expect(pickFocusFallback("quiet:workspace:ws-primary", before, after)).toBe("line:s-lead");

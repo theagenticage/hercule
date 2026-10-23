@@ -35,14 +35,14 @@ const pickLatestTime = (times: readonly string[]): string =>
  * that started at the same moment in key order, so the order never depends on
  * the order the server listed the sessions in.
  *
+ * `sessions` holds Threads and Agent sessions only, each once, as the
+ * sidebar's read returns them.
+ *
  * - Sessions group by their workspace id, not by `Workspace.sessionIds`,
  *   which no longer lists a session that has exited.
- * - Sessions of kind "run" and "assistant" belong to no group.
  * - A group needs a Thread. A Thread with no workspace is a group of its own;
  *   an Agent session with no workspace, or one whose workspace holds no
  *   Thread, is left out.
- * - When two reads of the same session were merged into `sessions`, the last
- *   one wins, because it is the newer read.
  *
  * An Agent session counts as ended when its status is `exited`, not when it
  * is settled (`isSettled`): a session that exited normally can still be
@@ -50,12 +50,8 @@ const pickLatestTime = (times: readonly string[]): string =>
  * Done shelf. An exited session is not working, which is all the shelf needs.
  */
 export const buildSessionGroups = (sessions: readonly Session[]): readonly SessionGroup[] => {
-  const latestReads = new Map<string, Session>();
-  for (const session of sessions) latestReads.set(session.id, session);
-
   const members = new Map<string, Session[]>();
-  for (const session of latestReads.values()) {
-    if (session.kind !== "thread" && session.kind !== "agent") continue;
+  for (const session of sessions) {
     if (session.workspaceId === null && session.kind === "agent") continue;
     const key =
       session.workspaceId === null ? `session:${session.id}` : `workspace:${session.workspaceId}`;
@@ -95,21 +91,6 @@ export const buildSessionGroups = (sessions: readonly Session[]): readonly Sessi
       Date.parse(b.lastStartedAt) - Date.parse(a.lastStartedAt) || compareText(a.key, b.key),
   );
 };
-
-/**
- * Returns the name that tells `sessionId` apart from the other sessions of
- * `group`, or `null` when nothing needs telling apart: the lead, and any
- * session of a group with one session. `label` is what the session is called
- * in its group, as `labelWorkspaceSessions` returns it.
- *
- * The sidebar's second line and Waiting on you both name the session that
- * asks with this rule, so they agree.
- */
-export const decideAskerLabel = (
-  group: SessionGroup,
-  sessionId: string,
-  label: string,
-): string | null => (group.sessions.length === 1 || sessionId === group.lead.id ? null : label);
 
 /**
  * Returns the ids of the projects that hold work, in the order the desktop

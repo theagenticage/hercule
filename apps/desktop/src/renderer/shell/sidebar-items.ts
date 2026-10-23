@@ -1,47 +1,34 @@
 /**
- * Builds what the sidebar draws from the lists it reads: the flat list of
- * items the virtualized list draws (section headers, group rows and their
- * lines, and "more" rows, each with a fixed height and the space the book
- * puts above it), and the session counts in the foot.
+ * Builds what the sidebar draws from the session presentation and the user's
+ * choices: the flat list of items the virtualized list draws (section
+ * headers, group rows and their lines, and "more" rows, each with a fixed
+ * height and the space the book puts above it).
  *
- * Which groups of sessions are shown, in which order, and in what pose is
- * decided in client-core. This file only lays the result out in Bureau's
- * geometry.
+ * Which groups of sessions are shown, in which order, in what pose, which
+ * session a row opens and which lines it unfolds into is decided in
+ * client-core (`selectSidebar`). This file only lays the result out in
+ * Bureau's geometry.
  */
 import {
-  buildSidebarSections,
-  countSessionsByPose,
   DONE_SHELF_STEP,
-  decideThreadPose,
-  listGroupLines,
+  selectSidebar,
+  type DoneShelf,
   type DoneShelfRow,
   type DraftPlace,
-  type ExpandedSections,
-  type GroupAsk,
   type GroupMember,
-  type DoneShelf,
   type GroupRow,
-  type GroupSummary,
-  type Pose,
   type ProjectSection,
-  type SidebarSections,
-  type SessionDot,
-  type SessionGroup,
-  type SessionCounts,
-  type ThreadRowStatus,
+  type SidebarChoices,
+  type SidebarRow,
+  type SidebarView,
+  type SessionPresentation,
   type Waiting,
   type WaitingRunSession,
   type WaitingSection,
+  type ExpandedSections,
   type WorkspaceLabel,
 } from "@hercule/client-core";
-import type {
-  Project,
-  ProviderInstance,
-  Resource,
-  Runner,
-  Session,
-  Workspace,
-} from "@hercule/contract";
+import type { Project } from "@hercule/contract";
 import type { GoMenuItem } from "../../ipc/contract";
 import { buildDestinationKey } from "../../ipc/destination";
 import { pickProjectTint, type ProjectTint } from "../screens/project-tile";
@@ -113,58 +100,21 @@ export type SidebarItemContent =
   | {
       readonly kind: "group-row";
       readonly key: string;
-      readonly groupKey: string;
-      /**
-       * The session a click opens: the one last open in this group while it
-       * is still in the group, else the group's lead.
-       */
+      readonly row: GroupRow;
+      /** The session a click opens, as `SidebarRow.openId` decides it. */
       readonly openId: string;
-      /** The lead's title. */
-      readonly title: string;
-      /** The pose of the session that decides the status, for the row's accessible name. */
-      readonly pose: Pose;
       /** Whether the session `openId` has a colleague in the Office, which decides where a click opens it. */
       readonly seated: boolean;
-      readonly status: ThreadRowStatus;
       /**
        * Whether the row steps back, drawn dimmer: a working group's row does,
        * so the groups that need the user stand out, except the group that
        * holds the open session, which the user is looking at.
        */
       readonly receded: boolean;
-      /**
-       * When the status's session was last active, which an `age` status
-       * counts from, or "" for any other status. Only an `age` row reads it,
-       * so a working row does not draw again each time its session does
-       * something.
-       */
-      readonly activityAt: string;
-      /** What waits on the user, which replaces the second line while something waits, or `null`. */
-      readonly ask: GroupAsk | null;
-      /**
-       * Where the lead works, the row's second line after the provider's
-       * mark, in two parts: the part that may be cut short, such as
-       * "rogier/fix-" or "webshop", and the part that never is, such as
-       * "sidebar-rows" or " · moss", or "" when there is none.
-       */
-      readonly placeClip: string;
-      readonly placeKeep: string;
-      /** The provider whose mark leads the second line, or `null`. */
-      readonly providerId: string | null;
-      /**
-       * Where the lead works, in words, for the row's accessible
-       * description, such as "in webshop, webshop main workspace, on moss,
-       * branch main".
-       */
-      readonly placeDescription: string;
       /** Whether the composer of any session of the group holds text or images the user has not sent. */
       readonly unsent: boolean;
-      /** The dots, or `null` for a group of one session, which has no dots and does not unfold. */
-      readonly summary: GroupSummary | null;
       /** Whether the group's lines are drawn under the row. */
       readonly unfolded: boolean;
-      /** The ids of the group's Threads not yet marked Done: what the row's Done button marks. */
-      readonly doneIds: readonly string[];
       /** What the card shows while the pointer rests on the row. */
       readonly details: ThreadHoverDetails;
     }
@@ -175,21 +125,7 @@ export type SidebarItemContent =
       readonly groupKey: string;
       /** The group's name, which describes the line to assistive technology. */
       readonly groupTitle: string;
-      readonly sessionId: string;
-      /** What the session is called in its group, such as "review". */
-      readonly label: string;
-      /** The session's full title, for a tooltip. */
-      readonly title: string;
-      readonly pose: Pose;
-      /** Whether the session has a colleague in the Office, which decides where a click opens it. */
-      readonly seated: boolean;
-      readonly status: ThreadRowStatus;
-      readonly activityAt: string;
-      readonly dot: SessionDot;
-      /** Whether the session is a Thread marked Done, which the line draws with a check. */
-      readonly done: boolean;
-      readonly providerId: string | null;
-      readonly model: string;
+      readonly member: GroupMember;
       /** Whether the line is the last of its unfolded group. */
       readonly last: boolean;
     }
@@ -230,26 +166,14 @@ export type SidebarItemContent =
   | {
       readonly kind: "done-group-row";
       readonly key: string;
-      readonly groupKey: string;
+      readonly row: GroupRow;
       /** The session a click opens, chosen as the group row's is. */
       readonly openId: string;
-      /** The lead's title. */
-      readonly title: string;
       /** Whether the session `openId` has a colleague in the Office, which decides where a click opens it. */
       readonly seated: boolean;
-      /** How many Threads the group has, which its second line counts. */
-      readonly threadCount: number;
       /** When the group's last Thread was marked Done, which the second line shows. */
       readonly doneAt: string;
-      readonly providerId: string | null;
       readonly unsent: boolean;
-      /** The ids of every Thread of the group: what the row's Reopen button reopens. */
-      readonly reopenIds: readonly string[];
-      /**
-       * The dots button's words, or `null` for a group of one session, which
-       * does not unfold. Nothing on the shelf is counted, so it draws no dot.
-       */
-      readonly summary: GroupSummary | null;
       /** Whether the group's lines are drawn under the row. */
       readonly unfolded: boolean;
       /** What the card shows while the pointer rests on the row: every session of the group, Agent sessions too. */
@@ -355,7 +279,7 @@ const buildGroupRowKey = (groupKey: string): string => `group:${groupKey}`;
 const buildDoneGroupRowKey = (groupKey: string): string => `done:${groupKey}`;
 
 /**
- * Returns which sections are expanded, in the shape `buildSidebarSections`
+ * Returns which sections are expanded, in the shape `selectSidebar`
  * takes, from the keys of the sections whose "more" row the user pressed.
  */
 const buildExpandedSections = (expanded: ReadonlySet<SectionKey>): ExpandedSections => ({
@@ -417,34 +341,6 @@ const buildWaitingRunRow = (run: WaitingRunSession): SidebarItemContent => ({
   title: run.title,
   question: run.question,
 });
-
-/** What the items need to know beyond the sidebar `buildSidebarSections` decided. */
-interface SidebarItemSources {
-  readonly sections: SidebarSections;
-  /** The runs' sessions waiting on the user, newest activity first. */
-  readonly waitingRunSessions: readonly WaitingRunSession[];
-  /** Whether the user expanded Waiting on you, so it shows every run's session too. */
-  readonly waitingExpanded: boolean;
-  readonly doneShelfOpen: boolean;
-  /** The project list in its own order, which decides each project's tint. */
-  readonly projects: readonly Project[];
-  /** The session ids of the sessions whose composer holds unsent work. */
-  readonly unsentKeys: ReadonlySet<string>;
-  /**
-   * The draft's second line, while a Draft Thread is open, or `null`. The
-   * draft's row is drawn first in the project the sidebar marks as holding
-   * the draft.
-   */
-  readonly draftPlaceLabel: WorkspaceLabel | null;
-  /** The session id of the open session, which no group row recedes for, or `null`. */
-  readonly selectedId: string | null;
-  /** The keys of the groups the user unfolded. */
-  readonly unfoldedGroups: ReadonlySet<string>;
-  /** The keys of the groups whose quiet sessions the user showed. */
-  readonly quietShownGroups: ReadonlySet<string>;
-  /** The session last open in each group, by the group's key. */
-  readonly lastOpen: ReadonlyMap<string, string>;
-}
 
 /** Returns a section's items: its contents, each given the section and the space above it. */
 const placeInSection = (
@@ -525,20 +421,6 @@ const buildWaitingContents = (
   return contents;
 };
 
-/**
- * Returns the id of the session a click on the row of `row` opens: the open
- * session when the group holds it, else the session last open in the group
- * while the group still holds it, else the group's lead.
- */
-const pickOpenId = (
-  row: GroupRow,
-  selectedId: string | null,
-  lastOpen: ReadonlyMap<string, string>,
-): string =>
-  [selectedId, lastOpen.get(row.key)].find(
-    (id): id is string => id != null && row.members.some((member) => member.sessionId === id),
-  ) ?? row.leadId;
-
 /** Returns the member of `row` that is the session `sessionId`, which the row holds. */
 const findMember = (row: GroupRow, sessionId: string): GroupMember =>
   row.members.find((member) => member.sessionId === sessionId)!;
@@ -577,88 +459,56 @@ const buildProjectPlace = (
 });
 
 /**
- * Returns the lines of the unfolded group of `row`: a line for each session
- * it shows, then the "n quiet" line when quiet sessions are folded away. A
- * group of one session has none.
+ * Returns the lines of the unfolded group of `shown`: a line for each session
+ * it shows, then the "n quiet" line when quiet sessions are folded away.
  */
-const buildLineContents = (
-  row: GroupRow,
-  { selectedId, quietShownGroups }: SidebarItemSources,
-): SidebarItemContent[] => {
-  const { lines, foldedQuietCount } = listGroupLines(row, {
-    selectedId,
-    quietShown: quietShownGroups.has(row.key),
+const buildLineContents = ({ row, lines }: SidebarRow): SidebarItemContent[] =>
+  lines.map((line, index): SidebarItemContent => {
+    const last = index === lines.length - 1;
+    return line.kind === "member"
+      ? {
+          kind: "group-line",
+          key: `line:${line.member.sessionId}`,
+          groupKey: row.key,
+          groupTitle: row.title,
+          member: line.member,
+          last,
+        }
+      : {
+          kind: "quiet-line",
+          key: `quiet:${row.key}`,
+          groupKey: row.key,
+          groupTitle: row.title,
+          count: line.count,
+          last,
+        };
   });
-  const contents = lines.map((member, index): SidebarItemContent => ({
-    kind: "group-line",
-    key: `line:${member.sessionId}`,
-    groupKey: row.key,
-    groupTitle: row.title,
-    sessionId: member.sessionId,
-    label: member.label,
-    title: member.title,
-    pose: member.pose,
-    seated: member.seated,
-    status: member.status,
-    activityAt: member.status === "age" ? member.activityAt : "",
-    dot: member.dot,
-    done: member.done,
-    providerId: member.providerId,
-    model: member.model,
-    last: foldedQuietCount === 0 && index === lines.length - 1,
-  }));
-  if (foldedQuietCount > 0) {
-    contents.push({
-      kind: "quiet-line",
-      key: `quiet:${row.key}`,
-      groupKey: row.key,
-      groupTitle: row.title,
-      count: foldedQuietCount,
-      last: true,
-    });
-  }
-  return contents;
-};
 
 /**
  * Returns the items of one group of the project list: its row, then, while
  * the group is unfolded, its lines.
  */
 const buildGroupContents = (
-  row: GroupRow,
-  sources: SidebarItemSources,
+  shown: SidebarRow,
+  { openGroupKey }: SidebarView,
+  { unsentKeys }: SidebarSources,
   place: { readonly projectName: string; readonly tint: ProjectTint | null },
 ): SidebarItemContent[] => {
-  const { unsentKeys, selectedId, unfoldedGroups, lastOpen } = sources;
-  const openId = pickOpenId(row, selectedId, lastOpen);
-  const holdsOpen = row.members.some((member) => member.sessionId === selectedId);
-  const unfolded = row.summary !== null && unfoldedGroups.has(row.key);
-  const contents: SidebarItemContent[] = [
+  const { row, openId, seated, unfolded } = shown;
+  return [
     {
       kind: "group-row",
       key: buildGroupRowKey(row.key),
-      groupKey: row.key,
+      row,
       openId,
-      title: row.title,
-      pose: row.pose,
-      seated: findMember(row, openId).seated,
-      status: row.status,
-      receded: row.status === "working" && !holdsOpen,
-      activityAt: row.status === "age" ? row.activityAt : "",
-      ask: row.ask,
-      placeClip: row.placeLabel.clip,
-      placeKeep: row.placeLabel.keep,
-      providerId: row.providerId,
-      placeDescription: row.placeDescription,
+      seated,
+      receded: row.status === "working" && row.key !== openGroupKey,
       unsent: row.members.some((member) => unsentKeys.has(member.sessionId)),
-      summary: row.summary,
       unfolded,
-      doneIds: row.doneIds,
       details: buildHoverDetails(row, place),
     },
+    ...buildLineContents(shown),
   ];
-  if (unfolded) contents.push(...buildLineContents(row, sources));
-  return contents;
 };
 
 /**
@@ -674,7 +524,8 @@ const buildGroupContents = (
  */
 const buildProjectContents = (
   project: ProjectSection,
-  sources: SidebarItemSources,
+  view: SidebarView,
+  sources: SidebarSources,
 ): SidebarItemContent[] => {
   const section = buildProjectSectionKey(project.projectId);
   const place = buildProjectPlace(project.projectId, sources.projects);
@@ -688,16 +539,16 @@ const buildProjectContents = (
       waitingCount: project.waitingCount,
     },
   ];
-  if (sources.draftPlaceLabel !== null && project.holdsDraft) {
+  if (sources.draft !== null && project.holdsDraft) {
     contents.push({
       kind: "draft-row",
       key: "draft",
-      placeClip: sources.draftPlaceLabel.clip,
-      placeKeep: sources.draftPlaceLabel.keep,
+      placeClip: sources.draft.rowPlaceLabel.clip,
+      placeKeep: sources.draft.rowPlaceLabel.keep,
     });
   }
-  for (const row of project.rows) {
-    contents.push(...buildGroupContents(row, sources, place));
+  for (const shown of project.rows) {
+    contents.push(...buildGroupContents(shown, view, sources, place));
   }
   if (project.hiddenCount > 0) {
     contents.push({
@@ -715,32 +566,24 @@ const buildProjectContents = (
  * list.
  */
 const buildDoneGroupContents = (
-  row: DoneShelfRow,
-  sources: SidebarItemSources,
+  shown: DoneShelfRow,
+  { unsentKeys, projects }: SidebarSources,
 ): SidebarItemContent[] => {
-  const { selectedId, lastOpen, unsentKeys, projects, unfoldedGroups } = sources;
-  const openId = pickOpenId(row, selectedId, lastOpen);
-  const unfolded = row.summary !== null && unfoldedGroups.has(row.key);
-  const contents: SidebarItemContent[] = [
+  const { row, openId, seated, unfolded, doneAt } = shown;
+  return [
     {
       kind: "done-group-row",
       key: buildDoneGroupRowKey(row.key),
-      groupKey: row.key,
+      row,
       openId,
-      title: row.title,
-      seated: findMember(row, openId).seated,
-      threadCount: row.threadIds.length,
-      doneAt: row.doneAt,
-      providerId: row.providerId,
+      seated,
+      doneAt,
       unsent: row.members.some((member) => unsentKeys.has(member.sessionId)),
-      reopenIds: row.threadIds,
-      summary: row.summary,
       unfolded,
       details: buildHoverDetails(row, buildProjectPlace(row.projectId, projects)),
     },
+    ...buildLineContents(shown),
   ];
-  if (unfolded) contents.push(...buildLineContents(row, sources));
-  return contents;
 };
 
 /**
@@ -749,19 +592,16 @@ const buildDoneGroupContents = (
  * its rows, most recently done first, each followed by its lines while
  * unfolded, then its "more" row when the open shelf hides some.
  */
-const buildDoneContents = (
-  doneShelf: DoneShelf,
-  sources: SidebarItemSources,
-): SidebarItemContent[] => {
+const buildDoneContents = (doneShelf: DoneShelf, sources: SidebarSources): SidebarItemContent[] => {
   if (doneShelf.count === 0) return [];
   const contents: SidebarItemContent[] = [
     {
       kind: "done-header",
       key: buildHeaderKey("done"),
       count: doneShelf.count,
-      open: sources.doneShelfOpen,
+      open: sources.doneShelfLimit !== null,
     },
-    ...doneShelf.rows.flatMap((row) => buildDoneGroupContents(row, sources)),
+    ...doneShelf.rows.flatMap((shown) => buildDoneGroupContents(shown, sources)),
   ];
   if (doneShelf.hiddenCount > 0) {
     contents.push({
@@ -776,36 +616,30 @@ const buildDoneContents = (
 /**
  * Returns the sidebar's items, top to bottom: Waiting on you when a thread,
  * an assistant or a run's session is waiting, then each project's section in
- * the order of `sections.projects`, then the Done shelf when a group is
- * done.
+ * the order of `view.projects`, then the Done shelf when a group is done.
  */
-const buildSidebarItems = (sources: SidebarItemSources): readonly SidebarItem[] => {
-  const { sections, waitingRunSessions, waitingExpanded } = sources;
-  return [
-    ...placeInSection(
-      "waiting",
-      buildWaitingContents(sections.waiting, waitingRunSessions, waitingExpanded),
+const buildSidebarItems = (view: SidebarView, sources: SidebarSources): readonly SidebarItem[] => [
+  ...placeInSection(
+    "waiting",
+    buildWaitingContents(view.waiting, sources.waitingRunSessions, sources.expanded.has("waiting")),
+  ),
+  ...view.projects.flatMap((project) =>
+    placeInSection(
+      buildProjectSectionKey(project.projectId),
+      buildProjectContents(project, view, sources),
     ),
-    ...sections.projects.flatMap((project) =>
-      placeInSection(
-        buildProjectSectionKey(project.projectId),
-        buildProjectContents(project, sources),
-      ),
-    ),
-    ...placeInSection("done", buildDoneContents(sections.doneShelf, sources)),
-  ];
-};
+  ),
+  ...placeInSection("done", buildDoneContents(view.doneShelf, sources)),
+];
 
-/** What the sidebar is built from: the lists it reads, the open draft, and the user's choices. */
-export interface SidebarSources {
-  /**
-   * The Threads and Agent sessions the sidebar holds, with the open session
-   * merged in, and the groups they form. `useSessionGroups` returns both.
-   */
-  readonly sessions: readonly Session[];
-  readonly groups: readonly SessionGroup[];
-  /** The threads and the assistants waiting on the user, as `listWaiting` returns them. */
-  readonly waiting: readonly Waiting[];
+/**
+ * What the sidebar is built from: the session presentation, the lists the
+ * items are laid out with, and the user's choices. The choices `SidebarChoices`
+ * names are applied by client-core, apart from the draft and the expanded
+ * sections, which the sidebar holds in a shape of its own.
+ */
+export interface SidebarSources extends Omit<SidebarChoices, "draft" | "expanded"> {
+  readonly presentation: SessionPresentation;
   /**
    * The runs' sessions waiting on the user, newest activity first, as
    * `listWaitingRunSessions` returns them.
@@ -813,11 +647,6 @@ export interface SidebarSources {
   readonly waitingRunSessions: readonly WaitingRunSession[];
   /** The project list in its own order, which decides each project's tint. */
   readonly projects: readonly Project[];
-  readonly workspaces: readonly Workspace[];
-  readonly resources: readonly Resource[];
-  readonly runners: readonly Runner[];
-  /** The instances whose catalogs give a session its model name. */
-  readonly instances: readonly ProviderInstance[];
   /**
    * The open Draft Thread, or `null`: the group it will join, and its row's
    * second line, as `buildDraftView` returns them.
@@ -830,97 +659,23 @@ export interface SidebarSources {
   readonly unsentKeys: ReadonlySet<string>;
   /** The keys of the project sections, and Waiting on you, whose "more" row the user pressed. */
   readonly expanded: ReadonlySet<SectionKey>;
-  /**
-   * How many done groups the Done shelf shows, or `null` while it is closed:
-   * `DONE_SHELF_LIMIT` when opened, and `DONE_SHELF_STEP` more for each press
-   * of its "more" row.
-   */
-  readonly doneShelfLimit: number | null;
-  /** The session id of the open session, whose group its section always shows, or `null`. */
-  readonly selectedId: string | null;
-  /** The keys of the groups the user unfolded. */
-  readonly unfoldedGroups: ReadonlySet<string>;
-  /** The keys of the groups whose quiet sessions the user showed. */
-  readonly quietShownGroups: ReadonlySet<string>;
-  /** The session last open in each group, by the group's key. */
-  readonly lastOpen: ReadonlyMap<string, string>;
 }
 
-/** What the sidebar draws: the items of its list, and the session counts in its foot. */
+/** What the sidebar draws: the items of its list. */
 export interface Sidebar {
   readonly items: readonly SidebarItem[];
-  readonly counts: SessionCounts;
   /** The key of the group that holds the open session, shown or not, or `null` when it is in none. */
   readonly openGroupKey: string | null;
 }
 
-/**
- * Returns what the sidebar draws from `sources`: its items, top to bottom,
- * and how many sessions are working, waiting and idle.
- *
- * Each session's pose is decided here for the counts. A Thread marked Done
- * counts in none of the foot's counts, but Waiting on you still lists it
- * while it waits, because `waiting` comes from every session.
- */
-export const buildSidebar = ({
-  sessions,
-  groups,
-  waiting,
-  waitingRunSessions,
-  projects,
-  workspaces,
-  resources,
-  runners,
-  instances,
-  draft,
-  unsentKeys,
-  expanded,
-  doneShelfLimit,
-  selectedId,
-  unfoldedGroups,
-  quietShownGroups,
-  lastOpen,
-}: SidebarSources): Sidebar => {
-  const sections = buildSidebarSections({
-    groups,
-    projects,
-    workspaces,
-    resources,
-    runners,
-    instances,
-    waiting,
-    draft: draft?.place ?? null,
-    expanded: buildExpandedSections(expanded),
-    doneShelfLimit,
-    selectedId,
+/** Returns what the sidebar draws from `sources`: its items, top to bottom. */
+export const buildSidebar = (sources: SidebarSources): Sidebar => {
+  const view = selectSidebar(sources.presentation, {
+    ...sources,
+    draft: sources.draft?.place ?? null,
+    expanded: buildExpandedSections(sources.expanded),
   });
-  const items = buildSidebarItems({
-    sections,
-    waitingRunSessions,
-    waitingExpanded: expanded.has("waiting"),
-    doneShelfOpen: doneShelfLimit !== null,
-    projects,
-    unsentKeys,
-    draftPlaceLabel: draft?.rowPlaceLabel ?? null,
-    selectedId,
-    unfoldedGroups,
-    quietShownGroups,
-    lastOpen,
-  });
-  const runnersById = new Map(runners.map((runner) => [runner.id, runner]));
-  const poses = new Map(
-    sessions.map((session) => [
-      session.id,
-      decideThreadPose(session, runnersById.get(session.runnerId)),
-    ]),
-  );
-  return {
-    items,
-    counts: countSessionsByPose(sessions, poses),
-    openGroupKey:
-      groups.find((group) => group.sessions.some((session) => session.id === selectedId))?.key ??
-      null,
-  };
+  return { items: buildSidebarItems(view, sources), openGroupKey: view.openGroupKey };
 };
 
 /** How many items the Go menu lists: one per shortcut, ⌘1 to ⌘9. */
@@ -951,8 +706,8 @@ const buildGoMenuEntry = (item: SidebarItem): GoMenuEntry | null => {
       };
     case "group-row":
       return {
-        identity: item.groupKey,
-        item: { destination: { kind: "thread", sessionId: item.openId }, title: item.title },
+        identity: item.row.key,
+        item: { destination: { kind: "thread", sessionId: item.openId }, title: item.row.title },
       };
     case "waiting-assistant-row": {
       const destination = { kind: "assistant", assistantId: item.assistantId } as const;

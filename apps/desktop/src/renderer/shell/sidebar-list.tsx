@@ -131,40 +131,43 @@ const renderItem = (
           waitingCount={item.waitingCount}
         />
       );
-    case "group-row":
+    case "group-row": {
+      const { row } = item;
       return (
         <GroupRow
           key={item.key}
           itemKey={item.key}
           leading={item.leading}
-          groupKey={item.groupKey}
+          groupKey={row.key}
           openId={item.openId}
-          title={item.title}
-          pose={item.pose}
+          title={row.title}
+          pose={row.pose}
           seated={item.seated}
-          status={item.status}
+          status={row.status}
           receded={item.receded}
-          activityAt={item.activityAt}
-          askerLabel={item.ask?.askerLabel ?? null}
-          question={item.ask?.question ?? null}
-          placeClip={item.placeClip}
-          placeKeep={item.placeKeep}
-          providerId={item.providerId}
+          activityAt={row.status === "age" ? row.activityAt : ""}
+          askerLabel={row.ask?.askerLabel ?? null}
+          question={row.ask?.question ?? null}
+          placeClip={row.placeLabel.clip}
+          placeKeep={row.placeLabel.keep}
+          providerId={row.providerId}
           model={item.details.model}
-          placeDescription={item.placeDescription}
+          placeDescription={row.placeDescription}
           unsent={item.unsent}
-          dots={item.summary?.dots ?? null}
-          hiddenCount={item.summary?.hiddenCount ?? 0}
-          summaryLabel={item.summary?.label ?? ""}
+          dots={row.summary?.dots ?? null}
+          hiddenCount={row.summary?.hiddenCount ?? 0}
+          summaryLabel={row.summary?.label ?? ""}
           unfolded={item.unfolded}
-          doneIds={item.doneIds}
+          doneIds={row.doneIds}
           onScreen={onScreen}
           officeOpen={officeOpen}
           onMarkDone={actions.onMarkDone}
           onToggleGroup={actions.onToggleGroup}
         />
       );
-    case "group-line":
+    }
+    case "group-line": {
+      const { member } = item;
       return (
         <GroupLine
           key={item.key}
@@ -172,23 +175,24 @@ const renderItem = (
           leading={item.leading}
           groupKey={item.groupKey}
           groupTitle={item.groupTitle}
-          sessionId={item.sessionId}
-          label={item.label}
-          title={item.title}
-          pose={item.pose}
-          seated={item.seated}
-          status={item.status}
-          activityAt={item.activityAt}
-          dot={item.dot}
-          done={item.done}
-          providerId={item.providerId}
-          model={item.model}
+          sessionId={member.sessionId}
+          label={member.label}
+          title={member.title}
+          pose={member.pose}
+          seated={member.seated}
+          status={member.status}
+          activityAt={member.status === "age" ? member.activityAt : ""}
+          dot={member.dot}
+          done={member.done}
+          providerId={member.providerId}
+          model={member.model}
           last={item.last}
           onScreen={onScreen}
           officeOpen={officeOpen}
           onToggleGroup={actions.onToggleGroup}
         />
       );
+    }
     case "quiet-line":
       return (
         <QuietLine
@@ -224,24 +228,25 @@ const renderItem = (
           onToggle={actions.onToggleDoneShelf}
         />
       );
-    case "done-group-row":
+    case "done-group-row": {
+      const { row } = item;
       return (
         <DoneGroupRow
           key={item.key}
           itemKey={item.key}
           leading={item.leading}
-          groupKey={item.groupKey}
+          groupKey={row.key}
           openId={item.openId}
-          title={item.title}
+          title={row.title}
           seated={item.seated}
-          threadCount={item.threadCount}
+          threadCount={row.threadIds.length}
           doneAt={item.doneAt}
-          providerId={item.providerId}
+          providerId={row.providerId}
           unsent={item.unsent}
-          reopenIds={item.reopenIds}
-          dots={item.summary?.dots ?? null}
-          hiddenCount={item.summary?.hiddenCount ?? 0}
-          summaryLabel={item.summary?.label ?? ""}
+          reopenIds={row.threadIds}
+          dots={row.summary?.dots ?? null}
+          hiddenCount={row.summary?.hiddenCount ?? 0}
+          summaryLabel={row.summary?.label ?? ""}
           unfolded={item.unfolded}
           onScreen={onScreen}
           officeOpen={officeOpen}
@@ -249,6 +254,7 @@ const renderItem = (
           onToggleGroup={actions.onToggleGroup}
         />
       );
+    }
     case "more":
       return (
         <MoreRow

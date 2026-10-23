@@ -5,10 +5,17 @@
  * the destination main names.
  */
 import { useCallback } from "react";
+import type { QueryClient } from "@tanstack/react-query";
 import { useMatch, useNavigate, useRouteContext } from "@tanstack/react-router";
-import { decideThreadPose, isSessionSeated, type Waiting } from "@hercule/client-core";
+import {
+  decideThreadPose,
+  isSessionSeated,
+  type HerculeClient,
+  type Waiting,
+} from "@hercule/client-core";
 import type { Destination, WaitingRequest } from "../../../ipc/contract";
-import { runnersQuery, sessionQuery, threadAndAgentSessionsQuery } from "../../app/queries";
+import { runnersQuery, sessionQuery } from "../../app/queries";
+import { useReadSessionPresentation } from "../../app/session-presentation";
 
 /**
  * Returns what main is sent of an entry of Waiting on you: where its
@@ -39,24 +46,44 @@ export const buildWaitingRequest = (waiting: Waiting): WaitingRequest => {
 };
 
 /**
+ * Checks whether the session `sessionId` has a colleague in the Office,
+ * from its own cached record and its runner, for a session the presentation
+ * does not hold. Returns false when the cache holds no record of it.
+ */
+const isSeatedByCachedRecord = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  sessionId: string,
+): boolean => {
+  const record = queryClient.getQueryData(sessionQuery(client, sessionId).queryKey);
+  if (record === undefined) return false;
+  const runner = queryClient
+    .getQueryData(runnersQuery(client).queryKey)
+    ?.find((each) => each.id === record.runnerId);
+  return isSessionSeated(record, decideThreadPose(record, runner));
+};
+
+/**
  * Returns a function that opens a destination main names, from the Go menu
  * or a notification:
  *
  * - a thread, or an Agent's session, opens in the Office's drawer while the
  *   Office is open and the session has a colleague there
- *   (`isSessionSeated`), as its sidebar row does, and on its own screen
- *   otherwise;
+ *   (`SessionPresentation.seatedIds`), as its sidebar row does, and on its own
+ *   screen otherwise;
  * - an assistant opens its Conversation, where its Request is answered: in
  *   the Office's drawer while the Office is open, because an assistant
  *   always has a colleague there, and on its own screen otherwise;
  * - a signal opens Intake with the signal selected.
  *
- * The session and its runner are read from the cache when the destination is
- * opened, so the function keeps its identity while the threads change.
+ * The seats are read when the destination is opened, so the function keeps
+ * its identity while the threads change. A session the presentation does not
+ * hold is asked from its own cached record and its runner.
  */
 export function useOpenDestination(): (destination: Destination) => void {
   const { controller, queryClient } = useRouteContext({ from: "/_connected/_shell" });
   const navigate = useNavigate();
+  const readPresentation = useReadSessionPresentation();
   const officeOpen =
     useMatch({ from: "/_connected/_shell/office", shouldThrow: false }) !== undefined;
   return useCallback(
@@ -64,22 +91,10 @@ export function useOpenDestination(): (destination: Destination) => void {
       switch (destination.kind) {
         case "thread": {
           const { sessionId } = destination;
-          const { client } = controller;
-          // The sidebar's read leaves out a Thread marked Done long ago, which
-          // the open screen's own record still holds.
-          const session =
-            queryClient
-              .getQueryData(threadAndAgentSessionsQuery(client).queryKey)
-              ?.find((each) => each.id === sessionId) ??
-            queryClient.getQueryData(sessionQuery(client, sessionId).queryKey);
-          const runner = queryClient
-            .getQueryData(runnersQuery(client).queryKey)
-            ?.find((each) => each.id === session?.runnerId);
-          if (
-            officeOpen &&
-            session !== undefined &&
-            isSessionSeated(session, decideThreadPose(session, runner))
-          ) {
+          const seated =
+            readPresentation().seatedIds.has(sessionId) ||
+            isSeatedByCachedRecord(queryClient, controller.client, sessionId);
+          if (officeOpen && seated) {
             void navigate({ to: "/office", search: { session: sessionId } });
           } else {
             void navigate({ to: "/threads/$sessionId", params: { sessionId } });
@@ -97,6 +112,6 @@ export function useOpenDestination(): (destination: Destination) => void {
           return;
       }
     },
-    [controller, navigate, officeOpen, queryClient],
+    [controller, navigate, officeOpen, queryClient, readPresentation],
   );
 }
