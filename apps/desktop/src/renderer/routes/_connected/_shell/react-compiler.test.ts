@@ -36,6 +36,7 @@ const PATHS = [
   join(SCREENS, "list-pane"),
   join(SCREENS, "thread/use-sender-reading.ts"),
   join(SCREENS, "thread/use-tab-overflow.ts"),
+  join(SCREENS, "session-status.tsx"),
   join(SCREENS, "intake/handoff-trip-line.tsx"),
   join(SCREENS, "intake/tracking-pane.tsx"),
   join(SCREENS, "intake/tracking-trip.tsx"),
