@@ -1,6 +1,6 @@
 /**
  * The records of the thread header specimen (thread-header.tsx): the
- * ten-Thread piece of work that the Workbench, refined drawing shows in
+ * ten Threads of one workspace that the Workbench, refined drawing shows in
  * `?state=stress` (docs/design/sidebar-directions/shared/world.js, `STRESS`),
  * with its lead open. The drawing's header at `?header=a` draws one tab per
  * Thread; `pnpm compare:bureau` compares it with the app's header, edited by

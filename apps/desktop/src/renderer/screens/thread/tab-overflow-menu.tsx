@@ -1,6 +1,11 @@
 import { useEffect, useEffectEvent, useId, useRef, useState, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
-import { describePose, isAbsentPose, type SessionTab } from "@hercule/client-core";
+import {
+  describeHiddenTabs,
+  isAbsentPose,
+  isWaitingOnUser,
+  type SessionTab,
+} from "@hercule/client-core";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { Mark } from "../../marks";
 import { AgentLabel, StatusSlot } from "../session-status";
@@ -11,14 +16,15 @@ import "./tab-overflow-menu.css";
 /**
  * Renders the "+n" button at the end of a header's tabs, and the menu it
  * opens. `tabs` are the tabs that did not fit in the header, in start order,
- * and the menu lists exactly those. `openId` is the id of the open session,
- * whose row, if it is in the list, is drawn as the current one.
+ * and the menu lists exactly those. `openKey` is the key of the open tab (a
+ * session id, or the key of a draft's "New thread" tab); its row, if it is in
+ * the list, is drawn as the current one.
  *
  * - The button carries `data-tab-overflow`, which the header's fitting finds
  *   it by (`useTabOverflow`).
  * - While a hidden tab waits on the user, the button starts with the waiting
- *   mark and its name says how many wait, so a question never hides without a
- *   sign.
+ *   mark and its name says how many wait (`describeHiddenTabs`), so a
+ *   question never hides without a sign.
  * - With no tab in `tabs` the button is drawn as "+1", out of flow and
  *   invisible, so the fitting can measure the room it needs. It takes no
  *   focus and is hidden from assistive technology then.
@@ -27,14 +33,15 @@ import "./tab-overflow-menu.css";
  * - The rows' ages run on the age clock only while the menu is open.
  * - When the list of tabs changes while the menu is open, the menu closes,
  *   because the row the focus was on may be gone. The focus goes back to the
- *   button, or, when the button is no longer shown, to the open tab.
+ *   button, or, when the button is no longer shown, to the open tab (found by
+ *   `openKey`).
  */
 export function TabOverflowMenu({
   tabs,
-  openId,
+  openKey,
 }: {
   readonly tabs: readonly SessionTab[];
-  readonly openId: string | null;
+  readonly openKey: string;
 }): JSX.Element {
   const { triggerProps, menuProps, buildItemProps, close } = usePopoverMenu();
   const headingId = useId();
@@ -42,7 +49,6 @@ export function TabOverflowMenu({
   const [open, setOpen] = useState(false);
   const idle = tabs.length === 0;
   const count = tabs.length;
-  const waitingCount = tabs.filter((tab) => tab.pose === "waiting").length;
   const hiddenIds = tabs.map((tab) => tab.sessionId).join(" ");
 
   const closeForNewList = useEffectEvent(() => {
@@ -54,9 +60,9 @@ export function TabOverflowMenu({
     if (!focusLost) return;
     const button = buttonRef.current;
     const target = idle
-      ? button
-          ?.closest("nav")
-          ?.querySelector<HTMLElement>('[data-tab][aria-current="page"], [data-tab].is-on')
+      ? Array.from(button?.closest("nav")?.querySelectorAll<HTMLElement>("[data-tab]") ?? []).find(
+          (tab) => tab.dataset["tab"] === openKey,
+        )
       : button;
     target?.focus({ preventScroll: true });
   });
@@ -73,10 +79,10 @@ export function TabOverflowMenu({
         data-tab-overflow=""
         {...triggerProps}
         aria-expanded={open}
-        aria-label={describeButton(count, waitingCount)}
+        aria-label={describeHiddenTabs(tabs)}
         {...(idle ? { "aria-hidden": true, tabIndex: -1 } : {})}
       >
-        {waitingCount > 0 ? <Mark state="waiting" /> : null}
+        {tabs.some(isWaitingOnUser) ? <Mark state="waiting" /> : null}
         <span>+{idle ? 1 : count}</span>
         <span className="tab-overflow-chevron">
           <ChevronRightIcon size={12} />
@@ -100,7 +106,7 @@ export function TabOverflowMenu({
           <TabOverflowRow
             key={tab.sessionId}
             tab={tab}
-            current={tab.sessionId === openId}
+            current={tab.sessionId === openKey}
             onScreen={open}
             itemProps={buildItemProps(tab.sessionId)}
             onTake={close}
@@ -112,23 +118,12 @@ export function TabOverflowMenu({
 }
 
 /**
- * Returns the accessible name of the "+n" button: "1 more thread", or "6 more
- * threads", followed by ", 1 waiting on you" when `waitingCount` is not zero,
- * so a question that hides behind the button is still announced.
- */
-const describeButton = (count: number, waitingCount: number): string => {
-  const more = `${count} more ${count === 1 ? "thread" : "threads"}`;
-  return waitingCount === 0 ? more : `${more}, ${waitingCount} waiting on you`;
-};
-
-/**
  * Renders one hidden tab as a row of the menu: its mark, its label, its
  * agent and its state, as a link to the session.
  *
- * The row is named "<label>, <title>, <state words>", or "<title>, <state
- * words>" when the label is the title because the session has no role. A
- * Thread marked Done reads "done". The title is also the row's tooltip. A
- * title-only label is drawn lighter than a role.
+ * The row is named `tab.accessibleName`. The title is also the row's
+ * tooltip. A label that is no role of its own (`tab.hasRoleLabel` is false)
+ * is drawn lighter than a role.
  */
 function TabOverflowRow({
   tab,
@@ -145,8 +140,6 @@ function TabOverflowRow({
   readonly onTake: () => void;
 }): JSX.Element {
   const statusId = useId();
-  const titleOnly = tab.label === tab.title;
-  const state = tab.done ? "done" : describePose(tab.pose);
   const classes = [
     "tab-overflow-row",
     itemProps.className,
@@ -159,7 +152,7 @@ function TabOverflowRow({
       {...itemProps}
       className={classes.join(" ")}
       title={tab.title}
-      aria-label={titleOnly ? `${tab.title}, ${state}` : `${tab.label}, ${tab.title}, ${state}`}
+      aria-label={tab.accessibleName}
       aria-describedby={statusId}
       onClick={onTake}
     >
@@ -170,7 +163,7 @@ function TabOverflowRow({
       ) : (
         <Mark state={tab.pose} />
       )}
-      <span className={titleOnly ? "tab-overflow-name is-title" : "tab-overflow-name"}>
+      <span className={tab.hasRoleLabel ? "tab-overflow-name" : "tab-overflow-name is-title"}>
         {tab.label}
       </span>
       <AgentLabel providerId={tab.providerId} model={tab.model} />

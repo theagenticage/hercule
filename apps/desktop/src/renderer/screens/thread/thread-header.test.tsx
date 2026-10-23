@@ -9,7 +9,7 @@
  */
 import type { JSX } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import userEvent from "@testing-library/user-event";
@@ -52,7 +52,7 @@ afterEach(() => {
 
 /** Returns the header's first pill: the project and the workspace's tabs. */
 const readTabStrip = (): HTMLElement =>
-  screen.getByRole("navigation", { name: "Threads in this workspace" });
+  screen.getByRole("navigation", { name: "Sessions in this workspace" });
 
 /** Returns the accessible name of every link in the tab strip, in order. */
 const readLinkNames = (): readonly (string | null)[] =>
@@ -312,6 +312,67 @@ describe("the thread header", () => {
     ).toBe(`/?project=${session.projectId!}&workspace=${primary.id}`);
   });
 
+  describe("when a partner of another project is open", () => {
+    const { flaky, runbook } = FIXTURE_THREAD_IDS;
+    const workspaceId = SIDEBAR_FIXTURE.threads.find((each) => each.id === flaky)!.workspaceId!;
+    const [webshop, ops] = SIDEBAR_FIXTURE.projects;
+
+    /** Returns an Agent session of the lead's worktree, in the ops project. */
+    const buildOpsPartner = (): Session =>
+      buildSession({
+        ...SIDEBAR_FIXTURE.threads.find((each) => each.id === runbook)!,
+        id: "01a06d02-7400-7000-8000-0000000000c1",
+        kind: "agent",
+        title: "Check the pager rota",
+        role: "oncall",
+        projectId: ops!.id,
+        status: "busy",
+        openRequests: [],
+        createdAt: "2026-09-10T09:06:00.000Z",
+        lastActivityAt: "2026-09-10T09:06:00.000Z",
+      });
+
+    /** Renders the header of `partner`, whose work is the row of the threads in the worktree. */
+    const renderPartnerHeader = (
+      partner: Session,
+      change: (session: Session) => Session,
+    ): ReturnType<typeof renderThreadPart> => {
+      function HeaderOfPartner(): JSX.Element {
+        return <ThreadHeader session={partner} />;
+      }
+      return renderThreadPart(HeaderOfPartner, {
+        thread: THREAD_FIXTURES.waiting,
+        handlers: buildWorktreeHandlers(change, [partner]),
+      });
+    };
+
+    it("shows the work's project, and links + with it, not the partner's", async () => {
+      await renderPartnerHeader(buildOpsPartner(), (session) => session);
+
+      const strip = readTabStrip();
+      expect(within(strip).getByText(webshop!.name)).toBeTruthy();
+      expect(within(strip).queryByText(ops!.name)).toBeNull();
+      expect(
+        within(strip)
+          .getByRole("link", { name: "New thread in this workspace" })
+          .getAttribute("href"),
+      ).toBe(`/?project=${webshop!.id}&workspace=${workspaceId}`);
+    });
+
+    it("shows No project when the work's lead has none, and links + with no project", async () => {
+      await renderPartnerHeader(buildOpsPartner(), (session) => ({ ...session, projectId: null }));
+
+      const strip = readTabStrip();
+      expect(within(strip).getByText("No project")).toBeTruthy();
+      expect(within(strip).queryByText(ops!.name)).toBeNull();
+      expect(
+        within(strip)
+          .getByRole("link", { name: "New thread in this workspace" })
+          .getAttribute("href"),
+      ).toBe(`/?workspace=${workspaceId}`);
+    });
+  });
+
   it("draws no + while the thread's workspace is not ready, because a new thread could not join it", async () => {
     const [primary, ...others] = SIDEBAR_FIXTURE.workspaces;
     await renderThreadPart(HeaderOfThread, {
@@ -384,6 +445,29 @@ describe("Done in the thread header", () => {
     await userEvent.click(screen.getByRole("button", { name: "Mark done" }));
 
     expect(readDoneMoves(calls)).toEqual([`${MARK_DONE_PATH} ${flaky},${runbook}`]);
+  });
+
+  it("ignores the second click of a double click, which would otherwise reopen the row", async () => {
+    const { flaky, runbook } = FIXTURE_THREAD_IDS;
+    const { calls } = await renderThreadPart(HeaderOfThread, {
+      thread: THREAD_FIXTURES.waiting,
+      handlers: buildWorktreeHandlers((session) => session),
+    });
+
+    await userEvent.dblClick(screen.getByRole("button", { name: "Mark done" }));
+
+    expect(readDoneMoves(calls)).toEqual([`${MARK_DONE_PATH} ${flaky},${runbook}`]);
+  });
+
+  it("does nothing for a click that is the second of a double click", async () => {
+    const { calls } = await renderThreadPart(HeaderOfThread, {
+      thread: THREAD_FIXTURES.waiting,
+      handlers: buildWorktreeHandlers((session) => session),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark done" }), { detail: 2 });
+
+    expect(readDoneMoves(calls)).toEqual([]);
   });
 
   it("becomes Reopen once every thread is done, and reopens every thread of the row", async () => {

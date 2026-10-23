@@ -30,10 +30,16 @@ afterEach(() => {
   hidePopover.mockClear();
 });
 
-/** Returns a tab with the fields a test does not care about filled in. */
+/**
+ * Returns a tab with the fields a test does not care about filled in. A test
+ * that reads a tab's accessible name passes it, because client-core decides it.
+ */
 const buildTab = (overrides: Partial<SessionTab> & { readonly sessionId: string }): SessionTab => ({
+  kind: "thread",
   label: overrides.sessionId,
   title: `Title of ${overrides.sessionId}`,
+  hasRoleLabel: true,
+  accessibleName: `${overrides.sessionId}, idle`,
   pose: "idle",
   status: "age",
   activityAt: new Date().toISOString(),
@@ -47,6 +53,7 @@ const REVIEW = buildTab({
   sessionId: "s-review",
   label: "review",
   title: "Adversarial review of the payout endpoints",
+  accessibleName: "review, Adversarial review of the payout endpoints, working",
   pose: "working",
   status: "working",
   model: "GPT 5.4",
@@ -55,10 +62,13 @@ const TITLE_ONLY = buildTab({
   sessionId: "s-title",
   label: "Ask whether Stripe can send payouts",
   title: "Ask whether Stripe can send payouts",
+  hasRoleLabel: false,
+  accessibleName: "Ask whether Stripe can send payouts, idle",
 });
 const WAITING = buildTab({
   sessionId: "s-wait",
   label: "tests",
+  accessibleName: "tests, Title of s-wait, waiting on you",
   pose: "waiting",
   status: "question",
 });
@@ -71,10 +81,25 @@ interface RenderedMenu {
   readonly setTabs: (tabs: readonly SessionTab[]) => void;
 }
 
+/** Draws the open tab as a session's tab: a link. */
+const renderOpenSessionTab = (openKey: string): JSX.Element => (
+  <a href={`/threads/${openKey}`} data-tab={openKey} aria-current="page">
+    open tab
+  </a>
+);
+
+/** Draws the open tab as the draft's "New thread" tab: a span that is not in the tab order. */
+const renderNewThreadTab = (openKey: string): JSX.Element => (
+  <span className="ptab is-on" aria-current="page" data-tab={openKey} tabIndex={-1}>
+    New thread
+  </span>
+);
+
 /** Renders the menu in a router that has the thread route. */
 const renderMenu = async (
   initialTabs: readonly SessionTab[],
-  openId: string | null = null,
+  openKey = "s-open",
+  openTab: (openKey: string) => JSX.Element = renderOpenSessionTab,
 ): Promise<RenderedMenu> => {
   let setTabs: (tabs: readonly SessionTab[]) => void = () => undefined;
   function Harness(): JSX.Element {
@@ -82,10 +107,8 @@ const renderMenu = async (
     setTabs = replaceTabs;
     return (
       <nav>
-        <a href="/threads/s-open" data-tab="s-open" aria-current="page">
-          open tab
-        </a>
-        <TabOverflowMenu tabs={tabs} openId={openId} />
+        {openTab(openKey)}
+        <TabOverflowMenu tabs={tabs} openKey={openKey} />
       </nav>
     );
   }
@@ -142,6 +165,12 @@ describe("TabOverflowMenu", () => {
     expect(button.classList.contains("is-idle")).toBe(false);
   });
 
+  it("says 'sessions' when a hidden tab is not a Thread", async () => {
+    await renderMenu([REVIEW, buildTab({ sessionId: "s-agent", kind: "agent" })]);
+
+    expect(screen.getByRole("button", { name: "2 more sessions" })).toBeTruthy();
+  });
+
   it("says 'thread' for one hidden tab", async () => {
     await renderMenu([REVIEW]);
 
@@ -185,7 +214,14 @@ describe("TabOverflowMenu", () => {
   });
 
   it("names a done tab as done, with the done mark", async () => {
-    await renderMenu([buildTab({ sessionId: "s-done", label: "lead", done: true })]);
+    await renderMenu([
+      buildTab({
+        sessionId: "s-done",
+        label: "lead",
+        done: true,
+        accessibleName: "lead, Title of s-done, done",
+      }),
+    ]);
 
     const row = screen.getByRole("menuitem", {
       name: "lead, Title of s-done, done",
@@ -239,5 +275,15 @@ describe("TabOverflowMenu", () => {
     setTabs([]);
 
     expect(document.activeElement).toBe(screen.getByRole("link", { name: "open tab" }));
+  });
+
+  it("moves the focus to the draft's New thread tab, which is not in the tab order, in the same case", async () => {
+    const { setTabs } = await renderMenu([REVIEW], "new-thread", renderNewThreadTab);
+    sendToggle("open");
+    screen.getByRole("menuitem", { hidden: true }).focus();
+
+    setTabs([]);
+
+    expect(document.activeElement).toBe(screen.getByText("New thread"));
   });
 });

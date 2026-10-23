@@ -300,7 +300,7 @@ describe("the thread drawer", () => {
 
     const drawer = findDrawer();
     expect(
-      await within(drawer).findByRole("navigation", { name: "Threads in this workspace" }),
+      await within(drawer).findByRole("navigation", { name: "Sessions in this workspace" }),
     ).toBeTruthy();
     // The drawer has read the thread's subagent, so only the missing side
     // pane keeps the tally pill out.

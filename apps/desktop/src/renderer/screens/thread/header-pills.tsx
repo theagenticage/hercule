@@ -6,7 +6,7 @@
  */
 import { useId, useRef, type JSX, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { describePose, isAbsentPose, type SessionTab } from "@hercule/client-core";
+import { isAbsentPose, isWaitingOnUser, type SessionTab } from "@hercule/client-core";
 import type { Project } from "@hercule/contract";
 import { ComposeIcon } from "../../icons/compose";
 import { MoreIcon } from "../../icons/more";
@@ -18,8 +18,11 @@ import { useTabOverflow } from "./use-tab-overflow";
 import "../session/floating-header.css";
 import "./thread-header.css";
 
-/** The key of the Draft Thread's "New thread" tab, which `useTabOverflow` finds it by. */
-const NEW_THREAD_TAB_KEY = "new-thread";
+/**
+ * The key of the Draft Thread's "New thread" tab. `ThreadTabsPill` takes it
+ * as `openKey` to draw that tab, and `useTabOverflow` finds the tab by it.
+ */
+export const NEW_THREAD_TAB_KEY = "new-thread";
 
 /**
  * Renders a header's More pill. More is drawn but does nothing yet, and
@@ -70,10 +73,9 @@ export function ProjectCrumb({
  *   after it, and left out, with the separator, when it is `null`.
  * - `tabs` are the tabs in their order. They come from the sidebar row's
  *   members, or, for a session with no row, from `listWorkspaceSessionTabs`.
- * - `openId` is the open session, whose tab is selected. It is `null` for a
- *   Draft Thread, which has no session yet.
- * - `newThreadTab` draws the Draft Thread's own "New thread" tab after the
- *   tabs. It is the open tab, so `openId` is `null` with it.
+ * - `openKey` is the open tab: the id of the open session, or
+ *   `NEW_THREAD_TAB_KEY` for a Draft Thread, which has no session yet. The
+ *   draft's own "New thread" tab is drawn after the tabs only for that key.
  * - `freeSpace` is drawn in the room after the pill, such as "Syncing…". It
  *   takes only the room the pill leaves, so it never changes the fit.
  * - `className` adds classes to the nav, such as the one that styles a run's
@@ -89,8 +91,7 @@ export function ThreadTabsPill({
   crumbs,
   workName,
   tabs,
-  openId,
-  newThreadTab,
+  openKey,
   freeSpace,
   children,
 }: {
@@ -99,20 +100,17 @@ export function ThreadTabsPill({
   readonly crumbs: ReactNode;
   readonly workName: string | null;
   readonly tabs: readonly SessionTab[];
-  readonly openId: string | null;
-  readonly newThreadTab?: boolean | undefined;
+  readonly openKey: string;
   readonly freeSpace?: ReactNode;
   readonly children?: ReactNode;
 }): JSX.Element {
   const roomRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
-  const hasNewThreadTab = newThreadTab === true;
-  const openKey = hasNewThreadTab ? NEW_THREAD_TAB_KEY : openId;
   const hiddenKeys = useTabOverflow({
     roomRef,
     navRef,
     openKey,
-    waitingKeys: tabs.filter((tab) => tab.pose === "waiting").map((tab) => tab.sessionId),
+    waitingKeys: tabs.filter(isWaitingOnUser).map((tab) => tab.sessionId),
   });
   return (
     <div ref={roomRef} className="thread-tabs-room">
@@ -131,22 +129,29 @@ export function ThreadTabsPill({
           </>
         )}
         {tabs.map((tab) => (
-          <ThreadTab
+          <SessionTabLink
             key={tab.sessionId}
             tab={tab}
-            open={tab.sessionId === openId}
+            open={tab.sessionId === openKey}
             hidden={hiddenKeys.has(tab.sessionId)}
           />
         ))}
-        {hasNewThreadTab ? (
-          <span className="ptab is-on" aria-current="page" data-tab={NEW_THREAD_TAB_KEY}>
+        {openKey === NEW_THREAD_TAB_KEY ? (
+          // Not in the tab order, but focusable by script: the menu moves the focus here when
+          // the last hidden tab returns while the focus was in the menu.
+          <span
+            className="ptab is-on"
+            aria-current="page"
+            data-tab={NEW_THREAD_TAB_KEY}
+            tabIndex={-1}
+          >
             <ComposeIcon size={14} />
             New thread
           </span>
         ) : null}
         <TabOverflowMenu
           tabs={tabs.filter((tab) => hiddenKeys.has(tab.sessionId))}
-          openId={openId}
+          openKey={openKey}
         />
         {children}
       </nav>
@@ -161,19 +166,20 @@ export function ThreadTabsPill({
  * word or the age that ends the session's sidebar line. A Thread marked Done
  * has the done mark and no end.
  *
- * - The tab is selected when `open` is true, from the open session's id and
- *   not from the route, because the Office's drawer draws this header on the
+ * - The tab is selected when `open` is true, from the open tab's key and not
+ *   from the route, because the Office's drawer draws this header on the
  *   Office's route.
  * - A `hidden` tab stays in the header, out of flow and invisible, so
- *   `useTabOverflow` can still measure it. The menu of "+n" lists it.
- * - The tab is named "<label>, <title>, <state>", or "<title>, <state>" when
- *   the label is the title because the session has no role, so someone who
- *   speaks the tab's name can say what they see. The state is "done" or the
- *   pose in words. The tooltip is the full title. The word or the age that
- *   ends the tab describes it. The mark is hidden from assistive technology,
- *   because the name already says the state.
+ *   `useTabOverflow` can still measure it. The menu of "+n" lists it. Its
+ *   age does not tick while it is hidden.
+ * - The tab is named `tab.accessibleName`, so someone who speaks the tab's
+ *   name can say what they see. The tooltip is the full title. The word or
+ *   the age that ends the tab describes it. The mark is hidden from
+ *   assistive technology, because the name already says the state. A label
+ *   that is no role of its own (`tab.hasRoleLabel` is false) is drawn
+ *   lighter.
  */
-function ThreadTab({
+function SessionTabLink({
   tab,
   open,
   hidden,
@@ -184,8 +190,6 @@ function ThreadTab({
 }): JSX.Element {
   const endId = useId();
   const { sessionId, label, title, pose, status } = tab;
-  const titleOnly = label === title;
-  const state = tab.done ? "done" : describePose(pose);
   // The mark says working and waiting, so only queued, offline and idle sessions need an end.
   const hasEnd =
     !tab.done && status !== "working" && status !== "approval" && status !== "question";
@@ -199,15 +203,15 @@ function ThreadTab({
       className={classes.join(" ")}
       data-tab={sessionId}
       aria-current={open ? "page" : undefined}
-      aria-label={titleOnly ? `${title}, ${state}` : `${label}, ${title}, ${state}`}
+      aria-label={tab.accessibleName}
       aria-describedby={hasEnd ? endId : undefined}
     >
       {tab.done ? <Mark state="done" /> : isAbsentPose(pose) ? null : <Mark state={pose} />}
-      <span className={titleOnly ? "ptab-title is-title" : "ptab-title"} title={title}>
+      <span className={tab.hasRoleLabel ? "ptab-title" : "ptab-title is-title"} title={title}>
         {label}
       </span>
       {!hasEnd ? null : status === "age" ? (
-        <AgeLabel at={tab.activityAt} onScreen descriptionId={endId} as="small" />
+        <AgeLabel at={tab.activityAt} onScreen={!hidden} descriptionId={endId} as="small" />
       ) : (
         <small id={endId}>{status}</small>
       )}

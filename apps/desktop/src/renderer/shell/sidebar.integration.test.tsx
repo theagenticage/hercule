@@ -1680,9 +1680,9 @@ describe("the sidebar's groups of sessions", () => {
       [...nav.querySelectorAll(".side-member a")].map((line) => line.getAttribute("aria-label")),
     ).toEqual([
       "Migrate payouts, working",
-      "review, waiting on you",
-      "tests, working",
-      "docs, working",
+      "review, Session of review, waiting on you",
+      "tests, Session of tests, working",
+      "docs, Session of docs, working",
     ]);
 
     // Pressing the quiet line draws the six idle sessions as lines too.
@@ -1702,7 +1702,7 @@ describe("the sidebar's groups of sessions", () => {
     await userEvent.click(within(nav).getByRole("button", { name: /^10 threads: .*\. Unfold$/ }));
 
     const line = within(nav).getByRole("link", {
-      name: "review, waiting on you",
+      name: "review, Session of review, waiting on you",
       description: "In Migrate payouts Approval",
     });
     expect(line.getAttribute("title")).toBe("Session of review");
@@ -1739,7 +1739,7 @@ describe("the sidebar's groups of sessions", () => {
   it("folds the group from the left arrow on a line, and moves focus to the group's row", async () => {
     const { nav } = await startSidebar({ records: buildCrewRecords() });
     await userEvent.click(within(nav).getByRole("button", { name: /^10 threads: .*\. Unfold$/ }));
-    const line = within(nav).getByRole("link", { name: "tests, working" });
+    const line = within(nav).getByRole("link", { name: "tests, Session of tests, working" });
 
     line.focus();
     expect(fireEvent.keyDown(line, { key: "ArrowLeft" })).toBe(false);

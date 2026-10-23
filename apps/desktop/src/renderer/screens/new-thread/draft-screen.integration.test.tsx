@@ -121,7 +121,7 @@ describe("the new-thread screen", () => {
     const worktree = SIDEBAR_FIXTURE.workspaces[1]!;
     await openDraft(`/?project=${WEBSHOP.id}&workspace=${worktree.id}`);
 
-    const strip = screen.getByRole("navigation", { name: "Threads in this workspace" });
+    const strip = screen.getByRole("navigation", { name: "Sessions in this workspace" });
     expect(strip.querySelector("[data-work-name]")?.textContent).toBe("Fix flaky webhook tests");
     expect(
       within(strip)
@@ -140,7 +140,7 @@ describe("the new-thread screen", () => {
   it("draws only the project and its New thread tab when the draft joins no workspace", async () => {
     await openDraft(`/?project=${WEBSHOP.id}`);
 
-    const strip = screen.getByRole("navigation", { name: "Threads in this workspace" });
+    const strip = screen.getByRole("navigation", { name: "Sessions in this workspace" });
     expect(within(strip).queryAllByRole("link")).toHaveLength(0);
     expect(strip.querySelector("[data-work-name]")).toBeNull();
     expect(strip.querySelector(".thread-tabs-sep")).toBeNull();

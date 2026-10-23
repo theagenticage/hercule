@@ -7,7 +7,7 @@
  * app's (thread-header.tsx). With `?state=menu` the drawing opens the "+n"
  * menu, and so does the specimen; the comparison then covers the menu too.
  *
- * The drawing draws the ten Threads of one piece of work, with the lead open.
+ * The drawing draws the ten Threads of one workspace, with the lead open.
  * First it stops every animation, so the waiting mark shows the frame the app
  * draws, and it hides the traffic-light placeholders. Then it makes exactly
  * eight edits, where the app shows what the product decided and the drawing

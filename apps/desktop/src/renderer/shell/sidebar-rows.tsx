@@ -865,7 +865,7 @@ const buildFoldOnLeftArrow =
  *
  * The line is the session's link, marked as the current page while the
  * session is open, and carries the session's full title as its tooltip. It
- * is named "<label>, <pose words>", or "<label>, done" for a Done Thread. A
+ * is named `member.accessibleName`. A
  * screen reader reads "In <group title>" after the name, and then the status
  * in words except "Working", because a flat, virtualized list cannot wrap
  * the lines in a group. It opens the session in the Office's drawer while
@@ -904,7 +904,7 @@ export const GroupLine = memo(function GroupLine({
         className="side-m"
         data-key={item.key}
         title={member.title}
-        aria-label={`${member.label}, ${member.done ? "done" : describePose(member.pose)}`}
+        aria-label={member.accessibleName}
         aria-describedby={member.status === "working" ? groupId : `${groupId} ${statusId}`}
         onKeyDown={buildFoldOnLeftArrow(item.groupKey, onToggleGroup)}
       >

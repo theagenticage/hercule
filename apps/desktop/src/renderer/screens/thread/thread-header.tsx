@@ -1,4 +1,4 @@
-import { lazy, Suspense, type JSX } from "react";
+import { lazy, memo, Suspense, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useRouteContext } from "@tanstack/react-router";
 import {
@@ -47,7 +47,8 @@ const RunSessionCrumbs = lazy(() =>
  *   name of the work, and one tab per line of the work's sidebar row: the
  *   Threads, the Agent sessions (ended ones too) and the Threads marked
  *   Done, in the row's order. A `+` follows them that opens a new thread in
- *   the workspace.
+ *   the workspace, in the work's project, so the new thread's crumb matches
+ *   this one.
  * - A step session has no row, because a run's sessions stay out of the
  *   sidebar. Its place is Workflows, its run's workflow and its run, each a
  *   link, it has no work name, and its tabs are the sessions of its
@@ -67,12 +68,21 @@ const RunSessionCrumbs = lazy(() =>
  * row's Done does. Once every Thread of the row is done, the button is
  * Reopen, which reopens them all. A move shows the shell's toast, with Undo.
  *
+ * It is memoized on `session`, because the page that draws it renders on
+ * every stored transcript row, and the header, whose tabs measure the layout
+ * (`useTabOverflow`), must not render again for each. It renders again when
+ * `session`, or what it reads through its own hooks, changes.
+ *
  * The lists it reads are shell data, in the cache before any thread renders,
  * so nothing here waits in practice. It takes the session record rather
  * than reading it, so the screen shown while a thread opens can draw it from
  * the sidebar's list before the session's own read has answered.
  */
-export function ThreadHeader({ session }: { readonly session: Session }): JSX.Element {
+export const ThreadHeader = memo(function ThreadHeader({
+  session,
+}: {
+  readonly session: Session;
+}): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const { groupRows } = useSessionPresentation();
@@ -93,36 +103,40 @@ export function ThreadHeader({ session }: { readonly session: Session }): JSX.El
       runners,
       instances,
     });
-  const projectId = row?.projectId ?? session.projectId;
+  // The row's project is the work's project, and it may be null: a lead with no project. The
+  // open session's own project must not stand in for it, or a partner in another project would
+  // move the work under that project.
+  const projectId = row === undefined ? session.projectId : row.projectId;
   const canStartThread = !isStepSession && workspace !== undefined && isJoinable(workspace);
 
   return (
     <header className="top">
       <ThreadTabsPill
-        label={isStepSession ? "Sessions in this workspace" : "Threads in this workspace"}
+        label="Sessions in this workspace"
         className={isStepSession ? "workflow-crumbs" : undefined}
         crumbs={
-          session.runId === null ? (
-            <ProjectCrumb projectId={projectId} projects={projects} />
-          ) : (
+          // A step session always has a run id; the check narrows its type.
+          isStepSession && session.runId !== null ? (
             // Nothing is drawn while the crumbs' code loads, which happens once.
             <Suspense fallback={null}>
               <RunSessionCrumbs runId={session.runId} />
             </Suspense>
+          ) : (
+            <ProjectCrumb projectId={projectId} projects={projects} />
           )
         }
         workName={isStepSession ? null : (row?.title ?? session.title)}
         tabs={tabs}
-        openId={session.id}
+        openKey={session.id}
         freeSpace={<TranscriptSyncMarker sessionId={session.id} />}
       >
         {canStartThread ? (
           <Link
             to="/"
             search={
-              session.projectId === null
+              projectId === null
                 ? { workspace: workspace.id }
-                : { project: session.projectId, workspace: workspace.id }
+                : { project: projectId, workspace: workspace.id }
             }
             className="icon-btn"
             title="New thread in this workspace"
@@ -136,7 +150,7 @@ export function ThreadHeader({ session }: { readonly session: Session }): JSX.El
       <MorePill />
     </header>
   );
-}
+});
 
 /**
  * Renders the pill with the Done button of `row`, the row of the work the
@@ -154,7 +168,10 @@ function DonePill({ row }: { readonly row: GroupRow }): JSX.Element {
         type="button"
         className="pill-btn"
         aria-label={marksDone ? "Mark done" : "Reopen"}
-        onClick={() => {
+        onClick={(event) => {
+          // The first click turns this button into Reopen under the pointer. A second click of a
+          // double click would then reopen the whole row, including a lead that was already done.
+          if (event.detail > 1) return;
           if (marksDone) markDone(row.doneIds);
           else reopen(row.threadIds);
         }}

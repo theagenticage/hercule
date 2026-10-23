@@ -54,7 +54,7 @@ const TRANSCRIPT_SELECTOR = 'section[aria-label="Transcript"]';
 /** Returns the title of the thread the header shows as open. */
 function readOpenTab(page: Page): Promise<string | null> {
   return page
-    .locator('nav[aria-label="Threads in this workspace"] a[aria-current="page"] .ptab-title')
+    .locator('nav[aria-label="Sessions in this workspace"] a[aria-current="page"] .ptab-title')
     .textContent();
 }
 
