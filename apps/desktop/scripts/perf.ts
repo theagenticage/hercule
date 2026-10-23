@@ -125,6 +125,15 @@
  *
  *        pnpm --filter @hercule/desktop perf -- --sidebar-only
  *
+ * The sidebar of groups of sessions has a run of its own, on 500 threads
+ * arranged in groups instead of the full run's (see `growGroups` in
+ * `perf-fixture.ts` and `measureSidebarGroups` in `perf-sidebar.ts`). It
+ * measures the sidebar's one read of sessions, how many items the list
+ * mounts, unfolding a group of ten by its dots and by →, and what a live push
+ * of one session's status redraws. Pass `--sidebar-groups-only`:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --sidebar-groups-only
+ *
  * The composer's message field is measured on the same long thread: the work
  * the renderer's main thread does for each key typed into it, from a Chromium
  * trace of a 200-character sentence typed one key at a time (see
@@ -302,7 +311,12 @@ import {
   seedDiscussions,
 } from "./perf-discussions.ts";
 import { measureKeystrokeWork, reportKeystrokeWork } from "./perf-keystrokes.ts";
-import { measureSidebarWork, reportSidebarWork } from "./perf-sidebar.ts";
+import {
+  measureSidebarGroups,
+  measureSidebarWork,
+  reportSidebarGroupsWork,
+  reportSidebarWork,
+} from "./perf-sidebar.ts";
 import { seedSkills, TIMED_IMPORT_SKILLS } from "./perf-skills.ts";
 import { measureSubagentLaunch, reportSubagentLaunch } from "./perf-subagents.ts";
 import {
@@ -903,7 +917,7 @@ async function measureNudges(
       expression: `performance.getEntriesByType("resource").filter((entry) => {
         const url = new URL(entry.name);
         return entry.startTime >= ${String(readsFrom)} &&
-          url.pathname === "/api/v1/sessions" && url.searchParams.get("thread") === "true";
+          url.pathname === "/api/v1/sessions" && url.searchParams.get("kind") === "thread";
       }).length`,
       returnByValue: true,
     })) as number;
@@ -1355,6 +1369,13 @@ const DISCUSSIONS_ONLY = process.argv.includes("--discussions-only");
 const SIDEBAR_ONLY = process.argv.includes("--sidebar-only");
 
 /**
+ * Whether the run measures only the sidebar of groups of sessions (see
+ * `measureSidebarGroups`), on 500 threads arranged in groups, and skips every
+ * other launch and the workflow list.
+ */
+const SIDEBAR_GROUPS_ONLY = process.argv.includes("--sidebar-groups-only");
+
+/**
  * Whether the run measures only typing into the composer (see
  * `perf-keystrokes.ts`), on 40 threads with the long thread open, and skips
  * every other launch and the workflow list.
@@ -1604,7 +1625,9 @@ async function measureLaunches(fixture: ThreadFixture, userDataDir: string) {
 const launches = await runWithThreadFixture(async (fixture) => {
   const userDataDir = mkdtempSync(join(tmpdir(), "hercule-desktop-perf-"));
   try {
-    await fixture.growTo(40);
+    // The groups run has threads of its own, so it does not start from 40.
+    const grouped = SIDEBAR_GROUPS_ONLY ? await fixture.growGroups() : null;
+    if (grouped === null) await fixture.growTo(40);
     writeSettings(userDataDir, { controllerUrl: fixture.url });
     await signInOnce(userDataDir);
     if (INTAKE_ONLY) {
@@ -1635,6 +1658,12 @@ const launches = await runWithThreadFixture(async (fixture) => {
       await openThreadOnce(userDataDir, thread.id);
       await warmUpApp(userDataDir);
       reportSidebarWork(await measureSidebarWork(userDataDir));
+      return null;
+    }
+    if (grouped !== null) {
+      await fixture.prepareLaunch({ twoMinuteRow: false });
+      await warmUpApp(userDataDir);
+      reportSidebarGroupsWork(await measureSidebarGroups(userDataDir, fixture, grouped));
       return null;
     }
     if (KEYSTROKES_ONLY) {

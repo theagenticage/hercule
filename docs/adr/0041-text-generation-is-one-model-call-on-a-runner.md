@@ -15,6 +15,8 @@ Accepted by [Text generation: one small model call, run on a runner, with Thread
 - **A caller may wait for a runner.** A call made with `whenNoRunner: "wait"` does not fail with `unavailable`: it waits in the service until a change may let a runner take it, then looks again. A workflow step waits; a Thread title passes `fail`. This amends "Nothing is retried" in the How it ends bullet below.
 - **The status says whether a call can run now.** `controller.read` returns `unavailableReason`, the sentence that says why no text generation can run now, or null when one can.
 
+**Amended 2026-10-23 ([#827](https://github.com/theagenticage/hercule/issues/827)):** the Thread titles bullet below changes in two places. The call also answers `role`, so it returns `{ title, needsRefinement, role }`, and a fork of a Thread gets the call too, on its continuation prompt ([spec 06 §14.6](../spec/06-providers.md)).
+
 ## Context
 
 Every model call in Hercule was a Session: an agent with tools, a workspace and a transcript. Many small jobs need none of that. They need one call: some instructions and an input go in, and a short, validated piece of structured text comes out. A Thread's title is the first such job. Until now it was the first prompt cut short. Known later callers are branch names, run summaries, memory gists, English to CEL or cron, a plugin pulling refs out of a mail, and a pull request's title and body.

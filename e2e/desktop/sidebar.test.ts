@@ -4,12 +4,16 @@
  * (spec 17, §Design system, **The sidebar**):
  *
  * - the live socket connects from `app://hercule` under the release policy;
- * - the list groups the threads by project, newest created first, each row
- *   names its workspace and ends in the right mark, word or age;
+ * - the list groups the threads by project, then by workspace: the threads that
+ *   work in one workspace are one row, with dots for its threads, and the other
+ *   rows come newest first; each row names its workspace and ends in the right
+ *   mark, word or age;
  * - a Request that opens brings its thread into Waiting on you within 1 s, and
- *   takes it out again when it closes;
- * - a new thread appears at the top of its project, also one in a new
- *   worktree, which its row names;
+ *   takes it out again when it closes; a Request from a thread in a shared
+ *   workspace names the row and the thread that asks;
+ * - a new thread joins the row of its workspace, or appears at the top of its
+ *   project when it works alone, also one in a new worktree, which its row
+ *   names;
  * - a runner that goes offline shows its threads as offline until it returns;
  * - the list mounts about as many rows for 500 threads as for 40;
  * - the face switch, Threads | Hercule, sits in the window's drag strip and
@@ -46,13 +50,19 @@ const longTests = process.env["HERCULE_LONG_TESTS"] === "1";
  * line of text:
  *
  * - a section header: "Waiting on you 2", or "project Webshop";
- * - a Waiting on you row: its accessible name and its question, as
- *   "Thread 3, waiting on you: Run pnpm test?";
- * - a thread row: its accessible name, its second line and its status, as
- *   "Thread 1, working | main | Working",
+ * - a Waiting on you row: its accessible name and its question, after the
+ *   name of the thread that asks when it is not the row's lead, as
+ *   "Thread 1, waiting on you: Run pnpm test?" or
+ *   "Thread 1, waiting on you: Thread 3 asks · Run pnpm test?";
+ * - a row of one thread: its accessible name, its second line and its status,
+ *   as "Thread 1, working | main | Working",
  *   "Thread 4, working | studio | Queued" or
- *   "Thread 5, idle | laptop | now";
- * - a "more" row: its label, "35 more threads";
+ *   "Thread 5, idle | laptop | now". While a Request waits, the second line is
+ *   its question, as "Thread 1, waiting on you | Run pnpm test? | Approval";
+ * - a row of 2 or more threads: the same, then the accessible name of its dots,
+ *   which counts the threads in words, as
+ *   "Thread 1, working | main | Working | 2 threads: 2 working. Unfold";
+ * - a "more" row: its label, which counts rows, "35 more";
  * - the Draft Thread's row: its name and its end, "New thread | draft".
  *
  * The app opens on a Draft Thread in no project, so every list has the
@@ -75,7 +85,10 @@ function readSidebarItems(page: Page): Promise<string[]> {
       if (item.matches(".side-row--wait")) return `${name}: ${readText(".side-ask")}`;
       if (item.matches(".side-row--more")) return item.textContent;
       if (keyed?.getAttribute("data-key") === "draft") return `${name} | ${readText(".side-end")}`;
-      return `${name} | ${readText(".side-detail")} | ${readText(".side-end")}`;
+      const row = `${name} | ${readText(".side-detail")} | ${readText(".side-end")}`;
+      // Only a row of 2 or more threads has dots.
+      const dots = item.querySelector(".side-dots")?.getAttribute("aria-label");
+      return dots === null || dots === undefined ? row : `${row} | ${dots}`;
     }),
   );
 }
@@ -141,7 +154,7 @@ describe("the sidebar", () => {
     expect(refusals).toEqual([]);
   });
 
-  it("lists the threads by project, newest created first, each row naming where it works and ending in its status", async () => {
+  it("lists the rows by project, newest started first, each row naming where it works and ending in its status, and holds the threads of one workspace in one row", async () => {
     const { url, fleet, client, waitForStatus } = await arrangeFleet();
     const webshop = await fleet.createProject("Webshop");
     const payments = await fleet.createProject("Payments");
@@ -193,26 +206,31 @@ describe("the sidebar", () => {
     const { page } = await openSignedIn(url);
 
     // Payments comes first: its newest thread, Thread 6, is the newest of
-    // all. Inside a project the newest thread comes first, whatever workspace
-    // it works in. Both threads on the offline laptop are away: the idle one
-    // shows "offline", and the exited one shows its age, as spec 17's pose
-    // table has it for a session that has exited on an offline runner.
+    // all. Inside a project the row that started last comes first. Thread 3
+    // works in the same main workspace as Thread 1, so they are one row,
+    // named by Thread 1, the lead, and it started when Thread 1 did: Thread 2,
+    // in a worktree of its own, comes before it. The row waits because Thread
+    // 3 asks, so its second line is Thread 3's question, and Waiting on you
+    // lists Thread 3's question under the row's name. Both threads on the
+    // offline laptop are away: the idle one shows "offline", and the exited
+    // one shows its age, as spec 17's pose table has it for a session that
+    // has exited on an offline runner.
     await expect
       .poll(() => readSidebarItems(page))
       .toEqual([
         "Waiting on you 1",
-        "Thread 3, waiting on you: Run pnpm test?",
+        "Thread 1, waiting on you: Thread 3 asks · Run pnpm test?",
         "project Payments",
         "Thread 6, can't be reached | laptop | now",
         "Thread 5, can't be reached | laptop | Offline",
         "Thread 4, working | studio | Queued",
         "project Webshop",
-        "Thread 3, waiting on you | main | Approval",
         "Thread 2, working | studio | Working",
-        "Thread 1, working | main | Working",
+        "Thread 1, waiting on you | Thread 3 asks · Run pnpm test? | Approval | 2 threads: 1 waiting on you, 1 working. Unfold",
         "project No project",
         "New thread | draft",
       ]);
+    // The foot counts threads, not rows.
     expect(await readCounts(page)).toBe("3 working · 1 waiting · 0 idle");
   });
 
@@ -240,7 +258,7 @@ describe("the sidebar", () => {
       "Thread 1, waiting on you: Run pnpm test?",
       "project No project",
       "New thread | draft",
-      "Thread 1, waiting on you | studio | Approval",
+      "Thread 1, waiting on you | Run pnpm test? | Approval",
     ]);
 
     await client.session.respondToApprovalRequest({
@@ -251,7 +269,7 @@ describe("the sidebar", () => {
     await expect.poll(() => readSidebarItems(page)).toEqual(working);
   });
 
-  it("shows a new thread at the top of its project, also one in a new worktree, whose generated branch its row leaves out", async () => {
+  it("puts a new thread in the row of its workspace, or at the top of its project when it works in a new worktree, whose generated branch its row leaves out", async () => {
     const { url, fleet, client, waitForStatus } = await arrangeFleet();
     const webshop = await fleet.createProject("Webshop");
     const repository = await fleet.createRepository("https://github.com/example/webshop", [
@@ -275,13 +293,19 @@ describe("the sidebar", () => {
         "New thread | draft",
       ]);
 
-    await fleet.spawnThreads(1, { runner, projectId: webshop.id, workspace: primary });
+    // Thread 2 works in the same main workspace, so it joins Thread 1's row
+    // instead of getting one, and the row does not move.
+    const [second] = await fleet.spawnThreads(1, {
+      runner,
+      projectId: webshop.id,
+      workspace: primary,
+    });
+    await waitForStatus(second!.id, "busy");
     await expect
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        "Thread 2, working | main | Working",
-        "Thread 1, working | main | Working",
+        "Thread 1, working | main | Working | 2 threads: 2 working. Unfold",
         "project No project",
         "New thread | draft",
       ]);
@@ -299,8 +323,7 @@ describe("the sidebar", () => {
       .toEqual([
         "project Webshop",
         "Thread 3, working | studio | Working",
-        "Thread 2, working | main | Working",
-        "Thread 1, working | main | Working",
+        "Thread 1, working | main | Working | 2 threads: 2 working. Unfold",
         "project No project",
         "New thread | draft",
       ]);
@@ -351,8 +374,10 @@ describe("the sidebar", () => {
     const { page } = await openSignedIn(url);
     await expect.poll(() => readCounts(page)).toBe("40 working · 0 waiting · 0 idle");
 
-    await page.getByRole("button", { name: "35 more threads" }).click();
-    await page.getByRole("button", { name: "35 more threads" }).waitFor({ state: "detached" });
+    // Every thread works alone, so a row is a thread and the project hides 35 rows.
+    const moreRows = page.getByRole("button", { name: "35 more", exact: true });
+    await moreRows.click();
+    await moreRows.waitFor({ state: "detached" });
     const countMounted = () =>
       page.evaluate(() => ({
         rows: document.querySelectorAll('nav[aria-label="Threads"] .side-row').length,

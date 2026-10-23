@@ -26,6 +26,7 @@ import {
   MEMORY_TOPIC_COUNT_CAP,
   SHRINK_GUARD_MIN_SIZE,
 } from "./groups/memory";
+import { MAX_ROLE_LENGTH } from "./groups/session";
 import { MAX_WIKI_PAGES, MAX_WIKI_REVISIONS_LISTED } from "./groups/wiki-page";
 import type { OperationId } from "./operations";
 
@@ -3487,9 +3488,10 @@ export const CLI = {
     examples: [
       { args: [] },
       { args: ["--status", "busy", "--status", "idle"] },
-      { args: ["--thread", "true"] },
+      { args: ["--kind", "thread"] },
       { args: ["--conversation", "7b41d0a5", "--limit", "1"] },
-      { args: ["--thread", "false", "--active-since", "2026-10-09T12:00:00.000Z"] },
+      { args: ["--kind", "agent", "--kind", "run", "--active-since", "2026-10-09T12:00:00.000Z"] },
+      { args: ["--kind", "thread", "--done-since", "2026-10-09T12:00:00.000Z"] },
     ],
     fields: {
       status: {
@@ -3521,10 +3523,13 @@ export const CLI = {
         help: "Only the sessions carrying this Permission Profile, by its id or a tail of eight or more characters; use it to find which sessions stop a profile from being deleted.",
         resolves: "profile.query",
       },
-      thread: {
-        flag: "thread",
-        help: "true for the sessions with no Agent behind them - the ones a person drives by hand - and false for the rest.",
+      kind: {
+        flag: "kind",
+        help: "Only sessions of this kind; repeat the flag to list several kinds together. thread: no Agent behind it, the kind a person drives by hand. agent: spawned from an Agent, outside runs and assistants. run: started by a run's agent step. assistant: answers an assistant's conversation.",
       },
+      // The removed filter that `--kind thread` replaced. The API refuses it so an
+      // old client is told; the command line never offered it.
+      thread: { hidden: true },
       done: {
         flag: "done",
         help: "true for only the Threads marked Done, false for every session that is not; mark one with `hercule session done`.",
@@ -3532,6 +3537,10 @@ export const CLI = {
       activeSince: {
         flag: "active-since",
         help: "Only sessions that had not exited before this UTC instant, with milliseconds: sessions that are not exited, and sessions that exited at or after it.",
+      },
+      doneSince: {
+        flag: "done-since",
+        help: "Only sessions not marked Done, and the ones marked Done at or after this UTC instant, with milliseconds. Sessions that are not Threads are kept, because none is ever Done.",
       },
     },
   },
@@ -3596,9 +3605,13 @@ export const CLI = {
   },
   "session.spawn": {
     command: "session spawn",
-    help: "Starts a session, from an Agent or as a Thread driven by hand. With `--agent` every value comes from that Agent. Without one it is a Thread. A Thread the user starts takes the values of the user's thread settings. A Thread a session starts takes the values of the calling session: its Provider Instance, its model and options when the Thread runs on the same instance, its access mode, Permission Profile, project (unless it was deleted) and GitHub Connection. A session's spawn, a Thread or from an Agent, runs on the calling session's Runner and in its workspace, so a reviewer sees the caller's files; --runner or --workspace sends it elsewhere. Either way, a flag given here takes precedence. A session needs `thread.start` as well as `session.spawn` to start a Thread. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
+    help: "Starts a session, from an Agent or as a Thread driven by hand. With `--agent` every value comes from that Agent. Without one it is a Thread. A Thread the user starts takes the values of the user's thread settings. A Thread a session starts takes the values of the calling session: its Provider Instance, its model and options when the Thread runs on the same instance, its access mode, Permission Profile, project (unless it was deleted) and GitHub Connection. A session's spawn, a Thread or from an Agent, runs on the calling session's Runner and in its workspace, so a reviewer sees the caller's files; --runner or --workspace sends it elsewhere. Either way, a flag given here takes precedence. `--role` names the session's job, such as review, so clients can show it in place of the title. A session needs `thread.start` as well as `session.spawn` to start a Thread. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
     examples: [
       { args: [], stdin: "Look at the failing login test and tell me what you find." },
+      {
+        args: ["--role", "review"],
+        stdin: "Review the diff on this branch and report what you would change.",
+      },
       {
         args: ["--image", "login-error.png"],
         stdin: "This is what the login page shows. Find the cause.",
@@ -3672,6 +3685,10 @@ export const CLI = {
       outputSchema: {
         flag: "output-schema",
         help: "What every turn must return, as an inline JSON Schema; a keyword outside the subset every harness supports is rejected, and the error names the keyword.",
+      },
+      role: {
+        flag: "role",
+        help: `A one- or two-word name for this session's job, such as review, tests or migration; one line, at most ${String(MAX_ROLE_LENGTH)} characters. Clients show it in place of the title. Make it specific when a role is already taken, e.g. \`refunds review\`. Without it, a Thread gets one generated from its prompt.`,
       },
       instanceId: {
         flag: "instance",
@@ -3910,34 +3927,38 @@ export const CLI = {
   },
   "session.markDone": {
     command: "session done",
-    help: "Marks a Thread Done, as you: it leaves the project lists and waits on the Done shelf. Nothing about the Thread itself changes - a running Thread keeps running. Marking a Thread that is already Done changes nothing. Undo it with `hercule session reopen`; new input to the Thread reopens it too.",
-    examples: [{ args: ["1f3a9c2e"] }],
+    help: "Marks Threads Done, as you: each leaves the project lists and waits on the Done shelf. Nothing about a Thread itself changes - a running Thread keeps running. The list is applied all or nothing: if one id is unknown or is not a Thread, none is marked. Marking a Thread that is already Done changes nothing. Undo it with `hercule session reopen`; new input to a Thread reopens it too.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "7b41d0a5"] }],
     fields: {
-      id: {
+      sessionIds: {
         positional: true,
-        help: "The Thread's id, or a tail of eight or more characters; find it with `hercule session list --thread true`.",
+        placeholder: "session-id",
+        help: "A Thread's id, or a tail of eight or more characters; find it with `hercule session list --kind thread`. Give several to mark them done in one call.",
         resolves: "session.query",
+        resolvesQuery: { kind: "thread" },
       },
     },
     errors: {
       invalid_state:
-        "the session is not a Thread: it was spawned from an Agent, and only a Thread can be marked Done; stop it with `hercule session stop` instead",
+        "one session is not a Thread: it was spawned from an Agent, by a run or by an assistant, and only a Thread can be marked Done; the message names its id. Stop it with `hercule session stop` instead, or leave it out of the list. None of the list was marked",
     },
   },
   "session.reopen": {
     command: "session reopen",
-    help: "Takes a Thread off the Done shelf, as you, and puts it back at the top of its project's list. Reopening a Thread that is not Done changes nothing.",
-    examples: [{ args: ["1f3a9c2e"] }],
+    help: "Takes Threads off the Done shelf, as you, and puts each back at the top of its project's list. The list is applied all or nothing: if one id is unknown or is not a Thread, none is reopened. Reopening a Thread that is not Done changes nothing.",
+    examples: [{ args: ["1f3a9c2e"] }, { args: ["1f3a9c2e", "7b41d0a5"] }],
     fields: {
-      id: {
+      sessionIds: {
         positional: true,
-        help: "The Thread's id, or a tail of eight or more characters; find it with `hercule session list --done true`.",
+        placeholder: "session-id",
+        help: "A Thread's id, or a tail of eight or more characters; find it with `hercule session list --done true`. Give several to reopen them in one call.",
         resolves: "session.query",
+        resolvesQuery: { kind: "thread" },
       },
     },
     errors: {
       invalid_state:
-        "the session is not a Thread: it was spawned from an Agent, so it is never Done and there is nothing to reopen",
+        "one session is not a Thread: it was spawned from an Agent, by a run or by an assistant, so it is never Done and there is nothing to reopen; the message names its id. Leave it out of the list. None of the list was reopened",
     },
   },
 

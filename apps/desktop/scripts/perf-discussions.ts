@@ -229,7 +229,7 @@ export interface SeededDiscussions {
 export async function seedDiscussions(fixture: ThreadFixture): Promise<SeededDiscussions> {
   const { call, callAsSession } = fixture;
   const authorIds = (
-    await call<{ readonly items: readonly Session[] }>("GET", "/sessions?thread=true&limit=500")
+    await call<{ readonly items: readonly Session[] }>("GET", "/sessions?kind=thread&limit=500")
   ).items
     .filter((thread) => thread.status === "busy")
     .map((thread) => thread.id);

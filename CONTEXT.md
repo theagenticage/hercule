@@ -33,12 +33,15 @@ A fully-qualified canonical identifier for a thing outside Hercule (`github:issu
 _Avoid_: link, URL (a ref is an identity, not a location)
 
 **Session**:
-One run of a provider-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Not required to belong to a task or workspace.
+One run of a provider-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Every session has exactly one kind, the field `kind`: a Thread, an Agent's session, a run's step or an assistant's. Not required to belong to a task or workspace.
 _Avoid_: execution, chat, conversation (reserved for an assistant's exchange in one channel container); "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
 
 **Thread**:
 A session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. Nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
 _Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
+
+**Role**:
+A session's one- or two-word name for what it does, such as review, tests or migration. Not a permission. It is given at spawn, or generated with a Thread's title; clients show it in place of the title.
 
 **Subagent**:
 An agent a session's harness delegated work to while the session runs. It works inside that session's process and settings, has turns and a transcript of its own within the session's, and may start subagents of its own. It is not a Session: it is never resumed or forked on its own, and it does not outlive its session's process.

@@ -7,7 +7,9 @@
  * the full height) of:
  * - each scene of the sidebar states specimen (specimens/sidebar-states.tsx),
  *   written to out/sidebar-states/<theme>-<scene>.png. A scene whose list is
- *   taller than the window fails, because the capture would cut off its end;
+ *   taller than the window fails, because the capture would cut off its end.
+ *   A scene that shows a group's card also captures the card, beside the
+ *   sidebar;
  * - each scene that has a thread row again, with the pointer on its last
  *   thread row that is not selected, so the row's Done or Reopen button
  *   shows, written to out/sidebar-states/<theme>-<scene>-hover.png;
@@ -32,6 +34,9 @@ import {
   startCaptureApp,
   THEMES,
 } from "./sheet-window.ts";
+
+/** The sidebar and the card beside it: the card sits 8px from the sidebar and is 312px wide. */
+const SIDEBAR_AND_CARD_REGION = { ...SIDEBAR_REGION, width: SIDEBAR_REGION.width + 8 + 312 };
 
 const repositoryDir = fileURLToPath(new URL("../../../", import.meta.url));
 const outputDir = fileURLToPath(new URL("../out/sidebar-states/", import.meta.url));
@@ -144,7 +149,14 @@ startCaptureApp(async (sheetsUrl) => {
       try {
         if (page.mustFit) await assertListFits(window, page.url);
         if (page.hover && !(await hoverLastRow(window))) continue;
-        const { image } = await captureSheet(window, SIDEBAR_REGION);
+        // The page marks a scene whose card shows (see `showGroupCard`).
+        const cardShows = (await window.webContents.executeJavaScript(
+          `document.documentElement.dataset.cardShown !== undefined`,
+        )) as boolean;
+        const { image } = await captureSheet(
+          window,
+          cardShows ? SIDEBAR_AND_CARD_REGION : SIDEBAR_REGION,
+        );
         const file = join(outputDir, `${page.name}.png`);
         writeFileSync(file, image.toPNG());
         files.push(relative(repositoryDir, file));

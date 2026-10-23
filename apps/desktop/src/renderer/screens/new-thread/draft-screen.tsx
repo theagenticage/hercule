@@ -4,7 +4,12 @@
  * question, the Draft Thread's composer, and the start cards.
  */
 import { lazy, Suspense, useRef, useState, useSyncExternalStore, type JSX } from "react";
-import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useIsMutating,
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
   appendToMessage,
@@ -18,6 +23,7 @@ import {
   isMutationRunning,
   joinPhraseText,
   listProjectRepos,
+  listSessionsOfWorkspace,
   listWorkspaceThreads,
   markShelfItemsExpired,
   queryKeys,
@@ -31,7 +37,7 @@ import {
 import type { SessionSpawnInput, Workspace } from "@hercule/contract";
 import { useDraftThread } from "../../app/draft-thread";
 import { buildDraftKey } from "../../app/pending-submissions";
-import { threadsQuery } from "../../app/queries";
+import { liveAgentSessionsQuery, threadAndAgentSessionsQuery } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
 import { buildLook, Face } from "../../faces";
 import { useComposerImages } from "../attachments/use-composer-images";
@@ -118,6 +124,8 @@ export function DraftScreen({
   }
   const { fields, catalogs, joinedWorkspace } = view;
   const { projects, workspaces } = catalogs;
+  const threadsAndPartners = useSuspenseQuery(threadAndAgentSessionsQuery(client)).data;
+  const agentSessions = useSuspenseQuery(liveAgentSessionsQuery(client)).data;
   const inspection = useMutation({
     mutationFn: (id: string) => client.workspace.inspect({ params: { id } }),
     onSuccess: (current) => {
@@ -145,7 +153,9 @@ export function DraftScreen({
     onSuccess: (session, sent) => {
       // The thread screen opens on this session without reading it again.
       queryClient.setQueryData(queryKeys.session(session.id), session);
-      void queryClient.invalidateQueries({ queryKey: threadsQuery(client).queryKey });
+      void queryClient.invalidateQueries({
+        queryKey: threadAndAgentSessionsQuery(client).queryKey,
+      });
       pendingSubmissions.clearSent(key, sent);
       if (sent.recent !== null) rememberRecentModel(controller.url, sent.recent);
     },
@@ -214,6 +224,11 @@ export function DraftScreen({
         projectId={projectId}
         projects={projects}
         tabs={listWorkspaceThreads(joinedWorkspace, catalogs.sessions)}
+        workspaceSessions={
+          joinedWorkspace === undefined
+            ? []
+            : listSessionsOfWorkspace(joinedWorkspace.id, [...threadsAndPartners, ...agentSessions])
+        }
         runners={catalogs.runners}
       />
       <div

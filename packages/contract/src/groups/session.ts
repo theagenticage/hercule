@@ -40,9 +40,9 @@ import { AttachmentId, MAX_ATTACHMENTS_PER_INPUT } from "./attachment";
 import { PermissionRequest } from "./permission";
 import { SessionSkillList } from "./session-skill";
 import { Branch } from "./workspace";
-import { page, pageParams } from "../pagination";
+import { MAX_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { atMost, bounded } from "../strings";
+import { atMost, bounded, nonBlankLine } from "../strings";
 
 /**
  * The request, subagent and usage vocabulary comes from the runner protocol;
@@ -168,8 +168,51 @@ export type ThreadDone = Schema.Schema.Type<typeof ThreadDone>;
  */
 export const THREAD_BRANCH_PREFIX = "hercule/thread-";
 
+/** The most characters a session's role may hold. */
+export const MAX_ROLE_LENGTH = 24;
+
+/**
+ * A session's role: its one- or two-word name for its job, such as "review",
+ * "tests" or "migration". One line, with no whitespace at either end, no
+ * control or invisible formatting characters, and at most `MAX_ROLE_LENGTH`
+ * characters. The zero-width non-joiner and joiner (U+200C and U+200D) are
+ * allowed, because some scripts need them to shape letters and emoji
+ * sequences need them to stay one emoji. A role names what the session does;
+ * it is not a permission.
+ */
+export const SessionRole = nonBlankLine(MAX_ROLE_LENGTH).check(
+  Schema.isTrimmed({ message: "must not start or end with whitespace" }),
+  Schema.makeFilter((role: string) =>
+    /(?![\u200C\u200D])[\p{Cc}\p{Cf}]/u.test(role)
+      ? "must not hold control or invisible formatting characters"
+      : undefined,
+  ),
+);
+
+/**
+ * What a session is, which every session has exactly one of:
+ *
+ * - `thread`: no Agent is behind it. A Thread that a run's step or an
+ *   assistant started is still a `thread`;
+ * - `run`: an Agent session that a run's agent step started;
+ * - `assistant`: an Agent session that answers an assistant's conversation;
+ * - `agent`: any other Agent session, such as one a Thread or another
+ *   session spawned from an Agent.
+ */
+export const SESSION_KINDS = ["thread", "agent", "run", "assistant"] as const;
+
+export const SessionKind = Schema.Literals(SESSION_KINDS);
+
+export type SessionKind = Schema.Schema.Type<typeof SessionKind>;
+
 export const Session = Schema.Struct({
   id: Id,
+  /**
+   * What the session is. Computed from `agentId`, `runId` and `conversationId`,
+   * which stay as the records the session came from. Clients read `kind`
+   * instead of testing those ids for null.
+   */
+  kind: SessionKind,
   /**
    * The session's title, capped at 80 characters. For an agent step's session
    * it is the run's workflow name and the step's id, as
@@ -181,6 +224,15 @@ export const Session = Schema.Struct({
    * generated title was judged too vague is stored but not exposed here.
    */
   title: Schema.String,
+  /**
+   * The session's one- or two-word name for its job, such as "review". It is
+   * the role given at spawn; else, for a Thread, the one generated with its
+   * title; else null. Clients show the role, or the title cut short when it
+   * is null. An agent session has only the role given at spawn. A fork takes
+   * none from its parent. Once set, a role never changes: `session.update` has
+   * no `role`.
+   */
+  role: Schema.NullOr(Schema.String),
   status: SessionStatus,
   /**
    * Computed when the session is read, never stored. True when all of these hold:
@@ -465,6 +517,12 @@ export const SessionSpawnInput = closedStruct({
   /** Ids from `attachment.create`; the prompt's images. */
   attachments: PromptAttachments,
   /**
+   * The session's role, its name for its job. Once set, a role never changes:
+   * `session.update` has no `role`. A Thread spawned without one gets a
+   * generated role, when that succeeds.
+   */
+  role: Schema.optionalKey(SessionRole),
+  /**
    * The Agent to spawn from. Its fields take the place of the Thread's
    * defaults, with the same precedence. `instanceId` and `permissionProfileId`
    * are rejected with it, because the Agent sets both.
@@ -691,6 +749,13 @@ export const SessionStatusFilter = Schema.Union([
  */
 export const SessionRunFilter = Schema.Union([Id, Schema.NonEmptyArray(Id)]);
 
+/**
+ * One kind, or several. The desktop sidebar reads its Threads and Agent
+ * sessions in one read. The query string carries several as repeated `kind`
+ * keys.
+ */
+export const SessionKindFilter = Schema.Union([SessionKind, Schema.NonEmptyArray(SessionKind)]);
+
 export const SessionFilter = Schema.Struct({
   status: Schema.optionalKey(SessionStatusFilter),
   runnerId: Schema.optionalKey(Id),
@@ -702,8 +767,8 @@ export const SessionFilter = Schema.Struct({
   conversationId: Schema.optionalKey(Id),
   /** Only the sessions these runs' agent steps started. */
   runId: Schema.optionalKey(SessionRunFilter),
-  /** `true` lists the sessions with no Agent behind them; `false` lists the rest. */
-  thread: Schema.optionalKey(Schema.Boolean),
+  /** Only the sessions of these kinds. */
+  kind: Schema.optionalKey(SessionKindFilter),
   /**
    * `true` lists only the Threads marked Done; `false` lists only the
    * sessions that are not, which is every session that is not a Thread too.
@@ -716,6 +781,23 @@ export const SessionFilter = Schema.Struct({
    * session is kept whatever its `exitedAt` says.
    */
   activeSince: Schema.optionalKey(Timestamp),
+  /**
+   * Only sessions not marked Done, and the ones marked Done at or after this
+   * instant. Every session that is not a Thread is kept, because none is ever
+   * Done.
+   */
+  doneSince: Schema.optionalKey(Timestamp),
+});
+
+/**
+ * The removed `thread` filter of `session.query`. Decoding fails for any value,
+ * because an unknown query key is dropped without a word, and an older client
+ * that still sends `thread=true` would otherwise get every session back.
+ */
+const RemovedThreadFilter = Schema.Never.annotate({
+  description: "removed; use kind",
+  message:
+    "The thread filter was replaced by kind. Send kind=thread to list only Threads, or remove the field.",
 });
 
 export const SESSION_SORT_FIELDS = ["createdAt"] as const;
@@ -754,11 +836,22 @@ export const SkillsPreviewFilter = Schema.Struct({
 
 export type SkillsPreviewFilter = Schema.Schema.Type<typeof SkillsPreviewFilter>;
 
+/** The most Threads one call of `session.markDone` or `session.reopen` names. */
+export const MAX_SESSION_IDS = MAX_PAGE_LIMIT;
+
+/** The payload of `session.markDone` and `session.reopen`: the Threads to move, in one call. */
+export const SessionIdsInput = Schema.Struct({
+  sessionIds: atMost(Id, MAX_SESSION_IDS).check(Schema.isMinLength(1)),
+});
+
+export type SessionIdsInput = Schema.Schema.Type<typeof SessionIdsInput>;
+
 export const session = HttpApiGroup.make("session")
   .add(
     HttpApiEndpoint.get("query", "/sessions", {
       query: Schema.Struct({
         ...SessionFilter.fields,
+        thread: Schema.optionalKey(RemovedThreadFilter),
         ...pageParams(SESSION_SORT_FIELDS).fields,
       }),
       success: page(Session),
@@ -835,14 +928,14 @@ export const session = HttpApiGroup.make("session")
       success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
-    HttpApiEndpoint.post("markDone", "/sessions/:id/mark-done", {
-      params: { id: Id },
-      success: Session,
+    HttpApiEndpoint.post("markDone", "/sessions/mark-done", {
+      payload: SessionIdsInput,
+      success: Schema.Array(Session),
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
-    HttpApiEndpoint.post("reopen", "/sessions/:id/reopen", {
-      params: { id: Id },
-      success: Session,
+    HttpApiEndpoint.post("reopen", "/sessions/reopen", {
+      payload: SessionIdsInput,
+      success: Schema.Array(Session),
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )

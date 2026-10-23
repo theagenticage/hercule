@@ -60,6 +60,7 @@ import {
   NotFound,
   SESSION_SORT_FIELDS,
   SessionFilter,
+  SessionRole,
   SUBAGENT_SORT_FIELDS,
   TRANSCRIPT_SORT_FIELDS,
   TranscriptPosition,
@@ -71,6 +72,8 @@ import {
   type Input,
   type Passage,
   type Session,
+  type SessionIdsInput,
+  type SessionKind,
   type SessionRequest,
   type SessionStatus,
   type Subagent,
@@ -265,6 +268,8 @@ export interface CreateRequest {
    * from the prompt (`buildTitle`).
    */
   readonly title: string | undefined;
+  /** The role the caller chose; `undefined` for a session that starts without one. */
+  readonly role: string | undefined;
   readonly kind: "session.spawned" | "session.continued";
   /** The audit entry's payload, apart from the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
@@ -485,13 +490,21 @@ const INPUT_DIRECTION: SortDirection = "asc";
 
 const NO_SUCH_INPUT = "no such input on that session";
 
-/** The refusal of `markDone` for a session that is not a Thread. */
-const MARK_DONE_NOT_A_THREAD =
-  "only a Thread can be marked Done, and this session was spawned from an Agent; stop it with session.stop instead";
+/**
+ * Returns the refusal of `markDone` for the session `id`, which is not a
+ * Thread. The whole call changed nothing, so the message says which id to
+ * remove.
+ */
+const describeMarkDoneRefusal = (id: string, kind: SessionKind): string =>
+  `${id} is not a Thread (its kind is ${kind}), and only a Thread can be marked Done; stop it with session.stop instead. Nothing was marked Done, so remove that id and try again`;
 
-/** The refusal of `reopen` for a session that is not a Thread. */
-const REOPEN_NOT_A_THREAD =
-  "only a Thread can be reopened, and this session was spawned from an Agent, so it is never Done and there is nothing to reopen";
+/**
+ * Returns the refusal of `reopen` for the session `id`, which is not a
+ * Thread. The whole call changed nothing, so the message says which id to
+ * remove.
+ */
+const describeReopenRefusal = (id: string, kind: SessionKind): string =>
+  `${id} is not a Thread (its kind is ${kind}), so it is never Done and there is nothing to reopen. Nothing was reopened, so remove that id and try again`;
 
 const NO_SUCH_SUBAGENT =
   "no such subagent on that session; list the session's subagents to find their ids";
@@ -608,29 +621,32 @@ const findNativeId = (event: ProviderEvent): string | undefined =>
 const MAX_TITLE_LENGTH = 80;
 
 /**
- * Trims a title and cuts it to `MAX_TITLE_LENGTH`. The cut can land right
- * after a space, so the end is trimmed again: a title never ends in
- * whitespace.
+ * Trims a title and cuts it to `MAX_TITLE_LENGTH` characters, counted by code
+ * point so the cut never splits an emoji or another character outside the
+ * Basic Multilingual Plane. The cut can land right after a space, so the end
+ * is trimmed again: a title never ends in whitespace.
  */
-const cutTitle = (title: string): string => title.trim().slice(0, MAX_TITLE_LENGTH).trimEnd();
+const cutTitle = (title: string): string =>
+  Array.from(title.trim()).slice(0, MAX_TITLE_LENGTH).join("").trimEnd();
 
 /**
- * Cleans a title a model generated: line breaks and repeated spaces become
- * single spaces, control and format characters are removed, and the result is
- * cut by `cutTitle`. A model can emit zero-width or direction-changing
- * characters, which would show up as nothing in a sidebar row but break
- * searching and copying. The zero-width non-joiner and joiner (U+200C and
- * U+200D) stay, because Persian and other scripts need them to shape letters,
- * and emoji sequences need them to stay one emoji.
+ * Cleans text a model generated: line breaks and repeated spaces become
+ * single spaces, and control and format characters are removed. It does not
+ * trim or cut. A model can emit zero-width or direction-changing characters,
+ * which would show up as nothing in a sidebar row but break searching and
+ * copying. The zero-width non-joiner and joiner (U+200C and U+200D) stay,
+ * because Persian and other scripts need them to shape letters, and emoji
+ * sequences need them to stay one emoji.
  */
-const cleanGeneratedTitle = (title: string): string =>
-  cutTitle(
-    title
-      .replace(/\s+/g, " ")
-      .replace(/(?![\u200C\u200D])[\p{Cc}\p{Cf}]/gu, "")
-      // Removing a character between two spaces leaves a double space.
-      .replace(/ {2,}/g, " "),
-  );
+const cleanGeneratedText = (text: string): string =>
+  text
+    .replace(/\s+/g, " ")
+    .replace(/(?![\u200C\u200D])[\p{Cc}\p{Cf}]/gu, "")
+    // Removing a character between two spaces leaves a double space.
+    .replace(/ {2,}/g, " ");
+
+/** Checks a role a model generated: the same rule as a role given at spawn. */
+const isAcceptableRole = Schema.is(SessionRole);
 
 /**
  * Builds a session's short title, trimmed and cut by `cutTitle`:
@@ -743,17 +759,17 @@ const make = Effect.gen(function* () {
   /**
    * Reads the session `id` and checks that it is a Thread. Fails with
    * `NotFound` when there is no such session, and with `InvalidState`
-   * carrying `refusal` as its message when the session was spawned from an
-   * Agent.
+   * carrying `describeRefusal(id, kind)` as its message when the session is not a
+   * Thread.
    */
   const readThread = (
     id: string,
-    refusal: string,
+    describeRefusal: (id: string, kind: SessionKind) => string,
   ): Effect.Effect<StoredSession, NotFound | InvalidState | SqlError> =>
     Effect.flatMap(readSession(id), (session) =>
-      session.agentId === null
+      session.kind === "thread"
         ? Effect.succeed(session)
-        : Effect.fail(createInvalidStateError(refusal)),
+        : Effect.fail(createInvalidStateError(describeRefusal(id, session.kind))),
     );
 
   /**
@@ -1533,23 +1549,24 @@ const make = Effect.gen(function* () {
           permissionProfileId,
           conversationId,
           runId,
-          thread,
+          kind,
           done,
           activeSince,
+          doneSince,
         } = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
+        const kinds = kind === undefined ? undefined : [kind].flat();
         // A Thread is a session with no Agent behind it. `agentId` filters for
-        // the sessions of one Agent, and `thread` filters for the sessions
-        // with no Agent, so no session can match both. A query with both would
-        // return an empty page, which looks like "there are none" instead of
-        // "the query is wrong".
-        if (agentId !== undefined && thread !== undefined) {
+        // the sessions of one Agent, so it can match none of the sessions in a
+        // query for Threads alone. Such a query would return an empty page,
+        // which looks like "there are none" instead of "the query is wrong".
+        if (agentId !== undefined && kinds?.every((each) => each === "thread")) {
           return yield* Effect.fail(
             createValidationError([
               {
-                path: ["thread"],
+                path: ["kind"],
                 message:
                   "a Thread is a session with no agent, so a query cannot ask for both: " +
-                  "send agentId to list one agent's sessions, or thread to list the " +
+                  "send agentId to list one agent's sessions, or kind=thread to list the " +
                   "sessions that have no agent",
               },
             ]),
@@ -1562,7 +1579,7 @@ const make = Effect.gen(function* () {
         if (
           done === true &&
           (agentId !== undefined ||
-            thread === false ||
+            kinds?.every((each) => each !== "thread") ||
             runId !== undefined ||
             conversationId !== undefined)
         ) {
@@ -1572,8 +1589,8 @@ const make = Effect.gen(function* () {
                 path: ["done"],
                 message:
                   "only a Thread can be Done, and agentId, runId, conversationId and " +
-                  "thread=false match only sessions spawned from an Agent: drop those " +
-                  "filters, or drop done",
+                  "a kind without thread match only sessions spawned from an Agent: drop " +
+                  "those filters, or drop done",
               },
             ]),
           );
@@ -1589,9 +1606,10 @@ const make = Effect.gen(function* () {
             permissionProfileId,
             conversationId,
             runId,
-            thread,
+            kind,
             done,
             activeSince,
+            doneSince,
           }),
         );
         const composeRecord = yield* recordComposer;
@@ -1625,59 +1643,83 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Marks a Thread Done, stamped with the caller, and returns the Thread.
-     * A Thread that is already Done is returned as it is, and nothing is
-     * written. Marking changes only how the Thread is filed: a running
-     * Thread keeps running.
+     * Marks Threads Done, stamped with the caller, all at one time, and
+     * returns the Threads in the order given. A Thread that is already Done is
+     * returned as it is, and nothing is written for it. Marking changes only
+     * how a Thread is filed: a running Thread keeps running.
      *
-     * Fails with `NotFound` when there is no such session, and with
-     * `InvalidState` when the session is not a Thread.
+     * The list is applied all or nothing, in one transaction: when one id
+     * fails, no Thread is marked.
+     *
+     * Fails with `NotFound` when an id is not a session, and with
+     * `InvalidState` when a session is not a Thread.
      */
     markDone: (
-      id: Id,
-    ): Effect.Effect<Session, Exclude<ReadError | NotFound | InvalidState, Validation>> =>
+      input: SessionIdsInput,
+    ): Effect.Effect<
+      ReadonlyArray<Session>,
+      Exclude<ReadError | NotFound | InvalidState, Validation>
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("session.markDone");
         const actor = yield* currentStamp;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            const session = yield* readThread(id, MARK_DONE_NOT_A_THREAD);
             const at = yield* nowIso;
-            if (yield* sessions.markDone(id, actor, at)) {
-              yield* audit.append({
-                kind: "session.markedDone",
-                actor,
-                record: { topic: "session", id, conversationId: session.conversationId },
-                payload: { sessionId: id },
-                at,
-              });
+            for (const id of input.sessionIds) {
+              const session = yield* readThread(id, describeMarkDoneRefusal);
+              if (yield* sessions.markDone(id, actor, at)) {
+                yield* audit.append({
+                  kind: "session.markedDone",
+                  actor,
+                  record: { topic: "session", id, conversationId: session.conversationId },
+                  payload: { sessionId: id },
+                  at,
+                });
+              }
             }
-            return (yield* recordComposer)(yield* readSession(id));
+            const composeRecord = yield* recordComposer;
+            return yield* Effect.forEach(input.sessionIds, (id) =>
+              Effect.map(readSession(id), composeRecord),
+            );
           }),
         );
       }),
 
     /**
-     * Takes the Done mark off a Thread, as the caller, and returns the
-     * Thread. A Thread that is not Done is returned as it is, and nothing is
-     * written, so its `reopenedAt` does not move.
+     * Takes the Done mark off Threads, as the caller, all at one time, and
+     * returns the Threads in the order given. A Thread that is not Done is
+     * returned as it is, and nothing is written for it, so its `reopenedAt`
+     * does not move.
      *
-     * Fails with `NotFound` when there is no such session, and with
-     * `InvalidState` when the session is not a Thread.
+     * The list is applied all or nothing, in one transaction: when one id
+     * fails, no Thread is reopened.
+     *
+     * Fails with `NotFound` when an id is not a session, and with
+     * `InvalidState` when a session is not a Thread.
      */
     reopen: (
-      id: Id,
-    ): Effect.Effect<Session, Exclude<ReadError | NotFound | InvalidState, Validation>> =>
+      input: SessionIdsInput,
+    ): Effect.Effect<
+      ReadonlyArray<Session>,
+      Exclude<ReadError | NotFound | InvalidState, Validation>
+    > =>
       Effect.gen(function* () {
         yield* requireGrant("session.reopen");
         const actor = yield* currentStamp;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* readThread(id, REOPEN_NOT_A_THREAD);
-            yield* reopenThread(id, actor, yield* nowIso, undefined);
-            return (yield* recordComposer)(yield* readSession(id));
+            const at = yield* nowIso;
+            for (const id of input.sessionIds) {
+              yield* readThread(id, describeReopenRefusal);
+              yield* reopenThread(id, actor, at, undefined);
+            }
+            const composeRecord = yield* recordComposer;
+            return yield* Effect.forEach(input.sessionIds, (id) =>
+              Effect.map(readSession(id), composeRecord),
+            );
           }),
         );
       }),
@@ -1847,6 +1889,7 @@ const make = Effect.gen(function* () {
         yield* sessions.insert({
           id: open.id,
           title: buildTitle(open.title, open.prompt, references[0]?.name),
+          role: open.role,
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
           conversationId: open.conversationId,
@@ -2411,32 +2454,44 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Replaces a Thread's cut-short title with one a model generated from its
-     * first message, and stores `needsRefinement`, the model's own judgement
-     * that the first message was too vague for a good title. Announces the
-     * session, so clients show the new title. Runs in its own transaction.
+     * Stores what the title generation answered for a Thread's first message:
+     * a title, `needsRefinement` (the model's own judgement that the message
+     * was too vague for a good title), and a role. Announces the session, so
+     * clients show the change. Runs in its own transaction.
      *
-     * The title is cleaned by `cleanGeneratedTitle`: line breaks and repeated
-     * spaces become single spaces, control and format characters are removed,
-     * and it is cut to `MAX_TITLE_LENGTH`. A title that is empty after
-     * cleaning changes nothing, and the cut-short title stays.
+     * Title and role are accepted on their own, so one can be stored while the
+     * other is dropped. Both are cleaned by `cleanGeneratedText` first:
+     * line breaks and repeated spaces become single spaces, and control and
+     * format characters are removed.
+     *
+     * - The title is cut to `MAX_TITLE_LENGTH`. A title that is empty after
+     *   cleaning is dropped, and the cut-short title stays.
+     * - The role is never cut, because a cut role reads as a broken phrase.
+     *   It is dropped unless it is a valid `SessionRole`: the one rule for a
+     *   role given at spawn and a generated one. A session that already has a
+     *   role keeps it.
+     *
+     * When both are dropped, nothing is written or announced.
      *
      * No user can rename a session today, so there is no user-chosen title to
      * protect. A system write like this one carries no actor, as with
      * `setSelection`.
      */
-    setGeneratedTitle: (
+    setGeneratedTitleAndRole: (
       sessionId: string,
-      title: string,
-      needsRefinement: boolean,
+      answer: { readonly title: string; readonly needsRefinement: boolean; readonly role: string },
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const cleaned = cleanGeneratedTitle(title);
-        if (cleaned === "") return;
+        const title = cutTitle(cleanGeneratedText(answer.title));
+        const cleanedRole = cleanGeneratedText(answer.role).trim();
+        const validRole = isAcceptableRole(cleanedRole) ? cleanedRole : undefined;
+        if (title === "" && validRole === undefined) return;
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* sessions.setGeneratedTitle(sessionId, cleaned, needsRefinement);
+            if (title !== "")
+              yield* sessions.setGeneratedTitle(sessionId, title, answer.needsRefinement);
+            if (validRole !== undefined) yield* sessions.setGeneratedRole(sessionId, validRole);
             yield* announceSessionChangeById(sessionId);
           }),
         );

@@ -15,6 +15,8 @@ export const ZONE = "Europe/Amsterdam";
 export const SESSION: Session = {
   id: SESSION_ID,
   title: "Fix the login bug",
+  kind: "thread",
+  role: null,
   status: "idle",
   resumable: false,
   resumeHeld: false,

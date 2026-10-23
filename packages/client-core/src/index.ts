@@ -277,7 +277,7 @@ export {
   type Waiting,
   type WaitingAssistant,
   type WaitingRunSession,
-  type WaitingThread,
+  type WaitingSession,
 } from "./waiting";
 export { buildIdOptions } from "./id-options";
 export { readJsonObject, readStringList } from "./json-shape";
@@ -613,10 +613,9 @@ export { decideOfficeSeating, type OfficeRoom, type OfficeSeating } from "./offi
 export {
   decideArrivedAt,
   isRestingPose,
-  isThreadSeated,
+  isSessionSeated,
   listWork,
   type OfficePose,
-  type SessionOrigin,
   type Work,
   type WorkKind,
   type Worker,
@@ -729,7 +728,6 @@ export {
   type ModelPill,
 } from "./threads/composer-fields";
 export { holdsMessageContent, readThreadConfig } from "./threads/config";
-export { countThreadsByPose, type ThreadCounts } from "./threads/counts";
 export { buildDraftView, type DraftAddress, type DraftView } from "./threads/draft-view";
 export type {
   MessageDraft,
@@ -826,27 +824,37 @@ export {
   type ProjectGroup,
   type WorkspaceGroup,
 } from "./threads/groups";
+export { orderProjectIdsByNewestGroup } from "./threads/session-groups";
 export {
-  holdsDraft,
-  listProjectRows,
-  orderProjectIdsByNewestThread,
-  sortProjectsByNewestThread,
-  type ProjectRow,
-} from "./threads/project-rows";
+  prepareSessionPresentation,
+  type SessionCounts,
+  type SessionPresentation,
+} from "./threads/session-presentation";
 export {
-  buildDoneShelf,
-  buildSidebarSections,
+  type GroupAsk,
+  type GroupMember,
+  type GroupRow,
+  type GroupSummary,
+  type SessionDot,
+} from "./threads/group-row";
+export {
   DONE_SHELF_LIMIT,
   DONE_SHELF_STEP,
+  selectSidebar,
   type DoneShelf,
+  type DoneShelfRow,
   type ExpandedSections,
   type ProjectSection,
-  type SidebarSections,
+  type SidebarChoices,
+  type SidebarLine,
+  type SidebarRow,
+  type SidebarView,
   type WaitingSection,
 } from "./threads/sidebar-sections";
 export {
   buildSiblingTabs,
-  labelSessionTab,
+  labelWorkspaceSessions,
+  listSessionsOfWorkspace,
   listWorkspaceSessionTabs,
   listWorkspaceThreads,
   type ThreadTab,

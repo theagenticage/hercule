@@ -142,7 +142,7 @@ import {
   snoozeTimerQuery,
   startTasksQuery,
   subagentsQuery,
-  threadsQuery,
+  threadAndAgentSessionsQuery,
   trackingDetailQuery,
   trackingQuery,
   yourWorkQuery,
@@ -165,6 +165,7 @@ import {
 } from "../app/pending-submissions";
 import { createAppearanceStore } from "../app/appearance";
 import { createQueryClient } from "../app/query-client";
+import { SessionPresentationProvider } from "../app/session-presentation";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
 import { DraftScreen } from "../screens/new-thread/draft-screen";
 import { AgentPage } from "../screens/thread/agent-page";
@@ -562,7 +563,7 @@ const seedQueryCache = (
     wiki,
   }: OpenScreens,
 ): void => {
-  queryClient.setQueryData(threadsQuery(client).queryKey, records.threads);
+  queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, records.threads);
   queryClient.setQueryData(projectsQuery(client).queryKey, records.projects);
   queryClient.setQueryData(workspacesQuery(client).queryKey, records.workspaces);
   queryClient.setQueryData(resourcesQuery(client).queryKey, records.resources);
@@ -639,6 +640,10 @@ const seedQueryCache = (
       items: [],
       skipped: [],
     });
+  } else {
+    // A page opened on the Draft Thread screen with no draft of its own, such
+    // as the sidebar states' Hercule face, still previews the draft's skills.
+    queryClient.setQueryData(previewSkillsQuery(client, {}).queryKey, { items: [], skipped: [] });
   }
   if (assistantsSettings !== undefined) {
     queryClient.setQueryData(profilesQuery(client).queryKey, assistantsSettings.profiles);
@@ -832,9 +837,11 @@ const seedQueryCache = (
  */
 function ShellLayout(): JSX.Element {
   return (
-    <Shell onNewThread={() => undefined}>
-      <Outlet />
-    </Shell>
+    <SessionPresentationProvider>
+      <Shell onNewThread={() => undefined}>
+        <Outlet />
+      </Shell>
+    </SessionPresentationProvider>
   );
 }
 

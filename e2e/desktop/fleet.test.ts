@@ -345,14 +345,14 @@ describe("the scripted fleet", () => {
     await expect
       .poll(
         async () => {
-          const { items } = await client.session.query({ query: { thread: true, limit: 500 } });
+          const { items } = await client.session.query({ query: { kind: "thread", limit: 500 } });
           return items.filter((session) => session.status === "busy").length;
         },
         { timeout: 30_000 },
       )
       .toBe(500);
     const settled = performance.now();
-    const { items } = await client.session.query({ query: { thread: true, limit: 500 } });
+    const { items } = await client.session.query({ query: { kind: "thread", limit: 500 } });
     const listed = performance.now();
 
     expect(items).toHaveLength(500);

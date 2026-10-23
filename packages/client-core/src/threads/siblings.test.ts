@@ -2,11 +2,14 @@
  * Tests the tab strip above a thread. It appears only when there is something
  * to switch between, it keeps the workspace's thread order rather than
  * sorting by activity, and a draft that joins the workspace is the last tab.
+ * It also tests the label each tab shows: a role, numbered when it repeats.
  */
+import type { Session } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import {
   buildSiblingTabs,
-  labelSessionTab,
+  labelWorkspaceSessions,
+  listSessionsOfWorkspace,
   listWorkspaceSessionTabs,
   listWorkspaceThreads,
 } from "./siblings";
@@ -107,20 +110,61 @@ describe("listWorkspaceSessionTabs", () => {
   });
 });
 
-describe("labelSessionTab", () => {
-  it("is a thread's title", () => {
-    expect(labelSessionTab(SESSIONS[1]!)).toBe("Fix flaky webhook tests");
+describe("labelWorkspaceSessions", () => {
+  const at = (minute: number): string => `2026-09-10T09:${String(minute).padStart(2, "0")}:00.000Z`;
+  const labelsOf = (sessions: readonly Session[]): string[] => {
+    const labels = labelWorkspaceSessions(sessions);
+    return sessions.map((session) => labels.get(session.id) ?? "missing");
+  };
+
+  it("labels a session with its role, a Thread included", () => {
+    expect(
+      labelsOf([
+        buildSession({ id: "s-lead", kind: "thread", role: "build", createdAt: at(0) }),
+        buildSession({ id: "s-agent", role: "review", title: "Check the diff", createdAt: at(1) }),
+      ]),
+    ).toEqual(["build", "review"]);
   });
 
-  it("is a step session's step id, not its title, which starts with the workflow's name", () => {
+  it("numbers a role that repeats, ignoring case, by when each session was created", () => {
+    const sessions = [
+      buildSession({ id: "s-late", role: "Review", createdAt: at(3) }),
+      buildSession({ id: "s-first", role: "review", createdAt: at(1) }),
+      buildSession({ id: "s-other", role: "tests", createdAt: at(2) }),
+      buildSession({ id: "s-third", role: "REVIEW", createdAt: at(4) }),
+    ];
+
+    expect(labelsOf(sessions)).toEqual(["Review 2", "review", "tests", "REVIEW 3"]);
+  });
+
+  it("numbers sessions created at the same moment by session id, whatever the list order", () => {
+    const first = buildSession({ id: "s-a", role: "review", createdAt: at(1) });
+    const second = buildSession({ id: "s-b", role: "review", createdAt: at(1) });
+
+    expect(labelsOf([second, first])).toEqual(["review 2", "review"]);
+    expect(labelsOf([first, second])).toEqual(["review", "review 2"]);
+  });
+
+  it("labels a session with no role by its full title, and does not number titles", () => {
+    const sessions = [
+      buildSession({ id: "s-1", role: null, title: "Fix flaky webhook tests" }),
+      buildSession({ id: "s-2", role: "  ", title: "Fix flaky webhook tests" }),
+    ];
+
+    expect(labelsOf(sessions)).toEqual(["Fix flaky webhook tests", "Fix flaky webhook tests"]);
+  });
+
+  it("labels a run's step session by its step id, not its title or role", () => {
     const step = buildSession({
       id: "s-step",
-      title: "Ticket to pull request · implement",
+      kind: "run",
+      title: "Ticket to pull request \u00b7 implement",
+      role: "review",
       runId: "r-1",
       stepId: "implement",
     });
 
-    expect(labelSessionTab(step)).toBe("implement");
+    expect(labelsOf([step])).toEqual(["implement"]);
   });
 });
 
@@ -133,5 +177,21 @@ describe("listWorkspaceThreads", () => {
     const workspace = { ...THREAD_3F1, sessionIds: ["s-flaky", "s-gone", "s-runbook"] };
 
     expect(listWorkspaceThreads(workspace, SESSIONS)).toEqual([SESSIONS[1], SESSIONS[0]]);
+  });
+});
+
+describe("listSessionsOfWorkspace", () => {
+  it("keeps the sessions of the workspace, exited ones too, and drops the others", () => {
+    const live = buildSession({ id: "s-live", workspaceId: "w-1" });
+    const exited = buildSession({ id: "s-exited", workspaceId: "w-1", status: "exited" });
+    const elsewhere = buildSession({ id: "s-elsewhere", workspaceId: "w-2" });
+
+    expect(listSessionsOfWorkspace("w-1", [live, elsewhere, exited])).toEqual([live, exited]);
+  });
+
+  it("returns a session that two reads hold once", () => {
+    const partner = buildSession({ id: "s-partner", workspaceId: "w-1", kind: "agent" });
+
+    expect(listSessionsOfWorkspace("w-1", [partner, partner])).toEqual([partner]);
   });
 });

@@ -25,6 +25,7 @@ import {
   stubElementSize,
   THREAD_FIXTURES,
 } from "../../../../../app/testing";
+import { threadAndAgentSessionsQuery } from "../../../../../app/queries";
 import { answerTranscriptRead, readTranscriptReads } from "../../../../../app/testing-transcript";
 import { saveThreadCopy } from "../../../../../app/testing-thread-copies";
 
@@ -169,6 +170,41 @@ describe("a thread that is slow to open", () => {
   });
 });
 
+describe("a thread that is slow to open, marked Done from the sidebar", () => {
+  beforeEach(() => {
+    stubElementSize(800, 800);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("opens once its read is answered, without cancelling that read", async () => {
+    const slow = THREAD_FIXTURES.failed;
+    const heldSession = holdAnswer();
+    const { app } = openApp(`/threads/${THREAD_FIXTURES.finished.session.id}`, {
+      ...buildThreadHandlers(slow),
+      [`GET /api/v1/sessions/${slow.session.id}`]: heldSession.handler,
+      "POST /api/v1/sessions/mark-done": {
+        body: [{ ...slow.session, done: { at: "2026-09-10T09:30:00.000Z", by: "user" } }],
+      },
+    });
+    await app;
+    const sidebar = screen.getByRole("navigation", { name: "Threads" });
+    const link = within(sidebar).getByRole("link", { name: new RegExp(`^${slow.session.title}`) });
+    await userEvent.click(link);
+    expect(await screen.findByText("Opening the thread…")).toBeTruthy();
+
+    await userEvent.click(
+      within(link.closest<HTMLElement>(".side-item")!).getByRole("button", { name: "Mark done" }),
+    );
+    heldSession.answer({ body: slow.session });
+
+    expect(await screen.findByRole("region", { name: "Transcript" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "This screen did not load" })).toBeNull();
+  });
+});
+
 describe("a message another session's agent sent into the thread", () => {
   const thread = THREAD_FIXTURES.finished;
   const sessionId = thread.session.id;
@@ -265,12 +301,11 @@ describe("a message another session's agent sent into the thread", () => {
     expect(calls.filter((call) => call.path === `/api/v1/sessions/${listed.id}`)).toHaveLength(0);
 
     // A push renames the session in the lists, and the messages follow.
-    const threads = context.queryClient.getQueryData<readonly Session[]>(
-      queryKeys.sessions({ thread: true }),
-    )!;
+    const key = threadAndAgentSessionsQuery(context.controller!.client).queryKey;
+    const threads = context.queryClient.getQueryData<readonly Session[]>(key)!;
     act(() => {
       context.queryClient.setQueryData(
-        queryKeys.sessions({ thread: true }),
+        key,
         threads.map((each) =>
           each.id === listed.id ? { ...each, title: "Ship the runbook" } : each,
         ),

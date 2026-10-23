@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { InputUpdatePayload } from "./input";
 import {
   LIVE_SESSION_STATUSES,
+  MAX_ROLE_LENGTH,
   SESSION_STATUSES,
   SessionContinueInput,
   SessionInputCall,
@@ -102,6 +103,61 @@ describe("starting revisions in session.spawn", () => {
           ._tag,
       ).toBe("Failure");
     }
+  });
+});
+
+describe("role in session.spawn", () => {
+  const decode = Schema.decodeUnknownExit(SessionSpawnInput);
+  const spawn = (role: string) => ({ prompt: "Review the diff", role });
+
+  it("accepts a short role, one of the longest length, and an emoji sequence", () => {
+    for (const role of [
+      "review",
+      "refunds review",
+      "a".repeat(MAX_ROLE_LENGTH),
+      "\u{1F9D1}\u200D\u{1F4BB} review",
+    ])
+      expect(Schema.decodeUnknownSync(SessionSpawnInput)(spawn(role))).toEqual(spawn(role));
+  });
+
+  it("counts characters, not UTF-16 units, so 24 emoji fit and 25 do not", () => {
+    expect(Schema.decodeUnknownSync(SessionSpawnInput)(spawn("😀".repeat(24)))).toEqual(
+      spawn("😀".repeat(24)),
+    );
+    expect(decode(spawn("😀".repeat(25)))._tag).toBe("Failure");
+  });
+
+  it("takes a spawn with no role", () => {
+    const input = { prompt: "Review the diff" };
+    expect(Schema.decodeUnknownSync(SessionSpawnInput)(input)).toEqual(input);
+  });
+
+  it.each([
+    ["empty", ""],
+    ["blank", "   "],
+    ["over the longest length", "a".repeat(MAX_ROLE_LENGTH + 1)],
+    ["with a line break", "code\nreview"],
+    ["with a leading space", " review"],
+    ["with a trailing space", "review "],
+    ["with an escape character", "re\u001Bview"],
+    ["with a tab", "code\treview"],
+    ["with a right-to-left override", "re\u202Eview"],
+    ["with a zero-width space", "re\u200Bview"],
+    ["with a tag character", "re\u{E0041}view"],
+  ])("refuses a role that is %s, at the role field", (_name, role) => {
+    const exit = decode(spawn(role));
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain(`["role"]`);
+  });
+
+  it("tells the caller why a role with surrounding whitespace is refused", () => {
+    expect(String(decode(spawn(" review")))).toContain("must not start or end with whitespace");
+  });
+
+  it("tells the caller why a role with an invisible character is refused", () => {
+    expect(String(decode(spawn("re\u200Bview")))).toContain(
+      "must not hold control or invisible formatting characters",
+    );
   });
 });
 

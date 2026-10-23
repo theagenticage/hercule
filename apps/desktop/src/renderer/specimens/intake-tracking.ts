@@ -241,6 +241,8 @@ const SDK_SESSION: Session = {
   id: "01a0ec64-7a00-7000-8000-0000000000e1",
   title: "Implement · implement",
   status: "busy",
+  kind: "run",
+  agentId: "01a0ec64-6e80-7000-8000-a00000000e01",
   runId: SDK.latestRun.id,
   stepId: "implement",
   openRequests: [

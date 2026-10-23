@@ -73,8 +73,8 @@ class ControllerApiTest {
         val sessions = buildApi().listThreadSessions()
 
         assertEquals(listOf("s1", "s2"), sessions.map { it.id })
-        assertEquals("/api/v1/sessions?thread=true&limit=500", takeRequest().target)
-        assertEquals("/api/v1/sessions?thread=true&limit=500&cursor=c1", takeRequest().target)
+        assertEquals("/api/v1/sessions?kind=thread&limit=500", takeRequest().target)
+        assertEquals("/api/v1/sessions?kind=thread&limit=500&cursor=c1", takeRequest().target)
     }
 
     @Test

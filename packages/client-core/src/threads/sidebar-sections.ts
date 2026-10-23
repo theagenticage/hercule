@@ -1,243 +1,382 @@
 /**
- * Decides which rows the sidebar shows when there are many, and how many more
- * each section hides behind its "more" row:
+ * Applies the user's choices to a `SessionPresentation`: which rows the
+ * desktop sidebar shows, in which order, how many more each section hides
+ * behind its "more" row, and which lines an unfolded row draws.
  *
- * - Waiting on you shows the first 3 entries of `listWaiting`: the most
- *   recently active threads and assistants, mixed.
- * - A project shows at most 5 threads. They are picked by priority: waiting
- *   threads first, then working ones, then the rest. Inside each of those
- *   tiers the most recent comes first: the later of its last activity and
- *   when it last started, so a thread reopened from the Done shelf is never
- *   hidden behind the "more" row by threads that are newer but idle. The threads with no project are capped the same
- *   way.
- * - The selected thread is always shown in its project, even when it is not
- *   among the 5, so a project shows at most 6. Waiting on you makes no such
- *   exception, because the selected thread is always shown in its project.
- * - A section the user expanded shows every thread.
- * - The projects list only the threads not marked Done. The Done shelf at the
- *   bottom lists the rest, closed until the user opens it, then 10 at a time
- *   and 25 more on each press, the most recently marked Done first.
+ * - Waiting on you shows the first 3 entries of `listWaiting`.
+ * - A project shows at most 5 groups, picked by priority: a group with a
+ *   waiting session first, then one with a working session, then the rest.
+ *   Inside a tier the most recent comes first: the later of the group's last
+ *   activity and when it last started, so a group reopened from the Done
+ *   shelf is never hidden behind the "more" row by newer idle ones. The
+ *   groups in no project are capped the same way.
+ * - The group that holds the selected session is always shown in its
+ *   project, so a project shows at most 6. Unfolded lines never count toward
+ *   the cap.
+ * - A section the user expanded shows every group.
+ * - A group is in its project's list until it is done: every Thread marked
+ *   Done and every Agent session ended. The Done shelf at the bottom lists
+ *   the done groups, closed until the user opens it, then 10 at a time and 25
+ *   more on each press, the most recently done first.
+ * - An unfolded row draws a line for each session, with the quiet ones
+ *   folded into one "n quiet" line.
  *
- * Two threads equally recent are ordered by session id, so the
- * pick never depends on the order the server listed them in.
- *
- * A project's shown rows keep the order `buildThreadGroups` gives them, so
- * capping a project only removes rows, it never moves one. The workspace
- * groups keep the labels `buildThreadGroups` gave them too.
+ * A project's shown rows keep the order of the group rows, so capping a
+ * project only removes rows, it never moves one.
  */
-import type { Session } from "@hercule/contract";
 import type { Waiting } from "../waiting";
-import type { ProjectGroup, WorkspaceGroup } from "./groups";
-import type { Pose } from "./pose";
-import { pickLastStartedAt } from "./project-rows";
-import type { ThreadRow } from "./rows";
-import { isMarkedDone } from "./status";
+import type { GroupMember, GroupRow } from "./group-row";
+import { decideGroupProjectId, type DraftPlace } from "./groups";
+import { orderGroupProjectIds } from "./session-groups";
+import type { SessionPresentation } from "./session-presentation";
 
 /** How many entries Waiting on you shows before it is expanded. */
 const WAITING_LIMIT = 3;
 
-/** How many threads a project picks by priority before it is expanded. */
+/** How many done groups the Done shelf shows when the user opens it. */
+export const DONE_SHELF_LIMIT = 10;
+
+/** How many more done groups each press of the shelf's "Show 25 more" row shows. */
+export const DONE_SHELF_STEP = 25;
+
+/** How many groups a project picks by priority before it is expanded. */
 const PROJECT_LIMIT = 5;
 
-/** Which sections the user has expanded to show every thread. */
+/** Which sections the user has expanded to show every group. */
 export interface ExpandedSections {
   /** Whether Waiting on you shows every entry. */
   readonly waiting: boolean;
-  /** The expanded projects, by id. `null` stands for the threads that belong to no project. */
+  /** The expanded projects, by id. `null` stands for the groups that belong to no project. */
   readonly projectIds: ReadonlySet<string | null>;
+}
+
+/** What the user chose, which `selectSidebar` applies to the presentation. */
+export interface SidebarChoices {
+  /** The entries of Waiting on you, as `listWaiting` returns them. */
+  readonly waiting: readonly Waiting[];
+  /**
+   * The session id of the session the user has open, or `null`. It may belong
+   * to a Done Thread, which is why its group's shelf row always shows.
+   */
+  readonly selectedId: string | null;
+  /** Where the draft being written will go, or `null`. */
+  readonly draft: DraftPlace | null;
+  /** The sections whose "more" row the user pressed. */
+  readonly expanded: ExpandedSections;
+  /** How many done groups the Done shelf shows, or `null` while it is closed. */
+  readonly doneShelfLimit: number | null;
+  /** The keys of the groups the user unfolded. */
+  readonly unfolded: ReadonlySet<string>;
+  /** The keys of the groups whose "n quiet" line the user pressed. */
+  readonly quietShown: ReadonlySet<string>;
+  /** The session last open in each group, by the group's key. */
+  readonly lastOpen: ReadonlyMap<string, string>;
+}
+
+/** One line of an unfolded row: a session, or the "n quiet" line that stands for several. */
+export type SidebarLine =
+  | { readonly kind: "member"; readonly member: GroupMember }
+  | { readonly kind: "quiet"; readonly count: number };
+
+/** A group's row as the sidebar shows it, with the choices applied. */
+export interface SidebarRow {
+  readonly row: GroupRow;
+  /**
+   * The session a click opens: the open session while the group holds it,
+   * else the session last open in the group while the group still holds it,
+   * else the group's lead.
+   */
+  readonly openId: string;
+  /** Whether the session `openId` has a colleague in the Office, which decides where a click opens it. */
+  readonly seated: boolean;
+  /** Whether the row is unfolded: the user unfolded it, and it has more than one session. */
+  readonly unfolded: boolean;
+  /** The lines under the row, or none while it is folded. */
+  readonly lines: readonly SidebarLine[];
 }
 
 /** The Waiting on you section. */
 export interface WaitingSection {
-  /** The threads and assistants it shows, newest activity first. */
+  /** The sessions and assistants it shows, newest activity first. */
   readonly rows: readonly Waiting[];
   /** How many entries it hides: the number on its "more" row, or 0 for none. */
   readonly hiddenCount: number;
 }
 
-/**
- * A project's section: the project's group from `buildThreadGroups`, holding
- * only the rows it shows. A workspace group with no row shown is left out, so
- * its label is not drawn either. `count` is still every thread in the project.
- */
-export interface ProjectSection extends ProjectGroup {
-  /** How many threads it hides: the number on its "more" row, or 0 for none. */
+/** A project's section: the rows it shows, and what it hides. */
+export interface ProjectSection {
+  /** `null` for the groups that belong to no project. */
+  readonly projectId: string | null;
+  /** Whether the draft being written sits in this project, so its row is drawn first. */
+  readonly holdsDraft: boolean;
+  /** The groups it shows, in the order of the group rows. */
+  readonly rows: readonly SidebarRow[];
+  /** How many groups it hides: the number on its "more" row, or 0 for none. */
   readonly hiddenCount: number;
   /**
-   * How many of the project's threads wait on the user, shown or hidden: the
-   * number in the header's "2 need you". The rows only say it one at a time,
-   * so a capped project would otherwise hide a thread that needs the user.
+   * How many counted sessions of the project wait on the user, shown or
+   * hidden: the number in the header's "2 need you". The rows only say it one
+   * at a time, so a capped project would otherwise hide a session that needs
+   * the user.
    */
   readonly waitingCount: number;
 }
 
-/**
- * What the sidebar draws, top to bottom: Waiting on you, then one section per
- * project, each holding only the rows it shows and counting the rows it hides.
- */
-export interface SidebarSections {
-  /** `null` when nothing is waiting, because the section is then not drawn. */
-  readonly waiting: WaitingSection | null;
-  /** One section per project group, in the groups' order. */
-  readonly projects: readonly ProjectSection[];
+/** A row of the Done shelf: a group that is done, with the time it was. */
+export type DoneShelfRow = SidebarRow & { readonly doneAt: string };
+
+/** The Done shelf at the bottom of the desktop sidebar. */
+export interface DoneShelf {
+  /** How many groups are done: the number in the shelf's header. */
+  readonly count: number;
+  /** The groups the shelf shows, the most recently done first. */
+  readonly rows: readonly DoneShelfRow[];
+  /** How many done groups the open shelf hides behind its "more" row, or 0 for none. */
+  readonly hiddenCount: number;
 }
 
+/** What the sidebar draws, top to bottom: Waiting on you, one section per project, the Done shelf. */
+export interface SidebarView {
+  /** `null` when nothing is waiting, because the section is then not drawn. */
+  readonly waiting: WaitingSection | null;
+  /** One section per project, in the order described at `buildProjectSections`. */
+  readonly projects: readonly ProjectSection[];
+  readonly doneShelf: DoneShelf;
+  /** The key of the group that holds the open session, shown or not, or `null` when it is in none. */
+  readonly openGroupKey: string | null;
+}
+
+/** Compares two strings by code unit, returning a negative, zero or positive number as `sort` expects. */
+const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
 /**
- * Returns a thread's priority tier in its project: 0 for waiting, 1 for
- * working, 2 for everything else. A lower tier is picked first.
+ * Returns a row's priority tier in its project: 0 when a counted session
+ * waits, 1 when one works, 2 otherwise. A lower tier is picked first.
  */
-const rankPriorityTier = (pose: Pose | undefined): number => {
-  if (pose === "waiting") return 0;
-  if (pose === "working") return 1;
+const rankPriorityTier = (row: GroupRow): number => {
+  if (row.members.some((member) => member.dot === "waiting")) return 0;
+  if (row.members.some((member) => member.dot === "working")) return 1;
   return 2;
 };
 
-/** Returns every row of a project group, in the group's order. */
-const listRows = (group: ProjectGroup): readonly ThreadRow[] =>
-  group.workspaces.flatMap((lane) => lane.rows);
+/**
+ * Returns the time, in milliseconds, a row counts as recent for the pick: the
+ * later of when its group last started and when its counted sessions were
+ * last active.
+ */
+const findRecency = (row: GroupRow): number =>
+  Math.max(
+    Date.parse(row.lastStartedAt),
+    ...row.members.filter((member) => member.counted).map((m) => Date.parse(m.activityAt)),
+  );
 
 /**
- * Returns a project's section: the 5 threads it picks by priority, plus the
- * selected thread when that is in the project and not already picked.
+ * Returns a project's rows: the groups it picks by priority, plus the open
+ * row, which is `undefined` when the open session is in none.
  */
-const buildProjectSection = (
-  group: ProjectGroup,
-  sessions: ReadonlyMap<string, Session>,
-  poses: ReadonlyMap<string, Pose>,
-  selectedId: string | null,
+const pickProjectRows = (
+  rows: readonly GroupRow[],
   expanded: boolean,
-): ProjectSection => {
-  const rows = listRows(group);
-  const waitingCount = rows.filter((row) => poses.get(row.id) === "waiting").length;
-  if (expanded) return { ...group, hiddenCount: 0, waitingCount };
-  const recency = new Map(
-    rows.map((row) => {
-      const session = sessions.get(row.id);
-      const startedAt = session === undefined ? 0 : Date.parse(pickLastStartedAt(session));
-      return [row.id, Math.max(Date.parse(row.activityAt), startedAt)];
-    }),
-  );
+  openRow: GroupRow | undefined,
+): readonly GroupRow[] => {
+  if (expanded) return rows;
   const picked = new Set(
     rows
-      .toSorted(
+      .map((row) => ({ row, recency: findRecency(row) }))
+      .sort(
         (a, b) =>
-          rankPriorityTier(poses.get(a.id)) - rankPriorityTier(poses.get(b.id)) ||
-          (recency.get(b.id) ?? 0) - (recency.get(a.id) ?? 0) ||
-          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+          rankPriorityTier(a.row) - rankPriorityTier(b.row) ||
+          b.recency - a.recency ||
+          compareText(a.row.key, b.row.key),
       )
       .slice(0, PROJECT_LIMIT)
-      .map((row) => row.id),
+      .map(({ row }) => row.key),
   );
-  const workspaces = group.workspaces
-    .map((lane): WorkspaceGroup => ({
-      ...lane,
-      rows: lane.rows.filter((row) => picked.has(row.id) || row.id === selectedId),
-    }))
-    // A group that holds the draft being written stays, because the draft is
-    // drawn in it even though it is not a thread yet.
-    .filter((lane) => lane.rows.length > 0 || lane.draft || lane.showWhenEmpty);
-  const shownCount = workspaces.reduce((sum, lane) => sum + lane.rows.length, 0);
-  return { ...group, workspaces, hiddenCount: rows.length - shownCount, waitingCount };
+  return rows.filter((row) => picked.has(row.key) || row === openRow);
 };
 
 /**
- * Returns the sidebar's sections, capped as described at the top of this
- * file.
+ * Returns the project sections, in the order the sidebar lists them:
  *
- * - `groups` is `buildThreadGroups`'s output.
- * - `sessions` holds each thread's session by id, for when it last started.
- *   A thread missing from it counts only its last activity.
- * - `waiting` is `listWaiting`'s output, already in the order Waiting on you
- *   shows it.
- * - `poses` holds each thread's pose by session id. A thread with no pose in
- *   `poses` is treated as neither working nor waiting.
- * - `selectedId` is the session id of the thread the user has open, or `null`.
+ * - the groups with no project last, even when they hold the draft;
+ * - otherwise the project that holds the draft being written first;
+ * - otherwise in the order of `orderGroupProjectIds`: by when the project's
+ *   newest group started, newest first, and projects that tie by project id.
+ *
+ * The draft's project is listed even when it holds no group yet. A draft for
+ * a project the list does not hold sits with the groups of no project, as
+ * that project's groups do.
  */
-export const buildSidebarSections = ({
-  groups,
-  sessions,
-  waiting,
-  poses,
-  expanded,
-  selectedId,
-}: {
-  readonly groups: readonly ProjectGroup[];
-  readonly sessions: ReadonlyMap<string, Session>;
-  readonly waiting: readonly Waiting[];
-  readonly poses: ReadonlyMap<string, Pose>;
-  readonly expanded: ExpandedSections;
-  readonly selectedId: string | null;
-}): SidebarSections => {
-  const shownWaiting = expanded.waiting ? waiting : waiting.slice(0, WAITING_LIMIT);
+const buildProjectSections = (
+  rows: readonly GroupRow[],
+  { listedProjectIds }: SessionPresentation,
+  { draft, expanded }: SidebarChoices,
+  openRow: GroupRow | undefined,
+  showRow: (row: GroupRow) => SidebarRow,
+): readonly ProjectSection[] => {
+  const draftProjectId =
+    draft === null ? undefined : decideGroupProjectId(draft.projectId, listedProjectIds);
+  const rowsByProject = new Map<string | null, GroupRow[]>();
+  for (const row of rows) {
+    const held = rowsByProject.get(row.projectId);
+    if (held === undefined) rowsByProject.set(row.projectId, [row]);
+    else held.push(row);
+  }
+  const projectIds = [...orderGroupProjectIds(rows)];
+  if (draftProjectId !== undefined && !projectIds.includes(draftProjectId))
+    projectIds.push(draftProjectId);
+
+  // The sort is stable, so projects the two rules do not separate keep their newest-first order.
+  return projectIds
+    .toSorted(
+      (a, b) =>
+        Number(a === null) - Number(b === null) ||
+        Number(b === draftProjectId) - Number(a === draftProjectId),
+    )
+    .map((projectId) => {
+      const held = rowsByProject.get(projectId) ?? [];
+      const shown = pickProjectRows(held, expanded.projectIds.has(projectId), openRow);
+      return {
+        projectId,
+        holdsDraft: projectId === draftProjectId,
+        rows: shown.map(showRow),
+        hiddenCount: held.length - shown.length,
+        waitingCount: held.reduce(
+          (sum, row) => sum + row.members.filter((member) => member.dot === "waiting").length,
+          0,
+        ),
+      };
+    });
+};
+
+/**
+ * Returns the Done shelf: every done group, the most recently done first,
+ * with ties in key order.
+ *
+ * - `limit` is how many the shelf shows, or `null` while it is closed.
+ * - The open row is always shown, even when the shelf is closed or the group
+ *   is beyond `limit`, so the open session always has a row.
+ * - `hiddenCount` counts the groups past `limit`. A closed shelf hides them
+ *   all behind its header, not behind a "more" row, so it is 0 then.
+ */
+const buildDoneShelf = (
+  rows: readonly GroupRow[],
+  limit: number | null,
+  openRow: GroupRow | undefined,
+  showRow: (row: GroupRow) => SidebarRow,
+): DoneShelf => {
+  const done = rows.flatMap((row) => (row.doneAt === null ? [] : [{ row, doneAt: row.doneAt }]));
+  const toShelfRow = ({ row, doneAt }: (typeof done)[number]): DoneShelfRow => ({
+    ...showRow(row),
+    doneAt,
+  });
+  // A closed shelf shows at most the open row, so it needs no order.
+  if (limit === null) {
+    return {
+      count: done.length,
+      rows: done.filter((each) => each.row === openRow).map(toShelfRow),
+      hiddenCount: 0,
+    };
+  }
+  const sorted = done.toSorted(
+    (a, b) => Date.parse(b.doneAt) - Date.parse(a.doneAt) || compareText(a.row.key, b.row.key),
+  );
+  const shown = sorted.filter((each, index) => index < limit || each.row === openRow);
+  return {
+    count: sorted.length,
+    rows: shown.map(toShelfRow),
+    hiddenCount: sorted.length - shown.length,
+  };
+};
+
+/**
+ * Returns the lines an unfolded row draws, one per session in the group's
+ * order, with the quiet ones folded into one "n quiet" line when more than
+ * two are quiet and at least one other line would still show. A session is
+ * quiet when it neither waits nor works; a Done Thread and an ended Agent
+ * session are quiet. A group whose sessions are all quiet shows every line,
+ * because a lone "n quiet" line would only make the user press again.
+ *
+ * The open session always has a line of its own and is not counted among the
+ * quiet ones. `quietShown` is true when the user pressed the "n quiet" line,
+ * which shows every session.
+ */
+const listLines = (
+  row: GroupRow,
+  selectedId: string | null,
+  quietShown: boolean,
+): readonly SidebarLine[] => {
+  const quiet = new Set(
+    row.members
+      .filter((member) => member.dot === "quiet" && member.sessionId !== selectedId)
+      .map((member) => member.sessionId),
+  );
+  const folds = quiet.size > 2 && !quietShown && quiet.size < row.members.length;
+  const lines = (
+    folds ? row.members.filter((member) => !quiet.has(member.sessionId)) : row.members
+  ).map((member): SidebarLine => ({ kind: "member", member }));
+  return folds ? [...lines, { kind: "quiet", count: quiet.size }] : lines;
+};
+
+/**
+ * Returns the id of the session a click on `row` opens: the open session
+ * when the group holds it, else the session last open in the group while the
+ * group still holds it, else the group's lead.
+ */
+const pickOpenId = (
+  row: GroupRow,
+  selectedId: string | null,
+  lastOpen: ReadonlyMap<string, string>,
+): string =>
+  [selectedId, lastOpen.get(row.key)].find(
+    (id): id is string => id != null && row.members.some((member) => member.sessionId === id),
+  ) ?? row.leadId;
+
+/**
+ * Returns what the desktop sidebar draws for `presentation` under the user's
+ * `choices`, top to bottom: Waiting on you (`waiting` is `listWaiting`'s
+ * output, a Done Thread's entry included, because a question never hides),
+ * one section per project, and the Done shelf.
+ *
+ * Every decision is made here: which rows show, their order, the session a
+ * row opens and whether the Office seats it, which lines an unfolded row
+ * draws. The desktop only lays the result out.
+ */
+export const selectSidebar = (
+  presentation: SessionPresentation,
+  choices: SidebarChoices,
+): SidebarView => {
+  const { waiting, selectedId, doneShelfLimit, unfolded, quietShown, lastOpen } = choices;
+  const { groupRows, seatedIds } = presentation;
+  const openRow =
+    selectedId === null
+      ? undefined
+      : groupRows.find((row) => row.members.some((member) => member.sessionId === selectedId));
+  const showRow = (row: GroupRow): SidebarRow => {
+    const openId = pickOpenId(row, selectedId, lastOpen);
+    const isUnfolded = row.summary !== null && unfolded.has(row.key);
+    return {
+      row,
+      openId,
+      seated: seatedIds.has(openId),
+      unfolded: isUnfolded,
+      lines: isUnfolded ? listLines(row, selectedId, quietShown.has(row.key)) : [],
+    };
+  };
+  const shownWaiting = choices.expanded.waiting ? waiting : waiting.slice(0, WAITING_LIMIT);
   return {
     waiting:
       waiting.length === 0
         ? null
         : { rows: shownWaiting, hiddenCount: waiting.length - shownWaiting.length },
-    projects: groups.map((group) =>
-      buildProjectSection(
-        group,
-        sessions,
-        poses,
-        selectedId,
-        expanded.projectIds.has(group.projectId),
-      ),
+    projects: buildProjectSections(
+      groupRows.filter((row) => row.doneAt === null),
+      presentation,
+      choices,
+      openRow,
+      showRow,
     ),
+    doneShelf: buildDoneShelf(groupRows, doneShelfLimit, openRow, showRow),
+    openGroupKey: openRow?.key ?? null,
   };
-};
-
-/** How many Done threads the Done shelf shows when the user opens it. */
-export const DONE_SHELF_LIMIT = 10;
-
-/** How many more Done threads each press of the shelf's "Show 25 more" row shows. */
-export const DONE_SHELF_STEP = 25;
-
-/** The Done shelf at the bottom of the desktop sidebar. */
-export interface DoneShelf {
-  /** How many threads are marked Done: the number in the shelf's header. */
-  readonly count: number;
-  /** The Done threads the shelf shows, the most recently marked Done first. */
-  readonly threads: readonly Session[];
-  /** How many Done threads the open shelf hides behind its "more" row, or 0 for none. */
-  readonly hiddenCount: number;
-}
-
-/**
- * Returns the Done shelf: every thread in `threads` that is marked Done, the
- * most recently marked first, with ties in session id order.
- *
- * - `limit` is how many the shelf shows, or `null` while it is closed.
- * - The selected thread is always shown, even when the shelf is closed or it
- *   is beyond `limit`, so the thread the user has open always has a row.
- * - `hiddenCount` counts the threads past `limit`. A closed shelf hides
- *   them all behind its header, not behind a "more" row, so it is 0 then.
- */
-export const buildDoneShelf = ({
-  threads,
-  limit,
-  selectedId,
-}: {
-  readonly threads: readonly Session[];
-  readonly limit: number | null;
-  readonly selectedId: string | null;
-}): DoneShelf => {
-  const unsorted = threads.filter(isMarkedDone);
-  // A closed shelf shows at most the selected thread, so it needs no order.
-  if (limit === null) {
-    return {
-      count: unsorted.length,
-      threads: unsorted.filter((session) => session.id === selectedId),
-      hiddenCount: 0,
-    };
-  }
-  const done = unsorted
-    .map((session) => ({ session, doneAt: Date.parse(session.done?.at ?? "") }))
-    .sort(
-      (a, b) =>
-        b.doneAt - a.doneAt ||
-        (a.session.id < b.session.id ? -1 : a.session.id > b.session.id ? 1 : 0),
-    )
-    .map(({ session }) => session);
-  const shown = done.filter((session, index) => index < limit || session.id === selectedId);
-  return { count: done.length, threads: shown, hiddenCount: done.length - shown.length };
 };

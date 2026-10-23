@@ -111,6 +111,7 @@ const COMMAND_REQUEST: OpenRequest = {
 /** The session of `review`, which asks the user to approve a command. */
 const ASKING: Session = buildSession({
   id: REVIEW_SESSION_ID,
+  agentId: "a-review",
   runId: RUN_ID,
   stepId: "review",
   openRequests: [COMMAND_REQUEST],

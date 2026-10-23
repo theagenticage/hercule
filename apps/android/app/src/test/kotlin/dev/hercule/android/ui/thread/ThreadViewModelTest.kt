@@ -43,7 +43,7 @@ class ThreadViewModelTest {
     private fun respondHttp(request: RecordedRequest): MockResponse {
         val url = request.url
         val body = when (url.encodedPath) {
-            "/api/v1/sessions" -> if (url.queryParameter("thread") == "true") """{"items":[${buildSessionJson("s1")}]}""" else """{"items":[]}"""
+            "/api/v1/sessions" -> if (url.queryParameter("kind") == "thread") """{"items":[${buildSessionJson("s1")}]}""" else """{"items":[]}"""
             "/api/v1/sessions/s1/transcript" -> {
                 transcriptReleased.await(5, TimeUnit.SECONDS)
                 """{"items":[{"position":1,"at":"$AT","event":{"_tag":"turn.started","turnId":"t1"}}]}"""

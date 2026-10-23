@@ -1109,7 +1109,9 @@ describe("hercule session spawn --agent", () => {
 
   const SPAWNED = {
     id: buildId("eeeeeee1"),
+    kind: "agent",
     title: "Assess this task.",
+    role: null,
     status: "starting",
     resumable: false,
     resumeHeld: false,
@@ -1255,16 +1257,19 @@ describe("hercule session list --agent", () => {
     expect(printed.error.code).toBe("conflict");
   });
 
-  it("asks for the sessions nobody drives by hand with --thread", async () => {
+  it("asks for several kinds of session with a repeated --kind", async () => {
     const { fetch, io } = stubAgentListing(AGENTS);
 
-    expect(await main(["--home", home, "session", "list", "--thread", "true", "--json"], io)).toBe(
-      0,
-    );
+    expect(
+      await main(
+        ["--home", home, "session", "list", "--kind", "agent", "--kind", "run", "--json"],
+        io,
+      ),
+    ).toBe(0);
 
     // No agent was given, so no agent list was read.
     expect(fetch.calls).toHaveLength(1);
-    expect(fetch.calls[0]?.query.get("thread")).toBe("true");
+    expect(fetch.calls[0]?.query.getAll("kind")).toEqual(["agent", "run"]);
   });
 });
 

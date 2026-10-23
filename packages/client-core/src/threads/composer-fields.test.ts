@@ -547,6 +547,8 @@ const THREAD_3F1: Workspace = {
 const buildThread = (id: string, title: string): Session => ({
   id,
   title,
+  kind: "thread",
+  role: null,
   status: "idle",
   resumable: false,
   resumeHeld: false,

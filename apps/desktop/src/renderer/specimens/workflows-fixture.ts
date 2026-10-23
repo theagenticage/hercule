@@ -560,7 +560,12 @@ const buildRun = (
   }
 };
 
-/** Returns the session of `run`'s step `stepId`, waiting on the user to run `command`. */
+/**
+ * Returns the session of `run`'s step `stepId`, waiting on the user to run
+ * `command`. Like every session a run's agent step starts, it is of kind
+ * `run` and has an Agent behind it; the fixture names the Writer for every
+ * step.
+ */
 const buildWaitingSession = (
   number: number,
   run: RunSummary,
@@ -579,6 +584,8 @@ const buildWaitingSession = (
     id: buildId("7a00", number),
     title: `${run.workflowName} · ${stepId}`,
     status: "busy",
+    kind: "run",
+    agentId: AGENTS[0]!.id,
     runId: run.id,
     stepId,
     openRequests: [request],

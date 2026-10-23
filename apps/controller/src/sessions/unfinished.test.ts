@@ -45,6 +45,7 @@ const insertSession = (kind: Kind) =>
     yield* sessions.insert({
       id,
       title: "a session",
+      role: undefined,
       permissionProfileId: mintId(),
       agentId: kind.agent ? mintId() : undefined,
       conversationId: undefined,

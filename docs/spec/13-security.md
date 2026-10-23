@@ -482,7 +482,7 @@ The event log ([./04-state-store.md](./04-state-store.md)) is the audit log; the
 
   An entry never holds the prompt, the instructions or the output. They can carry the user's private text, and the audit log is kept far longer than any of them is useful.
 
-  **What leaves the controller.** With `automatic`, up to 4000 characters of a Thread's first message go to the provider that `automatic` resolves to, to generate the Thread's title. That provider may differ from the Thread's own. Setting `textGeneration.model` to `off` stops it.
+  **What leaves the controller.** With `automatic`, up to 4000 characters of a Thread's first message go to the provider that `automatic` resolves to, to generate the Thread's title. That provider may differ from the Thread's own. Setting `textGeneration.model` to `off` stops it. *(Amended 2026-10-23, [#827](https://github.com/theagenticage/hercule/issues/827).)* A fork of a Thread sends its first message too, which is its continuation prompt, with the same limit.
 - *(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* **Skill Library entries.** Each entry holds the Skill's name and the revision's hash, and is stamped with the actor:
   - `skill.imported`: a Skill created, a revision imported, or a Skill Source changed by an import. An import sets the source from the request every time, so an import that answers `unchanged` still writes this entry when it changed the source, and writes none when it did not.
   - `skill.applied`: one per Skill that `skill.apply` or `skill.applyUpdates` changes. It also holds the hash of the revision that was current before, so the log shows what each apply replaced.
