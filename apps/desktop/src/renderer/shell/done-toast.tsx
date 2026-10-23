@@ -1,11 +1,14 @@
 /**
- * The toast over the bottom of the sidebar's list, after threads are marked
- * done or reopened: "Marked done" or "Reopened" with Undo, or the error of a
- * Done move that failed.
+ * The toast after threads are marked done or reopened: "Marked done" or
+ * "Reopened" with Undo, or the error of a Done move that failed. It shows over
+ * the bottom of the sidebar's list, or, while the sidebar is hidden, at the
+ * bottom left of the main pane.
  */
 import { useEffect, useEffectEvent, useState, useSyncExternalStore, type JSX } from "react";
+import { useDoneMoves } from "../app/done-moves";
 import type { DoneToast, DoneToastStore, DoneUndo } from "../app/done-toast-store";
 import { Mark } from "../marks";
+import { useSidebarLayout } from "./use-sidebar-layout";
 
 /** How long the toast shows before it fades, in milliseconds. Intake's toast shows as long. */
 const TOAST_SHOWN_MS = 5_000;
@@ -38,6 +41,29 @@ export function SidebarDoneToast({
       )}
     </div>
   );
+}
+
+/**
+ * Renders the app's one toast where the user can see it: `place` "sidebar"
+ * draws it in the sidebar while the sidebar shows, and `place` "main" draws
+ * it at the bottom left of the main pane while the sidebar is hidden. Both
+ * places read the same store, so only one of them ever draws a toast, and
+ * one that is up when the sidebar is shown or hidden moves to the other.
+ * The moved toast starts its five seconds again.
+ *
+ * Each place reads the sidebar's layout itself, so showing or hiding the
+ * sidebar draws these two places and nothing around them.
+ */
+export function DoneToastHost({
+  place,
+}: {
+  readonly place: "sidebar" | "main";
+}): JSX.Element | null {
+  const { toasts, undo } = useDoneMoves();
+  const { collapsed } = useSidebarLayout();
+  if (collapsed !== (place === "main")) return null;
+  const toast = <SidebarDoneToast store={toasts} onUndo={undo} />;
+  return place === "main" ? <div className="main-toast">{toast}</div> : toast;
 }
 
 /** Renders one toast, as `SidebarDoneToast` describes. */

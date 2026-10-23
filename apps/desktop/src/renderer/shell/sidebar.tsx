@@ -15,7 +15,7 @@ import { OfficeIcon } from "../icons/office";
 import { SearchIcon } from "../icons/search";
 import { SidebarIcon } from "../icons/sidebar";
 import { AssistantsSection } from "./assistants-section";
-import { SidebarDoneToast } from "./done-toast";
+import { DoneToastHost } from "./done-toast";
 import { FaceSwitch } from "./face-switch";
 import { decideScreenFace, type SidebarFace } from "./sidebar-face";
 import { buildSidebar, listGoMenuItems, type SectionKey } from "./sidebar-items";
@@ -173,7 +173,7 @@ export const Sidebar = memo(function Sidebar({
   }, []);
   // The toast reads its store on its own, so showing, fading or dismissing a
   // toast does not draw the sidebar again.
-  const { markDone, reopen, undo, toasts } = useDoneMoves();
+  const { markDone, reopen } = useDoneMoves();
   const listActions = useMemo(
     () => ({
       onExpand: expandSection,
@@ -266,7 +266,7 @@ export const Sidebar = memo(function Sidebar({
           items.length === 0 && <p className="side-meta side-empty">No threads yet</p>
         )}
       </SidebarList>
-      <SidebarDoneToast store={toasts} onUndo={undo} />
+      <DoneToastHost place="sidebar" />
       {face === "threads" && <AssistantsSection rows={assistantRows} officeOpen={officeOpen} />}
       <SidebarFoot
         working={presentation.counts.working}

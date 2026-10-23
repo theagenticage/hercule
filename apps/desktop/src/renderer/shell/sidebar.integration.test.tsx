@@ -15,6 +15,7 @@ import userEvent from "@testing-library/user-event";
 import { describePose } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import {
+  buildErrorBody,
   buildFixtureAssistant,
   FIXTURE_GITHUB_CONNECTION,
   buildFixtureAssistantSession,
@@ -747,6 +748,70 @@ describe("the sidebar's Done moves", () => {
     expect(readSentIds(calls, MARK_DONE_PATH)).toEqual([[FIXTURE_THREAD_IDS.bunPin]]);
     expect(readSentIds(calls, REOPEN_PATH)).toEqual([[FIXTURE_THREAD_IDS.bunPin]]);
     expect(within(nav).queryByRole("button", { name: /^Done/ })).toBeNull();
+  });
+
+  it("shows the toast in the sidebar while it shows, and in the main pane, with a working Undo, once the sidebar is hidden", async () => {
+    const controller = buildDoneController(buildLoneThreads(false));
+    const { nav, calls, fake } = await startSidebar({
+      readThreads: controller.readThreads,
+      handlers: { [MARK_DONE]: controller.handleMarkDone, [REOPEN]: controller.handleReopen },
+    });
+    const sidebar = nav.closest<HTMLElement>("aside")!;
+    const main = screen.getByRole("main");
+    const bunPin = within(nav).getByRole("link", { name: "Bump the Bun pin, idle" });
+
+    await userEvent.click(findRowButton(bunPin, "Mark done"));
+
+    expect(within(sidebar).getByText("Marked done")).toBeTruthy();
+    expect(within(main).queryByText("Marked done")).toBeNull();
+
+    act(() => {
+      fake.sendMenuCommand("toggleSidebar");
+    });
+
+    // Only one toast is ever drawn: the sidebar's has gone, the main pane's is up.
+    expect(within(sidebar).queryByText("Marked done")).toBeNull();
+    expect(screen.getAllByText("Marked done")).toHaveLength(1);
+    await userEvent.click(
+      within(within(main).getByText("Marked done").parentElement!).getByRole("button", {
+        name: "Undo",
+      }),
+    );
+
+    expect(screen.queryByText("Marked done")).toBeNull();
+    await waitFor(() => {
+      expect(readSentIds(calls, REOPEN_PATH)).toEqual([[FIXTURE_THREAD_IDS.bunPin]]);
+    });
+  });
+
+  it("shows a failed Done move as an alert in the main pane when the sidebar is hidden, and in the sidebar again when it shows", async () => {
+    const held = holdAnswer();
+    const controller = buildDoneController(buildLoneThreads(false));
+    const { nav, fake } = await startSidebar({
+      readThreads: controller.readThreads,
+      handlers: { [MARK_DONE]: held.handler },
+    });
+    const sidebar = nav.closest<HTMLElement>("aside")!;
+    const main = screen.getByRole("main");
+    await userEvent.click(
+      findRowButton(within(nav).getByRole("link", { name: "Bump the Bun pin, idle" }), "Mark done"),
+    );
+    act(() => {
+      fake.sendMenuCommand("toggleSidebar");
+    });
+
+    held.answer({ status: 409, body: buildErrorBody("invalid_state", "The thread is busy.") });
+
+    const failure = /Couldn't mark the thread done: The thread is busy\./;
+    expect((await within(main).findByText(failure)).closest("[role=alert]")).not.toBeNull();
+    expect(within(sidebar).queryByText(failure)).toBeNull();
+
+    act(() => {
+      fake.sendMenuCommand("toggleSidebar");
+    });
+
+    expect((await within(sidebar).findByText(failure)).closest("[role=alert]")).not.toBeNull();
+    expect(within(main).queryByText(failure)).toBeNull();
   });
 
   it("moves focus to the row's link when Done takes the row's Done button away but the row stays", async () => {

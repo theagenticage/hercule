@@ -100,6 +100,21 @@
   box-shadow: -1px 0 0 var(--line-soft);
 }
 
+/* The toast of a Done move, in the main pane while the sidebar is hidden (a
+   shown sidebar draws it over its own list; see `.side-toast`). It sits where
+   the sidebar's toast does: the sidebar's foot is 67px tall and the toast
+   rests 8px above it, so the toast's bottom edge is as far from the window's
+   bottom as in the sidebar, and it is as wide as the sidebar's toast at the
+   default sidebar width (272px less its 12px padding on each side). It lies
+   over every layer of the screen, which the main pane isolates. */
+.main-toast {
+  position: absolute;
+  bottom: 67px;
+  left: 14px;
+  z-index: 30;
+  width: 248px;
+}
+
 /* The band along the top of the window by which the window is dragged, as by
    a title bar: edge to edge, and as tall as the book's top row. It is the
    shell's only drag region. It paints nothing and takes no clicks, so the
