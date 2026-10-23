@@ -32,6 +32,8 @@ import {
   stubElementSize,
   THREAD_FIXTURES,
   neverAnswer,
+  type Answer,
+  type Call,
   type Handler,
   type SidebarRecords,
 } from "../app/testing";
@@ -668,46 +670,63 @@ describe("the sidebar's Done moves", () => {
 
   /**
    * Returns the controller's threads, as `readThreads` answers them, and the
-   * handlers of the two Done moves on "Bump the Bun pin", which change those
-   * threads as the controller would. `done` says whether the thread starts
-   * marked Done.
+   * Done moves on `initial`, which change those threads as the controller
+   * would. `markDone` and `reopen` apply a list of ids and return the
+   * controller's answer; `handleMarkDone` and `handleReopen` apply the ids
+   * the request carries.
    */
-  const buildDoneController = (done: boolean) => {
-    let threads: readonly Session[] = SINGLE_THREADS_FIXTURE.threads.map((session) =>
+  const buildDoneController = (initial: readonly Session[]) => {
+    let threads = initial;
+    const change = (ids: readonly string[], update: (session: Session) => Session): Answer => {
+      threads = threads.map((session) => (ids.includes(session.id) ? update(session) : session));
+      return { body: threads.filter((session) => ids.includes(session.id)) };
+    };
+    const markDone = (ids: readonly string[]): Answer =>
+      change(ids, (session) => ({
+        ...session,
+        done: { at: "2026-09-10T09:30:00.000Z", by: "user" },
+      }));
+    const reopen = (ids: readonly string[]): Answer =>
+      change(ids, (session) => {
+        const { done, ...open } = session;
+        void done;
+        return { ...open, reopenedAt: "2026-09-10T09:31:00.000Z" };
+      });
+    return {
+      readThreads: () => threads,
+      markDone,
+      reopen,
+      handleMarkDone: (call: Call) => markDone(readSessionIds(call)),
+      handleReopen: (call: Call) => reopen(readSessionIds(call)),
+    };
+  };
+
+  /** Returns the ids a Done move's request carries. */
+  const readSessionIds = (call: Call): readonly string[] =>
+    (call.body as { readonly sessionIds: readonly string[] }).sessionIds;
+
+  /** Returns the ids of every request sent to `path`, oldest first, each list sorted. */
+  const readSentIds = (calls: readonly Call[], path: string): (readonly string[])[] =>
+    calls.filter((call) => call.path === path).map((call) => [...readSessionIds(call)].sort());
+
+  /** The threads of the fixture, with "Bump the Bun pin" marked Done when `done` is true. */
+  const buildLoneThreads = (done: boolean): readonly Session[] =>
+    SINGLE_THREADS_FIXTURE.threads.map((session) =>
       done && session.id === FIXTURE_THREAD_IDS.bunPin
         ? { ...session, done: { at: "2026-09-10T09:00:00.000Z", by: "user" as const } }
         : session,
     );
-    const update = (change: (session: Session) => Session) => () => {
-      threads = threads.map((session) =>
-        session.id === FIXTURE_THREAD_IDS.bunPin ? change(session) : session,
-      );
-      return { body: threads.filter((session) => session.id === FIXTURE_THREAD_IDS.bunPin) };
-    };
-    return {
-      readThreads: () => threads,
-      markDone: update((session) => ({
-        ...session,
-        done: { at: "2026-09-10T09:30:00.000Z", by: "user" },
-      })),
-      reopen: update((session) => {
-        const { done, ...open } = session;
-        void done;
-        return { ...open, reopenedAt: "2026-09-10T09:31:00.000Z" };
-      }),
-    };
-  };
 
   /** Returns the button named `name` in the list item that holds the link `link`. */
   const findRowButton = (link: HTMLElement, name: string): HTMLElement =>
     within(link.closest<HTMLElement>(".side-item")!).getByRole("button", { name });
 
   it("takes the row off its project before the controller answers, says so with Undo, and puts it back from Undo", async () => {
-    const controller = buildDoneController(false);
+    const controller = buildDoneController(buildLoneThreads(false));
     const held = holdAnswer();
     const { nav, calls } = await startSidebar({
       readThreads: controller.readThreads,
-      handlers: { [MARK_DONE]: held.handler, [REOPEN]: controller.reopen },
+      handlers: { [MARK_DONE]: held.handler, [REOPEN]: controller.handleReopen },
     });
     const bunPin = within(nav).getByRole("link", { name: "Bump the Bun pin, idle" });
 
@@ -719,20 +738,19 @@ describe("the sidebar's Done moves", () => {
     expect(within(nav).getByRole("button", { name: "Done 1" }).getAttribute("aria-expanded")).toBe(
       "false",
     );
-    held.answer(controller.markDone());
+    held.answer(controller.markDone([FIXTURE_THREAD_IDS.bunPin]));
 
     await userEvent.click(within(toast).getByRole("button", { name: "Undo" }));
 
     expect(await within(nav).findByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
     expect(screen.queryByText("Marked done")).toBeNull();
-    expect(calls.filter((call) => call.method === "POST").map((call) => call.path)).toEqual(
-      expect.arrayContaining([MARK_DONE_PATH, REOPEN_PATH]),
-    );
+    expect(readSentIds(calls, MARK_DONE_PATH)).toEqual([[FIXTURE_THREAD_IDS.bunPin]]);
+    expect(readSentIds(calls, REOPEN_PATH)).toEqual([[FIXTURE_THREAD_IDS.bunPin]]);
     expect(within(nav).queryByRole("button", { name: /^Done/ })).toBeNull();
   });
 
   it("sends an Undo pressed before the Done is answered only after that answer, and keeps the row in its project throughout", async () => {
-    const controller = buildDoneController(false);
+    const controller = buildDoneController(buildLoneThreads(false));
     const heldDone = holdAnswer();
     const heldReopen = holdAnswer();
     const { nav, calls } = await startSidebar({
@@ -752,11 +770,13 @@ describe("the sidebar's Done moves", () => {
     expect(within(nav).getByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
     expect(sentMoves()).toEqual([MARK_DONE_PATH]);
 
-    heldDone.answer(controller.markDone());
+    heldDone.answer(controller.markDone([FIXTURE_THREAD_IDS.bunPin]));
 
     await waitFor(() => {
       expect(sentMoves()).toEqual([MARK_DONE_PATH, REOPEN_PATH]);
     });
+    expect(readSentIds(calls, MARK_DONE_PATH)).toEqual([[FIXTURE_THREAD_IDS.bunPin]]);
+    expect(readSentIds(calls, REOPEN_PATH)).toEqual([[FIXTURE_THREAD_IDS.bunPin]]);
     // The Done's answer is not written while the Undo is pending, so the row
     // never goes to the shelf.
     expect(within(nav).getByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
@@ -765,7 +785,7 @@ describe("the sidebar's Done moves", () => {
     const countThreadReads = () =>
       calls.filter((call) => call.method === "GET" && call.path === "/api/v1/sessions").length;
     const readsBeforeAnswer = countThreadReads();
-    heldReopen.answer(controller.reopen());
+    heldReopen.answer(controller.reopen([FIXTURE_THREAD_IDS.bunPin]));
 
     // The Undo is the last move, so its answer reads the list again.
     await waitFor(() => {
@@ -776,7 +796,7 @@ describe("the sidebar's Done moves", () => {
   });
 
   it("puts the row back and shows the error as an alert when the controller refuses", async () => {
-    const controller = buildDoneController(false);
+    const controller = buildDoneController(buildLoneThreads(false));
     const { nav } = await startSidebar({
       readThreads: controller.readThreads,
       handlers: {
@@ -793,11 +813,11 @@ describe("the sidebar's Done moves", () => {
     expect(await within(nav).findByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
   });
 
-  it("keeps the Done shelf closed until its heading is pressed, and reopens a thread from it", async () => {
-    const controller = buildDoneController(true);
-    const { nav } = await startSidebar({
+  it("keeps the Done shelf closed until its heading is pressed, and reopens a thread from it with an Undo that marks it done again", async () => {
+    const controller = buildDoneController(buildLoneThreads(true));
+    const { nav, calls } = await startSidebar({
       readThreads: controller.readThreads,
-      handlers: { [REOPEN]: controller.reopen },
+      handlers: { [REOPEN]: controller.handleReopen, [MARK_DONE]: controller.handleMarkDone },
     });
     const heading = within(nav).getByRole("button", { name: "Done 1" });
     expect(within(nav).queryByRole("link", { name: /^Bump the Bun pin/ })).toBeNull();
@@ -812,6 +832,77 @@ describe("the sidebar's Done moves", () => {
 
     expect(await within(nav).findByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
     expect(within(nav).queryByRole("button", { name: /^Done/ })).toBeNull();
+    expect(readSentIds(calls, REOPEN_PATH)).toEqual([[FIXTURE_THREAD_IDS.bunPin]]);
+    const toast = screen.getByText("Reopened").parentElement!;
+    expect(toast.getAttribute("role")).toBe("status");
+
+    await userEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+
+    // The shelf is still open, so the Thread is back on it.
+    expect(await within(nav).findByRole("link", { name: "Bump the Bun pin, done" })).toBeTruthy();
+    expect(within(nav).queryByRole("link", { name: "Bump the Bun pin, idle" })).toBeNull();
+    expect(readSentIds(calls, MARK_DONE_PATH)).toEqual([[FIXTURE_THREAD_IDS.bunPin]]);
+  });
+
+  describe("on a group of three Threads, one of them already Done", () => {
+    /** The ids of the group's Threads: the lead, a Done one, and a third. */
+    const LEAD = FIXTURE_THREAD_IDS.bunPin;
+    const FINISHED = "01a06d02-7400-7000-8000-0000000001a1";
+    const THIRD = "01a06d02-7400-7000-8000-0000000001a2";
+
+    /** The fixture with two more Threads in the workspace "Bump the Bun pin" works in, the first marked Done. */
+    const buildGroupRecords = (): SidebarRecords => {
+      const lead = SINGLE_THREADS_FIXTURE.threads.find((session) => session.id === LEAD)!;
+      const sibling = (id: string, title: string, createdAt: string): Session => ({
+        ...lead,
+        id,
+        title,
+        createdAt,
+        lastActivityAt: createdAt,
+      });
+      return {
+        ...SINGLE_THREADS_FIXTURE,
+        threads: [
+          ...SINGLE_THREADS_FIXTURE.threads,
+          {
+            ...sibling(FINISHED, "Check the Bun pin", "2026-09-10T09:03:10.000Z"),
+            done: { at: "2026-09-10T09:10:00.000Z", by: "user" },
+          },
+          sibling(THIRD, "Pin Bun in CI", "2026-09-10T09:03:20.000Z"),
+        ],
+        workspaces: SINGLE_THREADS_FIXTURE.workspaces.map((workspace) =>
+          workspace.sessionIds.includes(LEAD)
+            ? { ...workspace, sessionIds: [LEAD, FINISHED, THIRD] }
+            : workspace,
+        ),
+      };
+    };
+
+    it("sends the ids of the two that are not Done, and Undo reopens exactly those two", async () => {
+      const records = buildGroupRecords();
+      const controller = buildDoneController(records.threads);
+      const { nav, calls } = await startSidebar({
+        records,
+        readThreads: controller.readThreads,
+        handlers: {
+          [MARK_DONE]: controller.handleMarkDone,
+          [REOPEN]: controller.handleReopen,
+        },
+      });
+      const row = within(nav).getByRole("link", { name: /^Bump the Bun pin/ });
+
+      await userEvent.click(findRowButton(row, "Mark done"));
+
+      expect(readSentIds(calls, MARK_DONE_PATH)).toEqual([[LEAD, THIRD].sort()]);
+      const toast = screen.getByText("Marked 2 done").parentElement!;
+
+      await userEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+
+      await waitFor(() => {
+        expect(readSentIds(calls, REOPEN_PATH)).toEqual([[LEAD, THIRD].sort()]);
+      });
+      expect(await within(nav).findByRole("link", { name: /^Bump the Bun pin/ })).toBeTruthy();
+    });
   });
 });
 

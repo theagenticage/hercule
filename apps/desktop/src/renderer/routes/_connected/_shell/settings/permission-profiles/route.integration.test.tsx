@@ -248,9 +248,9 @@ describe("Settings > Permission profiles, the list", () => {
   it("opens the list again when Settings is opened after leaving a profile's page", async () => {
     const { fake, router } = await openProfile(TRIAGE);
 
-    await userEvent.click(screen.getByRole("link", { name: /Fix flaky webhook tests/ }));
+    await userEvent.click(screen.getByRole("link", { name: "Bump the Bun pin, idle" }));
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
+      expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.bunPin}`);
     });
     fake.sendMenuCommand("openSettings");
 

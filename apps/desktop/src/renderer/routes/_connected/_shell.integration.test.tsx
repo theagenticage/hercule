@@ -716,13 +716,16 @@ const buildThreadItem = (sessionId: string, title: string) => ({
   title,
 });
 
+// The runbook and flaky threads share one workspace, so they are one row named
+// after its lead, "Fix flaky webhook tests". Waiting on you lists the waiting
+// runbook thread under that row name, and the row itself follows it.
 describe("the Go menu", () => {
   it("sends main the sidebar's threads, top to bottom, once", async () => {
     const { fake } = await startShell();
 
     expect(fake.goMenus).toEqual([
       [
-        buildThreadItem(FIXTURE_THREAD_IDS.runbook, "Write the retry runbook"),
+        buildThreadItem(FIXTURE_THREAD_IDS.runbook, "Fix flaky webhook tests"),
         buildThreadItem(FIXTURE_THREAD_IDS.flaky, "Fix flaky webhook tests"),
         buildThreadItem(FIXTURE_THREAD_IDS.bunPin, "Bump the Bun pin"),
         buildThreadItem(FIXTURE_THREAD_IDS.backupsKey, "Rotate the backups key"),
@@ -735,7 +738,7 @@ describe("the Go menu", () => {
     const { fake } = await startShell({ handlers: WITH_ADA });
 
     expect(fake.goMenus.at(-1)?.slice(0, 3)).toEqual([
-      buildThreadItem(FIXTURE_THREAD_IDS.runbook, "Write the retry runbook"),
+      buildThreadItem(FIXTURE_THREAD_IDS.runbook, "Fix flaky webhook tests"),
       { destination: { kind: "assistant", assistantId: ADA.id }, title: "Ada" },
       buildThreadItem(FIXTURE_THREAD_IDS.flaky, "Fix flaky webhook tests"),
     ]);
@@ -760,7 +763,7 @@ describe("the Go menu", () => {
       expect(fake.goMenus).toHaveLength(2);
     });
     expect(fake.goMenus[1]?.map((item) => item.title)).toEqual([
-      "Write the retry runbook",
+      "Fix flaky webhook tests",
       "Fix flaky webhook tests",
       "Bump the Bun pin to 1.3",
       "Rotate the backups key",
