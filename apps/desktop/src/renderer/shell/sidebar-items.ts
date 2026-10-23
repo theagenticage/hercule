@@ -14,18 +14,11 @@ import {
   countThreadsByPose,
   DONE_SHELF_STEP,
   decideThreadPose,
-  decideThreadRowStatus,
-  holdsDraft,
-  isMarkedDone,
-  listProjectRows,
-  sortProjectsByNewestThread,
-  type DoneShelf,
   type DraftPlace,
-  type ExpandedSections,
+  type GroupAsk,
+  type GroupSummary,
+  type SessionDot,
   type Pose,
-  type ProjectGroup,
-  type ProjectSection,
-  type SidebarSections,
   type ThreadCounts,
   type ThreadRowStatus,
   type Waiting,
@@ -62,7 +55,14 @@ export type SidebarItemContent =
       readonly kind: "waiting-thread-row";
       readonly key: string;
       readonly sessionId: string;
+      /** The name of the group the asking session is in: its lead's title. */
       readonly title: string;
+      /**
+       * What the asking session is called in its group, such as "review", or
+       * `null` when the lead asks or the group has one session. The row draws
+       * it before the question, as "review asks".
+       */
+      readonly askerLabel: string | null;
       readonly question: string;
     }
   | {
@@ -96,45 +96,104 @@ export type SidebarItemContent =
       /** How many of the project's threads wait on the user, shown or hidden. */
       readonly waitingCount: number;
     }
+  /**
+   * A group's row: the Threads and Agent sessions that work in one workspace.
+   * A group of one session draws as a lone thread's row, with no dots.
+   */
   | {
-      readonly kind: "thread-row";
+      readonly kind: "group-row";
       readonly key: string;
-      readonly sessionId: string;
+      readonly groupKey: string;
+      /**
+       * The session a click opens: the one last open in this group while it
+       * is still in the group, else the group's lead.
+       */
+      readonly openId: string;
+      /** The lead's title. */
       readonly title: string;
+      /** The pose of the session that decides the status, for the row's accessible name. */
       readonly pose: Pose;
+      /** Whether the session `openId` has a colleague in the Office, which decides where a click opens it. */
+      readonly seated: boolean;
       readonly status: ThreadRowStatus;
       /**
-       * Whether the row steps back, drawn dimmer: a working thread's row does,
-       * so the threads that need the user stand out, except the open
-       * thread's, which the user is looking at.
+       * Whether the row steps back, drawn dimmer: a working group's row does,
+       * so the groups that need the user stand out, except the group that
+       * holds the open session, which the user is looking at.
        */
       readonly receded: boolean;
       /**
-       * When the thread was last active, which an `age` status counts from,
-       * or "" for any other status. Only an `age` row reads it, so a working
-       * row does not draw again each time its thread does something.
+       * When the status's session was last active, which an `age` status
+       * counts from, or "" for any other status. Only an `age` row reads it,
+       * so a working row does not draw again each time its session does
+       * something.
        */
       readonly activityAt: string;
+      /** What waits on the user, which replaces the second line while something waits, or `null`. */
+      readonly ask: GroupAsk | null;
       /**
-       * Where the thread works, the row's second line after the provider's
+       * Where the lead works, the row's second line after the provider's
        * mark, in two parts: the part that may be cut short, such as
        * "rogier/fix-" or "webshop", and the part that never is, such as
        * "sidebar-rows" or " · moss", or "" when there is none.
        */
       readonly placeClip: string;
       readonly placeKeep: string;
-      /** The provider of the thread's instance, whose mark leads the second line, or `null`. */
+      /** The provider whose mark leads the second line, or `null`. */
       readonly providerId: string | null;
       /**
-       * Where the thread works, in words, for the row's accessible
+       * Where the lead works, in words, for the row's accessible
        * description, such as "in webshop, webshop main workspace, on moss,
        * branch main".
        */
       readonly placeDescription: string;
-      /** Whether the thread's composer holds text or images the user has not sent. */
+      /** Whether the composer of any session of the group holds text or images the user has not sent. */
       readonly unsent: boolean;
+      /** The dots, or `null` for a group of one session, which has no dots and does not unfold. */
+      readonly summary: GroupSummary | null;
+      /** Whether the group's lines are drawn under the row. */
+      readonly unfolded: boolean;
+      /** Whether the open session is in the group. */
+      readonly holdsOpen: boolean;
+      /** The ids of the group's Threads not yet marked Done: what the row's Done button marks. */
+      readonly doneIds: readonly string[];
       /** What the card shows while the pointer rests on the row. */
       readonly details: ThreadHoverDetails;
+    }
+  /** One session of an unfolded group. */
+  | {
+      readonly kind: "group-line";
+      readonly key: string;
+      readonly groupKey: string;
+      /** The group's name, which describes the line to assistive technology. */
+      readonly groupTitle: string;
+      readonly sessionId: string;
+      /** What the session is called in its group, such as "review". */
+      readonly label: string;
+      /** The session's full title, for a tooltip. */
+      readonly title: string;
+      readonly pose: Pose;
+      /** Whether the session has a colleague in the Office, which decides where a click opens it. */
+      readonly seated: boolean;
+      readonly status: ThreadRowStatus;
+      readonly activityAt: string;
+      readonly dot: SessionDot;
+      /** Whether the session is a Thread marked Done, which the line draws with a check. */
+      readonly done: boolean;
+      readonly providerId: string | null;
+      readonly model: string;
+      /** Whether the line is the last of its unfolded group. */
+      readonly last: boolean;
+    }
+  /** The "n quiet" line of an unfolded group, which shows the quiet sessions it folded away. */
+  | {
+      readonly kind: "quiet-line";
+      readonly key: string;
+      readonly groupKey: string;
+      readonly groupTitle: string;
+      /** How many sessions the line stands for. */
+      readonly count: number;
+      readonly last: boolean;
     }
   | {
       readonly kind: "draft-row";
@@ -154,17 +213,27 @@ export type SidebarItemContent =
       readonly count: number;
       readonly open: boolean;
     }
-  /** A thread marked Done, on the Done shelf. */
+  /**
+   * A group on the Done shelf: every Thread of it is marked Done and every
+   * Agent session of it has ended.
+   */
   | {
-      readonly kind: "done-row";
+      readonly kind: "done-group-row";
       readonly key: string;
-      readonly sessionId: string;
+      readonly groupKey: string;
+      /** The session a click opens, chosen as the group row's is. */
+      readonly openId: string;
+      /** The lead's title. */
       readonly title: string;
       readonly pose: Pose;
-      /** When the thread was marked Done, which its second line counts from. */
+      /** How many Threads the group has, which its second line counts. */
+      readonly threadCount: number;
+      /** When the group's last Thread was marked Done, which the second line shows. */
       readonly doneAt: string;
       readonly providerId: string | null;
       readonly unsent: boolean;
+      /** The ids of every Thread of the group: what the row's Reopen button reopens. */
+      readonly reopenIds: readonly string[];
     }
   | { readonly kind: "more"; readonly key: string; readonly label: string };
 
@@ -206,10 +275,12 @@ export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
   "waiting-runs-label": 16,
   "waiting-run-row": 38,
   "project-header": 24,
-  "thread-row": 52,
+  "group-row": 52,
+  "group-line": 32,
+  "quiet-line": 32,
   "draft-row": 52,
   "done-header": 24,
-  "done-row": 52,
+  "done-group-row": 52,
   more: 28,
 };
 
