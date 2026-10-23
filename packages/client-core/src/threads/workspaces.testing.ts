@@ -106,6 +106,7 @@ export const buildWorkspace = (over: Partial<Workspace> & { id: string }): Works
 
 export const buildSession = (over: Partial<Session> & { id: string }): Session => ({
   title: "A thread",
+  role: null,
   status: "idle",
   resumable: false,
   resumeHeld: false,

@@ -286,6 +286,7 @@ export {
   SessionRequest,
   SessionRespondToApprovalRequestInput,
   SessionRespondToQuestionInput,
+  SessionRole,
   SessionSelection,
   SessionSpawnInput,
   SessionStatus,

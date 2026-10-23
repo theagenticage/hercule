@@ -1110,6 +1110,7 @@ describe("hercule session spawn --agent", () => {
   const SPAWNED = {
     id: buildId("eeeeeee1"),
     title: "Assess this task.",
+    role: null,
     status: "starting",
     resumable: false,
     resumeHeld: false,

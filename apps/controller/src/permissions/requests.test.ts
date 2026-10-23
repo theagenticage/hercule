@@ -34,6 +34,7 @@ const insertSession = Effect.gen(function* () {
   yield* sessions.insert({
     id,
     title: "a session",
+    role: undefined,
     permissionProfileId: PROFILE_ID,
     agentId: undefined,
     conversationId: undefined,

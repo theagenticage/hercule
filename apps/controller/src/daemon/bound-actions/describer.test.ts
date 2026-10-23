@@ -101,6 +101,7 @@ const insertSession = (
       yield* sessions.insert({
         id,
         title,
+        role: undefined,
         permissionProfileId,
         agentId: undefined,
         conversationId: undefined,

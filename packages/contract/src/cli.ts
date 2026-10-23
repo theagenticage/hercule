@@ -26,6 +26,7 @@ import {
   MEMORY_TOPIC_COUNT_CAP,
   SHRINK_GUARD_MIN_SIZE,
 } from "./groups/memory";
+import { MAX_ROLE_LENGTH } from "./groups/session";
 import { MAX_WIKI_PAGES, MAX_WIKI_REVISIONS_LISTED } from "./groups/wiki-page";
 import type { OperationId } from "./operations";
 
@@ -3596,9 +3597,13 @@ export const CLI = {
   },
   "session.spawn": {
     command: "session spawn",
-    help: "Starts a session, from an Agent or as a Thread driven by hand. With `--agent` every value comes from that Agent. Without one it is a Thread. A Thread the user starts takes the values of the user's thread settings. A Thread a session starts takes the values of the calling session: its Provider Instance, its model and options when the Thread runs on the same instance, its access mode, Permission Profile, project (unless it was deleted) and GitHub Connection. A session's spawn, a Thread or from an Agent, runs on the calling session's Runner and in its workspace, so a reviewer sees the caller's files; --runner or --workspace sends it elsewhere. Either way, a flag given here takes precedence. A session needs `thread.start` as well as `session.spawn` to start a Thread. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
+    help: "Starts a session, from an Agent or as a Thread driven by hand. With `--agent` every value comes from that Agent. Without one it is a Thread. A Thread the user starts takes the values of the user's thread settings. A Thread a session starts takes the values of the calling session: its Provider Instance, its model and options when the Thread runs on the same instance, its access mode, Permission Profile, project (unless it was deleted) and GitHub Connection. A session's spawn, a Thread or from an Agent, runs on the calling session's Runner and in its workspace, so a reviewer sees the caller's files; --runner or --workspace sends it elsewhere. Either way, a flag given here takes precedence. `--role` names the session's job, such as review, so clients can show it in place of the title. A session needs `thread.start` as well as `session.spawn` to start a Thread. Returns the session's id; read what it has done so far with `hercule transcript read <id>` and send the next turn with `hercule session input`.",
     examples: [
       { args: [], stdin: "Look at the failing login test and tell me what you find." },
+      {
+        args: ["--role", "review"],
+        stdin: "Review the diff on this branch and report what you would change.",
+      },
       {
         args: ["--image", "login-error.png"],
         stdin: "This is what the login page shows. Find the cause.",
@@ -3672,6 +3677,10 @@ export const CLI = {
       outputSchema: {
         flag: "output-schema",
         help: "What every turn must return, as an inline JSON Schema; a keyword outside the subset every harness supports is rejected, and the error names the keyword.",
+      },
+      role: {
+        flag: "role",
+        help: `A one- or two-word name for this session's job, such as review, tests or migration; one line, at most ${String(MAX_ROLE_LENGTH)} characters. Clients show it in place of the title. Make it specific when a role is already taken, e.g. \`refunds review\`. Without it, a Thread gets one generated from its prompt.`,
       },
       instanceId: {
         flag: "instance",

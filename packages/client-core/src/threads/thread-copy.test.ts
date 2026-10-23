@@ -13,6 +13,7 @@ const AT = "2026-10-19T09:00:00.000Z";
 const SESSION: Session = {
   id: SESSION_ID,
   title: "Fix the flaky upload test",
+  role: null,
   status: "idle",
   resumable: false,
   resumeHeld: false,

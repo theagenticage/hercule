@@ -194,6 +194,7 @@ const buildRequestOpened = (seconds: number, request: OpenRequest = REQUEST): Tr
 const BASE: Session = {
   id: "s1",
   title: "Fix the login bug",
+  role: null,
   status: "idle",
   resumable: false,
   resumeHeld: false,

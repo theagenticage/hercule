@@ -2,7 +2,7 @@
  * Tests for the frames the sessions domain builds: the complete `sessionStart`
  * frames `claimStarts` returns, and the defect `inputFrame` fails with on a
  * step's prompt that has no step key. Also tests `endOnLostRunners`,
- * `setGeneratedTitle`, and the transcript search `queryPassages`.
+ * `setGeneratedTitleAndRole`, and the transcript search `queryPassages`.
  *
  * The tests check the frame's shape on the wire and where each field comes
  * from, not how the domain builds it:
@@ -236,6 +236,7 @@ const insertQueuedSession = (
         yield* sessions.insert({
           id,
           title: "a session",
+          role: undefined,
           permissionProfileId: options.permissionProfileId ?? mintId(),
           agentId: options.agentId,
           conversationId: undefined,
@@ -1376,9 +1377,20 @@ describe("a report that starts a tool call", () => {
   });
 });
 
-describe("SessionService.setGeneratedTitle", () => {
-  /** Inserts a session titled `title` and applies `generated` as its generated title. */
-  const generateTitle = (title: string, generated: string, needsRefinement: boolean) => {
+describe("SessionService.setGeneratedTitleAndRole", () => {
+  /**
+   * Inserts a session titled `title`, with `existingRole` as the role spawn
+   * gave it (none by default), and applies `generated` as the generated answer.
+   */
+  const generate = (
+    title: string,
+    generated: {
+      readonly title: string;
+      readonly needsRefinement?: boolean;
+      readonly role?: string;
+    },
+    existingRole: string | null = null,
+  ) => {
     const published: Array<Change> = [];
     const listener = Layer.succeed(AfterCommit, {
       publish: (changes: ReadonlyArray<Change>) =>
@@ -1394,18 +1406,25 @@ describe("SessionService.setGeneratedTitle", () => {
         const { sessionId } = yield* insertRunningSession(mintId(), "busy", 0);
         yield* withTransaction(
           sql,
-          sql`UPDATE sessions SET title = ${title} WHERE id = ${uuidFromString(sessionId)}`,
+          sql`UPDATE sessions SET title = ${title}, role = ${existingRole}
+              WHERE id = ${uuidFromString(sessionId)}`,
         );
 
         yield* sessions
-          .setGeneratedTitle(sessionId, generated, needsRefinement)
+          .setGeneratedTitleAndRole(sessionId, {
+            title: generated.title,
+            needsRefinement: generated.needsRefinement ?? false,
+            role: generated.role ?? "",
+          })
           .pipe(Effect.provide(listener));
 
         const [stored] = yield* sql<{ readonly needs_refinement: number | null }>`
           SELECT needs_refinement FROM sessions WHERE id = ${uuidFromString(sessionId)}`;
+        const session = Option.getOrThrow(yield* rows.one(sessionId));
         return {
           sessionId,
-          title: Option.getOrThrow(yield* rows.one(sessionId)).title,
+          title: session.title,
+          role: session.role,
           needsRefinement: stored!.needs_refinement,
           published,
         };
@@ -1419,11 +1438,10 @@ describe("SessionService.setGeneratedTitle", () => {
   ])(
     "replaces the title, stores the refinement flag %s as %s and announces the session",
     async (needsRefinement, stored) => {
-      const result = await generateTitle(
-        "fix the thing pls",
-        "Fix the login redirect",
+      const result = await generate("fix the thing pls", {
+        title: "Fix the login redirect",
         needsRefinement,
-      );
+      });
 
       expect(result.title).toBe("Fix the login redirect");
       expect(result.needsRefinement).toBe(stored);
@@ -1434,18 +1452,22 @@ describe("SessionService.setGeneratedTitle", () => {
   );
 
   it("cleans the generated title like any other title", async () => {
-    const result = await generateTitle("a", `  Fix\nthe   build ${"x".repeat(200)}`, false);
+    const result = await generate("a", { title: `  Fix\nthe   build ${"x".repeat(200)}` });
 
     expect(result.title).toHaveLength(80);
     expect(result.title.startsWith("Fix the build xxx")).toBe(true);
   });
 
+  it("cuts the title by characters, so an emoji at the cut stays whole", async () => {
+    const result = await generate("a", { title: `${"x".repeat(79)}\u{1F680}\u{1F680} tail` });
+
+    expect(result.title).toBe(`${"x".repeat(79)}\u{1F680}`);
+  });
+
   it("removes control and format characters", async () => {
-    const result = await generateTitle(
-      "a",
-      "Fix\u0000 the\u200B login \u202Ebug\u0007 \uFEFF now",
-      false,
-    );
+    const result = await generate("a", {
+      title: "Fix\u0000 the\u200B login \u202Ebug\u0007 \uFEFF now",
+    });
 
     expect(result.title).toBe("Fix the login bug now");
   });
@@ -1457,17 +1479,63 @@ describe("SessionService.setGeneratedTitle", () => {
     const family = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}";
 
     // A zero-width space between the two parts must still be stripped.
-    const result = await generateTitle("a", `${persian} \u200B${family}`, false);
+    const result = await generate("a", { title: `${persian} \u200B${family}` });
 
     expect(result.title).toBe(`${persian} ${family}`);
   });
 
-  it("keeps the title it has when the generated one is empty", async () => {
-    const result = await generateTitle("the first line", " \n ", true);
+  it("keeps the title it has when the generated title and role are both empty", async () => {
+    const result = await generate("the first line", { title: " \n ", needsRefinement: true });
 
     expect(result.title).toBe("the first line");
+    expect(result.role).toBeNull();
     expect(result.needsRefinement).toBeNull();
     expect(result.published).toEqual([]);
+  });
+
+  it("stores a generated role, cleaned, on a session that has none", async () => {
+    const result = await generate("a", { title: "Fix it", role: "  API\n docs \u200B" });
+
+    expect(result.role).toBe("API docs");
+    expect(result.published).toContainEqual(
+      expect.objectContaining({ _tag: "record", topic: "session", id: result.sessionId }),
+    );
+  });
+
+  it("keeps the role the session already has", async () => {
+    const result = await generate("a", { title: "Fix it", role: "migration" }, "review");
+
+    expect(result.role).toBe("review");
+    expect(result.title).toBe("Fix it");
+  });
+
+  it.each([
+    ["is empty after cleaning", " \n\u200B "],
+    ["is over 24 characters", "x".repeat(25)],
+  ])(
+    "drops a generated role that %s, and never cuts it, but keeps the title and flag",
+    async (_why, role) => {
+      const result = await generate("a", { title: "Fix it", needsRefinement: true, role });
+
+      expect(result.role).toBeNull();
+      expect(result.title).toBe("Fix it");
+      expect(result.needsRefinement).toBe(1);
+    },
+  );
+
+  it("stores a valid role when the title is empty after cleaning, leaving the title and flag alone", async () => {
+    const result = await generate("the first line", {
+      title: " \n ",
+      needsRefinement: true,
+      role: "review",
+    });
+
+    expect(result.role).toBe("review");
+    expect(result.title).toBe("the first line");
+    expect(result.needsRefinement).toBeNull();
+    expect(result.published).toContainEqual(
+      expect.objectContaining({ _tag: "record", topic: "session", id: result.sessionId }),
+    );
   });
 });
 

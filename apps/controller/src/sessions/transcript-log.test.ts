@@ -69,6 +69,7 @@ const readStoredRows = <A>(
       yield* sessions.insert({
         id: sessionId,
         title: "a session",
+        role: undefined,
         permissionProfileId: mintId(),
         agentId: undefined,
         conversationId: undefined,

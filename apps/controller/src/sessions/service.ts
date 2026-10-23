@@ -60,6 +60,7 @@ import {
   NotFound,
   SESSION_SORT_FIELDS,
   SessionFilter,
+  SessionRole,
   SUBAGENT_SORT_FIELDS,
   TRANSCRIPT_SORT_FIELDS,
   TranscriptPosition,
@@ -265,6 +266,8 @@ export interface CreateRequest {
    * from the prompt (`buildTitle`).
    */
   readonly title: string | undefined;
+  /** The role the caller chose; `undefined` for a session that starts without one. */
+  readonly role: string | undefined;
   readonly kind: "session.spawned" | "session.continued";
   /** The audit entry's payload, apart from the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
@@ -608,29 +611,32 @@ const findNativeId = (event: ProviderEvent): string | undefined =>
 const MAX_TITLE_LENGTH = 80;
 
 /**
- * Trims a title and cuts it to `MAX_TITLE_LENGTH`. The cut can land right
- * after a space, so the end is trimmed again: a title never ends in
- * whitespace.
+ * Trims a title and cuts it to `MAX_TITLE_LENGTH` characters, counted by code
+ * point so the cut never splits an emoji or another character outside the
+ * Basic Multilingual Plane. The cut can land right after a space, so the end
+ * is trimmed again: a title never ends in whitespace.
  */
-const cutTitle = (title: string): string => title.trim().slice(0, MAX_TITLE_LENGTH).trimEnd();
+const cutTitle = (title: string): string =>
+  Array.from(title.trim()).slice(0, MAX_TITLE_LENGTH).join("").trimEnd();
 
 /**
- * Cleans a title a model generated: line breaks and repeated spaces become
- * single spaces, control and format characters are removed, and the result is
- * cut by `cutTitle`. A model can emit zero-width or direction-changing
- * characters, which would show up as nothing in a sidebar row but break
- * searching and copying. The zero-width non-joiner and joiner (U+200C and
- * U+200D) stay, because Persian and other scripts need them to shape letters,
- * and emoji sequences need them to stay one emoji.
+ * Cleans text a model generated: line breaks and repeated spaces become
+ * single spaces, and control and format characters are removed. It does not
+ * trim or cut. A model can emit zero-width or direction-changing characters,
+ * which would show up as nothing in a sidebar row but break searching and
+ * copying. The zero-width non-joiner and joiner (U+200C and U+200D) stay,
+ * because Persian and other scripts need them to shape letters, and emoji
+ * sequences need them to stay one emoji.
  */
-const cleanGeneratedTitle = (title: string): string =>
-  cutTitle(
-    title
-      .replace(/\s+/g, " ")
-      .replace(/(?![\u200C\u200D])[\p{Cc}\p{Cf}]/gu, "")
-      // Removing a character between two spaces leaves a double space.
-      .replace(/ {2,}/g, " "),
-  );
+const cleanGeneratedText = (text: string): string =>
+  text
+    .replace(/\s+/g, " ")
+    .replace(/(?![\u200C\u200D])[\p{Cc}\p{Cf}]/gu, "")
+    // Removing a character between two spaces leaves a double space.
+    .replace(/ {2,}/g, " ");
+
+/** Checks a role a model generated: the same rule as a role given at spawn. */
+const isAcceptableRole = Schema.is(SessionRole);
 
 /**
  * Builds a session's short title, trimmed and cut by `cutTitle`:
@@ -1847,6 +1853,7 @@ const make = Effect.gen(function* () {
         yield* sessions.insert({
           id: open.id,
           title: buildTitle(open.title, open.prompt, references[0]?.name),
+          role: open.role,
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
           conversationId: open.conversationId,
@@ -2411,32 +2418,44 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Replaces a Thread's cut-short title with one a model generated from its
-     * first message, and stores `needsRefinement`, the model's own judgement
-     * that the first message was too vague for a good title. Announces the
-     * session, so clients show the new title. Runs in its own transaction.
+     * Stores what the title generation answered for a Thread's first message:
+     * a title, `needsRefinement` (the model's own judgement that the message
+     * was too vague for a good title), and a role. Announces the session, so
+     * clients show the change. Runs in its own transaction.
      *
-     * The title is cleaned by `cleanGeneratedTitle`: line breaks and repeated
-     * spaces become single spaces, control and format characters are removed,
-     * and it is cut to `MAX_TITLE_LENGTH`. A title that is empty after
-     * cleaning changes nothing, and the cut-short title stays.
+     * Title and role are accepted on their own, so one can be stored while the
+     * other is dropped. Both are cleaned by `cleanGeneratedText` first:
+     * line breaks and repeated spaces become single spaces, and control and
+     * format characters are removed.
+     *
+     * - The title is cut to `MAX_TITLE_LENGTH`. A title that is empty after
+     *   cleaning is dropped, and the cut-short title stays.
+     * - The role is never cut, because a cut role reads as a broken phrase.
+     *   It is dropped unless it is a valid `SessionRole`: the one rule for a
+     *   role given at spawn and a generated one. A session that already has a
+     *   role keeps it.
+     *
+     * When both are dropped, nothing is written or announced.
      *
      * No user can rename a session today, so there is no user-chosen title to
      * protect. A system write like this one carries no actor, as with
      * `setSelection`.
      */
-    setGeneratedTitle: (
+    setGeneratedTitleAndRole: (
       sessionId: string,
-      title: string,
-      needsRefinement: boolean,
+      answer: { readonly title: string; readonly needsRefinement: boolean; readonly role: string },
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
-        const cleaned = cleanGeneratedTitle(title);
-        if (cleaned === "") return;
+        const title = cutTitle(cleanGeneratedText(answer.title));
+        const cleanedRole = cleanGeneratedText(answer.role).trim();
+        const validRole = isAcceptableRole(cleanedRole) ? cleanedRole : undefined;
+        if (title === "" && validRole === undefined) return;
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* sessions.setGeneratedTitle(sessionId, cleaned, needsRefinement);
+            if (title !== "")
+              yield* sessions.setGeneratedTitle(sessionId, title, answer.needsRefinement);
+            if (validRole !== undefined) yield* sessions.setGeneratedRole(sessionId, validRole);
             yield* announceSessionChangeById(sessionId);
           }),
         );
