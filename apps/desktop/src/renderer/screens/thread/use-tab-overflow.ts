@@ -4,7 +4,7 @@ import { pickHiddenTabs } from "./fit-tabs";
 /**
  * The widest the work's name draws in the pill, in pixels. The name's own
  * style cuts it at the same width; this copy lets the fit count the name at
- * its natural width up to that limit, so tabs hide before the name shrinks.
+ * its natural width up to that limit.
  */
 const WORK_NAME_MAX_WIDTH = 280;
 
@@ -23,7 +23,7 @@ const NO_TABS: ReadonlySet<string> = new Set();
  *   tab is hidden it is out of flow too, and shows the label it would have
  *   for one hidden tab, so there is a width to reserve when one must hide.
  * - `data-work-name`: the work's name. It counts at its natural width, up
- *   to 280 px.
+ *   to 280 px, and the stylesheet shrinks it when pinned tabs need the room.
  * - Any other child counts at its own width.
  *
  * A hidden tab stays in the DOM, out of flow, with `position: absolute;
@@ -45,26 +45,28 @@ const NO_TABS: ReadonlySet<string> = new Set();
  * a wider button hides at least as many tabs as a narrower one, so a button
  * that changed width settles after one more check.
  *
- * `pinnedKeys` are the tabs that always stay visible: the open tab and every
- * waiting tab.
+ * `openKey` is the open tab, which never hides. `waitingKeys` are the waiting
+ * tabs, which stay visible unless even the open tab and a work name shrunk to
+ * nothing leave no room for them (see `pickHiddenTabs`).
  */
 export function useTabOverflow(options: {
   readonly roomRef: RefObject<HTMLElement | null>;
   readonly navRef: RefObject<HTMLElement | null>;
-  readonly pinnedKeys: readonly string[];
+  readonly openKey: string | null;
+  readonly waitingKeys: readonly string[];
 }): ReadonlySet<string> {
-  const { roomRef, navRef, pinnedKeys } = options;
+  const { roomRef, navRef, openKey, waitingKeys } = options;
   const [hiddenKeys, setHiddenKeys] = useState(NO_TABS);
   const observerRef = useRef<ResizeObserver | null>(null);
   const observedRef = useRef(new Set<Element>());
 
-  // Reads the latest `pinnedKeys`, which the observer's callback, made once,
+  // Reads the latest `openKey` and `waitingKeys`, which the observer's callback, made once,
   // could not do by itself.
   const refit = useEffectEvent(() => {
     const room = roomRef.current;
     const nav = navRef.current;
     if (room === null || nav === null) return;
-    const next = pickHiddenTabKeys(room, nav, new Set(pinnedKeys));
+    const next = pickHiddenTabKeys(room, nav, openKey, new Set(waitingKeys));
     setHiddenKeys((current) => (hasSameKeys(current, next) ? current : next));
   });
 
@@ -112,18 +114,20 @@ function hasSameKeys(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
 
 /**
  * Measures the pill `nav` and returns the keys of the tabs that do not fit in
- * `room` and are not in `pinnedKeys`. See `useTabOverflow` for what it reads.
+ * `room`. See `useTabOverflow` for what it reads.
  */
 function pickHiddenTabKeys(
   room: HTMLElement,
   nav: HTMLElement,
-  pinnedKeys: ReadonlySet<string>,
+  openKey: string | null,
+  waitingKeys: ReadonlySet<string>,
 ): ReadonlySet<string> {
   const style = getComputedStyle(nav);
   const gap = Number.parseFloat(style.columnGap) || 0;
   const padding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
   // Each item below adds its width and one gap; n items have n - 1 gaps.
   let fixedWidth = padding - gap;
+  let nameWidth = 0;
   let overflowWidth = 0;
   const tabKeys: string[] = [];
   const tabWidths: number[] = [];
@@ -136,15 +140,20 @@ function pickHiddenTabKeys(
     } else if (child.dataset.tabOverflow !== undefined) {
       overflowWidth = width + gap;
     } else if (child.dataset.workName !== undefined) {
-      fixedWidth += Math.min(child.scrollWidth, WORK_NAME_MAX_WIDTH) + gap;
+      nameWidth = Math.min(child.scrollWidth, WORK_NAME_MAX_WIDTH);
+      fixedWidth += gap;
     } else {
       fixedWidth += width + gap;
     }
   }
+  // `openKey` can name a tab the pill does not draw (yet), which is no open tab.
+  const openTabPosition = openKey === null ? -1 : tabKeys.indexOf(openKey);
   const hiddenIndexes = pickHiddenTabs({
     tabWidths,
-    pinned: tabKeys.map((key) => pinnedKeys.has(key)),
+    openIndex: openTabPosition === -1 ? null : openTabPosition,
+    waiting: tabKeys.map((key) => waitingKeys.has(key)),
     fixedWidth,
+    nameWidth,
     overflowWidth,
     room: room.getBoundingClientRect().width,
   });
