@@ -2201,12 +2201,42 @@ Settings does not open a live topic the shell does not already need, except whil
 |---|---|---|
 | Processes | none added | none added |
 | The first screen's JavaScript | grows only by the shared pills' slot for crumbs, the run's read in the thread's loader and the `run` topic's hook: under 1 kB | 329.8 kB to 330.2 kB gzipped (+0.4 kB), `pnpm build:desktop`'s bundle check, before and after |
-| The thread's chunk (`agent-page`) | grows by the branch to the lazy crumbs and the shared tab list | 46.3 kB to 47.1 kB |
+| The thread's chunk (`agent-page`) | grows by the branch to the lazy crumbs and ~~the shared tab list~~ *(Amended 2026-10-24, [#829](https://github.com/theagenticage/hercule/issues/829).)* the thread's own parts. The pill that draws the tabs is no longer in this chunk: it is shared with the new-thread screen and loads with the first screen ([What the thread's header costs](#what-the-threads-header-costs)) | 46.3 kB to 47.1 kB |
 | The crumbs' code | its own chunks, loaded the first time a step session opens: the crumbs (2.1 kB), the crumbs shared with the run's page (4.1 kB) and the run's start time (7.2 kB, which the workflow screens already load) | the bundle check's table |
 | Reads | when a step session opens: the run, its workflow and the settings, once each, which the loader waits for at most `OPTIONAL_READ_WAIT_MS`, as it does for the senders. The sessions are the shell's own read of live sessions an Agent spawned. A thread opens with none of them | the stubbed controller's request log in the header's test |
 | Live topics | `run` and `workflow` while a step session's header is mounted and the window is visible, held by `useScreenTopicsLive` with `WORKFLOW_TOPICS`, as the run's page holds them, so a workflow deleted while the header is open shows as deleted | by reading `useScreenTopicsLive` |
 | Work per streamed token | none: the header reads no transcript | by reading the header |
 | Idle | one clock tick for the start time while the header is on screen, as the run's page has | by reading `useStartTime` |
+
+### What the thread's header costs
+
+*(Added 2026-10-24, [#829](https://github.com/theagenticage/hercule/issues/829).)* The thread's header now draws the work's name, one tab per line of the work's sidebar row, the "+n" menu for the tabs that do not fit, and Done or Reopen ("The header is the book's" under [Design system](#design-system)). The ticket stated its cost before the build: no new read, process or polling, nothing per streamed token, nothing idle but one `ResizeObserver`, and the overflow menu in the bundle. Measured 2026-10-24 on an Apple Silicon Mac (a one-minute load average of 6 to 9, other sessions running), the build `de93a2253` against `main` at `b9040064c`:
+
+| Cost | Expected | Measured |
+|---|---|---|
+| Processes | none added | none added |
+| The first screen's JavaScript | grows by the overflow menu and the pill's fit | 455.1 kB to 459.4 kB gzipped (+4.3 kB), `pnpm build:desktop`'s bundle check, before and after. The `first-screen` chunk is 395.8 kB to 400.2 kB; the 0.9 kB `use-popover-menu` chunk is now part of it. The guide of 250 kB was already missed |
+| The thread's chunk (`agent-page`) | no growth: the pill loads with the first screen, because the new-thread screen draws it too | 16.3 kB to 16.2 kB gzipped. No new chunk: 109 chunks before, 108 after |
+| CSS | not stated | the first screen's stylesheet grows from 63.17 kB to 66.71 kB (13.55 kB to 14.14 kB gzipped); every other stylesheet is unchanged. The bundle check counts JavaScript only; these are Vite's build report |
+| Reads | none added | none added: the header reads the shell's cached lists, the providers (which the thread's page reads too), and the shell's session presentation. The "+n" menu and the Done button read nothing. By reading `ThreadHeader` and the files it draws, which make no request |
+| Live topics, timers, listeners | none added | none: the header files hold no timer, no event listener and no polling |
+| Work per streamed token | none: the header reads no transcript | no header render for 60 taps in 6 pushes, none for a stored text row, one for a session update that changes the usage and the tool call count (the controller sends about one a second during a turn). Counted with a throwaway test on the thread's page (`THREAD_FIXTURES.running`), which counted the pill's renders |
+| Idle | nothing, apart from one `ResizeObserver` that fires on a size change | 0 layout reads and 0 style reads over 5 s of an open ten-thread header (a throwaway Electron script on the specimen `thread-header.html`) |
+| Age clocks | only the ages that show | the closed menu's rows keep no age (`onScreen` is the menu's open state). A hidden tab still keeps its age on the clock, because the tab passes `onScreen` always. That is at most one invisible label change a minute on the shared timer |
+| Layout | one fit after each render of the pill | one fit reads 18 rectangles and 1 computed style for ten tabs, and takes 0.1 ms or less of read time (the page's timer ticks in 0.1 ms). A window resize makes one to three fits as the tabs settle. A fit is made once for each session update, which is about one a second during a turn, and not for a token |
+
+`pnpm --filter @hercule/desktop perf -- --sidebar-only` is the one perf scenario that opens a thread and moves the width of its header, by hiding and showing the sidebar and dragging its edge. Its thread has one tab, not ten. Two runs of each build, in the order main, branch, main, branch (usual frame 8.3 ms; one dropped frame of 16.5 to 18.7 ms in every change of both builds, on `main` too). The most style and layout work in one frame, in milliseconds, main / branch:
+
+| Change | Run 1 | Run 2 |
+|---|---|---|
+| Hiding | 0.61 / 1.18 | 0.85 / 0.72 |
+| Showing | 0.73 / **2.27** | 0.72 / **2.24** |
+| Dragging the edge | 0.71 / 0.98 | 1.23 / 1.08 |
+| Pressing the edge | 0.78 / 0.32 | 0.56 / 0.32 |
+| `→` on the edge | 0.69 / 1.12 | 2.18 / 1.48 |
+
+- **Showing the sidebar misses the 2 ms limit of rule 2 on the branch,** by 0.2 to 0.3 ms, in both runs. It is not the header's fit: with the rule `.main:has(.has-scrollbar) > .main-toast` (the Done toast's offset from a scroll bar, in shell.css) taken out, four more runs measured 0.69, 1.14, 0.57 and 0.59 ms. A `:has()` on the main pane makes the browser check the whole pane's subtree on a change of style. This stays open until the rule is replaced by one that needs no `:has()`, and the measurement is made again.
+- **The ten-tab header is not in a perf scenario.** `--sidebar-groups-only` pushes a status change, but opens no thread. The ten-tab figures above are from the specimen and the render counts, not from the packaged app's frames.
 
 ### What every session in the Office costs
 
