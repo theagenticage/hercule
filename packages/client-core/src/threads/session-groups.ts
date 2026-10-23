@@ -1,6 +1,6 @@
 /**
  * Groups the sessions the desktop sidebar holds into rows: the Threads and
- * Agent sessions that work in one workspace are one row (spec 14 §App shell).
+ * Agent sessions that work in one workspace are one row (spec 17 §The sidebar).
  */
 import type { Session } from "@hercule/contract";
 import { pickLastStartedAt } from "./project-rows";
@@ -19,12 +19,15 @@ export interface SessionGroup {
   readonly doneAt: string | null;
 }
 
+/** Compares two strings by code unit, returning a negative, zero or positive number as `sort` expects. */
 const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
+/** Compares two sessions so that sorting puts the oldest first, and sessions created at the same moment in id order. */
 const compareOldestCreatedFirst = (a: Session, b: Session): number =>
   Date.parse(a.createdAt) - Date.parse(b.createdAt) || compareText(a.id, b.id);
 
-const latest = (times: readonly string[]): string =>
+/** Returns the latest of `times`, which must hold at least one timestamp. */
+const pickLatestTime = (times: readonly string[]): string =>
   times.reduce((a, b) => (Date.parse(b) > Date.parse(a) ? b : a));
 
 /**
@@ -56,7 +59,9 @@ export const buildSessionGroups = (sessions: readonly Session[]): readonly Sessi
     if (session.workspaceId === null && session.kind === "agent") continue;
     const key =
       session.workspaceId === null ? `session:${session.id}` : `workspace:${session.workspaceId}`;
-    members.set(key, [...(members.get(key) ?? []), session]);
+    const group = members.get(key);
+    if (group === undefined) members.set(key, [session]);
+    else group.push(session);
   }
 
   const groups: SessionGroup[] = [];
@@ -66,7 +71,7 @@ export const buildSessionGroups = (sessions: readonly Session[]): readonly Sessi
     const lead = threads[0];
     if (lead === undefined) continue;
     // A partner's creation must not move the group, so only a partner that was reopened counts.
-    const lastStartedAt = latest(
+    const lastStartedAt = pickLatestTime(
       threads
         .filter((thread) => thread === lead || thread.reopenedAt !== undefined)
         .map(pickLastStartedAt),
@@ -82,7 +87,7 @@ export const buildSessionGroups = (sessions: readonly Session[]): readonly Sessi
       lead,
       sessions: ordered,
       lastStartedAt,
-      doneAt: allDone ? latest(doneTimes) : null,
+      doneAt: allDone ? pickLatestTime(doneTimes) : null,
     });
   }
   return groups.toSorted(
