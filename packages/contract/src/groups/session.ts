@@ -173,12 +173,20 @@ export const MAX_ROLE_LENGTH = 24;
 
 /**
  * A session's role: its one- or two-word name for its job, such as "review",
- * "tests" or "migration". One line, with no whitespace at either end, and at
- * most `MAX_ROLE_LENGTH` characters. A role names what the session does; it is
- * not a permission.
+ * "tests" or "migration". One line, with no whitespace at either end, no
+ * control or invisible formatting characters, and at most `MAX_ROLE_LENGTH`
+ * characters. The zero-width non-joiner and joiner (U+200C and U+200D) are
+ * allowed, because some scripts need them to shape letters and emoji
+ * sequences need them to stay one emoji. A role names what the session does;
+ * it is not a permission.
  */
 export const SessionRole = nonBlankLine(MAX_ROLE_LENGTH).check(
   Schema.isTrimmed({ message: "must not start or end with whitespace" }),
+  Schema.makeFilter((role: string) =>
+    /(?![\u200C\u200D])[\p{Cc}\p{Cf}]/u.test(role)
+      ? "must not hold control or invisible formatting characters"
+      : undefined,
+  ),
 );
 
 export const Session = Schema.Struct({
@@ -199,7 +207,8 @@ export const Session = Schema.Struct({
    * the role given at spawn; else, for a Thread, the one generated with its
    * title; else null. Clients show the role, or the title cut short when it
    * is null. An agent session has only the role given at spawn. A fork takes
-   * none from its parent. A role never changes after spawn.
+   * none from its parent. Once set, a role never changes: `session.update` has
+   * no `role`.
    */
   role: Schema.NullOr(Schema.String),
   status: SessionStatus,
@@ -486,8 +495,9 @@ export const SessionSpawnInput = closedStruct({
   /** Ids from `attachment.create`; the prompt's images. */
   attachments: PromptAttachments,
   /**
-   * The session's role, its name for its job. A role never changes after spawn. A
-   * Thread spawned without one gets a generated role, when that succeeds.
+   * The session's role, its name for its job. Once set, a role never changes:
+   * `session.update` has no `role`. A Thread spawned without one gets a
+   * generated role, when that succeeds.
    */
   role: Schema.optionalKey(SessionRole),
   /**

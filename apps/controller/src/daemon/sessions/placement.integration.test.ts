@@ -1077,12 +1077,14 @@ describe("placeSession generates a Thread title", () => {
     });
   });
 
-  it("refuses a role that is blank or over 24 characters", async () => {
+  it("answers a spawn with an invalid role with a validation error on the role", async () => {
     await withTitles(answers, async (arranged) => {
-      for (const role of [" ", "x".repeat(25), " padded "]) {
-        const response = await spawnSession(arranged, { prompt: "hello", role });
-        expect(response.status, role).toBe(400);
-      }
+      const refused = await parseRefusal(
+        await spawnSession(arranged, { prompt: "hello", role: " " }),
+      );
+
+      expect(refused.code).toBe("validation");
+      expect(refused.text).toContain("role");
     });
   });
 

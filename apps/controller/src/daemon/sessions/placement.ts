@@ -117,7 +117,8 @@ const THREAD_TITLE_INSTRUCTIONS =
   'such as a greeting or "help me". Still write your best title.\n' +
   "- Set role to the job of the conversation in a word or two, " +
   'such as "migration", "fix", "feature", "review", "tests" or "API docs".\n' +
-  "- Write the role in lowercase, unless it is a name, and in the language of the message.\n" +
+  "- Write the role in lowercase, unless it is a name, and in the language of the message. " +
+  "Do not use quotes or a final period.\n" +
   "- Leave role empty when the message is too vague to name a job.";
 
 /**

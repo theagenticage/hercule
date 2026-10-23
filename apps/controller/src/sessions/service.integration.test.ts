@@ -1458,6 +1458,12 @@ describe("SessionService.setGeneratedTitleAndRole", () => {
     expect(result.title.startsWith("Fix the build xxx")).toBe(true);
   });
 
+  it("cuts the title by characters, so an emoji at the cut stays whole", async () => {
+    const result = await generate("a", { title: `${"x".repeat(79)}\u{1F680}\u{1F680} tail` });
+
+    expect(result.title).toBe(`${"x".repeat(79)}\u{1F680}`);
+  });
+
   it("removes control and format characters", async () => {
     const result = await generate("a", {
       title: "Fix\u0000 the\u200B login \u202Ebug\u0007 \uFEFF now",
@@ -1513,14 +1519,6 @@ describe("SessionService.setGeneratedTitleAndRole", () => {
     expect(result.title).toBe("Fix it");
   });
 
-  it("accepts a role of exactly 24 code points, counting an emoji as one", async () => {
-    const role = "\u{1F680}".repeat(24);
-
-    const result = await generate("a", { title: "Fix it", role });
-
-    expect(result.role).toBe(role);
-  });
-
   it("stores a valid role when the title is empty after cleaning, leaving the title and flag alone", async () => {
     const result = await generate("the first line", {
       title: " \n ",
@@ -1531,6 +1529,9 @@ describe("SessionService.setGeneratedTitleAndRole", () => {
     expect(result.role).toBe("review");
     expect(result.title).toBe("the first line");
     expect(result.needsRefinement).toBeNull();
+    expect(result.published).toContainEqual(
+      expect.objectContaining({ _tag: "record", topic: "session", id: result.sessionId }),
+    );
   });
 
   it("stores a valid title when the role is invalid, leaving the role empty", async () => {

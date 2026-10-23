@@ -611,11 +611,13 @@ const findNativeId = (event: ProviderEvent): string | undefined =>
 const MAX_TITLE_LENGTH = 80;
 
 /**
- * Trims a title and cuts it to `MAX_TITLE_LENGTH`. The cut can land right
- * after a space, so the end is trimmed again: a title never ends in
- * whitespace.
+ * Trims a title and cuts it to `MAX_TITLE_LENGTH` characters, counted by code
+ * point so the cut never splits an emoji or another character outside the
+ * Basic Multilingual Plane. The cut can land right after a space, so the end
+ * is trimmed again: a title never ends in whitespace.
  */
-const cutTitle = (title: string): string => title.trim().slice(0, MAX_TITLE_LENGTH).trimEnd();
+const cutTitle = (title: string): string =>
+  Array.from(title.trim()).slice(0, MAX_TITLE_LENGTH).join("").trimEnd();
 
 /**
  * Cleans text a model generated: line breaks and repeated spaces become
@@ -2431,7 +2433,7 @@ const make = Effect.gen(function* () {
      * - The role is never cut, because a cut role reads as a broken phrase.
      *   It is dropped unless it is a valid `SessionRole`: the one rule for a
      *   role given at spawn and a generated one. A session that already has a
-     *   role keeps it, whether spawn gave it or an earlier call did.
+     *   role keeps it.
      *
      * When both are dropped, nothing is written or announced.
      *
@@ -2445,17 +2447,15 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const title = cutTitle(cleanGeneratedText(answer.title));
-        const role = cleanGeneratedText(answer.role).trim();
-        const accepted = {
-          title: title === "" ? undefined : title,
-          needsRefinement: answer.needsRefinement,
-          role: isAcceptableRole(role) ? role : undefined,
-        };
-        if (accepted.title === undefined && accepted.role === undefined) return;
+        const cleanedRole = cleanGeneratedText(answer.role).trim();
+        const validRole = isAcceptableRole(cleanedRole) ? cleanedRole : undefined;
+        if (title === "" && validRole === undefined) return;
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            yield* sessions.setGeneratedTitleAndRole(sessionId, accepted);
+            if (title !== "")
+              yield* sessions.setGeneratedTitle(sessionId, title, answer.needsRefinement);
+            if (validRole !== undefined) yield* sessions.setGeneratedRole(sessionId, validRole);
             yield* announceSessionChangeById(sessionId);
           }),
         );

@@ -516,6 +516,28 @@ describe("the session token hash", () => {
   });
 });
 
+describe("storing a generated role", () => {
+  it("stores it on a session with no role and keeps a role spawn gave", async () => {
+    const roles = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        const bare = yield* aSession;
+        const given = yield* aSession;
+        yield* sql`UPDATE sessions SET role = 'review' WHERE id = ${uuidFromString(given)}`;
+        yield* sessions.setGeneratedRole(bare, "fix");
+        yield* sessions.setGeneratedRole(given, "fix");
+        return {
+          bare: Option.getOrThrow(yield* sessions.one(bare)).role,
+          given: Option.getOrThrow(yield* sessions.one(given)).role,
+        };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(roles).toEqual({ bare: "fix", given: "review" });
+  });
+});
+
 describe("listing the sessions on one profile", () => {
   it("returns that profile's live sessions and no other rows", async () => {
     const { listed, profileId, live } = await run(

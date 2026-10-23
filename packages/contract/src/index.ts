@@ -264,7 +264,6 @@ export {
   ApprovalDecision,
   LIVE_SESSION_STATUSES,
   MAX_PROMPT_LENGTH,
-  MAX_ROLE_LENGTH,
   MAX_SPAWN_CHECKOUTS,
   OpenRequest,
   QuestionAnswers,

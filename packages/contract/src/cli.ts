@@ -26,6 +26,7 @@ import {
   MEMORY_TOPIC_COUNT_CAP,
   SHRINK_GUARD_MIN_SIZE,
 } from "./groups/memory";
+import { MAX_ROLE_LENGTH } from "./groups/session";
 import { MAX_WIKI_PAGES, MAX_WIKI_REVISIONS_LISTED } from "./groups/wiki-page";
 import type { OperationId } from "./operations";
 
@@ -3679,7 +3680,7 @@ export const CLI = {
       },
       role: {
         flag: "role",
-        help: "A one- or two-word name for this session's job, such as review, tests or migration; one line, at most 24 characters. Clients show it in place of the title. Make it specific when a role is already taken, e.g. `refunds review`. Without it, a Thread gets one generated from its prompt.",
+        help: `A one- or two-word name for this session's job, such as review, tests or migration; one line, at most ${String(MAX_ROLE_LENGTH)} characters. Clients show it in place of the title. Make it specific when a role is already taken, e.g. \`refunds review\`. Without it, a Thread gets one generated from its prompt.`,
       },
       instanceId: {
         flag: "instance",

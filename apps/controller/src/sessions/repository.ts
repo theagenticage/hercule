@@ -1284,34 +1284,29 @@ const make = Effect.gen(function* () {
       `),
 
     /**
-     * Stores what a title generation answered, and writes only the parts that
-     * are given:
-     *
-     * - A `title` replaces the session's title, and `needs_refinement` is
-     *   written with it (whether the model judged that title too vague). The
-     *   column is never read back yet: it is the mark that a title was
-     *   generated.
-     * - A `role` is stored only when the session has none. A role given at
-     *   spawn, or generated earlier, is kept. The check is part of the
-     *   statement, so no read and write can interleave.
-     *
-     * With neither part, it changes nothing.
+     * Replaces the session's title with a generated one, and stores whether
+     * the model judged that title too vague (`needs_refinement`). The column
+     * is never read back yet: it is the mark that a title was generated.
      */
-    setGeneratedTitleAndRole: (
+    setGeneratedTitle: (
       sessionId: string,
-      answer: {
-        readonly title: string | undefined;
-        readonly needsRefinement: boolean;
-        readonly role: string | undefined;
-      },
+      title: string,
+      needsRefinement: boolean,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE sessions SET
-          title = COALESCE(${answer.title ?? null}, title),
-          needs_refinement = CASE WHEN ${answer.title ?? null} IS NULL
-                                  THEN needs_refinement ELSE ${answer.needsRefinement ? 1 : 0} END,
-          role = COALESCE(role, ${answer.role ?? null})
+        UPDATE sessions SET title = ${title}, needs_refinement = ${needsRefinement ? 1 : 0}
         WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
+     * Stores a generated role, only when the session has none, so a role given
+     * at spawn is kept. The condition is part of the statement, so no read and
+     * write can interleave.
+     */
+    setGeneratedRole: (sessionId: string, role: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET role = ${role}
+        WHERE id = ${uuidFromString(sessionId)} AND role IS NULL
       `),
 
     /**
