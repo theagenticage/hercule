@@ -154,10 +154,16 @@ export const useDoneMoves = (
     onMutate: async ({ sessionIds, move, announce }) => {
       // A read that started before the move would answer without it and
       // put the rows back, so it is cancelled; the last move reads again.
+      // A Thread's own record is cancelled only when it is cached. A first
+      // read still running has nothing to put back, and cancelling it would
+      // fail the screen that waits for it.
       for (const id of sessionIds) movedSinceRead.current.add(id);
+      const cachedIds = sessionIds.filter(
+        (id) => queryClient.getQueryData(sessionQuery(client, id).queryKey) !== undefined,
+      );
       await Promise.all([
         queryClient.cancelQueries({ queryKey: threadAndAgentSessionsQuery(client).queryKey }),
-        ...sessionIds.map((id) =>
+        ...cachedIds.map((id) =>
           queryClient.cancelQueries({ queryKey: sessionQuery(client, id).queryKey }),
         ),
       ]);
