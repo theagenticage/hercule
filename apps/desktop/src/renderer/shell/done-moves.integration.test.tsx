@@ -27,7 +27,7 @@ import {
   stubApi,
   type Handler,
 } from "../app/testing";
-import { SidebarDoneToast } from "./done-toast";
+import { CurrentDoneToast } from "./done-toast";
 
 const MARK_DONE_PATH = "/api/v1/sessions/mark-done";
 const REOPEN_PATH = "/api/v1/sessions/reopen";
@@ -172,7 +172,7 @@ function Harness({
  */
 function Toast() {
   const { toasts, undo } = useDoneMoves();
-  return <SidebarDoneToast store={toasts} onUndo={undo} />;
+  return <CurrentDoneToast store={toasts} onUndo={undo} />;
 }
 
 /**

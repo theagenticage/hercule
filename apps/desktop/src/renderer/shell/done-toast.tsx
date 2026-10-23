@@ -2,7 +2,8 @@
  * The toast after threads are marked done or reopened: "Marked done" or
  * "Reopened" with Undo, or the error of a Done move that failed. It shows over
  * the bottom of the sidebar's list, or, while the sidebar is hidden, at the
- * bottom left of the main pane.
+ * top right of the main pane, under the header's right-hand buttons, where the
+ * Done button that caused it is.
  */
 import { useEffect, useEffectEvent, useState, useSyncExternalStore, type JSX } from "react";
 import { useDoneMoves } from "../app/done-moves";
@@ -14,7 +15,8 @@ import { useSidebarLayout } from "./use-sidebar-layout";
 const TOAST_SHOWN_MS = 5_000;
 
 /**
- * Renders the toast `store` holds, or nothing when it holds none.
+ * Renders the toast `store` holds, or nothing when it holds none. It does not
+ * choose a place: `DoneToastHost` puts it in the sidebar or in the main pane.
  *
  * - The toast shows for five seconds, then fades and is dismissed.
  *   While the pointer is on it, it stays; when the pointer leaves, the five
@@ -25,7 +27,7 @@ const TOAST_SHOWN_MS = 5_000;
  * - A failed move shows its error behind the failed mark, as an alert, with
  *   no Undo.
  */
-export function SidebarDoneToast({
+export function CurrentDoneToast({
   store,
   onUndo,
 }: {
@@ -46,7 +48,7 @@ export function SidebarDoneToast({
 /**
  * Renders the app's one toast where the user can see it: `place` "sidebar"
  * draws it in the sidebar while the sidebar shows, and `place` "main" draws
- * it at the bottom left of the main pane while the sidebar is hidden. Both
+ * it at the top right of the main pane while the sidebar is hidden. Both
  * places read the same store, so only one of them ever draws a toast, and
  * one that is up when the sidebar is shown or hidden moves to the other.
  * The moved toast starts its five seconds again.
@@ -62,11 +64,54 @@ export function DoneToastHost({
   const { toasts, undo } = useDoneMoves();
   const { collapsed } = useSidebarLayout();
   if (collapsed !== (place === "main")) return null;
-  const toast = <SidebarDoneToast store={toasts} onUndo={undo} />;
-  return place === "main" ? <div className="main-toast">{toast}</div> : toast;
+  return place === "main" ? (
+    <MainToast store={toasts} onUndo={undo} />
+  ) : (
+    <CurrentDoneToast store={toasts} onUndo={undo} />
+  );
 }
 
-/** Renders one toast, as `SidebarDoneToast` describes. */
+/**
+ * Renders the toast `store` holds over the main pane, or nothing when it holds
+ * none. The frame is made again for each toast (`serial`), which is when it
+ * checks whether the main view shows a classic scroll bar.
+ */
+function MainToast({
+  store,
+  onUndo,
+}: {
+  readonly store: DoneToastStore;
+  readonly onUndo: (undo: DoneUndo) => void;
+}): JSX.Element | null {
+  const toast = useSyncExternalStore(store.subscribe, store.read);
+  return toast === null ? null : (
+    <MainToastFrame key={toast.serial} store={store} onUndo={onUndo} />
+  );
+}
+
+/**
+ * Renders the frame that places a toast at the top right of the main pane,
+ * and the toast. The frame keeps clear of a classic scroll bar, which the
+ * stylesheet cannot see without a `:has()` on the main pane that would
+ * re-check on every change inside it.
+ */
+function MainToastFrame({
+  store,
+  onUndo,
+}: {
+  readonly store: DoneToastStore;
+  readonly onUndo: (undo: DoneUndo) => void;
+}): JSX.Element {
+  // Checked once, when the toast mounts: a `:has()` on `.main` would cost 1.5 ms per sidebar show.
+  const [besideScrollbar] = useState(() => document.querySelector(".main .has-scrollbar") !== null);
+  return (
+    <div className={besideScrollbar ? "main-toast is-beside-scrollbar" : "main-toast"}>
+      <CurrentDoneToast store={store} onUndo={onUndo} />
+    </div>
+  );
+}
+
+/** Renders one toast, as `CurrentDoneToast` describes. */
 function ToastLine({
   toast,
   onUndo,
