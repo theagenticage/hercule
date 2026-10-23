@@ -313,7 +313,8 @@
    focus in the row, but `:focus-visible` does not match then, so the row
    the user clicked shows its status, not the button. The two crossfade; neither moves. The
    button sits 4px further right than the slot, so its word, inside its 4px
-   padding, ends where the slot's word ends. */
+   padding, ends where the slot's word ends. A row with no such button, the
+   draft's, keeps its status in view. */
 .side-act {
   position: absolute;
   top: 6px;
@@ -344,9 +345,202 @@
 .side-thread:has(:focus-visible) .side-act {
   opacity: 1;
 }
-.side-thread:hover .side-end,
-.side-thread:has(:focus-visible) .side-end {
+/* The status fades only where a button takes its place. The draft's row, and
+   a group with no Thread left to mark Done, have none and keep their status
+   in view. */
+.side-thread:has(> .side-act):hover .side-end,
+.side-thread:has(> .side-act):has(:focus-visible) .side-end {
   opacity: 0;
+}
+
+/* A group's second line while a session of it asks something: the question
+   in the colour of a question to the user, with the asker's name in bold. */
+.side-detail--ask .side-detail-clip {
+  color: var(--you-ink);
+}
+.side-asker {
+  font-weight: var(--w-bold);
+}
+/* A finished group's second line starts with a green check, where a thread's
+   starts with its provider's mark. */
+.side-glyph--done {
+  color: var(--ok);
+}
+.side-glyph--done .ic {
+  stroke-width: 2;
+}
+
+/* The dots of a group: what each of its sessions is doing, in the colours of
+   the status words. Marigold waits on the user, the accent's ink works, an
+   empty ring is quiet. */
+.side-dot {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.side-dot--waiting {
+  background: var(--you);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--you-ink) 35%, transparent);
+}
+.side-dot--working {
+  background: var(--accent-ink);
+}
+.side-dot--quiet {
+  border: 1.5px solid var(--faint);
+}
+/* A Done Thread's check takes a dot's place and width, so the names of the
+   lines of a group stay level. The check is wider than the dot and centred
+   on its slot. */
+.side-check {
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+  width: 7px;
+  color: var(--ok);
+}
+.side-check .ic {
+  flex: none;
+  stroke-width: 2;
+}
+/* Line 2 of a group row leaves room at its end for the dots button, which
+   sits over it (`--dots` is set inline). */
+.side-thread.has-crew .side-detail {
+  padding-right: calc(var(--dots) + 4px);
+}
+/* The dots are one button, drawn over line 2's end, in line 2's vertical
+   centre: 27px from the row's top and 22px tall. It is at least as wide as
+   it is tall, so a group with no counted session, and so no dot, still has a
+   target to unfold it by. */
+.side-dots {
+  position: absolute;
+  top: 27px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  transition: background var(--dur-1);
+}
+.side-dots:hover {
+  background: var(--hover);
+}
+.side-dots:focus-visible {
+  outline-offset: 0;
+}
+.side-dots-more {
+  margin-left: 2px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+/* The chevron shows beside the dots while the pointer is on the row or the
+   button has focus, and stays while the group is unfolded. It sits outside
+   the button's flow, to the left, so the dots never move. */
+.side-dots-chevron {
+  position: absolute;
+  top: 5px;
+  left: -14px;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  color: var(--muted);
+  opacity: 0;
+  transition:
+    opacity var(--dur-1),
+    transform var(--dur-1) var(--ease-out);
+}
+.side-thread:hover .side-dots-chevron,
+.side-dots:focus-visible .side-dots-chevron,
+.side-dots.is-open .side-dots-chevron {
+  opacity: 1;
+}
+.side-dots.is-open .side-dots-chevron {
+  transform: rotate(90deg);
+}
+/* While a group is unfolded, the open session is selected on its own line,
+   and its row keeps only a hint of the selection. */
+.side-thread.is-unfolded > .side-row.is-on {
+  background: color-mix(in oklab, var(--ink) 3%, transparent);
+}
+
+/* The lines of an unfolded group: 32px each, indented under the row, joined
+   by a hairline 2px inside the lines' left edge. Each line draws its part of
+   the hairline: from 1px below its own top to 2px past its bottom, which is
+   1px into the next line, so the parts meet with no gap, and the first one
+   starts 1px below the row's end. The last one stops 4px above its bottom. */
+.side-member {
+  position: relative;
+  padding-left: 12px;
+}
+.side-member::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  bottom: -2px;
+  left: 14px;
+  width: 1px;
+  background: var(--line);
+}
+.side-member.is-last::before {
+  bottom: 4px;
+}
+.side-m {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 0 8px 0 12px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-13);
+  text-align: left;
+  transition: background var(--dur-1);
+}
+.side-m:hover {
+  background: var(--hover);
+}
+.side-m.is-on {
+  background: var(--selected);
+}
+.side-m-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.side-m.is-on .side-m-name {
+  font-weight: var(--w-medium);
+}
+/* The agent of a session: its provider's mark and its model, in the faint
+   ink of a row's second line. It keeps its width; the name gives way. */
+.side-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+/* The status goes to the line's end. */
+.side-m .side-end {
+  margin-left: auto;
+}
+.side-m--quiet {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.side-m--quiet .ic {
+  color: var(--faint);
 }
 
 /* A project's count of threads that wait on the user, before its `+`. */

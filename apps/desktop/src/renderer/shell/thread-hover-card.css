@@ -69,3 +69,53 @@
   gap: 7px;
   font-weight: inherit;
 }
+
+/* A group of several sessions: wide enough for a session's name, agent and
+   status on one line, as the drawing's card is (312px). */
+.thread-hover--crew {
+  min-width: 312px;
+  max-width: 312px;
+}
+/* The list of sessions, under a hairline that reaches past the text by the
+   rows' own padding, so the row's marks line up with the title above. The
+   6px gap above is the card's; 4px more make the 10px of the drawing. */
+.thread-hover-crew {
+  display: flex;
+  flex-direction: column;
+  margin: 4px -4px 0 -6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft);
+}
+.thread-hover-member {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 4px 0 6px;
+  font-size: var(--t-12);
+}
+.thread-hover-member-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The status goes to the end of the row; its colour is the sidebar's. */
+.thread-hover-member .side-end {
+  margin-left: auto;
+}
+.thread-hover-more {
+  height: 24px;
+  padding-left: 21px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 24px;
+}
+.thread-hover-hint {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: 11.5px;
+}

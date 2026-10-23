@@ -9,7 +9,7 @@ import {
 import type { SidebarItem } from "./sidebar-items";
 import type { ThreadHoverDetails, ThreadHoverPlacement } from "./thread-hover-card";
 
-/** How long the pointer rests on a thread row before its card shows, in milliseconds. */
+/** How long the pointer rests on a group row before its card shows, in milliseconds. */
 const HOVER_DELAY_MS = 400;
 
 /** The space between the sidebar's right edge and the card, in CSS pixels. */
@@ -49,13 +49,15 @@ const placeBesideRow = (list: HTMLElement, key: string): ThreadHoverPlacement | 
 };
 
 /**
- * Decides when the sidebar's card of details shows, and for which thread
+ * Decides when the sidebar's card of details shows, and for which group
  * row. `listRef` is the list's `nav`. Returns the handlers to put on that
  * `nav`, where the card shows, or `null` while it is hidden, and the details
- * of the thread whose card shows.
+ * of the group whose card shows.
  *
- * - The card shows once the pointer has rested on a thread row for 400ms.
- * - While the card shows, moving to another thread row switches it at once.
+ * - The card shows once the pointer has rested on a group row, or a group's
+ *   row on the Done shelf, for 400ms. The lines of an unfolded group have no
+ *   card.
+ * - While the card shows, moving to another group row switches it at once.
  * - Moving to any other item, past the end of the list or out of it hides
  *   it at once, and so do a press on the list, a scroll of the list and a
  *   resize of the window. In
@@ -78,6 +80,8 @@ export const useThreadHover = (
   readonly listHandlers: ThreadHoverHandlers;
   readonly placement: ThreadHoverPlacement | null;
   readonly details: ThreadHoverDetails | null;
+  /** Whether the card's row unfolds into lines, which the card says in its last line. */
+  readonly unfolds: boolean;
 } => {
   const [placement, setPlacement] = useState<ThreadHoverPlacement | null>(null);
   // The placement last asked for. The handlers read it, not `placement`,
@@ -156,7 +160,7 @@ export const useThreadHover = (
       if (key === pressedKey.current) return;
       pressedKey.current = null;
       const item = items.find((each) => each.key === key);
-      if (item?.kind !== "thread-row") {
+      if (item?.kind !== "group-row" && item?.kind !== "done-group-row") {
         hide();
         return;
       }
@@ -191,8 +195,14 @@ export const useThreadHover = (
 
   const hoveredItem =
     placement === null ? undefined : items.find((item) => item.key === placement.key);
-  // The card of a thread that left the list never draws, also in the render
+  // The card of a group that left the list never draws, also in the render
   // before the layout effect above hides it.
-  const details = hoveredItem?.kind === "thread-row" ? hoveredItem.details : null;
-  return { listHandlers, placement: details === null ? null : placement, details };
+  const details =
+    hoveredItem?.kind === "group-row" || hoveredItem?.kind === "done-group-row"
+      ? hoveredItem.details
+      : null;
+  // Only a group of several sessions in a project's list unfolds. A group on
+  // the Done shelf shows its sessions in the card and has no lines to unfold.
+  const unfolds = hoveredItem?.kind === "group-row" && hoveredItem.summary !== null;
+  return { listHandlers, placement: details === null ? null : placement, details, unfolds };
 };

@@ -3,8 +3,9 @@
  * (`VirtualList`), in a `nav` landmark that scrolls. Every item kind has a
  * fixed height (`ITEM_HEIGHTS`).
  *
- * While the pointer rests on a thread row, one card beside the sidebar shows
- * the thread's details (`useThreadHover`).
+ * While the pointer rests on a group's row, one card beside the sidebar shows
+ * the details of the group's lead and, for a group of several sessions, of
+ * each session (`useThreadHover`).
  */
 import { useRef, type JSX, type ReactNode } from "react";
 import { VirtualList } from "../screens/virtual-list";
@@ -15,12 +16,14 @@ import {
   type SidebarItem,
 } from "./sidebar-items";
 import {
+  DoneGroupRow,
   DoneHeader,
-  DoneRow,
   DraftRow,
+  GroupLine,
+  GroupRow,
   MoreRow,
   ProjectHeader,
-  ThreadRow,
+  QuietLine,
   WaitingAssistantRow,
   WaitingHeader,
   WaitingRunRow,
@@ -36,22 +39,29 @@ import { useThreadHover } from "./use-thread-hover";
  * each render.
  *
  * - `onExpand`: a section's "more" row, with the section's key.
- * - `onMarkDone`: a thread row's Done button, with the thread's session id.
- * - `onReopen`: a Done shelf row's Reopen button, with the session id.
+ * - `onMarkDone`: a group row's Done button, with the ids of the Threads it
+ *   marks.
+ * - `onReopen`: a Done shelf row's Reopen button, with the ids of the
+ *   Threads it reopens.
  * - `onToggleDoneShelf`: the Done shelf's heading.
+ * - `onToggleGroup`: a group's dots button and the arrow keys, with the
+ *   group's key and whether to unfold it (true) or fold it (false).
+ * - `onShowQuiet`: an unfolded group's "n quiet" line, with the group's key.
  */
 export interface SidebarListActions {
   readonly onExpand: (section: SectionKey) => void;
-  readonly onMarkDone: (sessionId: string) => void;
-  readonly onReopen: (sessionId: string) => void;
+  readonly onMarkDone: (sessionIds: readonly string[]) => void;
+  readonly onReopen: (sessionIds: readonly string[]) => void;
   readonly onToggleDoneShelf: () => void;
+  readonly onToggleGroup: (groupKey: string, unfold: boolean) => void;
+  readonly onShowQuiet: (groupKey: string) => void;
 }
 
 /**
  * Returns the element that draws `item`. While `officeOpen` is true, the row
- * of a thread with a colleague in the Office, the row of an assistant and
- * the row of a run's waiting session open the thread or the Conversation in
- * the Office's drawer.
+ * or line of a session with a colleague in the Office, the row of an
+ * assistant and the row of a run's waiting session open the session or the
+ * Conversation in the Office's drawer.
  */
 const renderItem = (
   item: SidebarItem,
@@ -77,6 +87,7 @@ const renderItem = (
           leading={item.leading}
           sessionId={item.sessionId}
           title={item.title}
+          askerLabel={item.askerLabel}
           question={item.question}
           officeOpen={officeOpen}
         />
@@ -119,27 +130,76 @@ const renderItem = (
           waitingCount={item.waitingCount}
         />
       );
-    case "thread-row":
+    case "group-row":
       return (
-        <ThreadRow
+        <GroupRow
           key={item.key}
           itemKey={item.key}
           leading={item.leading}
-          sessionId={item.sessionId}
+          groupKey={item.groupKey}
+          openId={item.openId}
           title={item.title}
           pose={item.pose}
+          seated={item.seated}
           status={item.status}
           receded={item.receded}
           activityAt={item.activityAt}
+          askerLabel={item.ask?.askerLabel ?? null}
+          question={item.ask?.question ?? null}
           placeClip={item.placeClip}
           placeKeep={item.placeKeep}
           providerId={item.providerId}
           model={item.details.model}
           placeDescription={item.placeDescription}
           unsent={item.unsent}
+          dots={item.summary?.dots ?? null}
+          hiddenCount={item.summary?.hiddenCount ?? 0}
+          summaryLabel={item.summary?.label ?? ""}
+          unfolded={item.unfolded}
+          doneIds={item.doneIds}
           onScreen={onScreen}
           officeOpen={officeOpen}
           onMarkDone={actions.onMarkDone}
+          onToggleGroup={actions.onToggleGroup}
+        />
+      );
+    case "group-line":
+      return (
+        <GroupLine
+          key={item.key}
+          itemKey={item.key}
+          leading={item.leading}
+          groupKey={item.groupKey}
+          groupTitle={item.groupTitle}
+          sessionId={item.sessionId}
+          label={item.label}
+          title={item.title}
+          pose={item.pose}
+          seated={item.seated}
+          status={item.status}
+          activityAt={item.activityAt}
+          dot={item.dot}
+          done={item.done}
+          providerId={item.providerId}
+          model={item.model}
+          last={item.last}
+          onScreen={onScreen}
+          officeOpen={officeOpen}
+          onToggleGroup={actions.onToggleGroup}
+        />
+      );
+    case "quiet-line":
+      return (
+        <QuietLine
+          key={item.key}
+          itemKey={item.key}
+          leading={item.leading}
+          groupKey={item.groupKey}
+          groupTitle={item.groupTitle}
+          count={item.count}
+          last={item.last}
+          onShowQuiet={actions.onShowQuiet}
+          onToggleGroup={actions.onToggleGroup}
         />
       );
     case "draft-row":
@@ -163,18 +223,20 @@ const renderItem = (
           onToggle={actions.onToggleDoneShelf}
         />
       );
-    case "done-row":
+    case "done-group-row":
       return (
-        <DoneRow
+        <DoneGroupRow
           key={item.key}
           itemKey={item.key}
           leading={item.leading}
-          sessionId={item.sessionId}
+          openId={item.openId}
           title={item.title}
           pose={item.pose}
+          threadCount={item.threadCount}
           doneAt={item.doneAt}
           providerId={item.providerId}
           unsent={item.unsent}
+          reopenIds={item.reopenIds}
           onScreen={onScreen}
           officeOpen={officeOpen}
           onReopen={actions.onReopen}
@@ -201,9 +263,9 @@ const computeItemHeight = (item: SidebarItem): number => item.leading + ITEM_HEI
  * Renders the list in the `nav` landmark with the id `id` and the name
  * `label`, and `children` after its items, in the same scroll.
  *
- * - While `officeOpen` is true, the row of a thread with a colleague in the
- *   Office, and the row of a waiting assistant, opens the thread or the
- *   Conversation in the Office's drawer instead of on its own screen.
+ * - While `officeOpen` is true, the row or line of a session with a colleague
+ *   in the Office, and the row of a waiting assistant, opens the session or
+ *   the Conversation in the Office's drawer instead of on its own screen.
  *   Opening or leaving the Office draws every mounted row again, once.
  * - `actions` holds what the rows call when they are pressed
  *   (`SidebarListActions`).
@@ -224,7 +286,7 @@ export function SidebarList({
   readonly children?: ReactNode;
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement>(null);
-  const { listHandlers, placement, details } = useThreadHover(items, scrollRef);
+  const { listHandlers, placement, details, unfolds } = useThreadHover(items, scrollRef);
   return (
     <>
       <VirtualList
@@ -240,7 +302,7 @@ export function SidebarList({
       >
         {children}
       </VirtualList>
-      <ThreadHoverCard placement={placement} details={details} />
+      <ThreadHoverCard placement={placement} details={details} unfolds={unfolds} />
     </>
   );
 }

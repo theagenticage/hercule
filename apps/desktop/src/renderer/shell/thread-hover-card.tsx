@@ -1,7 +1,9 @@
 /**
  * The card of details that shows beside the sidebar while the pointer rests
- * on a thread row: the thread's full title, its project, its machine, its
- * branch and its model, as T3 Code's sidebar shows them.
+ * on a group's row: the lead's full title, its project, its machine, its
+ * branch and its model, as T3 Code's sidebar shows them. For a group of
+ * several sessions, a list of the sessions replaces the model: each one's
+ * mark, name, agent and status.
  *
  * The list draws one card for all its rows. The card is a popover, so it
  * sits in the top layer above the main pane, and the sidebar's scrolling
@@ -9,16 +11,18 @@
  * and no focus, and is hidden from assistive technology, because each row's
  * accessible description already carries the same details.
  */
-import { useLayoutEffect, useRef, type JSX, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, type JSX, type ReactNode } from "react";
+import type { GroupMember, SessionDot } from "@hercule/client-core";
 import { BranchIcon } from "../icons/branch";
 import { LaptopIcon } from "../icons/laptop";
 import { ProjectTile, type ProjectTint } from "../screens/project-tile";
 import { ProviderLogo } from "../screens/thread/provider-logo";
+import { AgentLabel, SessionMark, StatusSlot } from "./sidebar-rows";
 import "./thread-hover-card.css";
 
-/** What the card shows about one thread. */
+/** What the card shows about one group of sessions, or about one thread. */
 export interface ThreadHoverDetails {
-  /** The thread's title, in full. */
+  /** The title of the group's lead, in full. */
   readonly title: string;
   /** The project's name, or "No project". */
   readonly projectName: string;
@@ -32,6 +36,8 @@ export interface ThreadHoverDetails {
   readonly model: string | null;
   /** The id of the model's provider, whose mark shows before the model's name. */
   readonly providerId: string | null;
+  /** The sessions of a group of several, or none for a thread alone, whose card shows its model instead. */
+  readonly members: readonly GroupMember[];
 }
 
 /** Where the card shows, and for which row. */
@@ -50,6 +56,12 @@ const WINDOW_MARGIN = 8;
 /** The size of each row's icon, in CSS pixels. */
 const ICON_SIZE = 12;
 
+/** How many sessions the card lists before it folds the rest into "and n more". */
+const MEMBER_LIMIT = 8;
+
+/** Returns how urgent a session's dot is, lowest first: waiting, then working, then quiet. */
+const rankDot = (dot: SessionDot): number => (dot === "waiting" ? 0 : dot === "working" ? 1 : 2);
+
 /** Renders one line of the card: an icon, then the text beside it. */
 function DetailRow({
   icon,
@@ -66,10 +78,30 @@ function DetailRow({
   );
 }
 
+/** Renders one session of a group in the card: its mark, its name in the group, its agent and its status. */
+function MemberRow({ member }: { readonly member: GroupMember }): JSX.Element {
+  const statusId = useId();
+  return (
+    <div className="thread-hover-member">
+      <SessionMark dot={member.dot} done={member.done} />
+      <span className="thread-hover-member-name">{member.label}</span>
+      <AgentLabel providerId={member.providerId} model={member.model} />
+      <StatusSlot
+        id={statusId}
+        status={member.status}
+        activityAt={member.activityAt}
+        onScreen
+      />
+    </div>
+  );
+}
+
 /**
  * Renders the card of `details`, shown at `placement`, or hidden while
  * `placement` is `null`. The machine, the branch and the model each have a
- * row only when they are known.
+ * row only when they are known. A group of several sessions lists them, the
+ * most urgent first and eight at most, instead of its lead's model. When the
+ * row `unfolds`, the card ends with the hint that says how.
  *
  * The card's top is moved up when the card would reach past the window's
  * bottom edge, so a card for a row near the bottom stays in view. The card
@@ -78,9 +110,11 @@ function DetailRow({
 export function ThreadHoverCard({
   placement,
   details,
+  unfolds,
 }: {
   readonly placement: ThreadHoverPlacement | null;
   readonly details: ThreadHoverDetails | null;
+  readonly unfolds: boolean;
 }): JSX.Element {
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -100,8 +134,16 @@ export function ThreadHoverCard({
     card.style.top = `${String(top)}px`;
   }, [placement]);
 
+  const listed = details === null ? [] : details.members.toSorted(
+    (a, b) => rankDot(a.dot) - rankDot(b.dot),
+  );
   return (
-    <div ref={cardRef} popover="manual" className="thread-hover" aria-hidden="true">
+    <div
+      ref={cardRef}
+      popover="manual"
+      className={listed.length === 0 ? "thread-hover" : "thread-hover thread-hover--crew"}
+      aria-hidden="true"
+    >
       {details === null ? null : (
         <>
           <p className="thread-hover-title">{details.title}</p>
@@ -114,7 +156,7 @@ export function ThreadHoverCard({
           {details.branch === null ? null : (
             <DetailRow icon={<BranchIcon size={ICON_SIZE} />}>{details.branch}</DetailRow>
           )}
-          {details.model === null ? null : (
+          {listed.length > 0 || details.model === null ? null : (
             <DetailRow
               icon={
                 details.providerId === null ? null : (
@@ -124,6 +166,21 @@ export function ThreadHoverCard({
             >
               {details.model}
             </DetailRow>
+          )}
+          {listed.length === 0 ? null : (
+            <>
+              <div className="thread-hover-crew">
+                {listed.slice(0, MEMBER_LIMIT).map((member) => (
+                  <MemberRow key={member.sessionId} member={member} />
+                ))}
+                {listed.length > MEMBER_LIMIT ? (
+                  <div className="thread-hover-more">{`and ${String(listed.length - MEMBER_LIMIT)} more`}</div>
+                ) : null}
+              </div>
+              {unfolds ? (
+                <p className="thread-hover-hint">Click the dots or press → to unfold</p>
+              ) : null}
+            </>
           )}
         </>
       )}
