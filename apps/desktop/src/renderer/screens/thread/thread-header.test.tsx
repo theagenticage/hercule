@@ -106,6 +106,20 @@ describe("the thread header", () => {
     expect(tab.querySelector("svg")).not.toBeNull();
   });
 
+  it("labels a thread with a role by it, names the tab starting with the role, and keeps the title as its tooltip", async () => {
+    const { finished } = THREAD_FIXTURES;
+    await renderThreadPart(HeaderOfThread, {
+      thread: { ...finished, session: { ...finished.session, role: "review" } },
+    });
+
+    const tab = within(readTabStrip()).getByRole("link", {
+      name: "review, Bump the Bun pin, idle",
+    });
+    const text = tab.querySelector(".ptab-title");
+    expect(text?.textContent).toBe("review");
+    expect(text?.getAttribute("title")).toBe("Bump the Bun pin");
+  });
+
   it("ends a tab in a word when the thread's sidebar row would", async () => {
     const { finished } = THREAD_FIXTURES;
     await renderThreadPart(HeaderOfThread, {
@@ -186,6 +200,7 @@ describe("a step session's header", () => {
     permissionProfileId,
     instanceId,
     id: PLAN_ID,
+    kind: "run",
     title: "Ticket to pull request · plan",
     runId: RUN_ID,
     stepId: "plan",
@@ -198,6 +213,7 @@ describe("a step session's header", () => {
     permissionProfileId,
     instanceId,
     id: IMPLEMENT_ID,
+    kind: "run",
     title: "Ticket to pull request · implement",
     status: "busy",
     runId: RUN_ID,

@@ -113,8 +113,10 @@ export function ThreadTabsPill({
  * Renders one session of the workspace as a tab: the mark of its pose, when
  * the pose has one, its label, and, when its sidebar row would not end in a mark, the word or the age that row ends in.
  *
- * The tab is named "<title>, <pose words>", as the session's sidebar row is,
- * and described by the word or the age in words, such as "20 minutes ago".
+ * The tab is named "<title>, <pose words>", as the session's sidebar row is.
+ * When the label is the session's role, the name starts with it, "review 2,
+ * <title>, <pose words>", so someone who speaks the tab's name can say what
+ * they see. The tooltip keeps the full title. The tab is described by the word or the age in words, such as "20 minutes ago".
  * The mark says the pose, which the name already holds, so it is hidden.
  */
 function ThreadTab({
@@ -136,7 +138,11 @@ function ThreadTab({
       params={{ sessionId: session.id }}
       className="ptab"
       activeProps={SELECTED_TAB_PROPS}
-      aria-label={`${session.title}, ${describePose(pose)}`}
+      aria-label={
+        session.kind !== "run" && label !== session.title
+          ? `${label}, ${session.title}, ${describePose(pose)}`
+          : `${session.title}, ${describePose(pose)}`
+      }
       aria-describedby={end.kind === "mark" ? undefined : endId}
     >
       {isAbsentPose(pose) ? null : <Mark state={pose} />}
