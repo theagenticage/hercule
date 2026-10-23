@@ -116,7 +116,7 @@ export const isWaitingOnUser = (tab: SessionTab): boolean => tab.pose === "waiti
  * Returns the noun for `sessions`, in the plural unless there is exactly one:
  * "thread" or "threads" when every one is a Thread, otherwise "session" or
  * "sessions". An Agent session or a run's step session is not a Thread
- * (CONTEXT.md), so a list that holds one is counted in sessions.
+ * (GLOSSARY.md), so a list that holds one is counted in sessions.
  */
 const decideSessionsNoun = (sessions: readonly Pick<SessionTab, "kind">[]): string => {
   const noun = sessions.every((each) => each.kind === "thread") ? "thread" : "session";
