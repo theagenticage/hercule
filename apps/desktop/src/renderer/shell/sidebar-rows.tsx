@@ -558,25 +558,24 @@ const MIN_DOTS_BUTTON_WIDTH = 22;
  * Returns the width line 2 of a group row leaves free at its end for the
  * dots button and the chevron that shows beside it, in pixels. The button is
  * 11 for each dot and its gap, 20 for the "+n" and its gap and margin, 7 for
- * each digit of n, and 4 for its padding, but never under
- * `MIN_DOTS_BUTTON_WIDTH`. The chevron sits 14px to the button's left and
- * line 2 already ends 4px before the button's right edge, so 8 more keeps a
- * 2px gap between the end of line 2 and the chevron, with 4 more in the
- * stylesheet. Generous on purpose, so a cut question never runs under the
- * dots.
+ * each digit of n, and 4 for its padding. Three cases:
  *
- * A button with no dots holds its chevron inside, so line 2 only has to
- * end before the button itself: the button's right edge lies 4px past
- * line 2's, so the width less 4 leaves a 4px gap, with 4 more in the
- * stylesheet.
+ * - 2 or more dots: exactly what the Crew Bureau drawing reserves, which is
+ *   the button's width plus 6. The drawing never draws fewer than 2 dots, so
+ *   it is the reference and the clip box must match it to the pixel.
+ * - 1 dot: the button is never narrower than `MIN_DOTS_BUTTON_WIDTH`, and
+ *   the chevron sits 14px to its left. Line 2 already ends 4px before the
+ *   button's right edge, so 8 more keeps a 2px gap between the end of line 2
+ *   and the chevron, with 4 more in the stylesheet.
+ * - No dots: the button holds its chevron inside, so line 2 only has to end
+ *   before the button itself. The button's right edge lies 4px past line 2's,
+ *   so the width less 4 leaves a 4px gap, with 4 more in the stylesheet.
  */
-const measureDotsWidth = (dotCount: number, hiddenCount: number): number =>
-  dotCount === 0
-    ? MIN_DOTS_BUTTON_WIDTH - 4
-    : Math.max(
-        MIN_DOTS_BUTTON_WIDTH,
-        dotCount * 11 + (hiddenCount > 0 ? 13 + 7 * String(hiddenCount).length : 0) + 4,
-      ) + 8;
+const measureDotsWidth = (dotCount: number, hiddenCount: number): number => {
+  if (dotCount === 0) return MIN_DOTS_BUTTON_WIDTH - 4;
+  const buttonWidth = dotCount * 11 + (hiddenCount > 0 ? 13 + 7 * String(hiddenCount).length : 0);
+  return dotCount === 1 ? Math.max(MIN_DOTS_BUTTON_WIDTH, buttonWidth + 4) + 8 : buttonWidth + 10;
+};
 
 /**
  * Renders the mark of a session in a group, in the sidebar's rows and in the
