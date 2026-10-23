@@ -50,7 +50,7 @@ const LIBRARY_SKILLS: ReadonlyArray<readonly [string, string]> = [
     "debug",
     "Find the evidenced root cause of a failure before changing a line, then fix it and keep the reproduction as a test",
   ],
-  ["domain-modeling", "Build and sharpen the project's domain model: CONTEXT.md terms and ADRs"],
+  ["domain-modeling", "Build and sharpen the project's domain model: GLOSSARY.md terms and ADRs"],
   ["grilling", "Grill the user about a plan, decision or idea until it holds up"],
   [
     "handoff",

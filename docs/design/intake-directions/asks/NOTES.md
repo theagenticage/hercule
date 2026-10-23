@@ -272,9 +272,9 @@ This design depends on them.
 
 ### Needs a spec change
 
-- **Intake's definition.** CONTEXT.md defines Intake as triaged signals "before they spawn tasks
+- **Intake's definition.** GLOSSARY.md defines Intake as triaged signals "before they spawn tasks
   or reach the user", and spec 10 §8 lists Intake's members by Notification kind, all from triage
-  or the core. Asks are neither. This is Rogier's call; CONTEXT.md is not edited here.
+  or the core. Asks are neither. This is Rogier's call; GLOSSARY.md is not edited here.
 - **Typed text as an answer.** Spec 10 §7.4: "Free-text answers are not a button: the user opens
   the session and types." A Reply answer is one plugin action with one typed field. The core
   still writes its describe line, so the user still sees exactly what the click does.

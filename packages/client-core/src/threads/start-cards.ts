@@ -5,7 +5,7 @@
  */
 import type { Task, TaskPriority } from "@hercule/contract";
 
-/** The label that makes a task a Proposal (CONTEXT.md): prepared by agents, not yet accepted. */
+/** The label that makes a task a Proposal (GLOSSARY.md): prepared by agents, not yet accepted. */
 const PROPOSED_LABEL = "proposed";
 
 /** How many of four bars a priority fills. Four is urgent, which is drawn in the failure hue. */

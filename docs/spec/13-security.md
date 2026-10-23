@@ -354,7 +354,7 @@ approval-required < auto-accept-edits < auto < full-access
 
 - When a session's requested access mode is `unsupported` on the target provider, the controller substitutes a supported mode **before session start**, strictly downward: the most permissive supported mode that is equal or less permissive than the requested one.
 - If no equal-or-less-permissive supported mode exists, session start fails with a clear error naming the requested mode and the provider's supported set.
-- **The fallback chain is hardcoded in v1**, not configurable ([ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md) and the glossary entry "Access Mode" in [../../CONTEXT.md](../../CONTEXT.md), both amended). Ticket #18 amends ticket #12's "configurable controller-side fallback map": escalation to a more permissive mode through fallback is forbidden, so there is nothing for a map to express beyond the fixed order. The shipped behaviour `auto -> auto-accept-edits` is what the order yields.
+- **The fallback chain is hardcoded in v1**, not configurable ([ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md) and the glossary entry "Access Mode" in [../../GLOSSARY.md](../../GLOSSARY.md), both amended). Ticket #18 amends ticket #12's "configurable controller-side fallback map": escalation to a more permissive mode through fallback is forbidden, so there is nothing for a map to express beyond the fixed order. The shipped behaviour `auto -> auto-accept-edits` is what the order yields.
 - Adapters carry no fallback logic; `SessionSpec.accessMode` always names a natively supported mode.
 
 ## 8. Provider credentials on runners

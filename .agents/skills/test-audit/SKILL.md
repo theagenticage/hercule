@@ -74,7 +74,7 @@ not automatically deletable; the authoring gate still rejects new ones.
 
 Before judging a candidate, read the complete test and production owner, its
 entry point, callers, callees, sibling implementations, overlapping tests, CI
-routing, and relevant history. Read `AGENTS.md`, `CONTEXT.md`, and the spec
+routing, and relevant history. Read `AGENTS.md`, `GLOSSARY.md`, and the spec
 document and ADRs for the area first.
 When the test claims dependency-backed behavior, inspect the dependency source
 or types directly.

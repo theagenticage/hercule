@@ -31,7 +31,7 @@
  * 8. adds the meta line to the second message, which the book leaves out:
  *    each agent message has its own face, meta line and body (spec 17
  *    §Design system, The thread);
- * 9. removes "Own worktree" from the lip: CONTEXT.md keeps "worktree" for
+ * 9. removes "Own worktree" from the lip: GLOSSARY.md keeps "worktree" for
  *    the git mechanism, so the lip names the branch alone (spec 17 §Design
  *    system, The thread);
  * 10. sets the model pill's text to the model's name, "Opus 5.5": the pill

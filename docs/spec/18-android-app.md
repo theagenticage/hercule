@@ -69,10 +69,10 @@ The three SDK 36 notification calls (`setRequestPromotedOngoing`, `setShortCriti
 
 ### Names
 
-- **Alerts, not notifications.** CONTEXT.md's **Notification** is the controller's own message record, which the app never reads. The app's code calls the Android notifications it posts **alerts** (`AlertKey`, `AlertPoster`, `AlertActionReceiver`), so the two never share a name. Android's own classes keep their names.
+- **Alerts, not notifications.** GLOSSARY.md's **Notification** is the controller's own message record, which the app never reads. The app's code calls the Android notifications it posts **alerts** (`AlertKey`, `AlertPoster`, `AlertActionReceiver`), so the two never share a name. Android's own classes keep their names.
 - **No bare `Thread` type.** Kotlin has `java.lang.Thread`. The record is `Session`, and the screen is `ThreadScreen`.
-- **`ControllerWatchService`** is the foreground service that holds the one `/ws` socket, decides which Requests and messages alert, and posts the alerts. It is not named for a connection, because CONTEXT.md's **Connection** is another thing.
-- The other CONTEXT.md words apply to Kotlin identifiers as they do to TypeScript: Thread, Assistant, Request, Conversation, Session, Runner, Project.
+- **`ControllerWatchService`** is the foreground service that holds the one `/ws` socket, decides which Requests and messages alert, and posts the alerts. It is not named for a connection, because GLOSSARY.md's **Connection** is another thing.
+- The other GLOSSARY.md words apply to Kotlin identifiers as they do to TypeScript: Thread, Assistant, Request, Conversation, Session, Runner, Project.
 
 ### Package layout
 
