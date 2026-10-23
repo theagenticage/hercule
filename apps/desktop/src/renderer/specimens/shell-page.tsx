@@ -142,7 +142,7 @@ import {
   snoozeTimerQuery,
   startTasksQuery,
   subagentsQuery,
-  threadsQuery,
+  threadAndAgentSessionsQuery,
   trackingDetailQuery,
   trackingQuery,
   yourWorkQuery,
@@ -562,7 +562,7 @@ const seedQueryCache = (
     wiki,
   }: OpenScreens,
 ): void => {
-  queryClient.setQueryData(threadsQuery(client).queryKey, records.threads);
+  queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, records.threads);
   queryClient.setQueryData(projectsQuery(client).queryKey, records.projects);
   queryClient.setQueryData(workspacesQuery(client).queryKey, records.workspaces);
   queryClient.setQueryData(resourcesQuery(client).queryKey, records.resources);

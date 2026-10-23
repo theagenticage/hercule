@@ -177,6 +177,7 @@ const summarize = (run: Run): RunSummary =>
 /** The review step's session, which asks the user to approve a command. */
 const ASKING: Session = buildSession({
   id: SESSION_ID,
+  kind: "run",
   runId: RUN_ID,
   stepId: "review",
   runnerId: RUNNER_ID,

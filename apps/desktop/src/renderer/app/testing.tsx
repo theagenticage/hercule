@@ -575,6 +575,8 @@ export const NO_SIDEBAR_RECORDS: SidebarRecords = {
  *   assistant's current session, gets that assistant's session, or none;
  * - a listing filtered to runs gets the sessions of those runs in
  *   `runSessions`;
+ * - a listing that holds the threads gets the threads and the sessions of
+ *   `agentSessions` of kind `agent`, as the sidebar reads them;
  * - a listing of the sessions that are not threads gets `agentSessions`;
  * - any other listing gets the threads.
  */
@@ -589,7 +591,16 @@ const answerSessionQuery = (records: SidebarRecords, call: Call): Answer => {
     return { body: { items } };
   }
   if (conversationId === null) {
-    if (params.get("thread") !== "false") return { body: { items: records.threads } };
+    const kinds = params.getAll("kind");
+    if (kinds.includes("thread")) {
+      const partners = (records.agentSessions ?? []).filter((session) => session.kind === "agent");
+      return {
+        body: {
+          items: kinds.includes("agent") ? [...records.threads, ...partners] : records.threads,
+        },
+      };
+    }
+    if (!kinds.includes("agent")) return { body: { items: records.threads } };
     const activeSince = params.get("activeSince");
     if (activeSince === null) return { body: { items: records.agentSessions ?? [] } };
     // The Office reads every session an Agent spawned that had not exited

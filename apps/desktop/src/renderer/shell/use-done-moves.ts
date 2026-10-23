@@ -10,7 +10,7 @@ import {
   type HerculeClient,
 } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
-import { threadsQuery } from "../app/queries";
+import { threadAndAgentSessionsQuery } from "../app/queries";
 import type { DoneToastStore } from "./done-toast";
 
 /** A move on a thread's Done state: mark it Done, or reopen it. */
@@ -43,7 +43,7 @@ const applyDoneMove = (session: Session, move: DoneMove, at: string): Session =>
 
 /** Reads the thread list again, without cancelling a read that is running. */
 const readThreadsAgain = (queryClient: QueryClient, client: HerculeClient): void => {
-  invalidateWithoutCancelling(queryClient, threadsQuery(client).queryKey);
+  invalidateWithoutCancelling(queryClient, threadAndAgentSessionsQuery(client).queryKey);
 };
 
 /** The key every Done move runs under, so the moves can be counted. */
@@ -93,27 +93,29 @@ export const useDoneMoves = (
     scope: { id: "done-moves" },
     mutationFn: ({ sessionId, move }: { sessionId: string; move: DoneMove }) =>
       move === "markDone"
-        ? client.session.markDone({ params: { id: sessionId } })
-        : client.session.reopen({ params: { id: sessionId } }),
+        ? client.session.markDone({ payload: { sessionIds: [sessionId] } })
+        : client.session.reopen({ payload: { sessionIds: [sessionId] } }),
     // A move in a scope waits for the one before it to finish before it is
     // sent, but its `onMutate` runs at once, so the list follows the user.
     onMutate: async ({ sessionId, move }) => {
       // A read that started before the move would answer without it and
       // put the row back, so it is cancelled; the last move reads again.
-      await queryClient.cancelQueries({ queryKey: threadsQuery(client).queryKey });
+      await queryClient.cancelQueries({ queryKey: threadAndAgentSessionsQuery(client).queryKey });
       const at = new Date().toISOString();
       queryClient.setQueryData(
-        threadsQuery(client).queryKey,
+        threadAndAgentSessionsQuery(client).queryKey,
         (threads) =>
           threads && replaceThread(threads, sessionId, (s) => applyDoneMove(s, move, at)),
       );
       if (move === "markDone") toasts.show(sessionId, "Marked done", false);
     },
-    onSuccess: (session) => {
+    onSuccess: (moved) => {
       if (!isLastDoneMove(queryClient)) return;
       queryClient.setQueryData(
-        threadsQuery(client).queryKey,
-        (threads) => threads && replaceThread(threads, session.id, () => session),
+        threadAndAgentSessionsQuery(client).queryKey,
+        (threads) =>
+          threads &&
+          moved.reduce((rest, session) => replaceThread(rest, session.id, () => session), threads),
       );
       readThreadsAgain(queryClient, client);
     },

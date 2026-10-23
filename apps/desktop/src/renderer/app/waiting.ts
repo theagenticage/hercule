@@ -11,18 +11,18 @@ import {
   type WaitingRunSession,
 } from "@hercule/client-core";
 import { useAssistantRows } from "./assistant-rows";
-import { liveAgentSessionsQuery, threadsQuery } from "./queries";
+import { liveAgentSessionsQuery, threadAndAgentSessionsQuery } from "./queries";
 
 /**
- * Returns the threads and the assistants waiting on the user, most recently
- * active first, as `listWaiting` builds them from the thread list and
- * `useAssistantRows`. Every place that shows what waits reads it here, so
+ * Returns the Threads, the Agents' sessions and the assistants waiting on the
+ * user, most recently active first, as `listWaiting` builds them from the
+ * sidebar's sessions and `useAssistantRows`. Every place that shows what waits reads it here, so
  * they always agree.
  */
 export function useWaiting(): Waiting[] {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const threads = useSuspenseQuery(threadsQuery(client)).data;
-  return listWaiting(threads, useAssistantRows());
+  const sessions = useSuspenseQuery(threadAndAgentSessionsQuery(client)).data;
+  return listWaiting(sessions, useAssistantRows());
 }
 
 /**

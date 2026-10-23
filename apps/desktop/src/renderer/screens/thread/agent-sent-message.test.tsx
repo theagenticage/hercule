@@ -6,7 +6,6 @@
 import type { JSX } from "react";
 import { describe, expect, it } from "vitest";
 import { act, screen, within } from "@testing-library/react";
-import { queryKeys } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import {
   buildErrorBody,
@@ -15,6 +14,7 @@ import {
   SIDEBAR_FIXTURE,
   THREAD_FIXTURES,
 } from "../../app/testing";
+import { threadAndAgentSessionsQuery } from "../../app/queries";
 import { UserMessage } from "../session/messages";
 import { AgentSentMessage } from "./agent-sent-message";
 import { renderThreadPart } from "./testing";
@@ -97,12 +97,12 @@ describe("a message another session's agent sent", () => {
   });
 
   it("follows the title of an agent the sidebar's list holds when a push changes it", async () => {
-    const { queryClient } = await renderThreadPart(drawAgentMessage(RUNBOOK.id), {
+    const { queryClient, client } = await renderThreadPart(drawAgentMessage(RUNBOOK.id), {
       thread: THREAD,
     });
     await screen.findByRole("group", { name: `Message from ${RUNBOOK.title}` });
 
-    const key = queryKeys.sessions({ thread: true });
+    const key = threadAndAgentSessionsQuery(client).queryKey;
     const threads = queryClient.getQueryData<readonly Session[]>(key)!;
     act(() => {
       queryClient.setQueryData(

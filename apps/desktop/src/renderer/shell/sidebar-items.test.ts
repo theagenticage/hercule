@@ -63,7 +63,7 @@ const waitingAssistant = (id: string, minutes: number): AssistantRow => ({
  * "Deploy · <id>", last active at 09:`minutes`.
  */
 const waitingRunSession = (id: string, minutes: number): Session =>
-  waiting(id, minutes, { title: `Deploy · ${id}`, runId: "run-1", stepId: id });
+  waiting(id, minutes, { title: `Deploy · ${id}`, kind: "run", runId: "run-1", stepId: id });
 
 /**
  * Returns the sidebar for `threads`, `assistantRows` and the runs'

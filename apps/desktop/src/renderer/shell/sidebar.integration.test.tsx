@@ -628,10 +628,10 @@ describe("the sidebar", () => {
 });
 
 describe("the sidebar's Done moves", () => {
-  /** The path of the operation that marks "Bump the Bun pin" done. */
-  const MARK_DONE_PATH = `/api/v1/sessions/${FIXTURE_THREAD_IDS.bunPin}/mark-done`;
-  /** The path of the operation that reopens "Bump the Bun pin". */
-  const REOPEN_PATH = `/api/v1/sessions/${FIXTURE_THREAD_IDS.bunPin}/reopen`;
+  /** The path of the operation that marks threads done; here it marks "Bump the Bun pin". */
+  const MARK_DONE_PATH = "/api/v1/sessions/mark-done";
+  /** The path of the operation that reopens threads; here it reopens "Bump the Bun pin". */
+  const REOPEN_PATH = "/api/v1/sessions/reopen";
   const MARK_DONE = `POST ${MARK_DONE_PATH}`;
   const REOPEN = `POST ${REOPEN_PATH}`;
 
@@ -651,7 +651,7 @@ describe("the sidebar's Done moves", () => {
       threads = threads.map((session) =>
         session.id === FIXTURE_THREAD_IDS.bunPin ? change(session) : session,
       );
-      return { body: threads.find((session) => session.id === FIXTURE_THREAD_IDS.bunPin) };
+      return { body: threads.filter((session) => session.id === FIXTURE_THREAD_IDS.bunPin) };
     };
     return {
       readThreads: () => threads,
@@ -1146,6 +1146,7 @@ describe(`the sidebar's "From runs"`, () => {
     buildThreads(count, {
       status: "busy",
       openRequests: [APPROVAL],
+      kind: "run",
       runId: "01a06d02-7900-7000-8000-000000000001",
     }).map((session) => ({
       ...session,

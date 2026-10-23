@@ -160,6 +160,7 @@ const WAITING: Session = {
   id: "01a06d02-7a00-7000-8000-000000000001",
   title: "Ship release · review",
   status: "busy",
+  kind: "run",
   runId: SHIP_LIVE.id,
   stepId: "review",
   openRequests: [

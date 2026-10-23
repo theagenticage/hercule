@@ -7,7 +7,7 @@ import {
   assistantsQuery,
   liveAgentSessionsQuery,
   senderSessionQuery,
-  threadsQuery,
+  threadAndAgentSessionsQuery,
 } from "../../app/queries";
 
 /**
@@ -45,7 +45,7 @@ export function useSenderReadings(
 ): readonly SenderReading[] | "loading" {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  // The lists hold every thread and live agent session, so each reader keeps
+  // The lists hold the sidebar's Threads and Agent sessions and every live Agent session, so each reader keeps
   // only the sessions it needs. Query compares the result by value, so a push
   // that changes other sessions does not draw the senders again.
   const selectSenders = useCallback(
@@ -55,7 +55,7 @@ export function useSenderReadings(
     },
     [senderSessionIds],
   );
-  const threads = useQuery({ ...threadsQuery(client), select: selectSenders });
+  const threads = useQuery({ ...threadAndAgentSessionsQuery(client), select: selectSenders });
   const agentSessions = useQuery({ ...liveAgentSessionsQuery(client), select: selectSenders });
   const listed = new Map(
     [...(threads.data ?? []), ...(agentSessions.data ?? [])].map((session) => [

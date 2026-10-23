@@ -25,6 +25,7 @@ import {
   stubElementSize,
   THREAD_FIXTURES,
 } from "../../../../../app/testing";
+import { threadAndAgentSessionsQuery } from "../../../../../app/queries";
 import { answerTranscriptRead, readTranscriptReads } from "../../../../../app/testing-transcript";
 import { saveThreadCopy } from "../../../../../app/testing-thread-copies";
 
@@ -265,12 +266,11 @@ describe("a message another session's agent sent into the thread", () => {
     expect(calls.filter((call) => call.path === `/api/v1/sessions/${listed.id}`)).toHaveLength(0);
 
     // A push renames the session in the lists, and the messages follow.
-    const threads = context.queryClient.getQueryData<readonly Session[]>(
-      queryKeys.sessions({ thread: true }),
-    )!;
+    const key = threadAndAgentSessionsQuery(context.controller!.client).queryKey;
+    const threads = context.queryClient.getQueryData<readonly Session[]>(key)!;
     act(() => {
       context.queryClient.setQueryData(
-        queryKeys.sessions({ thread: true }),
+        key,
         threads.map((each) =>
           each.id === listed.id ? { ...each, title: "Ship the runbook" } : each,
         ),

@@ -71,7 +71,7 @@ export function ThreadHeader({ session }: { readonly session: Session }): JSX.El
 
   const workspace = workspaces.find((each) => each.id === session.workspaceId);
 
-  const isStepSession = session.runId !== null;
+  const isStepSession = session.kind === "run";
   // A thread's tabs are its workspace's threads, as the draft that joins the
   // workspace lists them. A step session's tabs also hold the sessions an
   // Agent spawned, which are the rest of what it works beside.

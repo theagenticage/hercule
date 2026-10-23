@@ -515,6 +515,7 @@ describe("the sessions of runs", () => {
     ...runbook,
     id,
     title: `Review · ${stepId}`,
+    kind: "run",
     agentId: "01a06d02-7b00-7000-8000-000000000001",
     runId,
     stepId,

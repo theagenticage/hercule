@@ -10,6 +10,7 @@ import type { JSX } from "react";
 import { vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import type { HerculeClient } from "@hercule/client-core";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -44,6 +45,8 @@ export interface RenderedThreadPart {
   readonly calls: readonly Call[];
   /** The app's query cache, for a test that waits until no write is running. */
   readonly queryClient: QueryClient;
+  /** The client the app reads with, whose query options name the cache's keys. */
+  readonly client: HerculeClient;
   /** What each thread's composer holds and has not sent. */
   readonly pendingSubmissions: PendingSubmissions;
   /** Sends a menu command, as main does when the user picks the menu item. */
@@ -138,6 +141,7 @@ export const renderThreadPart = async (
   return {
     calls,
     queryClient,
+    client,
     pendingSubmissions: controller.pendingSubmissions,
     sendMenuCommand,
   };

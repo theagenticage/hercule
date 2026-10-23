@@ -8,7 +8,7 @@ import { useCallback } from "react";
 import { useMatch, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { decideThreadPose, isMarkedDone, isThreadSeated, type Waiting } from "@hercule/client-core";
 import type { Destination, WaitingRequest } from "../../../ipc/contract";
-import { runnersQuery, threadsQuery } from "../../app/queries";
+import { runnersQuery, threadAndAgentSessionsQuery } from "../../app/queries";
 
 /**
  * Returns what main is sent of an entry of Waiting on you: where its
@@ -65,8 +65,8 @@ export function useOpenDestination(): (destination: Destination) => void {
           const { sessionId } = destination;
           const { client } = controller;
           const session = queryClient
-            .getQueryData(threadsQuery(client).queryKey)
-            ?.find((each) => each.id === sessionId);
+            .getQueryData(threadAndAgentSessionsQuery(client).queryKey)
+            ?.find((each) => each.id === sessionId && each.kind === "thread");
           const runner = queryClient
             .getQueryData(runnersQuery(client).queryKey)
             ?.find((each) => each.id === session?.runnerId);

@@ -184,7 +184,11 @@ describe("the queued inputs", () => {
     await renderThreadPart(QueuedInputs, {
       thread: {
         ...queued,
-        session: { ...queued.session, conversationId: "01a06d02-7800-7000-8000-000000000001" },
+        session: {
+          ...queued.session,
+          kind: "assistant",
+          conversationId: "01a06d02-7800-7000-8000-000000000001",
+        },
       },
     });
 

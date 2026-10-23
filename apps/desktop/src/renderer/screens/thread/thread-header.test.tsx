@@ -275,7 +275,7 @@ describe("a step session's header", () => {
     const answerSessions = sidebar["GET /api/v1/sessions"] as (call: Call) => unknown;
     return {
       "GET /api/v1/sessions": (call) =>
-        new URLSearchParams(call.search).get("thread") === "false"
+        !new URLSearchParams(call.search).getAll("kind").includes("thread")
           ? { body: { items: [PLAN_SESSION, IMPLEMENT_SESSION] } }
           : (answerSessions(call) as { body: unknown }),
       "GET /api/v1/workspaces": {
@@ -423,7 +423,7 @@ describe("a step session's header", () => {
       handlers: {
         ...buildRunHandlers(),
         "GET /api/v1/sessions": (call) =>
-          new URLSearchParams(call.search).get("thread") === "false"
+          !new URLSearchParams(call.search).getAll("kind").includes("thread")
             ? { body: { items: [stepInThreadWorkspace] } }
             : (
                 buildSidebarHandlers(SIDEBAR_FIXTURE)["GET /api/v1/sessions"] as (call: Call) => {

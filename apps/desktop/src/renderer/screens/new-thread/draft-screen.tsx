@@ -31,7 +31,7 @@ import {
 import type { SessionSpawnInput, Workspace } from "@hercule/contract";
 import { useDraftThread } from "../../app/draft-thread";
 import { buildDraftKey } from "../../app/pending-submissions";
-import { threadsQuery } from "../../app/queries";
+import { threadAndAgentSessionsQuery } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
 import { buildLook, Face } from "../../faces";
 import { useComposerImages } from "../attachments/use-composer-images";
@@ -145,7 +145,9 @@ export function DraftScreen({
     onSuccess: (session, sent) => {
       // The thread screen opens on this session without reading it again.
       queryClient.setQueryData(queryKeys.session(session.id), session);
-      void queryClient.invalidateQueries({ queryKey: threadsQuery(client).queryKey });
+      void queryClient.invalidateQueries({
+        queryKey: threadAndAgentSessionsQuery(client).queryKey,
+      });
       pendingSubmissions.clearSent(key, sent);
       if (sent.recent !== null) rememberRecentModel(controller.url, sent.recent);
     },

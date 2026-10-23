@@ -12,7 +12,7 @@ import { onlineManager, type QueryClient } from "@tanstack/react-query";
 import { invalidateWithoutCancelling } from "@hercule/client-core";
 import type { OpenRequest, Session, SessionRequest } from "@hercule/contract";
 import { ageClock } from "../../app/age-clock";
-import { projectsQuery, threadsQuery } from "../../app/queries";
+import { projectsQuery, threadAndAgentSessionsQuery } from "../../app/queries";
 import {
   buildErrorBody,
   buildFixtureAssistant,
@@ -57,7 +57,7 @@ const countReads = (calls: readonly Call[], path: string): number =>
 const readsThreads = (call: Call): boolean =>
   call.method === "GET" &&
   call.path === "/api/v1/sessions" &&
-  new URLSearchParams(call.search).get("thread") === "true";
+  new URLSearchParams(call.search).getAll("kind").includes("thread");
 
 /** Counts the reads of the thread list among `calls`. */
 const countThreadReads = (calls: readonly Call[]): number => calls.filter(readsThreads).length;
@@ -170,12 +170,12 @@ describe("the shell's loader", () => {
       expect(countReads(calls, path), path).toBeGreaterThan(0);
     }
     const client = context.controller!.client;
-    expect(context.queryClient.getQueryData(threadsQuery(client).queryKey)).toHaveLength(
-      SIDEBAR_FIXTURE.threads.length,
-    );
+    expect(
+      context.queryClient.getQueryData(threadAndAgentSessionsQuery(client).queryKey),
+    ).toHaveLength(SIDEBAR_FIXTURE.threads.length);
   });
 
-  it("reads only threads, and follows the cursor to the last page", async () => {
+  it("reads the Threads and the Agent sessions of the last 14 days, and follows the cursor to the last page", async () => {
     const [first, ...rest] = SIDEBAR_FIXTURE.threads;
     const { calls, context } = await startShell({
       handlers: {
@@ -188,21 +188,30 @@ describe("the shell's loader", () => {
       },
     });
     const client = context.controller!.client;
-    expect(context.queryClient.getQueryData(threadsQuery(client).queryKey)).toEqual(
+    expect(context.queryClient.getQueryData(threadAndAgentSessionsQuery(client).queryKey)).toEqual(
       SIDEBAR_FIXTURE.threads,
     );
-    const reads = calls.filter(readsThreads);
-    expect(
-      reads.slice(0, 2).map((call) => Object.fromEntries(new URLSearchParams(call.search))),
-    ).toEqual([
-      { thread: "true", limit: "500" },
-      { thread: "true", limit: "500", cursor: "page-2" },
+    const reads = calls.filter(readsThreads).slice(0, 2);
+    expect(reads.map((call) => new URLSearchParams(call.search).getAll("kind"))).toEqual([
+      ["thread", "agent"],
+      ["thread", "agent"],
     ]);
+    expect(reads.map((call) => new URLSearchParams(call.search).get("cursor"))).toEqual([
+      null,
+      "page-2",
+    ]);
+    // One cutoff for both pages, 14 days before the app first asked.
+    const [firstRead, secondRead] = reads.map((call) =>
+      new URLSearchParams(call.search).get("doneSince"),
+    );
+    expect(secondRead).toBe(firstRead);
+    expect(Date.now() - Date.parse(firstRead!)).toBeGreaterThanOrEqual(14 * 24 * 60 * 60 * 1000);
     // The shell also reads the live sessions that are not threads, for "From runs".
     const agentRead = calls.find(
       (call) =>
         call.path === "/api/v1/sessions" &&
-        new URLSearchParams(call.search).get("thread") === "false",
+        !readsThreads(call) &&
+        new URLSearchParams(call.search).getAll("kind").includes("agent"),
     );
     expect(new URLSearchParams(agentRead?.search).getAll("status")).toEqual([
       "queued",
@@ -248,7 +257,9 @@ describe("the shell's loader", () => {
     // The other reads succeeded before the controller rejected the token.
     // Kept, they would show as the sidebar of whoever signs in next.
     const client = context.controller!.client;
-    expect(context.queryClient.getQueryData(threadsQuery(client).queryKey)).toBeUndefined();
+    expect(
+      context.queryClient.getQueryData(threadAndAgentSessionsQuery(client).queryKey),
+    ).toBeUndefined();
   });
 });
 
@@ -308,7 +319,7 @@ describe("the shell's live connection", () => {
       handlers: { "GET /api/v1/sessions": answerThreads },
     });
     const queryClient = context.queryClient;
-    const threadsKey = threadsQuery(context.controller!.client).queryKey;
+    const threadsKey = threadAndAgentSessionsQuery(context.controller!.client).queryKey;
     holdReads = true;
     const before = countThreadReads(calls);
 
