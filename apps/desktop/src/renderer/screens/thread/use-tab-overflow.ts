@@ -2,11 +2,11 @@ import { useEffectEvent, useLayoutEffect, useRef, useState, type RefObject } fro
 import { pickHiddenTabs } from "./fit-tabs";
 
 /**
- * The widest the work's name draws in the pill, in pixels. The name's own
- * style cuts it at the same width; this copy lets the fit count the name at
- * its natural width up to that limit.
+ * The widest the work's name text draws in the pill, in pixels, without the
+ * slash before it. The name's own style cuts it at the same width; this copy
+ * lets the fit count the name at its natural width up to that limit.
  */
-const WORK_NAME_MAX_WIDTH = 280;
+const WORK_NAME_TEXT_MAX_WIDTH = 272;
 
 const NO_TABS: ReadonlySet<string> = new Set();
 
@@ -22,8 +22,10 @@ const NO_TABS: ReadonlySet<string> = new Set();
  * - `data-tab-overflow`: the "+n" button. It is always rendered. While no
  *   tab is hidden it is out of flow too, and shows the label it would have
  *   for one hidden tab, so there is a width to reserve when one must hide.
- * - `data-work-name`: the work's name. It counts at its natural width, up
- *   to 280 px, and the stylesheet shrinks it when pinned tabs need the room.
+ * - `data-work-name`: the work's name, the slash before its text and the
+ *   text in a `.work-name-text`. It counts at its natural width, the text
+ *   up to 272 px, and the stylesheet shrinks it when pinned tabs need the
+ *   room.
  * - A child with a `popover` attribute, such as the "+n" button's menu,
  *   takes no room and is not counted.
  * - Any other child counts at its own width.
@@ -145,7 +147,11 @@ function pickHiddenTabKeys(
     } else if (child.dataset.tabOverflow !== undefined) {
       overflowWidth = width + gap;
     } else if (child.dataset.workName !== undefined) {
-      nameWidth = Math.min(child.scrollWidth, WORK_NAME_MAX_WIDTH);
+      const text = child.querySelector<HTMLElement>(".work-name-text");
+      // The slash is what comes before the text. Without a layout, as in jsdom, there is neither.
+      const slashWidth =
+        text === null ? 0 : text.getBoundingClientRect().left - child.getBoundingClientRect().left;
+      nameWidth = slashWidth + Math.min(text?.scrollWidth ?? 0, WORK_NAME_TEXT_MAX_WIDTH);
       fixedWidth += gap;
     } else {
       fixedWidth += width + gap;

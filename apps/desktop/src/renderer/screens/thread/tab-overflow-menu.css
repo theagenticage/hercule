@@ -29,17 +29,20 @@
   transform: rotate(90deg);
 }
 
-/* The menu opens 6px under the button, its left edge on the button's. Where
-   that would leave the window, it opens with its right edge on the button's.
+/* The menu opens 6px under the button, its left edge 4px before the button's,
+   as the drawing places it. Where that would leave less than 14px between the
+   menu and the right edge of the window, which the main pane shares, it opens
+   with its right edge 14px from that edge instead. The 14px is the right
+   margin, which the browser counts in deciding that the menu does not fit.
    A long list scrolls. */
 .pop.popover-menu.tab-overflow-menu {
   min-width: 300px;
   max-width: 380px;
   max-height: calc(100% - 16px);
-  margin-top: 6px;
+  margin: 6px 14px 0 -4px;
   overflow-y: auto;
   position-area: block-end span-inline-end;
-  position-try-fallbacks: flip-inline;
+  position-try-fallbacks: --tab-overflow-menu-at-edge;
   /* The drawing's menu is a raised glass with the glass's rim, not the
      composer menus' surface glass. */
   border-radius: var(--r-md);
@@ -48,6 +51,10 @@
     inset 0 0 0 1px var(--glass-rim),
     inset 0 1px 0 var(--glass-edge),
     var(--shadow-3);
+}
+@position-try --tab-overflow-menu-at-edge {
+  position-area: block-end;
+  justify-self: end;
 }
 @media (prefers-reduced-motion: no-preference) {
   .tab-overflow-menu:popover-open {

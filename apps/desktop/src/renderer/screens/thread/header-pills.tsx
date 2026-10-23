@@ -125,7 +125,7 @@ export function ThreadTabsPill({
         {workName === null ? null : (
           <>
             <span className="work-name" data-work-name="" title={workName}>
-              {workName}
+              <span className="work-name-text">{workName}</span>
             </span>
             <span className="thread-tabs-sep" aria-hidden="true" />
           </>
