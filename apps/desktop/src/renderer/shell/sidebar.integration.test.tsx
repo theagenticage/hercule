@@ -30,6 +30,7 @@ import {
   SIDEBAR_FIXTURE,
   stubApi,
   stubElementSize,
+  stubResizeObserver,
   THREAD_FIXTURES,
   neverAnswer,
   type Answer,
@@ -1560,6 +1561,58 @@ describe("the sidebar's card of thread details", () => {
     expect(readCardTop()).not.toBe(topBefore);
     expect(readCard()).toContain("Bump the Bun pin");
   });
+
+  it("keeps the card inside the window when a live push adds sessions to the group it shows", async () => {
+    // jsdom lays nothing out. Each list item, and everything in it, reports a
+    // top from the item's place among the items, a row's height apart. The
+    // card is 40px tall plus 130px for each session it lists, so a card that
+    // grows by one session no longer fits in the window under its row.
+    const resize = stubResizeObserver();
+    const rowHeight = ITEM_HEIGHTS["group-row"];
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: Element,
+    ) {
+      const item = this.closest(".side-item");
+      const index = item === null ? 0 : [...item.parentElement!.children].indexOf(item);
+      return DOMRect.fromRect({ x: 0, y: index * rowHeight, width: 272, height: rowHeight });
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.classList.contains("thread-hover")
+        ? 40 + 130 * this.querySelectorAll(".thread-hover-member").length
+        : 800;
+    });
+    const bunPinThread = SINGLE_THREADS_FIXTURE.threads.find(
+      (session) => session.id === FIXTURE_THREAD_IDS.bunPin,
+    )!;
+    let threads: readonly Session[] = SINGLE_THREADS_FIXTURE.threads;
+    const { bunPin, live } = await startHovering(() => threads);
+    const rowTop = bunPin.getBoundingClientRect().top;
+    vi.stubGlobal("innerHeight", rowTop + 100);
+    restOn(bunPin);
+    expect(readCardTop()).toBe(`${String(rowTop)}px`);
+    vi.useRealTimers();
+
+    const [partner] = buildThreads(1, {
+      projectId: bunPinThread.projectId,
+      workspaceId: bunPinThread.workspaceId,
+      createdAt: "2026-09-10T09:10:00.000Z",
+    });
+    threads = [...threads, partner!];
+    act(() => {
+      live.pushInvalidation("session", [partner!.id]);
+    });
+    await waitFor(() => {
+      expect(document.querySelectorAll(".thread-hover-member")).toHaveLength(2);
+    });
+    // The card now measures 300px, and the browser reports its new size.
+    act(() => {
+      resize(document.querySelector(".thread-hover")!);
+    });
+
+    expect(readCardTop()).toBe(`${String(Math.max(8, rowTop + 100 - 8 - 300))}px`);
+  });
 });
 
 describe("the sidebar's groups of sessions", () => {
@@ -1762,6 +1815,91 @@ describe("the sidebar's groups of sessions", () => {
     });
     const card = document.querySelector(".thread-hover")!;
     expect(card.querySelectorAll(".thread-hover-member")).toHaveLength(2);
-    expect(card.textContent).not.toContain("to unfold");
+    expect(card.textContent).toContain("Click the dots or press → to unfold");
+  });
+
+  describe("on the Done shelf", () => {
+    /**
+     * Returns the records of a Done group in webshop's main workspace: the
+     * lead "Thread 1", a second Done Thread, and the reviewer, an Agent's
+     * session that has ended.
+     */
+    const buildDoneCrewRecords = (): { records: SidebarRecords; reviewer: Session } => {
+      const [lead, second] = buildThreads(2, {
+        projectId: SINGLE_THREADS_FIXTURE.projects[0]!.id,
+        workspaceId: primary!.id,
+        done: { at: "2026-09-10T09:20:00.000Z", by: "user" },
+      }).toReversed();
+      const [thread] = buildThreads(1, {
+        projectId: SINGLE_THREADS_FIXTURE.projects[0]!.id,
+        workspaceId: primary!.id,
+      });
+      const reviewer: Session = {
+        ...thread!,
+        id: "01a06d02-7b00-7000-8000-0000000000b1",
+        title: "Review the payouts",
+        role: "review",
+        kind: "agent",
+        agentId: "01a06d02-7c00-7000-8000-000000000001",
+        status: "exited",
+        createdAt: "2026-09-10T08:30:00.000Z",
+      };
+      return {
+        records: {
+          ...SINGLE_THREADS_FIXTURE,
+          threads: [lead!, second!],
+          agentSessions: [reviewer],
+        },
+        reviewer,
+      };
+    };
+
+    it("unfolds a Done group into its sessions, so an ended Agent session's transcript can be opened", async () => {
+      const { records, reviewer } = buildDoneCrewRecords();
+      const { nav, router } = await startSidebar({ records });
+      await userEvent.click(within(nav).getByRole("button", { name: /^Done/ }));
+
+      const dots = within(nav).getByRole("button", {
+        name: "3 sessions: 2 done, 1 ended. Unfold",
+      });
+      // Nothing on the shelf is counted, so the button has no dot, only its chevron.
+      expect(dots.querySelectorAll(".side-dot")).toHaveLength(0);
+      expect(dots.querySelectorAll(".side-dots-chevron")).toHaveLength(1);
+      expect(nav.querySelectorAll(".side-member")).toHaveLength(0);
+
+      await userEvent.click(dots);
+      expect(dots.getAttribute("aria-expanded")).toBe("true");
+      expect(dots.getAttribute("aria-label")).toBe("3 sessions: 2 done, 1 ended. Fold");
+      await userEvent.click(within(nav).getByRole("button", { name: "3 quiet" }));
+      expect(
+        [...nav.querySelectorAll(".side-member a")].map((line) => line.getAttribute("aria-label")),
+      ).toEqual(["Thread 1, done", "Thread 2, done", expect.stringMatching(/^review, /)]);
+
+      await userEvent.click(within(nav).getByRole("link", { name: /^review, / }));
+      await waitFor(() => {
+        expect(router.state.location.pathname).toBe(`/threads/${reviewer.id}`);
+      });
+    });
+
+    it("unfolds a Done group with the right arrow and folds it with the left arrow, and keeps its Reopen button and second line", async () => {
+      const { records } = buildDoneCrewRecords();
+      const { nav } = await startSidebar({ records });
+      await userEvent.click(within(nav).getByRole("button", { name: /^Done/ }));
+      const row = within(nav).getByRole("link", { name: "Thread 1, 2 threads, done" });
+
+      expect(row.textContent).toMatch(/^Thread 12 threads · done /);
+      expect(fireEvent.keyDown(row, { key: "ArrowLeft" })).toBe(true);
+      expect(fireEvent.keyDown(row, { key: "ArrowRight" })).toBe(false);
+      await waitFor(() => {
+        expect(nav.querySelectorAll(".side-m")).toHaveLength(1);
+      });
+      expect(within(nav).getByRole("button", { name: "Reopen" })).toBeTruthy();
+      expect(row.textContent).toMatch(/^Thread 12 threads · done /);
+
+      expect(fireEvent.keyDown(row, { key: "ArrowLeft" })).toBe(false);
+      await waitFor(() => {
+        expect(nav.querySelectorAll(".side-member")).toHaveLength(0);
+      });
+    });
   });
 });

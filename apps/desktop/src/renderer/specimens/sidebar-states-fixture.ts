@@ -1,5 +1,5 @@
 /**
- * The records of the sidebar states specimen (sidebar-states.tsx): eleven
+ * The records of the sidebar states specimen (sidebar-states.tsx): twelve
  * scenes that draw the sidebar states the Bureau book never draws, for a
  * check by eye. `node scripts/capture-sidebar-states.ts` captures each scene
  * in both themes.
@@ -7,7 +7,7 @@
  * Every thread row is 52px tall, so each scene holds only as many rows as
  * fit the capture's window. The threads of one workspace are one row, so
  * scenes 1 to 5 give each thread a workspace of its own, or none, to draw
- * rows of a single thread; scenes 6 to 11 draw groups.
+ * rows of a single thread; scenes 6 to 12 draw groups.
  *
  * - Scene 1 has an open thread and three projects:
  *   - webshop, whose threads work in a worktree, in the main workspace and in
@@ -46,6 +46,8 @@
  * - Scene 10 has the Done shelf open, with a group of three Threads that was
  *   marked Done together.
  * - Scene 11 is scene 8 with the card of the group of ten on show.
+ * - Scene 12 is scene 10 with the group on the Done shelf unfolded: its three
+ *   Threads and the Agent session that ended, folded into the "4 quiet" line.
  *
  * The threads run on the sidebar specimen's runner and models
  * (sidebar-fixture.ts), except the one on build-box, a runner that is
@@ -896,5 +898,12 @@ export const SIDEBAR_SCENES: ReadonlyArray<SidebarScene> = [
     records: buildSceneRecords([...RESULT_CREW, ...SCENE_8_SINGLES]),
     path: "/threads/s-ideal-notes",
     showCardOf: RESULT_GROUP_TITLE,
+  },
+  {
+    ...SCENE_DEFAULTS,
+    records: buildSceneRecords(SCENE_10_THREADS),
+    path: "/threads/s-cart-totals",
+    openDoneShelf: true,
+    unfoldGroup: "Fix 3-D Secure checkout for EU cards",
   },
 ];

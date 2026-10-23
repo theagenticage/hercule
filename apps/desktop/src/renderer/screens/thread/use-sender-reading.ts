@@ -45,9 +45,10 @@ export function useSenderReadings(
 ): readonly SenderReading[] | "loading" {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  // The lists hold the sidebar's Threads and Agent sessions and every live Agent session, so each reader keeps
-  // only the sessions it needs. Query compares the result by value, so a push
-  // that changes other sessions does not draw the senders again.
+  // The lists hold the sidebar's Threads and Agent sessions and every live
+  // Agent session, so each reader keeps only the sessions it needs. Query
+  // compares the result by value, so a push that changes other sessions does
+  // not draw the senders again.
   const selectSenders = useCallback(
     (sessions: readonly Session[]) => {
       const wanted = new Set(senderSessionIds);

@@ -2,28 +2,34 @@
  * Reads what waits on the user, for Waiting on you, the Go menu, the dock
  * badge and the notifications.
  */
+import { useMemo } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  buildSessionGroups,
   listWaiting,
   listWaitingRunSessions,
   type Waiting,
   type WaitingRunSession,
 } from "@hercule/client-core";
 import { useAssistantRows } from "./assistant-rows";
-import { liveAgentSessionsQuery, threadAndAgentSessionsQuery } from "./queries";
+import { liveAgentSessionsQuery } from "./queries";
+import { useSessionGroups } from "./session-groups";
 
 /**
  * Returns the Threads, the Agents' sessions and the assistants waiting on the
  * user, most recently active first, as `listWaiting` builds them from the
- * sidebar's sessions and `useAssistantRows`. Every place that shows what waits reads it here, so
+ * sidebar's groups (`useSessionGroups`) and `useAssistantRows`. The open
+ * session is among the sessions, so a Done Thread marked Done long ago still
+ * shows while it asks. Every place that shows what waits reads it here, so
  * they always agree.
  */
 export function useWaiting(): Waiting[] {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
-  const sessions = useSuspenseQuery(threadAndAgentSessionsQuery(client)).data;
-  return listWaiting(sessions, buildSessionGroups(sessions), useAssistantRows());
+  const { sessions, groups } = useSessionGroups();
+  const assistantRows = useAssistantRows();
+  return useMemo(
+    () => listWaiting(sessions, groups, assistantRows),
+    [sessions, groups, assistantRows],
+  );
 }
 
 /**

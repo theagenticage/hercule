@@ -658,6 +658,25 @@ function DotsButton({
 }
 
 /**
+ * Returns the key handler of a row of a group of several sessions: the right
+ * arrow unfolds a folded group and the left arrow folds an unfolded one,
+ * which calls `toggleGroup` with whether to unfold. A key that would do
+ * nothing is left alone, so it still reaches whatever else uses it.
+ */
+const buildToggleOnArrow =
+  (unfolded: boolean, toggleGroup: (unfold: boolean) => void) =>
+  (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key === "ArrowRight" && !unfolded) {
+      event.preventDefault();
+      toggleGroup(true);
+    } else if (event.key === "ArrowLeft" && unfolded) {
+      event.preventDefault();
+      toggleGroup(false);
+    }
+  };
+
+/**
  * Renders a group in its project, in two lines: a thread, or a lead with its
  * partners. The first line holds its title and its status slot
  * (`StatusSlot`); the second, the mark of its provider and, while a session
@@ -762,18 +781,7 @@ export const GroupRow = memo(function GroupRow({
   const toggleGroup = (unfold: boolean): void => {
     onToggleGroup(groupKey, unfold);
   };
-  // Left folds an unfolded group and right unfolds a folded one. A key that
-  // would do nothing is left alone, so it still reaches whatever else uses it.
-  const handleArrow = (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    if (event.key === "ArrowRight" && !unfolded) {
-      event.preventDefault();
-      toggleGroup(true);
-    } else if (event.key === "ArrowLeft" && unfolded) {
-      event.preventDefault();
-      toggleGroup(false);
-    }
-  };
+  const handleArrow = buildToggleOnArrow(unfolded, toggleGroup);
   const classNames = [
     "side-thread",
     ...(receded ? ["is-receded"] : []),
@@ -1056,53 +1064,91 @@ export const DoneHeader = memo(function DoneHeader({
  *   hours ago".
  * - A group of several starts it with a green check and reads "3 threads ·
  *   done 2 hours ago".
+ * - A group of several sessions has a dots button, as a group's row in a
+ *   project has (`DotsButton`), which unfolds its lines so an ended Agent
+ *   session can still be opened. Nothing on the shelf is counted, so the
+ *   button draws no dot, only its chevron. `dots` is `null` for a group of
+ *   one session, which does not unfold; `hiddenCount` and `summaryLabel` are
+ *   as for `GroupRow`, and the arrow keys work as they do there.
  *
  * The link is named "<title>, done", with the thread count before "done" for
  * several threads and ", unsent message" after it when `unsent` is true. It
- * opens the session `openId` as a thread row's link does. `pose` only
- * decides where the link opens while the Office is open.
+ * opens the session `openId` as a thread row's link does: in the Office's
+ * drawer while `officeOpen` is true and the session has a colleague there
+ * (`seated`), on its own screen if not.
  */
 export const DoneGroupRow = memo(function DoneGroupRow({
   itemKey,
   leading,
+  groupKey,
   openId,
   title,
-  pose,
+  seated,
   threadCount,
   doneAt,
   providerId,
   unsent,
   reopenIds,
+  dots,
+  hiddenCount,
+  summaryLabel,
+  unfolded,
   onScreen,
   officeOpen,
   onReopen,
+  onToggleGroup,
 }: Placement & {
+  readonly groupKey: string;
   readonly openId: string;
   readonly title: string;
-  readonly pose: Pose;
+  readonly seated: boolean;
   readonly threadCount: number;
   readonly doneAt: string;
   readonly providerId: string | null;
   readonly unsent: boolean;
   readonly reopenIds: readonly string[];
+  /** The dots of a group of two or more sessions, or `null` for one session. */
+  readonly dots: readonly SessionDot[] | null;
+  readonly hiddenCount: number;
+  readonly summaryLabel: string;
+  readonly unfolded: boolean;
   readonly onScreen: boolean;
   readonly officeOpen: boolean;
   readonly onReopen: (sessionIds: readonly string[]) => void;
+  readonly onToggleGroup: (groupKey: string, unfold: boolean) => void;
 }): JSX.Element {
   const doneWords = useAgeWords(doneAt, onScreen);
   const several = threadCount > 1;
+  const toggleGroup = (unfold: boolean): void => {
+    onToggleGroup(groupKey, unfold);
+  };
+  const handleArrow = buildToggleOnArrow(unfolded, toggleGroup);
+  const classNames = [
+    "side-thread",
+    "is-done",
+    "side-item",
+    ...(dots === null ? [] : ["has-crew"]),
+    ...(unfolded ? ["is-unfolded"] : []),
+  ];
   return (
     <div
-      className="side-thread is-done side-item"
-      style={{ marginTop: leading, height: ITEM_HEIGHTS["done-group-row"] }}
+      className={classNames.join(" ")}
+      style={{
+        marginTop: leading,
+        height: ITEM_HEIGHTS["done-group-row"],
+        ...(dots === null
+          ? {}
+          : { "--dots": `${String(measureDotsWidth(dots.length, hiddenCount))}px` }),
+      }}
     >
       <ThreadLink
         sessionId={openId}
-        seated={pose === "waiting"}
+        seated={seated}
         officeOpen={officeOpen}
         className={unsent ? "side-row is-unsent" : "side-row"}
         data-key={itemKey}
         aria-label={`${title}, ${several ? `${String(threadCount)} threads, ` : ""}done${unsent ? ", unsent message" : ""}`}
+        onKeyDown={dots === null ? undefined : handleArrow}
       >
         <span className="side-text">
           <span className="side-line">
@@ -1131,6 +1177,17 @@ export const DoneGroupRow = memo(function DoneGroupRow({
           onReopen(reopenIds);
         }}
       />
+      {dots === null ? null : (
+        <DotsButton
+          itemKey={itemKey}
+          dots={dots}
+          hiddenCount={hiddenCount}
+          label={summaryLabel}
+          unfolded={unfolded}
+          onToggle={toggleGroup}
+          onKeyDown={handleArrow}
+        />
+      )}
     </div>
   );
 }, arePropsEqual);
@@ -1139,10 +1196,10 @@ export const DoneGroupRow = memo(function DoneGroupRow({
  * Renders the row of the Draft Thread open in the main pane, drawn as a
  * thread row: "New thread" after a pencil and "draft" in the status slot,
  * then where it will work (`placeClip` and `placeKeep`, see
- * `DetailLine`), as the thread's row will say once it starts. It is tinted as a row with unsent work
- * is, because a draft is unsent work, and marked as the open screen, like
- * the open thread's row. It is not a link, because it leads to the screen it
- * marks.
+ * `DetailLine`), as the thread's row will say once it starts. It is tinted
+ * as a row with unsent work is, because a draft is unsent work, and marked
+ * as the open screen, like the open thread's row. It is not a link, because
+ * it leads to the screen it marks.
  */
 export const DraftRow = memo(function DraftRow({
   itemKey,
@@ -1180,9 +1237,9 @@ export const DraftRow = memo(function DraftRow({
 });
 
 /**
- * Renders a section's "more" row, such as "3 more threads". Pressing it shows
- * the section's hidden threads in place: `onExpand` is called with the
- * section's key. It is a button, not a link, because it goes nowhere.
+ * Renders a section's "more" row, such as "3 more". Pressing it shows the
+ * section's hidden rows in place: `onExpand` is called with the section's
+ * key. It is a button, not a link, because it goes nowhere.
  */
 export const MoreRow = memo(function MoreRow({
   itemKey,

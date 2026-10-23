@@ -4,7 +4,7 @@
  * Bureau book never draws. `node scripts/capture-sidebar-states.ts` captures
  * every scene in both themes.
  *
- * The page takes its scene from `?scene=1` to `?scene=11`, and its theme from
+ * The page takes its scene from `?scene=1` to `?scene=12`, and its theme from
  * `?theme=whitehaven` or `?theme=orient-express`.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as

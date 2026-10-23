@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useId, useMemo, useState, type JSX } from "react";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { DONE_SHELF_LIMIT, DONE_SHELF_STEP } from "@hercule/client-core";
 import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useAssistantRows } from "../app/assistant-rows";
@@ -10,13 +10,12 @@ import {
   providersQuery,
   resourcesQuery,
   runnersQuery,
-  sessionQuery,
-  threadAndAgentSessionsQuery,
   userQuery,
   workspacesQuery,
 } from "../app/queries";
 import { useRelatedReads } from "../app/related-reads";
 import { useSendOnChange } from "../app/send-on-change";
+import { useOpenSessionId, useSessionGroups } from "../app/session-groups";
 import { useWaiting, useWaitingRunSessions } from "../app/waiting";
 import { ComposeIcon } from "../icons/compose";
 import { OfficeIcon } from "../icons/office";
@@ -55,11 +54,12 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *     composer holds unsent work is tinted. A row's Done button marks the
  *     group's Threads Done: the group leaves its project at once, and the
  *     toast over the list's bottom edge says "Marked done" with Undo. Then
- *     the Done shelf, closed until its heading is pressed. Then the
- *     Assistants section, pinned under the list, while there is an
- *     assistant.
+ *     the Done shelf, closed until its heading is pressed, whose rows of
+ *     several sessions unfold into their lines too. Then the Assistants
+ *     section, pinned under the list, while there is an assistant.
  *   - On the Hercule face, the System section;
- * - the foot: the thread counts, the signed-in user and the Settings button.
+ * - the foot: how many sessions are working, waiting and idle, the
+ *   signed-in user and the Settings button.
  *
  * The face follows the screen (`decideScreenFace`). The switch, and View ›
  * Threads and View › Hercule in the menu, change it without leaving the
@@ -77,9 +77,11 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *
  * While the Office is open, the row of a session with a colleague in the
  * Office opens the session in the Office's drawer instead of on its own
- * screen, so the user stays in the Office. Every thread not marked Done has
- * a colleague, asleep and away ones too; a Done thread has none, so its row
- * still opens its own screen. A run's waiting session,
+ * screen, so the user stays in the Office (`isSessionSeated` decides). Every
+ * thread not marked Done has a colleague, asleep and away ones too; an Agent's
+ * session has one while it works, waits or is idle; a Done thread has none
+ * unless it waits, so its row still opens its own screen. A row, a line and a
+ * shelf row each ask about the session they open. A run's waiting session,
  * under "From runs", opens in the drawer too.
  *
  * The lists it reads are in the cache before the shell renders, because the
@@ -98,7 +100,7 @@ export const Sidebar = memo(function Sidebar({
 }): JSX.Element {
   const { bridge, controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  const sessions = useSuspenseQuery(threadAndAgentSessionsQuery(client)).data;
+  const { sessions, groups } = useSessionGroups();
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
@@ -119,22 +121,12 @@ export const Sidebar = memo(function Sidebar({
       : { projectId: draftSearch.project ?? null, workspaceId: draftSearch.workspace ?? null },
   );
 
-  // The open thread: the one on its own screen, or the one in the Office's
+  // The open session: the one on its own screen, or the one in the Office's
   // drawer while the Office is open.
-  const threadMatch = useMatch({
-    from: "/_connected/_shell/threads/$sessionId",
-    shouldThrow: false,
-  });
-  const officeMatch = useMatch({ from: "/_connected/_shell/office", shouldThrow: false });
-  const officeOpen = officeMatch !== undefined;
-  const selectedId = threadMatch?.params.sessionId ?? officeMatch?.search.session ?? null;
+  const selectedId = useOpenSessionId();
+  const officeOpen =
+    useMatch({ from: "/_connected/_shell/office", shouldThrow: false }) !== undefined;
   const listId = useId();
-  // The open session's own record, read from the cache the thread screen
-  // filled and never fetched here, for an open Thread marked Done long ago,
-  // which the sidebar's read leaves out. The empty id of no open session
-  // names no record.
-  const openSession =
-    useQuery({ ...sessionQuery(client, selectedId ?? ""), enabled: false }).data ?? null;
 
   // The face is set again each time a screen with a face of its own opens,
   // while rendering, so the sidebar never draws the old face beside the new
@@ -212,7 +204,7 @@ export const Sidebar = memo(function Sidebar({
 
   const { items, counts, openGroupKey } = buildSidebar({
     sessions,
-    openSession,
+    groups,
     waiting,
     waitingRunSessions,
     projects,

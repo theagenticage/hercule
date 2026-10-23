@@ -44,8 +44,9 @@ import { useThreadHover } from "./use-thread-hover";
  * - `onReopen`: a Done shelf row's Reopen button, with the ids of the
  *   Threads it reopens.
  * - `onToggleDoneShelf`: the Done shelf's heading.
- * - `onToggleGroup`: a group's dots button and the arrow keys, with the
- *   group's key and whether to unfold it (true) or fold it (false).
+ * - `onToggleGroup`: the dots button of a group's row, in a project or on the
+ *   Done shelf, and the arrow keys, with the group's key and whether to
+ *   unfold it (true) or fold it (false).
  * - `onShowQuiet`: an unfolded group's "n quiet" line, with the group's key.
  */
 export interface SidebarListActions {
@@ -229,17 +230,23 @@ const renderItem = (
           key={item.key}
           itemKey={item.key}
           leading={item.leading}
+          groupKey={item.groupKey}
           openId={item.openId}
           title={item.title}
-          pose={item.pose}
+          seated={item.seated}
           threadCount={item.threadCount}
           doneAt={item.doneAt}
           providerId={item.providerId}
           unsent={item.unsent}
           reopenIds={item.reopenIds}
+          dots={item.summary?.dots ?? null}
+          hiddenCount={item.summary?.hiddenCount ?? 0}
+          summaryLabel={item.summary?.label ?? ""}
+          unfolded={item.unfolded}
           onScreen={onScreen}
           officeOpen={officeOpen}
           onReopen={actions.onReopen}
+          onToggleGroup={actions.onToggleGroup}
         />
       );
     case "more":

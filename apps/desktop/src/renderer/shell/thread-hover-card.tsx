@@ -12,7 +12,7 @@
  * accessible description already carries the same details.
  */
 import { useId, useLayoutEffect, useRef, type JSX, type ReactNode } from "react";
-import type { GroupMember, SessionDot } from "@hercule/client-core";
+import type { GroupMember } from "@hercule/client-core";
 import { BranchIcon } from "../icons/branch";
 import { LaptopIcon } from "../icons/laptop";
 import { ProjectTile, type ProjectTint } from "../screens/project-tile";
@@ -36,7 +36,11 @@ export interface ThreadHoverDetails {
   readonly model: string | null;
   /** The id of the model's provider, whose mark shows before the model's name. */
   readonly providerId: string | null;
-  /** The sessions of a group of several, or none for a thread alone, whose card shows its model instead. */
+  /**
+   * The sessions of a group of several, the most urgent first
+   * (`GroupSummary.membersByUrgency`), or none for a thread alone, whose card
+   * shows its model instead.
+   */
   readonly members: readonly GroupMember[];
 }
 
@@ -58,9 +62,6 @@ const ICON_SIZE = 12;
 
 /** How many sessions the card lists before it folds the rest into "and n more". */
 const MEMBER_LIMIT = 8;
-
-/** Returns how urgent a session's dot is, lowest first: waiting, then working, then quiet. */
-const rankDot = (dot: SessionDot): number => (dot === "waiting" ? 0 : dot === "working" ? 1 : 2);
 
 /** Renders one line of the card: an icon, then the text beside it. */
 function DetailRow({
@@ -94,13 +95,16 @@ function MemberRow({ member }: { readonly member: GroupMember }): JSX.Element {
 /**
  * Renders the card of `details`, shown at `placement`, or hidden while
  * `placement` is `null`. The machine, the branch and the model each have a
- * row only when they are known. A group of several sessions lists them, the
- * most urgent first and eight at most, instead of its lead's model. When the
- * row `unfolds`, the card ends with the hint that says how.
+ * row only when they are known. A group of several sessions lists them in
+ * the order `details` holds them, eight at most, instead of its lead's model.
+ * When the row `unfolds`, the card ends with the hint that says how.
  *
  * The card's top is moved up when the card would reach past the window's
  * bottom edge, so a card for a row near the bottom stays in view. The card
- * lays itself out only when `placement` changes, not when `details` does.
+ * measures itself when `placement` changes and whenever its own size
+ * changes, such as when a live update adds sessions to the group while the
+ * pointer rests on its row. A change of `details` that leaves the card's
+ * size alone measures nothing.
  */
 export function ThreadHoverCard({
   placement,
@@ -115,7 +119,8 @@ export function ThreadHoverCard({
 
   // Shown and placed before the browser paints, so the card never shows at
   // the place it had for the previous row. Its height is known only once it
-  // shows, so the top is kept inside the window after that.
+  // shows, so the top is kept inside the window after that, and again each
+  // time the card's size changes.
   useLayoutEffect(() => {
     const card = cardRef.current!;
     if (placement === null) {
@@ -124,18 +129,25 @@ export function ThreadHoverCard({
     }
     card.style.left = `${String(placement.left)}px`;
     card.togglePopover(true);
-    const lowestTop = window.innerHeight - WINDOW_MARGIN - card.offsetHeight;
-    const top = Math.max(WINDOW_MARGIN, Math.min(placement.top, lowestTop));
-    card.style.top = `${String(top)}px`;
+    const keepInWindow = (): void => {
+      const lowestTop = window.innerHeight - WINDOW_MARGIN - card.offsetHeight;
+      const top = Math.max(WINDOW_MARGIN, Math.min(placement.top, lowestTop));
+      card.style.top = `${String(top)}px`;
+    };
+    keepInWindow();
+    const observer = new ResizeObserver(keepInWindow);
+    observer.observe(card);
+    return () => {
+      observer.disconnect();
+    };
   }, [placement]);
 
-  const listed =
-    details === null ? [] : details.members.toSorted((a, b) => rankDot(a.dot) - rankDot(b.dot));
+  const members = details?.members ?? [];
   return (
     <div
       ref={cardRef}
       popover="manual"
-      className={listed.length === 0 ? "thread-hover" : "thread-hover thread-hover--crew"}
+      className={members.length === 0 ? "thread-hover" : "thread-hover thread-hover--crew"}
       aria-hidden="true"
     >
       {details === null ? null : (
@@ -150,7 +162,7 @@ export function ThreadHoverCard({
           {details.branch === null ? null : (
             <DetailRow icon={<BranchIcon size={ICON_SIZE} />}>{details.branch}</DetailRow>
           )}
-          {listed.length > 0 || details.model === null ? null : (
+          {members.length > 0 || details.model === null ? null : (
             <DetailRow
               icon={
                 details.providerId === null ? null : (
@@ -161,14 +173,14 @@ export function ThreadHoverCard({
               {details.model}
             </DetailRow>
           )}
-          {listed.length === 0 ? null : (
+          {members.length === 0 ? null : (
             <>
               <div className="thread-hover-crew">
-                {listed.slice(0, MEMBER_LIMIT).map((member) => (
+                {members.slice(0, MEMBER_LIMIT).map((member) => (
                   <MemberRow key={member.sessionId} member={member} />
                 ))}
-                {listed.length > MEMBER_LIMIT ? (
-                  <div className="thread-hover-more">{`and ${String(listed.length - MEMBER_LIMIT)} more`}</div>
+                {members.length > MEMBER_LIMIT ? (
+                  <div className="thread-hover-more">{`and ${String(members.length - MEMBER_LIMIT)} more`}</div>
                 ) : null}
               </div>
               {unfolds ? (

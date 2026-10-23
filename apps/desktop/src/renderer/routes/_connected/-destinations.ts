@@ -8,7 +8,7 @@ import { useCallback } from "react";
 import { useMatch, useNavigate, useRouteContext } from "@tanstack/react-router";
 import { decideThreadPose, isSessionSeated, type Waiting } from "@hercule/client-core";
 import type { Destination, WaitingRequest } from "../../../ipc/contract";
-import { runnersQuery, threadAndAgentSessionsQuery } from "../../app/queries";
+import { runnersQuery, sessionQuery, threadAndAgentSessionsQuery } from "../../app/queries";
 
 /**
  * Returns what main is sent of an entry of Waiting on you: where its
@@ -42,15 +42,16 @@ export const buildWaitingRequest = (waiting: Waiting): WaitingRequest => {
  * Returns a function that opens a destination main names, from the Go menu
  * or a notification:
  *
- * - a thread opens in the Office's drawer while the Office is open and the
- *   thread has a colleague there, as its sidebar row does, and on its own
- *   screen otherwise;
+ * - a thread, or an Agent's session, opens in the Office's drawer while the
+ *   Office is open and the session has a colleague there
+ *   (`isSessionSeated`), as its sidebar row does, and on its own screen
+ *   otherwise;
  * - an assistant opens its Conversation, where its Request is answered: in
  *   the Office's drawer while the Office is open, because an assistant
  *   always has a colleague there, and on its own screen otherwise;
  * - a signal opens Intake with the signal selected.
  *
- * The thread and its runner are read from the cache when the thread is
+ * The session and its runner are read from the cache when the destination is
  * opened, so the function keeps its identity while the threads change.
  */
 export function useOpenDestination(): (destination: Destination) => void {
@@ -64,9 +65,13 @@ export function useOpenDestination(): (destination: Destination) => void {
         case "thread": {
           const { sessionId } = destination;
           const { client } = controller;
-          const session = queryClient
-            .getQueryData(threadAndAgentSessionsQuery(client).queryKey)
-            ?.find((each) => each.id === sessionId && each.kind === "thread");
+          // The sidebar's read leaves out a Thread marked Done long ago, which
+          // the open screen's own record still holds.
+          const session =
+            queryClient
+              .getQueryData(threadAndAgentSessionsQuery(client).queryKey)
+              ?.find((each) => each.id === sessionId) ??
+            queryClient.getQueryData(sessionQuery(client, sessionId).queryKey);
           const runner = queryClient
             .getQueryData(runnersQuery(client).queryKey)
             ?.find((each) => each.id === session?.runnerId);

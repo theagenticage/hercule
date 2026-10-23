@@ -13,7 +13,6 @@ import {
   projectsQuery,
   runnersQuery,
   threadAndAgentSessionsQuery,
-  threadsQuery,
   workspacesQuery,
 } from "../../app/queries";
 import { EditorIcon } from "../../icons/editor";
@@ -69,8 +68,8 @@ const RunSessionCrumbs = lazy(() =>
 export function ThreadHeader({ session }: { readonly session: Session }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
-  const threads = useSuspenseQuery(threadsQuery(client)).data;
   const threadsAndPartners = useSuspenseQuery(threadAndAgentSessionsQuery(client)).data;
+  const threads = threadsAndPartners.filter((each) => each.kind === "thread");
   const agentSessions = useSuspenseQuery(liveAgentSessionsQuery(client)).data;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;

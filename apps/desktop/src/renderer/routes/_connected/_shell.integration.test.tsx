@@ -541,6 +541,38 @@ describe("Go > Office", () => {
       expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.backupsKey}`);
     });
   });
+
+  it("opens an Agent's session that works in the Office's drawer, and one that has ended on its own screen", async () => {
+    const bunPin = SIDEBAR_FIXTURE.threads.find((each) => each.id === FIXTURE_THREAD_IDS.bunPin)!;
+    const buildAgentSession = (id: string, over: Partial<Session>): Session => ({
+      ...bunPin,
+      id,
+      title: "Reviewer",
+      kind: "agent",
+      agentId: "01a06d02-7c00-7000-8000-000000000001",
+      ...over,
+    });
+    const working = buildAgentSession("01a06d02-7b00-7000-8000-0000000000a1", { status: "busy" });
+    const ended = buildAgentSession("01a06d02-7b00-7000-8000-0000000000a2", { status: "exited" });
+    const { fake, router } = await startShell({
+      path: "/office",
+      handlers: buildSidebarHandlers({
+        ...SIDEBAR_FIXTURE,
+        agentSessions: [working, ended],
+      }),
+    });
+
+    fake.openDestination({ kind: "thread", sessionId: working.id });
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ session: working.id });
+    });
+    expect(router.state.location.pathname).toBe("/office");
+
+    fake.openDestination({ kind: "thread", sessionId: ended.id });
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${ended.id}`);
+    });
+  });
 });
 
 describe("Go > Workflows", () => {
@@ -707,6 +739,45 @@ describe("the threads and assistants waiting on the user", () => {
       expect(fake.goMenus).toHaveLength(2);
     });
     expect(fake.waitingLists).toEqual([[RUNBOOK_WAITING]]);
+  });
+
+  it("includes the open Done thread the sidebar's read leaves out, while it still asks", async () => {
+    // A Thread marked Done 40 days ago is older than the sidebar's 14 days,
+    // so only the thread screen's own read of the session holds it.
+    const old: Session = {
+      ...THREAD_FIXTURES.finished.session,
+      id: "01a06d02-7400-7000-8000-0000000009d0",
+      title: "Retire the old queue",
+      status: "busy",
+      done: { at: "2026-08-01T09:00:00.000Z", by: "user" },
+      openRequests: [
+        {
+          requestId: "req-old",
+          itemId: "tool-old",
+          kind: "command_approval",
+          decisions: ["allow", "deny"],
+          detail: { command: "git push" },
+        },
+      ],
+    };
+    // The thread screen opens its own live subscriptions, which `startShell`
+    // does not expect, so the app is rendered here.
+    stubApi({
+      ...buildSidebarHandlers(SIDEBAR_FIXTURE),
+      ...buildThreadHandlers({ ...THREAD_FIXTURES.finished, session: old }),
+    });
+    const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+    await renderApp(fake, { path: `/threads/${old.id}` });
+
+    await waitFor(() => {
+      expect(fake.waitingLists.at(-1)).toContainEqual({
+        destination: { kind: "thread", sessionId: old.id },
+        requestId: "req-old",
+        openRequestIds: ["req-old"],
+        title: "Retire the old queue",
+        body: "Run git push?",
+      });
+    });
   });
 });
 

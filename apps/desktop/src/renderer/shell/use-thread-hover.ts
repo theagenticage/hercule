@@ -197,12 +197,12 @@ export const useThreadHover = (
     placement === null ? undefined : items.find((item) => item.key === placement.key);
   // The card of a group that left the list never draws, also in the render
   // before the layout effect above hides it.
-  const details =
+  const hoveredGroup =
     hoveredItem?.kind === "group-row" || hoveredItem?.kind === "done-group-row"
-      ? hoveredItem.details
+      ? hoveredItem
       : null;
-  // Only a group of several sessions in a project's list unfolds. A group on
-  // the Done shelf shows its sessions in the card and has no lines to unfold.
-  const unfolds = hoveredItem?.kind === "group-row" && hoveredItem.summary !== null;
+  const details = hoveredGroup?.details ?? null;
+  // Only a group of several sessions unfolds, on the Done shelf too.
+  const unfolds = hoveredGroup !== null && hoveredGroup.summary !== null;
   return { listHandlers, placement: details === null ? null : placement, details, unfolds };
 };
