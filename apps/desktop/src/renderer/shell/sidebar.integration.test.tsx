@@ -559,7 +559,7 @@ describe("the sidebar", () => {
     act(() => {
       Object.defineProperty(nav, "scrollTop", {
         configurable: true,
-        value: 235 * ITEM_HEIGHTS["thread-row"],
+        value: 235 * ITEM_HEIGHTS["group-row"],
       });
       fireEvent.scroll(nav);
     });
@@ -1352,7 +1352,7 @@ describe("the sidebar's card of thread details", () => {
     // reports a top from the item's place among the items, a row's height
     // apart, and the card reports a height that fits the window, so its top
     // is not moved to keep it inside.
-    const rowHeight = ITEM_HEIGHTS["thread-row"];
+    const rowHeight = ITEM_HEIGHTS["group-row"];
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
       this: Element,
     ) {

@@ -927,7 +927,7 @@ describe("buildSidebar with the open session", () => {
   });
 
   it("keeps the list's record when both hold the session, and counts the session once", () => {
-    const reopened = { ...OLD_DONE, done: undefined, reopenedAt: at(9) };
+    const reopened = thread("s-old", 1, { projectId: OPS_PROJECT.id, reopenedAt: at(9) });
     const sidebar = buildFixtureSidebar({
       threads: [reopened],
       selectedId: "s-old",

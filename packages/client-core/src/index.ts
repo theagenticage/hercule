@@ -825,13 +825,7 @@ export {
   type ProjectGroup,
   type WorkspaceGroup,
 } from "./threads/groups";
-export {
-  holdsDraft,
-  listProjectRows,
-  orderProjectIdsByNewestThread,
-  sortProjectsByNewestThread,
-  type ProjectRow,
-} from "./threads/project-rows";
+export { orderProjectIdsByNewestThread } from "./threads/project-rows";
 export { buildSessionGroups, type SessionGroup } from "./threads/session-groups";
 export {
   describeGroupRows,
@@ -852,14 +846,9 @@ export {
   type ProjectGroupSection,
 } from "./threads/group-sidebar";
 export {
-  buildDoneShelf,
-  buildSidebarSections,
   DONE_SHELF_LIMIT,
   DONE_SHELF_STEP,
-  type DoneShelf,
   type ExpandedSections,
-  type ProjectSection,
-  type SidebarSections,
   type WaitingSection,
 } from "./threads/sidebar-sections";
 export {
