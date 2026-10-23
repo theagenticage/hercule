@@ -5,7 +5,7 @@
  * compares the main pane with the app's thread screen (thread.tsx).
  *
  * First it stops every animation, so the waiting faces show the frame the
- * app draws. Then it makes exactly fifteen edits, each where the app draws
+ * app draws. Then it makes exactly seventeen edits, each where the app draws
  * something else than the book, for the reason given:
  *
  * 1. removes the provenance line, "Started 09:02 from ...": v1 does not
@@ -19,8 +19,10 @@
  * 4. sets the dock's question and its answers' labels and descriptions to
  *    client-core's words, which no screen may reword (spec 17 §Design
  *    system, The thread);
- * 5. removes the "Changes +48 -12 | Commit" pill: nothing reports those
- *    numbers yet (spec 17 §Design system, The thread);
+ * 5. replaces the "Changes +48 -12 | Commit" pill with the Done button,
+ *    before More: nothing reports those numbers yet (spec 17 §Design system,
+ *    The thread), and the app's header has Done where the book's has the
+ *    pill (#829);
  * 6. sets the meta line's agent and time to the fixture's, and the
  *    composer's placeholder to spec 14's words for a thread whose turn is
  *    running, "Queued until the turn finishes…";
@@ -50,10 +52,16 @@
  * 14. sets the lip's branch in the UI face, where the book sets it in
  *     monospace: monospace is kept for code, commands and diffs (spec 17
  *     §Design system, item 2);
- * 15. adds the side pane's toggle before Open in editor: the book has no
- *     side pane, and the app's thread header draws its toggle there, with
- *     the sidebar's icon mirrored because the pane opens on the right
- *     (spec 17 §Thread, Subagents).
+ * 15. replaces Open in editor with the side pane's toggle: the book has no
+ *     side pane, and the app's thread header draws its toggle in the first
+ *     place of the right-hand buttons, with the sidebar's icon mirrored
+ *     because the pane opens on the right (spec 17 §Thread, Subagents). The
+ *     app has no Open in editor: it did nothing yet (#829);
+ * 16. adds the work's name and the separator after the crumb: the first
+ *     thread's title, and a line between the name and the tabs. The book's
+ *     header has the project and the tabs only (#829);
+ * 17. writes each tab's role, "fix" and "research", where the book writes the
+ *     thread's title: a tab shows its role when it has one (#827, #829).
  *
  * Last, it scrolls the transcript back to where crew.js put it before the
  * edits changed its height: to its bottom, or on the page's
@@ -75,10 +83,21 @@ import {
   type AgentBlock,
   type WorkBlock,
 } from "@hercule/client-core";
+import type { Session } from "@hercule/contract";
 import { CLAUDE_OPUS, SPECIMEN_INSTANCES, SPECIMEN_NOW } from "./sidebar-fixture";
-import { findElement, findElementByText, findElements, replaceTextAfterIcon } from "./book-page";
+import {
+  addWorkNameStyle,
+  buildDonePill,
+  buildSidePaneTogglePill,
+  buildWorkName,
+  buildWorkNameSeparator,
+  findElement,
+  findElementByText,
+  findElements,
+  replaceTextAfterIcon,
+} from "./book-page";
 import { computeScrolledTop, markSheetReady, readCrew, stillBookPage } from "./sheet-page";
-import { FIX_THREAD, PUSH_REQUEST } from "./thread-fixture";
+import { FIX_THREAD, PUSH_REQUEST, THREAD_PAGE_RECORDS } from "./thread-fixture";
 
 /** Returns a new element named `tag`, with the class `className` and the text `text`. */
 function buildElement(tag: string, className: string, text: string): HTMLElement {
@@ -99,6 +118,13 @@ function buildMetaLine(block: AgentBlock): string {
   const time = formatMessageTime(new Date(block.startedAt), timezone, new Date(SPECIMEN_NOW));
   const agent = describeAgent(instance, block.model);
   return time === undefined ? agent : `${agent} · ${time}`;
+}
+
+/** Returns the Read thread of the fixture, the thread that shares the Fix thread's workspace. Fails when the fixture has none. */
+function readReadSession(): Session {
+  const read = THREAD_PAGE_RECORDS.threads.find(({ id }) => id === "s-read");
+  if (read === undefined) throw new Error("The thread fixture has no Read thread.");
+  return read;
 }
 
 /** Returns the fixture's agent message at `index`. Fails when the fixture has fewer. */
@@ -146,8 +172,10 @@ answers.forEach((answer, index) => {
   findElement(answer, ".ans-desc").textContent = formatDescribeLine(row.describeLine);
 });
 
-// 5. The Changes and Commit pill.
-findElement(main, ".top .pill-btn").closest(".pill")!.remove();
+// 5. The Changes and Commit pill, as the Done pill before More.
+const changes = findElement(main, ".top .pill-btn").closest(".pill")!;
+findElement(main, '.top .icon-btn[title="More"]').closest(".pill")!.before(buildDonePill());
+changes.remove();
 
 // 6. The meta line and the placeholder.
 findElement(messages[0]!, ".msg-meta").textContent = buildMetaLine(readAgentBlock(0));
@@ -198,22 +226,24 @@ findElements(mini, ".btn", miniRows.length).forEach((button, index) => {
 // 14. The lip's branch in monospace.
 findElement(composer, ".lip .mono").classList.remove("mono");
 
-// 15. The side pane's toggle. The book has no `.pane-toggle-icon` rule, so
-// the mirror is an inline style. crew.js draws the icon in place of its
-// placeholder.
-const toggle = buildElement("button", "icon-btn", "");
-toggle.title = "Show the side pane";
-const toggleIcon = buildElement("span", "", "");
-toggleIcon.style.display = "inline-flex";
-toggleIcon.style.transform = "scaleX(-1)";
-const sidebarIcon = document.createElement("i");
-sidebarIcon.dataset.i = "sidebar";
-toggleIcon.append(sidebarIcon);
-toggle.append(toggleIcon);
-const togglePill = buildElement("span", "pill", "");
-togglePill.append(toggle);
-findElement(main, '.top .icon-btn[title="Open in editor"]').closest(".pill")!.before(togglePill);
-readCrew().drawPlaceholders(togglePill);
+// 15. The side pane's toggle, in place of Open in editor.
+findElement(main, '.top .icon-btn[title="Open in editor"]')
+  .closest(".pill")!
+  .replaceWith(buildSidePaneTogglePill());
+
+// 16. The work's name and the separator.
+addWorkNameStyle();
+const tabs = findElements(main, ".top .ptab", 2);
+const crumb = findElement(main, ".top .pill-crumb");
+const separator = buildWorkNameSeparator();
+crumb.after(buildWorkName(FIX_THREAD.session.title), separator);
+
+// 17. The tabs' roles. A tab's label is the text node that follows its mark.
+tabs.forEach((tab, index) => {
+  const session = [FIX_THREAD.session, readReadSession()][index]!;
+  const label = [...tab.childNodes].find((node) => node.nodeType === Node.TEXT_NODE)!;
+  label.textContent = session.role;
+});
 
 transcript.scrollTop =
   document.documentElement.dataset.state === "scrolled"

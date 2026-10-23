@@ -232,7 +232,7 @@ export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
 export const SPECIMEN_COUNTS = { working: 3, waiting: 2, idle: 2 } as const;
 
 /** Returns a provider instance whose one capability snapshot lists `models`. */
-const buildInstance = (
+export const buildInstance = (
   id: string,
   providerId: string,
   displayName: string,

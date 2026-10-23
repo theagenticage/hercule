@@ -10,12 +10,19 @@
  * answered at 09:04 and 09:09, and the Request opened at 09:31. Every time is
  * in UTC, which the capture sets as the system time zone.
  *
- * Everything else is the sidebar specimen's (sidebar-fixture.ts), with two
- * changes the header needs: Fix and Read share an own-branch workspace, so
- * the header draws both tabs, and Fix runs Opus 5.5 at high effort with
- * edits accepted, as the book's composer shows it. The sidebar keeps its own
- * Fix thread, because the book's sidebar draws no workspace labels, and it
- * shortens the Request to "Run git push?".
+ * Everything else is the sidebar specimen's (sidebar-fixture.ts), with three
+ * changes the header needs:
+ *
+ * - Fix and Read share an own-branch workspace, so the header draws both
+ *   tabs;
+ * - Fix started at 09:02, before Read, so it is the lead and names the work
+ *   in the header's crumb, and the tabs show the roles "fix" and "research"
+ *   where the book shows the titles;
+ * - Fix runs Opus 5.5 at high effort with edits accepted, as the book's
+ *   composer shows it.
+ *
+ * The sidebar keeps its own Fix thread, because the book's sidebar draws no
+ * workspace labels, and it shortens the Request to "Run git push?".
  *
  * The reference sheet reads this module too (thread-reference.ts), to edit
  * the book's thread where the app draws the fixture's words instead of the
@@ -74,9 +81,13 @@ const FIX_WORKSPACE: Workspace = buildWorkspace({
 const FIX_SESSION = buildSpecimenSession({
   id: FIX_THREAD_ID,
   title: "Fix 3-D Secure checkout for EU cards",
+  role: "fix",
   projectId: "p-webshop",
   status: "busy",
   minutesAgo: 10,
+  // Started when the user wrote at 09:02, before Read, so Fix is the lead of the pair and the
+  // header names the work after it.
+  createdAt: new Date(SPECIMEN_NOW - 39 * 60_000).toISOString(),
   model: CLAUDE_OPUS,
   modelSelection: { model: CLAUDE_OPUS.slug, options: { effort: "high" } },
   requestedAccessMode: "auto-accept-edits",
@@ -428,7 +439,7 @@ export const THREAD_PAGE_RECORDS: SidebarRecords = {
     thread.id === FIX_THREAD_ID
       ? FIX_SESSION
       : thread.id === READ_THREAD_ID
-        ? { ...thread, workspaceId: FIX_WORKSPACE.id }
+        ? { ...thread, role: "research", workspaceId: FIX_WORKSPACE.id }
         : thread,
   ),
   workspaces: [FIX_WORKSPACE],
