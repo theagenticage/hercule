@@ -31,7 +31,7 @@ import {
   type ReactNode,
 } from "react";
 import { Link } from "@tanstack/react-router";
-import { describePose, type SessionDot, type ThreadRowStatus } from "@hercule/client-core";
+import { describePose, type SessionDot } from "@hercule/client-core";
 import { useAgeWords } from "../app/age-clock";
 import { buildAssistantLook, buildLook, Face } from "../faces";
 import { CheckIcon } from "../icons/check";
@@ -40,9 +40,9 @@ import { ComposeIcon } from "../icons/compose";
 import { PlusIcon } from "../icons/plus";
 import { UndoIcon } from "../icons/undo";
 import { Mark } from "../marks";
-import { AgeLabel } from "../screens/age-label";
 import { ProjectTile } from "../screens/project-tile";
 import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
+import { AgentLabel, StatusSlot } from "../screens/session-status";
 import { ProviderLogo } from "../screens/thread/provider-logo";
 import { ITEM_HEIGHTS, type SectionKey, type SidebarItemOf } from "./sidebar-items";
 
@@ -407,15 +407,6 @@ const UNSENT_ICON_SIZE = 12;
 /** The size of the provider's mark that leads a row's second line, and of a row's action icon, in CSS pixels. */
 const ROW_GLYPH_SIZE = 12;
 
-/** The words a thread row's status slot shows for each status but `age`. */
-const STATUS_WORDS: Readonly<Record<Exclude<ThreadRowStatus, "age">, string>> = {
-  working: "Working",
-  approval: "Approval",
-  question: "Question",
-  queued: "Queued",
-  offline: "Offline",
-};
-
 /** How many characters at the end of a row's kept part always show. */
 const KEEP_TAIL_LENGTH = 8;
 
@@ -463,41 +454,6 @@ function DetailLine({
           <span className="side-detail-keep-tail">{keep.slice(-KEEP_TAIL_LENGTH)}</span>
         </span>
       )}
-    </span>
-  );
-}
-
-/**
- * Renders the status slot at the end of a thread row's first line, of a line
- * of an unfolded group, and of a session in the hover card: the status in
- * words, such as "Working" or "Approval", or, for `age`, how long ago
- * `activityAt` was. The age's words, such as "20 minutes ago", and every
- * other status carry the id `id`, which the row's description points at.
- */
-export function StatusSlot({
-  id,
-  status,
-  activityAt,
-  onScreen,
-}: {
-  readonly id: string;
-  readonly status: ThreadRowStatus;
-  readonly activityAt: string;
-  readonly onScreen: boolean;
-}): JSX.Element {
-  return status === "age" ? (
-    <span className="side-end">
-      <AgeLabel
-        at={activityAt}
-        onScreen={onScreen}
-        descriptionId={id}
-        as="span"
-        className="side-age"
-      />
-    </span>
-  ) : (
-    <span className={`side-end side-end--${status}`} id={id}>
-      {STATUS_WORDS[status]}
     </span>
   );
 }
@@ -582,27 +538,6 @@ export function SessionMark({
     </span>
   ) : (
     <span className={`side-dot side-dot--${dot}`} />
-  );
-}
-
-/**
- * Renders the agent of a session of a group: its provider's mark, then the
- * name of its model, which is left out whole, never cut short, when it has no
- * room, before the session's own name is. Both sit in the faint ink of a row's
- * second line.
- */
-export function AgentLabel({
-  providerId,
-  model,
-}: {
-  readonly providerId: string | null;
-  readonly model: string;
-}): JSX.Element {
-  return (
-    <span className="side-agent">
-      {providerId === null ? null : <ProviderLogo providerId={providerId} size={11} />}
-      <span>{model}</span>
-    </span>
   );
 }
 
