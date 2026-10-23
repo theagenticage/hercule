@@ -42,7 +42,6 @@ _Avoid_: interactive session, chat-first session, chat (reserved for a possible 
 
 **Role**:
 A session's one- or two-word name for what it does, such as review, tests or migration. Not a permission. It is given at spawn, or generated with a Thread's title; clients show it in place of the title.
-_Avoid_: permission (a Role grants nothing)
 
 **Subagent**:
 An agent a session's harness delegated work to while the session runs. It works inside that session's process and settings, has turns and a transcript of its own within the session's, and may start subagents of its own. It is not a Session: it is never resumed or forked on its own, and it does not outlive its session's process.
