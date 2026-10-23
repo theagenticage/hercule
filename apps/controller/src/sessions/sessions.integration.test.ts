@@ -6406,10 +6406,14 @@ describe("session.markDone and session.reopen", () => {
       expect(await listIds("kind=agent")).toEqual([agentSession.id]);
       expect(await listIds("kind=agent&kind=thread")).toEqual([done.id, open.id, agentSession.id]);
 
-      // Marked Done at the cutoff is kept; a cutoff after it drops the Thread but keeps the rest.
+      // A Thread marked Done after the cutoff, or at it, is kept; a cutoff after it drops the
+      // Thread but keeps the rest.
+      const doneAt = Date.parse(marked!.done!.at);
+      const before = encodeURIComponent(new Date(doneAt - 1).toISOString());
+      expect(await listIds(`doneSince=${before}`)).toEqual([done.id, open.id, agentSession.id]);
       const cutoff = encodeURIComponent(marked!.done!.at);
       expect(await listIds(`doneSince=${cutoff}`)).toEqual([done.id, open.id, agentSession.id]);
-      const later = encodeURIComponent(new Date(Date.parse(marked!.done!.at) + 1).toISOString());
+      const later = encodeURIComponent(new Date(doneAt + 1).toISOString());
       expect(await listIds(`doneSince=${later}`)).toEqual([open.id, agentSession.id]);
     });
   });

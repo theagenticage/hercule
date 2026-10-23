@@ -4174,32 +4174,33 @@ Requests, for the events that read a Done page (a Done page is one `signal.query
 - **The spec's slice 2 row for Intake's chunk (34.34 kB) is older than the Before column here.** Other work between then and 34beb532 grew it to 43.7 kB, so compare the After column with the Before column of this table.
 - **What is not measured.** The perf script is paused, so footprint, launch, idle wakeups and the main-thread time of a push are not measured. Nothing is added to boot, and the first screen grows by 886 bytes, so no change in idle or launch is expected, but that is a reading of the diff, not a measurement. The footprint decision of slice 2 stays open.
 
-**The sidebar's rows as sessions of one workspace,** measured 2026-10-23 on atlas (an Apple Silicon Mac, 16 cores) with `pnpm --filter @hercule/desktop perf -- --sidebar-groups-only`, on branch commit 70d2d36a, packaged app, for [#828](https://github.com/theagenticage/hercule/issues/828). *(Amended 2026-10-23, [#828](https://github.com/theagenticage/hercule/issues/828).)* This states what "What rows of sessions cost" in The sidebar promised. The new scenario has 500 Threads, shown as groups: one group of 10 (a busy lead and a waiting review), 12 groups of 3 of which 5 also hold an Agent session, 39 groups of 2 and 376 Threads alone. 100 of the lone Threads are Done, 40 of them 15 days or more ago. Two calm runs, at a one-minute load average of 6.5 and 5.5. The usual frame is 8.4 ms apart; style and layout is the time of every style and layout event on the renderer's main thread in one frame, added up.
+**The sidebar's rows as sessions of one workspace,** measured 2026-10-23 on atlas (an Apple Silicon Mac, 16 cores) with `pnpm --filter @hercule/desktop perf -- --sidebar-groups-only`, on branch commit 8b62607b, packaged app, for [#828](https://github.com/theagenticage/hercule/issues/828). *(Amended 2026-10-23, [#828](https://github.com/theagenticage/hercule/issues/828).)* This states what "What rows of sessions cost" in The sidebar promised. The new scenario has 500 Threads, shown as groups: one group of 10 (a busy lead and a waiting review), 12 groups of 3 of which 5 also hold an Agent session, 39 groups of 2 and 376 Threads alone. 100 of the lone Threads are Done, 40 of them 15 days or more ago. Two runs, at a one-minute load average of 4.3 and 8.4. The usual frame is 8.4 ms apart; style and layout is the time of every style and layout event on the renderer's main thread in one frame, added up.
 
 | Measure | Budget | Measured |
 |---|---|---|
-| The sidebar's one read at launch | one read, every page | 465 sessions (460 Threads and 5 Agent sessions; the 40 Threads Done more than 14 days ago are left out), 2 requests (pages), 829,664 bytes, 79 to 81 ms |
+| The sidebar's one read at launch | one read, every page | 465 sessions (460 Threads and 5 Agent sessions; the 40 Threads Done more than 14 days ago are left out), 2 requests (pages), 829,664 bytes, 80 to 82 ms |
 | Mounted at rest | a few rows, not 500 | 20 items, 10 rows (each project shows at most 5 groups) |
-| Unfolding the group of ten by its dots button: longest gap | no dropped frame | 17.0 to 17.8 ms (one dropped frame) |
-| The same: style and layout in one frame | at most 2 ms | 1.25 to 1.56 ms |
-| The same: longest task | - | 7.0 to 8.3 ms |
-| Unfolding by `→`: longest gap | no dropped frame | 17.0 to 18.1 ms (one dropped frame) |
-| The same: style and layout in one frame | at most 2 ms | 0.26 to 0.32 ms |
-| The same: longest task | - | 3.0 to 3.3 ms |
+| Unfolding the group of ten by its dots button: longest gap | no dropped frame | 16.8 to 19.5 ms (one dropped frame) |
+| The same: style and layout in one frame | at most 2 ms | 1.48 to 1.68 ms |
+| The same: longest task | - | 7.3 to 8.0 ms |
+| Unfolding by `→`: longest gap | no dropped frame | 16.8 ms (one dropped frame) |
+| The same: style and layout in one frame | at most 2 ms | 0.23 to 0.44 ms |
+| The same: longest task | - | 3.6 to 5.6 ms |
 | Mounted with the group of ten unfolded | a few rows | 20 items |
 | A live push that changes one session's status: mounted items whose DOM changed | 1 | 1 of 20 |
-| The same: longest gap | no dropped frame | 17.7 to 17.8 ms (one dropped frame) |
-| The same: style and layout in one frame | at most 2 ms | 0.57 to 0.63 ms |
-| The same: longest task | - | 6.3 to 7.5 ms |
-| The first screen's JavaScript, gzipped | a guide of 250 kB | desktop **456.4 kB** (main 450.0 kB, +6.4 kB); web 233.5 kB of 250 kB |
-| Main's startup file, minified | 160 kB | 155.8 kB, unchanged |
+| The same: longest gap | no dropped frame | 16.8 to 17.6 ms (one dropped frame) |
+| The same: style and layout in one frame | at most 2 ms | 0.51 to 0.55 ms |
+| The same: longest task | - | 7.4 to 8.3 ms |
+| The first screen's JavaScript, gzipped | a guide of 250 kB | desktop **455.1 kB** (main 450.0 kB, +5.1 kB); web 233.5 kB of 250 kB |
+| Main's startup file, minified | 160 kB | 155.8 kB of 160 kB, unchanged |
 | Work per streamed token, idle work, new processes, timers | none | not measured: nothing in the sidebar runs per streamed token, and the change adds no timer, no polling and no process |
 
-- **Style and layout passes in every frame of every run, and the dropped frames do not.** Each run misses the "no dropped frame" rule once per scenario, by one frame of about 17 to 18 ms. The worst style and layout is 1.56 ms, under the 2 ms limit.
+- **Style and layout passes in every frame of every run, and the dropped frames do not.** Each run misses the "no dropped frame" rule once per scenario, by one frame of about 17 to 20 ms. The worst style and layout is 1.68 ms, under the 2 ms limit.
 - **Main shows the same single dropped frame.** `--sidebar-only` on main on this machine: Hiding 16.9 to 17.0 ms, Dragging 17.0 to 17.4, Pressing the edge 17.1 to 20.5, `→` 17.1 to 17.4, with 2.05 to 2.09 ms of style and layout. On the branch (load 4.5): Hiding 24.8 ms gap and 0.81 ms of style and layout, Showing passes (9.3 ms), Dragging 17.6 and 0.83, Pressing 16.7 and 0.82, `→` 16.8 and 1.61. So the branch makes nothing worse, and its style and layout is lower than main's. One dropped frame of this size also showed in [The sidebar's layout](#the-sidebars-layout), where it was not traced to the sidebar's work. The Hiding gap of 24.8 ms is the largest and was seen in one run; it was not looked into.
 - **A live push redraws one row.** Of the 20 mounted items, only the one that holds the changed session changed its DOM.
 - **The read is bigger than the old one for the same Threads, by design.** It holds Agent sessions as well. The 829,664 bytes are for 465 sessions with long fixture titles, and the old read for 292 real Threads was about 500 KB, so the two are not like for like. The read does not bound Agent sessions by time, because they are never Done.
-- **The bundle grows by 6.4 kB gzipped on the desktop's first screen.** Main's startup file is unchanged.
+- **The bundle grows by 5.1 kB gzipped on the desktop's first screen.** Main's startup file is unchanged.
+- **A row's memo comparison walks every session of its group** (the row, card and urgency lists). That costs about 0.6 ms for an extreme group of 500 sessions in a Node benchmark. Real groups hold 1 to 3 sessions. It has not been measured on the Mac with a single very large group.
 - **Not measured:** per-token cost (nothing in the sidebar runs per streamed token).
 
 ## Slices
