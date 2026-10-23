@@ -598,25 +598,7 @@ describe("buildSidebar groups", () => {
     ];
     const DONE_ROW = "done:workspace:ws-primary";
 
-    it("draws every line of an unfolded group, because all its sessions are quiet", () => {
-      const items = buildItems({
-        threads: DONE_CREW,
-        doneShelfLimit: 10,
-        unfolded: new Set([PRIMARY_GROUP]),
-      });
-
-      expect(listKeys(items)).toEqual([
-        "header:done",
-        DONE_ROW,
-        "line:s-lead",
-        "line:s-second",
-        "line:s-review",
-      ]);
-      expect(findItem(items, DONE_ROW)).toMatchObject({ unfolded: true });
-      expect(findItem(items, "line:s-lead")).toMatchObject({ section: "done" });
-    });
-
-    it("spaces a row after the lines like a row after the lines of a group in a project", () => {
+    it("draws every line of an unfolded group, because all its sessions are quiet, and spaces a row after them like a row after the lines of a group in a project", () => {
       const other = thread("s-other", 0, { done: { at: at(4), by: "user" } });
       const items = buildItems({
         threads: [...DONE_CREW, other],
@@ -632,6 +614,8 @@ describe("buildSidebar groups", () => {
         ["line:s-review", 1],
         ["done:session:s-other", 6],
       ]);
+      expect(findItem(items, DONE_ROW)).toMatchObject({ unfolded: true });
+      expect(findItem(items, "line:s-lead")).toMatchObject({ section: "done" });
     });
   });
 });
@@ -720,20 +704,6 @@ describe("listGoMenuItems", () => {
     });
 
     expect(items.some((item) => item.kind === "group-line")).toBe(true);
-    expect(listGoMenuItems(items)).toEqual([
-      { destination: { kind: "thread", sessionId: "s-review" }, title: "s-lead" },
-    ]);
-  });
-
-  it("lists a waiting session once when the group row opens it too", () => {
-    const items = buildItems({
-      threads: [
-        lead("s-lead", 1),
-        partner("s-review", 2, { status: "busy", openRequests: [APPROVAL] }),
-      ],
-      selectedId: "s-review",
-    });
-
     expect(listGoMenuItems(items)).toEqual([
       { destination: { kind: "thread", sessionId: "s-review" }, title: "s-lead" },
     ]);

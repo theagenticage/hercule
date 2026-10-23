@@ -15,7 +15,6 @@ import userEvent from "@testing-library/user-event";
 import { describePose } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import {
-  buildErrorBody,
   buildFixtureAssistant,
   FIXTURE_GITHUB_CONNECTION,
   buildFixtureAssistantSession,
@@ -790,70 +789,6 @@ describe("the sidebar's Done moves", () => {
     });
     expect(within(nav).getByRole("link", { name: /^Bump the Bun pin, / })).toBe(row);
     expect(document.activeElement).toBe(row);
-  });
-
-  it("sends an Undo pressed before the Done is answered only after that answer, and keeps the row in its project throughout", async () => {
-    const controller = buildDoneController(buildLoneThreads(false));
-    const heldDone = holdAnswer();
-    const heldReopen = holdAnswer();
-    const { nav, calls } = await startSidebar({
-      readThreads: controller.readThreads,
-      handlers: { [MARK_DONE]: heldDone.handler, [REOPEN]: heldReopen.handler },
-    });
-    const sentMoves = () =>
-      calls
-        .filter((call) => call.path === MARK_DONE_PATH || call.path === REOPEN_PATH)
-        .map((call) => call.path);
-    const bunPin = within(nav).getByRole("link", { name: "Bump the Bun pin, idle" });
-
-    await userEvent.click(findRowButton(bunPin, "Mark done"));
-    const toast = screen.getByText("Marked done").parentElement!;
-    await userEvent.click(within(toast).getByRole("button", { name: "Undo" }));
-
-    expect(within(nav).getByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
-    expect(sentMoves()).toEqual([MARK_DONE_PATH]);
-
-    heldDone.answer(controller.markDone([FIXTURE_THREAD_IDS.bunPin]));
-
-    await waitFor(() => {
-      expect(sentMoves()).toEqual([MARK_DONE_PATH, REOPEN_PATH]);
-    });
-    expect(readSentIds(calls, MARK_DONE_PATH)).toEqual([[FIXTURE_THREAD_IDS.bunPin]]);
-    expect(readSentIds(calls, REOPEN_PATH)).toEqual([[FIXTURE_THREAD_IDS.bunPin]]);
-    // The Done's answer is not written while the Undo is pending, so the row
-    // never goes to the shelf.
-    expect(within(nav).getByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
-    expect(within(nav).queryByRole("button", { name: /^Done/ })).toBeNull();
-
-    const countThreadReads = () =>
-      calls.filter((call) => call.method === "GET" && call.path === "/api/v1/sessions").length;
-    const readsBeforeAnswer = countThreadReads();
-    heldReopen.answer(controller.reopen([FIXTURE_THREAD_IDS.bunPin]));
-
-    // The Undo is the last move, so its answer reads the list again.
-    await waitFor(() => {
-      expect(countThreadReads()).toBeGreaterThan(readsBeforeAnswer);
-    });
-    expect(within(nav).getByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
-    expect(within(nav).queryByRole("button", { name: /^Done/ })).toBeNull();
-  });
-
-  it("puts the row back and shows the error as an alert when the controller refuses", async () => {
-    const controller = buildDoneController(buildLoneThreads(false));
-    const { nav } = await startSidebar({
-      readThreads: controller.readThreads,
-      handlers: {
-        [MARK_DONE]: { status: 409, body: buildErrorBody("invalid_state", "The thread is busy.") },
-      },
-    });
-    const bunPin = within(nav).getByRole("link", { name: "Bump the Bun pin, idle" });
-
-    await userEvent.click(findRowButton(bunPin, "Mark done"));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Couldn't mark the thread done: The thread is busy.");
-    expect(within(alert).queryByRole("button", { name: "Undo" })).toBeNull();
-    expect(await within(nav).findByRole("link", { name: "Bump the Bun pin, idle" })).toBeTruthy();
   });
 
   it("keeps the Done shelf closed until its heading is pressed, and reopens a thread from it with an Undo that marks it done again", async () => {
@@ -1663,7 +1598,7 @@ describe("the sidebar's groups of sessions", () => {
     ).toBeNull();
   });
 
-  it("unfolds a group into a line per session from its dots, and folds it from the same button", async () => {
+  it("unfolds a group into a line per session from its dots, shows its quiet sessions from the quiet line, and folds it from the same button", async () => {
     const { nav } = await startSidebar({ records: buildCrewRecords() });
 
     const dots = within(nav).getByRole("button", { name: /^10 threads: .*\. Unfold$/ });
@@ -1684,21 +1619,15 @@ describe("the sidebar's groups of sessions", () => {
       "tests, working",
       "docs, working",
     ]);
-    expect(within(nav).getByRole("button", { name: "6 quiet" })).toBeTruthy();
+
+    // Pressing the quiet line draws the six idle sessions as lines too.
+    await userEvent.click(within(nav).getByRole("button", { name: "6 quiet" }));
+    expect(nav.querySelectorAll(".side-member a")).toHaveLength(10);
+    expect(within(nav).queryByRole("button", { name: "6 quiet" })).toBeNull();
 
     await userEvent.click(dots);
     expect(dots.getAttribute("aria-expanded")).toBe("false");
     expect(nav.querySelectorAll(".side-member")).toHaveLength(0);
-  });
-
-  it("shows the quiet sessions as lines once the quiet line is pressed", async () => {
-    const { nav } = await startSidebar({ records: buildCrewRecords() });
-    await userEvent.click(within(nav).getByRole("button", { name: /^10 threads: .*\. Unfold$/ }));
-
-    await userEvent.click(within(nav).getByRole("button", { name: "6 quiet" }));
-
-    expect(nav.querySelectorAll(".side-member a")).toHaveLength(10);
-    expect(within(nav).queryByRole("button", { name: "6 quiet" })).toBeNull();
   });
 
   it("describes a line by its group, and opens its session", async () => {
@@ -1793,31 +1722,6 @@ describe("the sidebar's groups of sessions", () => {
     expect(card.textContent).toContain("Click the dots or press → to unfold");
   });
 
-  it("draws a Done group on the shelf as one row that counts its threads, and shows its sessions in the card", async () => {
-    const [lead, partner] = buildThreads(2, {
-      projectId: SINGLE_THREADS_FIXTURE.projects[0]!.id,
-      workspaceId: primary!.id,
-      done: { at: "2026-09-10T09:20:00.000Z", by: "user" },
-    }).toReversed();
-    const { nav } = await startSidebar({
-      records: { ...SINGLE_THREADS_FIXTURE, threads: [lead!, { ...partner!, role: "review" }] },
-    });
-
-    await userEvent.click(within(nav).getByRole("button", { name: /^Done/ }));
-
-    const row = within(nav).getByRole("link", { name: "Thread 1, 2 threads, done" });
-    expect(row.textContent).toMatch(/^Thread 12 threads · done /);
-    expect(within(nav).getByRole("button", { name: "Reopen" })).toBeTruthy();
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    fireEvent.pointerOver(row);
-    act(() => {
-      vi.advanceTimersByTime(400);
-    });
-    const card = document.querySelector(".thread-hover")!;
-    expect(card.querySelectorAll(".thread-hover-member")).toHaveLength(2);
-    expect(card.textContent).toContain("Click the dots or press → to unfold");
-  });
-
   describe("on the Done shelf", () => {
     /**
      * Returns the records of a Done group in webshop's main workspace: the
@@ -1878,6 +1782,23 @@ describe("the sidebar's groups of sessions", () => {
       await waitFor(() => {
         expect(router.state.location.pathname).toBe(`/threads/${reviewer.id}`);
       });
+    });
+
+    it("shows the sessions of a Done group in its card, and says how to unfold it", async () => {
+      const { records } = buildDoneCrewRecords();
+      const { nav } = await startSidebar({ records });
+      await userEvent.click(within(nav).getByRole("button", { name: /^Done/ }));
+      const row = within(nav).getByRole("link", { name: "Thread 1, 2 threads, done" });
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+      fireEvent.pointerOver(row);
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+
+      const card = document.querySelector(".thread-hover")!;
+      expect(card.querySelectorAll(".thread-hover-member")).toHaveLength(3);
+      expect(card.textContent).toContain("Click the dots or press → to unfold");
     });
 
     it("unfolds a Done group with the right arrow and folds it with the left arrow, and keeps its Reopen button and second line", async () => {

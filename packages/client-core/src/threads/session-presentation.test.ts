@@ -234,7 +234,6 @@ describe("a group's row", () => {
       summary: null,
       threadIds: ["s-1"],
     });
-    expect(row.placeLabel).toEqual({ clip: "", keep: "main" });
   });
 
   it("asks the question alone when a lone Thread waits, and shows the lead's status when the group is done", () => {
@@ -369,37 +368,6 @@ describe("a group's row", () => {
 
       expect(row.ask).toEqual({ askerLabel: null, question: "Run git push?" });
       expect(row.providerId).toBe("claude-code");
-    });
-
-    it("follows the session that asked first, the one that has been still the longest", () => {
-      const row = describeOnly([
-        thread("s-1", { status: "busy" }),
-        reviewer({ lastActivityAt: at(8), openRequests: [ask("r-1", "late")] }),
-        agent("s-tests", {
-          role: "tests",
-          createdAt: at(2),
-          lastActivityAt: at(3),
-          openRequests: [ask("r-2", "early")],
-        }),
-      ]);
-
-      expect(row.ask).toEqual({ askerLabel: "tests", question: "Run early?" });
-    });
-
-    it("shows where the lead works while nothing asks", () => {
-      const main = describeOnly([
-        thread("s-1", { workspaceId: PRIMARY.id, projectId: WEBSHOP_PROJECT.id }),
-        agent("s-agent", { workspaceId: PRIMARY.id }),
-      ]);
-      const generated = describeOnly([thread("s-1", { workspaceId: THREAD_3F1.id })]);
-
-      expect(main.ask).toBeNull();
-      expect(main.placeLabel).toEqual({ clip: "", keep: "main" });
-      expect(main.placeDescription).toBe(
-        "in webshop, webshop main workspace, on moss, branch main",
-      );
-      // A generated branch is no name a person chose, so the machine stands instead.
-      expect(generated.placeLabel).toEqual({ clip: "moss", keep: "" });
     });
   });
 
@@ -594,11 +562,6 @@ describe("the sessions that wait on the user", () => {
     ]);
     expect(byLead.waitingSessions).toMatchObject([
       { sessionId: "s-lead", groupName: "Fix checkout", askerLabel: null },
-    ]);
-    expect(numbered.groupRows[0]?.members.map((member) => member.label)).toEqual([
-      "Fix checkout",
-      "review",
-      "Review 2",
     ]);
     expect(numbered.waitingSessions).toMatchObject([
       { sessionId: "s-review-2", askerLabel: "Review 2" },

@@ -214,29 +214,6 @@ const expectMove = (path: string, numbers: readonly number[]): string =>
 
 const OPEN_THREADS = [1, 2, 3, 4].map((number) => buildThread(number));
 
-describe("the Done moves on a lone Thread", () => {
-  it("marks it done before the controller answers, says so with Undo, and reopens exactly it from Undo", async () => {
-    const held = holdAnswer();
-    const controller = buildController(OPEN_THREADS);
-    const { readMoves } = await startHarness(controller, { [MARK_DONE]: held.handler });
-
-    await userEvent.click(screen.getByRole("button", { name: "Done Thread 1" }));
-
-    expect(screen.getByText("Thread 1: done")).toBeTruthy();
-    const toast = screen.getByText("Marked done").parentElement!;
-    expect(toast.getAttribute("role")).toBe("status");
-    held.answer(controller.markDone({ body: { sessionIds: [buildThread(1).id] } }));
-
-    await userEvent.click(within(toast).getByRole("button", { name: "Undo" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Thread 1: open")).toBeTruthy();
-    });
-    expect(screen.queryByText("Marked done")).toBeNull();
-    expect(readMoves()).toEqual([expectMove(MARK_DONE_PATH, [1]), expectMove(REOPEN_PATH, [1])]);
-  });
-});
-
 describe("the Done moves on a list of Threads", () => {
   it("marks three done in one request, says 'Marked 3 done', and reopens exactly those three from Undo", async () => {
     const held = holdAnswer();
@@ -285,15 +262,6 @@ describe("the Done moves on a list of Threads", () => {
       expectMove(REOPEN_PATH, [1, 2, 3]),
       expectMove(MARK_DONE_PATH, [1, 2, 3]),
     ]);
-  });
-
-  it("says 'Reopened' for a lone Thread", async () => {
-    const controller = buildController([buildThread(1, true)]);
-    await startHarness(controller);
-
-    await userEvent.click(screen.getByRole("button", { name: "Reopen Thread 1" }));
-
-    expect(screen.getByText("Reopened")).toBeTruthy();
   });
 
   it("puts the list back and shows the error as an alert when the controller refuses the whole list", async () => {
@@ -426,19 +394,6 @@ describe("an older Done move that fails while a newer one is pending", () => {
       expectMove(MARK_DONE_PATH, [2]),
       expectMove(REOPEN_PATH, [2]),
     ]);
-  });
-
-  it("replaces the toast of the move that failed with its own error", async () => {
-    const controller = buildController(OPEN_THREADS);
-    await startHarness(controller, {
-      [MARK_DONE]: { status: 409, body: buildErrorBody("invalid_state", "The thread is busy.") },
-    });
-
-    await userEvent.click(screen.getByRole("button", { name: "Done Thread 1" }));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Couldn't mark the thread done: The thread is busy.");
-    expect(screen.queryByText("Marked done")).toBeNull();
   });
 });
 

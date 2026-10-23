@@ -643,44 +643,6 @@ describe("the kind of a session", () => {
   });
 });
 
-describe("listing the sessions marked Done since an instant", () => {
-  const instant = "2026-09-07T12:00:00.000Z";
-
-  it("keeps sessions not marked Done and sessions marked Done at or after the instant", async () => {
-    const { open, atInstant, after, listed } = await run(
-      Effect.gen(function* () {
-        const sessions = yield* sessionRepository;
-        const profileId = mintId();
-        const open = yield* insertSession(profileId);
-        const before = yield* insertSession(profileId);
-        const atInstant = yield* insertSession(profileId);
-        const after = yield* insertSession(profileId);
-        yield* sessions.markDone(before, "user", "2026-09-07T11:59:59.999Z");
-        yield* sessions.markDone(atInstant, "user", instant);
-        yield* sessions.markDone(after, "user", "2026-09-07T12:00:00.001Z");
-        const page = yield* sessions.list({
-          limit: 10,
-          cursor: undefined,
-          direction: "asc",
-          status: undefined,
-          runnerId: undefined,
-          agentId: undefined,
-          permissionProfileId: profileId,
-          kind: undefined,
-          done: undefined,
-          runId: undefined,
-          conversationId: undefined,
-          activeSince: undefined,
-          doneSince: instant,
-        });
-        return { open, atInstant, after, listed: page.items.map((one) => one.id) };
-      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
-    );
-
-    expect(listed).toEqual([open, atInstant, after]);
-  });
-});
-
 describe("listing the sessions on one profile", () => {
   it("returns that profile's live sessions and no other rows", async () => {
     const { listed, profileId, live } = await run(

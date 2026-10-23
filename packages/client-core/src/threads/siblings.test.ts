@@ -117,19 +117,13 @@ describe("labelWorkspaceSessions", () => {
     return sessions.map((session) => labels.get(session.id) ?? "missing");
   };
 
-  it("labels a session with its role", () => {
-    expect(
-      labelsOf([buildSession({ id: "s-1", role: "review", title: "Check the diff" })]),
-    ).toEqual(["review"]);
-  });
-
-  it("labels the first Thread with its role too", () => {
+  it("labels a session with its role, a Thread included", () => {
     expect(
       labelsOf([
         buildSession({ id: "s-lead", kind: "thread", role: "build", createdAt: at(0) }),
-        buildSession({ id: "s-partner", kind: "thread", role: "tests", createdAt: at(1) }),
+        buildSession({ id: "s-agent", role: "review", title: "Check the diff", createdAt: at(1) }),
       ]),
-    ).toEqual(["build", "tests"]);
+    ).toEqual(["build", "review"]);
   });
 
   it("numbers a role that repeats, ignoring case, by when each session was created", () => {
