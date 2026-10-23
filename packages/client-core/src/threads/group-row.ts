@@ -17,13 +17,12 @@ import type {
   Workspace,
 } from "@hercule/contract";
 import { decideGroupProjectId } from "./groups";
-import { findModelName } from "./model-name";
 import { findOldestOpenRequest } from "./oldest-request";
-import { decideThreadRowStatus, type Pose, type ThreadRowStatus } from "./pose";
+import type { Pose, ThreadRowStatus } from "./pose";
 import { buildThreadPlaceLabel } from "./project-rows";
 import { formatRequestQuestion } from "./request-question";
-import type { SessionGroup } from "./session-groups";
-import { labelWorkspaceSessions } from "./siblings";
+import { buildGroupKey, type SessionGroup } from "./session-groups";
+import { describeSessionTab, labelWorkspaceSessions } from "./siblings";
 import { describeThreadPlace } from "./thread-place";
 import { buildWorkspaceLabelParts, type WorkspaceLabel } from "./workspaces";
 
@@ -277,27 +276,24 @@ export const describeGroupRows = ({
   return groups.map((group): GroupRow => {
     const labels = labelWorkspaceSessions(group.sessions);
     const describeMember = (session: Session): GroupMember => {
-      const runner = runnersById.get(session.runnerId);
       const pose = poses.get(session.id)!;
       const counted = isCounted(session);
       const oldest = findOldestOpenRequest(session);
-      const label = labels.get(session.id) ?? session.title;
-      return {
-        sessionId: session.id,
-        kind: session.kind === "agent" ? "agent" : "thread",
-        label,
-        askerLabel: session.id === group.lead.id ? null : label,
-        title: session.title,
+      const tab = describeSessionTab({
+        session,
+        label: labels.get(session.id) ?? session.title,
         pose,
-        status: decideThreadRowStatus(session, runner),
-        activityAt: session.lastActivityAt,
+        runner: runnersById.get(session.runnerId),
+        instance: instancesById.get(session.instanceId),
+      });
+      return {
+        ...tab,
+        kind: session.kind === "agent" ? "agent" : "thread",
+        askerLabel: session.id === group.lead.id ? null : tab.label,
         counted,
         seated: seatedIds.has(session.id),
-        done: session.done !== undefined,
         dot: decideDot(counted, pose),
         question: oldest === null ? null : formatRequestQuestion(oldest),
-        providerId: instancesById.get(session.instanceId)?.providerId ?? null,
-        model: findModelName(instancesById.get(session.instanceId), session.modelSelection.model),
       };
     };
     // The lead is described apart, so the row can fall back to it with no lookup.
@@ -372,4 +368,24 @@ export const describeGroupRows = ({
       doneAt: group.doneAt,
     };
   });
+};
+
+/**
+ * Returns the row of the group that holds `session`, or `undefined` when no
+ * row does. The row is found by the group's key and must list `session`
+ * among its members.
+ *
+ * Only a Thread or an Agent's session can be in a row. For any other kind,
+ * such as a run's step session, this returns `undefined` without looking, even
+ * when the step session shares a workspace, and so a key, with a Thread.
+ */
+export const findGroupRow = (
+  groupRows: readonly GroupRow[],
+  session: Session,
+): GroupRow | undefined => {
+  if (session.kind !== "thread" && session.kind !== "agent") return undefined;
+  const key = buildGroupKey(session);
+  return groupRows.find(
+    (row) => row.key === key && row.members.some((member) => member.sessionId === session.id),
+  );
 };

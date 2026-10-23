@@ -831,6 +831,7 @@ export {
   type SessionPresentation,
 } from "./threads/session-presentation";
 export {
+  findGroupRow,
   type GroupAsk,
   type GroupMember,
   type GroupRow,
@@ -857,6 +858,7 @@ export {
   listSessionsOfWorkspace,
   listWorkspaceSessionTabs,
   listWorkspaceThreads,
+  type SessionTab,
   type ThreadTab,
 } from "./threads/siblings";
 export {
