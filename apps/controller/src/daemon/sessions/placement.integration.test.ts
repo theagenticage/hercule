@@ -935,37 +935,6 @@ describe("placeSession for a session's spawn: where it runs", () => {
   });
 });
 
-/** What the fake runner does when the controller asks it for a title. */
-type TitleBehaviour =
-  | {
-      readonly kind: "answers";
-      readonly title: string;
-      readonly needsRefinement: boolean;
-      readonly role: string;
-    }
-  | { readonly kind: "fails" }
-  | { readonly kind: "never-answers" };
-
-/** Decides the fake runner's answer to a text generation request. */
-const decideTitleAnswer = (behaviour: TitleBehaviour): TextGenerationOutcome | undefined => {
-  switch (behaviour.kind) {
-    case "answers":
-      return {
-        outcome: "ok",
-        value: {
-          title: behaviour.title,
-          needsRefinement: behaviour.needsRefinement,
-          role: behaviour.role,
-        },
-        usage: null,
-      };
-    case "fails":
-      return { outcome: "failed", message: "the harness could not start" };
-    case "never-answers":
-      return undefined;
-  }
-};
-
 /** Reads the stored `needs_refinement` of a session: null when no title was generated. */
 const readNeedsRefinement = async (
   arranged: Arranged,
@@ -981,8 +950,9 @@ const readNeedsRefinement = async (
 };
 
 describe("placeSession generates a Thread title", () => {
+  /** Runs `body` with the fake runner answering every text generation with `answer`, or never answering when it is undefined. */
   const withTitles = (
-    behaviour: TitleBehaviour,
+    answer: TextGenerationOutcome | undefined,
     body: (
       arranged: Arranged,
       requests: () => ReadonlyArray<TextGenerationRequest>,
@@ -990,7 +960,7 @@ describe("placeSession generates a Thread title", () => {
   ): Promise<void> =>
     sharedWithFleet(
       async (arranged) => {
-        arranged.wire.setTextGenerationAnswer(() => decideTitleAnswer(behaviour));
+        arranged.wire.setTextGenerationAnswer(() => answer);
         // None of the fixture providers is one `automatic` tries, so the
         // Thread title runs on the instance the test chooses.
         const chosen = await send("PATCH", arranged.harness.base, "/api/v1/settings", {
@@ -1012,50 +982,33 @@ describe("placeSession generates a Thread title", () => {
       { plugins: buildPlugins(), facts: FACTS, models: MODELS },
     );
 
-  const answers = {
-    kind: "answers",
-    title: "Fix the login redirect",
-    needsRefinement: true,
-    role: "fix",
-  } as const;
+  const answers: TextGenerationOutcome = {
+    outcome: "ok",
+    value: { title: "Fix the login redirect", needsRefinement: true, role: "fix" },
+    usage: null,
+  };
 
-  it("replaces the cut-short title with the generated one and keeps the refinement flag", async () => {
+  it("replaces the cut-short title with the generated title and role, asking once", async () => {
     await withTitles(answers, async (arranged, requests) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "login redirect is broken" });
 
       expect(session.title).toBe("login redirect is broken");
-      const renamed = await waitForSession(
+      expect(session.role).toBeNull();
+      const generated = await waitForSession(
         arranged,
         session.id,
-        (one) => one.title === "Fix the login redirect",
+        (one) => one.title === "Fix the login redirect" && one.role !== null,
       );
-      expect(renamed.status).not.toBe("exited");
+      expect(generated.role).toBe("fix");
       expect(await readNeedsRefinement(arranged, session.id)).toBe(1);
       expect(requests()).toHaveLength(1);
-    });
-  });
-
-  it("asks for a role beside the title, as a required string with no length limit", async () => {
-    await withTitles(answers, async (arranged, requests) => {
-      await spawnSessionOrFail(arranged, { prompt: "login redirect is broken" });
-
-      await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
+      // The role is asked for as a required string with no length limit.
       const schema = requests()[0]?.spec.outputSchema as {
         readonly required: ReadonlyArray<string>;
         readonly properties: Record<string, Record<string, unknown>>;
       };
       expect(schema.required).toContain("role");
       expect(schema.properties.role).toEqual({ type: "string" });
-    });
-  });
-
-  it("stores a generated role on a Thread spawned without one", async () => {
-    await withTitles(answers, async (arranged) => {
-      const session = await spawnSessionOrFail(arranged, { prompt: "login redirect is broken" });
-
-      expect(session.role).toBeNull();
-      const generated = await waitForSession(arranged, session.id, (one) => one.role !== null);
-      expect(generated.role).toBe("fix");
     });
   });
 
@@ -1124,7 +1077,7 @@ describe("placeSession generates a Thread title", () => {
   });
 
   it("starts the turn at once while the title is still being generated", async () => {
-    await withTitles({ kind: "never-answers" }, async (arranged, requests) => {
+    await withTitles(undefined, async (arranged, requests) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "slow title" });
 
       await waitForStartFrames(arranged, session.id, 1);
@@ -1136,17 +1089,20 @@ describe("placeSession generates a Thread title", () => {
   });
 
   it("keeps the cut-short title and starts the turn when the generation fails", async () => {
-    await withTitles({ kind: "fails" }, async (arranged, requests) => {
-      const session = await spawnSessionOrFail(arranged, { prompt: "title will fail" });
+    await withTitles(
+      { outcome: "failed", message: "the harness could not start" },
+      async (arranged, requests) => {
+        const session = await spawnSessionOrFail(arranged, { prompt: "title will fail" });
 
-      await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
-      await waitForStartFrames(arranged, session.id, 1);
-      // Nothing happens after a failure, so there is nothing to wait for.
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      const after = await readSession(arranged, session.id);
-      expect(after.title).toBe("title will fail");
-      expect(await readNeedsRefinement(arranged, session.id)).toBeNull();
-    });
+        await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
+        await waitForStartFrames(arranged, session.id, 1);
+        // Nothing happens after a failure, so there is nothing to wait for.
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const after = await readSession(arranged, session.id);
+        expect(after.title).toBe("title will fail");
+        expect(await readNeedsRefinement(arranged, session.id)).toBeNull();
+      },
+    );
   });
 
   /** Spawns a session, lets it start, then ends it with a native id, so it can be forked. */

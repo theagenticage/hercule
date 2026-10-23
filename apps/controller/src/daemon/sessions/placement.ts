@@ -833,6 +833,8 @@ const make = Effect.gen(function* () {
   /**
    * Writes the workspace and the session in one transaction, then starts the
    * session. Returns the new session. A transaction never waits on a runner.
+   * For a new Thread with a text message, it also starts the call that
+   * generates the Thread's title and role.
    *
    * Waits while a promotion freezes the controller. A request was already
    * refused by then, so the wait only holds back a run that places an agent
@@ -849,7 +851,15 @@ const make = Effect.gen(function* () {
         if (Option.isNone(after)) {
           return yield* Effect.die("a session that was just inserted could not be read back");
         }
-        return (yield* recordComposer)(after.value);
+        const session = (yield* recordComposer)(after.value);
+        // Only a Thread gets a generated title and role: an Agent's session is
+        // titled by its caller's work, and a message with only images has no
+        // text to title. The call also runs when spawn gave a role, because
+        // the title still needs it. A fork of a Thread is a Thread.
+        if (open.agentId === undefined && open.prompt.trim() !== "") {
+          yield* startThreadTitle(session.id, open.prompt);
+        }
+        return session;
       }),
     );
 
@@ -1252,7 +1262,7 @@ const make = Effect.gen(function* () {
           timeouts: buildTimeouts(yield* settings.all()),
         } satisfies SessionSpec;
 
-        const session = yield* place({
+        return yield* place({
           permissionProfileId: profileId,
           agentId: agent?.id,
           conversationId: undefined,
@@ -1279,14 +1289,6 @@ const make = Effect.gen(function* () {
             ...(projectId === undefined ? {} : { projectId }),
           },
         });
-        // Only a Thread gets a generated title and role: a session spawned from
-        // an Agent is titled by its caller's work, and a message with only
-        // images has no text to title. The call also runs when spawn gave a
-        // role, because the title still needs it.
-        if (agent === undefined && decoded.prompt.trim() !== "") {
-          yield* startThreadTitle(session.id, decoded.prompt);
-        }
-        return session;
       }),
 
     /**
@@ -1341,7 +1343,7 @@ const make = Effect.gen(function* () {
         yield* resolved(parent.instanceId);
         const nativeSessionId = yield* resumableNativeSession(parent);
 
-        const fork = yield* place({
+        return yield* place({
           permissionProfileId: parent.permissionProfileId,
           // The fork is the same piece of work under the same configuration,
           // so it carries the same lineage as its parent.
@@ -1378,13 +1380,6 @@ const make = Effect.gen(function* () {
           checkoutBranch: undefined,
           payload: { parentSessionId: parent.id, mode },
         });
-        // A fork of a Thread is a Thread, so it gets a generated title and
-        // role from its first message, as a spawn does. A fork of an Agent's
-        // session does not.
-        if (parent.agentId === null && prompt.trim() !== "") {
-          yield* startThreadTitle(fork.id, prompt);
-        }
-        return fork;
       }),
   };
 });

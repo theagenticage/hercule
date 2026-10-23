@@ -1512,12 +1512,16 @@ describe("SessionService.setGeneratedTitleAndRole", () => {
   it.each([
     ["is empty after cleaning", " \n\u200B "],
     ["is over 24 characters", "x".repeat(25)],
-  ])("drops a generated role that %s, and never cuts it", async (_why, role) => {
-    const result = await generate("a", { title: "Fix it", role });
+  ])(
+    "drops a generated role that %s, and never cuts it, but keeps the title and flag",
+    async (_why, role) => {
+      const result = await generate("a", { title: "Fix it", needsRefinement: true, role });
 
-    expect(result.role).toBeNull();
-    expect(result.title).toBe("Fix it");
-  });
+      expect(result.role).toBeNull();
+      expect(result.title).toBe("Fix it");
+      expect(result.needsRefinement).toBe(1);
+    },
+  );
 
   it("stores a valid role when the title is empty after cleaning, leaving the title and flag alone", async () => {
     const result = await generate("the first line", {
@@ -1532,18 +1536,6 @@ describe("SessionService.setGeneratedTitleAndRole", () => {
     expect(result.published).toContainEqual(
       expect.objectContaining({ _tag: "record", topic: "session", id: result.sessionId }),
     );
-  });
-
-  it("stores a valid title when the role is invalid, leaving the role empty", async () => {
-    const result = await generate("a", {
-      title: "Fix it",
-      needsRefinement: true,
-      role: "x".repeat(30),
-    });
-
-    expect(result.title).toBe("Fix it");
-    expect(result.needsRefinement).toBe(1);
-    expect(result.role).toBeNull();
   });
 });
 
