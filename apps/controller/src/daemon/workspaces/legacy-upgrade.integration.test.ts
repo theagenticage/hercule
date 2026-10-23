@@ -274,7 +274,9 @@ const withLegacyController = async (
       // - which library skills it was given at its last claimed start: no old
       //   session had its start claimed under skill tracking, so the column
       //   stays null (an empty list would mean a start was claimed with no skills);
-      // - its role: no old session was given one, so it stays null.
+      // - its role: no old session was given one, so it stays null;
+      // - its kind: computed from the ids, and no old session has an Agent, so
+      //   each is a Thread.
       expect(reader.query("SELECT * FROM sessions ORDER BY id").all()).toEqual(
         fixture.before.sessions.map((row) => ({
           ...(row as object),
@@ -286,6 +288,7 @@ const withLegacyController = async (
           reopened_at: null,
           library_skills: null,
           role: null,
+          kind: "thread",
         })),
       );
       expect(reader.query("SELECT * FROM session_stream ORDER BY session_id").all()).toEqual(
