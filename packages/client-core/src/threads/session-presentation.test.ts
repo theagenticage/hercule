@@ -1065,10 +1065,9 @@ describe("the row of a workspace", () => {
     const sessions = [thread("s-lead"), agent("s-agent"), lone("s-lone", 5)];
     const { groupRows } = prepare(sessions);
 
-    expect(findWorkspaceGroupRow(groupRows, "w-1")?.members.map(({ sessionId }) => sessionId)).toEqual([
-      "s-lead",
-      "s-agent",
-    ]);
+    expect(
+      findWorkspaceGroupRow(groupRows, "w-1")?.members.map(({ sessionId }) => sessionId),
+    ).toEqual(["s-lead", "s-agent"]);
   });
 
   it("is nothing for a workspace that holds no Thread, or that no session works in", () => {
