@@ -75,7 +75,7 @@ export function useTabOverflow(options: {
 }): ReadonlySet<string> {
   const { roomRef, navRef, openKey, waitingKeys } = options;
   const [hiddenKeys, setHiddenKeys] = useState(NO_TABS);
-  const stylesRef = useRef<PillStyles>({ pill: null, maxWidths: new WeakMap() });
+  const pillStyleRef = useRef<PillStyle | null>(null);
 
   // Reads the latest props and state, which the observers' callbacks, made
   // once, could not do by themselves.
@@ -83,7 +83,7 @@ export function useTabOverflow(options: {
     const room = roomRef.current;
     const nav = navRef.current;
     if (room === null || nav === null) return;
-    const measurement = measurePill(room, nav, openKey, new Set(waitingKeys), stylesRef.current);
+    const measurement = measurePill(room, nav, openKey, new Set(waitingKeys), pillStyleRef);
     applyLimits(nav, measurement.crumbTexts, measurement.fit);
     const next = new Set(
       [...measurement.fit.hiddenIndexes].map((index) => measurement.tabKeys[index]!),
@@ -141,27 +141,22 @@ function hasSameKeys(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
 }
 
 /**
- * What the stylesheet gives the pill and its parts, read once. None of it
- * changes while the pill is on screen, and reading a computed style is the
- * most costly thing a check does.
+ * The pill's gap and horizontal padding. They do not change while the pill is
+ * on screen, so a check reads them once: reading a computed style is the most
+ * costly thing a check does. A `max-width` is not kept the same way, because
+ * a class can change it while the element stays (a tab's label loses
+ * `is-title`, and its 160px limit, when the session gets a role).
  */
-interface PillStyles {
-  /** The pill's gap and horizontal padding, or `null` before the first check. */
-  pill: { readonly gap: number; readonly padding: number } | null;
-  /** The `max-width` of each element a check measured, `Infinity` for none. */
-  readonly maxWidths: WeakMap<Element, number>;
+interface PillStyle {
+  readonly gap: number;
+  readonly padding: number;
 }
 
-/** Returns the `max-width` the stylesheet gives `element`, or `Infinity` when it gives none. */
-function readMaxWidth(styles: PillStyles, element: Element): number {
-  let width = styles.maxWidths.get(element);
-  if (width === undefined) {
-    // Without a layout, as in jsdom, the computed value is empty and parses to NaN.
-    const parsed = Number.parseFloat(getComputedStyle(element).maxWidth);
-    width = Number.isNaN(parsed) ? Infinity : parsed;
-    styles.maxWidths.set(element, width);
-  }
-  return width;
+/** Returns the `max-width` the stylesheet gives `element` now, or `Infinity` when it gives none. */
+function readMaxWidth(element: Element): number {
+  // Without a layout, as in jsdom, the computed value is empty and parses to NaN.
+  const parsed = Number.parseFloat(getComputedStyle(element).maxWidth);
+  return Number.isNaN(parsed) ? Infinity : parsed;
 }
 
 /**
@@ -170,8 +165,8 @@ function readMaxWidth(styles: PillStyles, element: Element): number {
  * `scrollWidth` of a box whose text is cut is the text's full width, so the
  * result does not depend on any limit this hook set.
  */
-function readNaturalTextWidth(styles: PillStyles, element: HTMLElement): number {
-  return Math.min(element.scrollWidth, readMaxWidth(styles, element));
+function readNaturalTextWidth(element: HTMLElement): number {
+  return Math.min(element.scrollWidth, readMaxWidth(element));
 }
 
 /**
@@ -196,22 +191,22 @@ function measurePill(
   nav: HTMLElement,
   openKey: string | null,
   waitingKeys: ReadonlySet<string>,
-  styles: PillStyles,
+  pillStyleRef: { current: PillStyle | null },
 ): {
   readonly fit: PillFit;
   readonly tabKeys: readonly string[];
   readonly crumbTexts: readonly HTMLElement[];
 } {
-  if (styles.pill === null) {
+  if (pillStyleRef.current === null) {
     const style = getComputedStyle(nav);
-    styles.pill = {
+    pillStyleRef.current = {
       gap: Number.parseFloat(style.columnGap) || 0,
       // Without a layout, as in jsdom, the computed padding is empty and parses to NaN.
       padding:
         (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0),
     };
   }
-  const { gap, padding } = styles.pill;
+  const { gap, padding } = pillStyleRef.current;
   // Each item below adds its width and one gap; n items have n - 1 gaps.
   let fixedWidth = padding - gap;
   let nameWidth = 0;
@@ -228,7 +223,7 @@ function measurePill(
     if (child.dataset.tab !== undefined) {
       tabKeys.push(child.dataset.tab);
       const isOpen = child.dataset.tab === openKey;
-      const tab = measureTab(child, isOpen, styles);
+      const tab = measureTab(child, isOpen);
       tabWidths.push(tab.width + gap);
       if (isOpen) openTabMinWidth = tab.minWidth;
     } else if (child.dataset.tabOverflow !== undefined) {
@@ -238,7 +233,7 @@ function measurePill(
       // The slash is what comes before the text. Without a layout, as in jsdom, there is neither.
       const slashWidth =
         text === null ? 0 : text.getBoundingClientRect().left - child.getBoundingClientRect().left;
-      nameWidth = slashWidth + (text === null ? 0 : readNaturalTextWidth(styles, text));
+      nameWidth = slashWidth + (text === null ? 0 : readNaturalTextWidth(text));
       fixedWidth += gap;
     } else {
       const text = child.classList.contains("pill-crumb") ? findCrumbText(child) : null;
@@ -250,7 +245,7 @@ function measurePill(
       const otherWidth = width - text.getBoundingClientRect().width;
       crumbTexts.push(text);
       crumbTextWidths.push(
-        Math.max(0, Math.min(text.scrollWidth, readMaxWidth(styles, child) - otherWidth)),
+        Math.max(0, Math.min(text.scrollWidth, readMaxWidth(child) - otherWidth)),
       );
       fixedWidth += otherWidth + gap;
     }
@@ -282,13 +277,12 @@ function measurePill(
 function measureTab(
   tab: HTMLElement,
   isOpen: boolean,
-  styles: PillStyles,
 ): { readonly width: number; readonly minWidth: number } {
   const width = tab.getBoundingClientRect().width;
   const label = isOpen ? tab.querySelector<HTMLElement>(".ptab-title") : null;
   if (label === null) return { width, minWidth: width };
   const minWidth = width - label.getBoundingClientRect().width;
-  return { width: minWidth + readNaturalTextWidth(styles, label), minWidth };
+  return { width: minWidth + readNaturalTextWidth(label), minWidth };
 }
 
 /**

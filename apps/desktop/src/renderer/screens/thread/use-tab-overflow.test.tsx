@@ -16,6 +16,8 @@ import { useTabOverflow } from "./use-tab-overflow";
 const CHROME_WIDTH = 20;
 const OVERFLOW_BUTTON_WIDTH = 48;
 const NEW_THREAD_BUTTON_WIDTH = 28;
+/** The stylesheet's `max-width` for a label that is the session's title. */
+const TITLE_LABEL_MAX_WIDTH = 160;
 
 let roomWidth = 0;
 let observers: FakeResizeObserver[] = [];
@@ -35,12 +37,16 @@ function widthOf(element: Element): number {
   }
   if (element.classList.contains("ptab")) {
     const label = element.querySelector<HTMLElement>(".ptab-title")!;
+    const labelWidth = Math.min(
+      Number(label.dataset.natural),
+      label.classList.contains("is-title") ? TITLE_LABEL_MAX_WIDTH : Infinity,
+    );
     const limit = element.classList.contains("is-on")
       ? readLimit(
           (element.parentElement as HTMLElement).style.getPropertyValue("--open-tab-max-width"),
         )
       : Infinity;
-    return Math.max(CHROME_WIDTH, Math.min(CHROME_WIDTH + Number(label.dataset.natural), limit));
+    return Math.max(CHROME_WIDTH, Math.min(CHROME_WIDTH + labelWidth, limit));
   }
   if (element.classList.contains("ptab-title")) {
     return Math.max(0, widthOf(element.parentElement!) - CHROME_WIDTH);
@@ -98,6 +104,16 @@ beforeEach(() => {
     const width = widthOf(this);
     return { width, left: 0, right: width, top: 0, bottom: 0, height: 0, x: 0, y: 0 } as DOMRect;
   });
+  // jsdom has no stylesheet, so the model gives the computed style the rules it needs.
+  vi.spyOn(window, "getComputedStyle").mockImplementation(
+    (element: Element) =>
+      ({
+        maxWidth: element.classList.contains("is-title") ? `${TITLE_LABEL_MAX_WIDTH}px` : "none",
+        columnGap: "0px",
+        paddingLeft: "0px",
+        paddingRight: "0px",
+      }) as CSSStyleDeclaration,
+  );
   vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (
     this: HTMLElement,
   ) {
@@ -110,13 +126,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Draws a pill with a crumb whose name is 54 px, then the tabs `[key, label width]`, "+n" and "+". */
+/**
+ * Draws a pill with a crumb whose name is 54 px, then the tabs `[key, label width]`, "+n" and "+".
+ * A tab's label is the session's title, as the stylesheet cuts at 160 px, unless its key is in `roleKeys`.
+ */
 function Pill({
   openKey,
   tabs,
+  roleKeys = [],
 }: {
   readonly openKey: string;
   readonly tabs: ReadonlyArray<readonly [string, number]>;
+  readonly roleKeys?: readonly string[];
 }): JSX.Element {
   const roomRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
@@ -141,7 +162,10 @@ function Pill({
               hidden.has(key) ? "is-hidden" : "",
             ].join(" ")}
           >
-            <span className="ptab-title" data-natural={labelWidth}>
+            <span
+              className={roleKeys.includes(key) ? "ptab-title" : "ptab-title is-title"}
+              data-natural={labelWidth}
+            >
               {key}
             </span>
           </a>
@@ -221,5 +245,24 @@ describe("the pill settles", () => {
     expect(hiddenTabs()).toEqual([]);
     expect(nav.style.getPropertyValue("--open-tab-max-width")).toBe("");
     expect(container.querySelector<HTMLElement>(".proj-name")!.style.maxWidth).toBe("");
+  });
+
+  it("fits a label that loses its 160 px limit when the session gets a role", () => {
+    // The title is cut at 160 px, so the open tab is 180 px and, with the crumb (74 px) and the
+    // "+" (28 px), fits in 300 px. The role has no limit: the tab is 306 px and the pill must shorten it.
+    roomWidth = 300;
+    const tabs = [["a", 286]] as const;
+    const { container, rerender } = render(<Pill openKey="a" tabs={tabs} />);
+    settle();
+    expect(container.querySelector("nav")!.style.getPropertyValue("--open-tab-max-width")).toBe("");
+
+    rerender(<Pill openKey="a" tabs={tabs} roleKeys={["a"]} />);
+    settle();
+    const nav = container.querySelector("nav")!;
+    // No tab is hidden, so the "+n" button is out of flow and takes no room.
+    const pillWidth = [...nav.children]
+      .filter((child) => !child.hasAttribute("data-tab-overflow"))
+      .reduce((sum, child) => sum + widthOf(child), 0);
+    expect(pillWidth).toBeLessThanOrEqual(roomWidth);
   });
 });

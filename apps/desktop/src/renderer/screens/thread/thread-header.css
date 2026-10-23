@@ -127,6 +127,16 @@
   color: var(--faint);
   font-weight: var(--w-regular);
 }
+/* The gap between the project's tile and its name is the name's own indent,
+   not the project's gap: when the fit cuts the name to nothing, the indent
+   is cut with it, and the tile is left alone, with no 6px after it. The
+   indent counts in the name's `scrollWidth`, which the fit reads. */
+.thread-tabs > .pill-crumb > .proj {
+  gap: 0;
+}
+.thread-tabs > .pill-crumb > .proj > .proj-name {
+  text-indent: 6px;
+}
 .work-name-text {
   min-width: 0;
   max-width: 272px;
