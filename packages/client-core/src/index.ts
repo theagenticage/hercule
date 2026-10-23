@@ -835,6 +835,24 @@ export {
 } from "./threads/project-rows";
 export { buildSessionGroups, type SessionGroup } from "./threads/session-groups";
 export {
+  describeGroupRows,
+  listGroupLines,
+  type GroupAsk,
+  type GroupLines,
+  type GroupMember,
+  type GroupRow,
+  type GroupRowSources,
+  type GroupSummary,
+  type SessionDot,
+} from "./threads/group-row";
+export {
+  buildGroupSidebar,
+  type DoneGroupRow,
+  type GroupDoneShelf,
+  type GroupSidebar,
+  type ProjectGroupSection,
+} from "./threads/group-sidebar";
+export {
   buildDoneShelf,
   buildSidebarSections,
   DONE_SHELF_LIMIT,

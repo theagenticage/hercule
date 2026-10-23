@@ -87,6 +87,8 @@ describe("buildSidebarSections: Waiting on you", () => {
     sessionId,
     requestId: `r-${sessionId}`,
     title: "A thread",
+    groupName: "A thread",
+    askerLabel: null,
     question: "Run git push?",
     newestRequestId: `r-${sessionId}`,
     openRequestIds: [`r-${sessionId}`],

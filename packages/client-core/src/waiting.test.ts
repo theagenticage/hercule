@@ -57,6 +57,8 @@ describe("listWaiting", () => {
         sessionId: "s-1",
         requestId: "r-1",
         title: "Fix the login bug",
+        groupName: "Fix the login bug",
+        askerLabel: null,
         question: "Run git push?",
         newestRequestId: "r-1",
         openRequestIds: ["r-1"],
@@ -68,6 +70,8 @@ describe("listWaiting", () => {
         sessionId: "s-3",
         requestId: "r-3",
         title: "Write the release notes",
+        groupName: "Write the release notes",
+        askerLabel: null,
         question: "Run pnpm test?",
         newestRequestId: "r-3",
         openRequestIds: ["r-3"],
@@ -75,6 +79,136 @@ describe("listWaiting", () => {
         activityAt: EARLY,
       },
     ]);
+  });
+
+  describe("sessions that share a workspace", () => {
+    const lead = (over: Partial<Session> = {}): Session =>
+      buildSession({ id: "s-lead", title: "Fix checkout", workspaceId: "w-1", ...over });
+    const reviewer = (over: Partial<Session> = {}): Session =>
+      buildSession({
+        id: "s-review",
+        title: "Adversarial review of the 3-D Secure fix",
+        role: "review",
+        agentId: "a-1",
+        workspaceId: "w-1",
+        createdAt: MIDDLE,
+        ...over,
+      });
+
+    it("names the group by its lead, and the asker by its role, when an Agent session asks", () => {
+      const [entry] = listWaiting(
+        [
+          lead(),
+          reviewer({
+            lastActivityAt: LATE,
+            openRequests: [buildCommandRequest("r-1", "git push")],
+          }),
+        ],
+        [],
+      );
+
+      expect(entry).toMatchObject({
+        kind: "thread",
+        sessionId: "s-review",
+        title: "Adversarial review of the 3-D Secure fix",
+        groupName: "Fix checkout",
+        askerLabel: "review",
+        question: "Run git push?",
+      });
+    });
+
+    it("gives no asker label when the lead asks, even in a group of several", () => {
+      const [entry] = listWaiting(
+        [lead({ openRequests: [buildCommandRequest("r-1", "git push")] }), reviewer()],
+        [],
+      );
+
+      expect(entry).toMatchObject({
+        sessionId: "s-lead",
+        groupName: "Fix checkout",
+        askerLabel: null,
+      });
+    });
+
+    it("labels a partner Thread by its role, and numbers repeated roles", () => {
+      const waiting = listWaiting(
+        [
+          lead(),
+          reviewer({
+            agentId: null,
+            kind: "thread",
+            openRequests: [buildCommandRequest("r-1", "ls")],
+          }),
+          reviewer({
+            id: "s-review-2",
+            agentId: null,
+            kind: "thread",
+            createdAt: LATE,
+            openRequests: [buildCommandRequest("r-2", "ls")],
+          }),
+        ],
+        [],
+      );
+
+      expect(
+        waiting.map((entry) => [entry.sessionId, "askerLabel" in entry && entry.askerLabel]),
+      ).toEqual(
+        expect.arrayContaining([
+          ["s-review", "review"],
+          ["s-review-2", "review 2"],
+        ]),
+      );
+    });
+
+    it("lists a Thread marked Done while it waits, under its group's name", () => {
+      const [entry] = listWaiting(
+        [
+          lead({
+            done: { at: LATE, by: "user" },
+            openRequests: [buildCommandRequest("r-1", "git push")],
+          }),
+          reviewer(),
+        ],
+        [],
+      );
+
+      expect(entry).toMatchObject({ sessionId: "s-lead", groupName: "Fix checkout" });
+    });
+
+    it("lists an Agent session no group holds, named by its own title", () => {
+      const [entry] = listWaiting(
+        [reviewer({ workspaceId: null, openRequests: [buildCommandRequest("r-1", "ls")] })],
+        [],
+      );
+
+      expect(entry).toMatchObject({
+        sessionId: "s-review",
+        groupName: "Adversarial review of the 3-D Secure fix",
+        askerLabel: null,
+      });
+    });
+
+    it("ignores the sessions of runs and of assistants, and lists a session read twice once", () => {
+      const asking = lead({ openRequests: [buildCommandRequest("r-1", "ls")] });
+      const waiting = listWaiting(
+        [
+          asking,
+          { ...asking, title: "Fix checkout, newer read" },
+          buildSession({
+            id: "s-step",
+            agentId: "a-2",
+            runId: "run-1",
+            workspaceId: "w-1",
+            openRequests: [buildCommandRequest("r-2", "ls")],
+          }),
+        ],
+        [],
+      );
+
+      expect(waiting.map((entry) => [entry.sessionId, "title" in entry && entry.title])).toEqual([
+        ["s-lead", "Fix checkout, newer read"],
+      ]);
+    });
   });
 
   it("lists the assistants whose session has an open Request, and skips the rest", () => {
@@ -276,6 +410,8 @@ describe("listWaiting", () => {
         sessionId: "s-1",
         requestId: "r-1",
         title: "Save drafts",
+        groupName: "Save drafts",
+        askerLabel: null,
         question: "Which storage should drafts use?",
         newestRequestId: "r-1",
         openRequestIds: ["r-1"],
@@ -293,6 +429,7 @@ describe("listWaitingRunSessions", () => {
         buildSession({
           id: "s-security",
           title: "Release · security",
+          agentId: "a-flow",
           runId: "run-1",
           stepId: "security",
           lastActivityAt: EARLY,
@@ -301,6 +438,7 @@ describe("listWaitingRunSessions", () => {
         buildSession({
           id: "s-publish",
           title: "Release · publish",
+          agentId: "a-flow",
           runId: "run-1",
           stepId: "publish",
           lastActivityAt: LATE,
@@ -333,9 +471,16 @@ describe("listWaitingRunSessions", () => {
   it("leaves out a run session that asks nothing, and a waiting session of no run", () => {
     expect(
       listWaitingRunSessions([
-        buildSession({ id: "s-step", runId: "run-1", stepId: "build", lastActivityAt: MIDDLE }),
+        buildSession({
+          id: "s-step",
+          agentId: "a-flow",
+          runId: "run-1",
+          stepId: "build",
+          lastActivityAt: MIDDLE,
+        }),
         buildSession({
           id: "s-assistant",
+          agentId: "a-ada",
           conversationId: "c-1",
           openRequests: [buildCommandRequest("r-1", "git push")],
         }),

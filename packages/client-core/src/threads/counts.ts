@@ -1,12 +1,12 @@
 /**
- * Counts the threads by pose, for the line at the foot of the sidebar, such
- * as "3 working · 2 waiting · 4 idle".
+ * Counts the sessions by pose, for the line at the foot of the sidebar, such
+ * as "3 working · 2 waiting · 4 idle". Threads and Agents' sessions count.
  */
 import type { Session } from "@hercule/contract";
 import type { Pose } from "./pose";
 import { isMarkedDone } from "./status";
 
-/** How many threads are working, waiting on the user, and idle. */
+/** How many sessions are working, waiting on the user, and idle. */
 export interface ThreadCounts {
   readonly working: number;
   readonly waiting: number;
@@ -14,20 +14,21 @@ export interface ThreadCounts {
 }
 
 /**
- * Returns how many of `threads` are `working`, `waiting` and `idle`, by their
- * pose in `poses`, keyed by session id. These threads are not counted:
+ * Returns how many of `sessions` are `working`, `waiting` and `idle`, by their
+ * pose in `poses`, keyed by session id. A group's sessions count one by one:
+ * a row with one working and one idle Thread is both. These are not counted:
  *
- * - asleep and away threads, so a fleet with hundreds of old threads reads
+ * - asleep and away sessions, so a fleet with hundreds of old threads reads
  *   "4 idle", not "470 idle";
- * - threads marked Done, waiting or not, because the user put them away;
- * - a thread `poses` holds no pose for.
+ * - Threads marked Done, waiting or not, because the user put them away;
+ * - a session `poses` holds no pose for.
  */
 export const countThreadsByPose = (
-  threads: readonly Session[],
+  sessions: readonly Session[],
   poses: ReadonlyMap<string, Pose>,
 ): ThreadCounts => {
   const counts = { working: 0, waiting: 0, idle: 0 };
-  for (const session of threads) {
+  for (const session of sessions) {
     if (isMarkedDone(session)) continue;
     const pose = poses.get(session.id);
     if (pose === "working" || pose === "waiting" || pose === "idle") counts[pose] += 1;

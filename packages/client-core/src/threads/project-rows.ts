@@ -281,7 +281,7 @@ export const sortProjectsByNewestThread = (
 export const orderProjectIdsByNewestThread = (sessions: readonly Session[]): readonly string[] => {
   const newestByProject = new Map<string, number>();
   for (const session of sessions) {
-    if (session.agentId !== null || isMarkedDone(session) || session.projectId === null) continue;
+    if (session.kind !== "thread" || isMarkedDone(session) || session.projectId === null) continue;
     const started = Date.parse(pickLastStartedAt(session));
     newestByProject.set(
       session.projectId,

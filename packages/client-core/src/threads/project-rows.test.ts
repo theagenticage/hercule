@@ -300,7 +300,7 @@ describe("orderProjectIdsByNewestThread", () => {
 
   it("ignores the sessions of Agents", () => {
     const agents = SESSIONS.map((session) =>
-      session.id === "s-keys" ? { ...session, agentId: "a-ada" } : session,
+      session.id === "s-keys" ? { ...session, agentId: "a-ada", kind: "agent" as const } : session,
     );
 
     expect(orderProjectIdsByNewestThread(agents)).toEqual([WEBSHOP_PROJECT.id]);
