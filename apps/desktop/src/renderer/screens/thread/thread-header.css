@@ -19,9 +19,9 @@
 }
 
 /* Not in the book, whose titles are short. When the header runs out of
-   room, the tabs' pill shrinks and the pills on the right keep their place:
-   the project's name and each title ellipsize, and the marks, the ages and
-   the `+` keep their size. */
+   room, the project's name and each title ellipsize, and the marks, the ages
+   and the `+` keep their size. A subagent's pill (`.top > nav.pill`) shrinks
+   with the header, and the pills on the right keep their place. */
 .top > nav.pill,
 .pill-crumb,
 .ptab {
@@ -34,15 +34,99 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Not in the book. When the header runs out of room, the other threads'
-   tabs give way first, and only then the open thread's tab. A tab that is
-   not open stops at 72px: its padding, its mark, the gap and about four
-   letters with an ellipsis. On a subagent's page, the earlier crumbs give
-   way the same way (subagent-header.css). Other headers' tabs, such as the
-   workflow list's filters, never shrink. */
-:is(.thread-tabs, .subagent-crumbs) .ptab:not(.is-on) {
+/* Not in the book. When a subagent's header runs out of room, the earlier
+   crumbs give way first, and only then the open page's crumb (see
+   subagent-header.css). A crumb that is not the open one stops at 72px: its
+   padding, its mark, the gap and about four letters with an ellipsis. Other
+   headers' tabs, such as the workflow list's filters, never shrink. */
+.subagent-crumbs .ptab:not(.is-on) {
   flex-shrink: 1000;
   min-width: 72px;
+}
+
+/* ---------- The thread's tabs ---------- */
+
+/* The room the thread's pill may take: all the width of the header the
+   buttons on the right leave, less 24px (the header's 8px gap and 16px
+   here). The tabs are fitted to this width (`useTabOverflow`), so it must be
+   exactly the pill's room, and the gap must stay outside its box. The
+   drawing computes the same room in script. */
+.thread-tabs-room {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  min-width: 0;
+  margin-right: 16px;
+}
+/* The pill takes the width of its content, up to the room. The drawing's
+   `overflow: hidden` clips what a window too narrow for the open tab pushes
+   out. It is positioned, so the tabs the fit hides stay in it, out of flow. */
+.thread-tabs-room > .thread-tabs {
+  position: relative;
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow: hidden;
+}
+/* "Syncing…" fills the room the pill leaves, so it takes no part in the fit.
+   Elsewhere it sits against the pills on the right (sync-marker.css). Here it
+   follows the pill instead, 12px after it, where the eye is, and the room
+   clips it before it reaches the buttons. */
+.thread-tabs-room > .sync-slot {
+  justify-content: flex-start;
+  padding: 0 0 0 12px;
+}
+/* The pill's parts keep their natural size, so the fit can add them up: the
+   work's name is the one that shrinks, down to nothing, and only when the
+   open tab and the waiting tabs need its room. */
+.thread-tabs > .pill-crumb,
+.thread-tabs > .ptab {
+  flex: none;
+}
+/* The work's name, as the drawing's `.b2-bench-name`. Not in the drawing:
+   it has no padding, so that it can shrink to zero width and leave only the
+   project's tile. Its 2px of space before the text is an indent, and the 6px
+   after it is the separator's. */
+.thread-tabs > .work-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 280px;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  text-indent: 2px;
+  text-overflow: ellipsis;
+}
+/* The drawing's `.b2-sep`: a 1px line, 18px high, with 8px before it and 6px
+   after it. The space is padding, not margin, because the fit measures the
+   width of each part, and a width leaves a margin out. */
+.thread-tabs > .thread-tabs-sep {
+  flex: none;
+  box-sizing: content-box;
+  width: 1px;
+  height: 18px;
+  padding: 0 6px 0 8px;
+  background: var(--line);
+  background-clip: content-box;
+}
+/* A tab whose label is the session's title, because it has no role, is cut
+   at 160px, as the drawing cuts it. */
+.thread-tabs .ptab-title.is-title {
+  max-width: 160px;
+}
+/* A tab the fit hides stays in the pill, out of flow and invisible, so it
+   can still be measured (see `useTabOverflow`). */
+.thread-tabs > .ptab.is-hidden {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}
+/* Not in the drawing, which draws a step session's crumbs in no header. The
+   fit counts the width of every crumb of a run, so none may shrink: the
+   tabs go behind "+n" first. The workflow's name still stops at 260px. Four
+   classes deep, so it wins over run-crumbs.css whatever order the two style
+   sheets load in. */
+.thread-tabs-room > .thread-tabs.workflow-crumbs > .pill-crumb {
+  flex: none;
 }
 
 /* The side pane's toggle. The pane opens on the right, so the sidebar's

@@ -1,6 +1,6 @@
 /**
- * Tests the new-thread screen as the app opens it at `/`: the question and
- * the lead, a draft that cannot start, starting a thread with ⏎ or Thread >
+ * Tests the new-thread screen as the app opens it at `/`: the header's tabs,
+ * the question and the lead, a draft that cannot start, starting a thread with ⏎ or Thread >
  * Send, a start the controller refuses, a start made once when the user
  * comes back while it runs, the draft kept per place, the start cards, the
  * starter threads while Intake is empty, and the picks a start carries.
@@ -115,6 +115,37 @@ describe("the new-thread screen", () => {
     expect(screen.getByTitle("The workspace it joins decides the machine").textContent).toBe(
       "moss",
     );
+  });
+
+  it("draws the header of a workspace it joins as its threads do: the work's name, the row's tabs, and its own New thread tab selected", async () => {
+    const worktree = SIDEBAR_FIXTURE.workspaces[1]!;
+    await openDraft(`/?project=${WEBSHOP.id}&workspace=${worktree.id}`);
+
+    const strip = screen.getByRole("navigation", { name: "Threads in this workspace" });
+    expect(strip.querySelector("[data-work-name]")?.textContent).toBe("Fix flaky webhook tests");
+    expect(
+      within(strip)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("aria-label")),
+    ).toEqual(["Fix flaky webhook tests, working", "Write the retry runbook, waiting on you"]);
+    const draft = strip.querySelector("[data-tab='new-thread']")!;
+    expect(draft.textContent).toBe("New thread");
+    expect(draft.getAttribute("aria-current")).toBe("page");
+    expect(draft.classList.contains("is-on")).toBe(true);
+    for (const link of within(strip).getAllByRole("link")) {
+      expect(link.classList.contains("is-on")).toBe(false);
+    }
+  });
+
+  it("draws only the project and its New thread tab when the draft joins no workspace", async () => {
+    await openDraft(`/?project=${WEBSHOP.id}`);
+
+    const strip = screen.getByRole("navigation", { name: "Threads in this workspace" });
+    expect(within(strip).queryAllByRole("link")).toHaveLength(0);
+    expect(strip.querySelector("[data-work-name]")).toBeNull();
+    expect(strip.querySelector(".thread-tabs-sep")).toBeNull();
+    expect(within(strip).getByText("webshop")).toBeTruthy();
+    expect(strip.querySelector("[data-tab='new-thread']")?.textContent).toBe("New thread");
   });
 
   it("runs on the runner main finds on this Mac, rather than on the first one", async () => {

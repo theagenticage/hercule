@@ -4,12 +4,7 @@
  * question, the Draft Thread's composer, and the start cards.
  */
 import { lazy, Suspense, useRef, useState, useSyncExternalStore, type JSX } from "react";
-import {
-  useIsMutating,
-  useMutation,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
   appendToMessage,
@@ -19,12 +14,11 @@ import {
   buildSubmission,
   findDraftSubject,
   findExpiredShelfKeys,
+  findWorkspaceGroupRow,
   holdsMessageContent,
   isMutationRunning,
   joinPhraseText,
   listProjectRepos,
-  listSessionsOfWorkspace,
-  listWorkspaceThreads,
   markShelfItemsExpired,
   queryKeys,
   readErrorMessage,
@@ -37,8 +31,9 @@ import {
 import type { SessionSpawnInput, Workspace } from "@hercule/contract";
 import { useDraftThread } from "../../app/draft-thread";
 import { buildDraftKey } from "../../app/pending-submissions";
-import { liveAgentSessionsQuery, threadAndAgentSessionsQuery } from "../../app/queries";
+import { threadAndAgentSessionsQuery } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
+import { useSessionPresentation } from "../../app/session-presentation";
 import { buildLook, Face } from "../../faces";
 import { useComposerImages } from "../attachments/use-composer-images";
 import { useSendOnMenuCommand } from "../session/send-key";
@@ -77,8 +72,8 @@ interface SentDraft {
  *
  * From top to bottom:
  *
- * - the header, with the project and the threads of the workspace the draft
- *   joins;
+ * - the header, with the project and, when the draft joins a workspace that
+ *   has a row in the sidebar, the work's name and the lines of that row;
  * - a face and a question, "What should the agent do in webshop?", then the
  *   lead: where the thread will work and on which machine, or why it cannot
  *   start yet. When the reason is a provider instance that is not logged in,
@@ -124,8 +119,7 @@ export function DraftScreen({
   }
   const { fields, catalogs, joinedWorkspace } = view;
   const { projects, workspaces } = catalogs;
-  const threadsAndPartners = useSuspenseQuery(threadAndAgentSessionsQuery(client)).data;
-  const agentSessions = useSuspenseQuery(liveAgentSessionsQuery(client)).data;
+  const { groupRows } = useSessionPresentation();
   const inspection = useMutation({
     mutationFn: (id: string) => client.workspace.inspect({ params: { id } }),
     onSuccess: (current) => {
@@ -223,13 +217,11 @@ export function DraftScreen({
       <DraftHeader
         projectId={projectId}
         projects={projects}
-        tabs={listWorkspaceThreads(joinedWorkspace, catalogs.sessions)}
-        workspaceSessions={
+        row={
           joinedWorkspace === undefined
-            ? []
-            : listSessionsOfWorkspace(joinedWorkspace.id, [...threadsAndPartners, ...agentSessions])
+            ? undefined
+            : findWorkspaceGroupRow(groupRows, joinedWorkspace.id)
         }
-        runners={catalogs.runners}
       />
       <div
         ref={scrollRef}
