@@ -62,6 +62,7 @@ const buildWaitingThread = (sessionId: string): Waiting => ({
   sessionId,
   requestId: `r-${sessionId}`,
   title: "A thread",
+  groupKey: `session:${sessionId}`,
   groupName: "A thread",
   askerLabel: null,
   question: "Run git push?",

@@ -66,6 +66,12 @@ export interface WaitingThread extends WaitingSession {
   /** The name of the sidebar row that holds the session: the title of its group's lead. */
   readonly groupName: string;
   /**
+   * The key of the group that holds the session (`SessionGroup.key`), or
+   * `session:<id>` with the session's own id when no group holds it, so a
+   * session in no group is its own group.
+   */
+  readonly groupKey: string;
+  /**
    * What the session is called in its group, such as "review", or `null`
    * when it is the lead or alone in its group, so nothing needs telling
    * apart.
@@ -125,19 +131,26 @@ const buildRequestFields = (session: Session): WaitingSession | null => {
 };
 
 /**
- * Returns the name of the sidebar row that holds each session of `sessions`,
- * and what the session is called in that row (`WaitingThread.askerLabel`),
- * by session id. A session no row holds, such as an Agent's session in a
+ * Returns the key and the name of the sidebar row that holds each session of
+ * `sessions`, and what the session is called in that row
+ * (`WaitingThread.askerLabel`), by session id. A session no row holds, such as an Agent's session in a
  * workspace where no Thread works, has no entry.
  */
 const mapSessionsToGroupNames = (
   sessions: readonly Session[],
-): ReadonlyMap<string, { readonly groupName: string; readonly askerLabel: string | null }> => {
-  const names = new Map<string, { groupName: string; askerLabel: string | null }>();
+): ReadonlyMap<
+  string,
+  { readonly groupKey: string; readonly groupName: string; readonly askerLabel: string | null }
+> => {
+  const names = new Map<
+    string,
+    { groupKey: string; groupName: string; askerLabel: string | null }
+  >();
   for (const group of buildSessionGroups(sessions)) {
     const labels = labelWorkspaceSessions(group.sessions);
     for (const session of group.sessions) {
       names.set(session.id, {
+        groupKey: group.key,
         groupName: group.lead.title,
         askerLabel:
           group.sessions.length === 1 || session.id === group.lead.id
@@ -161,7 +174,7 @@ const mapSessionsToGroupNames = (
  *   never hide.
  * - A session's entry names its group, the sidebar row that holds it, and
  *   what the session is called in it. A session with no group is named by its
- *   own title.
+ *   own title and keyed by its own id.
  *
  * The list is sorted with the most recently active first, sessions and
  * assistants mixed, and two entries active at the same moment by session id.
@@ -179,7 +192,11 @@ export const listWaiting = (
     ...threads.flatMap((session): Waiting[] => {
       const fields = buildRequestFields(session);
       if (fields === null) return [];
-      const names = groupNames.get(session.id) ?? { groupName: session.title, askerLabel: null };
+      const names = groupNames.get(session.id) ?? {
+        groupKey: `session:${session.id}`,
+        groupName: session.title,
+        askerLabel: null,
+      };
       return [{ kind: "thread", title: session.title, ...names, ...fields }];
     }),
     ...assistantRows.flatMap((row): Waiting[] => {

@@ -1050,6 +1050,21 @@ describe("listGoMenuItems", () => {
     ]);
   });
 
+  it("lists a group once when a partner waits, opening the session that asks", () => {
+    const items = buildItems({
+      threads: [
+        lead("s-lead", 1),
+        partner("s-review", 2, { status: "busy", openRequests: [APPROVAL] }),
+      ],
+      selectedId: "s-lead",
+    });
+
+    expect(items.filter((item) => item.kind === "group-row")).toHaveLength(1);
+    expect(listGoMenuItems(items)).toEqual([
+      { destination: { kind: "thread", sessionId: "s-review" }, title: "s-lead" },
+    ]);
+  });
+
   it("lists no thread on the Done shelf", () => {
     const items = buildItems({
       threads: [thread("s-done", 1, { done: { at: at(2), by: "user" } })],

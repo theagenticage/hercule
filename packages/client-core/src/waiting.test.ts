@@ -57,6 +57,7 @@ describe("listWaiting", () => {
         sessionId: "s-1",
         requestId: "r-1",
         title: "Fix the login bug",
+        groupKey: "session:s-1",
         groupName: "Fix the login bug",
         askerLabel: null,
         question: "Run git push?",
@@ -70,6 +71,7 @@ describe("listWaiting", () => {
         sessionId: "s-3",
         requestId: "r-3",
         title: "Write the release notes",
+        groupKey: "session:s-3",
         groupName: "Write the release notes",
         askerLabel: null,
         question: "Run pnpm test?",
@@ -111,6 +113,7 @@ describe("listWaiting", () => {
         kind: "thread",
         sessionId: "s-review",
         title: "Adversarial review of the 3-D Secure fix",
+        groupKey: "workspace:w-1",
         groupName: "Fix checkout",
         askerLabel: "review",
         question: "Run git push?",
@@ -183,6 +186,7 @@ describe("listWaiting", () => {
 
       expect(entry).toMatchObject({
         sessionId: "s-review",
+        groupKey: "session:s-review",
         groupName: "Adversarial review of the 3-D Secure fix",
         askerLabel: null,
       });
@@ -410,6 +414,7 @@ describe("listWaiting", () => {
         sessionId: "s-1",
         requestId: "r-1",
         title: "Save drafts",
+        groupKey: "session:s-1",
         groupName: "Save drafts",
         askerLabel: null,
         question: "Which storage should drafts use?",

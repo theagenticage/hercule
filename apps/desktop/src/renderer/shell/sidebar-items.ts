@@ -62,6 +62,8 @@ export type SidebarItemContent =
       readonly kind: "waiting-thread-row";
       readonly key: string;
       readonly sessionId: string;
+      /** The key of the group the asking session is in, `GroupRow.key` of its row. */
+      readonly groupKey: string;
       /** The name of the group the asking session is in: its lead's title. */
       readonly title: string;
       /**
@@ -379,6 +381,7 @@ const buildWaitingRow = (waiting: Waiting): SidebarItemContent => {
         kind: "waiting-thread-row",
         key: `waiting:${buildDestinationKey({ kind: "thread", sessionId: waiting.sessionId })}`,
         sessionId: waiting.sessionId,
+        groupKey: waiting.groupKey,
         title: waiting.groupName,
         askerLabel: waiting.askerLabel,
         question: waiting.question,
@@ -888,25 +891,41 @@ export const buildSidebar = ({
 /** How many items the Go menu lists: one per shortcut, ⌘1 to ⌘9. */
 const GO_MENU_LIMIT = 9;
 
+/** A Go menu item, and what it stands for: the Go menu lists each identity once. */
+interface GoMenuEntry {
+  /** The group's key for a thread, the destination's key for an assistant. */
+  readonly identity: string;
+  readonly item: GoMenuItem;
+}
+
 /**
- * Returns the Go menu item of a sidebar item that opens a thread or an
+ * Returns the Go menu entry of a sidebar item that opens a thread or an
  * assistant, or `null` for any other item. A group's row opens the session
- * its click opens. A line of an unfolded group is not listed, nor a run's
- * session's row: the Go menu stays about the user's own work and assistants
- * (spec 17, "From runs" in Waiting on you). A group on the Done shelf is not
- * listed either, because the user put it away.
+ * its click opens, and a waiting row opens the session that asks. A line of
+ * an unfolded group is not listed, nor a run's session's row: the Go menu
+ * stays about the user's own work and assistants (spec 17, "From runs" in
+ * Waiting on you). A group on the Done shelf is not listed either, because
+ * the user put it away.
  */
-const buildGoMenuItem = (item: SidebarItem): GoMenuItem | null => {
+const buildGoMenuEntry = (item: SidebarItem): GoMenuEntry | null => {
   switch (item.kind) {
     case "waiting-thread-row":
-      return { destination: { kind: "thread", sessionId: item.sessionId }, title: item.title };
-    case "group-row":
-      return { destination: { kind: "thread", sessionId: item.openId }, title: item.title };
-    case "waiting-assistant-row":
       return {
-        destination: { kind: "assistant", assistantId: item.assistantId },
-        title: item.name,
+        identity: item.groupKey,
+        item: { destination: { kind: "thread", sessionId: item.sessionId }, title: item.title },
       };
+    case "group-row":
+      return {
+        identity: item.groupKey,
+        item: { destination: { kind: "thread", sessionId: item.openId }, title: item.title },
+      };
+    case "waiting-assistant-row": {
+      const destination = { kind: "assistant", assistantId: item.assistantId } as const;
+      return {
+        identity: buildDestinationKey(destination),
+        item: { destination, title: item.name },
+      };
+    }
     case "waiting-run-row":
     case "waiting-runs-label":
     case "waiting-header":
@@ -923,20 +942,19 @@ const buildGoMenuItem = (item: SidebarItem): GoMenuItem | null => {
 
 /**
  * Returns the first nine threads and assistants the sidebar's list shows,
- * top to bottom, for the Go menu. A waiting session shows twice, under
- * Waiting on you and in its group's row when it is the session the row
- * opens, and is listed once, where it shows first. An assistant is listed
- * only while Waiting on you shows it: the Assistants section is not part of
- * the list. A run's session is not listed.
+ * top to bottom, for the Go menu. A group is listed once, where the list
+ * shows it first: a group with a session waiting on the user shows under
+ * Waiting on you, then again as its row in the project, and the Go menu keeps
+ * the first, so it opens the session that asks. An assistant is listed only
+ * while Waiting on you shows it: the Assistants section is not part of the
+ * list. A run's session is not listed.
  */
 export const listGoMenuItems = (items: readonly SidebarItem[]): GoMenuItem[] => {
   const listed = new Map<string, GoMenuItem>();
   for (const item of items) {
     if (listed.size === GO_MENU_LIMIT) break;
-    const goMenuItem = buildGoMenuItem(item);
-    if (goMenuItem === null) continue;
-    const key = buildDestinationKey(goMenuItem.destination);
-    if (!listed.has(key)) listed.set(key, goMenuItem);
+    const entry = buildGoMenuEntry(item);
+    if (entry !== null && !listed.has(entry.identity)) listed.set(entry.identity, entry.item);
   }
   return [...listed.values()];
 };
