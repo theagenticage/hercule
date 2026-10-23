@@ -9,24 +9,23 @@
  * geometry.
  */
 import {
-  buildGroupSidebar,
+  buildSidebarSections,
   buildSessionGroups,
-  countThreadsByPose,
+  countSessionsByPose,
   DONE_SHELF_STEP,
   decideThreadPose,
-  isThreadSeated,
   listGroupLines,
-  type DoneGroupRow,
+  type DoneShelfRow,
   type DraftPlace,
   type ExpandedSections,
   type GroupAsk,
-  type GroupDoneShelf,
+  type DoneShelf,
   type GroupRow,
   type GroupSummary,
   type Pose,
-  type ProjectGroupSection,
+  type ProjectSection,
   type SessionDot,
-  type ThreadCounts,
+  type SessionCounts,
   type ThreadRowStatus,
   type Waiting,
   type WaitingRunSession,
@@ -343,7 +342,7 @@ const buildMoreRowKey = (section: SectionKey): string => `more:${section}`;
 const buildGroupRowKey = (groupKey: string): string => `group:${groupKey}`;
 
 /**
- * Returns which sections are expanded, in the shape `buildGroupSidebar`
+ * Returns which sections are expanded, in the shape `buildSidebarSections`
  * takes, from the keys of the sections whose "more" row the user pressed.
  */
 const buildExpandedSections = (expanded: ReadonlySet<SectionKey>): ExpandedSections => ({
@@ -376,7 +375,7 @@ const formatMoreLabel = (section: "waiting" | "project" | "done", hidden: number
 /** Returns the content of a Waiting on you row: a thread's or an assistant's. */
 const buildWaitingRow = (waiting: Waiting): SidebarItemContent => {
   switch (waiting.kind) {
-    case "thread":
+    case "session":
       return {
         kind: "waiting-thread-row",
         key: `waiting:${buildDestinationKey({ kind: "thread", sessionId: waiting.sessionId })}`,
@@ -406,9 +405,9 @@ const buildWaitingRunRow = (run: WaitingRunSession): SidebarItemContent => ({
   question: run.question,
 });
 
-/** What the items need to know beyond the sidebar `buildGroupSidebar` decided. */
+/** What the items need to know beyond the sidebar `buildSidebarSections` decided. */
 interface SidebarItemSources {
-  readonly groupSidebar: ReturnType<typeof buildGroupSidebar>;
+  readonly groupSidebar: ReturnType<typeof buildSidebarSections>;
   /** The runs' sessions waiting on the user, newest activity first. */
   readonly waitingRunSessions: readonly WaitingRunSession[];
   /** Whether the user expanded Waiting on you, so it shows every run's session too. */
@@ -570,7 +569,7 @@ const buildGroupContents = (
       openId,
       title: row.title,
       pose: row.pose,
-      seated: opened !== undefined && isThreadSeated(opened.pose, opened.done),
+      seated: opened !== undefined && opened.seated,
       status: row.status,
       receded: row.status === "working" && !holdsOpen,
       activityAt: row.status === "age" ? row.activityAt : "",
@@ -583,9 +582,7 @@ const buildGroupContents = (
       summary: row.summary,
       unfolded,
       holdsOpen,
-      doneIds: row.members
-        .filter((member) => member.kind === "thread" && !member.done)
-        .map((member) => member.sessionId),
+      doneIds: row.doneIds,
       details: buildHoverDetails(row, place),
     },
   ];
@@ -604,7 +601,7 @@ const buildGroupContents = (
       label: member.label,
       title: member.title,
       pose: member.pose,
-      seated: isThreadSeated(member.pose, member.done),
+      seated: member.seated,
       status: member.status,
       activityAt: member.status === "age" ? member.activityAt : "",
       dot: member.dot,
@@ -639,7 +636,7 @@ const buildGroupContents = (
  * its workspace or its machine on its second line.
  */
 const buildProjectContents = (
-  project: ProjectGroupSection,
+  project: ProjectSection,
   sources: SidebarItemSources,
 ): SidebarItemContent[] => {
   const section = buildProjectSectionKey(project.projectId);
@@ -680,7 +677,7 @@ const buildProjectContents = (
 
 /** Returns the content of a group's row on the Done shelf. */
 const buildDoneGroupRow = (
-  row: DoneGroupRow,
+  row: DoneShelfRow,
   { selectedId, lastOpen, unsentKeys, projects }: SidebarItemSources,
 ): SidebarItemContent => ({
   kind: "done-group-row",
@@ -707,7 +704,7 @@ const buildDoneGroupRow = (
  * shelf hides some.
  */
 const buildDoneContents = (
-  doneShelf: GroupDoneShelf,
+  doneShelf: DoneShelf,
   sources: SidebarItemSources,
 ): SidebarItemContent[] => {
   if (doneShelf.count === 0) return [];
@@ -808,7 +805,7 @@ export interface SidebarSources {
 /** What the sidebar draws: the items of its list, and the session counts in its foot. */
 export interface Sidebar {
   readonly items: readonly SidebarItem[];
-  readonly counts: ThreadCounts;
+  readonly counts: SessionCounts;
   /** The key of the group that holds the open session, shown or not, or `null` when it is in none. */
   readonly openGroupKey: string | null;
 }
@@ -846,7 +843,7 @@ export const buildSidebar = ({
     !listed.some((session) => session.id === openSession.id);
   const sessions = mergeOpenSession ? [...listed, openSession] : listed;
   const groups = buildSessionGroups(sessions);
-  const groupSidebar = buildGroupSidebar({
+  const groupSidebar = buildSidebarSections({
     groups,
     projects,
     workspaces,
@@ -881,7 +878,7 @@ export const buildSidebar = ({
   );
   return {
     items,
-    counts: countThreadsByPose(sessions, poses),
+    counts: countSessionsByPose(sessions, poses),
     openGroupKey:
       groups.find((group) => group.sessions.some((session) => session.id === selectedId))?.key ??
       null,

@@ -41,7 +41,7 @@ import {
   buildTimestamp,
   listFixtureWork,
 } from "./work.testing";
-import { decideArrivedAt, isThreadSeated, listWork } from "./work";
+import { decideArrivedAt, isSessionSeated, listWork } from "./work";
 
 /** Returns each piece of work as its kind, its id, and its workers' ids and poses. */
 const describeWork = (
@@ -220,13 +220,30 @@ describe("listWork's order and projects", () => {
   });
 });
 
-describe("isThreadSeated", () => {
+describe("isSessionSeated", () => {
+  const seatedPoses = (session: Session) => POSES.filter((pose) => isSessionSeated(session, pose));
+
   it("seats a thread not marked Done in every pose", () => {
-    expect(POSES.filter((pose) => isThreadSeated(pose, false))).toEqual(POSES);
+    expect(seatedPoses(buildSession({ id: "s-thread" }))).toEqual(POSES);
   });
 
   it("seats a thread marked Done only while it waits on the user", () => {
-    expect(POSES.filter((pose) => isThreadSeated(pose, true))).toEqual(["waiting"]);
+    const done = buildSession({ id: "s-done", done: { at: AT, by: "user" } });
+
+    expect(seatedPoses(done)).toEqual(["waiting"]);
+  });
+
+  it("seats an Agent's session only while it is working, waiting or idle", () => {
+    expect(seatedPoses(buildSession({ id: "s-agent", agentId: "a-1" }))).toEqual([
+      "working",
+      "waiting",
+      "idle",
+    ]);
+  });
+
+  it("seats the session of a run or of an assistant in no pose", () => {
+    expect(seatedPoses(buildStepSession("s-step", "run-1"))).toEqual([]);
+    expect(seatedPoses(buildAssistantSession("s-chat"))).toEqual([]);
   });
 });
 

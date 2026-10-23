@@ -6,7 +6,7 @@
  */
 import { useCallback } from "react";
 import { useMatch, useNavigate, useRouteContext } from "@tanstack/react-router";
-import { decideThreadPose, isMarkedDone, isThreadSeated, type Waiting } from "@hercule/client-core";
+import { decideThreadPose, isSessionSeated, type Waiting } from "@hercule/client-core";
 import type { Destination, WaitingRequest } from "../../../ipc/contract";
 import { runnersQuery, threadAndAgentSessionsQuery } from "../../app/queries";
 
@@ -23,7 +23,7 @@ export const buildWaitingRequest = (waiting: Waiting): WaitingRequest => {
     body: waiting.notificationBody,
   };
   switch (waiting.kind) {
-    case "thread":
+    case "session":
       return {
         destination: { kind: "thread", sessionId: waiting.sessionId },
         title: waiting.title,
@@ -73,7 +73,7 @@ export function useOpenDestination(): (destination: Destination) => void {
           if (
             officeOpen &&
             session !== undefined &&
-            isThreadSeated(decideThreadPose(session, runner), isMarkedDone(session))
+            isSessionSeated(session, decideThreadPose(session, runner))
           ) {
             void navigate({ to: "/office", search: { session: sessionId } });
           } else {

@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import type { OpenRequest, Session } from "@hercule/contract";
 import type { AssistantRow } from "./assistants/rows";
+import { buildSessionGroups } from "./threads/session-groups";
 import { buildSession } from "./threads/workspaces.testing";
 import { listWaiting, listWaitingRunSessions } from "./waiting";
 
@@ -30,10 +31,17 @@ const buildAssistantRow = (id: string, name: string, session: Session | null): A
   session,
 });
 
+/** Returns what waits, the way the desktop calls `listWaiting`: with the groups of `sessions`. */
+const listFromSessions = (
+  sessions: readonly Session[],
+  assistantRows: readonly AssistantRow[],
+): ReturnType<typeof listWaiting> =>
+  listWaiting(sessions, buildSessionGroups(sessions), assistantRows);
+
 describe("listWaiting", () => {
   it("lists the threads with an open Request, with their question", () => {
     expect(
-      listWaiting(
+      listFromSessions(
         [
           buildSession({
             id: "s-1",
@@ -53,7 +61,7 @@ describe("listWaiting", () => {
       ),
     ).toEqual([
       {
-        kind: "thread",
+        kind: "session",
         sessionId: "s-1",
         requestId: "r-1",
         title: "Fix the login bug",
@@ -67,7 +75,7 @@ describe("listWaiting", () => {
         activityAt: LATE,
       },
       {
-        kind: "thread",
+        kind: "session",
         sessionId: "s-3",
         requestId: "r-3",
         title: "Write the release notes",
@@ -98,7 +106,7 @@ describe("listWaiting", () => {
       });
 
     it("names the group by its lead, and the asker by its role, when an Agent session asks", () => {
-      const [entry] = listWaiting(
+      const [entry] = listFromSessions(
         [
           lead(),
           reviewer({
@@ -110,7 +118,7 @@ describe("listWaiting", () => {
       );
 
       expect(entry).toMatchObject({
-        kind: "thread",
+        kind: "session",
         sessionId: "s-review",
         title: "Adversarial review of the 3-D Secure fix",
         groupKey: "workspace:w-1",
@@ -121,7 +129,7 @@ describe("listWaiting", () => {
     });
 
     it("gives no asker label when the lead asks, even in a group of several", () => {
-      const [entry] = listWaiting(
+      const [entry] = listFromSessions(
         [lead({ openRequests: [buildCommandRequest("r-1", "git push")] }), reviewer()],
         [],
       );
@@ -134,7 +142,7 @@ describe("listWaiting", () => {
     });
 
     it("labels a partner Thread by its role, and numbers repeated roles", () => {
-      const waiting = listWaiting(
+      const waiting = listFromSessions(
         [
           lead(),
           reviewer({
@@ -164,7 +172,7 @@ describe("listWaiting", () => {
     });
 
     it("lists a Thread marked Done while it waits, under its group's name", () => {
-      const [entry] = listWaiting(
+      const [entry] = listFromSessions(
         [
           lead({
             done: { at: LATE, by: "user" },
@@ -178,8 +186,22 @@ describe("listWaiting", () => {
       expect(entry).toMatchObject({ sessionId: "s-lead", groupName: "Fix checkout" });
     });
 
+    it("names a session's row from the groups it is given, not from the sessions alone", () => {
+      const asking = lead({ openRequests: [buildCommandRequest("r-1", "git push")] });
+      const openLead = lead({
+        id: "s-open",
+        title: "Open lead",
+        createdAt: "2026-09-10T08:00:00.000Z",
+      });
+      const sessions = [asking, reviewer()];
+
+      const [entry] = listWaiting(sessions, buildSessionGroups([...sessions, openLead]), []);
+
+      expect(entry).toMatchObject({ groupKey: "workspace:w-1", groupName: "Open lead" });
+    });
+
     it("lists an Agent session no group holds, named by its own title", () => {
-      const [entry] = listWaiting(
+      const [entry] = listFromSessions(
         [reviewer({ workspaceId: null, openRequests: [buildCommandRequest("r-1", "ls")] })],
         [],
       );
@@ -194,7 +216,7 @@ describe("listWaiting", () => {
 
     it("ignores the sessions of runs and of assistants, and lists a session read twice once", () => {
       const asking = lead({ openRequests: [buildCommandRequest("r-1", "ls")] });
-      const waiting = listWaiting(
+      const waiting = listFromSessions(
         [
           asking,
           { ...asking, title: "Fix checkout, newer read" },
@@ -223,7 +245,7 @@ describe("listWaiting", () => {
     });
 
     expect(
-      listWaiting(
+      listFromSessions(
         [],
         [
           buildAssistantRow("a-ada", "Ada", asking),
@@ -248,7 +270,7 @@ describe("listWaiting", () => {
   });
 
   it("mixes threads and assistants, the most recently active first", () => {
-    const waiting = listWaiting(
+    const waiting = listFromSessions(
       [
         buildSession({
           id: "s-old",
@@ -285,7 +307,7 @@ describe("listWaiting", () => {
         openRequests: [buildCommandRequest(`r-${id}`, "ls")],
       });
 
-    const waiting = listWaiting(
+    const waiting = listFromSessions(
       [asking("s-c"), asking("s-a")],
       [buildAssistantRow("a-ada", "Ada", asking("s-b"))],
     );
@@ -294,7 +316,7 @@ describe("listWaiting", () => {
   });
 
   it("shows the oldest of a session's open Requests in the row, whichever agent asked it", () => {
-    const [waiting] = listWaiting(
+    const [waiting] = listFromSessions(
       [
         buildSession({
           id: "s-1",
@@ -312,7 +334,7 @@ describe("listWaiting", () => {
   });
 
   it("shows the newest of a session's open Requests in the notification, and counts the others", () => {
-    const [waiting] = listWaiting(
+    const [waiting] = listFromSessions(
       [
         buildSession({
           id: "s-1",
@@ -334,7 +356,7 @@ describe("listWaiting", () => {
   });
 
   it("starts the notification with the subagent's name when a subagent asked the newest Request", () => {
-    const [waiting] = listWaiting(
+    const [waiting] = listFromSessions(
       [],
       [
         buildAssistantRow(
@@ -364,7 +386,7 @@ describe("listWaiting", () => {
   });
 
   it('starts the notification with "A subagent asks: " when the subagent has no name yet', () => {
-    const [waiting] = listWaiting(
+    const [waiting] = listFromSessions(
       [
         buildSession({
           id: "s-1",
@@ -404,13 +426,13 @@ describe("listWaiting", () => {
     };
 
     expect(
-      listWaiting(
+      listFromSessions(
         [buildSession({ id: "s-1", title: "Save drafts", openRequests: [question] })],
         [],
       ),
     ).toEqual([
       {
-        kind: "thread",
+        kind: "session",
         sessionId: "s-1",
         requestId: "r-1",
         title: "Save drafts",

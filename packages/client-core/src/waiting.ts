@@ -1,7 +1,7 @@
 /**
  * What waits on the user: the Threads, the Agents' sessions and the
- * assistants whose session has an open Request, whichever of its agents asked. Answering the last one,
- * wherever it is answered, ends the wait.
+ * assistants whose session has an open Request, whichever of its agents
+ * asked. Answering the last one, wherever it is answered, ends the wait.
  *
  * The desktop app counts these on its dock badge, shows a notification for
  * each, lists them in Waiting on you and in its Go menu. All of them read
@@ -25,11 +25,11 @@ import type { AssistantRow } from "./assistants/rows";
 import { findOldestOpenRequest } from "./threads/oldest-request";
 import { compareNewestFirst } from "./threads/rows";
 import { formatRequestQuestion } from "./threads/request-question";
-import { buildSessionGroups } from "./threads/session-groups";
+import { decideAskerLabel, type SessionGroup } from "./threads/session-groups";
 import { labelWorkspaceSessions } from "./threads/siblings";
 
 /** The fields every entry has, read from the session that waits and its open Requests. */
-interface WaitingSession {
+interface WaitingRequestFields {
   /**
    * The session that asks: the thread's own, or the current session of the
    * assistant's main conversation.
@@ -57,10 +57,10 @@ interface WaitingSession {
 
 /**
  * A Thread or an Agent's session waiting on the user, and the Requests it
- * waits on. Both open as a thread, so both have this kind.
+ * waits on. Both open as a thread, so both are entries of this kind.
  */
-export interface WaitingThread extends WaitingSession {
-  readonly kind: "thread";
+export interface WaitingSession extends WaitingRequestFields {
+  readonly kind: "session";
   /** The session's own title. */
   readonly title: string;
   /** The name of the sidebar row that holds the session: the title of its group's lead. */
@@ -80,14 +80,14 @@ export interface WaitingThread extends WaitingSession {
 }
 
 /** An assistant waiting on the user, and the Requests its session waits on. */
-export interface WaitingAssistant extends WaitingSession {
+export interface WaitingAssistant extends WaitingRequestFields {
   readonly kind: "assistant";
   readonly assistantId: string;
   readonly name: string;
 }
 
 /** A Thread, an Agent's session or an assistant waiting on the user. */
-export type Waiting = WaitingThread | WaitingAssistant;
+export type Waiting = WaitingSession | WaitingAssistant;
 
 /**
  * Returns the text of the notification about `newest`, the newest open
@@ -115,7 +115,7 @@ const formatNotificationBody = (newest: SessionRequest, others: number): string 
  * Returns the parts of an entry that come from `session` and its open
  * Requests, or null when it has none and so does not wait on the user.
  */
-const buildRequestFields = (session: Session): WaitingSession | null => {
+const buildRequestFields = (session: Session): WaitingRequestFields | null => {
   const oldest = findOldestOpenRequest(session);
   const newest = session.openRequests.at(-1);
   if (oldest === null || newest === undefined) return null;
@@ -130,32 +130,35 @@ const buildRequestFields = (session: Session): WaitingSession | null => {
   };
 };
 
+/** Where a waiting session sits in the sidebar: the row that holds it, and what it is called there. */
+interface GroupNames {
+  readonly groupKey: string;
+  readonly groupName: string;
+  readonly askerLabel: string | null;
+}
+
 /**
- * Returns the key and the name of the sidebar row that holds each session of
- * `sessions`, and what the session is called in that row
- * (`WaitingThread.askerLabel`), by session id. A session no row holds, such as an Agent's session in a
- * workspace where no Thread works, has no entry.
+ * Returns the names of the group that holds each session of `waitingIds`
+ * (a session id set), by session id. A session no group holds, such as an
+ * Agent's session in a workspace where no Thread works, has no entry.
+ *
+ * Only a group that holds a waiting session is labelled, so a list where
+ * nothing waits costs one pass over the groups' sessions.
  */
-const mapSessionsToGroupNames = (
-  sessions: readonly Session[],
-): ReadonlyMap<
-  string,
-  { readonly groupKey: string; readonly groupName: string; readonly askerLabel: string | null }
-> => {
-  const names = new Map<
-    string,
-    { groupKey: string; groupName: string; askerLabel: string | null }
-  >();
-  for (const group of buildSessionGroups(sessions)) {
+const mapWaitingToGroupNames = (
+  waitingIds: ReadonlySet<string>,
+  groups: readonly SessionGroup[],
+): ReadonlyMap<string, GroupNames> => {
+  const names = new Map<string, GroupNames>();
+  for (const group of groups) {
+    if (!group.sessions.some((session) => waitingIds.has(session.id))) continue;
     const labels = labelWorkspaceSessions(group.sessions);
     for (const session of group.sessions) {
+      if (!waitingIds.has(session.id)) continue;
       names.set(session.id, {
         groupKey: group.key,
         groupName: group.lead.title,
-        askerLabel:
-          group.sessions.length === 1 || session.id === group.lead.id
-            ? null
-            : (labels.get(session.id) ?? null),
+        askerLabel: decideAskerLabel(group, session.id, labels.get(session.id) ?? session.title),
       });
     }
   }
@@ -168,6 +171,10 @@ const mapSessionsToGroupNames = (
  * Requests. An assistant's session is the one on its row; an assistant with
  * no session waits on nothing.
  *
+ * - `groups` are the sidebar's rows of those sessions, as
+ *   `buildSessionGroups` returns them. The caller passes the groups it
+ *   already built for the sidebar, so a session's entry names the row the
+ *   sidebar draws. They should be built from the same `sessions`.
  * - Sessions of other kinds are ignored. When `sessions` holds a session
  *   twice, the last read wins.
  * - A Thread marked Done is listed while it waits, because a question must
@@ -181,24 +188,30 @@ const mapSessionsToGroupNames = (
  */
 export const listWaiting = (
   sessions: readonly Session[],
+  groups: readonly SessionGroup[],
   assistantRows: readonly AssistantRow[],
 ): Waiting[] => {
   const latestReads = new Map(sessions.map((session) => [session.id, session]));
-  const threads = [...latestReads.values()].filter(
-    (session) => session.kind === "thread" || session.kind === "agent",
+  const waitingSessions = [...latestReads.values()].flatMap((session) => {
+    if (session.kind !== "thread" && session.kind !== "agent") return [];
+    const fields = buildRequestFields(session);
+    return fields === null ? [] : [{ session, fields }];
+  });
+  const groupNames = mapWaitingToGroupNames(
+    new Set(waitingSessions.map(({ session }) => session.id)),
+    groups,
   );
-  const groupNames = mapSessionsToGroupNames(threads);
   return [
-    ...threads.flatMap((session): Waiting[] => {
-      const fields = buildRequestFields(session);
-      if (fields === null) return [];
-      const names = groupNames.get(session.id) ?? {
+    ...waitingSessions.map(({ session, fields }): Waiting => ({
+      kind: "session",
+      title: session.title,
+      ...(groupNames.get(session.id) ?? {
         groupKey: `session:${session.id}`,
         groupName: session.title,
         askerLabel: null,
-      };
-      return [{ kind: "thread", title: session.title, ...names, ...fields }];
-    }),
+      }),
+      ...fields,
+    })),
     ...assistantRows.flatMap((row): Waiting[] => {
       const fields = row.session === null ? null : buildRequestFields(row.session);
       return fields === null

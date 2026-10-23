@@ -132,6 +132,38 @@ describe("describeGroupRows: the status", () => {
     expect(statusOf({ status: "busy" }, { openRequests: [ask("r-1")] })).toBe("approval");
   });
 
+  it("is the asker's, with the asker's second line, when several sessions wait", () => {
+    const question: OpenRequest = {
+      requestId: "r-q",
+      itemId: "tool-2",
+      kind: "question",
+      detail: {
+        questions: [
+          { question: "Which storage?", header: "Storage", options: [], multiSelect: false },
+        ],
+      },
+    } as unknown as OpenRequest;
+    const partnerFirst = describeOnly([
+      thread("s-lead", { lastActivityAt: at(9), openRequests: [question] }),
+      thread("s-partner", { createdAt: at(2), lastActivityAt: at(0), openRequests: [ask("r-1")] }),
+    ]);
+    const leadFirst = describeOnly([
+      thread("s-lead", { lastActivityAt: at(0), openRequests: [question] }),
+      thread("s-partner", { createdAt: at(2), lastActivityAt: at(9), openRequests: [ask("r-1")] }),
+    ]);
+
+    expect(partnerFirst).toMatchObject({
+      status: "approval",
+      activityAt: at(0),
+      ask: { askerLabel: "Thread s-partner", question: "Run git push?" },
+    });
+    expect(leadFirst).toMatchObject({
+      status: "question",
+      activityAt: at(0),
+      ask: { askerLabel: null, question: "Which storage?" },
+    });
+  });
+
   it("takes the most recently active session among equals, then the group's order", () => {
     const recent = describeOnly([
       thread("s-1", { status: "idle", lastActivityAt: at(2) }),
@@ -189,6 +221,29 @@ describe("describeGroupRows: the status", () => {
 
     expect(row).toMatchObject({ pose: "waiting", status: "approval" });
     expect(row.summary?.dots).toEqual(["waiting", "quiet"]);
+  });
+});
+
+describe("describeGroupRows: what a Done press and the Office use", () => {
+  const row = () =>
+    describeOnly([
+      thread("s-lead", done(30)),
+      thread("s-partner", { createdAt: at(2), status: "idle" }),
+      agent("s-agent", { status: "busy" }),
+      agent("s-gone", { createdAt: at(3), status: "exited", exitedAt: at(5) }),
+    ]);
+
+  it("lists the Threads a Done press marks: those not yet Done, never an Agent session", () => {
+    expect(row().doneIds).toEqual(["s-partner"]);
+  });
+
+  it("seats a member as the Office does: a Done Thread and an ended Agent session are not", () => {
+    expect(row().members.map((member) => [member.sessionId, member.seated])).toEqual([
+      ["s-lead", false],
+      ["s-agent", true],
+      ["s-partner", true],
+      ["s-gone", false],
+    ]);
   });
 });
 
@@ -302,7 +357,7 @@ describe("describeGroupRows: the dots", () => {
   it("shows the three most urgent and the rest as +n for more than 3 sessions", () => {
     const summary = describeOnly(buildCrew(10, 3, 1)).summary;
 
-    expect(summary).toEqual({
+    expect(summary).toMatchObject({
       dots: ["waiting", "working", "working"],
       hiddenCount: 7,
       label: "10 threads: 1 waiting on you, 3 working, 6 quiet",
@@ -316,7 +371,7 @@ describe("describeGroupRows: the dots", () => {
       agent("s-agent", { status: "exited", exitedAt: at(5) }),
     ]).summary;
 
-    expect(summary).toEqual({
+    expect(summary).toMatchObject({
       dots: ["working"],
       hiddenCount: 0,
       label: "3 sessions: 1 working, 1 done, 1 ended",
@@ -329,7 +384,7 @@ describe("describeGroupRows: the dots", () => {
       thread("s-partner", { createdAt: at(2), status: "idle" }),
     ]).summary;
 
-    expect(summary).toEqual({
+    expect(summary).toMatchObject({
       dots: ["quiet"],
       hiddenCount: 0,
       label: "2 threads: 1 quiet, 1 done",
@@ -351,13 +406,31 @@ describe("describeGroupRows: the dots", () => {
     });
   });
 
+  it("lists every session, the most urgent first, for the hover card", () => {
+    const summary = describeOnly([
+      thread("s-lead", { status: "idle" }),
+      thread("s-done", { ...done(30), createdAt: at(2) }),
+      thread("s-working", { createdAt: at(3), status: "busy" }),
+      thread("s-quiet", { createdAt: at(4), status: "idle" }),
+      thread("s-waiting", { createdAt: at(5), openRequests: [ask("r-1")] }),
+    ]).summary;
+
+    expect(summary?.membersByUrgency.map((member) => member.sessionId)).toEqual([
+      "s-waiting",
+      "s-working",
+      "s-lead",
+      "s-done",
+      "s-quiet",
+    ]);
+  });
+
   it("keeps a summary with no dot for a group with nothing counted, so the row still unfolds", () => {
     const summary = describeOnly([
       thread("s-1", done(30)),
       thread("s-2", { ...done(31), createdAt: at(2) }),
     ]).summary;
 
-    expect(summary).toEqual({ dots: [], hiddenCount: 0, label: "2 threads: 2 done" });
+    expect(summary).toMatchObject({ dots: [], hiddenCount: 0, label: "2 threads: 2 done" });
   });
 });
 

@@ -277,7 +277,7 @@ export {
   type Waiting,
   type WaitingAssistant,
   type WaitingRunSession,
-  type WaitingThread,
+  type WaitingSession,
 } from "./waiting";
 export { buildIdOptions } from "./id-options";
 export { readJsonObject, readStringList } from "./json-shape";
@@ -613,7 +613,7 @@ export { decideOfficeSeating, type OfficeRoom, type OfficeSeating } from "./offi
 export {
   decideArrivedAt,
   isRestingPose,
-  isThreadSeated,
+  isSessionSeated,
   listWork,
   type OfficePose,
   type Work,
@@ -728,7 +728,7 @@ export {
   type ModelPill,
 } from "./threads/composer-fields";
 export { holdsMessageContent, readThreadConfig } from "./threads/config";
-export { countThreadsByPose, type ThreadCounts } from "./threads/counts";
+export { countSessionsByPose, type SessionCounts } from "./threads/counts";
 export { buildDraftView, type DraftAddress, type DraftView } from "./threads/draft-view";
 export type {
   MessageDraft,
@@ -825,30 +825,28 @@ export {
   type ProjectGroup,
   type WorkspaceGroup,
 } from "./threads/groups";
-export { orderProjectIdsByNewestThread } from "./threads/project-rows";
-export { buildSessionGroups, type SessionGroup } from "./threads/session-groups";
 export {
-  describeGroupRows,
+  buildSessionGroups,
+  orderProjectIdsByNewestGroup,
+  type SessionGroup,
+} from "./threads/session-groups";
+export {
   listGroupLines,
   type GroupAsk,
-  type GroupLines,
   type GroupMember,
   type GroupRow,
-  type GroupRowSources,
   type GroupSummary,
   type SessionDot,
 } from "./threads/group-row";
 export {
-  buildGroupSidebar,
-  type DoneGroupRow,
-  type GroupDoneShelf,
-  type GroupSidebar,
-  type ProjectGroupSection,
-} from "./threads/group-sidebar";
-export {
+  buildSidebarSections,
   DONE_SHELF_LIMIT,
   DONE_SHELF_STEP,
+  type DoneShelf,
+  type DoneShelfRow,
   type ExpandedSections,
+  type ProjectSection,
+  type SidebarSections,
   type WaitingSection,
 } from "./threads/sidebar-sections";
 export {

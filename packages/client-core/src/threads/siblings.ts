@@ -90,10 +90,20 @@ export const listWorkspaceSessionTabs = (
  * - A session with no role is labelled with its full title, which the screen
  *   cuts short. Titles are not numbered.
  *
- * The header's tabs and the sidebar's unfolded list both call this, so they
- * name a session the same way, as long as they pass the same sessions: every
- * session of the workspace, exited ones and Agent sessions included
- * (`listSessionsOfWorkspace`). A shorter list can number differently.
+ * The header's tabs and the sidebar's rows both call this, so they name a
+ * session the same way, as long as they pass the same Threads and Agent
+ * sessions. A run's step session and an assistant's session have no role, so
+ * they never change another session's number.
+ *
+ * - The header passes every session of the workspace that it holds
+ *   (`listSessionsOfWorkspace`), exited Agent sessions included.
+ * - The sidebar passes the sessions of a group (`SessionGroup.sessions`):
+ *   the workspace's Threads and Agent sessions that it holds.
+ *
+ * Both read the sidebar's sessions, so both lack the same Threads, those
+ * marked Done long ago, and they number alike.
+ *
+ * A list that lacks one of those sessions can number differently.
  */
 export const labelWorkspaceSessions = (
   sessions: readonly Session[],

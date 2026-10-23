@@ -1,6 +1,6 @@
 /**
  * Helpers for the desktop sidebar's rows: where a row's workspace is named,
- * when a thread last started, and the order of the projects.
+ * and when a thread last started.
  *
  * The desktop sorts by when each thread last started: created, or reopened
  * after it was marked Done, whichever is later. It does not sort by latest
@@ -17,7 +17,6 @@ import {
   type Session,
   type Workspace,
 } from "@hercule/contract";
-import { isMarkedDone } from "./status";
 import { buildWorkspaceLabelParts, type WorkspaceLabel } from "./workspaces";
 
 /** Matches the end of a generated branch name: the last hex digits of the session id. */
@@ -85,46 +84,4 @@ export const buildThreadPlaceLabel = ({
   if (workspace?.kind === "primary") return buildWorkspaceLabelParts(workspace, resources, runners);
   if (machine !== null) return { clip: machine, keep: "" };
   return { clip: workspace === undefined ? "No workspace" : "unknown machine", keep: "" };
-};
-
-/**
- * Returns the ids of the projects that hold threads, in the order the
- * desktop sidebar lists them: by when the project's newest thread started
- * (`pickLastStartedAt`), newest first, and projects that tie by project id.
- * The result is a plain array of ids, so a caller that reads it through
- * React Query's `select` keeps the same array while nothing changed.
- *
- * It counts the threads the sidebar counts and no others: a session with no
- * agent, not marked Done, that belongs to a project. A Done thread leaves
- * its project for the Done shelf, an Agent's session belongs to that Agent,
- * and a session with no project is in no project's list. A project with no
- * such thread is not in the result. The sidebar sorts those last, by project
- * id, and so should a caller that lists them.
- *
- * It ignores a Draft Thread on purpose. A draft is not a session until it
- * starts, and the sidebar moves the project that holds the draft being
- * written to the top. This order is for the lists of other screens, and they should not reorder their project groups
- * when the user opens or abandons a draft.
- *
- * It does not know which projects exist. The sidebar files the threads of a
- * deleted project under "No project", so a caller drops ids it does not
- * list, as `groupByProject` does.
- */
-export const orderProjectIdsByNewestThread = (sessions: readonly Session[]): readonly string[] => {
-  const newestByProject = new Map<string, number>();
-  for (const session of sessions) {
-    if (session.kind !== "thread" || isMarkedDone(session) || session.projectId === null) continue;
-    const started = Date.parse(pickLastStartedAt(session));
-    newestByProject.set(
-      session.projectId,
-      Math.max(newestByProject.get(session.projectId) ?? 0, started),
-    );
-  }
-  return [...newestByProject]
-    .map(([projectId, newest]) => ({ projectId, newest }))
-    .sort(
-      (a, b) =>
-        b.newest - a.newest || (a.projectId < b.projectId ? -1 : a.projectId > b.projectId ? 1 : 0),
-    )
-    .map(({ projectId }) => projectId);
 };

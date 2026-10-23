@@ -7,7 +7,7 @@ import type { Pose } from "./pose";
 import { isMarkedDone } from "./status";
 
 /** How many sessions are working, waiting on the user, and idle. */
-export interface ThreadCounts {
+export interface SessionCounts {
   readonly working: number;
   readonly waiting: number;
   readonly idle: number;
@@ -23,10 +23,10 @@ export interface ThreadCounts {
  * - Threads marked Done, waiting or not, because the user put them away;
  * - a session `poses` holds no pose for.
  */
-export const countThreadsByPose = (
+export const countSessionsByPose = (
   sessions: readonly Session[],
   poses: ReadonlyMap<string, Pose>,
-): ThreadCounts => {
+): SessionCounts => {
   const counts = { working: 0, waiting: 0, idle: 0 };
   for (const session of sessions) {
     if (isMarkedDone(session)) continue;

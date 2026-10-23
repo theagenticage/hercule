@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSessionGroups,
   listWaiting,
   listWaitingRunSessions,
   type AssistantRow,
@@ -63,7 +64,13 @@ const waitingAssistant = (id: string, minutes: number): AssistantRow => ({
  * "Deploy · <id>", last active at 09:`minutes`.
  */
 const waitingRunSession = (id: string, minutes: number): Session =>
-  waiting(id, minutes, { title: `Deploy · ${id}`, kind: "run", runId: "run-1", stepId: id });
+  waiting(id, minutes, {
+    title: `Deploy · ${id}`,
+    kind: "run",
+    agentId: "agent-1",
+    runId: "run-1",
+    stepId: id,
+  });
 
 /** Returns the key of the row of the group of the lone thread `id`, which has no workspace. */
 const rowOf = (id: string): string => `group:session:${id}`;
@@ -114,7 +121,7 @@ const buildFixtureSidebar = ({
     unfoldedGroups,
     quietShownGroups,
     lastOpen,
-    waiting: listWaiting(threads, assistantRows),
+    waiting: listWaiting(threads, buildSessionGroups(threads), assistantRows),
     waitingRunSessions: listWaitingRunSessions(runSessions),
     projects,
     workspaces,

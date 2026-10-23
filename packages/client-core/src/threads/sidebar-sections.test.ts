@@ -1,6 +1,6 @@
 /**
- * Tests `buildGroupSidebar`, which decides the rows the sidebar shows for its
- * groups of sessions, and how many each section hides. The tests check that:
+ * Tests `buildSidebarSections`, which decides the rows the sidebar shows for
+ * its groups of sessions, and how many each section hides. The tests check that:
  *
  * - Waiting on you shows its first 3 entries and counts the rest;
  * - a group sits under its lead's project, a deleted project's groups sit
@@ -18,10 +18,14 @@
 import type { OpenRequest, Session } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import type { Waiting } from "../waiting";
-import { buildGroupSidebar, type GroupSidebar } from "./group-sidebar";
 import type { DraftPlace } from "./groups";
 import { buildSessionGroups } from "./session-groups";
-import { DONE_SHELF_LIMIT, type ExpandedSections } from "./sidebar-sections";
+import {
+  buildSidebarSections,
+  DONE_SHELF_LIMIT,
+  type ExpandedSections,
+  type SidebarSections,
+} from "./sidebar-sections";
 import {
   MOSS,
   OPS_PROJECT,
@@ -57,8 +61,8 @@ const thread = (id: string, minute: number, over: Partial<Session> = {}): Sessio
 
 const done = (minute: number): Pick<Session, "done"> => ({ done: { at: at(minute), by: "user" } });
 
-const buildWaitingThread = (sessionId: string): Waiting => ({
-  kind: "thread",
+const buildWaitingSession = (sessionId: string): Waiting => ({
+  kind: "session",
   sessionId,
   requestId: `r-${sessionId}`,
   title: "A thread",
@@ -72,7 +76,7 @@ const buildWaitingThread = (sessionId: string): Waiting => ({
   activityAt: at(0),
 });
 
-/** Returns the sidebar of `sessions`, the way the desktop calls `buildGroupSidebar`. */
+/** Returns the sidebar of `sessions`, the way the desktop calls `buildSidebarSections`. */
 const build = (
   sessions: readonly Session[],
   over: {
@@ -82,8 +86,8 @@ const build = (
     doneShelfLimit?: number | null;
     selectedId?: string | null;
   } = {},
-): GroupSidebar =>
-  buildGroupSidebar({
+): SidebarSections =>
+  buildSidebarSections({
     groups: buildSessionGroups(sessions),
     projects: [WEBSHOP_PROJECT, OPS_PROJECT],
     workspaces: [PRIMARY],
@@ -99,7 +103,7 @@ const build = (
   });
 
 /** Returns the leads of the rows each project shows, by project id (`none` for no project). */
-const listShown = (sidebar: GroupSidebar): Record<string, string[]> =>
+const listShown = (sidebar: SidebarSections): Record<string, string[]> =>
   Object.fromEntries(
     sidebar.projects.map((project) => [
       project.projectId ?? "none",
@@ -107,13 +111,13 @@ const listShown = (sidebar: GroupSidebar): Record<string, string[]> =>
     ]),
   );
 
-describe("buildGroupSidebar: Waiting on you", () => {
+describe("buildSidebarSections: Waiting on you", () => {
   it("is null when nothing waits", () => {
     expect(build([thread("s-1", 0)]).waiting).toBeNull();
   });
 
   it("shows the first 3 entries and counts the rest, or all of them when expanded", () => {
-    const waiting = ["a", "b", "c", "d", "e"].map(buildWaitingThread);
+    const waiting = ["a", "b", "c", "d", "e"].map(buildWaitingSession);
 
     const collapsed = build([], { waiting }).waiting;
     const expanded = build([], { waiting, expanded: { ...COLLAPSED, waiting: true } }).waiting;
@@ -125,7 +129,7 @@ describe("buildGroupSidebar: Waiting on you", () => {
   });
 });
 
-describe("buildGroupSidebar: the projects", () => {
+describe("buildSidebarSections: the projects", () => {
   it("puts a group under its lead's project, even when a partner works in another", () => {
     const sidebar = build([
       thread("s-lead", 0, { workspaceId: "w-1" }),
@@ -216,12 +220,12 @@ describe("buildGroupSidebar: the projects", () => {
   });
 });
 
-describe("buildGroupSidebar: the cap", () => {
+describe("buildSidebarSections: the cap", () => {
   /** Returns `count` idle groups, the lead `s-<n>` started at minute `n`, so `s-0` is the oldest. */
   const buildIdle = (count: number): Session[] =>
     Array.from({ length: count }, (_, index) => thread(`s-${String(index)}`, index));
 
-  const shownIn = (sidebar: GroupSidebar): string[] =>
+  const shownIn = (sidebar: SidebarSections): string[] =>
     sidebar.projects[0]?.rows.map((row) => row.leadId) ?? [];
 
   it("shows 5 groups and counts the rest behind its more row", () => {
@@ -320,7 +324,7 @@ describe("buildGroupSidebar: the cap", () => {
   });
 });
 
-describe("buildGroupSidebar: the Done shelf", () => {
+describe("buildSidebarSections: the Done shelf", () => {
   it("holds a group once every Thread is Done and every Agent session has ended, and counts groups", () => {
     const lead = (id: string, minute: number, over: Partial<Session> = {}) =>
       thread(id, minute, { workspaceId: `w-${id}`, ...over });

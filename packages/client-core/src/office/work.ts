@@ -71,23 +71,37 @@ export const isRestingPose = (pose: OfficePose): boolean =>
 const AT_WORK_POSES: ReadonlySet<Pose> = new Set<Pose>(["working", "waiting", "idle"]);
 
 /**
- * Checks whether a Thread whose pose is `pose` is work in progress;
- * `markedDone` says whether the user marked it Done. A Thread is at work
- * until it is marked Done, in any pose, so the Office seats every thread
- * the sidebar lists in a project. An asleep or away Thread is still work
- * the user has not finished. An asleep one's process ended, at a runner
- * restart for one, and the next message resumes it; an away one cannot be
- * reached until the user acts or its runner returns. Both rest in the
- * Lounge, as an idle one does (`isRestingPose`). A Done Thread
- * that waits on the user stays until it is answered, so the Office never
- * hides a Request.
+ * Checks whether a Thread or an Agent's session whose pose is `pose` is work
+ * in progress, and so seated in the Office. A session of a run or of an
+ * assistant is never seated by this rule: a run seats its sessions by the
+ * run, and an assistant always keeps to its corner.
+ *
+ * - A Thread is at work until it is marked Done, in any pose, so the Office
+ *   seats every thread the sidebar lists in a project. An asleep or away
+ *   Thread is still work the user has not finished. An asleep one's process
+ *   ended, at a runner restart for one, and the next message resumes it; an
+ *   away one cannot be reached until the user acts or its runner returns.
+ *   Both rest in the Lounge, as an idle one does (`isRestingPose`). A Done
+ *   Thread that waits on the user stays until it is answered, so the Office
+ *   never hides a Request.
+ * - An Agent's session is at work while it is working, waiting or idle. It
+ *   cannot be marked Done, so it leaves when it exits.
  *
  * The sidebar and the Go menu ask this while the Office is open, to open a
- * thread in the Office's drawer or on its own screen, so they always agree
- * with `listWork` about which threads are in the Office.
+ * session in the Office's drawer or on its own screen, so they always agree
+ * with `listWork` about which sessions are in the Office.
  */
-export const isThreadSeated = (pose: Pose, markedDone: boolean): boolean =>
-  !markedDone || pose === "waiting";
+export const isSessionSeated = (session: Session, pose: Pose): boolean => {
+  switch (session.kind) {
+    case "thread":
+      return !isMarkedDone(session) || pose === "waiting";
+    case "agent":
+      return AT_WORK_POSES.has(pose);
+    case "run":
+    case "assistant":
+      return false;
+  }
+};
 
 /**
  * Returns the pose of a session of a run's agent step:
@@ -157,15 +171,15 @@ const isRunFinished = (
  * apart by id, so the order never depends on the order of `sessions`. Each
  * kind of work has its own rule for when it is over:
  *
- * - A Thread is at work while `isThreadSeated` holds: until it is marked
+ * - A Thread is at work while `isSessionSeated` holds: until it is marked
  *   Done, in any pose. One marked Done that waits on the user stays until
  *   it is answered. It ended when it was marked Done: no record holds when
  *   it was answered.
  * - A Run is at work while it has not finished, with every session its
  *   agent steps started, in any pose. A session whose step has finished is
  *   `done`. When the run finishes, its sessions all leave together.
- * - An Agent's session outside a run is at work while it is working,
- *   waiting or idle. It cannot be marked Done, so it ends when it exits. The
+ * - An Agent's session outside a run is at work while `isSessionSeated`
+ *   holds: working, waiting or idle. It cannot be marked Done, so it ends when it exits. The
  *   record keeps no pose from before the exit, so ended, it is `idle`: its
  *   last turn had ended.
  * - An assistant's session is no work: the assistant is always there.
@@ -236,7 +250,7 @@ export const listWork = ({
       case "thread": {
         const pose = decideThreadPose(session, runner);
         const doneAt = session.done?.at;
-        if (isThreadSeated(pose, isMarkedDone(session))) {
+        if (isSessionSeated(session, pose)) {
           addSessionWork("thread", session, pose, null);
         } else if (isEndedSince(doneAt)) {
           addSessionWork("thread", session, pose, doneAt);
@@ -245,7 +259,7 @@ export const listWork = ({
       }
       case "agent": {
         const pose = decideThreadPose(session, runner);
-        if (AT_WORK_POSES.has(pose)) {
+        if (isSessionSeated(session, pose)) {
           addSessionWork("agent", session, pose, null);
         } else if (session.status === "exited" && isEndedSince(session.exitedAt)) {
           addSessionWork("agent", session, "idle", session.exitedAt);

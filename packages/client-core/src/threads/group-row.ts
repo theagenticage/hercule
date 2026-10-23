@@ -16,13 +16,14 @@ import type {
   Session,
   Workspace,
 } from "@hercule/contract";
+import { isSessionSeated } from "../office/work";
 import { decideGroupProjectId } from "./groups";
 import { findModelName } from "./model-name";
 import { findOldestOpenRequest } from "./oldest-request";
 import { decideThreadPose, decideThreadRowStatus, type Pose, type ThreadRowStatus } from "./pose";
 import { buildThreadPlaceLabel } from "./project-rows";
 import { formatRequestQuestion } from "./request-question";
-import type { SessionGroup } from "./session-groups";
+import { decideAskerLabel, type SessionGroup } from "./session-groups";
 import { labelWorkspaceSessions } from "./siblings";
 import { describeThreadPlace } from "./thread-place";
 import { buildWorkspaceLabelParts, type WorkspaceLabel } from "./workspaces";
@@ -52,6 +53,8 @@ export interface GroupMember {
   readonly activityAt: string;
   /** Whether the session counts toward the row's status, dots and waiting. */
   readonly counted: boolean;
+  /** Whether the Office seats the session at work, as `isSessionSeated` decides it. */
+  readonly seated: boolean;
   /** Whether the session is a Thread marked Done. */
   readonly done: boolean;
   readonly dot: SessionDot;
@@ -90,6 +93,12 @@ export interface GroupSummary {
   /** How many counted sessions the dots leave out: the "+n" after them, or 0 for none. */
   readonly hiddenCount: number;
   /**
+   * Every session of the group, the most urgent dot first: waiting, then
+   * working, then quiet, and in the group's order among equals. The hover
+   * card lists them in this order.
+   */
+  readonly membersByUrgency: readonly GroupMember[];
+  /**
    * Every session of the group in words, the Done and ended ones as parts of
    * their own: "10 threads: 1 waiting on you, 3 working, 4 quiet, 2 done", or
    * "3 sessions: 1 working, 1 done, 1 ended". It says "threads" when every
@@ -111,9 +120,11 @@ export interface GroupRow {
   /** The pose of the session that decides the status. */
   readonly pose: Pose;
   /**
-   * The status of the most urgent counted session: waiting first, then
-   * working, then queued, then the rest, with the most recently active first
-   * among equals. A group with no counted session shows its lead's.
+   * The status of the session that asked first while a counted session waits,
+   * so the status and the second line (`ask`) describe the same session.
+   * Otherwise the status of the most urgent counted session: working, then
+   * queued, then the rest, with the most recently active first among equals.
+   * A group with no counted session shows its lead's.
    */
   readonly status: ThreadRowStatus;
   /** When the status's session was last active, which an `age` status counts from. */
@@ -134,6 +145,12 @@ export interface GroupRow {
   readonly members: readonly GroupMember[];
   /** The Threads of the group, in the group's order, whether Done or not. */
   readonly threadIds: readonly string[];
+  /**
+   * The Threads a Done press on the row marks: those of the group not yet
+   * marked Done, in the group's order. An Agent session is never among them,
+   * because it cannot be marked Done.
+   */
+  readonly doneIds: readonly string[];
   /** The dots after the row's name, or `null` for a group of one session, which has no dots and does not unfold. */
   readonly summary: GroupSummary | null;
   /** When the group last started, as `SessionGroup.lastStartedAt` says. */
@@ -190,9 +207,9 @@ const decideDot = (counted: boolean, pose: Pose): SessionDot => {
  * them. Only counted members get a dot; every member is in the words.
  */
 const summarizeMembers = (members: readonly GroupMember[]): GroupSummary => {
-  const counted = members
-    .filter((member) => member.counted)
-    .toSorted((a, b) => rankDot(a.dot) - rankDot(b.dot));
+  // `toSorted` is stable, so equals keep the group's order.
+  const membersByUrgency = members.toSorted((a, b) => rankDot(a.dot) - rankDot(b.dot));
+  const counted = membersByUrgency.filter((member) => member.counted);
   const shown = counted.slice(0, MAX_DOTS);
   const countOf = (dot: SessionDot): number =>
     counted.filter((member) => member.dot === dot).length;
@@ -209,6 +226,7 @@ const summarizeMembers = (members: readonly GroupMember[]): GroupSummary => {
   return {
     dots: shown.map((member) => member.dot),
     hiddenCount: counted.length - shown.length,
+    membersByUrgency,
     label: `${String(members.length)} ${noun}: ${parts.join(", ")}`,
   };
 };
@@ -218,9 +236,10 @@ const summarizeMembers = (members: readonly GroupMember[]): GroupSummary => {
  * decision that does not depend on the user's choices (which section is
  * open, which session is selected) is made here:
  *
- * - the status of the most urgent counted session;
- * - the second line: the question of the counted session that asked first
- *   (the one whose last activity is oldest), or else where the lead works;
+ * - the status and the second line: when a counted session waits, the one
+ *   that asked first (the one whose last activity is oldest) decides both, so
+ *   they describe the same session; otherwise the status is the most urgent
+ *   counted session's and the second line shows where the lead works;
  * - the dots, none for a group of one session;
  * - the project, resolved so that a deleted project, and a lead with none,
  *   give `null`.
@@ -258,6 +277,7 @@ export const describeGroupRows = ({
         status: decideThreadRowStatus(session, runner),
         activityAt: session.lastActivityAt,
         counted,
+        seated: isSessionSeated(session, pose),
         done: session.done !== undefined,
         dot: decideDot(counted, pose),
         question: oldest === null ? null : formatRequestQuestion(oldest),
@@ -272,18 +292,22 @@ export const describeGroupRows = ({
     );
     const countedMembers = members.filter((member) => member.counted);
 
-    // `toSorted` is stable, so equals keep the group's order.
-    const statusMember =
-      countedMembers.toSorted(
-        (a, b) =>
-          rankUrgency(a.status) - rankUrgency(b.status) ||
-          Date.parse(b.activityAt) - Date.parse(a.activityAt),
-      )[0] ?? lead;
+    // The session that asked first is the one that has been still the longest. It decides both the
+    // status and the second line, so the two never describe different sessions.
     const asker = countedMembers
       .flatMap((member) =>
         member.question === null ? [] : [{ member, question: member.question }],
       )
       .toSorted((a, b) => Date.parse(a.member.activityAt) - Date.parse(b.member.activityAt))[0];
+    // Without an asker, no counted session waits. `toSorted` is stable, so equals keep the group's order.
+    const statusMember =
+      asker?.member ??
+      countedMembers.toSorted(
+        (a, b) =>
+          rankUrgency(a.status) - rankUrgency(b.status) ||
+          Date.parse(b.activityAt) - Date.parse(a.activityAt),
+      )[0] ??
+      lead;
 
     const projectId = decideGroupProjectId(group.lead.projectId, listedProjectIds);
     const projectName = projectId === null ? null : (projectNames.get(projectId) ?? null);
@@ -304,10 +328,7 @@ export const describeGroupRows = ({
         asker === undefined
           ? null
           : {
-              askerLabel:
-                members.length === 1 || asker.member.sessionId === group.lead.id
-                  ? null
-                  : asker.member.label,
+              askerLabel: decideAskerLabel(group, asker.member.sessionId, asker.member.label),
               question: asker.question,
             },
       providerId: (asker?.member ?? lead).providerId,
@@ -328,6 +349,9 @@ export const describeGroupRows = ({
       branch,
       members,
       threadIds: members.filter((member) => member.kind === "thread").map((m) => m.sessionId),
+      doneIds: members
+        .filter((member) => member.kind === "thread" && !member.done)
+        .map((member) => member.sessionId),
       summary: members.length < 2 ? null : summarizeMembers(members),
       lastStartedAt: group.lastStartedAt,
       doneAt: group.doneAt,

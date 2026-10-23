@@ -1,10 +1,10 @@
 /**
- * Tests `countThreadsByPose`, which counts the threads for the line at the
- * foot of the sidebar.
+ * Tests `countSessionsByPose`, which counts the Threads and the Agents'
+ * sessions for the line at the foot of the sidebar.
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "@hercule/contract";
-import { countThreadsByPose } from "./counts";
+import { countSessionsByPose } from "./counts";
 import type { Pose } from "./pose";
 import { buildSession } from "./workspaces.testing";
 
@@ -17,7 +17,7 @@ const buildThreads = (
   poses: new Map(poses.map((pose, index) => [`t${String(index)}`, pose])),
 });
 
-describe("countThreadsByPose", () => {
+describe("countSessionsByPose", () => {
   it("counts the working, waiting and idle threads", () => {
     const { threads, poses } = buildThreads([
       "working",
@@ -28,12 +28,12 @@ describe("countThreadsByPose", () => {
       "idle",
       "waiting",
     ]);
-    expect(countThreadsByPose(threads, poses)).toEqual({ working: 2, waiting: 2, idle: 3 });
+    expect(countSessionsByPose(threads, poses)).toEqual({ working: 2, waiting: 2, idle: 3 });
   });
 
   it("does not count asleep or away threads", () => {
     const { threads, poses } = buildThreads(["asleep", "away", "asleep", "idle"]);
-    expect(countThreadsByPose(threads, poses)).toEqual({ working: 0, waiting: 0, idle: 1 });
+    expect(countSessionsByPose(threads, poses)).toEqual({ working: 0, waiting: 0, idle: 1 });
   });
 
   it("does not count threads marked Done, even one that waits", () => {
@@ -41,10 +41,17 @@ describe("countThreadsByPose", () => {
     const { threads, poses } = buildThreads(["idle", "waiting", "idle", "working"], (index) =>
       index < 2 ? done : {},
     );
-    expect(countThreadsByPose(threads, poses)).toEqual({ working: 1, waiting: 0, idle: 1 });
+    expect(countSessionsByPose(threads, poses)).toEqual({ working: 1, waiting: 0, idle: 1 });
+  });
+
+  it("counts an Agent's session as it counts a thread", () => {
+    const { threads, poses } = buildThreads(["working", "idle"], (index) =>
+      index === 0 ? { agentId: "a-1" } : {},
+    );
+    expect(countSessionsByPose(threads, poses)).toEqual({ working: 1, waiting: 0, idle: 1 });
   });
 
   it("returns zero for every part when there are no threads", () => {
-    expect(countThreadsByPose([], new Map())).toEqual({ working: 0, waiting: 0, idle: 0 });
+    expect(countSessionsByPose([], new Map())).toEqual({ working: 0, waiting: 0, idle: 0 });
   });
 });

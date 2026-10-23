@@ -31,7 +31,6 @@ import {
 import { Link } from "@tanstack/react-router";
 import {
   describePose,
-  isThreadSeated,
   type Pose,
   type SessionDot,
   type ThreadRowStatus,
@@ -1099,7 +1098,7 @@ export const DoneGroupRow = memo(function DoneGroupRow({
     >
       <ThreadLink
         sessionId={openId}
-        seated={isThreadSeated(pose, true)}
+        seated={pose === "waiting"}
         officeOpen={officeOpen}
         className={unsent ? "side-row is-unsent" : "side-row"}
         data-key={itemKey}

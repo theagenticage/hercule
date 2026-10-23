@@ -5,6 +5,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
+  buildSessionGroups,
   listWaiting,
   listWaitingRunSessions,
   type Waiting,
@@ -22,7 +23,7 @@ import { liveAgentSessionsQuery, threadAndAgentSessionsQuery } from "./queries";
 export function useWaiting(): Waiting[] {
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const sessions = useSuspenseQuery(threadAndAgentSessionsQuery(client)).data;
-  return listWaiting(sessions, useAssistantRows());
+  return listWaiting(sessions, buildSessionGroups(sessions), useAssistantRows());
 }
 
 /**
