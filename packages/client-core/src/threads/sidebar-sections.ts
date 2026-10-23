@@ -27,6 +27,7 @@
 import type { Waiting } from "../waiting";
 import type { GroupMember, GroupRow } from "./group-row";
 import { decideGroupProjectId, type DraftPlace } from "./groups";
+import { orderGroupProjectIds } from "./session-groups";
 import type { SessionPresentation } from "./session-presentation";
 
 /** How many entries Waiting on you shows before it is expanded. */
@@ -199,8 +200,8 @@ const pickProjectRows = (
  *
  * - the groups with no project last, even when they hold the draft;
  * - otherwise the project that holds the draft being written first;
- * - otherwise by when the project's newest group started, newest first, and
- *   projects that tie by project id.
+ * - otherwise in the order of `orderGroupProjectIds`: by when the project's
+ *   newest group started, newest first, and projects that tie by project id.
  *
  * The draft's project is listed even when it holds no group yet. A draft for
  * a project the list does not hold sits with the groups of no project, as
@@ -221,28 +222,23 @@ const buildProjectSections = (
     if (held === undefined) rowsByProject.set(row.projectId, [row]);
     else held.push(row);
   }
-  if (draftProjectId !== undefined && !rowsByProject.has(draftProjectId))
-    rowsByProject.set(draftProjectId, []);
+  const projectIds = [...orderGroupProjectIds(rows)];
+  if (draftProjectId !== undefined && !projectIds.includes(draftProjectId))
+    projectIds.push(draftProjectId);
 
-  return [...rowsByProject]
-    .map(([projectId, held]) => ({
-      projectId,
-      held,
-      holdsDraft: projectId === draftProjectId,
-      newest: Math.max(0, ...held.map((row) => Date.parse(row.lastStartedAt))),
-    }))
-    .sort(
+  // The sort is stable, so projects the two rules do not separate keep their newest-first order.
+  return projectIds
+    .toSorted(
       (a, b) =>
-        Number(a.projectId === null) - Number(b.projectId === null) ||
-        Number(b.holdsDraft) - Number(a.holdsDraft) ||
-        b.newest - a.newest ||
-        compareText(a.projectId ?? "", b.projectId ?? ""),
+        Number(a === null) - Number(b === null) ||
+        Number(b === draftProjectId) - Number(a === draftProjectId),
     )
-    .map(({ projectId, held, holdsDraft }) => {
+    .map((projectId) => {
+      const held = rowsByProject.get(projectId) ?? [];
       const shown = pickProjectRows(held, expanded.projectIds.has(projectId), openRow);
       return {
         projectId,
-        holdsDraft,
+        holdsDraft: projectId === draftProjectId,
         rows: shown.map(showRow),
         hiddenCount: held.length - shown.length,
         waitingCount: held.reduce(

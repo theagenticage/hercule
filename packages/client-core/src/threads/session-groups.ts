@@ -93,17 +93,40 @@ export const buildSessionGroups = (sessions: readonly Session[]): readonly Sessi
 };
 
 /**
- * Returns the ids of the projects that hold work, in the order the desktop
- * sidebar lists them: by when the project's newest group started
- * (`SessionGroup.lastStartedAt`), newest first, and projects that tie by
- * project id. The result is a plain array of ids, so a caller that reads it
- * through React Query's `select` keeps the same array while nothing changed.
+ * Returns the distinct project ids of `groups`, in the order the desktop
+ * sidebar and the project lists of other screens share: by when the
+ * project's newest group started (`lastStartedAt`), newest first, and
+ * projects that tie by project id. `null` stands for a group in no project.
  *
- * It follows the sidebar's rule. A group belongs to its lead's project, and a
- * group on the Done shelf is in none. A partner's spawn never moves a
- * project, because it does not move its group. A project with no group in
- * its list is not in the result; the sidebar sorts those last, by project
- * id, and so should a caller that lists them.
+ * The sidebar adds its own rules on top of this order (the draft's project
+ * first, no project last).
+ */
+export const orderGroupProjectIds = (
+  groups: readonly { readonly projectId: string | null; readonly lastStartedAt: string }[],
+): readonly (string | null)[] => {
+  const newestByProject = new Map<string | null, number>();
+  for (const { projectId, lastStartedAt } of groups) {
+    newestByProject.set(
+      projectId,
+      Math.max(newestByProject.get(projectId) ?? 0, Date.parse(lastStartedAt)),
+    );
+  }
+  return [...newestByProject.keys()].sort(
+    (a, b) => newestByProject.get(b)! - newestByProject.get(a)! || compareText(a ?? "", b ?? ""),
+  );
+};
+
+/**
+ * Returns the ids of the projects that hold work, in the order the desktop
+ * sidebar lists them (`orderGroupProjectIds`). The result is a plain array of
+ * ids, so a caller that reads it through React Query's `select` keeps the same
+ * array while nothing changed.
+ *
+ * A group belongs to its lead's project, and a group on the Done shelf is in
+ * none. A partner's spawn never moves a project, because it does not move its
+ * group. A project with no group in its list is not in the result; the
+ * sidebar sorts those last, by project id, and so should a caller that lists
+ * them.
  *
  * It ignores a Draft Thread on purpose. A draft is not a session until it
  * starts, and the sidebar moves the project that holds the draft being
@@ -115,16 +138,9 @@ export const buildSessionGroups = (sessions: readonly Session[]): readonly Sessi
  * deleted project under "No project", so a caller drops ids it does not
  * list, as `groupByProject` does.
  */
-export const orderProjectIdsByNewestGroup = (sessions: readonly Session[]): readonly string[] => {
-  const newestByProject = new Map<string, number>();
-  for (const group of buildSessionGroups(sessions)) {
-    const projectId = group.lead.projectId;
-    if (group.doneAt !== null || projectId === null) continue;
-    const started = Date.parse(group.lastStartedAt);
-    newestByProject.set(projectId, Math.max(newestByProject.get(projectId) ?? 0, started));
-  }
-  return [...newestByProject]
-    .map(([projectId, newest]) => ({ projectId, newest }))
-    .sort((a, b) => b.newest - a.newest || compareText(a.projectId, b.projectId))
-    .map(({ projectId }) => projectId);
-};
+export const orderProjectIdsByNewestGroup = (sessions: readonly Session[]): readonly string[] =>
+  orderGroupProjectIds(
+    buildSessionGroups(sessions)
+      .filter((group) => group.doneAt === null)
+      .map((group) => ({ projectId: group.lead.projectId, lastStartedAt: group.lastStartedAt })),
+  ).filter((projectId): projectId is string => projectId !== null);

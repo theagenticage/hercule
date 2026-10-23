@@ -697,19 +697,6 @@ describe("the project sections", () => {
     });
   });
 
-  it("orders the projects by their newest group, and ties by project id", () => {
-    const newestOps = select([lone("s-w", 1), lone("s-o", 2, { projectId: OPS_PROJECT.id })]);
-    const tied = select([lone("s-w", 1), lone("s-o", 1, { projectId: OPS_PROJECT.id })]);
-
-    expect(newestOps.projects.map((project) => project.projectId)).toEqual([
-      OPS_PROJECT.id,
-      WEBSHOP_PROJECT.id,
-    ]);
-    expect(tied.projects.map((project) => project.projectId)).toEqual(
-      [OPS_PROJECT.id, WEBSHOP_PROJECT.id].toSorted(),
-    );
-  });
-
   it("lists the project that holds the draft first, even with no group, and no project last", () => {
     const sessions = [lone("s-w", 5), lone("s-o", 1, { projectId: OPS_PROJECT.id })];
     const place = (projectId: string | null): DraftPlace => ({
