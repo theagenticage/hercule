@@ -70,6 +70,24 @@ interface DoneRequest {
 const reverseDoneMove = (move: DoneMove): DoneMove => (move === "markDone" ? "reopen" : "markDone");
 
 /**
+ * Cancels the running reads of the thread list and of the record of each of
+ * `sessionIds`, and returns when they have stopped. A query that holds no
+ * data yet is left alone: nothing in it can be put back, and cancelling its
+ * first read would fail the screen that waits for it.
+ */
+const cancelReadsHoldingData = async (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  sessionIds: Iterable<string>,
+): Promise<void> => {
+  const queryKeys = [
+    threadAndAgentSessionsQuery(client).queryKey,
+    ...[...sessionIds].map((id) => sessionQuery(client, id).queryKey),
+  ].filter((queryKey) => queryClient.getQueryData(queryKey) !== undefined);
+  await Promise.all(queryKeys.map((queryKey) => queryClient.cancelQueries({ queryKey })));
+};
+
+/**
  * Reads the thread list, and the record of each of `sessionIds` that is
  * cached, again, without cancelling a read that is running.
  */
@@ -203,7 +221,8 @@ export interface DoneMovesValue extends DoneMoves {
  * later move is still pending, a move's answer is not written to the list:
  * the list already shows the later move, and the answer would briefly put
  * the rows back where the user just moved them from. The last move to finish
- * reads the list, and the Threads moved since the last read, again.
+ * cancels the reads running then, which may hold a state from before its
+ * answer, and reads the list, and the Threads moved since the last read, again.
  *
  * The three functions keep their identity across renders, so the memoized
  * rows that take them do not draw again.
@@ -232,24 +251,13 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
     onMutate: async ({ sessionIds, move, announce }) => {
       // A read that started before the move would answer without it and
       // put the rows back, so it is cancelled; the last move reads again.
-      // A Thread's own record is cancelled only when it is cached. A first
-      // read still running has nothing to put back, and cancelling it would
-      // fail the screen that waits for it.
       // Pending from now, not after the cancelling below, so the moves are
       // applied in the order the user made them.
       const at = new Date().toISOString();
       const pendingMove = { sessionIds, move, at };
       pending.current.add(pendingMove);
       for (const id of sessionIds) movedSinceRead.current.add(id);
-      const cachedIds = sessionIds.filter(
-        (id) => queryClient.getQueryData(sessionQuery(client, id).queryKey) !== undefined,
-      );
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: threadAndAgentSessionsQuery(client).queryKey }),
-        ...cachedIds.map((id) =>
-          queryClient.cancelQueries({ queryKey: sessionQuery(client, id).queryKey }),
-        ),
-      ]);
+      await cancelReadsHoldingData(queryClient, client, sessionIds);
       updateCachedSessions(queryClient, client, sessionIds, (session) =>
         applyDoneMove(session, move, at),
       );
@@ -276,9 +284,18 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
     },
     // Runs after the answer or the error, for a move that succeeded and for
     // one that failed alike.
-    onSettled: (_answered, _error, _request, context) => {
+    onSettled: async (_answered, _error, _request, context) => {
       if (context !== undefined) pending.current.delete(context.pendingMove);
       if (!isLastDoneMove(queryClient)) return;
+      // The moves no longer cover the cached Threads, so a read that started
+      // while one was pending, and answers now, would put back a state from
+      // before the controller's last answer. Cancelling those reads and
+      // reading again is simpler than keeping the moves applied until a read
+      // that started after this point has answered.
+      await cancelReadsHoldingData(queryClient, client, movedSinceRead.current);
+      // A move made while the reads were stopping reads again when it
+      // finishes, and keeps the Threads moved so far in `movedSinceRead`.
+      if (pending.current.size > 0) return;
       readThreadsAgain(queryClient, client, movedSinceRead.current);
       movedSinceRead.current.clear();
     },

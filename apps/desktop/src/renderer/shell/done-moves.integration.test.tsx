@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { matchQuery, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import {
   createClient,
   invalidateWithoutCancelling,
@@ -227,6 +227,30 @@ const startHarness = async (
         expect(queryClient.isFetching()).toBe(0);
       });
     },
+    /** Returns what the cache holds for the thread list. */
+    readCachedThreads: () => queryClient.getQueryData(threadAndAgentSessionsQuery(client).queryKey),
+    /**
+     * Calls `listener` whenever the cache changes the thread list, and
+     * returns the function that stops it.
+     */
+    watchThreads: (listener: () => void) =>
+      queryClient.getQueryCache().subscribe((event) => {
+        if (matchQuery({ queryKey: threadAndAgentSessionsQuery(client).queryKey }, event.query)) {
+          listener();
+        }
+      }),
+    /** Starts the reads of the thread list that a push from the controller starts, and returns at once. */
+    pushThreads: () => {
+      invalidateWithoutCancelling(queryClient, threadAndAgentSessionsQuery(client).queryKey);
+    },
+    waitForMoves: () =>
+      waitFor(() => {
+        expect(queryClient.isMutating()).toBe(0);
+      }),
+    waitForReads: () =>
+      waitFor(() => {
+        expect(queryClient.isFetching()).toBe(0);
+      }),
     readMoves: () =>
       calls
         .filter((call) => call.method === "POST")
@@ -507,6 +531,54 @@ describe("a read that answers while Done moves are pending", () => {
     await waitFor(() => {
       expect(screen.getByText("Thread 2: done")).toBeTruthy();
     });
+    expect(screen.getByText("Thread 1: open")).toBeTruthy();
+  });
+});
+
+describe("a read that started before the last Done move settled", () => {
+  it("cannot put back the Done that a confirmed Reopen undid", async () => {
+    const heldReopen = holdAnswer();
+    const heldRead = holdAnswer();
+    const controller = buildController(OPEN_THREADS);
+    let holdNextRead = false;
+    const { pushThreads, countReads, readCachedThreads, watchThreads, waitForMoves, waitForReads } =
+      await startHarness(controller, {
+        [REOPEN]: heldReopen.handler,
+        "GET /api/v1/sessions": () => {
+          if (!holdNextRead) return { body: { items: controller.readThreads() } };
+          holdNextRead = false;
+          return heldRead.handler();
+        },
+      });
+    const thread = OPEN_THREADS[0]!;
+
+    await userEvent.click(screen.getByRole("button", { name: "Done Thread 1" }));
+    await waitForReads();
+    await userEvent.click(screen.getByRole("button", { name: "Reopen Thread 1" }));
+
+    // The push for the committed Done reaches the app only now, while the
+    // Reopen is on its way, and starts a read that captures Thread 1 done.
+    const doneState = controller.readThreads();
+    holdNextRead = true;
+    const readsBeforePush = countReads();
+    pushThreads();
+    await waitFor(() => {
+      expect(countReads()).toBeGreaterThan(readsBeforePush);
+    });
+    heldReopen.answer(controller.reopen({ body: { sessionIds: [thread.id] } }));
+    await waitForMoves();
+
+    // The older read answers after the Reopen was confirmed.
+    // Records every moment the cache holds Thread 1 done from here on.
+    let shownDone = false;
+    const stopWatching = watchThreads(() => {
+      if (readCachedThreads()?.find((session) => session.id === thread.id)?.done) shownDone = true;
+    });
+    heldRead.answer({ body: { items: doneState } });
+    await waitForReads();
+    stopWatching();
+
+    expect(shownDone).toBe(false);
     expect(screen.getByText("Thread 1: open")).toBeTruthy();
   });
 });
