@@ -293,7 +293,6 @@ export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
   more: 28,
 };
 
-
 /** The space above a section's first item: the book's `.side-sec { padding-top: 8px }`. */
 const SECTION_LEADING = 8;
 
@@ -553,13 +552,7 @@ const buildHoverDetails = (
  */
 const buildGroupContents = (
   row: GroupRow,
-  {
-    unsentKeys,
-    selectedId,
-    unfoldedGroups,
-    quietShownGroups,
-    lastOpen,
-  }: SidebarItemSources,
+  { unsentKeys, selectedId, unfoldedGroups, quietShownGroups, lastOpen }: SidebarItemSources,
   place: { readonly projectName: string; readonly tint: ProjectTint | null },
 ): SidebarItemContent[] => {
   const openId = pickOpenId(row, selectedId, lastOpen);
@@ -599,26 +592,24 @@ const buildGroupContents = (
     quietShown: quietShownGroups.has(row.key),
   });
   contents.push(
-    ...lines.map(
-      (member, index): SidebarItemContent => ({
-        kind: "group-line",
-        key: `line:${member.sessionId}`,
-        groupKey: row.key,
-        groupTitle: row.title,
-        sessionId: member.sessionId,
-        label: member.label,
-        title: member.title,
-        pose: member.pose,
-        seated: isThreadSeated(member.pose, member.done),
-        status: member.status,
-        activityAt: member.status === "age" ? member.activityAt : "",
-        dot: member.dot,
-        done: member.done,
-        providerId: member.providerId,
-        model: member.model,
-        last: foldedQuietCount === 0 && index === lines.length - 1,
-      }),
-    ),
+    ...lines.map((member, index): SidebarItemContent => ({
+      kind: "group-line",
+      key: `line:${member.sessionId}`,
+      groupKey: row.key,
+      groupTitle: row.title,
+      sessionId: member.sessionId,
+      label: member.label,
+      title: member.title,
+      pose: member.pose,
+      seated: isThreadSeated(member.pose, member.done),
+      status: member.status,
+      activityAt: member.status === "age" ? member.activityAt : "",
+      dot: member.dot,
+      done: member.done,
+      providerId: member.providerId,
+      model: member.model,
+      last: foldedQuietCount === 0 && index === lines.length - 1,
+    })),
   );
   if (foldedQuietCount > 0) {
     contents.push({
