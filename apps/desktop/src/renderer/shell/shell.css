@@ -107,7 +107,10 @@
    the edge), and its top is the header's 10px, a 36px pill and an 8px gap.
    It is as wide as the sidebar's toast at the default sidebar width (272px
    less its 12px padding on each side). A classic scroll bar takes room at
-   the right edge, and the toast keeps its 14px from it, as the header does.
+   the right edge, and the toast keeps its 14px from it, as the header does:
+   the toast host adds `is-beside-scrollbar` when it shows the toast over a
+   view that has one (`.has-scrollbar`). A `:has()` on `.main` would do the
+   same in CSS, but then every DOM change inside the main pane re-checks it.
    It lies over every layer of the screen, which the main pane isolates.
 
    It drops in from above, where the sidebar's toast rises from below. */
