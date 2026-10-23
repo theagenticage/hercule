@@ -1,0 +1,745 @@
+/* PROTOTYPE - direction 3, round 2: Workbench, refined. Every rule is scoped under .d-bench2,
+   the window's root. The bench row reuses the stage's 52px thread row (.st-thread, .st-line,
+   .st-detail), and a lone thread is the stage's row itself, so it is exactly today's. */
+
+/* ================================================================== the bench row */
+
+.d-bench2 .b2-bench {
+  position: relative;
+}
+.d-bench2 .b2-bench > .st-thread {
+  position: relative;
+}
+/* Line 2 leaves room at its end for the dots cluster. */
+.d-bench2 .b2-bench.has-crew .st-detail {
+  padding-right: calc(var(--dots) + 4px);
+}
+.d-bench2 .st-detail .st-glyph {
+  color: var(--faint);
+}
+/* The waiting line: what the bench asks of you, in the marigold ink. */
+.d-bench2 .b2-ask {
+  color: var(--you-ink);
+}
+.d-bench2 .b2-asker {
+  font-weight: var(--w-bold);
+}
+.d-bench2 .b2-pr {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.d-bench2 .b2-ok {
+  display: inline-flex;
+  vertical-align: -1px;
+  margin-left: 2px;
+  color: var(--ok);
+}
+.d-bench2 .b2-ok .ic {
+  stroke-width: 2;
+}
+.d-bench2 .b2-noproj::before,
+.d-bench2 .b2-rug--none::before {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--faint);
+}
+.d-bench2 .b2-rug {
+  gap: 0;
+}
+.d-bench2 .b2-rug::before {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+
+/* The dots: a summary in the state colors of the status words. Marigold waits on you, the
+   accent's ink works, an empty ring is quiet. The cluster is one button: it unfolds the bench. */
+.d-bench2 .b2-dot {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.d-bench2 .b2-dot--waiting {
+  background: var(--you);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--you-ink) 35%, transparent);
+}
+.d-bench2 .b2-dot--working {
+  background: var(--accent-ink);
+}
+.d-bench2 .b2-dot--queued {
+  border: 1.5px solid var(--accent-ink);
+}
+.d-bench2 .b2-dot--quiet {
+  border: 1.5px solid var(--faint);
+}
+.d-bench2 .b2-dot--done {
+  background: var(--ok);
+}
+.d-bench2 .b2-more {
+  margin-left: 2px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.d-bench2 .b2-dots {
+  position: absolute;
+  top: 27px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 4px 0 4px;
+  border-radius: var(--r-xs);
+  color: inherit;
+  font: inherit;
+  transition: background var(--dur-1);
+}
+.d-bench2 .b2-dots:hover {
+  background: var(--hover);
+}
+.d-bench2 .b2-dots:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+}
+/* The chevron shows beside the dots on hover and focus, and stays while the bench is unfolded.
+   It sits outside the button's flow, to the left, so the dots never move. */
+.d-bench2 .b2-chev {
+  position: absolute;
+  top: 5px;
+  left: -14px;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity var(--dur-1), transform var(--dur-1) var(--ease-out);
+}
+.d-bench2 .b2-bench:hover .b2-chev,
+.d-bench2 .b2-dots:focus-visible .b2-chev,
+.d-bench2 .b2-dots.is-open .b2-chev {
+  opacity: 1;
+}
+.d-bench2 .b2-dots.is-open .b2-chev {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .d-bench2 .b2-dots.is-new .b2-dot,
+  .d-bench2 .b2-dots.is-new .b2-more {
+    animation: b2-pop 520ms var(--ease-spring) both;
+  }
+  .d-bench2 .b2-dots.is-new .b2-dot:nth-of-type(2) {
+    animation-delay: 90ms;
+  }
+}
+@keyframes b2-pop {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+}
+
+/* Finish crossfades over the status word on hover, as today's Done does. A lone thread's reads Done. */
+.d-bench2 .b2-act {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 48px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+  opacity: 0;
+  transition: opacity var(--dur-1), background var(--dur-1);
+}
+.d-bench2 .b2-act:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.d-bench2 .b2-bench:not(.is-unfolded):hover > .b2-act,
+.d-bench2 .b2-bench > .st-thread:hover .b2-act,
+.d-bench2 .b2-bench:has(> .st-thread :focus-visible) .b2-act {
+  opacity: 1;
+}
+.d-bench2 .b2-bench > .st-thread .side-end,
+.d-bench2 .b2-bench--lone .side-end {
+  transition: opacity var(--dur-1);
+}
+.d-bench2 .b2-bench > .st-thread:hover .st-line .side-end,
+.d-bench2 .b2-bench--lone:hover .st-line .side-end,
+.d-bench2 .b2-bench:has(> .st-thread :focus-visible) .st-line .side-end {
+  opacity: 0;
+}
+.d-bench2 .b2-bench--lone .st-thread:hover {
+  opacity: 1;
+}
+
+/* An unfolded bench's open thread is selected on its own line; the bench row keeps a hint of it. */
+.d-bench2 .side-row.is-within {
+  background: color-mix(in oklab, var(--ink) 3%, transparent);
+}
+
+/* ================================================================== unfolded */
+
+/* One 32px line per thread, indented under the bench, with a hairline that holds them together. */
+.d-bench2 .b2-members {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 1px 0 4px 12px;
+}
+.d-bench2 .b2-members::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 8px;
+  left: 14px;
+  width: 1px;
+  background: var(--line);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .d-bench2 .b2-members {
+    animation: b2-open 200ms var(--ease-out) both;
+  }
+}
+@keyframes b2-open {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.d-bench2 .b2-m {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px 0 12px;
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-13);
+  text-align: left;
+  text-decoration: none;
+  transition: background var(--dur-1);
+}
+.d-bench2 .b2-m:hover {
+  background: var(--hover);
+}
+.d-bench2 .b2-m.is-on {
+  background: var(--selected);
+}
+.d-bench2 .b2-m-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.d-bench2 .b2-m.is-on .b2-m-name {
+  font-weight: var(--w-medium);
+}
+.d-bench2 .b2-m-name.is-title {
+  flex: 1 1 auto;
+  color: var(--muted);
+}
+.d-bench2 .b2-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.d-bench2 .b2-agent .br,
+.d-bench2 .b2-agent svg,
+.d-bench2 .b2-agent .pi {
+  flex: none;
+}
+.d-bench2 .b2-agent .pi {
+  font-size: 11px !important;
+}
+.d-bench2 .b2-m-slot {
+  flex: none;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.d-bench2 .b2-quiet {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.d-bench2 .b2-quiet .ic {
+  color: var(--faint);
+}
+
+/* The status words, wherever this direction draws them outside the stage's row. */
+.d-bench2 .st-end--working {
+  color: var(--accent-ink);
+}
+.d-bench2 .st-end--approval,
+.d-bench2 .st-end--question {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
+
+/* The specimen of the dots rule (?state=rows). */
+.d-bench2 .b2-spec-h {
+  letter-spacing: 0.04em;
+}
+
+/* ================================================================== the sidebar, adjusted */
+
+.d-bench2 .stage-list {
+  mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 28px), transparent);
+}
+.d-bench2 .b2-lens {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  margin: 4px 0 2px;
+  padding: 0 8px 0 6px;
+}
+.d-bench2 .b2-lens-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.d-bench2 .b2-lens-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.d-bench2 .b2-lens-btn b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.d-bench2 .b2-lens-sort {
+  margin-left: auto;
+  color: var(--faint);
+}
+
+/* The Done shelf: a bench finished together is one row. */
+.d-bench2 .b2-shelf .side-h {
+  padding-left: 6px;
+}
+.d-bench2 .b2-shelf-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.d-bench2 .b2-shelf-btn .ic {
+  transition: transform var(--dur-1);
+}
+.d-bench2 .b2-shelf-btn[aria-expanded="true"] .ic {
+  transform: rotate(90deg);
+}
+.d-bench2 .b2-shelf-btn .count {
+  margin-left: 2px;
+}
+.d-bench2 .b2-bench--done {
+  opacity: 0.6;
+}
+.d-bench2 .b2-bench--done:hover,
+.d-bench2 .b2-bench--done:has(.is-on) {
+  opacity: 1;
+}
+.d-bench2 .b2-done-glyph {
+  color: var(--ok) !important;
+}
+.d-bench2 .b2-bench--done .b2-act--reopen {
+  min-width: 64px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .d-bench2 .b2-bench.is-leaving {
+    overflow: hidden;
+    animation: b2-leave 320ms var(--ease-out) forwards;
+  }
+  .d-bench2 .b2-bench.is-arriving {
+    animation: b2-arrive 520ms var(--ease-out) both;
+  }
+}
+@keyframes b2-leave {
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+@keyframes b2-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* ================================================================== the hover card */
+
+/* Read-only and inert, as today's hover card: no pointer events and no focus. */
+.d-bench2 .b2-card {
+  position: fixed;
+  z-index: 30;
+  left: 280px;
+  width: 312px;
+  padding: 12px 12px 10px 14px;
+  border-radius: var(--r-lg);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+  transform: translateX(-4px);
+  transition: opacity var(--dur-1), transform var(--dur-1) var(--ease-out);
+}
+.d-bench2 .b2-card.is-shown {
+  opacity: 1;
+  transform: none;
+}
+.d-bench2 .b2-card-name {
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+  line-height: 18px;
+}
+.d-bench2 .b2-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.d-bench2 .b2-card-meta .proj {
+  flex: none;
+  font-weight: var(--w-regular);
+}
+.d-bench2 .b2-card-meta > span:last-child {
+  flex: none;
+  margin-left: auto;
+  color: var(--faint);
+}
+.d-bench2 .b2-card-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+.d-bench2 .b2-card-place .mono {
+  overflow: hidden;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+}
+.d-bench2 .b2-card-crew {
+  display: flex;
+  flex-direction: column;
+  margin: 10px -4px 0 -6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft);
+}
+.d-bench2 .b2-card-m {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 4px 0 6px;
+  font-size: var(--t-12);
+}
+.d-bench2 .b2-card-name2 {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.d-bench2 .b2-card-name2.is-title {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.d-bench2 .b2-card-slot {
+  flex: none;
+  margin-left: auto;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.d-bench2 .b2-card-more {
+  height: 24px;
+  padding-left: 21px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 24px;
+}
+.d-bench2 .b2-card-hint {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+/* ================================================================== the header */
+
+.d-bench2 .b2-top {
+  gap: 8px;
+}
+.d-bench2 .b2-nav {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.d-bench2 .b2-bench-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 280px;
+  overflow: hidden;
+  padding: 0 6px 0 2px;
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.d-bench2 .b2-top--lone .b2-bench-name {
+  max-width: 420px;
+}
+.d-bench2 .b2-sep {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 6px 0 2px;
+  background: var(--line);
+}
+.d-bench2 .b2-tab {
+  flex: none;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.d-bench2 .b2-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.d-bench2 .b2-nav--a .b2-tab.is-title .b2-tab-label {
+  max-width: 160px;
+}
+.d-bench2 .b2-tab .mark,
+.d-bench2 .b2-tab small {
+  flex: none;
+}
+.d-bench2 .b2-tab[hidden],
+.d-bench2 .b2-over[hidden] {
+  display: none;
+}
+/* Variant c: browser tabs. Every tab gets the same width; the label is cut, the mark stays. */
+.d-bench2 .b2-nav--c .b2-tab {
+  justify-content: flex-start;
+}
+.d-bench2 .b2-nav--c .b2-tab small {
+  display: none;
+}
+.d-bench2 .b2-over {
+  flex: none;
+  gap: 4px;
+  padding: 0 8px 0 10px;
+  color: var(--muted);
+  font: inherit;
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.d-bench2 .b2-over.is-pressed,
+.d-bench2 .b2-switch.is-pressed {
+  background: var(--press);
+  color: var(--ink);
+}
+/* Variant b: one switcher for the open thread, with the bench's dots beside it. */
+.d-bench2 .b2-switch {
+  flex: none;
+  gap: 7px;
+  font: inherit;
+  font-weight: var(--w-medium);
+}
+.d-bench2 .b2-switch b {
+  font-weight: var(--w-bold);
+}
+.d-bench2 .b2-switch span {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.d-bench2 .b2-switch .ic {
+  color: var(--muted);
+}
+.d-bench2 .b2-sum {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 0 6px 0 4px;
+}
+.d-bench2 .b2-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.d-bench2 .b2-prpill {
+  gap: 5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.d-bench2 .b2-prpill .ic {
+  width: 14px;
+  height: 14px;
+}
+.d-bench2 .b2-prpill .b2-ok .ic {
+  width: 12px;
+  height: 12px;
+}
+.d-bench2 .top .pill-btn.is-pressed {
+  background: var(--press);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .d-bench2 .b2-tab.is-new,
+  .d-bench2 .b2-sep.is-new {
+    animation: b2-tab-in 460ms var(--ease-out) both;
+  }
+  .d-bench2 .b2-tab.is-new:last-of-type {
+    animation-delay: 80ms;
+  }
+}
+@keyframes b2-tab-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+}
+.d-bench2 .b2-tab.is-finishing {
+  opacity: 0.35;
+  transition: opacity var(--dur-2);
+}
+
+/* ================================================================== the menu */
+
+.d-bench2 .b2-menu {
+  position: absolute;
+  z-index: 20;
+  min-width: 300px;
+  max-width: 380px;
+  padding: 6px;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 0 var(--glass-edge), var(--shadow-3);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .d-bench2 .b2-menu {
+    animation: b2-arrive 160ms var(--ease-out) both;
+  }
+}
+.d-bench2 .b2-menu-h {
+  padding: 4px 8px 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.d-bench2 .b2-mi {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-13);
+  text-align: left;
+}
+.d-bench2 .b2-mi.is-active {
+  background: var(--hover);
+}
+.d-bench2 .b2-mi.is-current {
+  background: var(--selected);
+}
+.d-bench2 .b2-mi:focus-visible {
+  outline: none;
+}
+.d-bench2 .b2-mi-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.d-bench2 .b2-mi-name.is-title {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.d-bench2 .b2-mi-slot {
+  flex: none;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================== the main pane */
+
+.d-bench2 .stage-x-name {
+  flex: none;
+}
+.d-bench2 .b2-stamp {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 46px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* The status words win over the faint ink of the card's, the menu's and the unfolded lines' slots. */
+.d-bench2 .b2-card-slot.st-end--working,
+.d-bench2 .b2-mi-slot.st-end--working,
+.d-bench2 .b2-m-slot.st-end--working {
+  color: var(--accent-ink);
+}
+.d-bench2 .b2-card-slot.st-end--approval,
+.d-bench2 .b2-card-slot.st-end--question,
+.d-bench2 .b2-mi-slot.st-end--approval,
+.d-bench2 .b2-mi-slot.st-end--question,
+.d-bench2 .b2-m-slot.st-end--approval,
+.d-bench2 .b2-m-slot.st-end--question {
+  color: var(--you-ink);
+  font-weight: var(--w-bold);
+}
