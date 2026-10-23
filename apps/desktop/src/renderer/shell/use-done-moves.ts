@@ -1,5 +1,5 @@
 /**
- * Marking a thread done from the sidebar, and reopening it (spec 17
+ * Marking threads done from the sidebar, and reopening them (spec 17
  * §Sidebar, the Done shelf).
  */
 import { useCallback } from "react";
@@ -11,22 +11,7 @@ import {
 } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import { threadAndAgentSessionsQuery } from "../app/queries";
-import type { DoneToastStore } from "./done-toast";
-
-/** A move on a thread's Done state: mark it Done, or reopen it. */
-type DoneMove = "markDone" | "reopen";
-
-/**
- * Returns the thread list with the session `sessionId` replaced by what
- * `update` returns for it. The list is unchanged when it does not hold the
- * session.
- */
-const replaceThread = (
-  threads: readonly Session[],
-  sessionId: string,
-  update: (session: Session) => Session,
-): readonly Session[] =>
-  threads.map((session) => (session.id === sessionId ? update(session) : session));
+import type { DoneMove, DoneToastStore, DoneUndo } from "./done-toast";
 
 /**
  * Returns the session as it is once `move` has been applied at `at`: done
@@ -40,6 +25,33 @@ const applyDoneMove = (session: Session, move: DoneMove, at: string): Session =>
   void done;
   return { ...open, reopenedAt: at };
 };
+
+/**
+ * Returns the toast text for a move on `count` threads. A move that worked
+ * reads "Marked done", "Marked 3 done", "Reopened" or "Reopened 3"; one that
+ * failed reads "Couldn't mark the thread done" or "Couldn't reopen 3 threads".
+ */
+const describeDoneMove = (move: DoneMove, count: number, failed: boolean): string => {
+  if (failed) {
+    const threads = count === 1 ? "the thread" : `${String(count)} threads`;
+    return move === "markDone" ? `Couldn't mark ${threads} done` : `Couldn't reopen ${threads}`;
+  }
+  if (move === "markDone") return count === 1 ? "Marked done" : `Marked ${String(count)} done`;
+  return count === 1 ? "Reopened" : `Reopened ${String(count)}`;
+};
+
+/**
+ * One Done move on a list of threads. `announce` says whether it shows a
+ * toast: the user's own moves do, an Undo does not.
+ */
+interface DoneRequest {
+  readonly sessionIds: readonly string[];
+  readonly move: DoneMove;
+  readonly announce: boolean;
+}
+
+/** Returns the move that reverses `move`. */
+const reverseDoneMove = (move: DoneMove): DoneMove => (move === "markDone" ? "reopen" : "markDone");
 
 /** Reads the thread list again, without cancelling a read that is running. */
 const readThreadsAgain = (queryClient: QueryClient, client: HerculeClient): void => {
@@ -59,84 +71,98 @@ const isLastDoneMove = (queryClient: QueryClient): boolean =>
 
 /**
  * Runs the sidebar's Done moves for `client`, and shows their toasts in
- * `toasts`.
+ * `toasts`. A move takes a list of thread ids and is one request, applied by
+ * the controller all or nothing.
  *
- * - `markDone(sessionId)` takes the thread off its project at once, before
- *   the controller answers, and shows "Marked done" with Undo in the toast.
- * - `reopen(sessionId)` puts the thread back in its project at once. Undo in
- *   the toast and Reopen on the Done shelf both call it.
- * - A move that fails reads the thread list again, so the row goes back to
- *   where the controller has it, and shows the error in the toast as an
+ * - `markDone(sessionIds)` takes the threads off their projects at once,
+ *   before the controller answers, and shows "Marked done" (or "Marked 3
+ *   done") with Undo in the toast.
+ * - `reopen(sessionIds)` puts the threads back in their projects at once and
+ *   shows "Reopened" (or "Reopened 3") with Undo. Reopen on the Done shelf
+ *   calls it.
+ * - `undo(undo)` makes the move of a toast's Undo on exactly the threads of
+ *   that toast. It shows no toast of its own.
+ * - A move that fails reads the thread list again, so the rows go back to
+ *   where the controller has them, and shows the error in the toast as an
  *   alert.
  *
  * The moves are sent one at a time, in the order the user made them, so a
  * quick Undo always reaches the controller after the Done it undoes. While a
  * later move is still pending, a move's answer is not written to the list:
  * the list already shows the later move, and the answer would briefly put
- * the row back where the user just moved it from. The last move to finish
+ * the rows back where the user just moved them from. The last move to finish
  * reads the list again.
  *
- * `markDone` and `reopen` keep their identity across renders, so the
- * memoized rows that take them do not draw again.
+ * The three functions keep their identity across renders, so the memoized
+ * rows that take them do not draw again.
  */
 export const useDoneMoves = (
   client: HerculeClient,
   toasts: DoneToastStore,
 ): {
-  readonly markDone: (sessionId: string) => void;
-  readonly reopen: (sessionId: string) => void;
+  readonly markDone: (sessionIds: readonly string[]) => void;
+  readonly reopen: (sessionIds: readonly string[]) => void;
+  readonly undo: (undo: DoneUndo) => void;
 } => {
   const queryClient = useQueryClient();
 
   const { mutate } = useMutation({
     mutationKey: DONE_MOVES_KEY,
     scope: { id: "done-moves" },
-    mutationFn: ({ sessionId, move }: { sessionId: string; move: DoneMove }) =>
+    mutationFn: ({ sessionIds, move }: DoneRequest) =>
       move === "markDone"
-        ? client.session.markDone({ payload: { sessionIds: [sessionId] } })
-        : client.session.reopen({ payload: { sessionIds: [sessionId] } }),
+        ? client.session.markDone({ payload: { sessionIds } })
+        : client.session.reopen({ payload: { sessionIds } }),
     // A move in a scope waits for the one before it to finish before it is
     // sent, but its `onMutate` runs at once, so the list follows the user.
-    onMutate: async ({ sessionId, move }) => {
+    onMutate: async ({ sessionIds, move, announce }) => {
       // A read that started before the move would answer without it and
-      // put the row back, so it is cancelled; the last move reads again.
+      // put the rows back, so it is cancelled; the last move reads again.
       await queryClient.cancelQueries({ queryKey: threadAndAgentSessionsQuery(client).queryKey });
       const at = new Date().toISOString();
-      queryClient.setQueryData(
-        threadAndAgentSessionsQuery(client).queryKey,
-        (threads) =>
-          threads && replaceThread(threads, sessionId, (s) => applyDoneMove(s, move, at)),
+      const moved = new Set(sessionIds);
+      queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, (sessions) =>
+        sessions?.map((session) =>
+          moved.has(session.id) ? applyDoneMove(session, move, at) : session,
+        ),
       );
-      if (move === "markDone") toasts.show(sessionId, "Marked done", false);
+      if (announce) {
+        const text = describeDoneMove(move, sessionIds.length, false);
+        toasts.show(text, false, { move: reverseDoneMove(move), sessionIds });
+      }
     },
-    onSuccess: (moved) => {
+    onSuccess: (answered) => {
       if (!isLastDoneMove(queryClient)) return;
-      queryClient.setQueryData(
-        threadAndAgentSessionsQuery(client).queryKey,
-        (threads) =>
-          threads &&
-          moved.reduce((rest, session) => replaceThread(rest, session.id, () => session), threads),
+      const answers = new Map(answered.map((session) => [session.id, session]));
+      queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, (sessions) =>
+        sessions?.map((session) => answers.get(session.id) ?? session),
       );
       readThreadsAgain(queryClient, client);
     },
-    onError: (error, { sessionId, move }) => {
+    onError: (error, { sessionIds, move }) => {
       if (isLastDoneMove(queryClient)) readThreadsAgain(queryClient, client);
-      const what = move === "markDone" ? "mark the thread done" : "reopen the thread";
-      toasts.show(sessionId, `Couldn't ${what}: ${readErrorMessage(error)}`, true);
+      const text = describeDoneMove(move, sessionIds.length, true);
+      toasts.show(`${text}: ${readErrorMessage(error)}`, true, null);
     },
   });
 
   const markDone = useCallback(
-    (sessionId: string) => {
-      mutate({ sessionId, move: "markDone" });
+    (sessionIds: readonly string[]) => {
+      mutate({ sessionIds, move: "markDone", announce: true });
     },
     [mutate],
   );
   const reopen = useCallback(
-    (sessionId: string) => {
-      mutate({ sessionId, move: "reopen" });
+    (sessionIds: readonly string[]) => {
+      mutate({ sessionIds, move: "reopen", announce: true });
     },
     [mutate],
   );
-  return { markDone, reopen };
+  const undo = useCallback(
+    ({ move, sessionIds }: DoneUndo) => {
+      mutate({ sessionIds, move, announce: false });
+    },
+    [mutate],
+  );
+  return { markDone, reopen, undo };
 };

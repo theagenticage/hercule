@@ -1,6 +1,7 @@
 /**
- * The toast over the bottom of the sidebar's list, after a thread is marked
- * done: "Marked done" with Undo, or the error of a Done move that failed.
+ * The toast over the bottom of the sidebar's list, after threads are marked
+ * done or reopened: "Marked done" or "Reopened" with Undo, or the error of a
+ * Done move that failed.
  */
 import { useEffect, useEffectEvent, useState, useSyncExternalStore, type JSX } from "react";
 import { Mark } from "../marks";
@@ -8,17 +9,26 @@ import { Mark } from "../marks";
 /** How long the toast shows before it fades, in milliseconds. Intake's toast shows as long. */
 const TOAST_SHOWN_MS = 5_000;
 
+/** A move on the Done state of threads: mark them Done, or reopen them. */
+export type DoneMove = "markDone" | "reopen";
+
+/** The move that undoes a Done move, and the threads it applies to: exactly the ones the first move did. */
+export interface DoneUndo {
+  readonly move: DoneMove;
+  readonly sessionIds: readonly string[];
+}
+
 /**
- * What the sidebar's toast shows: "Marked done" with Undo, after the thread
- * `sessionId` was marked Done, or the error of a move that failed. `serial`
- * changes with every toast, so a new toast replaces the last one even when
- * its text is the same.
+ * What the sidebar's toast shows: the text of a Done move with the `undo`
+ * that reverses it, or the error of a move that failed, which has no `undo`.
+ * `serial` changes with every toast, so a new toast replaces the last one
+ * even when its text is the same.
  */
 export interface DoneToast {
   readonly serial: number;
-  readonly sessionId: string;
   readonly text: string;
   readonly failed: boolean;
+  readonly undo: DoneUndo | null;
 }
 
 /**
@@ -27,7 +37,7 @@ export interface DoneToast {
  */
 export interface DoneToastStore {
   /** Shows a new toast, replacing the one shown. */
-  readonly show: (sessionId: string, text: string, failed: boolean) => void;
+  readonly show: (text: string, failed: boolean, undo: DoneUndo | null) => void;
   /** Hides the toast shown, if any. */
   readonly dismiss: () => void;
   /** Calls `listener` after every change; returns the function that stops that. */
@@ -46,9 +56,9 @@ export const createDoneToastStore = (): DoneToastStore => {
     for (const listener of listeners) listener();
   };
   return {
-    show: (sessionId, text, failed) => {
+    show: (text, failed, undo) => {
       serial += 1;
-      change({ serial, sessionId, text, failed });
+      change({ serial, text, failed, undo });
     },
     dismiss: () => {
       if (toast !== null) change(null);
@@ -70,8 +80,8 @@ export const createDoneToastStore = (): DoneToastStore => {
  *   While the pointer is on it, it stays; when the pointer leaves, the five
  *   seconds start again. Under Reduce motion it neither rises nor fades: it
  *   goes at once.
- * - "Marked done" leads with the done mark and ends with Undo, which calls
- *   `onUndo` with the thread's session id and dismisses the toast.
+ * - A Done move's toast leads with the done mark and ends with Undo, which
+ *   calls `onUndo` with the toast's `undo` and dismisses the toast.
  * - A failed move shows its error behind the failed mark, as an alert, with
  *   no Undo.
  */
@@ -80,7 +90,7 @@ export function SidebarDoneToast({
   onUndo,
 }: {
   readonly store: DoneToastStore;
-  readonly onUndo: (sessionId: string) => void;
+  readonly onUndo: (undo: DoneUndo) => void;
 }): JSX.Element {
   const toast = useSyncExternalStore(store.subscribe, store.read);
   // The anchor stays when there is no toast, so the list above never moves.
@@ -100,9 +110,10 @@ function ToastLine({
   onDismiss,
 }: {
   readonly toast: DoneToast;
-  readonly onUndo: (sessionId: string) => void;
+  readonly onUndo: (undo: DoneUndo) => void;
   readonly onDismiss: () => void;
 }): JSX.Element {
+  const { undo } = toast;
   const [held, setHeld] = useState(false);
   const [fading, setFading] = useState(false);
   const dismiss = useEffectEvent(onDismiss);
@@ -135,11 +146,11 @@ function ToastLine({
     >
       <Mark state={toast.failed ? "failed" : "done"} />
       <span className="side-toast-text">{toast.text}</span>
-      {toast.failed ? null : (
+      {undo === null ? null : (
         <button
           type="button"
           onClick={() => {
-            onUndo(toast.sessionId);
+            onUndo(undo);
             onDismiss();
           }}
         >
