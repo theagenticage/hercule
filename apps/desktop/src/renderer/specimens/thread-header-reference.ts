@@ -32,7 +32,8 @@
  *    It runs after edit 4, so the drawing's own fit decides which tabs stay,
  *    with its own geometry. The slash, the text and the line land on the same
  *    pixels as in the drawing. The text is cut at 272px, as the drawing's
- *    name is cut at 280px with 8px of padding;
+ *    name is cut at 280px with 8px of padding, or where the drawing's fit
+ *    cuts it, when the room is short;
  * 6. in `?state=menu`, opens the "+n" menu again, because edit 4 closes it;
  * 7. gives the header's pills the Bureau book's glass, which the app draws
  *    (spec 17 §Design system): the drawing's stage restyles its pills with a
@@ -99,6 +100,12 @@ const name = findElement(main, ".b2-bench-name");
 const separator = findElement(main, ".b2-sep");
 const appName = buildWorkName(name.textContent);
 appName.title = name.getAttribute("title") ?? "";
+// When the room is short, the drawing's fit cuts its name with an inline `max-width`, 8px of
+// which are the name's padding. The text takes the rest.
+const cut = Number.parseFloat((name as HTMLElement).style.maxWidth);
+if (!Number.isNaN(cut)) {
+  (findElement(appName, ".work-name-text") as HTMLElement).style.maxWidth = `${String(cut - 8)}px`;
+}
 name.replaceWith(appName);
 separator.replaceWith(buildWorkNameSeparator());
 
