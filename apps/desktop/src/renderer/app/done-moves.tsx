@@ -7,13 +7,14 @@ import {
   createContext,
   use,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type JSX,
   type ReactNode,
 } from "react";
-import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { matchQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   invalidateWithoutCancelling,
   readErrorMessage,
@@ -106,6 +107,53 @@ const updateCachedSessions = (
   }
 };
 
+/**
+ * A Done move that has not finished: sent or waiting to be sent. The cached
+ * Threads show it, and a read that lands meanwhile has it applied again.
+ */
+interface PendingDoneMove {
+  readonly sessionIds: readonly string[];
+  readonly move: DoneMove;
+  /** The moment the move was made, so every application of it sorts the same. */
+  readonly at: string;
+}
+
+/**
+ * Applies each of `pending`, oldest first, to the cached Threads whenever a
+ * read writes the thread list or the record of a Thread they move. Returns
+ * the function that stops watching.
+ *
+ * A read can answer with the controller's state from before a move that is
+ * still pending. A push from the controller starts such a read while the user
+ * has Done and Reopen queued. Without this, the answer would put the rows
+ * back where an earlier move left them until the last move finishes. Writes
+ * made with `setQueryData`, which are the moves' own, are not read answers
+ * and are left alone.
+ */
+const keepPendingMovesApplied = (
+  queryClient: QueryClient,
+  client: HerculeClient,
+  pending: ReadonlySet<PendingDoneMove>,
+): (() => void) =>
+  queryClient.getQueryCache().subscribe((event) => {
+    if (pending.size === 0) return;
+    if (event.type !== "updated" || event.action.type !== "success") return;
+    if (event.action.manual === true) return;
+    const writesMovedThread = [...pending].some(
+      ({ sessionIds }) =>
+        matchQuery({ queryKey: threadAndAgentSessionsQuery(client).queryKey }, event.query) ||
+        sessionIds.some((id) =>
+          matchQuery({ queryKey: sessionQuery(client, id).queryKey }, event.query),
+        ),
+    );
+    if (!writesMovedThread) return;
+    for (const { sessionIds, move, at } of pending) {
+      updateCachedSessions(queryClient, client, sessionIds, (session) =>
+        applyDoneMove(session, move, at),
+      );
+    }
+  });
+
 /** The key every Done move runs under, so the moves can be counted. */
 const DONE_MOVES_KEY = ["done-moves"];
 
@@ -165,6 +213,12 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
   // The Threads moved since the last time no move was pending. The last move
   // to finish reads their records again.
   const movedSinceRead = useRef(new Set<string>());
+  // The moves not finished, oldest first (a Set keeps the order they were added in).
+  const pending = useRef(new Set<PendingDoneMove>());
+  useEffect(
+    () => keepPendingMovesApplied(queryClient, client, pending.current),
+    [queryClient, client],
+  );
 
   const { mutate } = useMutation({
     mutationKey: DONE_MOVES_KEY,
@@ -181,6 +235,11 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
       // A Thread's own record is cancelled only when it is cached. A first
       // read still running has nothing to put back, and cancelling it would
       // fail the screen that waits for it.
+      // Pending from now, not after the cancelling below, so the moves are
+      // applied in the order the user made them.
+      const at = new Date().toISOString();
+      const pendingMove = { sessionIds, move, at };
+      pending.current.add(pendingMove);
       for (const id of sessionIds) movedSinceRead.current.add(id);
       const cachedIds = sessionIds.filter(
         (id) => queryClient.getQueryData(sessionQuery(client, id).queryKey) !== undefined,
@@ -191,13 +250,15 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
           queryClient.cancelQueries({ queryKey: sessionQuery(client, id).queryKey }),
         ),
       ]);
-      const at = new Date().toISOString();
       updateCachedSessions(queryClient, client, sessionIds, (session) =>
         applyDoneMove(session, move, at),
       );
-      if (!announce) return { toastSerial: null };
+      if (!announce) return { pendingMove, toastSerial: null };
       const text = describeDoneMove(move, sessionIds.length, false);
-      return { toastSerial: toasts.show(text, { move: reverseDoneMove(move), sessionIds }) };
+      return {
+        pendingMove,
+        toastSerial: toasts.show(text, { move: reverseDoneMove(move), sessionIds }),
+      };
     },
     onSuccess: (answered, { sessionIds }) => {
       if (!isLastDoneMove(queryClient)) return;
@@ -215,7 +276,8 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
     },
     // Runs after the answer or the error, for a move that succeeded and for
     // one that failed alike.
-    onSettled: () => {
+    onSettled: (_answered, _error, _request, context) => {
+      if (context !== undefined) pending.current.delete(context.pendingMove);
       if (!isLastDoneMove(queryClient)) return;
       readThreadsAgain(queryClient, client, movedSinceRead.current);
       movedSinceRead.current.clear();

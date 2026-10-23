@@ -36,6 +36,7 @@ const PATHS = [
   join(SCREENS, "list-pane"),
   join(SCREENS, "thread/use-sender-reading.ts"),
   join(SCREENS, "thread/use-tab-overflow.ts"),
+  join(HERE, "../../../app/done-moves.tsx"),
   join(SCREENS, "session-status.tsx"),
   join(SCREENS, "thread/tab-overflow-menu.tsx"),
   join(SCREENS, "thread/header-pills.tsx"),
