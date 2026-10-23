@@ -161,6 +161,7 @@ const WAITING: Session = {
   title: "Ship release · review",
   status: "busy",
   kind: "run",
+  agentId: "01a06d02-7b00-7000-8000-000000000001",
   runId: SHIP_LIVE.id,
   stepId: "review",
   openRequests: [

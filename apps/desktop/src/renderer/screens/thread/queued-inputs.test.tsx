@@ -187,6 +187,7 @@ describe("the queued inputs", () => {
         session: {
           ...queued.session,
           kind: "assistant",
+          agentId: "01a06d02-7b00-7000-8000-000000000001",
           conversationId: "01a06d02-7800-7000-8000-000000000001",
         },
       },

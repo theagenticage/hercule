@@ -1164,6 +1164,7 @@ const buildRequestingSession = (task: Task): Session => ({
   title: "Implement · code",
   status: "busy",
   kind: "run",
+  agentId: "01a06d02-7b00-7000-8000-000000000001",
   runId: getRunId(task),
   stepId: "code",
   openRequests: [
