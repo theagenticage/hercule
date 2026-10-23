@@ -72,200 +72,64 @@ const renderItem = (
 ): JSX.Element => {
   switch (item.kind) {
     case "waiting-header":
-      return (
-        <WaitingHeader
-          key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          count={item.count}
-        />
-      );
+      return <WaitingHeader key={item.key} item={item} />;
     case "waiting-thread-row":
-      return (
-        <WaitingThreadRow
-          key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          sessionId={item.sessionId}
-          title={item.title}
-          askerLabel={item.askerLabel}
-          question={item.question}
-          officeOpen={officeOpen}
-        />
-      );
+      return <WaitingThreadRow key={item.key} item={item} officeOpen={officeOpen} />;
     case "waiting-assistant-row":
-      return (
-        <WaitingAssistantRow
-          key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          assistantId={item.assistantId}
-          name={item.name}
-          question={item.question}
-          officeOpen={officeOpen}
-        />
-      );
+      return <WaitingAssistantRow key={item.key} item={item} officeOpen={officeOpen} />;
     case "waiting-runs-label":
-      return <WaitingRunsLabel key={item.key} itemKey={item.key} leading={item.leading} />;
+      return <WaitingRunsLabel key={item.key} item={item} />;
     case "waiting-run-row":
-      return (
-        <WaitingRunRow
-          key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          sessionId={item.sessionId}
-          title={item.title}
-          question={item.question}
-          officeOpen={officeOpen}
-        />
-      );
+      return <WaitingRunRow key={item.key} item={item} officeOpen={officeOpen} />;
     case "project-header":
-      return (
-        <ProjectHeader
-          key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          projectId={item.projectId}
-          name={item.name}
-          tint={item.tint}
-          waitingCount={item.waitingCount}
-        />
-      );
-    case "group-row": {
-      const { row } = item;
+      return <ProjectHeader key={item.key} item={item} />;
+    case "group-row":
       return (
         <GroupRow
           key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          groupKey={row.key}
-          openId={item.openId}
-          title={row.title}
-          pose={row.pose}
-          seated={item.seated}
-          status={row.status}
-          receded={item.receded}
-          activityAt={row.status === "age" ? row.activityAt : ""}
-          askerLabel={row.ask?.askerLabel ?? null}
-          question={row.ask?.question ?? null}
-          placeClip={row.placeLabel.clip}
-          placeKeep={row.placeLabel.keep}
-          providerId={row.providerId}
-          model={item.details.model}
-          placeDescription={row.placeDescription}
-          unsent={item.unsent}
-          dots={row.summary?.dots ?? null}
-          hiddenCount={row.summary?.hiddenCount ?? 0}
-          summaryLabel={row.summary?.label ?? ""}
-          unfolded={item.unfolded}
-          doneIds={row.doneIds}
+          item={item}
           onScreen={onScreen}
           officeOpen={officeOpen}
           onMarkDone={actions.onMarkDone}
           onToggleGroup={actions.onToggleGroup}
         />
       );
-    }
-    case "group-line": {
-      const { member } = item;
+    case "group-line":
       return (
         <GroupLine
           key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          groupKey={item.groupKey}
-          groupTitle={item.groupTitle}
-          sessionId={member.sessionId}
-          label={member.label}
-          title={member.title}
-          pose={member.pose}
-          seated={member.seated}
-          status={member.status}
-          activityAt={member.status === "age" ? member.activityAt : ""}
-          dot={member.dot}
-          done={member.done}
-          providerId={member.providerId}
-          model={member.model}
-          last={item.last}
+          item={item}
           onScreen={onScreen}
           officeOpen={officeOpen}
           onToggleGroup={actions.onToggleGroup}
         />
       );
-    }
     case "quiet-line":
       return (
         <QuietLine
           key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          groupKey={item.groupKey}
-          groupTitle={item.groupTitle}
-          count={item.count}
-          last={item.last}
+          item={item}
           onShowQuiet={actions.onShowQuiet}
           onToggleGroup={actions.onToggleGroup}
         />
       );
     case "draft-row":
-      return (
-        <DraftRow
-          key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          placeClip={item.placeClip}
-          placeKeep={item.placeKeep}
-        />
-      );
+      return <DraftRow key={item.key} item={item} />;
     case "done-header":
-      return (
-        <DoneHeader
-          key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          count={item.count}
-          open={item.open}
-          onToggle={actions.onToggleDoneShelf}
-        />
-      );
-    case "done-group-row": {
-      const { row } = item;
+      return <DoneHeader key={item.key} item={item} onToggle={actions.onToggleDoneShelf} />;
+    case "done-group-row":
       return (
         <DoneGroupRow
           key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          groupKey={row.key}
-          openId={item.openId}
-          title={row.title}
-          seated={item.seated}
-          threadCount={row.threadIds.length}
-          doneAt={item.doneAt}
-          providerId={row.providerId}
-          unsent={item.unsent}
-          reopenIds={row.threadIds}
-          dots={row.summary?.dots ?? null}
-          hiddenCount={row.summary?.hiddenCount ?? 0}
-          summaryLabel={row.summary?.label ?? ""}
-          unfolded={item.unfolded}
+          item={item}
           onScreen={onScreen}
           officeOpen={officeOpen}
           onReopen={actions.onReopen}
           onToggleGroup={actions.onToggleGroup}
         />
       );
-    }
     case "more":
-      return (
-        <MoreRow
-          key={item.key}
-          itemKey={item.key}
-          leading={item.leading}
-          section={item.section}
-          label={item.label}
-          onExpand={actions.onExpand}
-        />
-      );
+      return <MoreRow key={item.key} item={item} onExpand={actions.onExpand} />;
   }
 };
 

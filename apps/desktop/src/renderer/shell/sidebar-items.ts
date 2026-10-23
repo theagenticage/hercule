@@ -193,6 +193,9 @@ export type SidebarItem = SidebarItemContent & {
 
 export type SidebarItemKind = SidebarItem["kind"];
 
+/** The items of `Kind`: the one kind, or several kinds that share a row's frame. */
+export type SidebarItemOf<Kind extends SidebarItemKind> = Extract<SidebarItem, { kind: Kind }>;
+
 /**
  * The height of each kind of item, in CSS pixels. Measured with
  * `getBoundingClientRect` in the Bureau book's `desktop/session-active.html`,
