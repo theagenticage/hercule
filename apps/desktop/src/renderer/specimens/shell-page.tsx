@@ -165,6 +165,7 @@ import {
 } from "../app/pending-submissions";
 import { createAppearanceStore } from "../app/appearance";
 import { createQueryClient } from "../app/query-client";
+import { SessionPresentationProvider } from "../app/session-presentation";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
 import { DraftScreen } from "../screens/new-thread/draft-screen";
 import { AgentPage } from "../screens/thread/agent-page";
@@ -836,9 +837,11 @@ const seedQueryCache = (
  */
 function ShellLayout(): JSX.Element {
   return (
-    <Shell onNewThread={() => undefined}>
-      <Outlet />
-    </Shell>
+    <SessionPresentationProvider>
+      <Shell onNewThread={() => undefined}>
+        <Outlet />
+      </Shell>
+    </SessionPresentationProvider>
   );
 }
 
