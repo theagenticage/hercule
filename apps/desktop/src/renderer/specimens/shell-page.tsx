@@ -56,6 +56,7 @@ import {
   Outlet,
   RouterProvider,
   useParams,
+  useRouteContext,
   useSearch,
 } from "@tanstack/react-router";
 import type {
@@ -165,6 +166,7 @@ import {
 } from "../app/pending-submissions";
 import { createAppearanceStore } from "../app/appearance";
 import { createQueryClient } from "../app/query-client";
+import { DoneMovesProvider } from "../app/done-moves";
 import { SessionPresentationProvider } from "../app/session-presentation";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
 import { DraftScreen } from "../screens/new-thread/draft-screen";
@@ -836,11 +838,14 @@ const seedQueryCache = (
  * route does. New thread does nothing: the page has no project picker.
  */
 function ShellLayout(): JSX.Element {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
   return (
     <SessionPresentationProvider>
-      <Shell onNewThread={() => undefined}>
-        <Outlet />
-      </Shell>
+      <DoneMovesProvider client={client}>
+        <Shell onNewThread={() => undefined}>
+          <Outlet />
+        </Shell>
+      </DoneMovesProvider>
     </SessionPresentationProvider>
   );
 }

@@ -1,8 +1,18 @@
 /**
- * Marking threads done from the sidebar, and reopening them (spec 17
- * §Sidebar, the Done shelf).
+ * Marking threads done, and reopening them (spec 17 §Sidebar, the Done
+ * shelf, the thread header). The sidebar and the thread screen share one
+ * move queue and one toast, offered by `DoneMovesProvider`.
  */
-import { useCallback, useRef } from "react";
+import {
+  createContext,
+  use,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type JSX,
+  type ReactNode,
+} from "react";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   invalidateWithoutCancelling,
@@ -10,8 +20,13 @@ import {
   type HerculeClient,
 } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
-import { sessionQuery, threadAndAgentSessionsQuery } from "../app/queries";
-import type { DoneMove, DoneToastStore, DoneUndo } from "./done-toast";
+import {
+  createDoneToastStore,
+  type DoneMove,
+  type DoneToastStore,
+  type DoneUndo,
+} from "./done-toast-store";
+import { sessionQuery, threadAndAgentSessionsQuery } from "./queries";
 
 /**
  * Returns the session as it is once `move` has been applied at `at`: done
@@ -102,9 +117,20 @@ const DONE_MOVES_KEY = ["done-moves"];
 const isLastDoneMove = (queryClient: QueryClient): boolean =>
   queryClient.isMutating({ mutationKey: DONE_MOVES_KEY }) === 1;
 
+/** The three Done moves, as `useRunDoneMoves` describes them. */
+interface DoneMoves {
+  readonly markDone: (sessionIds: readonly string[]) => void;
+  readonly reopen: (sessionIds: readonly string[]) => void;
+  readonly undo: (undo: DoneUndo) => void;
+}
+
+/** What `useDoneMoves` returns: the three moves, and the store of the toast they show. */
+export interface DoneMovesValue extends DoneMoves {
+  readonly toasts: DoneToastStore;
+}
+
 /**
- * Runs the sidebar's Done moves for `client`, and shows their toasts in
- * `toasts`. A move takes a list of thread ids and is one request, applied by
+ * Runs the Done moves for `client`, and shows their toasts in `toasts`. A move takes a list of thread ids and is one request, applied by
  * the controller all or nothing.
  *
  * - `markDone(sessionIds)` takes the threads off their projects at once,
@@ -134,14 +160,7 @@ const isLastDoneMove = (queryClient: QueryClient): boolean =>
  * The three functions keep their identity across renders, so the memoized
  * rows that take them do not draw again.
  */
-export const useDoneMoves = (
-  client: HerculeClient,
-  toasts: DoneToastStore,
-): {
-  readonly markDone: (sessionIds: readonly string[]) => void;
-  readonly reopen: (sessionIds: readonly string[]) => void;
-  readonly undo: (undo: DoneUndo) => void;
-} => {
+const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMoves => {
   const queryClient = useQueryClient();
   // The Threads moved since the last time no move was pending. The last move
   // to finish reads their records again.
@@ -223,3 +242,42 @@ export const useDoneMoves = (
   );
   return { markDone, reopen, undo };
 };
+
+const DoneMovesContext = createContext<DoneMovesValue | null>(null);
+
+/**
+ * Runs the Done moves for `client` and offers them to `children`, which use
+ * them with `useDoneMoves`. There is one queue and one toast for the whole
+ * shell, so a move made in the thread header and one made in the sidebar are
+ * sent in the order the user made them, and the last of them to finish reads
+ * the threads again.
+ *
+ * The offered value never changes, so a move or a toast draws none of the
+ * components that use it. Only the toast, which reads its store on its own,
+ * draws again.
+ */
+export function DoneMovesProvider({
+  client,
+  children,
+}: {
+  readonly client: HerculeClient;
+  readonly children: ReactNode;
+}): JSX.Element {
+  const [toasts] = useState(createDoneToastStore);
+  const { markDone, reopen, undo } = useRunDoneMoves(client, toasts);
+  const value = useMemo(
+    () => ({ markDone, reopen, undo, toasts }),
+    [markDone, reopen, undo, toasts],
+  );
+  return <DoneMovesContext value={value}>{children}</DoneMovesContext>;
+}
+
+/**
+ * Returns the shell's Done moves and the store of the toast they show. The value keeps its identity, so the
+ * component that calls this never draws again because of a move.
+ */
+export function useDoneMoves(): DoneMovesValue {
+  const moves = use(DoneMovesContext);
+  if (moves === null) throw new Error("No DoneMovesProvider above this component");
+  return moves;
+}

@@ -1,18 +1,18 @@
 /**
- * Tests the sidebar's Done moves on lists of Threads: `useDoneMoves` with
- * the toast it feeds, against a stubbed controller that applies a list as it
- * would, all or nothing.
+ * Tests the Done moves on lists of Threads: the moves of `DoneMovesProvider`
+ * with the toast they feed, against a stubbed controller that applies a list
+ * as it would, all or nothing.
  *
  * The Threads are drawn by a small harness, not by the sidebar, so a test can
  * move three of them as one group without the group rows of the sidebar.
  */
-import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { createClient, type HerculeClient } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
+import { DoneMovesProvider, useDoneMoves } from "../app/done-moves";
 import { createQueryClient } from "../app/query-client";
 import { sessionQuery, threadAndAgentSessionsQuery } from "../app/queries";
 import {
@@ -23,8 +23,7 @@ import {
   stubApi,
   type Handler,
 } from "../app/testing";
-import { createDoneToastStore, SidebarDoneToast } from "./done-toast";
-import { useDoneMoves } from "./use-done-moves";
+import { SidebarDoneToast } from "./done-toast";
 
 const MARK_DONE_PATH = "/api/v1/sessions/mark-done";
 const REOPEN_PATH = "/api/v1/sessions/reopen";
@@ -96,8 +95,7 @@ function Harness({
   readonly client: HerculeClient;
   readonly openIds: readonly string[];
 }) {
-  const [toasts] = useState(createDoneToastStore);
-  const { markDone, reopen, undo } = useDoneMoves(client, toasts);
+  const { markDone, reopen } = useDoneMoves();
   const { data = [] } = useQuery(threadAndAgentSessionsQuery(client));
   const idsOf = (numbers: readonly number[]) => numbers.map((number) => buildThread(number).id);
   return (
@@ -158,9 +156,19 @@ function Harness({
       >
         Reopen Thread 1
       </button>
-      <SidebarDoneToast store={toasts} onUndo={undo} />
+      <Toast />
     </>
   );
+}
+
+/**
+ * Draws the toast as the sidebar does. It is a component of its own, apart
+ * from the buttons, so the test shows that two users of the provider share
+ * one queue and one toast.
+ */
+function Toast() {
+  const { toasts, undo } = useDoneMoves();
+  return <SidebarDoneToast store={toasts} onUndo={undo} />;
 }
 
 /**
@@ -195,7 +203,9 @@ const startHarness = async (
   }
   render(
     <QueryClientProvider client={queryClient}>
-      <Harness client={client} openIds={openThreads.map((thread) => thread.id)} />
+      <DoneMovesProvider client={client}>
+        <Harness client={client} openIds={openThreads.map((thread) => thread.id)} />
+      </DoneMovesProvider>
     </QueryClientProvider>,
   );
   return {

@@ -3,6 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { DONE_SHELF_LIMIT, DONE_SHELF_STEP } from "@hercule/client-core";
 import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
 import { useAssistantRows } from "../app/assistant-rows";
+import { useDoneMoves } from "../app/done-moves";
 import { useDraftThread } from "../app/draft-thread";
 import { useUnsentKeys } from "../app/pending-submissions";
 import { projectsQuery, userQuery } from "../app/queries";
@@ -14,14 +15,13 @@ import { OfficeIcon } from "../icons/office";
 import { SearchIcon } from "../icons/search";
 import { SidebarIcon } from "../icons/sidebar";
 import { AssistantsSection } from "./assistants-section";
-import { createDoneToastStore, SidebarDoneToast } from "./done-toast";
+import { SidebarDoneToast } from "./done-toast";
 import { FaceSwitch } from "./face-switch";
 import { decideScreenFace, type SidebarFace } from "./sidebar-face";
 import { buildSidebar, listGoMenuItems, type SectionKey } from "./sidebar-items";
 import { SidebarFoot } from "./sidebar-foot";
 import { SidebarList } from "./sidebar-list";
 import { SystemSection } from "./system-section";
-import { useDoneMoves } from "./use-done-moves";
 import { toggleSidebar } from "./use-sidebar-layout";
 import { WorkSection } from "./work-section";
 import "./sidebar.css";
@@ -171,10 +171,9 @@ export const Sidebar = memo(function Sidebar({
   const toggleDoneShelf = useCallback(() => {
     setDoneShelfLimit((limit) => (limit === null ? DONE_SHELF_LIMIT : null));
   }, []);
-  // Kept for the sidebar's life. The toast reads it on its own, so showing,
-  // fading or dismissing a toast does not draw the sidebar again.
-  const [toasts] = useState(createDoneToastStore);
-  const { markDone, reopen, undo } = useDoneMoves(client, toasts);
+  // The toast reads its store on its own, so showing, fading or dismissing a
+  // toast does not draw the sidebar again.
+  const { markDone, reopen, undo, toasts } = useDoneMoves();
   const listActions = useMemo(
     () => ({
       onExpand: expandSection,
