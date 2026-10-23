@@ -1,0 +1,152 @@
+import { useEffectEvent, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { pickHiddenTabs } from "./fit-tabs";
+
+/**
+ * The widest the work's name draws in the pill, in pixels. The name's own
+ * style cuts it at the same width; this copy lets the fit count the name at
+ * its natural width up to that limit, so tabs hide before the name shrinks.
+ */
+const WORK_NAME_MAX_WIDTH = 280;
+
+const NO_TABS: ReadonlySet<string> = new Set();
+
+/**
+ * Returns the keys of the tabs to hide behind the "+n" button, so that the
+ * pill in `navRef` fits in the room `roomRef` gives it. The caller marks
+ * each returned tab as overflowed, and shows the "+n" button with the count.
+ *
+ * The pill's children are found by attribute:
+ *
+ * - `data-tab="<key>"`: a tab. Tabs must not shrink (`flex: none`), so a
+ *   tab has the same width whether or not it is hidden.
+ * - `data-tab-overflow`: the "+n" button. It is always rendered. While no
+ *   tab is hidden it is out of flow too, and shows the label it would have
+ *   for one hidden tab, so there is a width to reserve when one must hide.
+ * - `data-work-name`: the work's name. It counts at its natural width, up
+ *   to 280 px.
+ * - Any other child counts at its own width.
+ *
+ * A hidden tab stays in the DOM, out of flow, with `position: absolute;
+ * visibility: hidden`. It is then still measurable, and the hook never has
+ * to show every tab to measure them again. The pill must be a positioned
+ * element so that these tabs do not escape it. `roomRef` is the element
+ * whose width the pill may take (a `flex: 1 1 0; min-width: 0` wrapper). The
+ * gap between the pill and the buttons beside it is the caller's: put it
+ * outside `roomRef`'s box.
+ *
+ * Tabs are checked after every render, and again whenever the room or a
+ * child of the pill changes size (a font arriving, an age label changing
+ * unit, a state word, the open tab turning bold). A single `ResizeObserver`
+ * watches them; it never watches the pill itself, whose width follows the
+ * fit. Nothing runs while the sizes stay the same.
+ *
+ * The "+n" button is wider for two digits than for one, and the fit uses the
+ * width it has when checked. The fit cannot flip back and forth over this:
+ * a wider button hides at least as many tabs as a narrower one, so a button
+ * that changed width settles after one more check.
+ *
+ * `pinnedKeys` are the tabs that always stay visible: the open tab and every
+ * waiting tab.
+ */
+export function useTabOverflow(options: {
+  readonly roomRef: RefObject<HTMLElement | null>;
+  readonly navRef: RefObject<HTMLElement | null>;
+  readonly pinnedKeys: readonly string[];
+}): ReadonlySet<string> {
+  const { roomRef, navRef, pinnedKeys } = options;
+  const [hiddenKeys, setHiddenKeys] = useState(NO_TABS);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const observedRef = useRef(new Set<Element>());
+
+  // Reads the latest `pinnedKeys`, which the observer's callback, made once,
+  // could not do by itself.
+  const refit = useEffectEvent(() => {
+    const room = roomRef.current;
+    const nav = navRef.current;
+    if (room === null || nav === null) return;
+    const next = pickHiddenTabKeys(room, nav, new Set(pinnedKeys));
+    setHiddenKeys((current) => (hasSameKeys(current, next) ? current : next));
+  });
+
+  useLayoutEffect(() => {
+    const observer = new ResizeObserver(() => {
+      refit();
+    });
+    const observed = observedRef.current;
+    observerRef.current = observer;
+    return () => {
+      observer.disconnect();
+      observerRef.current = null;
+      observed.clear();
+    };
+  }, []);
+
+  // Runs after every render, because a tab can start waiting or become the
+  // open tab without any size changing. Also keeps the observer on the room
+  // and on the children the pill has now.
+  useLayoutEffect(() => {
+    const observer = observerRef.current!;
+    const observed = observedRef.current;
+    const wanted = new Set<Element>(navRef.current?.children ?? []);
+    if (roomRef.current !== null) wanted.add(roomRef.current);
+    for (const element of observed) {
+      if (wanted.has(element)) continue;
+      observer.unobserve(element);
+      observed.delete(element);
+    }
+    for (const element of wanted) {
+      if (observed.has(element)) continue;
+      observer.observe(element);
+      observed.add(element);
+    }
+    refit();
+  });
+
+  return hiddenKeys;
+}
+
+/** Returns whether `a` and `b` hold the same keys. */
+function hasSameKeys(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  return a.size === b.size && [...a].every((key) => b.has(key));
+}
+
+/**
+ * Measures the pill `nav` and returns the keys of the tabs that do not fit in
+ * `room` and are not in `pinnedKeys`. See `useTabOverflow` for what it reads.
+ */
+function pickHiddenTabKeys(
+  room: HTMLElement,
+  nav: HTMLElement,
+  pinnedKeys: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const style = getComputedStyle(nav);
+  const gap = Number.parseFloat(style.columnGap) || 0;
+  const padding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+  // Each item below adds its width and one gap; n items have n - 1 gaps.
+  let fixedWidth = padding - gap;
+  let overflowWidth = 0;
+  const tabKeys: string[] = [];
+  const tabWidths: number[] = [];
+  for (const child of nav.children) {
+    if (!(child instanceof HTMLElement)) continue;
+    const width = child.getBoundingClientRect().width;
+    if (child.dataset.tab !== undefined) {
+      tabKeys.push(child.dataset.tab);
+      tabWidths.push(width + gap);
+    } else if (child.dataset.tabOverflow !== undefined) {
+      overflowWidth = width + gap;
+    } else if (child.dataset.workName !== undefined) {
+      fixedWidth += Math.min(child.scrollWidth, WORK_NAME_MAX_WIDTH) + gap;
+    } else {
+      fixedWidth += width + gap;
+    }
+  }
+  const hiddenIndexes = pickHiddenTabs({
+    tabWidths,
+    pinned: tabKeys.map((key) => pinnedKeys.has(key)),
+    fixedWidth,
+    overflowWidth,
+    room: room.getBoundingClientRect().width,
+  });
+  return new Set([...hiddenIndexes].map((index) => tabKeys[index]!));
+}
