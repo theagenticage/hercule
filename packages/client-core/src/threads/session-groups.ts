@@ -19,9 +19,12 @@ export interface SessionGroup {
   readonly doneAt: string | null;
 }
 
+/** Returns the key of the group of the sessions that work in the workspace `workspaceId`, as `SessionGroup.key` spells it. */
+export const buildWorkspaceGroupKey = (workspaceId: string): string => `workspace:${workspaceId}`;
+
 /** Returns the key of the group that holds `session`, as `SessionGroup.key` spells it. */
 export const buildGroupKey = (session: Session): string =>
-  session.workspaceId === null ? `session:${session.id}` : `workspace:${session.workspaceId}`;
+  session.workspaceId === null ? `session:${session.id}` : buildWorkspaceGroupKey(session.workspaceId);
 
 /** Compares two strings by code unit, returning a negative, zero or positive number as `sort` expects. */
 const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);

@@ -21,7 +21,7 @@ import { findOldestOpenRequest } from "./oldest-request";
 import type { Pose, ThreadRowStatus } from "./pose";
 import { buildThreadPlaceLabel } from "./project-rows";
 import { formatRequestQuestion } from "./request-question";
-import { buildGroupKey, type SessionGroup } from "./session-groups";
+import { buildGroupKey, buildWorkspaceGroupKey, type SessionGroup } from "./session-groups";
 import { describeSessionTab, labelWorkspaceSessions } from "./siblings";
 import { describeThreadPlace } from "./thread-place";
 import { buildWorkspaceLabelParts, type WorkspaceLabel } from "./workspaces";
@@ -388,4 +388,18 @@ export const findGroupRow = (
   return groupRows.find(
     (row) => row.key === key && row.members.some((member) => member.sessionId === session.id),
   );
+};
+
+/**
+ * Returns the row of the group of the workspace `workspaceId`, or `undefined`
+ * when no row has that key: a workspace that holds no Thread, or none the
+ * sidebar lists. A Draft Thread that joins a workspace finds the tabs of its
+ * header here, before it has a session of its own.
+ */
+export const findWorkspaceGroupRow = (
+  groupRows: readonly GroupRow[],
+  workspaceId: string,
+): GroupRow | undefined => {
+  const key = buildWorkspaceGroupKey(workspaceId);
+  return groupRows.find((row) => row.key === key);
 };

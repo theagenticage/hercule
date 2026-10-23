@@ -17,7 +17,7 @@ import type { OpenRequest, Project, Session } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import type { Waiting } from "../waiting";
 import type { DraftPlace } from "./groups";
-import { findGroupRow } from "./group-row";
+import { findGroupRow, findWorkspaceGroupRow } from "./group-row";
 import { prepareSessionPresentation } from "./session-presentation";
 import {
   DONE_SHELF_LIMIT,
@@ -1057,6 +1057,25 @@ describe("the row that holds a session", () => {
 
     expect(findGroupRow(groupRows, orphan)).toBeUndefined();
     expect(findGroupRow(groupRows, thread("s-unlisted"))).toBeUndefined();
+  });
+});
+
+describe("the row of a workspace", () => {
+  it("is the row of the group that works in it, which a Draft Thread that joins the workspace draws its tabs from", () => {
+    const sessions = [thread("s-lead"), agent("s-agent"), lone("s-lone", 5)];
+    const { groupRows } = prepare(sessions);
+
+    expect(findWorkspaceGroupRow(groupRows, "w-1")?.members.map(({ sessionId }) => sessionId)).toEqual([
+      "s-lead",
+      "s-agent",
+    ]);
+  });
+
+  it("is nothing for a workspace that holds no Thread, or that no session works in", () => {
+    const { groupRows } = prepare([thread("s-lead"), agent("s-orphan", { workspaceId: "w-2" })]);
+
+    expect(findWorkspaceGroupRow(groupRows, "w-2")).toBeUndefined();
+    expect(findWorkspaceGroupRow(groupRows, "w-3")).toBeUndefined();
   });
 });
 
