@@ -4,7 +4,7 @@
  * Bureau book never draws. `node scripts/capture-sidebar-states.ts` captures
  * every scene in both themes.
  *
- * The page takes its scene from `?scene=1` to `?scene=5`, and its theme from
+ * The page takes its scene from `?scene=1` to `?scene=11`, and its theme from
  * `?theme=whitehaven` or `?theme=orient-express`.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
@@ -66,6 +66,56 @@ function openDoneShelf(): void {
 }
 
 /**
+ * Returns the row of the group titled `title`. Fails when no row of the
+ * sidebar has that title.
+ */
+function findGroupRow(title: string): HTMLElement {
+  const row = [...document.querySelectorAll<HTMLElement>(".side-thread")].find(
+    (each) => each.querySelector(".side-name")?.textContent === title,
+  );
+  if (row === undefined) throw new Error(`The sidebar has no row titled "${title}".`);
+  return row;
+}
+
+/**
+ * Presses the dots of the group titled `title`, as a click would, and waits
+ * for the sidebar to draw the group's lines. Fails when the row has no dots,
+ * or when the group is still folded afterwards.
+ */
+function unfoldGroup(title: string): void {
+  const dots = findGroupRow(title).querySelector<HTMLElement>(".side-dots");
+  if (dots === null) throw new Error(`The row "${title}" has no dots to press.`);
+  flushSync(() => {
+    dots.click();
+  });
+  if (dots.getAttribute("aria-expanded") !== "true") {
+    throw new Error(`The group "${title}" is still folded after its dots were pressed.`);
+  }
+}
+
+/** How long the page waits for the card of a row to show, in milliseconds. */
+const CARD_WAIT_MS = 2_000;
+
+/**
+ * Rests the pointer on the row of the group titled `title`, as a moved mouse
+ * would, and waits for its card to show beside the sidebar. Sets
+ * `data-card-shown` on `<html>`, which the capture reads to include the card
+ * in its picture. Fails when the card does not show in time.
+ */
+async function showGroupCard(title: string): Promise<void> {
+  const link = findGroupRow(title).querySelector<HTMLElement>("a");
+  if (link === null) throw new Error(`The row "${title}" has no link to rest the pointer on.`);
+  link.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+  // The page's `Date` is stopped, so the wait counts with `performance.now`.
+  const deadline = performance.now() + CARD_WAIT_MS;
+  while (document.querySelector(".thread-hover:popover-open") === null) {
+    if (performance.now() > deadline) throw new Error(`The card of "${title}" did not show.`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  document.documentElement.dataset.cardShown = "";
+}
+
+/**
  * Presses the face switch's segment for `face`, as a click would, and waits
  * for the sidebar to draw that face. Fails when the switch has no such
  * segment, or when the segment is not selected afterwards.
@@ -91,5 +141,7 @@ document.documentElement.dataset.sceneCount = String(SIDEBAR_SCENES.length);
 await mountSidebarSpecimen(scene.records, scene.path, scene.unsentThreadIds);
 if (scene.pressMore !== null) pressMoreRow(scene.pressMore);
 if (scene.openDoneShelf) openDoneShelf();
+if (scene.unfoldGroup !== null) unfoldGroup(scene.unfoldGroup);
 pressFaceSegment(scene.face);
+if (scene.showCardOf !== null) await showGroupCard(scene.showCardOf);
 await markSheetReady();

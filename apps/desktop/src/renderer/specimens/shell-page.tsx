@@ -639,6 +639,10 @@ const seedQueryCache = (
       items: [],
       skipped: [],
     });
+  } else {
+    // A page opened on the Draft Thread screen with no draft of its own, such
+    // as the sidebar states' Hercule face, still previews the draft's skills.
+    queryClient.setQueryData(previewSkillsQuery(client, {}).queryKey, { items: [], skipped: [] });
   }
   if (assistantsSettings !== undefined) {
     queryClient.setQueryData(profilesQuery(client).queryKey, assistantsSettings.profiles);

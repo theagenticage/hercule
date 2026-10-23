@@ -63,13 +63,44 @@ afterEach(() => {
 });
 
 /**
+ * `SIDEBAR_FIXTURE` with every thread in a workspace of its own, so each is
+ * a group of one session and draws as a thread's row. The fixture itself
+ * keeps "Write the retry runbook" and "Fix flaky webhook tests" in one
+ * worktree, which is a group of two.
+ */
+const SINGLE_THREADS_FIXTURE: SidebarRecords = (() => {
+  const worktree = SIDEBAR_FIXTURE.workspaces.find((each) =>
+    each.sessionIds.includes(FIXTURE_THREAD_IDS.flaky),
+  )!;
+  const flakyWorktree = {
+    ...worktree,
+    id: "01a06d02-7200-7000-8000-0000000000f1",
+    sessionIds: [FIXTURE_THREAD_IDS.flaky],
+  };
+  return {
+    ...SIDEBAR_FIXTURE,
+    threads: SIDEBAR_FIXTURE.threads.map((thread) =>
+      thread.id === FIXTURE_THREAD_IDS.flaky
+        ? { ...thread, workspaceId: flakyWorktree.id }
+        : thread,
+    ),
+    workspaces: [
+      ...SIDEBAR_FIXTURE.workspaces.map((each) =>
+        each === worktree ? { ...each, sessionIds: [FIXTURE_THREAD_IDS.runbook] } : each,
+      ),
+      flakyWorktree,
+    ],
+  };
+})();
+
+/**
  * Starts the app signed in at `path`, with the controller holding `records`
  * and answering the thread list from `readThreads` when given, and returns
  * the thread list's `nav` with the app and its fake bridge. `handlers` replace the controller's
  * answers to the operations they name.
  */
 const startSidebar = async ({
-  records = SIDEBAR_FIXTURE,
+  records = SINGLE_THREADS_FIXTURE,
   readThreads,
   handlers = {},
   path = "/",
@@ -93,10 +124,10 @@ const startSidebar = async ({
 };
 
 /** "Sketch the pricing page": idle, in no project. The base of the threads a test makes. */
-const PLAIN_THREAD = SIDEBAR_FIXTURE.threads[4]!;
+const PLAIN_THREAD = SINGLE_THREADS_FIXTURE.threads[4]!;
 
 /** The command approval "Write the retry runbook" waits on. */
-const APPROVAL = SIDEBAR_FIXTURE.threads[0]!.openRequests[0]!;
+const APPROVAL = SINGLE_THREADS_FIXTURE.threads[0]!.openRequests[0]!;
 
 /**
  * Returns `count` threads titled "Thread 1" to "Thread <count>", the last the
@@ -191,12 +222,14 @@ describe("the sidebar", () => {
         description: "Run git push?",
       }),
     ).toBe(waitingRow);
-    // In its project the row ends with what it waits for. A worktree's name
-    // is its branch, so the branch is not named again.
+    // In its project the row's second line is what it waits for, so the
+    // description starts with it. A worktree's name is its branch, so the
+    // branch is not named again.
     expect(
       within(nav).getByRole("link", {
         name: "Write the retry runbook, waiting on you",
-        description: "claude-sonnet-5 in webshop, workspace hercule/thread-3f1, on moss Approval",
+        description:
+          "Run git push? claude-sonnet-5 in webshop, workspace hercule/thread-3f1, on moss Approval",
       }),
     ).toBe(projectRow);
     expect(
@@ -237,7 +270,7 @@ describe("the sidebar", () => {
 
   it("opens a new thread in a project from its +", async () => {
     const { nav, router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
-    const [webshop, ops] = SIDEBAR_FIXTURE.projects;
+    const [webshop, ops] = SINGLE_THREADS_FIXTURE.projects;
 
     const readHref = (name: string) => within(nav).getByRole("link", { name }).getAttribute("href");
     expect(readHref("New thread in webshop")).toBe(`/?project=${webshop!.id}`);
@@ -342,8 +375,8 @@ describe("the sidebar", () => {
   });
 
   it("draws the Draft Thread as the current, first row of its project, saying where it will work, and follows the pick", async () => {
-    const [webshop] = SIDEBAR_FIXTURE.projects;
-    const [, thread3f1] = SIDEBAR_FIXTURE.workspaces;
+    const [webshop] = SINGLE_THREADS_FIXTURE.projects;
+    const [primary, thread3f1, flakyWorktree] = SINGLE_THREADS_FIXTURE.workspaces;
     const { nav, router } = await startSidebar({
       path: `/?project=${webshop!.id}&workspace=${thread3f1!.id}`,
     });
@@ -355,7 +388,7 @@ describe("the sidebar", () => {
       );
       return keys.slice(
         keys.indexOf(`header:project:${webshop!.id}`),
-        keys.indexOf(`thread:${FIXTURE_THREAD_IDS.bunPin}`) + 1,
+        keys.indexOf(`group:workspace:${primary!.id}`) + 1,
       );
     };
     const draft = await waitFor(() => {
@@ -370,16 +403,16 @@ describe("the sidebar", () => {
     expect(readDraftProject()).toEqual([
       `header:project:${webshop!.id}`,
       "draft",
-      `thread:${FIXTURE_THREAD_IDS.runbook}`,
-      `thread:${FIXTURE_THREAD_IDS.flaky}`,
-      `thread:${FIXTURE_THREAD_IDS.bunPin}`,
+      `group:workspace:${thread3f1!.id}`,
+      `group:workspace:${flakyWorktree!.id}`,
+      `group:workspace:${primary!.id}`,
     ]);
 
     const { pendingSubmissions } = router.options.context.controller!;
     const key = buildDraftKey(webshop!.id, thread3f1!.id);
     act(() => {
       pendingSubmissions.writePicks(key, {
-        workspace: { kind: "primary", resourceId: SIDEBAR_FIXTURE.resources[0]!.id },
+        workspace: { kind: "primary", resourceId: SINGLE_THREADS_FIXTURE.resources[0]!.id },
       });
     });
     // The repo's main workspace is on a branch the user chose, so the row names it.
@@ -451,7 +484,7 @@ describe("the sidebar", () => {
   });
 
   it("draws again only the row whose thread a live push changed", async () => {
-    let threads: readonly Session[] = SIDEBAR_FIXTURE.threads;
+    let threads: readonly Session[] = SINGLE_THREADS_FIXTURE.threads;
     const { nav, live } = await startSidebar({ readThreads: () => threads });
     await waitFor(() => {
       expect(live.readTopics()).toContain("session");
@@ -472,7 +505,7 @@ describe("the sidebar", () => {
   });
 
   it("draws only the new rows when a new thread pushes every row below it down", async () => {
-    let threads: readonly Session[] = SIDEBAR_FIXTURE.threads;
+    let threads: readonly Session[] = SINGLE_THREADS_FIXTURE.threads;
     const { nav, live } = await startSidebar({ readThreads: () => threads });
     await waitFor(() => {
       expect(live.readTopics()).toContain("session");
@@ -483,13 +516,11 @@ describe("the sidebar", () => {
     // A new thread in webshop waits on an approval: a row at the top of
     // Waiting on you and a row at the top of webshop, with every row below
     // each of them moving down.
-    const [primary] = SIDEBAR_FIXTURE.workspaces;
     const [arrived] = buildThreads(1, {
       title: "Pin the lockfile",
       status: "busy",
       openRequests: [APPROVAL],
-      projectId: SIDEBAR_FIXTURE.projects[0]!.id,
-      workspaceId: primary!.id,
+      projectId: SINGLE_THREADS_FIXTURE.projects[0]!.id,
       createdAt: "2026-09-10T09:06:00.000Z",
       lastActivityAt: "2026-09-10T09:06:00.000Z",
     });
@@ -528,29 +559,29 @@ describe("the sidebar", () => {
   });
 
   it("shows 5 threads of a project, and every thread once its more row is pressed", async () => {
-    const webshop = SIDEBAR_FIXTURE.projects[0]!;
+    const webshop = SINGLE_THREADS_FIXTURE.projects[0]!;
     const threads = buildThreads(8, { projectId: webshop.id });
     const { nav } = await startSidebar({
-      records: { ...SIDEBAR_FIXTURE, threads },
+      records: { ...SINGLE_THREADS_FIXTURE, threads },
     });
 
-    expect(nav.querySelectorAll("a[data-key^='thread:']")).toHaveLength(5);
-    const more = within(nav).getByRole("button", { name: "3 more threads" });
+    expect(nav.querySelectorAll("a[data-key^='group:']")).toHaveLength(5);
+    const more = within(nav).getByRole("button", { name: "3 more" });
 
     more.focus();
     await userEvent.keyboard("{Enter}");
 
-    expect(nav.querySelectorAll("a[data-key^='thread:']")).toHaveLength(8);
-    expect(readFocusedKey()).toBe(`thread:${threads[5]!.id}`);
+    expect(nav.querySelectorAll("a[data-key^='group:']")).toHaveLength(8);
+    expect(readFocusedKey()).toBe(`group:session:${threads[5]!.id}`);
   });
 
   it("mounts only the rows near the visible part of a long list, and keeps the focused row mounted", async () => {
-    const webshop = SIDEBAR_FIXTURE.projects[0]!;
+    const webshop = SINGLE_THREADS_FIXTURE.projects[0]!;
     const threads = buildThreads(500, { projectId: webshop.id });
-    const { nav } = await startSidebar({ records: { ...SIDEBAR_FIXTURE, threads } });
+    const { nav } = await startSidebar({ records: { ...SINGLE_THREADS_FIXTURE, threads } });
 
-    await userEvent.click(within(nav).getByRole("button", { name: "495 more threads" }));
-    const focused = `thread:${threads[5]!.id}`;
+    await userEvent.click(within(nav).getByRole("button", { name: "495 more" }));
+    const focused = `group:session:${threads[5]!.id}`;
     expect(readFocusedKey()).toBe(focused);
     expect(nav.querySelectorAll(".side-item").length).toBeLessThanOrEqual(45);
 
@@ -573,7 +604,7 @@ describe("the sidebar", () => {
 
   it("moves focus to Waiting on you when the focused waiting row is answered", async () => {
     let threads: readonly Session[] = [
-      ...SIDEBAR_FIXTURE.threads,
+      ...SINGLE_THREADS_FIXTURE.threads,
       { ...buildThreads(1)[0]!, status: "busy", openRequests: [APPROVAL] },
     ];
     const { nav, live } = await startSidebar({ readThreads: () => threads });
@@ -642,7 +673,7 @@ describe("the sidebar's Done moves", () => {
    * marked Done.
    */
   const buildDoneController = (done: boolean) => {
-    let threads: readonly Session[] = SIDEBAR_FIXTURE.threads.map((session) =>
+    let threads: readonly Session[] = SINGLE_THREADS_FIXTURE.threads.map((session) =>
       done && session.id === FIXTURE_THREAD_IDS.bunPin
         ? { ...session, done: { at: "2026-09-10T09:00:00.000Z", by: "user" as const } }
         : session,
@@ -1008,7 +1039,7 @@ describe("the sidebar's faces", () => {
 
     // A new Draft Thread opens at "/" again, with other search parameters.
     await act(() =>
-      router.navigate({ to: "/", search: { project: SIDEBAR_FIXTURE.projects[0]!.id } }),
+      router.navigate({ to: "/", search: { project: SINGLE_THREADS_FIXTURE.projects[0]!.id } }),
     );
 
     expect(readSelectedSegments()).toEqual(["Threads"]);
@@ -1045,7 +1076,7 @@ describe("the sidebar's faces", () => {
   });
 
   it("sends the Go menu the threads face's rows while the Hercule face shows, and not again on a switch", async () => {
-    let threads: readonly Session[] = SIDEBAR_FIXTURE.threads;
+    let threads: readonly Session[] = SINGLE_THREADS_FIXTURE.threads;
     const { fake, live } = await startSidebar({ readThreads: () => threads });
     await waitFor(() => {
       expect(live.readTopics()).toContain("session");
@@ -1065,7 +1096,7 @@ describe("the sidebar's faces", () => {
     await waitFor(() => {
       expect(fake.goMenus.at(-1)?.map((item) => item.title)).toContain("Thread 1");
     });
-    expect(fake.goMenus.at(-1)).toHaveLength(SIDEBAR_FIXTURE.threads.length + 1);
+    expect(fake.goMenus.at(-1)).toHaveLength(SINGLE_THREADS_FIXTURE.threads.length + 1);
   });
 });
 
@@ -1091,7 +1122,7 @@ describe("the sidebar's assistants", () => {
   it("lists every assistant, by name, in the pinned section between the threads and the foot", async () => {
     await startSidebar({
       records: {
-        ...SIDEBAR_FIXTURE,
+        ...SINGLE_THREADS_FIXTURE,
         assistants: [
           { assistant: MILO, session: null },
           { assistant: ADA, session: ADA_WAITING },
@@ -1112,7 +1143,10 @@ describe("the sidebar's assistants", () => {
 
   it("lists a waiting assistant in Waiting on you, linked to its screen", async () => {
     const { nav } = await startSidebar({
-      records: { ...SIDEBAR_FIXTURE, assistants: [{ assistant: ADA, session: ADA_WAITING }] },
+      records: {
+        ...SINGLE_THREADS_FIXTURE,
+        assistants: [{ assistant: ADA, session: ADA_WAITING }],
+      },
     });
 
     const row = nav.querySelector(`[data-key='waiting:assistant:${ADA.id}']`)!;
@@ -1157,7 +1191,7 @@ describe(`the sidebar's "From runs"`, () => {
   it("lists the runs' waiting sessions under Waiting on you's threads, capped at 3, the rest on the more row", async () => {
     const runSessions = buildRunSessions(5);
     const { nav, fake } = await startSidebar({
-      records: { ...SIDEBAR_FIXTURE, agentSessions: runSessions },
+      records: { ...SINGLE_THREADS_FIXTURE, agentSessions: runSessions },
     });
 
     expect(within(nav).getByRole("heading", { name: "Waiting on you 6" })).toBeTruthy();
@@ -1192,7 +1226,7 @@ describe(`the sidebar's "From runs"`, () => {
     const [runSession] = buildRunSessions(1);
     const { nav } = await startSidebar({
       path: "/office",
-      records: { ...SIDEBAR_FIXTURE, agentSessions: [runSession!] },
+      records: { ...SINGLE_THREADS_FIXTURE, agentSessions: [runSession!] },
     });
 
     expect(
@@ -1331,7 +1365,7 @@ describe("the sidebar's card of thread details", () => {
   });
 
   it("hides the card when its thread leaves the list", async () => {
-    let threads: readonly Session[] = SIDEBAR_FIXTURE.threads;
+    let threads: readonly Session[] = SINGLE_THREADS_FIXTURE.threads;
     const { bunPin, live } = await startHovering(() => threads);
     restOn(bunPin);
     expect(readCard()).toContain("Bump the Bun pin");
@@ -1365,10 +1399,10 @@ describe("the sidebar's card of thread details", () => {
     ) {
       return this.classList.contains("thread-hover") ? 100 : 800;
     });
-    const bunPinThread = SIDEBAR_FIXTURE.threads.find(
+    const bunPinThread = SINGLE_THREADS_FIXTURE.threads.find(
       (session) => session.id === FIXTURE_THREAD_IDS.bunPin,
     )!;
-    let threads: readonly Session[] = SIDEBAR_FIXTURE.threads;
+    let threads: readonly Session[] = SINGLE_THREADS_FIXTURE.threads;
     const { nav, bunPin, live } = await startHovering(() => threads);
     restOn(bunPin);
     const topBefore = readCardTop();
@@ -1391,5 +1425,209 @@ describe("the sidebar's card of thread details", () => {
     expect(readCardTop()).toBe(`${String(row.getBoundingClientRect().top)}px`);
     expect(readCardTop()).not.toBe(topBefore);
     expect(readCard()).toContain("Bump the Bun pin");
+  });
+});
+
+describe("the sidebar's groups of sessions", () => {
+  /** The main workspace of webshop, where the group of ten of `buildCrewRecords` works. */
+  const [primary] = SINGLE_THREADS_FIXTURE.workspaces;
+
+  /**
+   * Returns the records of one group of ten Threads in webshop's main
+   * workspace: "Migrate payouts", the lead, then "review", which waits on an
+   * approval, "tests" and "docs", which work, and six that are idle.
+   */
+  const buildCrewRecords = (): SidebarRecords => {
+    const crew = buildThreads(10, {
+      projectId: SINGLE_THREADS_FIXTURE.projects[0]!.id,
+      workspaceId: primary!.id,
+    }).toReversed();
+    const sessions = crew.map((session, index): Session => {
+      if (index === 0) return { ...session, title: "Migrate payouts", status: "busy" };
+      const role = ["review", "tests", "docs", "a", "b", "c", "d", "e", "f"][index - 1]!;
+      return {
+        ...session,
+        role,
+        title: `Session of ${role}`,
+        status: index <= 3 ? "busy" : "idle",
+        openRequests: index === 1 ? [APPROVAL] : [],
+      };
+    });
+    return { ...NO_SIDEBAR_RECORDS, ...SINGLE_THREADS_FIXTURE, threads: sessions };
+  };
+
+  /** Returns the link of the group row named `name`, not the one Waiting on you draws for the same group. */
+  const findRowOf = (nav: HTMLElement, name: string | RegExp): HTMLElement =>
+    within(nav)
+      .getAllByRole("link", { name })
+      .find((link) => link.closest(".side-thread") !== null)!;
+
+  it("draws the two sessions of a worktree as one row, with a button for its two dots", async () => {
+    const { nav } = await startSidebar({ records: SIDEBAR_FIXTURE });
+
+    const dots = within(nav).getByRole("button", {
+      name: "2 threads: 1 waiting on you, 1 working. Unfold",
+    });
+    expect(dots.getAttribute("aria-expanded")).toBe("false");
+    expect(dots.querySelectorAll(".side-dot")).toHaveLength(2);
+    // The two sessions are one row: neither has a row of its own.
+    expect(
+      within(nav).queryByRole("link", { name: "Fix flaky webhook tests, working" }),
+    ).toBeNull();
+  });
+
+  it("unfolds a group into a line per session from its dots, and folds it from the same button", async () => {
+    const { nav } = await startSidebar({ records: buildCrewRecords() });
+
+    const dots = within(nav).getByRole("button", { name: /^10 threads: .*\. Unfold$/ });
+    expect(dots.querySelectorAll(".side-dot")).toHaveLength(3);
+    expect(dots.textContent).toBe("+7");
+    expect(nav.querySelectorAll(".side-member")).toHaveLength(0);
+
+    await userEvent.click(dots);
+    expect(dots.getAttribute("aria-expanded")).toBe("true");
+    expect(dots.getAttribute("aria-label")).toMatch(/\. Fold$/);
+    // The lines show the lead, then the partners that wait or work, in the
+    // group's order, and the six idle ones as one line.
+    expect(
+      [...nav.querySelectorAll(".side-member a")].map((line) => line.getAttribute("aria-label")),
+    ).toEqual([
+      "Migrate payouts, working",
+      "review, waiting on you",
+      "tests, working",
+      "docs, working",
+    ]);
+    expect(within(nav).getByRole("button", { name: "6 quiet" })).toBeTruthy();
+
+    await userEvent.click(dots);
+    expect(dots.getAttribute("aria-expanded")).toBe("false");
+    expect(nav.querySelectorAll(".side-member")).toHaveLength(0);
+  });
+
+  it("shows the quiet sessions as lines once the quiet line is pressed", async () => {
+    const { nav } = await startSidebar({ records: buildCrewRecords() });
+    await userEvent.click(within(nav).getByRole("button", { name: /^10 threads: .*\. Unfold$/ }));
+
+    await userEvent.click(within(nav).getByRole("button", { name: "6 quiet" }));
+
+    expect(nav.querySelectorAll(".side-member a")).toHaveLength(10);
+    expect(within(nav).queryByRole("button", { name: "6 quiet" })).toBeNull();
+  });
+
+  it("describes a line by its group, and opens its session", async () => {
+    const records = buildCrewRecords();
+    const review = records.threads.find((session) => session.role === "review")!;
+    const { nav, router } = await startSidebar({ records });
+    await userEvent.click(within(nav).getByRole("button", { name: /^10 threads: .*\. Unfold$/ }));
+
+    const line = within(nav).getByRole("link", {
+      name: "review, waiting on you",
+      description: "In Migrate payouts Approval",
+    });
+    expect(line.getAttribute("title")).toBe("Session of review");
+    await userEvent.click(line);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/threads/${review.id}`);
+    });
+    // The open session is marked on its own line. Its group's row, which
+    // opens the same session, is marked too.
+    expect(line.getAttribute("aria-current")).toBe("page");
+  });
+
+  it("unfolds a group with the right arrow, folds it with the left arrow, and leaves the arrows alone elsewhere", async () => {
+    const { nav } = await startSidebar({ records: buildCrewRecords() });
+    const row = findRowOf(nav, /^Migrate payouts, waiting on you$/);
+
+    row.focus();
+    // Left on a folded row does nothing, so it reaches whatever else uses it.
+    expect(fireEvent.keyDown(row, { key: "ArrowLeft" })).toBe(true);
+    expect(nav.querySelectorAll(".side-member")).toHaveLength(0);
+    expect(fireEvent.keyDown(row, { key: "ArrowRight" })).toBe(false);
+    await waitFor(() => {
+      expect(nav.querySelectorAll(".side-member a")).toHaveLength(4);
+    });
+    // Right on an unfolded row does nothing either.
+    expect(fireEvent.keyDown(row, { key: "ArrowRight" })).toBe(true);
+    expect(fireEvent.keyDown(row, { key: "ArrowLeft" })).toBe(false);
+    await waitFor(() => {
+      expect(nav.querySelectorAll(".side-member")).toHaveLength(0);
+    });
+  });
+
+  it("folds the group from the left arrow on a line, and moves focus to the group's row", async () => {
+    const { nav } = await startSidebar({ records: buildCrewRecords() });
+    await userEvent.click(within(nav).getByRole("button", { name: /^10 threads: .*\. Unfold$/ }));
+    const line = within(nav).getByRole("link", { name: "tests, working" });
+
+    line.focus();
+    expect(fireEvent.keyDown(line, { key: "ArrowLeft" })).toBe(false);
+
+    await waitFor(() => {
+      expect(nav.querySelectorAll(".side-member")).toHaveLength(0);
+    });
+    const row = findRowOf(nav, /^Migrate payouts, waiting on you$/);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(row);
+    });
+  });
+
+  it("names the asker on the row's second line and in Waiting on you", async () => {
+    const { nav } = await startSidebar({ records: buildCrewRecords() });
+
+    const [waitingRow] = within(nav).getAllByRole("link", {
+      name: /^Migrate payouts, waiting on you$/,
+    });
+    expect(waitingRow!.textContent).toBe("Migrate payouts" + "review asks · Run git push?");
+    expect(findRowOf(nav, /^Migrate payouts, waiting on you$/).textContent).toContain(
+      "review asks · Run git push?",
+    );
+    expect([...nav.querySelectorAll(".side-asker")].map((asker) => asker.textContent)).toEqual([
+      "review",
+      "review",
+    ]);
+  });
+
+  it("lists the sessions of a group in its card, and says how to unfold it", async () => {
+    const { nav } = await startSidebar({ records: buildCrewRecords() });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    fireEvent.pointerOver(findRowOf(nav, /^Migrate payouts, waiting on you$/));
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+
+    const card = document.querySelector(".thread-hover")!;
+    // The most urgent first, then the group's order; eight at most.
+    expect(
+      [...card.querySelectorAll(".thread-hover-member-name")].map((name) => name.textContent),
+    ).toEqual(["review", "Migrate payouts", "tests", "docs", "a", "b", "c", "d"]);
+    expect(card.querySelector(".thread-hover-more")?.textContent).toBe("and 2 more");
+    expect(card.textContent).toContain("Click the dots or press → to unfold");
+  });
+
+  it("draws a Done group on the shelf as one row that counts its threads, and shows its sessions in the card", async () => {
+    const [lead, partner] = buildThreads(2, {
+      projectId: SINGLE_THREADS_FIXTURE.projects[0]!.id,
+      workspaceId: primary!.id,
+      done: { at: "2026-09-10T09:20:00.000Z", by: "user" },
+    }).toReversed();
+    const { nav } = await startSidebar({
+      records: { ...SINGLE_THREADS_FIXTURE, threads: [lead!, { ...partner!, role: "review" }] },
+    });
+
+    await userEvent.click(within(nav).getByRole("button", { name: /^Done/ }));
+
+    const row = within(nav).getByRole("link", { name: "Thread 1, 2 threads, done" });
+    expect(row.textContent).toMatch(/^Thread 12 threads · done /);
+    expect(within(nav).getByRole("button", { name: "Reopen" })).toBeTruthy();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent.pointerOver(row);
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    const card = document.querySelector(".thread-hover")!;
+    expect(card.querySelectorAll(".thread-hover-member")).toHaveLength(2);
+    expect(card.textContent).not.toContain("to unfold");
   });
 });

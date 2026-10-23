@@ -24,7 +24,6 @@ import {
   memo,
   useId,
   type ComponentProps,
-  type CSSProperties,
   type JSX,
   type KeyboardEvent,
   type ReactNode,
@@ -585,7 +584,8 @@ export function SessionMark({
 
 /**
  * Renders the agent of a session of a group: its provider's mark, then the
- * name of its model. Both sit in the faint ink of a row's second line.
+ * name of its model, which is cut short with an ellipsis before the session's
+ * own name is. Both sit in the faint ink of a row's second line.
  */
 export function AgentLabel({
   providerId,
@@ -597,7 +597,7 @@ export function AgentLabel({
   return (
     <span className="side-agent">
       {providerId === null ? null : <ProviderLogo providerId={providerId} size={11} />}
-      {model}
+      <span className="side-agent-model">{model}</span>
     </span>
   );
 }
@@ -651,7 +651,9 @@ function DotsButton({
       {dots.map((dot, index) => (
         <span key={index} className={`side-dot side-dot--${dot}`} />
       ))}
-      {hiddenCount === 0 ? null : <span className="side-dots-more">{`+${String(hiddenCount)}`}</span>}
+      {hiddenCount === 0 ? null : (
+        <span className="side-dots-more">{`+${String(hiddenCount)}`}</span>
+      )}
     </button>
   );
 }
@@ -783,13 +785,13 @@ export const GroupRow = memo(function GroupRow({
   return (
     <div
       className={classNames.join(" ")}
-      style={
-        {
-          marginTop: leading,
-          height: ITEM_HEIGHTS["group-row"],
-          ...(dots === null ? {} : { "--dots": `${String(measureDotsWidth(dots.length, hiddenCount))}px` }),
-        } as CSSProperties
-      }
+      style={{
+        marginTop: leading,
+        height: ITEM_HEIGHTS["group-row"],
+        ...(dots === null
+          ? {}
+          : { "--dots": `${String(measureDotsWidth(dots.length, hiddenCount))}px` }),
+      }}
     >
       <ThreadLink
         sessionId={openId}
@@ -865,7 +867,13 @@ export const GroupRow = memo(function GroupRow({
 const buildFoldOnLeftArrow =
   (groupKey: string, onToggleGroup: (groupKey: string, unfold: boolean) => void) =>
   (event: KeyboardEvent<HTMLElement>): void => {
-    if (event.key !== "ArrowLeft" || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+    if (
+      event.key !== "ArrowLeft" ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey
+    ) {
       return;
     }
     event.preventDefault();

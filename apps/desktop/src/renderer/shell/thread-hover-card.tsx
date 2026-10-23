@@ -86,12 +86,7 @@ function MemberRow({ member }: { readonly member: GroupMember }): JSX.Element {
       <SessionMark dot={member.dot} done={member.done} />
       <span className="thread-hover-member-name">{member.label}</span>
       <AgentLabel providerId={member.providerId} model={member.model} />
-      <StatusSlot
-        id={statusId}
-        status={member.status}
-        activityAt={member.activityAt}
-        onScreen
-      />
+      <StatusSlot id={statusId} status={member.status} activityAt={member.activityAt} onScreen />
     </div>
   );
 }
@@ -134,9 +129,8 @@ export function ThreadHoverCard({
     card.style.top = `${String(top)}px`;
   }, [placement]);
 
-  const listed = details === null ? [] : details.members.toSorted(
-    (a, b) => rankDot(a.dot) - rankDot(b.dot),
-  );
+  const listed =
+    details === null ? [] : details.members.toSorted((a, b) => rankDot(a.dot) - rankDot(b.dot));
   return (
     <div
       ref={cardRef}
