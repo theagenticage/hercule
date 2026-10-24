@@ -4,12 +4,13 @@
  * the first screen, loads only them. The thread's header loads with the
  * thread, together with the side pane's toggle and the Done button it draws.
  */
-import { useId, useRef, type JSX, type ReactNode } from "react";
+import { useId, useRef, type JSX, type ReactNode, type RefCallback } from "react";
 import { Link } from "@tanstack/react-router";
 import { isAbsentPose, isWaitingOnUser, type SessionTab } from "@hercule/client-core";
 import type { Project } from "@hercule/contract";
 import { ComposeIcon } from "../../icons/compose";
 import { MoreIcon } from "../../icons/more";
+import { PlusIcon } from "../../icons/plus";
 import { Mark } from "../../marks";
 import { AgeLabel } from "../age-label";
 import { pickProjectTint, ProjectTile } from "../project-tile";
@@ -19,10 +20,15 @@ import "../session/floating-header.css";
 import "./thread-header.css";
 
 /**
- * The key of the Draft Thread's "New thread" tab. `ThreadTabsPill` takes it
- * as `openKey` to draw that tab, and `useTabOverflow` finds the tab by it.
+ * The key `useTabOverflow` finds the Draft Thread's "New thread" tab by. It
+ * is no session id.
  */
-export const NEW_THREAD_TAB_KEY = "new-thread";
+const NEW_THREAD_TAB_KEY = "new-thread";
+
+/** The open tab of a header: a session's tab, or a Draft Thread's own tab. */
+type OpenTab =
+  | { readonly kind: "session"; readonly sessionId: string }
+  | { readonly kind: "draft" };
 
 /**
  * Renders a header's More pill. More is drawn but does nothing yet, and
@@ -64,7 +70,7 @@ export function ProjectCrumb({
 /**
  * Renders a header's first pill, a nav named `label`: `crumbs`, the work's
  * name, one tab per session in `tabs`, the "+n" button for the tabs that do
- * not fit, then `children`. The pill sits in a room that takes the width the
+ * not fit, then the "+" button. The pill sits in a room that takes the width the
  * header's buttons leave, less 24px (see thread-header.css).
  *
  * - `crumbs` are the place of the sessions: a project's crumb, or a run's.
@@ -73,9 +79,10 @@ export function ProjectCrumb({
  *   after it, and left out, with the separator, when it is `null`.
  * - `tabs` are the tabs in their order. They come from the sidebar row's
  *   members, or, for a session with no row, from `listWorkspaceSessionTabs`.
- * - `openKey` is the open tab: the id of the open session, or
- *   `NEW_THREAD_TAB_KEY` for a Draft Thread, which has no session yet. The
- *   draft's own "New thread" tab is drawn after the tabs only for that key.
+ * - `open` is the open tab: a session's, or a Draft Thread's own "New thread"
+ *   tab, which has no session yet and is drawn after the tabs only for a draft.
+ * - `newThread` is the workspace and the project that the "+" button starts a
+ *   thread in, or `null` for no "+" button.
  * - `freeSpace` is drawn in the room after the pill, such as "Syncing…". It
  *   takes only the room the pill leaves, so it never changes the fit.
  * - `className` adds classes to the nav, such as the one that styles a run's
@@ -83,7 +90,7 @@ export function ProjectCrumb({
  *
  * The open tab and each waiting tab always stay in the pill. The tabs that
  * do not fit move behind "+n", in `TabOverflowMenu` (`useTabOverflow`).
- * `children` follow "+n" and always stay, such as the button for a new thread.
+ * The "+" button follows "+n" and always stays.
  */
 export function ThreadTabsPill({
   label,
@@ -91,21 +98,26 @@ export function ThreadTabsPill({
   crumbs,
   workName,
   tabs,
-  openKey,
+  open,
+  newThread,
   freeSpace,
-  children,
 }: {
   readonly label: string;
   readonly className?: string | undefined;
   readonly crumbs: ReactNode;
   readonly workName: string | null;
   readonly tabs: readonly SessionTab[];
-  readonly openKey: string;
+  readonly open: OpenTab;
+  readonly newThread: { readonly projectId: string | null; readonly workspaceId: string } | null;
   readonly freeSpace?: ReactNode;
-  readonly children?: ReactNode;
 }): JSX.Element {
   const roomRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
+  const openTabRef = useRef<HTMLElement | null>(null);
+  const setOpenTab = (element: HTMLElement | null): void => {
+    openTabRef.current = element;
+  };
+  const openKey = open.kind === "session" ? open.sessionId : NEW_THREAD_TAB_KEY;
   const hiddenKeys = useTabOverflow({
     roomRef,
     navRef,
@@ -134,12 +146,14 @@ export function ThreadTabsPill({
             tab={tab}
             open={tab.sessionId === openKey}
             hidden={hiddenKeys.has(tab.sessionId)}
+            tabRef={tab.sessionId === openKey ? setOpenTab : undefined}
           />
         ))}
-        {openKey === NEW_THREAD_TAB_KEY ? (
+        {open.kind === "draft" ? (
           // Not in the tab order, but focusable by script: the menu moves the focus here when
           // the last hidden tab returns while the focus was in the menu.
           <span
+            ref={setOpenTab}
             className="ptab is-on"
             aria-current="page"
             data-tab={NEW_THREAD_TAB_KEY}
@@ -151,9 +165,23 @@ export function ThreadTabsPill({
         ) : null}
         <TabOverflowMenu
           tabs={tabs.filter((tab) => hiddenKeys.has(tab.sessionId))}
-          openKey={openKey}
+          openSessionId={open.kind === "session" ? open.sessionId : null}
+          restoreFocus={() => openTabRef.current?.focus({ preventScroll: true })}
         />
-        {children}
+        {newThread === null ? null : (
+          <Link
+            to="/"
+            search={
+              newThread.projectId === null
+                ? { workspace: newThread.workspaceId }
+                : { project: newThread.projectId, workspace: newThread.workspaceId }
+            }
+            className="icon-btn"
+            title="New thread in this workspace"
+          >
+            <PlusIcon />
+          </Link>
+        )}
       </nav>
       {freeSpace}
     </div>
@@ -169,6 +197,8 @@ export function ThreadTabsPill({
  * - The tab is selected when `open` is true, from the open tab's key and not
  *   from the route, because the Office's drawer draws this header on the
  *   Office's route.
+ * - `tabRef` receives the tab's element, for the open tab, so the menu can
+ *   return the focus to it.
  * - A `hidden` tab stays in the header, out of flow and invisible, so
  *   `useTabOverflow` can still measure it. The menu of "+n" lists it. Its
  *   age does not tick while it is hidden.
@@ -183,10 +213,12 @@ function SessionTabLink({
   tab,
   open,
   hidden,
+  tabRef,
 }: {
   readonly tab: SessionTab;
   readonly open: boolean;
   readonly hidden: boolean;
+  readonly tabRef: RefCallback<HTMLElement> | undefined;
 }): JSX.Element {
   const endId = useId();
   const { sessionId, label, title, pose, status } = tab;
@@ -198,6 +230,7 @@ function SessionTabLink({
   );
   return (
     <Link
+      ref={tabRef}
       to="/threads/$sessionId"
       params={{ sessionId }}
       className={classes.join(" ")}

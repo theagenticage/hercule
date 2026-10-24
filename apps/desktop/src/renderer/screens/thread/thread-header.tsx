@@ -1,6 +1,6 @@
 import { lazy, memo, Suspense, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link, useRouteContext } from "@tanstack/react-router";
+import { useRouteContext } from "@tanstack/react-router";
 import {
   findGroupRow,
   isJoinable,
@@ -20,7 +20,6 @@ import {
 } from "../../app/queries";
 import { useSessionPresentation } from "../../app/session-presentation";
 import { CheckIcon } from "../../icons/check";
-import { PlusIcon } from "../../icons/plus";
 import { SidebarIcon } from "../../icons/sidebar";
 import { UndoIcon } from "../../icons/undo";
 import { useHasSidePane, useSidePaneLayout } from "../subagents/use-side-pane";
@@ -127,24 +126,10 @@ export const ThreadHeader = memo(function ThreadHeader({
         }
         workName={isStepSession ? null : (row?.title ?? session.title)}
         tabs={tabs}
-        openKey={session.id}
+        open={{ kind: "session", sessionId: session.id }}
+        newThread={canStartThread ? { projectId, workspaceId: workspace.id } : null}
         freeSpace={<TranscriptSyncMarker sessionId={session.id} />}
-      >
-        {canStartThread ? (
-          <Link
-            to="/"
-            search={
-              projectId === null
-                ? { workspace: workspace.id }
-                : { project: projectId, workspace: workspace.id }
-            }
-            className="icon-btn"
-            title="New thread in this workspace"
-          >
-            <PlusIcon />
-          </Link>
-        ) : null}
-      </ThreadTabsPill>
+      />
       <SidePaneToggle sessionId={session.id} />
       {row === undefined ? null : <DonePill row={row} />}
       <MorePill />

@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import type { GroupRow } from "@hercule/client-core";
 import type { Project } from "@hercule/contract";
-import { MorePill, NEW_THREAD_TAB_KEY, ProjectCrumb, ThreadTabsPill } from "../thread/header-pills";
+import { MorePill, ProjectCrumb, ThreadTabsPill } from "../thread/header-pills";
 import "../session/floating-header.css";
 import "../thread/thread-header.css";
 
@@ -44,7 +44,8 @@ export function DraftHeader({
         }
         workName={row?.title ?? null}
         tabs={row?.members ?? NO_TABS}
-        openKey={NEW_THREAD_TAB_KEY}
+        open={{ kind: "draft" }}
+        newThread={null}
       />
       <MorePill />
     </header>

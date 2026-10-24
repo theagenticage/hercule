@@ -16,9 +16,9 @@ import "./tab-overflow-menu.css";
 /**
  * Renders the "+n" button at the end of a header's tabs, and the menu it
  * opens. `tabs` are the tabs that did not fit in the header, in start order,
- * and the menu lists exactly those. `openKey` is the key of the open tab (a
- * session id, or the key of a draft's "New thread" tab); its row, if it is in
- * the list, is drawn as the current one.
+ * and the menu lists exactly those. `openSessionId` is the open session, or
+ * `null` for a Draft Thread's header; its row, if it is in the list, is drawn
+ * as the current one.
  *
  * - The button carries `data-tab-overflow`, which the header's fitting finds
  *   it by (`useTabOverflow`).
@@ -38,10 +38,12 @@ import "./tab-overflow-menu.css";
  */
 export function TabOverflowMenu({
   tabs,
-  openKey,
+  openSessionId,
+  restoreFocus,
 }: {
   readonly tabs: readonly SessionTab[];
-  readonly openKey: string;
+  readonly openSessionId: string | null;
+  readonly restoreFocus: () => void;
 }): JSX.Element {
   const { triggerProps, menuProps, buildItemProps, close } = usePopoverMenu();
   const headingId = useId();
@@ -58,13 +60,8 @@ export function TabOverflowMenu({
     const menu = menuProps.ref.current;
     const focusLost = focused === null || focused === document.body || menu?.contains(focused);
     if (!focusLost) return;
-    const button = buttonRef.current;
-    const target = idle
-      ? Array.from(button?.closest("nav")?.querySelectorAll<HTMLElement>("[data-tab]") ?? []).find(
-          (tab) => tab.dataset["tab"] === openKey,
-        )
-      : button;
-    target?.focus({ preventScroll: true });
+    if (idle) restoreFocus();
+    else buttonRef.current?.focus({ preventScroll: true });
   });
   useEffect(() => {
     closeForNewList();
@@ -106,7 +103,7 @@ export function TabOverflowMenu({
           <TabOverflowRow
             key={tab.sessionId}
             tab={tab}
-            current={tab.sessionId === openKey}
+            current={tab.sessionId === openSessionId}
             onScreen={open}
             itemProps={buildItemProps(tab.sessionId)}
             onTake={close}

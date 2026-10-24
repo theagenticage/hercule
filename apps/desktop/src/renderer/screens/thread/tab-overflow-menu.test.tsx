@@ -17,7 +17,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import type { SessionTab } from "@hercule/client-core";
-import { NEW_THREAD_TAB_KEY, ThreadTabsPill } from "./header-pills";
+import { ThreadTabsPill } from "./header-pills";
 import { TabOverflowMenu } from "./tab-overflow-menu";
 
 const hidePopover = vi.fn();
@@ -83,8 +83,8 @@ interface RenderedMenu {
 }
 
 /** Draws the open tab as a session's tab: a link. */
-const OpenSessionTab = ({ openKey }: { readonly openKey: string }): JSX.Element => (
-  <a href={`/threads/${openKey}`} data-tab={openKey} aria-current="page">
+const OpenSessionTab = ({ sessionId }: { readonly sessionId: string }): JSX.Element => (
+  <a href={`/threads/${sessionId}`} data-tab={sessionId} aria-current="page">
     open tab
   </a>
 );
@@ -92,7 +92,7 @@ const OpenSessionTab = ({ openKey }: { readonly openKey: string }): JSX.Element 
 /** Renders the menu in a router that has the thread route. */
 const renderMenu = async (
   initialTabs: readonly SessionTab[],
-  openKey = "s-open",
+  openSessionId = "s-open",
 ): Promise<RenderedMenu> => {
   let setTabs: (tabs: readonly SessionTab[]) => void = () => undefined;
   function Harness(): JSX.Element {
@@ -102,8 +102,14 @@ const renderMenu = async (
     }, [replaceTabs]);
     return (
       <nav>
-        <OpenSessionTab openKey={openKey} />
-        <TabOverflowMenu tabs={tabs} openKey={openKey} />
+        <OpenSessionTab sessionId={openSessionId} />
+        <TabOverflowMenu
+          tabs={tabs}
+          openSessionId={openSessionId}
+          restoreFocus={() =>
+            document.querySelector<HTMLElement>(`[data-tab="${openSessionId}"]`)?.focus()
+          }
+        />
       </nav>
     );
   }
@@ -328,7 +334,8 @@ describe("TabOverflowMenu in a Draft Thread's header", () => {
           crumbs={<span>payments</span>}
           workName={null}
           tabs={[REVIEW]}
-          openKey={NEW_THREAD_TAB_KEY}
+          open={{ kind: "draft" }}
+          newThread={null}
         />
       );
     }
