@@ -337,7 +337,9 @@ export const createLive = (options: LiveOptions): Live => {
    *   the taps lost during the wait too. A mutable subscriber learns what it
    *   missed from the controller's first push on the new subscription. An
    *   error that keeps repeating costs two frames a minute rather than a
-   *   flood.
+   *   flood. A stream that stayed up longer than the longest wait shows the
+   *   subscription works, so the next wait starts again from the shortest
+   *   delay.
    *
    * Apart from `not_found`, nothing here ends a subscription for good: only
    * the caller does that.
@@ -355,6 +357,7 @@ export const createLive = (options: LiveOptions): Live => {
         // subscription with a push that says every record may have changed
         // (spec 14 §Live model).
         let replay = subscription.cursor !== undefined;
+        const startedAt = performance.now();
         const outcome = yield* Effect.result(
           Stream.runForEach(rpc.subscribe(payload), (message: LiveMessage) =>
             Effect.sync(() => {
@@ -405,6 +408,7 @@ export const createLive = (options: LiveOptions): Live => {
           );
           continue;
         }
+        if (performance.now() - startedAt >= MAX_RETRY_MS) delay = FIRST_RETRY_MS;
         yield* sleepWithJitter(delay);
         delay = Math.min(delay * 2, MAX_RETRY_MS);
         resetCursorlessSubscriber(subscription);
