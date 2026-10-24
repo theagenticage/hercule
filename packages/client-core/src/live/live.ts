@@ -65,6 +65,14 @@ import { buildQueryKeys, type LiveQueryKey } from "./keys";
 const FIRST_RETRY_MS = 1_000;
 const MAX_RETRY_MS = 30_000;
 
+/**
+ * Returns whether a connection or a subscription stream that stayed up for
+ * `upMs` showed it works, so the retry wait after it starts again from the
+ * shortest delay rather than continuing a backoff from hours ago. The
+ * connection's loop and each subscription's loop share this rule.
+ */
+const stayedUpLongEnough = (upMs: number): boolean => upMs >= MAX_RETRY_MS;
+
 /** How often the connection pings the controller to show it is still alive. */
 const PING_INTERVAL_MS = 30_000;
 
@@ -380,6 +388,10 @@ export const createLive = (options: LiveOptions): Live => {
    *   because that subscription was making progress: the controller ends a
    *   subscription with `cap_exceeded` when too much waits for a slow reader,
    *   and a client catching up on a large backlog is cut off again and again.
+   *   It also starts again after a stream that stayed up long enough
+   *   (`stayedUpLongEnough`), which covers a subscription that never moves a
+   *   cursor, such as every mutable topic and tap, and a log with nothing new
+   *   to deliver.
    *   Delivering a message is not progress: every new subscription gets a
    *   first message for free (a mutable topic's push, a log's first message),
    *   so the wait would almost never grow. Just before the next attempt, a
@@ -407,6 +419,7 @@ export const createLive = (options: LiveOptions): Live => {
         // (spec 14 §Live model).
         let replay = subscription.cursor !== undefined;
         const cursorAtStart = subscription.cursor;
+        const startedAt = performance.now();
         // The RPC client turns a pushed chunk it cannot decode into a defect
         // (a `SchemaError`) of this one request. `Effect.result` only sees
         // typed failures, so `catchDefect` picks out that defect; any other
@@ -486,7 +499,12 @@ export const createLive = (options: LiveOptions): Live => {
           );
           continue;
         }
-        if (subscription.cursor !== cursorAtStart) delay = FIRST_RETRY_MS;
+        if (
+          subscription.cursor !== cursorAtStart ||
+          stayedUpLongEnough(performance.now() - startedAt)
+        ) {
+          delay = FIRST_RETRY_MS;
+        }
         yield* sleepWithJitter(delay);
         delay = Math.min(delay * 2, MAX_RETRY_MS);
         resetCursorlessSubscriber(subscription);
@@ -613,7 +631,7 @@ export const createLive = (options: LiveOptions): Live => {
       // A connection that lasted longer than the longest wait shows the client
       // can connect, so the next wait starts again from the shortest delay
       // rather than continuing a backoff from hours ago.
-      if (held !== null && held >= MAX_RETRY_MS) delay = FIRST_RETRY_MS;
+      if (held !== null && stayedUpLongEnough(held)) delay = FIRST_RETRY_MS;
       yield* sleepWithJitter(delay);
       delay = Math.min(delay * 2, MAX_RETRY_MS);
     }
