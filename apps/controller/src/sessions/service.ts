@@ -1327,9 +1327,11 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Ends every session waiting on a workspace that could not be created. The
-   * sessions never started, so there is no harness to stop and nothing to send
-   * to the runner. The user needs the reason, so the runner's error message is
+   * Ends every `queued` session waiting on a workspace that is unavailable.
+   * Those sessions never started, so there is no harness to stop and nothing
+   * to send to the runner. Sessions already running in the workspace are left
+   * alone, because the runner still holds their harness and reports their exit
+   * itself. The user needs the reason, so the runner's error message is
    * stored as a `session.exited` row on each session's stream, where the exit
    * is shown.
    */

@@ -1456,14 +1456,17 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Ends every session in a workspace that has not exited, and returns those
-     * rows as they were before. The caller runs it in a transaction.
+     * Ends every `queued` session in a workspace, and returns those rows as
+     * they were before. A queued session never reached the runner, so nothing
+     * needs stopping. A session the runner already holds (`starting`, `idle` or
+     * `busy`) is left alone: it ends only when the runner reports its exit. The
+     * caller runs it in a transaction.
      */
     endInWorkspace: (
       workspaceId: string,
       at: string,
     ): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
-      endMatching(sql`workspace_id = ${uuidFromString(workspaceId)}`, at),
+      endMatching(sql`workspace_id = ${uuidFromString(workspaceId)} AND status = 'queued'`, at),
 
     /**
      * Ends every session still open on this runner, queued ones included, and
