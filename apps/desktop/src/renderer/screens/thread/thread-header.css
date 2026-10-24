@@ -19,9 +19,11 @@
 }
 
 /* Not in the book, whose titles are short. When the header runs out of
-   room, the tabs' pill shrinks and the pills on the right keep their place:
-   the project's name and each title ellipsize, and the marks, the ages and
-   the `+` keep their size. */
+   room, the project's name and each title ellipsize, and the marks, the ages
+   and the `+` keep their size. A subagent's pill (`.top > nav.pill`) shrinks
+   with the header, and the pills on the right keep their place. The thread's
+   pill does not shrink its parts this way: the fit decides how wide each one
+   is (see "The thread's tabs" below). */
 .top > nav.pill,
 .pill-crumb,
 .ptab {
@@ -34,15 +36,155 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Not in the book. When the header runs out of room, the other threads'
-   tabs give way first, and only then the open thread's tab. A tab that is
-   not open stops at 72px: its padding, its mark, the gap and about four
-   letters with an ellipsis. On a subagent's page, the earlier crumbs give
-   way the same way (subagent-header.css). Other headers' tabs, such as the
-   workflow list's filters, never shrink. */
-:is(.thread-tabs, .subagent-crumbs) .ptab:not(.is-on) {
+/* Not in the book. When a subagent's header runs out of room, the earlier
+   crumbs give way first, and only then the open page's crumb (see
+   subagent-header.css). A crumb that is not the open one stops at 72px: its
+   padding, its mark, the gap and about four letters with an ellipsis. Other
+   headers' tabs, such as the workflow list's filters, never shrink. */
+.subagent-crumbs .ptab:not(.is-on) {
   flex-shrink: 1000;
   min-width: 72px;
+}
+
+/* ---------- The thread's tabs ---------- */
+
+/* The room the thread's pill may take: all the width of the header the
+   buttons on the right leave, less 24px (the header's 8px gap and 16px
+   here). The tabs are fitted to this width (`useTabOverflow`), so it must be
+   exactly the pill's room, and the gap must stay outside its box. The
+   drawing computes the same room in script. */
+.thread-tabs-room {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  min-width: 0;
+  margin-right: 16px;
+}
+/* The pill takes the width of its content, up to the room. The drawing's
+   `overflow: hidden` clips what a window too narrow for the open tab pushes
+   out. It is positioned, so the tabs the fit hides stay in it, out of flow. */
+.thread-tabs-room > .thread-tabs {
+  position: relative;
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow: hidden;
+}
+/* "Syncing…" fills the room the pill leaves, so it takes no part in the fit.
+   Elsewhere it sits against the pills on the right (sync-marker.css). Here it
+   follows the pill instead, 12px after it, where the eye is, and the room
+   clips it before it reaches the buttons. The 12px is the word's margin and
+   not the slot's padding: padding is a width the slot cannot give up, and it
+   would take 12px of the room from the pill, which the fit counts as its
+   own. */
+.thread-tabs-room > .sync-slot {
+  justify-content: flex-start;
+  padding: 0;
+}
+.thread-tabs-room > .sync-slot > .sync-status {
+  margin-left: 12px;
+}
+/* The pill's parts keep their natural size, so the fit can add them up. When
+   the room is short, the tabs go behind "+n" first. Then the work's name
+   shrinks, here in the stylesheet, down to nothing. Then the fit limits the
+   names of the crumbs, the project's name or the run's crumbs, down to
+   nothing, with a `max-width` on the name (`useTabOverflow`); the project's
+   tile stays. A name is only ever shortened when the open tab and the
+   waiting tabs need its room. */
+.thread-tabs > .pill-crumb,
+.thread-tabs > .ptab {
+  flex: none;
+}
+/* The work's name, as the drawing's `.b2-bench-name`, with the "/" before it
+   as its own first part, so the slash goes with the name when the name
+   shrinks away and only the project's tile is left. The crumb before it draws
+   no slash and no right padding then. The slash keeps its place, 8px after
+   the project (the crumb's 6px gap and 2px margin in the drawing, here the
+   pill's 2px gap and 6px of margin), and the 8px after it are the 4px
+   padding, 2px gap and 2px indent the crumb and the name had in the drawing.
+   The drawing cuts the name's text at 280px, less the 8px of the name's
+   padding, so the text is cut at 272px and the slash is outside the cut. The
+   name has no padding here, so that it can shrink to zero width. The fit
+   reads the 272px from the text's computed `max-width`, so this rule is the
+   only place that sets it. */
+.thread-tabs > .pill-crumb:has(+ .work-name) {
+  padding-right: 0;
+}
+.thread-tabs > .pill-crumb:has(+ .work-name)::after {
+  content: none;
+}
+.thread-tabs > .work-name {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.thread-tabs > .work-name::before {
+  content: "/";
+  flex: none;
+  margin: 0 8px 0 6px;
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+/* The gap between the project's tile and its name is the name's own indent,
+   not the project's gap: when the fit cuts the name to nothing, the indent
+   is cut with it, and the tile is left alone, with no 6px after it. The
+   indent counts in the name's `scrollWidth`, which the fit reads. */
+.thread-tabs > .pill-crumb > .proj {
+  gap: 0;
+}
+.thread-tabs > .pill-crumb > .proj > .proj-name {
+  text-indent: 6px;
+}
+.work-name-text {
+  min-width: 0;
+  max-width: 272px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The drawing's `.b2-sep`: a 1px line, 18px high, with 8px before it and 6px
+   after it. The space is padding, not margin, because the fit measures the
+   width of each part, and a width leaves a margin out. */
+.thread-tabs > .thread-tabs-sep {
+  flex: none;
+  box-sizing: content-box;
+  width: 1px;
+  height: 18px;
+  padding: 0 6px 0 8px;
+  background: var(--line);
+  background-clip: content-box;
+}
+/* A tab whose label is the session's title, because it has no role, is cut
+   at 160px, as the drawing cuts it. */
+.thread-tabs .ptab-title.is-title {
+  max-width: 160px;
+}
+/* Not in the drawing. In a pill too narrow for the open tab, the fit sets
+   the width the tab may take (`--open-tab-max-width`, `useTabOverflow`), so
+   its label ellipsizes and "+n" and "+" stay in view. The tab never shrinks
+   otherwise, so the fit can add up the tabs' widths. Only a tab with a label
+   that can ellipsize takes the limit: the new-thread tab's bare text could
+   not, and would be cut off instead. */
+.thread-tabs > .ptab.is-on:has(> .ptab-title) {
+  max-width: var(--open-tab-max-width, none);
+}
+/* A tab the fit hides stays in the pill, out of flow and invisible, so it
+   can still be measured (see `useTabOverflow`). */
+.thread-tabs > .ptab.is-hidden {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}
+/* Not in the drawing, which draws a step session's crumbs in no header. No
+   crumb shrinks by itself, because the fit adds up their widths and limits
+   the names (`useTabOverflow`): the tabs go behind "+n" first. The workflow's
+   crumb still stops at 260px, and the fit counts it so. Four classes deep,
+   so it wins over run-crumbs.css whatever order the two style sheets load
+   in. */
+.thread-tabs-room > .thread-tabs.workflow-crumbs > .pill-crumb {
+  flex: none;
 }
 
 /* The side pane's toggle. The pane opens on the right, so the sidebar's

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, type JSX, type ReactNode } from "re
 import { useRouteContext } from "@tanstack/react-router";
 import { SidebarIcon } from "../icons/sidebar";
 import { drawSidebarWidth, SidebarHandle } from "./sidebar-handle";
+import { DoneToastHost } from "./done-toast";
 import { Sidebar } from "./sidebar";
 import { toggleSidebar, useSidebarLayout } from "./use-sidebar-layout";
 import "./shell.css";
@@ -108,7 +109,10 @@ export function Shell({
       <div ref={slotRef} className="side-slot">
         <Sidebar onNewThread={onNewThread} />
       </div>
-      <main className="main">{children}</main>
+      <main className="main">
+        {children}
+        <DoneToastHost place="main" />
+      </main>
       {collapsed ? (
         <button
           ref={showRef}

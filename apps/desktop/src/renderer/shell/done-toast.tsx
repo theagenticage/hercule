@@ -1,100 +1,22 @@
 /**
- * The toast over the bottom of the sidebar's list, after threads are marked
- * done or reopened: "Marked done" or "Reopened" with Undo, or the error of a
- * Done move that failed.
+ * The toast after threads are marked done or reopened: "Marked done" or
+ * "Reopened" with Undo, or the error of a Done move that failed. It shows over
+ * the bottom of the sidebar's list, or, while the sidebar is hidden, at the
+ * top right of the main pane, under the header's right-hand buttons, where the
+ * Done button that caused it is.
  */
 import { useEffect, useEffectEvent, useState, useSyncExternalStore, type JSX } from "react";
+import { useDoneMoves } from "../app/done-moves";
+import type { DoneToast, DoneToastStore, DoneUndo } from "../app/done-toast-store";
 import { Mark } from "../marks";
+import { useSidebarLayout } from "./use-sidebar-layout";
 
 /** How long the toast shows before it fades, in milliseconds. Intake's toast shows as long. */
 const TOAST_SHOWN_MS = 5_000;
 
-/** A move on the Done state of threads: mark them Done, or reopen them. */
-export type DoneMove = "markDone" | "reopen";
-
-/** The move that undoes a Done move, and the threads it applies to: exactly the ones the first move did. */
-export interface DoneUndo {
-  readonly move: DoneMove;
-  readonly sessionIds: readonly string[];
-}
-
 /**
- * What the sidebar's toast shows: the text of a Done move with the `undo`
- * that reverses it, or the error of a move that failed, which has no `undo`.
- * `serial` changes with every toast, so a new toast replaces the last one
- * even when its text is the same.
- */
-export interface DoneToast {
-  readonly serial: number;
-  readonly text: string;
-  readonly failed: boolean;
-  readonly undo: DoneUndo | null;
-}
-
-/**
- * The toast the sidebar shows, held outside React state so that showing or
- * dismissing a toast redraws only the toast, not the whole sidebar.
- */
-export interface DoneToastStore {
-  /** Shows a new toast with `undo`, replacing the one shown. Returns the new toast's `serial`. */
-  readonly show: (text: string, undo: DoneUndo) => number;
-  /**
-   * Shows the error `text` of a Done move that failed, as a toast without
-   * Undo. `own` is the `serial` of the toast that move showed, or `null` when
-   * it showed none.
-   *
-   * The error replaces the toast shown, except when that toast is the Undo of
-   * a different, newer move. Replacing it would take that Undo away. The
-   * error is held until that toast goes, then shown. Held errors are shown
-   * one after the other.
-   */
-  readonly showFailure: (text: string, own: number | null) => void;
-  /** Hides the toast shown, if any, and shows the next held error. */
-  readonly dismiss: () => void;
-  /** Calls `listener` after every change; returns the function that stops that. */
-  readonly subscribe: (listener: () => void) => () => void;
-  /** Returns the toast shown, or `null` for none. */
-  readonly read: () => DoneToast | null;
-}
-
-/** Creates an empty toast store. The sidebar creates one and keeps it for its life. */
-export const createDoneToastStore = (): DoneToastStore => {
-  let toast: DoneToast | null = null;
-  let serial = 0;
-  const heldErrors: string[] = [];
-  const listeners = new Set<() => void>();
-  const change = (next: DoneToast | null): void => {
-    toast = next;
-    for (const listener of listeners) listener();
-  };
-  const display = (text: string, failed: boolean, undo: DoneUndo | null): number => {
-    serial += 1;
-    change({ serial, text, failed, undo });
-    return serial;
-  };
-  return {
-    show: (text, undo) => display(text, false, undo),
-    showFailure: (text, own) => {
-      if (toast !== null && toast.undo !== null && toast.serial !== own) heldErrors.push(text);
-      else display(text, true, null);
-    },
-    dismiss: () => {
-      const next = heldErrors.shift();
-      if (next !== undefined) display(next, true, null);
-      else if (toast !== null) change(null);
-    },
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-    read: () => toast,
-  };
-};
-
-/**
- * Renders the toast `store` holds, or nothing when it holds none.
+ * Renders the toast `store` holds, or nothing when it holds none. It does not
+ * choose a place: `DoneToastHost` puts it in the sidebar or in the main pane.
  *
  * - The toast shows for five seconds, then fades and is dismissed.
  *   While the pointer is on it, it stays; when the pointer leaves, the five
@@ -105,7 +27,7 @@ export const createDoneToastStore = (): DoneToastStore => {
  * - A failed move shows its error behind the failed mark, as an alert, with
  *   no Undo.
  */
-export function SidebarDoneToast({
+export function CurrentDoneToast({
   store,
   onUndo,
 }: {
@@ -123,7 +45,73 @@ export function SidebarDoneToast({
   );
 }
 
-/** Renders one toast, as `SidebarDoneToast` describes. */
+/**
+ * Renders the app's one toast where the user can see it: `place` "sidebar"
+ * draws it in the sidebar while the sidebar shows, and `place` "main" draws
+ * it at the top right of the main pane while the sidebar is hidden. Both
+ * places read the same store, so only one of them ever draws a toast, and
+ * one that is up when the sidebar is shown or hidden moves to the other.
+ * The moved toast starts its five seconds again.
+ *
+ * Each place reads the sidebar's layout itself, so showing or hiding the
+ * sidebar draws these two places and nothing around them.
+ */
+export function DoneToastHost({
+  place,
+}: {
+  readonly place: "sidebar" | "main";
+}): JSX.Element | null {
+  const { toasts, undo } = useDoneMoves();
+  const { collapsed } = useSidebarLayout();
+  if (collapsed !== (place === "main")) return null;
+  return place === "main" ? (
+    <MainToast store={toasts} onUndo={undo} />
+  ) : (
+    <CurrentDoneToast store={toasts} onUndo={undo} />
+  );
+}
+
+/**
+ * Renders the toast `store` holds over the main pane, or nothing when it holds
+ * none. The frame is made again for each toast (`serial`), which is when it
+ * checks whether the main view shows a classic scroll bar.
+ */
+function MainToast({
+  store,
+  onUndo,
+}: {
+  readonly store: DoneToastStore;
+  readonly onUndo: (undo: DoneUndo) => void;
+}): JSX.Element | null {
+  const toast = useSyncExternalStore(store.subscribe, store.read);
+  return toast === null ? null : (
+    <MainToastFrame key={toast.serial} store={store} onUndo={onUndo} />
+  );
+}
+
+/**
+ * Renders the frame that places a toast at the top right of the main pane,
+ * and the toast. The frame keeps clear of a classic scroll bar, which the
+ * stylesheet cannot see without a `:has()` on the main pane that would
+ * re-check on every change inside it.
+ */
+function MainToastFrame({
+  store,
+  onUndo,
+}: {
+  readonly store: DoneToastStore;
+  readonly onUndo: (undo: DoneUndo) => void;
+}): JSX.Element {
+  // Checked once, when the toast mounts: a `:has()` on `.main` would cost 1.5 ms per sidebar show.
+  const [besideScrollbar] = useState(() => document.querySelector(".main .has-scrollbar") !== null);
+  return (
+    <div className={besideScrollbar ? "main-toast is-beside-scrollbar" : "main-toast"}>
+      <CurrentDoneToast store={store} onUndo={onUndo} />
+    </div>
+  );
+}
+
+/** Renders one toast, as `CurrentDoneToast` describes. */
 function ToastLine({
   toast,
   onUndo,

@@ -1,0 +1,115 @@
+/* The "+n" button of a header's tabs, and its menu. The rules are the
+   drawing's `.b2-over`, `.b2-menu` and `.b2-mi` (workbench-refined). The menu
+   is a popover menu (`.popover-menu`, menus.css) with the drawing's glass. */
+
+/* The button is a tab that does not shrink, and reads as pressed while its
+   menu is open. */
+.tab-overflow {
+  flex: none;
+  gap: 4px;
+  padding: 0 8px 0 10px;
+  font: inherit;
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.tab-overflow:has(+ .tab-overflow-menu:popover-open) {
+  background: var(--press);
+  color: var(--ink);
+}
+/* While no tab is hidden the button only exists to be measured: the header
+   reads the room it would take for one hidden tab. */
+.tab-overflow.is-idle {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+}
+/* The chevron is the right one turned down, as the drawing's is. */
+.tab-overflow-chevron {
+  display: inline-flex;
+  transform: rotate(90deg);
+}
+
+/* The menu opens 6px under the button, its left edge 4px before the button's,
+   as the drawing places it. Where that would leave less than 14px between the
+   menu and the right edge of the window, which the main pane shares, it opens
+   with its right edge 14px from that edge instead. The 14px is the right
+   margin, which the browser counts in deciding that the menu does not fit.
+   A long list scrolls. */
+.pop.popover-menu.tab-overflow-menu {
+  min-width: 300px;
+  max-width: 380px;
+  max-height: calc(100% - 16px);
+  margin: 6px 14px 0 -4px;
+  overflow-y: auto;
+  position-area: block-end span-inline-end;
+  position-try-fallbacks: --tab-overflow-menu-at-edge;
+  /* The drawing's menu is a raised glass with the glass's rim, not the
+     composer menus' surface glass. */
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-3);
+}
+@position-try --tab-overflow-menu-at-edge {
+  position-area: block-end;
+  justify-self: end;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .tab-overflow-menu:popover-open {
+    animation: tab-overflow-arrive 160ms var(--ease-out) both;
+  }
+}
+@keyframes tab-overflow-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.tab-overflow-heading {
+  padding: 4px 8px 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+/* A row is a popover menu's item with a gap of 8px. The open session's row
+   is selected, and wins over the highlight of the item under the pointer. */
+.tab-overflow-menu [role="menuitem"] {
+  gap: 8px;
+}
+.tab-overflow-menu.popover-menu [role="menuitem"].is-current {
+  background: var(--selected);
+}
+.tab-overflow-menu .mark,
+.tab-overflow-no-mark {
+  flex: none;
+}
+/* The room of a mark, for a session that has none, so the names line up. */
+.tab-overflow-no-mark {
+  width: 14px;
+}
+.tab-overflow-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tab-overflow-name.is-title {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+/* The drawing keeps the model whole and cuts the name, unlike the sidebar's
+   lines, which drop the model first. */
+.tab-overflow-menu .side-agent {
+  flex: none;
+}
+.tab-overflow-menu .side-end {
+  margin-left: auto;
+  padding-left: 8px;
+}

@@ -17,6 +17,7 @@ import type { OpenRequest, Project, Session } from "@hercule/contract";
 import { describe, expect, it } from "vitest";
 import type { Waiting } from "../waiting";
 import type { DraftPlace } from "./groups";
+import { findGroupRow, findWorkspaceGroupRow } from "./group-row";
 import { prepareSessionPresentation } from "./session-presentation";
 import {
   DONE_SHELF_LIMIT,
@@ -25,6 +26,7 @@ import {
   type SidebarChoices,
   type SidebarView,
 } from "./sidebar-sections";
+import { listWorkspaceSessionTabs, type SessionTab } from "./siblings";
 import {
   MOSS,
   OPS_PROJECT,
@@ -1023,5 +1025,89 @@ describe("the Done shelf", () => {
     expect(closed.rows.map(({ row }) => row.leadId)).toEqual(["s-old"]);
     expect(open.rows.map(({ row }) => row.leadId)).toEqual(["s-new", "s-old"]);
     expect(open.hiddenCount).toBe(0);
+  });
+});
+
+describe("the row that holds a session", () => {
+  it("is the group's row for a Thread of a workspace, and for an Agent session beside it", () => {
+    const sessions = [thread("s-lead"), agent("s-agent"), lone("s-lone", 5)];
+    const { groupRows } = prepare(sessions);
+
+    expect(findGroupRow(groupRows, sessions[0]!)?.leadId).toBe("s-lead");
+    expect(findGroupRow(groupRows, sessions[1]!)?.leadId).toBe("s-lead");
+  });
+
+  it("is a Thread with no workspace's own row", () => {
+    const sessions = [thread("s-lead"), lone("s-lone", 5)];
+    const { groupRows } = prepare(sessions);
+
+    expect(findGroupRow(groupRows, sessions[1]!)?.key).toBe("session:s-lone");
+  });
+
+  it("is nothing for a run's step session that shares the Thread's workspace", () => {
+    const step = buildSession({ id: "s-step", kind: "run", runId: "r-1", workspaceId: "w-1" });
+    const { groupRows } = prepare([thread("s-lead")]);
+
+    expect(findGroupRow(groupRows, step)).toBeUndefined();
+  });
+
+  it("is nothing for a session no row lists, such as an Agent session in a workspace with no Thread", () => {
+    const orphan = agent("s-orphan", { workspaceId: "w-2" });
+    const { groupRows } = prepare([thread("s-lead"), orphan]);
+
+    expect(findGroupRow(groupRows, orphan)).toBeUndefined();
+    expect(findGroupRow(groupRows, thread("s-unlisted"))).toBeUndefined();
+  });
+});
+
+describe("the row of a workspace", () => {
+  it("is the row of the group that works in it, which a Draft Thread that joins the workspace draws its tabs from", () => {
+    const sessions = [thread("s-lead"), agent("s-agent"), lone("s-lone", 5)];
+    const { groupRows } = prepare(sessions);
+
+    expect(
+      findWorkspaceGroupRow(groupRows, "w-1")?.members.map(({ sessionId }) => sessionId),
+    ).toEqual(["s-lead", "s-agent"]);
+  });
+
+  it("is nothing for a workspace that holds no Thread, or that no session works in", () => {
+    const { groupRows } = prepare([thread("s-lead"), agent("s-orphan", { workspaceId: "w-2" })]);
+
+    expect(findWorkspaceGroupRow(groupRows, "w-2")).toBeUndefined();
+    expect(findWorkspaceGroupRow(groupRows, "w-3")).toBeUndefined();
+  });
+});
+
+describe("a header tab and a row's line", () => {
+  it("describe one session identically, so the two paths cannot disagree", () => {
+    const sessions = [
+      thread("s-lead", { role: "build", status: "busy", ...done(40) }),
+      agent("s-reviewer", { role: "review", openRequests: [ask("r-1")] }),
+      agent("s-ended", { role: "review", status: "exited", exitedAt: at(6), createdAt: at(6) }),
+      thread("s-codex", { instanceId: "i-codex", createdAt: at(3) }),
+    ];
+    const workspace = { ...THREAD_3F1, id: "w-1", sessionIds: sessions.map(({ id }) => id) };
+    const { groupRows } = prepare(sessions);
+    const members = groupRows[0]!.members;
+
+    for (const session of sessions) {
+      const tabs = listWorkspaceSessionTabs(session, sessions, {
+        workspaces: [workspace],
+        runners: [MOSS],
+        instances: INSTANCES,
+      });
+      const tab = tabs.find(({ sessionId }) => sessionId === session.id)!;
+      const member = members.find(({ sessionId }) => sessionId === session.id)!;
+      // A member is usable wherever a tab is expected.
+      const asTab: SessionTab = member;
+
+      expect(asTab).toMatchObject(tab);
+    }
+    expect(members.map(({ label }) => label)).toEqual([
+      "build",
+      "review",
+      "Thread s-codex",
+      "review 2",
+    ]);
   });
 });

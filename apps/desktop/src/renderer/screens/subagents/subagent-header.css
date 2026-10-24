@@ -1,15 +1,16 @@
 /* A subagent's page: a crumb from the thread down to the subagent. The
    rules are the subagents prototype's `.proto-crumbs`, `.proto-crumb-here`
    and `.proto-tag` (commit 6253a529, variant D, the tinted crumb). The
-   header, the tabs and how a tab that is not open gives way are the thread
-   header's (../session/floating-header.css, ../thread/thread-header.css). */
+   header and the tabs are the thread header's (../session/floating-header.css,
+   ../thread/thread-header.css), and so is the rule that makes a crumb that is
+   not open give way first (`.subagent-crumbs .ptab:not(.is-on)` there). */
 .subagent-crumb {
   display: inline-flex;
   align-items: center;
   min-width: 0;
 }
 /* Not in the prototype: an ancestor gives way before the subagent's own
-   name, as the thread's crumb does (see `.ptab:not(.is-on)` in
+   name, as its tab does (see `.subagent-crumbs .ptab:not(.is-on)` in
    thread-header.css). The ancestor's own tab holds the floor, so its
    crumb, with the separator, never gets narrower than that tab. */
 .subagent-crumb:not(:last-child) {

@@ -4,7 +4,7 @@
  * specimen sheets as `--sheets-url` and the switches that fix the capture's
  * scale, its colour profile and how its pixels are drawn.
  *
- * For each theme, Whitehaven and Orient Express, it compares thirty-nine pairs of
+ * For each theme, Whitehaven and Orient Express, it compares forty-two pairs of
  * pages. The first pair is the sheets of pieces. It:
  * - opens the reference sheet (the Bureau book's crew.js) and the app's
  *   specimen sheet, each in its own hidden 1440 × 900 window, and waits
@@ -23,6 +23,11 @@
  *   drawing's `?state=rows`, which draws one row each for 1, 2, 3 and 10
  *   Threads, edited by specimens/sidebar-rows-reference.ts, and the sidebar
  *   rows specimen (sidebar-rows.html);
+ * - the thread header (the top 56 px of the main pane) of the same drawing's
+ *   `?state=stress&header=a`, a piece of work of ten Threads with its lead
+ *   open: the drawing edited by specimens/thread-header-reference.ts, and the
+ *   thread header specimen (thread-header.html). Again with its "+n" menu
+ *   open (`?state=menu`), over the top 400 px;
  * - the thread (x 272-1440, the main pane) of session-active.html: the
  *   book's page edited by specimens/thread-reference.ts, and the thread
  *   specimen (thread.html);
@@ -312,6 +317,45 @@ const SIDEBAR_ROWS_PARTS = [
   ".side-me",
 ];
 
+// Every part of the thread header whose box is compared, as a selector inside
+// `main.main`. The Workbench, refined drawing names the parts of its header
+// with its own classes, so a part that the two pages name differently is one
+// selector that lists both names: the app's, then the drawing's. A tab that
+// the fit hides stays in the app's pill, invisible and out of flow, and the
+// drawing removes it, so the tabs are those that are not hidden.
+const THREAD_HEADER_PARTS = [
+  ".top",
+  ".top .pill",
+  ".pill-crumb",
+  ".pill-crumb > .proj",
+  ".work-name",
+  ".work-name-text",
+  ".thread-tabs-sep",
+  ".ptab:not(.is-hidden, .is-idle)",
+  ".ptab:not(.is-hidden, .is-idle) > .mark",
+  ".ptab:not(.is-hidden, .is-idle) > small",
+  ".ptab:not(.is-hidden, .is-idle) svg",
+  ".ptab:not(.is-hidden, .is-idle) > :is(.ptab-title, .b2-tab-label)",
+  ".top .icon-btn",
+  ".top .icon-btn svg",
+  ".top .pill-btn",
+  ".top .pill-btn svg",
+];
+
+// Every part of the thread header's "+n" menu whose box is compared, as a
+// selector inside `main.main`, named as the app's then the drawing's.
+const THREAD_HEADER_MENU_PARTS = [
+  ...THREAD_HEADER_PARTS,
+  ".tab-overflow-menu, .b2-menu",
+  ".tab-overflow-heading, .b2-menu-h",
+  ".tab-overflow-row, .b2-mi",
+  ".tab-overflow-row > .mark, .b2-mi > .mark",
+  ".tab-overflow-name, .b2-mi-name",
+  ".side-agent, .b2-agent",
+  ".side-agent svg, .b2-agent svg",
+  ".side-end, .b2-mi-slot",
+];
+
 // Every part of the thread screen whose box is compared, as a selector
 // inside `main.main`. The book wraps some of the composer's rows in one more
 // element inside each fold than the app does, so the composer's parts are
@@ -328,12 +372,12 @@ const SIDEBAR_ROWS_PARTS = [
 //   card's rounded corner. The text lands on the same pixels.
 const THREAD_PARTS = [
   ".top",
-  ".top > .pill",
+  ".top .pill",
   ".pill-crumb",
   ".pill-crumb > .proj",
-  ".ptab",
-  ".ptab > .mark",
-  ".ptab > small",
+  ".ptab:not(.is-hidden, .is-idle)",
+  ".ptab:not(.is-hidden, .is-idle) > .mark",
+  ".ptab:not(.is-hidden, .is-idle) > small",
   ".top .icon-btn",
   ".top .icon-btn > svg",
   ".transcript",
@@ -389,11 +433,11 @@ const THREAD_PARTS = [
 // padding. The pixel comparison checks it.
 const DRAFT_PARTS = [
   ".top",
-  ".top > .pill",
+  ".top .pill",
   ".pill-crumb",
   ".pill-crumb > .proj",
-  ".ptab",
-  ".ptab > svg",
+  ".ptab:not(.is-hidden, .is-idle)",
+  ".ptab:not(.is-hidden, .is-idle) > svg",
   ".top .icon-btn",
   ".top .icon-btn > svg",
   ".hello",
@@ -1230,6 +1274,17 @@ function buildTrackingPanePair(state: string): RegionPair {
   };
 }
 
+/** The thread header's region: the main pane's top 56px, which hold its pills. */
+const THREAD_HEADER_REGION: Rect = {
+  x: MAIN_PANE_REGION.x,
+  y: 0,
+  width: MAIN_PANE_REGION.width,
+  height: 56,
+};
+
+/** The region of the thread header with its "+n" menu open: the header and the room under it that the menu takes. */
+const THREAD_HEADER_MENU_REGION: Rect = { ...THREAD_HEADER_REGION, height: 400 };
+
 const REGION_PAIRS: ReadonlyArray<RegionPair> = [
   {
     name: "sidebar",
@@ -1249,6 +1304,28 @@ const REGION_PAIRS: ReadonlyArray<RegionPair> = [
     region: SIDEBAR_REGION,
     scope: "aside.side",
     parts: SIDEBAR_ROWS_PARTS,
+  },
+  {
+    name: "thread-header",
+    bookPage: "sidebar-directions/workbench-refined/desktop.html",
+    referenceModule: "thread-header-reference.ts",
+    specimenPage: "thread-header.html",
+    state: "stress",
+    search: { header: "a" },
+    region: THREAD_HEADER_REGION,
+    scope: "main.main",
+    parts: THREAD_HEADER_PARTS,
+  },
+  {
+    name: "thread-header-menu",
+    bookPage: "sidebar-directions/workbench-refined/desktop.html",
+    referenceModule: "thread-header-reference.ts",
+    specimenPage: "thread-header.html",
+    state: "menu",
+    search: { header: "a" },
+    region: THREAD_HEADER_MENU_REGION,
+    scope: "main.main",
+    parts: THREAD_HEADER_MENU_PARTS,
   },
   {
     name: "thread",

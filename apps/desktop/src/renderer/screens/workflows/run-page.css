@@ -10,19 +10,6 @@
 .run-crumbs > .ptab {
   flex: none;
 }
-/* A button in a header pill, such as Cancel run…. */
-.pill-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 8px;
-  font-weight: var(--w-medium);
-}
-.pill-btn:hover {
-  background: var(--hover);
-}
 
 /* ---------- The lead ---------- */
 

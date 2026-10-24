@@ -20,9 +20,11 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { buildRouterContext } from "../../app/context";
+import { DoneMovesProvider } from "../../app/done-moves";
 import type { PendingSubmissions } from "../../app/pending-submissions";
 import { ensureShellData, ensureThreadData } from "../../app/queries";
 import { useKeepRequestDrafts } from "../../app/request-drafts";
+import { SessionPresentationProvider } from "../../app/session-presentation";
 import {
   buildSidebarHandlers,
   buildThreadHandlers,
@@ -68,7 +70,8 @@ export interface RenderedThreadPart {
  * `/threads/$sessionId` and `/assistants/$assistantId`, so the part's links
  * resolve, and the app's id for
  * the thread's route under `_shell`, so a part that matches that route finds
- * it. It starts at the thread, whose loader makes the reads the shell's and
+ * it. The shell route offers the session presentation and the Done moves, as
+ * the app's does. It starts at the thread, whose loader makes the reads the shell's and
  * the thread's loaders make. So, as in the app, nothing waits once this
  * returns. The thread's route keeps the thread's Request drafts, as the
  * thread's layout route does in the app.
@@ -108,7 +111,15 @@ export const renderThreadPart = async (
   const shellRoute = createRoute({
     getParentRoute: () => connectedRoute,
     id: "_shell",
-    component: Outlet,
+    component: function ShellLayout() {
+      return (
+        <SessionPresentationProvider>
+          <DoneMovesProvider client={client}>
+            <Outlet />
+          </DoneMovesProvider>
+        </SessionPresentationProvider>
+      );
+    },
   });
   const threadRoute = createRoute({
     getParentRoute: () => shellRoute,

@@ -16,8 +16,9 @@ import type { GroupMember } from "@hercule/client-core";
 import { BranchIcon } from "../icons/branch";
 import { LaptopIcon } from "../icons/laptop";
 import { ProjectTile, type ProjectTint } from "../screens/project-tile";
+import { AgentLabel, StatusSlot } from "../screens/session-status";
 import { ProviderLogo } from "../screens/thread/provider-logo";
-import { AgentLabel, SessionMark, StatusSlot } from "./sidebar-rows";
+import { SessionMark } from "./sidebar-rows";
 import "./thread-hover-card.css";
 
 /** What the card shows about one group of sessions, or about one thread. */

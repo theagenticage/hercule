@@ -269,6 +269,21 @@
   font-weight: var(--w-regular);
 }
 
+/* A button in a floating pill, with an icon and a word, such as Cancel run…
+   on a run's page and Done in the thread's header. */
+.pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-weight: var(--w-medium);
+}
+.pill-btn:hover {
+  background: var(--hover);
+}
+
 /* ---------- Segmented controls ---------- */
 /* A row of buttons that picks one of a few values, such as a model option's
    choices. The pressed button is the value in use. */

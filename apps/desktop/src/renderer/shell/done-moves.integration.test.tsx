@@ -1,18 +1,22 @@
 /**
- * Tests the sidebar's Done moves on lists of Threads: `useDoneMoves` with
- * the toast it feeds, against a stubbed controller that applies a list as it
- * would, all or nothing.
+ * Tests the Done moves on lists of Threads: the moves of `DoneMovesProvider`
+ * with the toast they feed, against a stubbed controller that applies a list
+ * as it would, all or nothing.
  *
  * The Threads are drawn by a small harness, not by the sidebar, so a test can
  * move three of them as one group without the group rows of the sidebar.
  */
-import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { createClient, type HerculeClient } from "@hercule/client-core";
+import { matchQuery, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import {
+  createClient,
+  invalidateWithoutCancelling,
+  type HerculeClient,
+} from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
+import { DoneMovesProvider, useDoneMoves } from "../app/done-moves";
 import { createQueryClient } from "../app/query-client";
 import { sessionQuery, threadAndAgentSessionsQuery } from "../app/queries";
 import {
@@ -23,8 +27,7 @@ import {
   stubApi,
   type Handler,
 } from "../app/testing";
-import { createDoneToastStore, SidebarDoneToast } from "./done-toast";
-import { useDoneMoves } from "./use-done-moves";
+import { CurrentDoneToast } from "./done-toast";
 
 const MARK_DONE_PATH = "/api/v1/sessions/mark-done";
 const REOPEN_PATH = "/api/v1/sessions/reopen";
@@ -96,8 +99,7 @@ function Harness({
   readonly client: HerculeClient;
   readonly openIds: readonly string[];
 }) {
-  const [toasts] = useState(createDoneToastStore);
-  const { markDone, reopen, undo } = useDoneMoves(client, toasts);
+  const { markDone, reopen } = useDoneMoves();
   const { data = [] } = useQuery(threadAndAgentSessionsQuery(client));
   const idsOf = (numbers: readonly number[]) => numbers.map((number) => buildThread(number).id);
   return (
@@ -158,9 +160,19 @@ function Harness({
       >
         Reopen Thread 1
       </button>
-      <SidebarDoneToast store={toasts} onUndo={undo} />
+      <Toast />
     </>
   );
+}
+
+/**
+ * Draws the toast as the sidebar does. It is a component of its own, apart
+ * from the buttons, so the test shows that two users of the provider share
+ * one queue and one toast.
+ */
+function Toast() {
+  const { toasts, undo } = useDoneMoves();
+  return <CurrentDoneToast store={toasts} onUndo={undo} />;
 }
 
 /**
@@ -195,11 +207,50 @@ const startHarness = async (
   }
   render(
     <QueryClientProvider client={queryClient}>
-      <Harness client={client} openIds={openThreads.map((thread) => thread.id)} />
+      <DoneMovesProvider client={client}>
+        <Harness client={client} openIds={openThreads.map((thread) => thread.id)} />
+      </DoneMovesProvider>
     </QueryClientProvider>,
   );
   return {
     calls,
+    /**
+     * Reads the thread list and the records of `openThreads` again, as a push
+     * from the controller does, and waits until those reads have answered.
+     */
+    readAfterPush: async () => {
+      invalidateWithoutCancelling(queryClient, threadAndAgentSessionsQuery(client).queryKey);
+      for (const thread of openThreads) {
+        invalidateWithoutCancelling(queryClient, sessionQuery(client, thread.id).queryKey);
+      }
+      await waitFor(() => {
+        expect(queryClient.isFetching()).toBe(0);
+      });
+    },
+    /** Returns what the cache holds for the thread list. */
+    readCachedThreads: () => queryClient.getQueryData(threadAndAgentSessionsQuery(client).queryKey),
+    /**
+     * Calls `listener` whenever the cache changes the thread list, and
+     * returns the function that stops it.
+     */
+    watchThreads: (listener: () => void) =>
+      queryClient.getQueryCache().subscribe((event) => {
+        if (matchQuery({ queryKey: threadAndAgentSessionsQuery(client).queryKey }, event.query)) {
+          listener();
+        }
+      }),
+    /** Starts the reads of the thread list that a push from the controller starts, and returns at once. */
+    pushThreads: () => {
+      invalidateWithoutCancelling(queryClient, threadAndAgentSessionsQuery(client).queryKey);
+    },
+    waitForMoves: () =>
+      waitFor(() => {
+        expect(queryClient.isMutating()).toBe(0);
+      }),
+    waitForReads: () =>
+      waitFor(() => {
+        expect(queryClient.isFetching()).toBe(0);
+      }),
     readMoves: () =>
       calls
         .filter((call) => call.method === "POST")
@@ -394,6 +445,141 @@ describe("an older Done move that fails while a newer one is pending", () => {
       expectMove(MARK_DONE_PATH, [2]),
       expectMove(REOPEN_PATH, [2]),
     ]);
+  });
+});
+
+describe("a read that answers while Done moves are pending", () => {
+  it("keeps showing a queued Reopen after the Done is answered, until the Reopen is answered", async () => {
+    const heldDone = holdAnswer();
+    const heldReopen = holdAnswer();
+    const controller = buildController(OPEN_THREADS);
+    const { readMoves, readAfterPush } = await startHarness(
+      controller,
+      { [MARK_DONE]: heldDone.handler, [REOPEN]: heldReopen.handler },
+      [OPEN_THREADS[0]!],
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Done Thread 1" }));
+    await userEvent.click(screen.getByRole("button", { name: "Reopen Thread 1" }));
+    heldDone.answer(controller.markDone({ body: { sessionIds: [OPEN_THREADS[0]!.id] } }));
+    await waitFor(() => {
+      expect(readMoves()).toEqual([expectMove(MARK_DONE_PATH, [1]), expectMove(REOPEN_PATH, [1])]);
+    });
+
+    // The controller has marked Thread 1 done and not yet reopened it, so
+    // this read answers with it done.
+    await readAfterPush();
+
+    expect(screen.getByText("Thread 1: open")).toBeTruthy();
+    expect(screen.getByText("Open Thread 1: open")).toBeTruthy();
+
+    heldReopen.answer(controller.reopen({ body: { sessionIds: [OPEN_THREADS[0]!.id] } }));
+    await waitFor(() => {
+      expect(screen.getByText("Thread 1: open")).toBeTruthy();
+      expect(screen.getByText("Open Thread 1: open")).toBeTruthy();
+    });
+  });
+
+  it("keeps showing a pending Done when a read answers with the Thread still open", async () => {
+    const held = holdAnswer();
+    const controller = buildController(OPEN_THREADS);
+    const { readAfterPush } = await startHarness(controller, { [MARK_DONE]: held.handler }, [
+      OPEN_THREADS[0]!,
+    ]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Done Thread 1" }));
+    await readAfterPush();
+
+    expect(screen.getByText("Thread 1: done")).toBeTruthy();
+    expect(screen.getByText("Open Thread 1: done")).toBeTruthy();
+    expect(screen.getByText("Thread 2: open")).toBeTruthy();
+    held.answer(controller.markDone({ body: { sessionIds: [OPEN_THREADS[0]!.id] } }));
+    await waitFor(() => {
+      expect(screen.getByText("Thread 1: done")).toBeTruthy();
+    });
+  });
+
+  it("shows the controller's state for a move that failed, and keeps the move after it", async () => {
+    const heldFirst = holdAnswer();
+    const heldSecond = holdAnswer();
+    const controller = buildController(OPEN_THREADS);
+    let sent = 0;
+    const { readMoves, readAfterPush } = await startHarness(controller, {
+      [MARK_DONE]: () => {
+        sent += 1;
+        return sent === 1 ? heldFirst.handler() : heldSecond.handler();
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Done Thread 1" }));
+    await userEvent.click(screen.getByRole("button", { name: "Done Thread 2" }));
+    heldFirst.answer({
+      status: 409,
+      body: buildErrorBody("invalid_state", "The thread is busy."),
+    });
+    await waitFor(() => {
+      expect(readMoves()).toHaveLength(2);
+    });
+
+    await readAfterPush();
+
+    // The refused Done no longer holds Thread 1 done, and the Done on Thread 2
+    // is still on its way.
+    expect(screen.getByText("Thread 1: open")).toBeTruthy();
+    expect(screen.getByText("Thread 2: done")).toBeTruthy();
+    heldSecond.answer(controller.markDone({ body: { sessionIds: [OPEN_THREADS[1]!.id] } }));
+    await waitFor(() => {
+      expect(screen.getByText("Thread 2: done")).toBeTruthy();
+    });
+    expect(screen.getByText("Thread 1: open")).toBeTruthy();
+  });
+});
+
+describe("a read that started before the last Done move settled", () => {
+  it("cannot put back the Done that a confirmed Reopen undid", async () => {
+    const heldReopen = holdAnswer();
+    const heldRead = holdAnswer();
+    const controller = buildController(OPEN_THREADS);
+    let holdNextRead = false;
+    const { pushThreads, countReads, readCachedThreads, watchThreads, waitForMoves, waitForReads } =
+      await startHarness(controller, {
+        [REOPEN]: heldReopen.handler,
+        "GET /api/v1/sessions": () => {
+          if (!holdNextRead) return { body: { items: controller.readThreads() } };
+          holdNextRead = false;
+          return heldRead.handler();
+        },
+      });
+    const thread = OPEN_THREADS[0]!;
+
+    await userEvent.click(screen.getByRole("button", { name: "Done Thread 1" }));
+    await waitForReads();
+    await userEvent.click(screen.getByRole("button", { name: "Reopen Thread 1" }));
+
+    // The push for the committed Done reaches the app only now, while the
+    // Reopen is on its way, and starts a read that captures Thread 1 done.
+    const doneState = controller.readThreads();
+    holdNextRead = true;
+    const readsBeforePush = countReads();
+    pushThreads();
+    await waitFor(() => {
+      expect(countReads()).toBeGreaterThan(readsBeforePush);
+    });
+    heldReopen.answer(controller.reopen({ body: { sessionIds: [thread.id] } }));
+    await waitForMoves();
+
+    // The older read answers after the Reopen was confirmed.
+    // Records every moment the cache holds Thread 1 done from here on.
+    let shownDone = false;
+    const stopWatching = watchThreads(() => {
+      if (readCachedThreads()?.find((session) => session.id === thread.id)?.done) shownDone = true;
+    });
+    heldRead.answer({ body: { items: doneState } });
+    await waitForReads();
+    stopWatching();
+
+    expect(shownDone).toBe(false);
+    expect(screen.getByText("Thread 1: open")).toBeTruthy();
   });
 });
 

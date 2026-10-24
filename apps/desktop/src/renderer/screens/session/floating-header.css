@@ -83,8 +83,11 @@
    pointer reach the transcript between the pills.
 
    The pills sit inside the shell's drag strip, the top 52px of the window,
-   so each one opts out of it to take clicks. */
-.top > .pill {
+   so each one opts out of it to take clicks. The thread's pill sits in a room
+   that takes no clicks itself (thread-header.css), so the pill inside it is
+   named too. */
+.top > .pill,
+.top > .thread-tabs-room > .pill {
   pointer-events: auto;
   -webkit-app-region: no-drag;
 }
