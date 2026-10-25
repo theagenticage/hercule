@@ -153,7 +153,7 @@ describe("a thread that is slow to open", () => {
     // by role, which skip hidden elements, tell what is on screen.
     expect(await screen.findByText("Opening the thread…")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Transcript" })).toBeNull();
-    const tabs = screen.getByRole("navigation", { name: "Threads in this workspace" });
+    const tabs = screen.getByRole("navigation", { name: "Sessions in this workspace" });
     expect(
       within(tabs)
         .getByRole("link", { name: new RegExp(`^${slow.session.title}`) })

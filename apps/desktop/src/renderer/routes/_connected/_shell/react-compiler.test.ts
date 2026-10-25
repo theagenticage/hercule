@@ -20,7 +20,7 @@ const SCREENS = join(HERE, "../../../screens");
 /**
  * The folders and single files whose sources are compiled: the route folders
  * of the three pages and of a run's page, the screens they draw, the folders
- * they share, Intake's screen, the parts of its Tracking pane, and the line of a Done signal's trip. A folder is compiled
+ * they share, Intake's screen, the parts of its Tracking pane, the line of a Done signal's trip, and the Done moves' queue and toast. A folder is compiled
  * without its tests.
  */
 const PATHS = [
@@ -35,6 +35,15 @@ const PATHS = [
   join(SCREENS, "project-groups"),
   join(SCREENS, "list-pane"),
   join(SCREENS, "thread/use-sender-reading.ts"),
+  join(SCREENS, "thread/use-tab-overflow.ts"),
+  join(HERE, "../../../app/done-moves.tsx"),
+  join(SCREENS, "session-status.tsx"),
+  join(SCREENS, "thread/tab-overflow-menu.tsx"),
+  join(SCREENS, "thread/header-pills.tsx"),
+  join(SCREENS, "thread/thread-header.tsx"),
+  join(SCREENS, "new-thread/draft-header.tsx"),
+  join(HERE, "../../../app/done-moves.tsx"),
+  join(HERE, "../../../shell/done-toast.tsx"),
   join(SCREENS, "intake/handoff-trip-line.tsx"),
   join(SCREENS, "intake/tracking-pane.tsx"),
   join(SCREENS, "intake/tracking-trip.tsx"),

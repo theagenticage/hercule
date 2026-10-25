@@ -831,6 +831,8 @@ export {
   type SessionPresentation,
 } from "./threads/session-presentation";
 export {
+  findGroupRow,
+  findWorkspaceGroupRow,
   type GroupAsk,
   type GroupMember,
   type GroupRow,
@@ -853,10 +855,10 @@ export {
 } from "./threads/sidebar-sections";
 export {
   buildSiblingTabs,
-  labelWorkspaceSessions,
-  listSessionsOfWorkspace,
+  describeHiddenTabs,
+  isWaitingOnUser,
   listWorkspaceSessionTabs,
-  listWorkspaceThreads,
+  type SessionTab,
   type ThreadTab,
 } from "./threads/siblings";
 export {

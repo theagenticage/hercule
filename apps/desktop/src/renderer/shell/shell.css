@@ -100,6 +100,51 @@
   box-shadow: -1px 0 0 var(--line-soft);
 }
 
+/* The toast of a Done move, in the main pane while the sidebar is hidden (a
+   shown sidebar draws it over its own list; see `.side-toast`). It sits at
+   the top right, under the header's right-hand buttons, where the Done that
+   caused it is: its right edge is the floating header's (`.top`, 14px from
+   the edge), and its top is the header's 10px, a 36px pill and an 8px gap.
+   It is as wide as the sidebar's toast at the default sidebar width (272px
+   less its 12px padding on each side). A classic scroll bar takes room at
+   the right edge, and the toast keeps its 14px from it, as the header does:
+   the toast host adds `is-beside-scrollbar` when it shows the toast over a
+   view that has one (`.has-scrollbar`). A `:has()` on `.main` would do the
+   same in CSS, but then every DOM change inside the main pane re-checks it.
+   It lies over every layer of the screen, which the main pane isolates.
+
+   It drops in from above, where the sidebar's toast rises from below. */
+.main-toast {
+  position: absolute;
+  top: 54px;
+  right: 14px;
+  z-index: 30;
+  width: 248px;
+}
+/* The sidebar's toast grows upward from its anchor; here it grows downward. */
+.main-toast .side-toast {
+  top: 0;
+  bottom: auto;
+}
+.main-toast.is-beside-scrollbar {
+  right: calc(14px + var(--scrollbar-width));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .main-toast .side-toast.is-new {
+    animation-name: main-toast-drop;
+  }
+}
+@keyframes main-toast-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* The band along the top of the window by which the window is dragged, as by
    a title bar: edge to edge, and as tall as the book's top row. It is the
    shell's only drag region. It paints nothing and takes no clicks, so the

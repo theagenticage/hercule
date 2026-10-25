@@ -1,13 +1,15 @@
 /**
- * Tests the thread header against the stubbed controller: the tabs of the
- * thread's workspace, how each tab ends, the link to a new thread in the
- * workspace, the two buttons that are drawn but do nothing yet, the crumbs of
- * a run's step session, and the side pane's toggle, on the thread's page and
- * on a subagent's page.
+ * Tests the thread header against the stubbed controller: the work's name and
+ * the tabs, which are the lines of the work's sidebar row, how each tab is
+ * named and ends, the link to a new thread in the workspace, Done and
+ * Reopen, More, which is drawn but does nothing yet, the crumbs of a run's
+ * step session, and the side pane's toggle, on the thread's page and on a
+ * subagent's page. The fit of the tabs in the room needs a layout, which
+ * jsdom has none of, so it is not tested here.
  */
 import type { JSX } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import userEvent from "@testing-library/user-event";
@@ -50,7 +52,7 @@ afterEach(() => {
 
 /** Returns the header's first pill: the project and the workspace's tabs. */
 const readTabStrip = (): HTMLElement =>
-  screen.getByRole("navigation", { name: "Threads in this workspace" });
+  screen.getByRole("navigation", { name: "Sessions in this workspace" });
 
 /** Returns the accessible name of every link in the tab strip, in order. */
 const readLinkNames = (): readonly (string | null)[] =>
@@ -58,8 +60,45 @@ const readLinkNames = (): readonly (string | null)[] =>
     .getAllByRole("link")
     .map((link) => link.getAttribute("aria-label") ?? link.getAttribute("title"));
 
+const MARK_DONE_PATH = "/api/v1/sessions/mark-done";
+const REOPEN_PATH = "/api/v1/sessions/reopen";
+const DONE_AT = { at: "2026-09-10T09:00:00.000Z", by: "user" } as const;
+
+/** Returns the stubbed controller's answers to the two Done moves, which change nothing. */
+const answerDoneMoves = (): Record<string, Handler> => ({
+  [`POST ${MARK_DONE_PATH}`]: { body: [] },
+  [`POST ${REOPEN_PATH}`]: { body: [] },
+});
+
+/** Returns the bodies of the Done moves the app sent, as "<path> <session ids>", oldest first. */
+const readDoneMoves = (calls: readonly Call[]): readonly string[] =>
+  calls
+    .filter((call) => call.method === "POST" && /\/sessions\/(mark-done|reopen)$/.test(call.path))
+    .map((call) => `${call.path} ${(call.body as { sessionIds: string[] }).sessionIds.join(",")}`);
+
+/**
+ * Returns the sidebar's handlers with `change` applied to the thread
+ * `FIXTURE_THREAD_IDS.flaky` and `FIXTURE_THREAD_IDS.runbook`, which share a
+ * worktree, and with `agents` the Agent sessions of that worktree.
+ */
+const buildWorktreeHandlers = (
+  change: (session: Session) => Session,
+  agents: readonly Session[] = [],
+): Record<string, Handler> => ({
+  ...buildSidebarHandlers({
+    ...SIDEBAR_FIXTURE,
+    threads: SIDEBAR_FIXTURE.threads.map((each) =>
+      each.id === FIXTURE_THREAD_IDS.flaky || each.id === FIXTURE_THREAD_IDS.runbook
+        ? change(each)
+        : each,
+    ),
+    agentSessions: agents,
+  }),
+  ...answerDoneMoves(),
+});
+
 describe("the thread header", () => {
-  it("draws a tab per thread of the workspace, in the workspace's order, with the open one selected", async () => {
+  it("draws the work's name, and a tab per line of the work's row, in the row's order, with the open one selected", async () => {
     await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.waiting });
 
     expect(readLinkNames()).toEqual([
@@ -76,6 +115,7 @@ describe("the thread header", () => {
     expect(open.getAttribute("aria-current")).toBe("page");
     expect(open.classList.contains("is-on")).toBe(true);
     expect(other.getAttribute("aria-current")).toBeNull();
+    expect(other.classList.contains("is-on")).toBe(false);
     expect(other.getAttribute("href")).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
     // A working or waiting thread ends in its mark, which the name already
     // says, so the tab holds only its title and describes nothing.
@@ -85,19 +125,101 @@ describe("the thread header", () => {
       expect(tab.getAttribute("aria-describedby")).toBeNull();
     }
     expect(within(readTabStrip()).getByText("webshop")).toBeTruthy();
+    // The row is named by its lead, which is the work's name, with its title as the tooltip.
+    const name = readTabStrip().querySelector("[data-work-name]")!;
+    expect(name.textContent).toBe("Fix flaky webhook tests");
+    expect(name.getAttribute("title")).toBe("Fix flaky webhook tests");
   });
 
-  it("draws the syncing marker in the free space after the tabs, empty while nothing syncs", async () => {
+  it("selects the open tab by the session's id, not by the route", async () => {
+    // The route is the flaky thread's, as the Office's drawer draws this header on a route that is no thread's.
+    const runbook = SIDEBAR_FIXTURE.threads.find((each) => each.id === FIXTURE_THREAD_IDS.runbook)!;
+    function HeaderOfRunbook(): JSX.Element {
+      return <ThreadHeader session={runbook} />;
+    }
+    await renderThreadPart(HeaderOfRunbook, { thread: THREAD_FIXTURES.delegating });
+
+    const flaky = within(readTabStrip()).getByRole("link", {
+      name: "Fix flaky webhook tests, working",
+    });
+    const open = within(readTabStrip()).getByRole("link", {
+      name: "Write the retry runbook, waiting on you",
+    });
+    expect(open.classList.contains("is-on")).toBe(true);
+    expect(open.getAttribute("aria-current")).toBe("page");
+    expect(flaky.classList.contains("is-on")).toBe(false);
+  });
+
+  it("draws the Agent sessions, an ended one too, and a Done thread with its mark, all named by role", async () => {
+    const { runbook, flaky } = FIXTURE_THREAD_IDS;
+    const base = SIDEBAR_FIXTURE.threads.find((each) => each.id === runbook)!;
+    const reviewer = buildSession({
+      ...base,
+      id: "01a06d02-7400-7000-8000-0000000000a1",
+      kind: "agent",
+      title: "Adversarial review of MwsResult endpoints",
+      role: "review",
+      status: "busy",
+      openRequests: [],
+      createdAt: "2026-09-10T09:06:00.000Z",
+      lastActivityAt: "2026-09-10T09:06:00.000Z",
+    });
+    const ended = buildSession({
+      ...base,
+      id: "01a06d02-7400-7000-8000-0000000000a2",
+      kind: "agent",
+      title: "Map the webhook handlers",
+      role: "explore",
+      status: "exited",
+      exitedAt: "2026-09-10T09:07:00.000Z",
+      openRequests: [],
+      createdAt: "2026-09-10T09:07:00.000Z",
+      lastActivityAt: "2026-09-10T09:07:00.000Z",
+    });
+    await renderThreadPart(HeaderOfThread, {
+      thread: THREAD_FIXTURES.waiting,
+      handlers: buildWorktreeHandlers(
+        (session) => (session.id === flaky ? { ...session, done: DONE_AT } : session),
+        [reviewer, ended],
+      ),
+    });
+
+    expect(readLinkNames()).toEqual([
+      "Fix flaky webhook tests, done",
+      "Write the retry runbook, waiting on you",
+      "review, Adversarial review of MwsResult endpoints, working",
+      "explore, Map the webhook handlers, can't be reached",
+      "New thread in this workspace",
+    ]);
+    const done = within(readTabStrip()).getByRole("link", {
+      name: "Fix flaky webhook tests, done",
+    });
+    expect(done.querySelector(".mark--done")).not.toBeNull();
+    // A Done thread says its state with its mark and ends in nothing.
+    expect(done.querySelector("small")).toBeNull();
+    const role = within(readTabStrip()).getByRole("link", { name: /^review, / });
+    expect(role.querySelector(".ptab-title")?.textContent).toBe("review");
+    expect(role.querySelector(".ptab-title")?.getAttribute("title")).toBe(
+      "Adversarial review of MwsResult endpoints",
+    );
+    expect(role.getAttribute("href")).toBe(`/threads/${reviewer.id}`);
+  });
+
+  it("draws the syncing marker in the free space after the pill, empty while nothing syncs", async () => {
     await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.waiting });
 
-    expect(screen.getByRole("status").textContent).toBe("");
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe("");
+    // It is in the room of the pill, which is how it follows the pill without changing the fit.
+    expect(status.closest(".thread-tabs-room")).not.toBeNull();
   });
 
-  it("draws a thread alone in its workspace as one tab, ending in the age it was last active", async () => {
+  it("draws a thread alone in its workspace as the crumb, its title as the work's name, and its tab, ending in the age it was last active", async () => {
     vi.useFakeTimers({ now: new Date("2026-09-10T09:25:00.000Z"), toFake: ["Date"] });
     await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.finished });
 
     expect(readLinkNames()).toEqual(["Bump the Bun pin, idle", "New thread in this workspace"]);
+    expect(readTabStrip().querySelector("[data-work-name]")?.textContent).toBe("Bump the Bun pin");
     const tab = within(readTabStrip()).getByRole("link", {
       name: "Bump the Bun pin, idle",
       description: "22 minutes ago",
@@ -118,18 +240,30 @@ describe("the thread header", () => {
     const text = tab.querySelector(".ptab-title");
     expect(text?.textContent).toBe("review");
     expect(text?.getAttribute("title")).toBe("Bump the Bun pin");
+    expect(text?.classList.contains("is-title")).toBe(false);
+  });
+
+  it("cuts a title with no role at 160px, which only a title-only label is", async () => {
+    await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.finished });
+
+    expect(
+      within(readTabStrip())
+        .getByRole("link", { name: "Bump the Bun pin, idle" })
+        .querySelector(".ptab-title")
+        ?.classList.contains("is-title"),
+    ).toBe(true);
   });
 
   it("numbers a role among every session of the workspace, an exited one included, as the sidebar does", async () => {
     const { waiting } = THREAD_FIXTURES;
     const open = { ...waiting.session, role: "review" };
-    // The workspace no longer lists it, so it is no tab, yet it was the first "review".
     const earlier = buildSession({
       ...waiting.session,
       id: "01a06d02-7400-7000-8000-0000000000ff",
       title: "Review the webhook change",
       role: "review",
       status: "exited",
+      openRequests: [],
       createdAt: "2026-09-10T09:00:00.000Z",
     });
     await renderThreadPart(HeaderOfThread, {
@@ -143,7 +277,9 @@ describe("the thread header", () => {
       }),
     });
 
+    // The earlier thread is the first "review", and is a line of the row too.
     expect(readLinkNames()).toEqual([
+      "review, Review the webhook change, can't be reached",
       "Fix flaky webhook tests, working",
       "review 2, Write the retry runbook, waiting on you",
       "New thread in this workspace",
@@ -176,6 +312,67 @@ describe("the thread header", () => {
     ).toBe(`/?project=${session.projectId!}&workspace=${primary.id}`);
   });
 
+  describe("when a partner of another project is open", () => {
+    const { flaky, runbook } = FIXTURE_THREAD_IDS;
+    const workspaceId = SIDEBAR_FIXTURE.threads.find((each) => each.id === flaky)!.workspaceId!;
+    const [webshop, ops] = SIDEBAR_FIXTURE.projects;
+
+    /** Returns an Agent session of the lead's worktree, in the ops project. */
+    const buildOpsPartner = (): Session =>
+      buildSession({
+        ...SIDEBAR_FIXTURE.threads.find((each) => each.id === runbook)!,
+        id: "01a06d02-7400-7000-8000-0000000000c1",
+        kind: "agent",
+        title: "Check the pager rota",
+        role: "oncall",
+        projectId: ops!.id,
+        status: "busy",
+        openRequests: [],
+        createdAt: "2026-09-10T09:06:00.000Z",
+        lastActivityAt: "2026-09-10T09:06:00.000Z",
+      });
+
+    /** Renders the header of `partner`, whose work is the row of the threads in the worktree. */
+    const renderPartnerHeader = (
+      partner: Session,
+      change: (session: Session) => Session,
+    ): ReturnType<typeof renderThreadPart> => {
+      function HeaderOfPartner(): JSX.Element {
+        return <ThreadHeader session={partner} />;
+      }
+      return renderThreadPart(HeaderOfPartner, {
+        thread: THREAD_FIXTURES.waiting,
+        handlers: buildWorktreeHandlers(change, [partner]),
+      });
+    };
+
+    it("shows the work's project, and links + with it, not the partner's", async () => {
+      await renderPartnerHeader(buildOpsPartner(), (session) => session);
+
+      const strip = readTabStrip();
+      expect(within(strip).getByText(webshop!.name)).toBeTruthy();
+      expect(within(strip).queryByText(ops!.name)).toBeNull();
+      expect(
+        within(strip)
+          .getByRole("link", { name: "New thread in this workspace" })
+          .getAttribute("href"),
+      ).toBe(`/?project=${webshop!.id}&workspace=${workspaceId}`);
+    });
+
+    it("shows No project when the work's lead has none, and links + with no project", async () => {
+      await renderPartnerHeader(buildOpsPartner(), (session) => ({ ...session, projectId: null }));
+
+      const strip = readTabStrip();
+      expect(within(strip).getByText("No project")).toBeTruthy();
+      expect(within(strip).queryByText(ops!.name)).toBeNull();
+      expect(
+        within(strip)
+          .getByRole("link", { name: "New thread in this workspace" })
+          .getAttribute("href"),
+      ).toBe(`/?workspace=${workspaceId}`);
+    });
+  });
+
   it("draws no + while the thread's workspace is not ready, because a new thread could not join it", async () => {
     const [primary, ...others] = SIDEBAR_FIXTURE.workspaces;
     await renderThreadPart(HeaderOfThread, {
@@ -197,18 +394,116 @@ describe("the thread header", () => {
     expect(within(readTabStrip()).getByText("No project")).toBeTruthy();
   });
 
-  it("draws Open in editor and More as disabled buttons that do nothing", async () => {
+  it("draws More as a disabled button that does nothing, and no Open in editor", async () => {
     const user = userEvent.setup();
     const { calls } = await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.finished });
     const sent = calls.length;
 
-    for (const name of ["Open in editor", "More"]) {
-      const button = screen.getByRole("button", { name });
-      expect(button.getAttribute("aria-disabled")).toBe("true");
-      await user.click(button);
-    }
+    const more = screen.getByRole("button", { name: "More" });
+    expect(more.getAttribute("aria-disabled")).toBe("true");
+    await user.click(more);
     expect(calls).toHaveLength(sent);
+    expect(screen.queryByRole("button", { name: "Open in editor" })).toBeNull();
     expect(readLinkNames()).toEqual(["Bump the Bun pin, idle", "New thread in this workspace"]);
+  });
+
+  it("orders the buttons on the right as the side pane, Done and More", async () => {
+    await renderThreadPart(HeaderOfThread, { thread: THREAD_FIXTURES.finished });
+
+    const header = screen.getByRole("banner");
+    expect(
+      within(header)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label") ?? button.title),
+    ).toEqual(["Side pane", "Mark done", "More"]);
+  });
+});
+
+describe("Done in the thread header", () => {
+  it("marks every thread of the row that is not done, and only those, with one request", async () => {
+    const { flaky, runbook } = FIXTURE_THREAD_IDS;
+    const { calls } = await renderThreadPart(HeaderOfThread, {
+      thread: THREAD_FIXTURES.waiting,
+      // The lead was marked done elsewhere, as `hercule session done` does.
+      handlers: buildWorktreeHandlers((session) =>
+        session.id === flaky ? { ...session, done: DONE_AT } : session,
+      ),
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Mark done" }));
+
+    expect(readDoneMoves(calls)).toEqual([`${MARK_DONE_PATH} ${runbook}`]);
+  });
+
+  it("marks both threads of a row with none done, in the row's order", async () => {
+    const { flaky, runbook } = FIXTURE_THREAD_IDS;
+    const { calls } = await renderThreadPart(HeaderOfThread, {
+      thread: THREAD_FIXTURES.waiting,
+      handlers: buildWorktreeHandlers((session) => session),
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Mark done" }));
+
+    expect(readDoneMoves(calls)).toEqual([`${MARK_DONE_PATH} ${flaky},${runbook}`]);
+  });
+
+  it("ignores the second click of a double click, which would otherwise reopen the row", async () => {
+    const { flaky, runbook } = FIXTURE_THREAD_IDS;
+    const { calls } = await renderThreadPart(HeaderOfThread, {
+      thread: THREAD_FIXTURES.waiting,
+      handlers: buildWorktreeHandlers((session) => session),
+    });
+
+    await userEvent.dblClick(screen.getByRole("button", { name: "Mark done" }));
+
+    expect(readDoneMoves(calls)).toEqual([`${MARK_DONE_PATH} ${flaky},${runbook}`]);
+  });
+
+  it("does nothing for a click that is the second of a double click", async () => {
+    const { calls } = await renderThreadPart(HeaderOfThread, {
+      thread: THREAD_FIXTURES.waiting,
+      handlers: buildWorktreeHandlers((session) => session),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark done" }), { detail: 2 });
+
+    expect(readDoneMoves(calls)).toEqual([]);
+  });
+
+  it("becomes Reopen once every thread is done, and reopens every thread of the row", async () => {
+    const { flaky, runbook } = FIXTURE_THREAD_IDS;
+    const { calls } = await renderThreadPart(HeaderOfThread, {
+      thread: THREAD_FIXTURES.waiting,
+      handlers: buildWorktreeHandlers((session) => ({ ...session, done: DONE_AT })),
+    });
+
+    expect(screen.queryByRole("button", { name: "Mark done" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Reopen" }));
+
+    expect(readDoneMoves(calls)).toEqual([`${REOPEN_PATH} ${flaky},${runbook}`]);
+  });
+
+  it("is not drawn for a session that has no row, such as an Agent session in a workspace with no thread", async () => {
+    const base = THREAD_FIXTURES.finished.session;
+    const orphan = buildSession({
+      ...base,
+      id: "01a06d02-7400-7000-8000-0000000000b1",
+      kind: "agent",
+      title: "Survey the lockfile",
+      role: "survey",
+      workspaceId: "01a06d02-7200-7000-8000-0000000000b1",
+      createdAt: "2026-09-10T09:08:00.000Z",
+    });
+    await renderThreadPart(HeaderOfThread, {
+      thread: { ...THREAD_FIXTURES.finished, session: orphan },
+      handlers: buildSidebarHandlers({
+        ...SIDEBAR_FIXTURE,
+        threads: [...SIDEBAR_FIXTURE.threads, orphan],
+      }),
+    });
+
+    expect(screen.queryByRole("button", { name: "Mark done" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
   });
 });
 
@@ -378,8 +673,8 @@ describe("a step session's header", () => {
       "Workflows",
       "Ticket to pull request",
       "Run Today 09:30, Running",
-      "Ticket to pull request · plan, idle",
-      "Ticket to pull request · implement, working",
+      "plan, Ticket to pull request · plan, idle",
+      "implement, Ticket to pull request · implement, working",
     ]);
   });
 
@@ -409,7 +704,7 @@ describe("a step session's header", () => {
     await within(readStepStrip()).findByRole("link", { name: "Workflows" });
 
     const open = within(readStepStrip()).getByRole("link", {
-      name: "Ticket to pull request · implement, working",
+      name: "implement, Ticket to pull request · implement, working",
     });
     expect(open.textContent).toBe("implement");
     expect(open.getAttribute("aria-current")).toBe("page");
@@ -417,30 +712,46 @@ describe("a step session's header", () => {
       "Ticket to pull request · implement",
     );
     const other = within(readStepStrip()).getByRole("link", {
-      name: "Ticket to pull request · plan, idle",
+      name: "plan, Ticket to pull request · plan, idle",
     });
     expect(other.textContent).toContain("plan");
     expect(other.getAttribute("href")).toBe(`/threads/${PLAN_ID}`);
   });
 
-  it("draws no +, because a new thread would not be a session of the run", async () => {
+  it("draws no +, because a new thread would not be a session of the run, and no Done or work name, because a run's sessions have no row", async () => {
     await renderStepHeader();
     await within(readStepStrip()).findByRole("link", { name: "Workflows" });
 
     expect(
       within(readStepStrip()).queryByRole("link", { name: "New thread in this workspace" }),
     ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Mark done" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
+    expect(readStepStrip().querySelector("[data-work-name]")).toBeNull();
   });
 
   it("lists a thread that works in the run's workspace as a tab, labelled with its title", async () => {
-    await renderStepHeader(holdRunWorkspace([PLAN_ID, IMPLEMENT_ID, FIXTURE_THREAD_IDS.bunPin]));
+    const bunPin = FIXTURE_THREAD_IDS.bunPin;
+    const answerThreads = buildSidebarHandlers({
+      ...SIDEBAR_FIXTURE,
+      threads: SIDEBAR_FIXTURE.threads.map((each) =>
+        each.id === bunPin ? { ...each, workspaceId: WORKSPACE_ID } : each,
+      ),
+    })["GET /api/v1/sessions"] as (call: Call) => unknown;
+    await renderStepHeader({
+      ...holdRunWorkspace([PLAN_ID, IMPLEMENT_ID, bunPin]),
+      "GET /api/v1/sessions": (call) =>
+        !new URLSearchParams(call.search).getAll("kind").includes("thread")
+          ? { body: { items: [PLAN_SESSION, IMPLEMENT_SESSION] } }
+          : (answerThreads(call) as { body: unknown }),
+    });
     await within(readStepStrip()).findByRole("link", { name: "Workflows" });
 
     const thread = within(readStepStrip()).getByRole("link", { name: "Bump the Bun pin, idle" });
     expect(thread.textContent).toContain("Bump the Bun pin");
     expect(readStepLinkNames().slice(-3)).toEqual([
-      "Ticket to pull request · plan, idle",
-      "Ticket to pull request · implement, working",
+      "plan, Ticket to pull request · plan, idle",
+      "implement, Ticket to pull request · implement, working",
       "Bump the Bun pin, idle",
     ]);
   });
@@ -518,8 +829,8 @@ describe("a step session's header", () => {
     await within(strip).findByRole("link", { name: "Workflows" });
     expect(readStepLinkNames()).toEqual([
       "Workflows",
-      "Ticket to pull request · plan, idle",
-      "Ticket to pull request · implement, working",
+      "plan, Ticket to pull request · plan, idle",
+      "implement, Ticket to pull request · implement, working",
     ]);
   });
 });

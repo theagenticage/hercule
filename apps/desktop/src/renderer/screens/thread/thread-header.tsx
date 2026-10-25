@@ -1,23 +1,27 @@
-import { lazy, Suspense, type JSX } from "react";
+import { lazy, memo, Suspense, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { Link, useRouteContext } from "@tanstack/react-router";
+import { useRouteContext } from "@tanstack/react-router";
 import {
+  findGroupRow,
   isJoinable,
-  listSessionsOfWorkspace,
   listWorkspaceSessionTabs,
   toggleSidePane,
+  type GroupRow,
 } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
+import { useDoneMoves } from "../../app/done-moves";
 import {
   liveAgentSessionsQuery,
   projectsQuery,
+  providersQuery,
   runnersQuery,
   threadAndAgentSessionsQuery,
   workspacesQuery,
 } from "../../app/queries";
-import { EditorIcon } from "../../icons/editor";
-import { PlusIcon } from "../../icons/plus";
+import { useSessionPresentation } from "../../app/session-presentation";
+import { CheckIcon } from "../../icons/check";
 import { SidebarIcon } from "../../icons/sidebar";
+import { UndoIcon } from "../../icons/undo";
 import { useHasSidePane, useSidePaneLayout } from "../subagents/use-side-pane";
 import { MorePill, ProjectCrumb, ThreadTabsPill } from "./header-pills";
 import { TranscriptSyncMarker } from "./transcript-sync-marker";
@@ -38,109 +42,129 @@ const RunSessionCrumbs = lazy(() =>
  * Bureau book's `.top` draws them. A subagent's page draws its own header,
  * `SubagentHeader`, which loads with that page.
  *
- * - The first pill holds the place of the session, then one tab per session
- *   of its workspace, in the workspace's order. A thread's place is its
- *   project, its tabs are the threads of its workspace, and a `+` follows
- *   them that opens a new thread in the workspace. A step session's place is
- *   Workflows, its run's workflow and its run, each a link; its tabs also
- *   hold the sessions an Agent spawned, and it has no `+`, because a new
- *   thread would not be a session of the run. A step session's tab reads as
- *   its step's id.
- *   A session alone in its workspace, or in none, has one tab: its own. A
- *   thread in no workspace, or in one that is not ready, has no `+`, because
- *   a new thread could not join it.
- * - The free space after the tabs holds "Syncing…" while the thread, opened
+ * - The first pill (`ThreadTabsPill`) holds the place of the session, the
+ *   name of the work, and one tab per line of the work's sidebar row: the
+ *   Threads, the Agent sessions (ended ones too) and the Threads marked
+ *   Done, in the row's order. A `+` follows them that opens a new thread in
+ *   the workspace, in the work's project, so the new thread's crumb matches
+ *   this one.
+ * - A step session has no row, because a run's sessions stay out of the
+ *   sidebar. Its place is Workflows, its run's workflow and its run, each a
+ *   link, it has no work name, and its tabs are the sessions of its
+ *   workspace, which read as their steps' ids. It has no `+`, because a new
+ *   thread would not be a session of the run, and no Done.
+ * - A session that has no row and is not a step session, such as an Agent
+ *   session in a workspace with no Thread, is named by its own title.
+ * - A thread in no workspace, or in one that is not ready, has no `+`,
+ *   because a new thread could not join it.
+ * - The free space after the pill holds "Syncing…" while the thread, opened
  *   from its saved copy, is brought up to date (`TranscriptSyncMarker`).
- * - The side pane's toggle follows, on the thread's screen only.
- * - Open in editor and More are drawn but do nothing yet, and carry
- *   `aria-disabled` to say so.
+ * - The buttons on the right are the side pane's toggle, on the thread's
+ *   screen only, Done (or Reopen), and More, which is drawn but does nothing
+ *   yet and carries `aria-disabled` to say so.
  *
- * When the header runs out of room, the other sessions' tabs shrink first,
- * down to about four letters, then the open thread's tab, whose title keeps
- * its tooltip. The pills on the right never move. The lists it reads are
- * shell data, in the cache before any thread renders, so nothing here waits
- * in practice.
+ * Done marks every Thread of the row that is not done yet, as the sidebar
+ * row's Done does. Once every Thread of the row is done, the button is
+ * Reopen, which reopens them all. A move shows the shell's toast, with Undo.
  *
- * It takes the session record rather than reading it, so the screen shown
- * while a thread opens can draw it from the sidebar's list before the
- * session's own read has answered.
+ * It is memoized on `session`, because the page that draws it renders on
+ * every stored transcript row, and the header, whose tabs measure the layout
+ * (`useTabOverflow`), must not render again for each. It renders again when
+ * `session`, or what it reads through its own hooks, changes.
+ *
+ * The lists it reads are shell data, in the cache before any thread renders,
+ * so nothing here waits in practice. It takes the session record rather
+ * than reading it, so the screen shown while a thread opens can draw it from
+ * the sidebar's list before the session's own read has answered.
  */
-export function ThreadHeader({ session }: { readonly session: Session }): JSX.Element {
+export const ThreadHeader = memo(function ThreadHeader({
+  session,
+}: {
+  readonly session: Session;
+}): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
+  const { groupRows } = useSessionPresentation();
   const threadsAndPartners = useSuspenseQuery(threadAndAgentSessionsQuery(client)).data;
-  const threads = threadsAndPartners.filter((each) => each.kind === "thread");
   const agentSessions = useSuspenseQuery(liveAgentSessionsQuery(client)).data;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
+  const instances = useSuspenseQuery(providersQuery(client)).data;
 
   const workspace = workspaces.find((each) => each.id === session.workspaceId);
-
   const isStepSession = session.kind === "run";
-  // A thread's tabs are its workspace's threads, as the draft that joins the
-  // workspace lists them. A step session's tabs also hold the sessions an
-  // Agent spawned, which are the rest of what it works beside.
-  const tabs = listWorkspaceSessionTabs(
-    session,
-    isStepSession ? [...threads, ...agentSessions] : threads,
-    workspaces,
-  );
-  // Labels are numbered among every session of the workspace, as the sidebar
-  // does: the exited ones and the Agent sessions too, which no tab shows.
-  const workspaceSessions =
-    session.workspaceId === null
-      ? [session]
-      : listSessionsOfWorkspace(session.workspaceId, [
-          session,
-          ...threadsAndPartners,
-          ...agentSessions,
-        ]);
+  const row = findGroupRow(groupRows, session);
+  const tabs =
+    row?.members ??
+    listWorkspaceSessionTabs(session, [...threadsAndPartners, ...agentSessions], {
+      workspaces,
+      runners,
+      instances,
+    });
+  // The row's project is the work's project, and it may be null: a lead with no project. The
+  // open session's own project must not stand in for it, or a partner in another project would
+  // move the work under that project.
+  const projectId = row === undefined ? session.projectId : row.projectId;
   const canStartThread = !isStepSession && workspace !== undefined && isJoinable(workspace);
 
   return (
     <header className="top">
       <ThreadTabsPill
-        label={isStepSession ? "Sessions in this workspace" : "Threads in this workspace"}
+        label="Sessions in this workspace"
         className={isStepSession ? "workflow-crumbs" : undefined}
         crumbs={
-          session.runId === null ? (
-            <ProjectCrumb projectId={session.projectId} projects={projects} />
-          ) : (
+          // A step session always has a run id; the check narrows its type.
+          isStepSession && session.runId !== null ? (
             // Nothing is drawn while the crumbs' code loads, which happens once.
             <Suspense fallback={null}>
               <RunSessionCrumbs runId={session.runId} />
             </Suspense>
+          ) : (
+            <ProjectCrumb projectId={projectId} projects={projects} />
           )
         }
+        workName={isStepSession ? null : (row?.title ?? session.title)}
         tabs={tabs}
-        workspaceSessions={workspaceSessions}
-        runners={runners}
-      >
-        {canStartThread ? (
-          <Link
-            to="/"
-            search={
-              session.projectId === null
-                ? { workspace: workspace.id }
-                : { project: session.projectId, workspace: workspace.id }
-            }
-            className="icon-btn"
-            title="New thread in this workspace"
-          >
-            <PlusIcon />
-          </Link>
-        ) : null}
-      </ThreadTabsPill>
-      <TranscriptSyncMarker sessionId={session.id} />
+        open={{ kind: "session", sessionId: session.id }}
+        newThread={canStartThread ? { projectId, workspaceId: workspace.id } : null}
+        freeSpace={<TranscriptSyncMarker sessionId={session.id} />}
+      />
       <SidePaneToggle sessionId={session.id} />
-      <span className="pill">
-        <button type="button" className="icon-btn" title="Open in editor" aria-disabled="true">
-          <EditorIcon />
-        </button>
-      </span>
+      {row === undefined ? null : <DonePill row={row} />}
       <MorePill />
     </header>
+  );
+});
+
+/**
+ * Renders the pill with the Done button of `row`, the row of the work the
+ * header shows. While a Thread of the row is not done, the button reads
+ * "Done", is named "Mark done", and marks exactly those Threads
+ * (`row.doneIds`). Once every Thread is done, it reads "Reopen" and reopens
+ * every Thread of the row (`row.threadIds`), as the Done shelf's Reopen does.
+ */
+function DonePill({ row }: { readonly row: GroupRow }): JSX.Element {
+  const { markDone, reopen } = useDoneMoves();
+  const marksDone = row.doneIds.length > 0;
+  return (
+    <span className="pill">
+      <button
+        type="button"
+        className="pill-btn"
+        aria-label={marksDone ? "Mark done" : "Reopen"}
+        onClick={(event) => {
+          // The first click turns this button into Reopen under the pointer. A second click of a
+          // double click would then reopen the whole row, including a lead that was already done.
+          if (event.detail > 1) return;
+          if (marksDone) markDone(row.doneIds);
+          else reopen(row.threadIds);
+        }}
+      >
+        {marksDone ? <CheckIcon size={14} /> : <UndoIcon size={14} />}
+        {marksDone ? "Done" : "Reopen"}
+      </button>
+    </span>
   );
 }
 
