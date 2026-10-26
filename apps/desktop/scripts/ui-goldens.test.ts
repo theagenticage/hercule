@@ -189,7 +189,11 @@ describe("goldens on disk", () => {
   it("leaves the goldens of unmeasured themes alone, and still checks the others and provenance.json", async () => {
     const image = buildImage(4, 4);
     // A shard of the theme "light": "dark" is measured by another shard.
-    const shard: GoldensLocation = { ...location, unmeasuredThemes: ["dark"], names: ["light/a.png"] };
+    const shard: GoldensLocation = {
+      ...location,
+      unmeasuredThemes: ["dark"],
+      names: ["light/a.png"],
+    };
     await put("screenshots", "light/a.png", withPixel(image, 0, 0, [1, 2, 3, 255]));
     await put("goldens", "light/a.png", image);
     await put("goldens", "dark/a.png", image);
@@ -214,7 +218,11 @@ describe("goldens on disk", () => {
 
   it("still reports a file outside every theme folder as extra in a shard", async () => {
     const image = buildImage(2, 2);
-    const shard: GoldensLocation = { ...location, unmeasuredThemes: ["dark"], names: ["light/a.png"] };
+    const shard: GoldensLocation = {
+      ...location,
+      unmeasuredThemes: ["dark"],
+      names: ["light/a.png"],
+    };
     await put("screenshots", "light/a.png", image);
     await put("goldens", "light/a.png", image);
     await put("goldens", "retired/a.png", image);

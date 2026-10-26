@@ -261,8 +261,7 @@ async function listFiles(dir: string): Promise<string[]> {
 async function listExtraGoldens(location: GoldensLocation): Promise<string[]> {
   const known = new Set<string>([...location.names, PROVENANCE_FILE]);
   return (await listFiles(location.goldensDir)).filter(
-    (name) =>
-      !known.has(name) && !location.unmeasuredThemes.includes(name.split("/")[0] ?? ""),
+    (name) => !known.has(name) && !location.unmeasuredThemes.includes(name.split("/")[0] ?? ""),
   );
 }
 

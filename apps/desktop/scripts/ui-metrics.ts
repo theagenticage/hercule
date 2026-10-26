@@ -183,9 +183,7 @@ function parseArguments(args: ReadonlyArray<string>): {
  * page cannot be measured.
  */
 async function runUiMetrics(): Promise<number> {
-  const { shouldWriteBaseline, shouldWriteGoldens, themes } = parseArguments(
-    process.argv.slice(2),
-  );
+  const { shouldWriteBaseline, shouldWriteGoldens, themes } = parseArguments(process.argv.slice(2));
 
   const startedAt = performance.now();
   await rm(outputDir, { recursive: true, force: true });
