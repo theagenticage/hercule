@@ -9,6 +9,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Exit, Scope } from "effect";
 import type { RunnerToController } from "@hercule/protocol";
 import type { Machine } from "../sessions/context";
+import { makeGithubTokenCopies } from "../credentials";
 import { makeSupervising } from "../sessions/supervisor";
 import { makeWorkspaces } from "../workspaces";
 import { ADAPTER_IDS, findAdapter, adapters } from "./index";
@@ -74,6 +75,9 @@ describe("the adapters in this runner build", () => {
     const supervisor = makeSupervising(adapters).forConnection({
       scope,
       machine,
+      githubTokenCopies: makeGithubTokenCopies({
+        ask: () => Promise.reject(new Error("no controller")),
+      }),
       send: (frame) => Effect.sync(() => void sent.push(frame)),
       // No session runs, so no agent step begins.
       workspaceSteps: {

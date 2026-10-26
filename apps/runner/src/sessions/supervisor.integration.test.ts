@@ -1,3 +1,4 @@
+import { makeGithubTokenCopies } from "../credentials";
 import { makeTestWorkspaces } from "../workspaces/testing";
 /**
  * Tests the supervisor the way a connection uses it: the controller's frames go
@@ -40,7 +41,7 @@ import type {
   WorkspaceStepResult,
   WorkspaceReport,
 } from "@hercule/protocol";
-import { MAX_FRAME_BYTES } from "@hercule/protocol";
+import { MAX_FRAME_BYTES, type GithubTokenAnswer } from "@hercule/protocol";
 import { FIXTURE_SCHEMA } from "@hercule/protocol/testing";
 import type { ProviderAdapter, ProviderRunnerContext } from "../providers";
 import type { Machine } from "./context";
@@ -287,6 +288,30 @@ const createFake = (): Fake => {
   return fake;
 };
 
+/** What a test has the controller answer to a GitHub token ask: a token, a refusal, or no answer at all. */
+type ControllerReply = { token: string } | { reason: string } | Error;
+
+/**
+ * Builds a connection like `buildConnection`, on a controller that answers each
+ * GitHub token ask with `answer` (an `Error` makes the ask fail). `asked` lists
+ * the session tokens that were asked for.
+ */
+const buildConnectionAsking = (fake: Fake, answer: (sessionToken: string) => ControllerReply) => {
+  const asked: Array<string> = [];
+  const connection = buildConnection(fake, undefined, undefined, undefined, (sessionToken) => {
+    asked.push(sessionToken);
+    const reply = answer(sessionToken);
+    return reply instanceof Error
+      ? Promise.reject(reply)
+      : Promise.resolve<GithubTokenAnswer>({
+          _tag: "githubTokenAnswer",
+          requestId: "request",
+          ...reply,
+        });
+  });
+  return { ...connection, asked };
+};
+
 /**
  * Builds one connection that records every frame the supervisor sends, in
  * order, on a fresh machine. `cache` replaces the machine's cache of attached
@@ -299,6 +324,8 @@ const buildConnection = (
   cache?: AttachmentCache,
   path = "/usr/bin",
   skillsController = "https://controller.example:4938",
+  askController: (sessionToken: string) => Promise<GithubTokenAnswer> = () =>
+    Promise.reject(new Error("no controller in this test")),
 ) => {
   const under = mkdtempSync(join(tmpdir(), "hercule-supervisor-"));
   roots.push(under);
@@ -351,8 +378,17 @@ const buildConnection = (
   // socket that started them, and so does the shutdown that stops them all.
   const runner = makeSupervising([fake.adapter]);
   watchers.set(fake, { runner, scope, watching: false });
-  const supervisor = runner.forConnection({ scope, machine, send, workspaceSteps: steps });
-  return { supervisor, runner, sent, machine, under, steps, scope };
+  // By default the controller never answers: a test sees only the token the
+  // start gave.
+  const githubTokenCopies = makeGithubTokenCopies({ ask: askController });
+  const supervisor = runner.forConnection({
+    scope,
+    machine,
+    githubTokenCopies,
+    send,
+    workspaceSteps: steps,
+  });
+  return { supervisor, runner, sent, machine, githubTokenCopies, under, steps, scope };
 };
 
 /**
@@ -860,26 +896,37 @@ describe("a start interrupted while its harness is starting", () => {
 });
 
 describe("a start the controller sends twice", () => {
-  it("is a no-op, and leaves the running session its working directory", async () => {
+  it("is a no-op, and leaves the running session its working directory and its GitHub token", async () => {
     const fake = createFake();
-    const { supervisor, sent, machine } = buildConnection(fake);
+    const { supervisor, sent, machine, githubTokenCopies } = buildConnection(fake);
     const scratch = join(machine.scratchDir, SESSION);
+    // The replay carries the running session's own session token, so a hold
+    // taken for it would be released together with the running session's.
+    const withToken: SessionStart = {
+      ...START,
+      ghToken: "ghs_start-token",
+      githubConnectionId: "the-connection",
+    };
 
     await runConnected(
       fake,
       supervisor,
       Effect.gen(function* () {
-        yield* supervisor.start(START);
+        yield* supervisor.start(withToken);
         yield* waitUntil("sent the start", () => listSessionEvents(sent).length === 1);
         yield* Effect.sync(() => writeFileSync(join(scratch, "work.txt"), "half a turn"));
         // After a reconnect the controller sends again every command whose work
         // the runner did not report, so a start can arrive twice, and the
         // second must not be destructive (spec 03 section 2.3).
-        yield* supervisor.start(START);
+        yield* supervisor.start(withToken);
         // Wait for the watch to read past the duplicate before counting.
         // Otherwise an event the duplicate wrongly published could still be
         // in flight, and the count below would pass too early.
         yield* awaitMarker(fake);
+        // Read from the copy the first start seeded: the fake controller never answers.
+        expect(yield* Effect.promise(() => githubTokenCopies.read(START.token))).toEqual({
+          token: "ghs_start-token",
+        });
       }),
     );
 
@@ -1130,6 +1177,215 @@ describe("a session that ended while the socket was down", () => {
 
     expect(fake.contexts).toHaveLength(2);
     expect(listInputResults(sent).map((result) => result.ok)).toEqual([true, true]);
+  });
+});
+
+describe("the GitHub token a start carries", () => {
+  const WITH_TOKEN: SessionStart = {
+    ...START,
+    ghToken: "ghs_start-token",
+    githubConnectionId: "the-connection",
+  };
+  const NOT_BOUND = { reason: "this runner holds no GitHub token for this session" };
+
+  it("is held for the session from its start until its exit", async () => {
+    const fake = createFake();
+    const { supervisor, sent, githubTokenCopies } = buildConnection(fake);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(WITH_TOKEN);
+        // Read from the copy the start seeded: the fake controller never answers.
+        expect(yield* Effect.promise(() => githubTokenCopies.read(START.token))).toEqual({
+          token: "ghs_start-token",
+        });
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* waitUntil("sent the exit", () =>
+          listSessionEvents(sent).some((frame) => frame.event._tag === "session.exited"),
+        );
+      }),
+    );
+
+    expect(await githubTokenCopies.read(START.token)).toEqual(NOT_BOUND);
+  });
+
+  it("is released when the adapter fails to start the session", async () => {
+    const fake = createFake();
+    fake.fails = "no fake-harness on this machine";
+    const { supervisor, githubTokenCopies } = buildConnection(fake);
+
+    await runConnected(fake, supervisor, supervisor.start(WITH_TOKEN));
+
+    expect(await githubTokenCopies.read(START.token)).toEqual(NOT_BOUND);
+  });
+
+  it("is released when the context cannot be resolved", async () => {
+    const fake = createFake();
+    const { supervisor, githubTokenCopies } = buildConnection(fake);
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({ ...WITH_TOKEN, spec: { ...SPEC, workspaceId: createId() } }),
+    );
+
+    expect(fake.contexts).toEqual([]);
+    expect(await githubTokenCopies.read(START.token)).toEqual(NOT_BOUND);
+  });
+
+  it("is not held, and not asked for, when the start names no Connection, as from an older controller", async () => {
+    const fake = createFake();
+    const { supervisor, githubTokenCopies, asked } = buildConnectionAsking(fake, () => ({
+      reason: "not reached",
+    }));
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...START, ghToken: "ghs_start-token" });
+        expect(yield* Effect.promise(() => githubTokenCopies.read(START.token))).toEqual(NOT_BOUND);
+      }),
+    );
+
+    expect(fake.contexts[0]?.env["GH_TOKEN"]).toBe("ghs_start-token");
+    expect(asked).toEqual([]);
+  });
+
+  it("keeps the Connection's copy while another session of it runs", async () => {
+    const fake = createFake();
+    const { supervisor, sent, githubTokenCopies } = buildConnection(fake);
+    const OTHER = "0199e0e7-0000-7000-8000-0000000000c2";
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(WITH_TOKEN);
+        yield* supervisor.start({
+          ...WITH_TOKEN,
+          sessionId: OTHER,
+          requestId: "0199e0e7-0000-7000-8000-0000000000c3",
+          token: "another-session-token",
+        });
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* waitUntil("sent the exit", () =>
+          listSessionEvents(sent).some((frame) => frame.event._tag === "session.exited"),
+        );
+        expect(yield* Effect.promise(() => githubTokenCopies.read(START.token))).toEqual(NOT_BOUND);
+        expect(
+          yield* Effect.promise(() => githubTokenCopies.read("another-session-token")),
+        ).toEqual({
+          token: "ghs_start-token",
+        });
+      }),
+    );
+  });
+});
+
+describe("the GH_TOKEN a session starts with", () => {
+  const MINUTE = 60 * 1000;
+  const CONNECTED: SessionStart = { ...START, githubConnectionId: "the-connection" };
+  const expiresIn = (minutes: number): string =>
+    new Date(Date.now() + minutes * MINUTE).toISOString();
+
+  /** Starts a session on a controller that answers as `answer` says, and returns the session's environment, its `GH_TOKEN` and what was asked. */
+  const startWith = async (
+    frame: SessionStart,
+    answer: (sessionToken: string) => ControllerReply,
+  ) => {
+    const fake = createFake();
+    const { supervisor, asked } = buildConnectionAsking(fake, answer);
+    await runConnected(fake, supervisor, supervisor.start(frame));
+    return { env: fake.contexts[0]?.env["GH_TOKEN"], fullEnv: fake.contexts[0]?.env, asked };
+  };
+
+  it("is a fresh start token, without asking the controller", async () => {
+    const { env, asked } = await startWith(
+      { ...CONNECTED, ghToken: "ghs_start-token", ghTokenExpiresAt: expiresIn(8 * 60) },
+      () => ({ token: "ghs_asked" }),
+    );
+
+    expect(env).toBe("ghs_start-token");
+    expect(asked).toEqual([]);
+  });
+
+  it("is the controller's fresh token when the start token expires within 10 minutes", async () => {
+    const { env, asked } = await startWith(
+      { ...CONNECTED, ghToken: "ghs_start-token", ghTokenExpiresAt: expiresIn(5) },
+      () => ({ token: "ghs_asked" }),
+    );
+
+    expect(env).toBe("ghs_asked");
+    expect(asked).toEqual([START.token]);
+  });
+
+  it("is the controller's token when the start carries none", async () => {
+    const { env, asked } = await startWith(CONNECTED, () => ({ token: "ghs_asked" }));
+
+    expect(env).toBe("ghs_asked");
+    expect(asked).toEqual([START.token]);
+  });
+
+  it("is the start token when the controller refuses the ask", async () => {
+    const { env } = await startWith(
+      { ...CONNECTED, ghToken: "ghs_start-token", ghTokenExpiresAt: expiresIn(5) },
+      () => ({ reason: "the Connection is disabled" }),
+    );
+
+    expect(env).toBe("ghs_start-token");
+  });
+
+  it("is unset when the ask fails and the start carries no token, and the session still commits as the Connection's account", async () => {
+    const { env, fullEnv, asked } = await startWith(
+      { ...CONNECTED, gitIdentity: { name: "octocat", email: "octocat@users.noreply.github.com" } },
+      () => new Error("no connection"),
+    );
+
+    expect(env).toBeUndefined();
+    expect(asked).toEqual([START.token]);
+    // The identity comes from the Connection, not from the token.
+    expect(Object.values(fullEnv ?? {})).toContain("octocat@users.noreply.github.com");
+  });
+
+  it("starts nothing when a stop arrives while the controller is being asked", async () => {
+    const fake = createFake();
+    let asking = false;
+    let answerAsk: () => void = () => {};
+    const { supervisor, sent, githubTokenCopies } = buildConnection(
+      fake,
+      undefined,
+      undefined,
+      undefined,
+      () =>
+        new Promise((resolve) => {
+          asking = true;
+          answerAsk = () =>
+            resolve({ _tag: "githubTokenAnswer", requestId: "r", token: "ghs_late" });
+        }),
+    );
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* Effect.forkChild(supervisor.start(CONNECTED));
+        yield* waitUntil("the start asked the controller", () => asking);
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        answerAsk();
+        yield* waitUntil("the exit reached the wire", () =>
+          listSessionEvents(sent).some((frame) => frame.event._tag === "session.exited"),
+        );
+      }),
+    );
+
+    expect(fake.contexts).toEqual([]);
+    expect(listExitReasons(sent)).toEqual(["stopped"]);
+    expect(await githubTokenCopies.read(START.token)).toEqual({
+      reason: "this runner holds no GitHub token for this session",
+    });
   });
 });
 
@@ -2733,7 +2989,7 @@ describe("a stop that arrives while a session is still starting", () => {
 
   it("spawns no harness when it arrives while the start switches the workspace's branch", async () => {
     const fake = createFake();
-    const { runner, machine, steps, scope } = buildConnection(fake);
+    const { runner, machine, githubTokenCopies, steps, scope } = buildConnection(fake);
     const remote = makeRemote();
     addBranch(remote, "release");
     const workspaceId = createId();
@@ -2755,6 +3011,7 @@ describe("a stop that arrives while a session is still starting", () => {
     const sent: Array<RunnerToController> = [];
     const supervisor = runner.forConnection({
       scope,
+      githubTokenCopies,
       machine: {
         ...machine,
         workspaces: {
@@ -2859,7 +3116,7 @@ describe("a start that follows a stop of the same id", () => {
 
   it("keeps its entry when the old exit is handled after the adapter dropped the old session", async () => {
     const fake = createFake();
-    const { runner, machine, steps, scope } = buildConnection(fake);
+    const { runner, machine, githubTokenCopies, steps, scope } = buildConnection(fake);
     // The watch holds this event until the test lets it go, so the old exit,
     // published after it, is handled only then.
     const HOLD: ProviderEvent = { ...MARKER, eventId: "e-hold" };
@@ -2871,6 +3128,7 @@ describe("a start that follows a stop of the same id", () => {
     const supervisor = runner.forConnection({
       scope,
       machine,
+      githubTokenCopies,
       workspaceSteps: steps,
       send: (frame) =>
         Effect.andThen(
@@ -4270,7 +4528,8 @@ describe("the files an edit changed", () => {
 
     it("sends the live sessions' files again on a new connection, and not those of the session that exited", async () => {
       const fake = createFake();
-      const { supervisor, runner, sent, machine, steps, scope } = buildConnection(fake);
+      const { supervisor, runner, sent, machine, githubTokenCopies, steps, scope } =
+        buildConnection(fake);
       const exiting = await provisionRepository(machine, "ephemeral");
       const staying = await provisionRepository(machine, "ephemeral");
       await runConnected(
@@ -4303,6 +4562,7 @@ describe("the files an edit changed", () => {
       const next = runner.forConnection({
         scope: nextScope,
         machine,
+        githubTokenCopies,
         workspaceSteps: steps,
         send: (frame) => Effect.sync(() => void nextSent.push(frame)),
       });

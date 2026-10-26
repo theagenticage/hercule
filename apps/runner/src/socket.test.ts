@@ -19,6 +19,7 @@ import { locateRunnerFile } from "@hercule/home";
 import {
   AGENT_STEPS_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
+  GITHUB_TOKEN_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   PROTOCOL_VERSION,
   REPOSITORY_SKILLS_CAPABILITY,
@@ -55,7 +56,7 @@ import {
 } from "./socket";
 import { acceptControllerMove } from "./repoint";
 import { writeRunnerFile } from "./runner-file";
-import { makeCredentialRelay } from "./credentials";
+import { makeCredentialRelay, makeGithubTokenCopies } from "./credentials";
 import type { ProviderAdapter } from "./providers";
 import { makeLogins, type Logins } from "./providers/login";
 import { makeSupervising, type Supervising } from "./sessions/supervisor";
@@ -365,6 +366,9 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
         workspaceSteps: IDLE_STEPS,
         socketPath: `${STORAGE_DIR}/daemon.sock`,
         credentials: makeCredentialRelay(),
+        githubTokenCopies: makeGithubTokenCopies({
+          ask: () => Promise.reject(new Error("no test in this file asks for a token")),
+        }),
         providerLogins: IDLE_LOGINS,
         sessions: makeSupervising([]),
         binDir: BIN_DIR,
@@ -597,6 +601,7 @@ describe("which controller a runner accepts", () => {
       capabilities: expect.arrayContaining([
         "action:git.commit",
         LOGIN_ENDED_CAPABILITY,
+        GITHUB_TOKEN_CAPABILITY,
         AGENT_STEPS_CAPABILITY,
         ATTACHMENTS_CAPABILITY,
         REPOSITORY_SKILLS_CAPABILITY,
@@ -817,6 +822,30 @@ describe("reporting the end of a device login", () => {
       report!({ _tag: "loginEnded", requestId: "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c72" }),
     );
     expect(exit._tag).toBe("Failure");
+  });
+});
+
+describe("asking the controller for a session's GitHub token", () => {
+  it("sends the request and delivers the answer, to a controller whose hello lists the capability", async () => {
+    const stub = await stubController((real) => ({
+      ...real,
+      capabilities: [GITHUB_TOKEN_CAPABILITY],
+    }));
+    const credentials = makeCredentialRelay();
+
+    const pending = runConnection(buildPin(stub), { credentials });
+    await stub.connected();
+    await waitUntilProven(stub);
+    const asking = credentials.askGithubToken("the-session");
+    const findRequest = () => stub.received.find((frame) => frame._tag === "githubTokenRequest");
+    await waitUntil(() => findRequest() !== undefined);
+    const request = findRequest()!;
+    expect(request).toMatchObject({ sessionToken: "the-session" });
+    stub.say({ _tag: "githubTokenAnswer", requestId: request.requestId, token: "ghs_new" });
+
+    await expect(asking).resolves.toMatchObject({ token: "ghs_new" });
+    stub.hangUp();
+    await pending;
   });
 });
 

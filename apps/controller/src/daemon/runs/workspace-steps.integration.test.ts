@@ -25,6 +25,7 @@ import {
 import {
   createGithubConnection,
   createRepo,
+  disableConnection,
   githubPlugin,
   GITHUB_LOGIN,
   GITHUB_PAT,
@@ -189,6 +190,28 @@ describe("workspace steps over the runner socket", () => {
     },
     WAIT_DEADLINE_MS * 2,
   );
+
+  it("makes the commit as the Connection's account even when the Connection is disabled", async () => {
+    await withFleet(
+      async (arranged) => {
+        const connectionId = await createGithubConnection(arranged, { pat: GITHUB_PAT });
+        const repoId = await createRepo(
+          arranged,
+          "https://github.com/o/disabled.git",
+          connectionId,
+        );
+        await disableConnection(arranged, connectionId);
+        const runId = await startCommitRun(arranged, repoId);
+
+        const start = await waitForStepStart(arranged.wire, runId);
+        expect(start["gitIdentity"]).toEqual({
+          name: GITHUB_LOGIN,
+          email: `${GITHUB_LOGIN}@users.noreply.github.com`,
+        });
+      },
+      { plugins: [githubPlugin] },
+    );
+  });
 
   it(
     "hands on a workspace step made ready by a result while another branch of the run still waits",

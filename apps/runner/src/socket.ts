@@ -47,6 +47,7 @@ import {
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
+  GITHUB_TOKEN_CAPABILITY,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
@@ -64,7 +65,7 @@ import {
   type WorkspaceReport,
 } from "@hercule/protocol";
 import type { AttachmentCache, AttachmentUploader } from "./attachments";
-import type { CredentialRelay } from "./credentials";
+import type { CredentialRelay, GithubTokenCopies } from "./credentials";
 import type { FileClock } from "./edit-marks";
 import { fitRepositorySkillsInspection } from "./frame-size";
 import { refreshFacts } from "./probe";
@@ -101,6 +102,8 @@ const NONCE_BYTES = 16;
  * - one for each workspace action its build implements. The controller pins a
  *   run only to a runner that lists every workspace action in the run's plan.
  * - `LOGIN_ENDED_CAPABILITY`: this runner reports the end of a device login.
+ * - `GITHUB_TOKEN_CAPABILITY`: this runner asks for a session's GitHub token
+ *   when its copy has gone stale.
  * - `AGENT_STEPS_CAPABILITY`: this runner runs an agent step's turn, sends
  *   how it ended, and answers a start sent again for the step.
  * - `ATTACHMENTS_CAPABILITY`: this runner fetches the images an input refers
@@ -114,6 +117,7 @@ const NONCE_BYTES = 16;
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
   LOGIN_ENDED_CAPABILITY,
+  GITHUB_TOKEN_CAPABILITY,
   AGENT_STEPS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
@@ -188,6 +192,8 @@ export interface ConnectOptions {
   readonly socketPath: string;
   /** Forwards a credential helper's request to the controller, and the response back. */
   readonly credentials: CredentialRelay;
+  /** The GitHub tokens this machine holds for its sessions. They outlive this connection. */
+  readonly githubTokenCopies: GithubTokenCopies;
   /** The provider logins on this machine. They outlive this connection. */
   readonly providerLogins: Logins;
   /**
@@ -467,12 +473,8 @@ export const connect = (
         workspaces: options.workspaces,
         socketPath: options.socketPath,
       },
+      githubTokenCopies: options.githubTokenCopies,
     });
-
-    // Credential requests go out on this connection while it is up. With no
-    // connection there is no credential, which git treats as "try the next
-    // helper", not as a failure.
-    yield* options.credentials.attachConnection((frame) => write(encodeFrameText(frame)));
 
     /**
      * Runs a workspace operation and sends its report. Provisioning takes as
@@ -778,6 +780,17 @@ export const connect = (
               .attachConnection((frame) => write(encodeFrameText(frame)))
               .pipe(Scope.provide(connection));
           }
+          // Credential requests go out on this connection while it is up,
+          // and only once the controller has proved its identity. With no
+          // connection there is no credential, which git treats as "try the
+          // next helper", not as a failure. A controller that cannot read a
+          // GitHub token request would close the connection, so the runner
+          // asks for tokens only when the hello lists the capability.
+          yield* options.credentials
+            .attachConnection((frame) => write(encodeFrameText(frame)), {
+              answersGithubTokens: message.capabilities.includes(GITHUB_TOKEN_CAPABILITY),
+            })
+            .pipe(Scope.provide(connection));
           Deferred.doneUnsafe(
             proven,
             Effect.succeed({
@@ -948,8 +961,9 @@ export const connect = (
               ),
             );
           case "credentialAnswer":
-            // A git process is waiting for this response. Nothing is kept after
-            // it is delivered.
+          case "githubTokenAnswer":
+            // A git process or a `gh` shim is waiting for this response.
+            // Nothing is kept after it is delivered.
             return yield* Effect.sync(() => options.credentials.deliver(message));
           case "workspaceStepStart":
             // A request for an agent step's result waits in its session's

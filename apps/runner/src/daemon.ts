@@ -13,6 +13,7 @@ import { IDENTITY_PORT, type ForwardingPointer } from "@hercule/protocol";
 import {
   buildGitCredentialEnv,
   makeCredentialRelay,
+  makeGithubTokenCopies,
   serveCredentialSocket,
   buildSocketPath,
 } from "./credentials";
@@ -204,12 +205,20 @@ export const runDaemon = (
         baseEnv: process.env,
       });
       const credentials = makeCredentialRelay();
+      // Like the relay, it outlives any one connection: a session keeps its
+      // token through a reconnect.
+      const githubTokenCopies = makeGithubTokenCopies({ ask: credentials.askGithubToken });
       yield* Effect.acquireRelease(
         // A second daemon on the same Hercule Home could give this machine's
         // credential helpers another controller's credentials. So the daemon
         // fails to start instead of taking over the socket.
         Effect.tryPromise({
-          try: () => serveCredentialSocket({ path: socketPath, ask: credentials.ask }),
+          try: () =>
+            serveCredentialSocket({
+              path: socketPath,
+              ask: credentials.ask,
+              readGithubToken: githubTokenCopies.read,
+            }),
           catch: (error) =>
             new NotEnrolled({
               message: error instanceof Error ? error.message : String(error),
@@ -281,6 +290,7 @@ export const runDaemon = (
             workspaceSteps,
             socketPath,
             credentials,
+            githubTokenCopies,
             providerLogins,
             sessions,
             binDir,

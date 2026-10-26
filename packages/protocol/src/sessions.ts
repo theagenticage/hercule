@@ -20,6 +20,7 @@ import {
   MAX_FACT_LENGTH,
   Sequenced,
   SessionId,
+  Timestamp,
   WorkspaceStepKey,
 } from "./primitives";
 
@@ -922,12 +923,33 @@ export const SessionStart = Schema.Struct({
    * git credential.
    */
   token: Schema.String.check(Schema.isLengthBetween(1, MAX_TOKEN_LENGTH)),
-  /** `GH_TOKEN` for this session, when a GitHub Connection backs it. */
+  /**
+   * `GH_TOKEN` for this session. Present only when a GitHub Connection backs
+   * the session and the controller read a usable token from it: an expired
+   * token, a disabled Connection, or one that needs reconnecting leaves it
+   * off. The runner keeps it in memory as the first copy of that Connection's
+   * token. A token close to its expiry is sent as it is; the runner replaces it by
+   * sending `GithubTokenRequest` when it prepares the session.
+   */
   ghToken: Schema.optionalKey(Fact),
   /**
-   * Who the session commits as: the account its Connection belongs to. Absent
-   * when no Connection backs it; the machine then leaves git's own identity
-   * unchanged rather than inventing one.
+   * The GitHub Connection that backs the session. Present whenever there is
+   * one, even without a `ghToken`: when the start token is missing or stale,
+   * the runner asks the controller for that Connection's token. The runner
+   * keys its in-memory copy of the token by it, so sessions that share a
+   * Connection share one copy.
+   */
+  githubConnectionId: Schema.optionalKey(Fact),
+  /**
+   * When `ghToken` stops working. Absent when the token has no expiry, such as
+   * a personal access token. Present only when `ghToken` is.
+   */
+  ghTokenExpiresAt: Schema.optionalKey(Timestamp),
+  /**
+   * Who the session commits as: the account its Connection belongs to. Present
+   * whenever a Connection backs the session, even without a `ghToken`, because
+   * the runner may fetch a token later. Absent when no Connection backs it; the
+   * machine then leaves git's own identity unchanged rather than inventing one.
    */
   gitIdentity: Schema.optionalKey(GitIdentity),
   /** The branch the session's checkout is switched to before the harness starts. */
@@ -1121,6 +1143,67 @@ export const FilesEdited = Schema.Struct({
 });
 
 export type FilesEdited = Schema.Schema.Type<typeof FilesEdited>;
+
+/**
+ * The capability for `GithubTokenRequest` and `GithubTokenAnswer`. The runner
+ * lists it at hello when it sends the request; the controller lists it when it
+ * answers it. Both frames are new, so a controller on an older build cannot
+ * decode the request and closes the socket, again after every reconnect. The
+ * runner therefore sends `GithubTokenRequest` only when the controller's hello
+ * lists this. `PROTOCOL_VERSION` does not change, because a peer without the
+ * capability still works for everything else: the runner then keeps using the
+ * copy of the token it got in `SessionStart`.
+ */
+export const GITHUB_TOKEN_CAPABILITY = "github-token";
+
+/**
+ * Sent by the runner when a session's `gh` command needs a GitHub token and
+ * the runner's in-memory copy of its Connection's token has gone stale: too
+ * old, or close to its expiry. The `gh` shim in the session asks the runner,
+ * and the runner asks the controller here, because only the controller can
+ * refresh a Connection's token.
+ *
+ * `sessionToken` is the session's own credential from `SessionStart.token`.
+ * The controller finds the session by it and answers from that session's own
+ * GitHub Connection only. The request names no Connection, so a session cannot
+ * ask for another one's token. The controller answers with exactly one
+ * `GithubTokenAnswer` carrying the same `requestId`.
+ */
+export const GithubTokenRequest = Schema.Struct({
+  _tag: Schema.Literal("githubTokenRequest"),
+  requestId: Fact,
+  sessionToken: Fact,
+});
+
+export type GithubTokenRequest = Schema.Schema.Type<typeof GithubTokenRequest>;
+
+/**
+ * The reply to one `GithubTokenRequest`: either a token to use, or the reason
+ * there is none. Two union members, and each forbids the other's keys, so a
+ * frame that has both or neither does not decode and a reader cannot forget to
+ * check which it is. `expiresAt` is absent when the token has no expiry.
+ * `reason` is one human-readable line that the runner passes on to the person
+ * running `gh`, for example that the Connection needs reconnecting.
+ */
+const GithubTokenGranted = Schema.Struct({
+  _tag: Schema.Literal("githubTokenAnswer"),
+  requestId: Fact,
+  token: Fact,
+  expiresAt: Schema.optionalKey(Timestamp),
+  reason: Schema.optionalKey(Schema.Never),
+});
+
+const GithubTokenRefused = Schema.Struct({
+  _tag: Schema.Literal("githubTokenAnswer"),
+  requestId: Fact,
+  reason: Fact,
+  token: Schema.optionalKey(Schema.Never),
+  expiresAt: Schema.optionalKey(Schema.Never),
+});
+
+export const GithubTokenAnswer = Schema.Union([GithubTokenGranted, GithubTokenRefused]);
+
+export type GithubTokenAnswer = Schema.Schema.Type<typeof GithubTokenAnswer>;
 
 /**
  * The most sessions one runner will ever report. A runner's own session cap,

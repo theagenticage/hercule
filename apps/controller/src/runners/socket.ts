@@ -32,6 +32,7 @@ import {
   AGENT_STEPS_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
   FILES_EDITED_CAPABILITY,
+  GITHUB_TOKEN_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
   SKILLS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
@@ -110,6 +111,9 @@ const RETIRED = "this runner was retired; run `hercule runner join` to join the 
  *   only to a runner that negotiated it.
  * - `FILES_EDITED_CAPABILITY`: this controller reads the `filesEdited` frame.
  *   A runner sends it only to a controller that lists this.
+ * - `GITHUB_TOKEN_CAPABILITY`: this controller answers `githubTokenRequest`
+ *   with a fresh token for the session's GitHub Connection. A runner sends it
+ *   only to a controller that lists this.
  * - `SKILLS_CAPABILITY`: this controller names a session's library skills on
  *   its start frame, and serves their archives to runners. A runner that did
  *   not negotiate it gets the start without them, and the session's transcript
@@ -125,6 +129,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   ATTACHMENTS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
   FILES_EDITED_CAPABILITY,
+  GITHUB_TOKEN_CAPABILITY,
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
 ];
@@ -313,6 +318,9 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           case "credentialRequest":
             if (!greeted) return;
             return yield* connections.requestedCredential(runnerId, mine, message);
+          case "githubTokenRequest":
+            if (!greeted) return;
+            return yield* connections.requestedGithubToken(runnerId, mine, message);
           case "sessionEvent":
           case "sessionsReport":
           case "filesEdited":

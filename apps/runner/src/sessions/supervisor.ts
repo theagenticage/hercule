@@ -57,6 +57,7 @@ import {
   type LoadedSkills,
   type RepositorySkillListing,
 } from "../skills";
+import type { GithubTokenCopies } from "../credentials";
 import type { WorkspaceSteps } from "../workspace-steps";
 import {
   removeSessionDirectory,
@@ -235,6 +236,14 @@ interface Live {
   readonly gone: Deferred.Deferred<void>;
   /** Whether the session runs under an output schema, so an agent step's turn must return a structured result. */
   readonly hasOutputSchema: boolean;
+  /**
+   * Releases the session's hold on its GitHub Connection's token, which drops
+   * the runner's copy once the Connection's last session is gone. A no-op when
+   * the start held nothing. The start's `ArrivedStart` took the hold and
+   * handed it to this entry. `tearDownSession` calls it, and every removal of
+   * the entry goes through that, so the hold ends exactly once.
+   */
+  readonly releaseGithubToken: () => void;
   /** The agent step whose turn runs in this session now, if any. */
   step: RunningStep | undefined;
 }
@@ -284,6 +293,16 @@ interface ArrivedStart {
    * ends before the entry exists.
    */
   sessionSkillsFolder: string | undefined;
+  /**
+   * Releases the start's hold on its GitHub Connection's token. The start
+   * takes the hold once it knows it is not a duplicate and the earlier entry
+   * of its session is gone, and before it waits on anything else, so a slow
+   * preparation cannot seed the Connection's copy with an older token than one
+   * a later start has already stored. A no-op until then. The start calls this
+   * when it ends before the session's entry exists. Once the entry owns the
+   * hold, this is a no-op.
+   */
+  releaseGithubToken: () => void;
 }
 
 /**
@@ -314,6 +333,12 @@ const isWatched = (held: Live): boolean =>
 export interface Connection {
   readonly scope: Scope.Scope;
   readonly machine: Machine;
+  /**
+   * The GitHub tokens this runner holds for its sessions. A session with a
+   * GitHub Connection holds its Connection's token from the moment its start
+   * begins until its entry is removed, or until the start ends without one.
+   */
+  readonly githubTokenCopies: GithubTokenCopies;
   /**
    * The workspace steps of this process. The supervisor tells them when an
    * agent step's turn begins, and the step keeps them to say how it ended.
@@ -601,8 +626,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   /**
    * Takes a removed session entry out of its edit watch, interrupts every
    * timer fiber of the entry, removes its scratch, image and marks
-   * directories, and completes its `gone`. Call it after the entry has left
-   * `live`.
+   * directories, releases its hold on its GitHub token, and completes its
+   * `gone`. Call it after the entry has left `live`.
    */
   const tearDownSession = (sessionId: string, held: Live): Effect.Effect<void> =>
     Effect.gen(function* () {
@@ -612,6 +637,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       yield* cancelIdleUnload(held);
       yield* removeSessionDirectories(held);
       yield* removeSessionSkillsFolder(held.sessionSkillsFolder);
+      held.releaseGithubToken();
       yield* Deferred.succeed(held.gone, undefined);
     });
 
@@ -1193,6 +1219,28 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       );
 
     /**
+     * Returns the token the session's `GH_TOKEN` starts with. For a session
+     * with a GitHub Connection this is the runner's copy of the Connection's
+     * token, which the copies take from the start frame when it is fresh and
+     * otherwise ask the controller for (the controller refreshes it). When the
+     * copies give no token (the ask was refused or failed), it is the frame's
+     * own token, or undefined when the frame has none. A frame without a
+     * Connection id has nothing to ask about: the session has no GitHub
+     * Connection, or the controller is too old to send the id. The frame's own
+     * token, if any, is used as it is.
+     *
+     * Never fails. Interrupting it, for example when the connection drops,
+     * stops the wait for the controller's answer.
+     */
+    const readStartGithubToken = (frame: SessionStart): Effect.Effect<string | undefined> =>
+      frame.githubConnectionId === undefined
+        ? Effect.succeed(frame.ghToken)
+        : Effect.map(
+            Effect.promise(() => connection.githubTokenCopies.read(frame.token)),
+            (result) => ("token" in result ? result.token : frame.ghToken),
+          );
+
+    /**
      * Checks that a session can start here and resolves its context on this
      * machine, before anything is spawned. Returns the adapter and the
      * context. Fails with an `UndeliveredStart` when the session must not
@@ -1261,6 +1309,30 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           live.delete(frame.sessionId);
           yield* tearDownSession(frame.sessionId, stale);
         }
+        // Hold the Connection's token for this session, and keep the
+        // release in `arrived`: the start's cleanup calls it when the start
+        // ends before the session's entry exists. This comes after the
+        // checks above for two reasons:
+        // - A replayed start carries the running session's own session
+        //   token. The copies keep one member per token, so its hold would
+        //   join the running session's, and its release would unbind that
+        //   session.
+        // - The earlier entry of this id released its hold when it was torn
+        //   down, so this hold must come after that.
+        // It comes before any wait below, so a slow preparation cannot seed
+        // the Connection's copy with an older token than one a later start
+        // has already stored.
+        // Without a Connection id (no GitHub Connection, or a controller too
+        // old to send the id) nothing is held, and `GH_TOKEN` is the frame's
+        // own token, if any.
+        if (frame.githubConnectionId !== undefined) {
+          arrived.releaseGithubToken = connection.githubTokenCopies.hold({
+            sessionToken: frame.token,
+            connectionId: frame.githubConnectionId,
+            ...(frame.ghToken === undefined ? {} : { githubToken: frame.ghToken }),
+            ...(frame.ghTokenExpiresAt === undefined ? {} : { expiresAt: frame.ghTokenExpiresAt }),
+          });
+        }
         // The controller linted this schema before it sent the frame, and the
         // harness would hold every turn of the session to it. A schema outside
         // the subset means the controller and the runner disagree about which
@@ -1275,6 +1347,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             ),
           );
         }
+        // Read before the stop check below, so a stop that arrives during the
+        // read (it can take up to the GitHub ask deadline) is seen by that
+        // check and spares the context.
+        const githubToken = yield* readStartGithubToken(frame);
         // A stop that reached this start before now means no harness is
         // spawned at all. Checking here, before the context is resolved,
         // spares the branch switch and the scratch directory. Resolving the
@@ -1299,7 +1375,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           );
         }
         const resolved = yield* Effect.mapError(
-          resolveSessionContext(frame, connection.machine, adapter.binaryName),
+          resolveSessionContext(frame, connection.machine, adapter.binaryName, githubToken),
           buildCrashedStart,
         );
         arrived.directories = resolved;
@@ -1438,6 +1514,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           pendingStop: arrived.pendingStop,
           gone: Deferred.makeUnsafe<void>(),
           hasOutputSchema: frame.spec.outputSchema !== undefined,
+          // The entry owns the start's hold from here on, so every way the
+          // entry ends releases it.
+          releaseGithubToken: arrived.releaseGithubToken,
           step: undefined,
         };
         // In the same step, with no yield between, so a stop finds either the
@@ -1449,6 +1528,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         arrived.editWatch = undefined;
         arrived.directories = undefined;
         arrived.sessionSkillsFolder = undefined;
+        arrived.releaseGithubToken = () => undefined;
         // Check `stopped` again. A shutdown that began after `prepareStart`
         // checked it would not see this session, because `listSessions` and
         // `resolveSessionContext` both yield to other fibers before this
@@ -1649,6 +1729,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           directories: undefined,
           librarySkills: frame.skills ?? [],
           sessionSkillsFolder: undefined,
+          releaseGithubToken: () => undefined,
         };
         // Added now, not when the work begins, so a stop that arrives while
         // the start waits behind earlier frames of the session finds it.
@@ -1689,6 +1770,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               arrived.editWatch?.removeSession(frame.sessionId);
               yield* removeSessionDirectories(arrived.directories);
               yield* removeSessionSkillsFolder(arrived.sessionSkillsFolder);
+              arrived.releaseGithubToken();
               yield* Deferred.succeed(arrived.harnessReady, undefined);
               arrivedStarts.delete(arrived);
             }),

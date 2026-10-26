@@ -937,7 +937,7 @@ describe("the access token of a connection set up by a device flow", () => {
     });
   });
 
-  it("is never refreshed when the provider sent no expiry and no refresh token, as GitHub does", async () => {
+  it("is never refreshed when the provider sent no expiry and no refresh token", async () => {
     await withDevice(async (harness, registry, token, provider) => {
       approve(provider);
       const id = await signIn(harness, token, provider);

@@ -34,6 +34,10 @@ const ROLE_ENTRYPOINTS: Record<Role, () => Promise<RoleModule>> = {
  * Master Key), so it cannot live in the CLI, and it must not boot a
  * controller, so it is not `serve` either.
  *
+ * `hercule github-token` is not routed here. `main.ts` handles it before it
+ * imports this module, so the `gh` shim, which runs it on every `gh` call,
+ * never loads the dispatcher and the code behind it.
+ *
  * `--home <dir>` and `-c key=value` may come before the verb, so the verb is
  * wherever `parseGlobalOptions` found it. The role runs the same parser on the
  * same line, so there is no second copy of the rule here.

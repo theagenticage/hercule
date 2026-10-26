@@ -30,6 +30,7 @@ import {
   type ContinuedSubagent,
   type Delivery,
   type FilesEdited,
+  type GitIdentity,
   SubagentId,
   type ModelSelection,
   type ProviderEvent,
@@ -307,7 +308,23 @@ export interface StartRequest {
  * itself.
  */
 export interface StartNeeds {
+  /**
+   * Returns the GitHub account of a Connection with its token and the token's
+   * expiry, or `undefined` when the Connection has no usable token. This is a
+   * plain read: it never refreshes, because a refresh calls GitHub and a
+   * transaction never waits on anything outside the database. The runner asks
+   * the controller for a fresh token when it prepares the session.
+   */
   readonly readGithubAccount: (connectionId: string) => Effect.Effect<GithubAccount | undefined>;
+  /**
+   * Returns the identity a Connection's account commits as, or `undefined`
+   * when the Connection does not exist or is not a GitHub Connection. It does
+   * not depend on the token: a Connection whose token is unusable still has
+   * its login, and the runner commits as it once it has fetched a new token.
+   */
+  readonly readGitIdentity: (
+    connectionId: string,
+  ) => Effect.Effect<GitIdentity | undefined, SqlError>;
   /**
    * Returns the provider instance's credentials, decrypted for this frame and
    * stored nowhere. Fails when they cannot be decrypted, which skips the
@@ -1949,6 +1966,15 @@ const make = Effect.gen(function* () {
      * lets a Thread on the local runner see User Material. In the same write
      * it records the library skills each session got (`recordLibrarySkills`).
      *
+     * The account is read plainly. A session with a GitHub Connection always
+     * gets the Connection's id and the git identity it commits as on its
+     * frame, whatever state its token is in: the runner can ask for a fresh
+     * token while it prepares the session, and the commits are made as the
+     * Connection's account either way. The token and its expiry are on the
+     * frame only when the read gave a usable token: it gives none for an
+     * expired token or a Connection that is disabled or needs reconnecting. A
+     * token inside the refresh margin but not yet expired is passed as it is.
+     *
      * The input is the session's oldest waiting input. It is claimed in the
      * same write, exactly as an input sent on its own is, so the runner's
      * answer to it is recorded the same way, and a controller restart before
@@ -2055,10 +2081,11 @@ const make = Effect.gen(function* () {
             yield* announceSessionChange(row);
             // The account's token is read now rather than stored: the only
             // place it is written is the frame that carries it to the runner.
+            const connectionId = row.githubConnectionId;
             const account =
-              row.githubConnectionId === null
-                ? undefined
-                : yield* needs.readGithubAccount(row.githubConnectionId);
+              connectionId === null ? undefined : yield* needs.readGithubAccount(connectionId);
+            const gitIdentity =
+              connectionId === null ? undefined : yield* needs.readGitIdentity(connectionId);
             // Built at every start rather than stored, so a resume or a fork
             // sees the session's grants and repositories as they are now.
             const coordination = yield* needs.buildCoordination(row.id);
@@ -2105,9 +2132,16 @@ const make = Effect.gen(function* () {
                 secrets: secrets.value,
                 spec: coordination === undefined ? spec.value : { ...spec.value, coordination },
                 token,
+                ...(connectionId === null ? {} : { githubConnectionId: connectionId }),
+                ...(gitIdentity === undefined ? {} : { gitIdentity }),
                 ...(account === undefined
                   ? {}
-                  : { ghToken: account.token, gitIdentity: account.gitIdentity }),
+                  : {
+                      ghToken: account.token,
+                      ...(account.expiresAt === undefined
+                        ? {}
+                        : { ghTokenExpiresAt: account.expiresAt }),
+                    }),
                 ...(row.checkoutBranch === null ? {} : { checkoutBranch: row.checkoutBranch }),
                 // Only a Thread on the local runner sees User Material (spec
                 // 06 section 9.1). The flag is decided here at every start

@@ -22,9 +22,12 @@ import {
 import { buildHomePaths, HerculeHome } from "../config";
 import { copyDatabaseAndStopWrites, resumeWrites } from "../db";
 import { openDatabase } from "../db/client";
+import { ConnectionTypesLayer } from "../connections";
 import { AuditLogLayer } from "../events";
 import { get, post, send } from "../http/testing";
 import { SessionTokensLayer } from "../permissions";
+import { PluginConfigsLayer } from "../plugins";
+import { ServingPromotionStateLayer } from "../promotion/testing";
 import { startSentWorkflow, waitForRunTo } from "../runs/testing";
 import { RunWorkspaceStepActivityLayer } from "../runs";
 import { masterKeyLayer } from "../secrets/masterKey";
@@ -201,6 +204,9 @@ const reopenWorkspaceDomain = (database: string, home: string) =>
   WorkspaceServiceLayer.pipe(
     Layer.provideMerge(SessionTokensLayer),
     Layer.provideMerge(RunWorkspaceStepActivityLayer),
+    Layer.provideMerge(ConnectionTypesLayer),
+    Layer.provideMerge(PluginConfigsLayer),
+    Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),

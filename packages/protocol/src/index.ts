@@ -26,6 +26,8 @@ import {
 } from "./primitives";
 import {
   FilesEdited,
+  GithubTokenAnswer,
+  GithubTokenRequest,
   SessionEvent,
   SessionInput,
   SessionInputResult,
@@ -629,6 +631,7 @@ export const RunnerToController = Schema.Union([
   LoginEnded,
   SessionEvent,
   FilesEdited,
+  GithubTokenRequest,
   SessionInputResult,
   SessionRespondToQuestionResult,
   SessionsReport,
@@ -731,6 +734,7 @@ export const ControllerToRunner = Schema.Union([
   RepositorySkillsInspect,
   RepositorySkillsPreview,
   CredentialAnswer,
+  GithubTokenAnswer,
   WorkspaceStepStart,
   WorkspaceStepSettle,
   ForwardingPointer,

@@ -55,7 +55,7 @@ Ticket #24 called this step `hercule takeover <token>`; ticket #10 and ADR 0005 
 
 Token-minting ops are named `create`, not `mint` (resolved 2026-09-01, [#44](https://github.com/theagenticage/hercule/issues/44)): `runner.createJoinToken` and `controller.createPromotionToken` in the catalogue ([./11](./11-public-api-and-agent-surface.md)).
 
-A session reaches the `hercule` binary through a **PATH prepend** (resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43)): the runner maintains `~/.hercule/runner/bin/` containing a `hercule` symlink to `process.execPath`, refreshed at runner start so upgrades follow, and prepends that directory to every session's `PATH`. The skill text stays portable (`hercule task ...`, no absolute paths) and `which hercule` works for the agent. The git credential helper is a subcommand of the same binary and needs nothing extra.
+A session reaches the `hercule` binary through a **PATH prepend** (resolved 2026-08-31, [#43](https://github.com/theagenticage/hercule/issues/43)): the runner maintains `~/.hercule/runner/bin/` containing a `hercule` symlink to `process.execPath`, refreshed at runner start so upgrades follow, and prepends that directory to every session's `PATH`. The skill text stays portable (`hercule task ...`, no absolute paths) and `which hercule` works for the agent. The git credential helper is a subcommand of the same binary and needs nothing extra. *(Amended 2026-10-26, [#613](https://github.com/theagenticage/hercule/issues/613).)* The directory also holds `gh`, a POSIX shell script (not a symlink) that the runner rewrites at every start. It runs the real `gh` with a fresh `GH_TOKEN` from `hercule github-token` ([./13-security.md](./13-security.md) section 9.3).
 
 ## 3. Mode isolation (CI-enforced)
 
@@ -167,6 +167,7 @@ Naming a Home is not enough for the Service Unit, because a machine user has one
 These are guards against an agent's mistake, not a sandbox: an agent that names `~/.hercule` itself, or unsets `HERCULE_SESSION`, gets through, as [13 §5](./13-security.md) accepts for credentials. Not covered:
 
 - `hercule git-credential`, which reads no Home and must run inside sessions for git to work;
+- *(Amended 2026-10-26, [#613](https://github.com/theagenticage/hercule/issues/613).)* `hercule github-token`, which reads no Home either and runs inside sessions, from the `gh` shim and from agents;
 - `hercule login` and `hercule logout`. They write only `credentials.json`, and the CLI never reads that file inside a session ([13 §5](./13-security.md)), so a session's login cannot make another session act as the user. At worst it replaces the user's stored login, which the user fixes by logging in again.
 
 Every other command resolves the Home as above.

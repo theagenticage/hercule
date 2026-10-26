@@ -157,8 +157,8 @@ const resolveSync = (frame: SessionStart, machine: Machine) =>
   Effect.runSync(Effect.result(resolveSessionContext(frame, machine, "claude")));
 
 /** Like `resolveSync`, for cases where resolving a workspace calls real git, which is async. */
-const resolveAsync = (frame: SessionStart, machine: Machine) =>
-  Effect.runPromise(Effect.result(resolveSessionContext(frame, machine, "claude")));
+const resolveAsync = (frame: SessionStart, machine: Machine, githubToken?: string) =>
+  Effect.runPromise(Effect.result(resolveSessionContext(frame, machine, "claude", githubToken)));
 
 describe("what a workspace-less session runs in", () => {
   it("gets a scratch directory of its own, and it is empty", () => {
@@ -611,12 +611,12 @@ describe("the git credential environment a session runs with", () => {
     expect(readGitConfig(env)[1]?.[0]).toBe("credential.helper");
   });
 
-  it("carries GH_TOKEN only when the frame does", async () => {
-    const withToken = await resolveAsync(
-      buildSessionStart({ ghToken: "ghp_for_gh_cli" }),
+  it("carries GH_TOKEN only when the caller resolved a token, never the frame's own", async () => {
+    const withToken = await resolveAsync(buildSessionStart(), buildMachine(), "ghp_for_gh_cli");
+    const without = await resolveAsync(
+      buildSessionStart({ ghToken: "ghp_in_the_frame" }),
       buildMachine(),
     );
-    const without = await resolveAsync(buildSessionStart(), buildMachine());
 
     expect(withToken._tag === "Success" ? withToken.success.ctx.env["GH_TOKEN"] : undefined).toBe(
       "ghp_for_gh_cli",

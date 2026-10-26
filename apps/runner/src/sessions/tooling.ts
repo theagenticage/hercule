@@ -4,12 +4,14 @@
  *
  * - it links the `hercule` binary into the directory that goes at the front of
  *   every session's `PATH` (spec 15 section 2);
+ * - it writes the `gh` shim into the same directory, so a session's `gh` runs
+ *   with a fresh GitHub token (see `gh-shim.ts`);
  * - it writes the Claude plugin directory that holds the skill (spec 06
  *   section 9.3).
  *
- * Both are rewritten at every start, not only the first. An upgraded binary has
- * to replace the symlink and the skill text an older build left behind, and
- * nothing else on the machine rewrites them.
+ * All of it is rewritten at every start, not only the first. An upgraded binary
+ * has to replace the symlink, the shim and the skill text an older build left
+ * behind, and nothing else on the machine rewrites them.
  *
  * The work is synchronous, because runner start has nothing else to do while it
  * waits, and no session may be placed here before it is done.
@@ -19,14 +21,15 @@
  * session that calls `hercule` gets bun instead. The daemon warns about this at
  * start, so a session does not have to discover it.
  */
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { locateRunnerDir } from "@hercule/home";
 import { VERSION } from "@hercule/home/version";
+import { buildGhShim } from "./gh-shim";
 import { SKILL_DESCRIPTION } from "./skill";
 
 export interface Tooling {
-  /** `<home>/runner/bin`: prepended to every session's `PATH`. */
+  /** `<home>/runner/bin`, holding `hercule` and the `gh` shim: prepended to every session's `PATH`. */
   readonly binDir: string;
   /**
    * The Hercule tool in the shape every adapter takes. It is built here so the
@@ -84,6 +87,12 @@ export const prepareTooling = ({
   // longer exists, and `symlinkSync` does not overwrite an existing file.
   rmSync(link, { force: true });
   symlinkSync(execPath, link);
+  // A shell reads its script while it runs. Writing a new file and renaming it
+  // over the old one leaves a `gh` that a session is running at this moment
+  // with the text it started with.
+  const shim = join(binDir, "gh");
+  writeFileSync(`${shim}.new`, buildGhShim(binDir), { mode: 0o755 });
+  renameSync(`${shim}.new`, shim);
 
   const claudePluginDir = join(storageDir, "claude-plugin");
   mkdirSync(join(claudePluginDir, ".claude-plugin"), { recursive: true });

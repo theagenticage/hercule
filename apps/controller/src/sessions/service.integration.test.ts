@@ -364,6 +364,7 @@ const claimStarting = (
       sql,
       sessions.claimStarts(runnerId, room, {
         readGithubAccount: () => Effect.succeed(undefined),
+        readGitIdentity: () => Effect.succeed(undefined),
         readSecrets: NO_SECRETS,
         buildCoordination: () => Effect.succeed(coordination),
         runner: { name: "a runner", negotiatedCapabilities: [] },
@@ -759,6 +760,7 @@ describe("SessionService.claimStarts", () => {
             sql,
             sessions.claimStarts(runnerId, 1, {
               readGithubAccount: accounts.readGithubAccount,
+              readGitIdentity: accounts.readGitIdentity,
               readSecrets: NO_SECRETS,
               buildCoordination: () => Effect.succeed(undefined),
               runner: { name: "a runner", negotiatedCapabilities: [] },

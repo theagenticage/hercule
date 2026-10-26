@@ -12,8 +12,15 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
+import { HOST_API, registerConnectionType, type Plugin } from "@hercule/plugin-host";
 import type { SessionStart } from "@hercule/protocol";
 import { OAUTH_TOKENS } from "../connections";
+import {
+  buildJsonResponse,
+  createDeviceProvider,
+  type DeviceProvider,
+} from "../connections/testing";
 import { withTransaction } from "../db";
 import { get, post, send } from "../http/testing";
 import { findStepRecords, startSentWorkflow, waitForRun } from "../runs/testing";
@@ -47,6 +54,39 @@ const SECOND_PAT = "ghp_another-token";
 
 /** An access token as the GitHub device flow issues one. */
 const DEVICE_TOKEN = "gho_a-device-token";
+const REFRESHED_DEVICE_TOKEN = "gho_a-refreshed-device-token";
+
+/**
+ * The GitHub Connection type with a device flow against the test provider, so
+ * a token inside its refresh margin can be refreshed. A pasted token is the
+ * other way to connect, as in `githubPlugin`.
+ */
+const buildDeviceGithubPlugin = (provider: DeviceProvider): Plugin => ({
+  manifest: {
+    id: "github",
+    displayName: "GitHub",
+    hostApi: HOST_API,
+    capabilities: ["connections"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) =>
+    registerConnectionType(host, {
+      type: "github",
+      displayName: "GitHub",
+      setup: [
+        { kind: "device" },
+        { kind: "credentials", fields: [{ name: "pat", label: "Personal access token" }] },
+      ],
+      device: {
+        clientId: "device-client-1",
+        deviceCodeUrl: `${provider.base}/device/code`,
+        tokenUrl: `${provider.base}/token`,
+        scopes: ["repo"],
+      },
+      validate: () => Effect.succeed({ displayName: GITHUB_LOGIN, accountId: "583231" }),
+    }),
+  activate: () => Effect.succeed(Effect.void),
+});
 
 const withCredentials = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   withFleet(body, { plugins: [githubPlugin] });
@@ -149,7 +189,11 @@ describe("a credential asked for by a provisioning workspace", () => {
   const storeDeviceTokens = async (
     arranged: Arranged,
     connectionId: string,
-    tokens: { readonly accessToken: string; readonly expiresAt?: string },
+    tokens: {
+      readonly accessToken: string;
+      readonly refreshToken?: string;
+      readonly expiresAt?: string;
+    },
   ): Promise<void> => {
     const { secrets } = arranged.harness;
     const owner = { kind: "connection", id: connectionId } as const;
@@ -185,7 +229,7 @@ describe("a credential asked for by a provisioning workspace", () => {
     });
   });
 
-  it("answers no_connection, and leaves the connection's status alone, when the device flow's token has expired", async () => {
+  it("answers no_connection, and marks the connection needs-reauth, when the device flow's token has expired and cannot be refreshed", async () => {
     await withCredentials(async (arranged) => {
       const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
       await storeDeviceTokens(arranged, github, {
@@ -204,15 +248,53 @@ describe("a credential asked for by a provisioning workspace", () => {
       });
       expect(answer["error"]).toBe("no_connection");
       expect(answer["token"]).toBeUndefined();
-      // Reading the token is a plain read: it does not mark the connection.
       const read = await get(
         arranged.harness.base,
         `/api/v1/connections/${github}`,
         arranged.token,
       );
       expect(read.status, await read.clone().text()).toBe(200);
-      expect(await read.json()).toMatchObject({ status: "connected" });
+      expect(await read.json()).toMatchObject({ status: "needs-reauth" });
     });
+  });
+
+  it("answers with a refreshed token when the device flow's token is inside its refresh margin", async () => {
+    const provider = createDeviceProvider();
+    provider.answers.token = () =>
+      buildJsonResponse({
+        access_token: REFRESHED_DEVICE_TOKEN,
+        refresh_token: "refresh-2",
+        token_type: "bearer",
+        expires_in: 8 * 60 * 60,
+      });
+    try {
+      await withFleet(
+        async (arranged) => {
+          const github = await createGithubConnection(arranged, { pat: GITHUB_PAT });
+          await storeDeviceTokens(arranged, github, {
+            accessToken: DEVICE_TOKEN,
+            refreshToken: "refresh-1",
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+          });
+          const web = await createRepo(arranged, "https://github.com/acme/web", github);
+          const workspace = await provisionWorkspaceOrFail(arranged, {
+            resourceId: web,
+            runnerId: arranged.runnerId,
+          });
+
+          const answer = await askForCredential(arranged.wire, {
+            remote: "github.com/acme/web",
+            workspaceId: workspace.id,
+          });
+          expect(answer["token"]).toBe(REFRESHED_DEVICE_TOKEN);
+          expect(answer["username"]).toBe(GITHUB_LOGIN);
+          expect(answer["error"]).toBeUndefined();
+        },
+        { plugins: [buildDeviceGithubPlugin(provider)] },
+      );
+    } finally {
+      await provider.stop();
+    }
   });
 
   it("stops answering once the workspace is no longer provisioning", async () => {

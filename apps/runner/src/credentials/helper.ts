@@ -12,8 +12,8 @@
 import { createConnection } from "node:net";
 import { CREDENTIAL_DEADLINE_MS, isSpeakable } from "./socket";
 
-/** The session's own token, injected by the runner into the session's environment. */
-const TOKEN = "HERCULE_TOKEN";
+/** The environment variable that holds the session's own token, injected by the runner. */
+export const SESSION_TOKEN_VARIABLE = "HERCULE_TOKEN";
 
 /**
  * The environment variable that holds the id of the workspace the runner's
@@ -62,7 +62,7 @@ export const answerCredentialQuestion = async (
 ): Promise<string> => {
   const path = env[RUNNER_SOCKET_VARIABLE];
   if (path === undefined || path.length === 0) return "";
-  const token = env[TOKEN];
+  const token = env[SESSION_TOKEN_VARIABLE];
   const workspaceId = env[RUNNER_WORKSPACE_VARIABLE];
   const claim =
     token !== undefined && token.length > 0

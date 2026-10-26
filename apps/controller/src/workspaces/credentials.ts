@@ -7,7 +7,9 @@
  * The runner asks as itself only while it provisions that workspace or runs
  * a workspace step in it (spec 13 section 9.1). A session is entitled only
  * while it holds an active lease on its workspace. The credential is valid
- * for that request alone.
+ * for that request alone. A device-flow token inside its refresh margin is
+ * refreshed first, which calls GitHub, so answering never runs inside a
+ * transaction.
  *
  * The rule is simple: the remote must canonicalize to a resource the asker
  * already has a checkout of. Everything else gets `unauthorized`, including a
@@ -28,7 +30,12 @@ import type {
   CredentialRequest,
   GitIdentity,
 } from "@hercule/protocol";
-import { githubTokens, type GithubToken } from "../connections";
+import {
+  connectionRepository,
+  githubTokens,
+  isGithubConnection,
+  type GithubToken,
+} from "../connections";
 import { hashToken } from "../credentials";
 import { uuidFromString, uuidToString } from "../db";
 import { SessionTokens } from "../permissions";
@@ -72,10 +79,14 @@ const buildGitIdentity = (login: string): GitIdentity => ({
   email: `${login}@users.noreply.github.com`,
 });
 
-/** A GitHub account as work uses it: the token it pushes with and the identity it commits as. */
+/**
+ * A GitHub account as work uses it: the token it pushes with, and when that
+ * token expires (`undefined` when it never does). The identity it commits as is
+ * read apart (`readGitIdentity`), because it does not depend on the token.
+ */
 export interface GithubAccount {
   readonly token: string;
-  readonly gitIdentity: GitIdentity;
+  readonly expiresAt: string | undefined;
 }
 
 /**
@@ -86,16 +97,29 @@ export interface GithubAccount {
  */
 export const githubAccounts = Effect.gen(function* () {
   const { findGithubToken } = yield* githubTokens;
+  const connections = yield* connectionRepository;
 
   return {
-    findGithubToken,
+    /**
+     * Returns the identity a Connection's account commits as. Returns
+     * `undefined` if the Connection does not exist or is not a GitHub
+     * Connection. The identity is the account's login, so a Connection that
+     * is `disabled` or `needs-reauth` still gives it even though it gives no
+     * token.
+     */
+    readGitIdentity: (connectionId: string): Effect.Effect<GitIdentity | undefined, SqlError> =>
+      Effect.map(connections.one(connectionId), (found) =>
+        Option.isSome(found) && isGithubConnection(found.value)
+          ? buildGitIdentity(found.value.displayName)
+          : undefined,
+      ),
 
     /**
      * Returns the GitHub account of a Connection, for work that starts with
-     * it: the token it pushes with and the identity it commits as. Returns
-     * `undefined` if the connection has no usable token. A connection that
-     * cannot be read is logged and treated the same way, because work that
-     * starts without an account is better than work that does not start.
+     * it: the token it pushes with and its expiry. Returns `undefined` if the connection has no usable token. A
+     * connection that cannot be read is logged and treated the same way,
+     * because work that starts without an account is better than work that
+     * does not start.
      */
     readGithubAccount: (connectionId: string): Effect.Effect<GithubAccount | undefined> =>
       Effect.map(
@@ -116,7 +140,7 @@ export const githubAccounts = Effect.gen(function* () {
             ? undefined
             : {
                 token: credential.value.token,
-                gitIdentity: buildGitIdentity(credential.value.login),
+                expiresAt: credential.value.expiresAt,
               },
       ),
   };
@@ -124,7 +148,7 @@ export const githubAccounts = Effect.gen(function* () {
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const accounts = yield* githubAccounts;
+  const { readFreshGithubToken } = yield* githubTokens;
   const sessionTokens = yield* SessionTokens;
   const stepActivity = yield* WorkspaceStepActivity;
 
@@ -206,7 +230,12 @@ const make = Effect.gen(function* () {
     /**
      * Builds the answer frame for one credential request: the token and
      * username, or `unauthorized` or `no_connection` as explained at the top of
-     * this file. Fails if the database fails.
+     * this file. A Connection that cannot give a token right now (disabled,
+     * needs reconnecting, or GitHub unreachable with the token expired) is
+     * answered `no_connection`. Fails if the database fails.
+     *
+     * Reading the token can call GitHub, so this must run outside any
+     * transaction.
      */
     answer: (
       runnerId: string,
@@ -223,7 +252,7 @@ const make = Effect.gen(function* () {
         const held = yield* findHeldResource(runnerId, request, canonicalRemote);
         if (Option.isNone(held)) return buildRefusalAnswer("unauthorized");
         if (held.value.connectionId === null) return buildRefusalAnswer("no_connection");
-        const credential = yield* accounts.findGithubToken(held.value.connectionId);
+        const credential = yield* Effect.option(readFreshGithubToken(held.value.connectionId));
         if (Option.isNone(credential)) return buildRefusalAnswer("no_connection");
         return {
           _tag: "credentialAnswer",

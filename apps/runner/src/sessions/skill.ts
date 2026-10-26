@@ -14,6 +14,10 @@
  * and `skill.test.ts` checks that against the contract's CLI table. Spec 11
  * section 6.3 owns the rule.
  *
+ * The orientation also names `hercule github-token`. It is a command that runs
+ * on the runner, like `hercule git-credential`, so it is not in the contract's
+ * CLI table. It sits inside a longer shell command, so the check does not see it.
+ *
  * One section of the skill is the exception: "Discussions and the wiki" names
  * the commands an agent needs the moment another session reaches it, with an
  * example each, so it can act without first reading the help (spec 19 section
@@ -26,7 +30,7 @@
  * told not to use it, because Hercule would not see that work, and one
  * without is told that Hercule is how it reaches other sessions at all.
  */
-export const SESSION_ORIENTATION = `This session runs inside Hercule, the platform that started it. The **hercule** CLI is on PATH, already signed in as this session, and \`hercule --help\` lists everything it can do.
+export const SESSION_ORIENTATION = `This session runs inside Hercule, the platform that started it. The **hercule** CLI is on PATH, already signed in as this session, and \`hercule --help\` lists everything it can do. When this session has a GitHub token, \`gh\` always gets a fresh one; for another tool that reads \`GH_TOKEN\`, run \`token=$(hercule github-token) && GH_TOKEN=$token sometool\`.
 
 Other sessions are reached through Hercule. To start a session, on any provider or model, see \`hercule session spawn --help\`. To send a message to a session that exists, see \`hercule session input --help\`. If your harness has its own way to reach other sessions or agents outside this one, do not use it: Hercule would not see that work, and nobody could follow it. Your harness's own subagent tool, if it has one, starts a helper inside this session, and that is fine to use.`;
 

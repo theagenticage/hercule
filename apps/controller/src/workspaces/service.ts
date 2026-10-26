@@ -83,6 +83,7 @@ import {
   resolveSortDirection,
   withTransaction,
 } from "../db";
+import type { ConnectionTypes } from "../connections";
 import type { SessionTokens } from "../permissions";
 import { AuditLog } from "../events";
 import {
@@ -1481,15 +1482,16 @@ const make = Effect.gen(function* () {
      * workspace commits and pushes as. It is read now rather than stored, the
      * way a session start reads its account. Returns `undefined` when no
      * Connection backs the workspace, when there is no such workspace, or
-     * when the Connection has no usable account; the runner then leaves git's
-     * own identity unchanged.
+     * when the Connection is gone; the runner then leaves git's own identity
+     * unchanged. A `disabled` Connection still gives its identity, because the
+     * identity is the account's login and needs no token.
      */
     readCommitAuthor: (workspaceId: string): Effect.Effect<GitIdentity | undefined, SqlError> =>
       Effect.gen(function* () {
         const found = yield* workspaces.one(workspaceId);
         const connectionId = Option.isNone(found) ? null : found.value.designatedConnectionId;
         if (connectionId === null) return undefined;
-        return (yield* accounts.readGithubAccount(connectionId))?.gitIdentity;
+        return yield* accounts.readGitIdentity(connectionId);
       }),
 
     /**
@@ -1541,7 +1543,9 @@ const make = Effect.gen(function* () {
      * Builds the answer to a runner's git credential request. The answer is
      * not stored: it is built for that one request and returned, to be sent on
      * the connection the request came in on. Never fails: an error is logged
-     * and answered as `no_connection`.
+     * and answered as `no_connection`. It may call GitHub to refresh a token,
+     * so the caller runs it outside any transaction and off the queue of other
+     * fleet traffic.
      */
     credentialAnswer: (
       runnerId: string,
@@ -1582,5 +1586,11 @@ export class WorkspaceService extends Context.Service<
 export const WorkspaceServiceLayer: Layer.Layer<
   WorkspaceService,
   never,
-  SqlClient.SqlClient | AuditLog | Settings | Secrets | SessionTokens | WorkspaceStepActivity
+  | SqlClient.SqlClient
+  | AuditLog
+  | Settings
+  | Secrets
+  | ConnectionTypes
+  | SessionTokens
+  | WorkspaceStepActivity
 > = Layer.effect(WorkspaceService)(make);

@@ -9,6 +9,7 @@ import { createConnection } from "node:net";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { CredentialAnswer } from "@hercule/protocol";
+import type { GithubTokenResult } from "./github-tokens";
 import { serveCredentialSocket } from "./index";
 import { cleanTemporaries, createTemporaryDir } from "../workspaces/testing";
 
@@ -52,6 +53,8 @@ const asked: Array<unknown> = [];
 
 const startCredentialSocket = async (
   answer: (request: unknown) => Promise<CredentialAnswer>,
+  readGithubToken: (sessionToken: string) => Promise<GithubTokenResult> = () =>
+    Promise.reject(new Error("no GitHub token was expected")),
 ): Promise<{ path: string; close: () => Promise<void> }> => {
   const path = createSocketPath();
   const server = await serveCredentialSocket({
@@ -60,6 +63,7 @@ const startCredentialSocket = async (
       asked.push(request);
       return answer(request);
     },
+    readGithubToken,
   });
   return { path, close: () => server.close() };
 };
@@ -100,6 +104,79 @@ describe("what the socket forwards", () => {
     expect(asked).toEqual([
       { remote: "github.com/acme/web", workspaceId: "0199e0e7-0000-7000-8000-00000000000b" },
     ]);
+    await served.close();
+  });
+});
+
+describe("what the socket answers the gh shim", () => {
+  const ask = (path: string, fields: Record<string, string> = { sessionToken: "the-session" }) =>
+    askOverSocket(path, { kind: "githubToken", ...fields });
+
+  it("returns the token held for the session, and does not ask git's question", async () => {
+    asked.length = 0;
+    const read: Array<string> = [];
+    const served = await startCredentialSocket(
+      () => Promise.reject(new Error("git was not asked")),
+      (sessionToken) => {
+        read.push(sessionToken);
+        return Promise.resolve({ token: "ghs_the-token" });
+      },
+    );
+
+    const reply = await ask(served.path);
+
+    expect(JSON.parse(reply.trim())).toEqual({ token: "ghs_the-token" });
+    expect(read).toEqual(["the-session"]);
+    expect(asked).toEqual([]);
+    await served.close();
+  });
+
+  it("returns the reason when there is no token, such as for a session it does not know", async () => {
+    const served = await startCredentialSocket(
+      () => Promise.reject(new Error("git was not asked")),
+      () => Promise.resolve({ reason: "this runner holds no GitHub token for this session" }),
+    );
+
+    const reply = await ask(served.path, { sessionToken: "unknown-session" });
+
+    expect(JSON.parse(reply.trim())).toEqual({
+      reason: "this runner holds no GitHub token for this session",
+    });
+    await served.close();
+  });
+
+  it("returns a reason, and reads nothing, when the request has no session token", async () => {
+    const read: Array<string> = [];
+    const served = await startCredentialSocket(
+      () => Promise.reject(new Error("git was not asked")),
+      (sessionToken) => {
+        read.push(sessionToken);
+        return Promise.resolve({ token: "ghs_the-token" });
+      },
+    );
+
+    const reply = await ask(served.path, {});
+
+    expect(JSON.parse(reply.trim())).toEqual({ reason: "the request has no session token" });
+    expect(read).toEqual([]);
+    await served.close();
+  });
+
+  it.each([
+    ["token", { token: "ghs_one\nGH_HOST=evil.example" }],
+    ["reason", { reason: "line one\nline two" }],
+  ])("never sends a %s with a line break, and gives a reason instead", async (_name, result) => {
+    const served = await startCredentialSocket(
+      () => Promise.reject(new Error("git was not asked")),
+      () => Promise.resolve(result),
+    );
+
+    const reply = await ask(served.path);
+
+    const answer = JSON.parse(reply.trim()) as Record<string, string>;
+    expect(Object.keys(answer)).toEqual(["reason"]);
+    expect(answer["reason"]).not.toMatch(/[\n\r]/);
+    expect(reply).not.toContain("ghs_one");
     await served.close();
   });
 });
@@ -231,7 +308,11 @@ describe("the socket itself", () => {
     // Two daemons on one Hercule Home could answer this machine's helpers with
     // credentials from two different controllers.
     await expect(
-      serveCredentialSocket({ path: served.path, ask: () => Promise.reject(new Error("never")) }),
+      serveCredentialSocket({
+        path: served.path,
+        ask: () => Promise.reject(new Error("never")),
+        readGithubToken: () => Promise.reject(new Error("never")),
+      }),
     ).rejects.toThrow("already listening");
 
     // The existing daemon's socket is left in place.

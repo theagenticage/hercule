@@ -23,6 +23,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
+import { ConnectionTypes } from "../../connections";
 import { withTransaction } from "../../db";
 import { PluginHost } from "../../plugins";
 import { PromotionState } from "../../promotion";
@@ -137,6 +138,7 @@ const make = Effect.gen(function* () {
               if (room <= 0) return [];
               return yield* sessions.claimStarts(runnerId, room, {
                 readGithubAccount: accounts.readGithubAccount,
+                readGitIdentity: accounts.readGitIdentity,
                 readSecrets: (instanceId, providerId) =>
                   Effect.flatMap(host.providers(), (registered) =>
                     readInstanceSecrets(secrets, registered, instanceId, providerId),
@@ -176,6 +178,7 @@ export const DispatchLayer: Layer.Layer<
   never,
   | SqlClient.SqlClient
   | SessionService
+  | ConnectionTypes
   | RunnerConnections
   | Secrets
   | PluginHost
