@@ -168,6 +168,14 @@ export const Sidebar = memo(function Sidebar({
     }
     setExpanded((current) => new Set(current).add(section));
   }, []);
+  const collapseSection = useCallback((section: SectionKey) => {
+    setExpanded((current) => {
+      if (!current.has(section)) return current;
+      const next = new Set(current);
+      next.delete(section);
+      return next;
+    });
+  }, []);
   const toggleDoneShelf = useCallback(() => {
     setDoneShelfLimit((limit) => (limit === null ? DONE_SHELF_LIMIT : null));
   }, []);
@@ -177,13 +185,14 @@ export const Sidebar = memo(function Sidebar({
   const listActions = useMemo(
     () => ({
       onExpand: expandSection,
+      onCollapse: collapseSection,
       onMarkDone: markDone,
       onReopen: reopen,
       onToggleDoneShelf: toggleDoneShelf,
       onToggleGroup: toggleGroup,
       onShowQuiet: showQuiet,
     }),
-    [expandSection, markDone, reopen, toggleDoneShelf, toggleGroup, showQuiet],
+    [expandSection, collapseSection, markDone, reopen, toggleDoneShelf, toggleGroup, showQuiet],
   );
 
   const { items, openGroupKey } = buildSidebar({

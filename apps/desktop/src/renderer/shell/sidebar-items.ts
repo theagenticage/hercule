@@ -1,7 +1,7 @@
 /**
  * Builds what the sidebar draws from the session presentation and the user's
  * choices: the flat list of items the virtualized list draws (section
- * headers, group rows and their lines, and "more" rows, each with a fixed
+ * headers, group rows and their lines, and "more" and "Show fewer" rows, each with a fixed
  * height and the space the book puts above it).
  *
  * Which groups of sessions are shown, in which order, in what pose, which
@@ -179,7 +179,15 @@ export type SidebarItemContent =
       /** What the card shows while the pointer rests on the row: every session of the group, Agent sessions too. */
       readonly details: ThreadHoverDetails;
     }
-  | { readonly kind: "more"; readonly key: string; readonly label: string };
+  | { readonly kind: "more"; readonly key: string; readonly label: string }
+  | {
+      /** The row that collapses an expanded section to its capped list again. */
+      readonly kind: "fewer";
+      readonly key: string;
+      readonly label: string;
+      /** The row's accessible name, which says which section it collapses, as the label alone repeats. */
+      readonly name: string;
+    };
 
 /**
  * One entry of the sidebar's list: what it draws, the section it belongs to,
@@ -206,7 +214,8 @@ export type SidebarItemOf<Kind extends SidebarItemKind> = Extract<SidebarItem, {
  * - a Waiting on you row (`.side-row--wait`) is 38, a thread's, an
  *   assistant's and a run's session's alike;
  * - the "From runs" label (`.side-sub`) is 16;
- * - a "more" row (`.side-row--more`, in the book's swarm state) is 28.
+ * - a "more" row (`.side-row--more`, in the book's swarm state) is 28, and
+ *   so is the "Show fewer" row, which is drawn as it is.
  *
  * The book's thread row (`.side-row`) is 35, with two tight lines. This
  * app's group row is 52, so two lines read apart at a glance (spec 17 §The
@@ -229,6 +238,7 @@ export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
   "done-header": 24,
   "done-group-row": 52,
   more: 28,
+  fewer: 28,
 };
 
 /** The space above a section's first item: the book's `.side-sec { padding-top: 8px }`. */
@@ -275,6 +285,9 @@ const buildHeaderKey = (section: SectionKey): string => `header:${section}`;
 /** Returns the key of a section's "more" row. */
 const buildMoreRowKey = (section: SectionKey): string => `more:${section}`;
 
+/** Returns the key of a section's "Show fewer" row. */
+const buildFewerRowKey = (section: SectionKey): string => `fewer:${section}`;
+
 /** Returns the key of the row of the group `groupKey` in a project's list. */
 const buildGroupRowKey = (groupKey: string): string => `group:${groupKey}`;
 
@@ -311,6 +324,9 @@ const formatMoreLabel = (section: "waiting" | "project" | "done", hidden: number
       return `Show ${String(Math.min(hidden, DONE_SHELF_STEP))} more`;
   }
 };
+
+/** The text of a "Show fewer" row. */
+const FEWER_LABEL = "Show fewer";
 
 /** Returns the content of a Waiting on you row: a thread's or an assistant's. */
 const buildWaitingRow = (waiting: Waiting): SidebarItemContent => {
@@ -385,7 +401,8 @@ const pickLeading = (kind: SidebarItemKind, previous: SidebarItemKind | undefine
  * - its threads and assistants, in `waiting`'s order;
  * - "From runs" and the runs' sessions in `waitingRunSessions`, at most
  *   `WAITING_RUN_SESSION_LIMIT` of them unless `expanded` is true;
- * - its "more" row when it hides some threads, assistants or runs' sessions.
+ * - its "more" row when it hides some threads, assistants or runs' sessions,
+ *   or, once expanded and the caps would hide some, its "Show fewer" row.
  *
  * `waiting` is `null` when no thread or assistant waits.
  */
@@ -419,6 +436,18 @@ const buildWaitingContents = (
       kind: "more",
       key: buildMoreRowKey("waiting"),
       label: formatMoreLabel("waiting", hiddenCount),
+    });
+  }
+  // The runs' cap is kept here, so only the threads' and assistants' part is decided in client-core.
+  if (
+    expanded &&
+    ((waiting?.canCollapse ?? false) || waitingRunSessions.length > WAITING_RUN_SESSION_LIMIT)
+  ) {
+    contents.push({
+      kind: "fewer",
+      key: buildFewerRowKey("waiting"),
+      label: FEWER_LABEL,
+      name: `${FEWER_LABEL} waiting on you`,
     });
   }
   return contents;
@@ -518,8 +547,9 @@ const buildGroupContents = (
  * Returns what a project's section draws: its header, then the draft's row
  * when the project holds the Draft Thread, then its shown groups, the most
  * recently started or reopened first, each followed by its lines while
- * unfolded, then its "more" row when it hides some groups. The groups in no
- * project are headed "No project".
+ * unfolded, then its "more" row when it hides some groups, or its "Show
+ * fewer" row when the user expanded it and the cap would hide some. The
+ * groups in no project are headed "No project".
  *
  * The draft's row is first because the draft is the newest thread of its
  * project. Groups have no heading of their own: each row names its branch,
@@ -558,6 +588,14 @@ const buildProjectContents = (
       kind: "more",
       key: buildMoreRowKey(section),
       label: formatMoreLabel("project", project.hiddenCount),
+    });
+  }
+  if (project.canCollapse) {
+    contents.push({
+      kind: "fewer",
+      key: buildFewerRowKey(section),
+      label: FEWER_LABEL,
+      name: `${FEWER_LABEL} in ${place.projectName}`,
     });
   }
   return contents;
@@ -729,6 +767,7 @@ const buildGoMenuEntry = (item: SidebarItem): GoMenuEntry | null => {
     case "done-header":
     case "done-group-row":
     case "more":
+    case "fewer":
       return null;
   }
 };

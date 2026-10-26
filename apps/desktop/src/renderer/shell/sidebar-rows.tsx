@@ -2,7 +2,7 @@
  * The items of the sidebar's thread list: section headers, group rows (a
  * thread, or a lead with its partners) and the lines an unfolded group opens
  * into, the waiting assistants' rows, "From runs" and the waiting runs'
- * sessions' rows, the draft's row, "more" rows, and the Done shelf's heading
+ * sessions' rows, the draft's row, "more" and "Show fewer" rows, and the Done shelf's heading
  * and rows, drawn as the Bureau book's crew.js draws them.
  *
  * Each item draws itself at its kind's fixed height, with the space above it
@@ -1122,8 +1122,40 @@ export const MoreRow = memo(function MoreRow({
       className="side-row side-row--more side-item"
       data-key={item.key}
       style={{ marginTop: item.leading, height: ITEM_HEIGHTS.more }}
+      // The Done shelf's row adds more rows rather than expanding the section.
+      aria-expanded={item.section === "done" ? undefined : false}
       onClick={() => {
         onExpand(item.section);
+      }}
+    >
+      {item.label}
+    </button>
+  );
+}, areSameData);
+
+/**
+ * Renders the "Show fewer" row at the end of an expanded section. Pressing it
+ * shows the section's capped list again: `onCollapse` is called with the
+ * section's key (`item.section`). Its accessible name says which section it
+ * collapses, because every expanded section has one.
+ */
+export const FewerRow = memo(function FewerRow({
+  item,
+  onCollapse,
+}: {
+  readonly item: SidebarItemOf<"fewer">;
+  readonly onCollapse: (section: SectionKey) => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="side-row side-row--fewer side-item"
+      data-key={item.key}
+      style={{ marginTop: item.leading, height: ITEM_HEIGHTS.fewer }}
+      aria-label={item.name}
+      aria-expanded
+      onClick={() => {
+        onCollapse(item.section);
       }}
     >
       {item.label}

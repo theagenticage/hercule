@@ -19,6 +19,7 @@ import {
   DoneGroupRow,
   DoneHeader,
   DraftRow,
+  FewerRow,
   GroupLine,
   GroupRow,
   MoreRow,
@@ -39,6 +40,7 @@ import { useThreadHover } from "./use-thread-hover";
  * each render.
  *
  * - `onExpand`: a section's "more" row, with the section's key.
+ * - `onCollapse`: an expanded section's "Show fewer" row, with the section's key.
  * - `onMarkDone`: a group row's Done button, with the ids of the Threads it
  *   marks.
  * - `onReopen`: a Done shelf row's Reopen button, with the ids of the
@@ -51,6 +53,7 @@ import { useThreadHover } from "./use-thread-hover";
  */
 export interface SidebarListActions {
   readonly onExpand: (section: SectionKey) => void;
+  readonly onCollapse: (section: SectionKey) => void;
   readonly onMarkDone: (sessionIds: readonly string[]) => void;
   readonly onReopen: (sessionIds: readonly string[]) => void;
   readonly onToggleDoneShelf: () => void;
@@ -130,6 +133,8 @@ const renderItem = (
       );
     case "more":
       return <MoreRow key={item.key} item={item} onExpand={actions.onExpand} />;
+    case "fewer":
+      return <FewerRow key={item.key} item={item} onCollapse={actions.onCollapse} />;
   }
 };
 

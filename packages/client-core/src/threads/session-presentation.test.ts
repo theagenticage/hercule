@@ -680,7 +680,16 @@ describe("Waiting on you", () => {
 
     expect(collapsed?.rows.map((row) => row.sessionId)).toEqual(["a", "b", "c"]);
     expect(collapsed?.hiddenCount).toBe(2);
-    expect(expanded).toMatchObject({ hiddenCount: 0, rows: { length: 5 } });
+    expect(collapsed?.canCollapse).toBe(false);
+    expect(expanded).toMatchObject({ hiddenCount: 0, canCollapse: true, rows: { length: 5 } });
+  });
+
+  it("cannot collapse when expanded but the cap hides nothing", () => {
+    const entries = ["a", "b", "c"].map(waiting);
+
+    const view = select([], { waiting: entries, expanded: { ...COLLAPSED, waiting: true } });
+
+    expect(view.waiting?.canCollapse).toBe(false);
   });
 });
 
@@ -793,6 +802,40 @@ describe("the project sections", () => {
       expect(expanded.projects[0]?.hiddenCount).toBe(0);
       expect(none.projects[0]).toMatchObject({ projectId: null, hiddenCount: 2 });
       expect(shownIn(none)).toHaveLength(5);
+    });
+
+    describe("collapsing an expanded section", () => {
+      const expandWebshop = { waiting: false, projectIds: new Set([WEBSHOP_PROJECT.id]) };
+
+      it("can collapse once expanded, and not before", () => {
+        const collapsed = select(buildIdle(8));
+        const expanded = select(buildIdle(8), { expanded: expandWebshop });
+
+        expect(collapsed.projects[0]?.canCollapse).toBe(false);
+        expect(expanded.projects[0]?.canCollapse).toBe(true);
+      });
+
+      it("cannot collapse a section the cap hides nothing of, expanded or not", () => {
+        const view = select(buildIdle(5), { expanded: expandWebshop });
+
+        expect(view.projects[0]?.canCollapse).toBe(false);
+      });
+
+      it("cannot collapse when the open group is the sixth and so the cap hides nothing", () => {
+        const view = select(buildIdle(6), { selectedId: "s-0", expanded: expandWebshop });
+
+        expect(shownIn(view)).toHaveLength(6);
+        expect(view.projects[0]?.canCollapse).toBe(false);
+      });
+
+      it("can collapse the groups of no project too", () => {
+        const view = select(
+          buildIdle(7).map((session) => ({ ...session, projectId: null })),
+          { expanded: { waiting: false, projectIds: new Set([null]) } },
+        );
+
+        expect(view.projects[0]).toMatchObject({ projectId: null, canCollapse: true });
+      });
     });
 
     it("counts every counted session that waits in a project, shown or hidden, and not a Done Thread's", () => {
