@@ -31,8 +31,7 @@ interface Choice {
 const SCREENS = [
   { value: "sidebar", label: "sidebar", path: "sidebar.html" },
   { value: "thread", label: "thread", path: "thread.html" },
-  // thread.tsx has no "long" state, so the thread with steps stands in for it.
-  { value: "thread-steps", label: "thread (steps)", path: "thread.html?state=steps" },
+  { value: "thread-long", label: "thread (long)", path: "thread.html?state=long" },
   { value: "draft", label: "draft", path: "draft.html" },
   { value: "intake", label: "intake", path: "intake.html" },
   {
