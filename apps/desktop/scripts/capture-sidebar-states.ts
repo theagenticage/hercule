@@ -1,7 +1,7 @@
 /**
  * Captures the sidebar states specimen for a check by eye:
  * `pnpm --filter @hercule/desktop capture:sidebar-states`. It compares
- * nothing; `pnpm compare:bureau` is the pixel comparison.
+ * nothing.
  *
  * It serves the sheets and runs Electron with
  * scripts/sidebar-states-capture.ts as its main file (see

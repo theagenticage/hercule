@@ -3,8 +3,7 @@
  * book's Wiki page (docs/design/crew-bureau-2/desktop/wiki.html), and the
  * open one, "Checkout architecture", with its body and its seven revisions,
  * as the controller would return them at the clock of list-week-clock.ts,
- * Wednesday 14 October 2026, 09:41 UTC. `pnpm compare:bureau` compares the
- * list and the open page the app builds from them with the book's.
+ * Wednesday 14 October 2026, 09:41 UTC.
  *
  * The list is in the order the controller returns it, last changed first. The
  * app groups it by project and repository, which gives the book's order.

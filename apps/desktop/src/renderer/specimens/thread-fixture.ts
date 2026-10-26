@@ -23,10 +23,6 @@
  *
  * The sidebar keeps its own Fix thread, because the book's sidebar draws no
  * workspace labels, and it shortens the Request to "Run git push?".
- *
- * The reference sheet reads this module too (thread-reference.ts), to edit
- * the book's thread where the app draws the fixture's words instead of the
- * book's.
  */
 import type {
   Input,
@@ -54,7 +50,7 @@ import {
 const READ_THREAD_ID = "s-read";
 
 /** The Request the Fix thread waits on: may the agent push its branch. */
-export const PUSH_REQUEST: OpenRequest = {
+const PUSH_REQUEST: OpenRequest = {
   requestId: "rq-fix-push",
   itemId: "it-push",
   kind: "command_approval",
@@ -332,8 +328,7 @@ const setCompletion = (
 /**
  * The Fix thread whose first stretch shows what an open stretch draws, which
  * the book never draws: a web search before the reads, what the first read
- * returned, and a command that failed with its error. The divider's summary
- * differs from the book's, so `pnpm compare:bureau` does not compare it.
+ * returned, and a command that failed with its error.
  */
 const FIX_STEPS_WITH_RESULTS: ReadonlyArray<TranscriptStep> = [
   ...FIX_STEPS.slice(0, 3),

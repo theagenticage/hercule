@@ -1,23 +1,22 @@
 /**
  * The Settings > Permission profiles specimen: the app's real shell with
  * Settings open on the Permission profiles section, drawn from the records in
- * settings-profiles-fixture.ts. `pnpm compare:bureau` compares its main pane
- * pixel for pixel with the Bureau book's desktop/settings-profiles.html,
- * edited by settings-profiles-reference.ts to show the same data.
+ * settings-profiles-fixture.ts. No capture script draws it now; open it in the
+ * dev server for a check by eye.
  *
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`,
- * and opens the state the book opens with the same `?state=`:
+ * and opens the state its `?state=` names, as the Bureau book's page does:
  * - none: the list of profiles;
  * - `reviewer`: Reviewer's page;
  * - `shipped`: `unrestricted`'s page;
  * - `confirm`: `unrestricted`'s page with the confirmation open, which the
  *   page opens by pressing the verb Delete on Tasks, as the user does.
  *
- * With `?scrolled=1`, it scrolls the section's body to its end, as the
- * reference does, so the sections below the first screen are compared too.
+ * With `?scrolled=1`, it scrolls the section's body to its end, so the
+ * sections below the first screen can be looked at too.
  *
- * The working face's paws tap. The page removes every animation, as the
- * book's page is held still, so the paws rest where they start.
+ * The working face's paws tap. The page removes every animation, so
+ * the paws rest where they start.
  */
 import { mountPermissionProfilesSettingsSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";

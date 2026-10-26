@@ -7,8 +7,7 @@
  *
  * The thread is idle. No Request is open and no input is queued, so the
  * composer is in its plain state and the sidebar draws the Fix thread without
- * its Request. The book draws no such thread, so `pnpm compare:bureau` does
- * not compare it.
+ * its Request.
  *
  * The turns run at these times, in seconds after 09:02 UTC:
  *

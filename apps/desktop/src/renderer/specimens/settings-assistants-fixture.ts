@@ -17,9 +17,6 @@
  * - Ada's memory is the book's: a core note of 1,284 characters that starts
  *   with the book's words, and its seven topics with their sizes and gists,
  *   listed by name as the controller lists them.
- *
- * The reference module (settings-assistants-reference.ts) reads this module
- * too, to edit the book's page where the app draws the fixture's words.
  */
 import {
   GITHUB_CONNECTION_TYPE,
@@ -38,7 +35,7 @@ import { ADA, buildAssistantSession, JUNO, MILO } from "./assistant-states-fixtu
 const CREATED_AT = "2026-09-10T09:00:00.000Z";
 
 /** Ada, as the book's page sets Ada up. */
-export const SETTINGS_ADA: Assistant = {
+const SETTINGS_ADA: Assistant = {
   ...ADA,
   systemPrompt:
     "You are Ada, Rogier's personal assistant. Be brief. Never deploy on Fridays, and ask before you spend money.",
@@ -127,7 +124,7 @@ export const FAILED_CONNECTION: Connection = {
 };
 
 /** Ada's core note: 1,284 characters, which start with the words the book shows. */
-export const ADA_CORE_NOTE: MemoryDocument = {
+const ADA_CORE_NOTE: MemoryDocument = {
   name: "core",
   gist: "",
   size: 1284,
@@ -137,7 +134,7 @@ export const ADA_CORE_NOTE: MemoryDocument = {
 };
 
 /** Ada's memory index: the core note, then the book's seven topics in name order. */
-export const ADA_MEMORY: ReadonlyArray<MemoryEntry> = [
+const ADA_MEMORY: ReadonlyArray<MemoryEntry> = [
   { name: "core", gist: "", size: ADA_CORE_NOTE.size },
   {
     name: "customers",

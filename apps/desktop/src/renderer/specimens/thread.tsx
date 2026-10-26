@@ -1,38 +1,31 @@
 /**
  * The thread specimen: the app's real shell with the Fix thread open, drawn
- * from the records in thread-fixture.ts. `pnpm compare:bureau` compares its
- * main pane pixel for pixel with the Bureau book's session-active.html,
- * edited by thread-reference.ts to show the same data.
+ * from the records in thread-fixture.ts. `capture:ui` captures it and
+ * `ui:metrics` measures it.
  *
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`.
- * With `?state=scrolled`, it scrolls the transcript to where the book's
- * `?state=scrolled` page has it, and the composer shrinks as it does when
- * the user scrolls there. With `?state=warning`, the thread shows two
- * runtime warnings and a runtime error among its work, which the book never
- * draws, so `pnpm compare:bureau` does not compare that state. With
+ * With `?state=scrolled`, it scrolls the transcript 42% of the way down (see
+ * `computeScrolledTop`), and the composer shrinks as it does when the user
+ * scrolls there. With `?state=warning`, the thread shows two
+ * runtime warnings and a runtime error among its work. With
  * `?state=steps`, the first stretch holds a web search, a read that returned
- * text and a command that failed, for what an open stretch draws; the book
- * draws no open stretch, so that state is not compared either. With
+ * text and a command that failed, for what an open stretch draws. With
  * `?state=senders`, other agents' messages are in its transcript and its
  * queue: a thread's, an assistant's and one from a session the user cannot
- * read, beside the user's own steered message. The book draws none of them
- * either. With
+ * read, beside the user's own steered message. With
  * `?state=permission`, the thread waits on no agent Request and the dock
  * shows a Permission Request instead; `?state=permissions` opens two, so the
  * pager shows, `?state=permission-scrolled` shrinks the composer, as
  * `?state=scrolled` does, `?state=permission-unnamed` fails to read the
  * profiles, so "Add to profile" names none and cannot be given, and
  * `?state=permission-long-profile` names a profile of 128 characters with no
- * space, which the answer's line wraps. The book draws no
- * Permission Request, so none of these is compared; they are for comparing
- * by eye with its dock. With `?state=syncing`, the thread was opened from its
+ * space, which the answer's line wraps. These states are for a check by eye. With
+ * `?state=syncing`, the thread was opened from its
  * saved copy and the read that brings it up to date never answers, so the
- * header says "Syncing…" once 400 ms have passed; the book draws no such
- * state either. With `?state=long`, the thread has finished three turns of
+ * header says "Syncing…" once 400 ms have passed. With `?state=long`, the thread has finished three turns of
  * long messages, with headings, lists, code and a link, enough to fill about
  * three windows of 900 px, and waits on nothing; the transcript opens at its
- * bottom. The book draws no such state, so `pnpm compare:bureau` does not
- * compare it.
+ * bottom.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
@@ -123,7 +116,7 @@ if (state === "senders") {
   );
 }
 if (state === "scrolled") {
-  // Where the book's `?state=scrolled` page has the transcript.
+  // 42% of the way down, so every capture scrolls to the same place.
   await scrollTranscriptAway(computeScrolledTop);
 } else if (state === "permission-scrolled") {
   // The Fix thread without its agent Request overflows the window by only a

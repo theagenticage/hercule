@@ -1,9 +1,9 @@
 /**
  * The Wiki specimen: the app's real shell with the Wiki open, its list and
  * its open page built from the records of wiki-fixture.ts.
- * `pnpm compare:bureau` compares it with the book's page
- * (docs/design/crew-bureau-2/desktop/wiki.html), opening both with the same
- * parameters, which the page reads as the book's page does:
+ * `capture:ui` captures it and `ui:metrics` measures it. The page reads the
+ * same parameters as the Bureau book's page
+ * (docs/design/crew-bureau-2/desktop/wiki.html):
  *
  * - `?view=table`, the default, shows the list as a table, with no page open;
  * - `?view=split` opens "Checkout architecture" beside the list, drawn as a

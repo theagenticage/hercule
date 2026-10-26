@@ -12,10 +12,6 @@
  *
  * The sidebar is the sidebar specimen's (sidebar-fixture.ts), with Ada in its
  * Assistants section.
- *
- * The reference sheet reads this module too (conversation-reference.ts), to
- * edit the book's page where the app draws the fixture's words instead of
- * the book's.
  */
 import type { ConversationMessage } from "@hercule/contract";
 import { CLAUDE_SONNET, SPECIMEN_RECORDS } from "./sidebar-fixture";
@@ -29,17 +25,14 @@ import {
 } from "./assistant-states-fixture";
 
 /** The Conversation's messages, oldest first: yesterday's notice, then Ada's morning. */
-export const CONVERSATION_MESSAGES: ReadonlyArray<ConversationMessage> = buildConversationMessages(
-  ADA,
-  [
-    {
-      senderRole: "notice",
-      createdAt: "2026-09-28T22:14:00.000Z",
-      text: "Ada was interrupted: her turn failed: provider timeout after 120s. Your last message was kept.",
-    },
-    ...ADA_MORNING_STEPS,
-  ],
-);
+const CONVERSATION_MESSAGES: ReadonlyArray<ConversationMessage> = buildConversationMessages(ADA, [
+  {
+    senderRole: "notice",
+    createdAt: "2026-09-28T22:14:00.000Z",
+    text: "Ada was interrupted: her turn failed: provider timeout after 120s. Your last message was kept.",
+  },
+  ...ADA_MORNING_STEPS,
+]);
 
 /**
  * The text Ada is writing, not finished yet. It is plain text, as the app

@@ -8,9 +8,7 @@
  * used here: that module imports vitest and Testing Library, which do not
  * run in a page, and its threads are not the book's.
  *
- * The reference sheet reads this module too (sidebar-reference.ts), to edit
- * the book's sidebar where the app draws the fixture's data instead of the
- * book's: the model names and the counts line. The sidebar states fixture
+ * The sidebar states fixture
  * (sidebar-states-fixture.ts) builds its threads on the same runner, from the
  * same model catalogs.
  */
@@ -131,7 +129,7 @@ export const STUDIO_MAC: Runner = buildRunner("r-studio-mac", "studio-mac");
  * Every thread is on one runner, which is online, and in no workspace, so
  * each row's second line names that runner's machine.
  */
-export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
+const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
   {
     id: FIX_THREAD_ID,
     title: "Fix 3-D Secure checkout for EU cards",
@@ -223,13 +221,6 @@ export const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
     openRequests: [],
   },
 ];
-
-/**
- * The counts line the sidebar's foot draws for the fixture: Payout, Rotate
- * and Refactor are working, Fix and Migrate wait on the user, Read and iDEAL
- * are idle.
- */
-export const SPECIMEN_COUNTS = { working: 3, waiting: 2, idle: 2 } as const;
 
 /** Returns a provider instance whose one capability snapshot lists `models`. */
 export const buildInstance = (

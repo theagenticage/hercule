@@ -19,10 +19,6 @@
  *   page.
  * - Ada and Juno use `assistant`, triage-step and fix-step use `worker`, and
  *   Milo and pr-review use Reviewer. Nothing uses `unrestricted` or Releaser.
- *
- * The reference module (settings-profiles-reference.ts) reads this module
- * too, to edit the book's page where the app orders or poses something
- * differently from the book.
  */
 import {
   ALL_GRANTS,
@@ -176,9 +172,9 @@ const AGENTS: ReadonlyArray<Agent> = [
 
 /**
  * The records the specimen draws around the screen: the Assistants
- * specimen's, with Milo on Reviewer, as the book has him. The book's sidebar
- * is not compared, so, as in the Appearance specimen, it holds just the first
- * four threads.
+ * specimen's, with Milo on Reviewer, as the book has him. The sidebar is not
+ * what the page is about, so, as in the Appearance specimen, it holds just the
+ * first four threads.
  */
 export const PERMISSION_PROFILES_SIDEBAR_RECORDS: SidebarRecords = {
   ...SETTINGS_ASSISTANTS_RECORDS,

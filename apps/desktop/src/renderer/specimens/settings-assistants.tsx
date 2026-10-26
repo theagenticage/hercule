@@ -1,17 +1,15 @@
 /**
  * The Settings > Assistants specimen: the app's real shell with Settings
  * open on the Assistants section and Ada picked, drawn from the records in
- * settings-assistants-fixture.ts. `pnpm compare:bureau` compares its main
- * pane pixel for pixel with the Bureau book's
- * desktop/settings-assistants.html, edited by
- * settings-assistants-reference.ts to show the same data.
+ * settings-assistants-fixture.ts. No capture script draws it now; open it in
+ * the dev server for a check by eye.
  *
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`.
- * With `?state=scrolled`, it scrolls the section's body to its end, as the
- * reference does, so the rows below the first screen are compared too.
+ * With `?state=scrolled`, it scrolls the section's body to its end, so the
+ * rows below the first screen can be looked at too.
  *
- * The working face's paws tap. The page removes every animation, as the
- * book's page is held still, so the paws rest where they start.
+ * The working face's paws tap. The page removes every animation, so
+ * the paws rest where they start.
  */
 // The fixed clock comes first: the heartbeat's "now" line reads the time
 // when the section opens.

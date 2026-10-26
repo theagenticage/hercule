@@ -4,8 +4,7 @@
  * desktop/discussions.html), and the open one, "Edits overlap in
  * src/cart/totals.ts", with its shared files and its Posts, as the
  * controller would return them at the clock of list-week-clock.ts, Wednesday
- * 14 October 2026, 09:41 UTC. `pnpm compare:bureau` compares the list and the
- * open Discussion the app builds from them with the book's.
+ * 14 October 2026, 09:41 UTC.
  *
  * The list is in the order the controller returns it, newest Post first. The
  * app groups it by project and repository, which gives the book's order.

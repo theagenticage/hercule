@@ -1,9 +1,7 @@
 /**
  * The sidebar specimen: the app's real shell and sidebar, drawn from the
  * records in sidebar-fixture.ts, with the Fix thread open, as the book shows
- * it. `pnpm compare:bureau` compares it pixel for pixel with the sidebar of
- * the Bureau book's session-active.html, edited by sidebar-reference.ts to
- * show the same data.
+ * it. `capture:ui` captures it and `ui:metrics` measures it.
  *
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`.
  */

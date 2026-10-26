@@ -1,7 +1,6 @@
 /**
  * Captures the Intake specimen for a check by eye:
- * `pnpm --filter @hercule/desktop capture:intake`. It compares nothing;
- * `pnpm compare:bureau` is the pixel comparison.
+ * `pnpm --filter @hercule/desktop capture:intake`. It compares nothing.
  *
  * It serves the sheets and runs Electron with scripts/intake-capture.ts as
  * its main file (see scripts/sheet-server.ts), which captures the main pane

@@ -1,7 +1,7 @@
 /**
  * Captures each state of the app's first run beside the Bureau book's, for a
  * check by eye: `pnpm --filter @hercule/desktop capture:first-run`. It fails
- * no comparison; `pnpm compare:bureau` is the comparison that gates.
+ * no comparison.
  *
  * It serves the sheets and runs Electron with scripts/first-run-capture.ts
  * as its main file (see scripts/sheet-server.ts), which writes each state's
