@@ -76,7 +76,8 @@
           "screen",
           "theme",
           "scale",
-          "scores"
+          "scores",
+          "overall_note"
         ],
         "properties": {
           "file_name": {
@@ -90,7 +91,7 @@
               "other-app",
               "calibration"
             ],
-            "description": "hercule: a capture of the app under review. other-app: a screenshot of another app. calibration: an image of the app that the prompt marks as calibration."
+            "description": "hercule: a capture of the app under review. other-app: a screenshot of another app. calibration: an image of the app that the prompt marks as calibration. Only hercule images may be cited by a fix."
           },
           "screen": {
             "type": "string",
@@ -135,7 +136,7 @@
           },
           "scores": {
             "type": "array",
-            "description": "Exactly one entry per category, 11 in all, in the order of the brief.",
+            "description": "Exactly one entry per category, 11 in all, in the order of the brief. A null (unassessable) score is ignored by every aggregate.",
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -183,13 +184,20 @@
                 }
               }
             }
+          },
+          "overall_note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null in most cases. When the overall score differs by more than 2 points from the average of the other non-null category scores of this image, one sentence on why."
           }
         }
       }
     },
     "fixes": {
       "type": "array",
-      "description": "Prioritized: all MUST first, then SHOULD, then COULD. Empty when this turn found nothing to fix.",
+      "description": "Prioritized: all MUST first, then SHOULD, then COULD. Only for images with set hercule. Empty when this turn found nothing to fix.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -197,6 +205,7 @@
           "id",
           "priority",
           "category",
+          "images",
           "screens",
           "themes",
           "problem",
@@ -236,9 +245,17 @@
             ],
             "description": "The category the fix improves."
           },
+          "images": {
+            "type": "array",
+            "description": "The file names, exactly as listed in the prompt, of the images that show the problem. Only images with set hercule: an image of another app or a calibration image never produces a fix.",
+            "items": {
+              "type": "string",
+              "description": "An image file name."
+            }
+          },
           "screens": {
             "type": "array",
-            "description": "The screens where the problem is seen.",
+            "description": "The screens of the cited images.",
             "items": {
               "type": "string",
               "enum": [
@@ -260,7 +277,7 @@
           },
           "themes": {
             "type": "array",
-            "description": "The themes where the problem is seen.",
+            "description": "The themes of the cited images.",
             "items": {
               "type": "string",
               "enum": [

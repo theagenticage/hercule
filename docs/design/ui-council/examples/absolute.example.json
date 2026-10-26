@@ -89,7 +89,8 @@
           "unassessable_reason": null,
           "evidence": "thread-1x-glass40.png (whole image): coherent, with the localized defects listed in the fixes."
         }
-      ]
+      ],
+      "overall_note": null
     },
     {
       "file_name": "codex-light-1x.png",
@@ -112,9 +113,9 @@
         },
         {
           "category": "spacing-density",
-          "score": 7,
-          "unassessable_reason": null,
-          "evidence": "codex-light-1x.png (whole image): illustrative evidence for spacing-density."
+          "score": null,
+          "unassessable_reason": "This Codex image is its empty new-chat screen, which says little about density.",
+          "evidence": "codex-light-1x.png (whole image): almost no content to measure spacing on."
         },
         {
           "category": "colour-contrast",
@@ -164,7 +165,8 @@
           "unassessable_reason": null,
           "evidence": "codex-light-1x.png (whole image): illustrative evidence for overall."
         }
-      ]
+      ],
+      "overall_note": null
     }
   ],
   "fixes": [
@@ -172,9 +174,11 @@
       "id": "F1",
       "priority": "SHOULD",
       "category": "spacing-density",
+      "images": [
+        "thread-1x-glass40.png"
+      ],
       "screens": [
-        "thread",
-        "sidebar"
+        "thread"
       ],
       "themes": [
         "whitehaven"
@@ -189,12 +193,14 @@
       "id": "F2",
       "priority": "COULD",
       "category": "consistency-polish",
+      "images": [
+        "thread-1x-glass40.png"
+      ],
       "screens": [
         "thread"
       ],
       "themes": [
-        "whitehaven",
-        "orient-express"
+        "whitehaven"
       ],
       "problem": "thread-1x-glass40.png (x 1100, y 60, w 80, h 28): the header button has a 9px radius and the composer button 7px.",
       "change": "Use var(--r-btn), 7px, for the header button.",

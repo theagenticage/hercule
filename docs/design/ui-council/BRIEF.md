@@ -31,8 +31,8 @@ A round may also include images of other apps (T3 Code, Claude, Codex) and image
 
 **Images of other apps.** They are windows of 1440 x 900 captured on 2026-10-26, at 1x and 2x.
 
-- Judge their Character against their own identity, not against Hercule's. Character there means how strongly the app looks like itself.
-- Codex: the empty new-chat screen of a Codex whose UI is drawn in a monospace font. Its typography is not a reference, and an empty screen says little about density. Score Typography and Spacing and density as `null` ("unassessable") for it, or give a score with the caveat in the evidence.
+- Judge their Character against their own identity, not against Hercule's. Section 3.10 has anchors for it.
+- Codex: the empty new-chat screen of a Codex whose UI is drawn in a monospace font. Its typography is not a reference, and an empty screen says little about density. Always score `typography` and `spacing-density` as `null` ("unassessable") for it, with that reason. Do this in every round, so that rounds can be compared.
 - T3 Code: Ocean theme only. There is no light capture.
 
 **What a still image can and cannot show.** Every anchor below is written so that a still screenshot decides it.
@@ -47,30 +47,31 @@ Each category has an id (used in the output), a one-line meaning, and anchors fo
 
 How to use the anchors:
 
-- **3** means the defect obstructs use. **5** means usable, with repeated defects. **7** means coherent, with localized defects. **9** means clear and consistent in every state the image shows.
+- **3** means the defect obstructs use. **5** means usable, with repeated defects. **7** means coherent, with localized defects. **9** means clear and consistent in every state this image shows.
 - Use 4, 6 and 8 for "between". Use 0 to 2 for worse than the 3 anchor: unusable. Use 10 only when a careful reviewer could not name one thing to improve. It should be rare.
-- A category cannot score 9 or more on an image for which you list a fix in that category. A MUST fix caps the category at 6 on the images it names. A SHOULD caps it at 8.
+- Each anchor is about the one image in front of you. It never asks you to compare screens, themes or scales, or to imagine use over time. Score what the visible state costs the person who looks at it or uses it.
+- Scores follow the anchors. Fixes do not set or cap a score (section 4 has a consistency note).
 
 ### 3.1 `typography`: legibility at 12 to 14px, rhythm, letter shapes, line length
 
 - **3:** Body and metadata text at 12 to 14px is hard to read: strokes break up or look thin and blurred, the letters look too small for their size, and `I`, `l` and `1`, or `O` and `0`, cannot be told apart in ids, numbers and hashes. Line spacing is uneven, so lines nearly touch in one place and float apart in another. Prose lines run past 100 characters or are narrower than 35.
 - **5:** Readable with effort. The same defects repeat: sizes that differ by half a pixel sit side by side (12 and 12.5, 13 and 14 for the same role), weights that do not separate levels, confusable letters where it matters, a prose measure outside 55 to 85 characters, or 11 to 12px metadata that is small and light together.
 - **7:** One UI face and one code face, a small set of sizes with clear roles, even line rhythm, prose at 60 to 75 characters. Localized defects: one label cramped or off the scale, numbers that do not align in one table, a weight too light on one surface.
-- **9:** Every text role has one size, weight and line height, wherever it appears. 12px metadata is as legible as 14px prose. Confusable letters are distinct where it matters, numbers align in columns, prose is at 60 to 75 characters, and there is no orphan or ragged line in any state shown. The Deco face appears only in the wordmark, logo lettering and large numerals, and the code face only in code, diffs, commands and branch names.
+- **9:** Every text role in the image reads clearly at its size: 12px metadata is as legible as 14px prose. Sizes and weights separate the levels. Confusable letters are distinct where it matters, numbers align in columns, and prose is at 60 to 75 characters. Line spacing is even in every state the image shows.
 
 ### 3.2 `hierarchy`: the most important thing wins first
 
 - **3:** You cannot tell what matters. Everything has the same weight, or everything shouts. The main content of a region (the latest message, the open signal, the suggested answer) loses to chrome or decoration. Four or more levels of emphasis compete in one region.
 - **5:** The main thing can be found, but only after scanning. Two elements fight for first place in a region, or metadata and tool rows are as loud as messages and titles. Four levels of emphasis appear in places.
 - **7:** In most regions the most important item wins first, with at most three levels of emphasis. One region is off: metadata outweighs a title, or the primary action is not the strongest control.
-- **9:** In every region the eye lands first on the right item. At most three levels of emphasis show at once. Reading order matches importance. The one suggested answer, the filled `--accent` button, is clearly the primary action wherever it appears.
+- **9:** In every region the eye lands first on the right item. At most three levels of emphasis show at once. Reading order matches importance. The one suggested answer, the filled `--accent` button, is clearly the primary action wherever it appears in the image.
 
 ### 3.3 `spacing-density`: dense without cramped, one rhythm, aligned edges
 
 - **3:** Cramped or empty enough to obstruct. Text touches an edge or a neighbour, rows run into each other, controls cannot be told apart. Or large empty bands push the content out of view. Edges are ragged everywhere.
 - **5:** Usable. Similar regions have different densities (list rows of different heights for no reason). Near-equal gaps differ (6, 8 and 10px for the same relation). Left edges are a few pixels off in several places. A few spots are cramped or loose.
 - **7:** Dense without being cramped, one rhythm on the 4px grid, aligned edges. Localized defects: one row or panel with the wrong padding, one group whose gap is too small.
-- **9:** The same relation has the same gap on every screen. Row heights are consistent. Left and right edges line up across regions. Every region shows its content with no wasted band and no touching elements, in every state shown (long, empty, selected).
+- **9:** The same relation has the same gap everywhere in the image. Row heights are consistent. Left and right edges line up across regions. Every region shows its content with no wasted band and no touching elements, in every state the image shows (long, empty, selected).
 
 ### 3.4 `colour-contrast`: text and edges are clear, and colour means one thing
 
@@ -86,7 +87,7 @@ This is scored apart from contrast. "More contrast" does not raise this score, a
 - **3:** Hard to look at for long. Large bright areas glare, or pure white text on near black makes the text seem to glow or vibrate (halation). Surfaces are muddy, and layers merge into one slab. Saturated areas are harsh.
 - **5:** Tiring in places. A dark theme reads as muddy or flat brown-black, layers differ barely, or a bright element pulls the eye (a white bubble, a strong selected row). A light theme has one glaring white sheet. Or the whole image is dim and grey.
 - **7:** Calm overall. Layers separate gently and nothing glares. Localized defects: one bright patch, one muddy layer, one saturated badge louder than the rest.
-- **9:** Looks calm for hours. Layers step up clearly but softly. The brightest element is the content. No glow or vibration around text. Saturated colour is small and means something. Glass adds depth, not murk.
+- **9:** Calm to look at, with nothing that would tire the eye. Layers step up clearly but softly. The brightest element is the content. No glow or vibration around text. Saturated colour is small and means something. Glass adds depth, not murk.
 
 ### 3.6 `iconography`: one stroke weight, one optical size, aligned to text
 
@@ -108,10 +109,10 @@ States are working, waiting, failed, done, selected, focused and disabled. Score
 
 ### 3.8 `consistency-polish`: same thing, same look; no stray misalignments
 
-- **3:** The same thing looks different within one screen or across screens: buttons with different radius, height or weight. Many 1px misalignments. Text is clipped or overlaps. Something renders broken.
+- **3:** The same thing looks different within the image: buttons with different radius, height or weight. Many 1px misalignments. Text is clipped or overlaps. Something renders broken.
 - **5:** Mostly the same, with repeated deviations. Row heights, radii or button styles vary. Several 1px misalignments, uneven borders or clipped text.
 - **7:** Coherent, with a few localized defects: one stray radius, one misaligned label, one doubled border.
-- **9:** The same thing looks identical on every screen and in every theme. No stray misalignment at 1x or 2x. Edges, radii and borders are crisp, with no half-pixel blur. The themes differ only in palette, never in structure.
+- **9:** The same thing looks identical everywhere in the image. No stray misalignment at this image's scale. Edges, radii and borders are crisp, with no half-pixel blur.
 
 ### 3.9 `clarity-copy`: labels predict what happens; plain words
 
@@ -122,31 +123,42 @@ Use the vocabulary of `GLOSSARY.md`. You judge the words that are drawn, not the
 - **7:** Labels predict outcomes, and words are plain. Localized defects: one ambiguous label, one inconsistent term, one bad truncation.
 - **9:** Every label, heading, button and empty state predicts what happens. One word per concept. Truncation keeps the informative part. Sentences are short.
 
-### 3.10 `character`: it still looks like Hercule
+### 3.10 `character`: it still looks like itself
 
-Character is not the amount of ornament. A quiet screen can score 9, and more ornament never scores higher. Character is whether the screen is still recognisably Hercule: the colleague faces, the crew hues, the warmth, and the Deco touches. This category guards against drift to a generic grey app.
+Character is not the amount of ornament. A quiet screen can score 9, and more ornament never scores higher. It guards against drift to a generic grey app. There are two sets of anchors. Use the first for images with `set` `hercule` or `calibration`, and the second for images of other apps.
 
-For an image of another app, score that app's own identity.
+**Hercule.** Character is whether the image is still recognisably Hercule: the colleague faces, the crew hues, the warmth, and the Deco touches.
 
 - **3:** It looks like a generic grey app. Faces, crew hues, warmth and Deco touches are missing or so muted that nothing says Hercule. Or ornament is so heavy that it obstructs reading.
-- **5:** Some Hercule. Faces are present but small or washed out, crew hues have faded toward grey, warmth is partly lost, Deco touches are in one or two spots, or the character differs a lot between themes.
-- **7:** Recognisably Hercule on most screens. Faces are readable, crew hues can be told apart, the palette is warm, and the Deco face and ornament appear where they belong. Localized defects: one screen or theme is bare, one hue is washed out.
-- **9:** Unmistakably Hercule on every screen and theme shown. Faces are expressive, each colleague's hue is identifiable and appears only on that colleague, the tone is warm, and the Deco touches are placed with restraint, without costing legibility.
+- **5:** Some Hercule. Faces are present but small or washed out, crew hues have faded toward grey, warmth is partly lost, or Deco touches are in one or two spots.
+- **7:** Recognisably Hercule. Faces are readable, crew hues can be told apart, the palette is warm, and the Deco face and ornament appear where they belong. Localized defects: one region is bare, one hue is washed out.
+- **9:** Unmistakably Hercule. Faces are expressive, each colleague's hue is identifiable and appears only on that colleague, the tone is warm, and the Deco touches are placed with restraint, without costing legibility.
+
+**Another app (`set` `other-app`).** Character is how coherent and recognisable the app's own identity is. Do not look for Hercule's faces, hues or Deco touches, and do not reward or punish the app for being quiet or ornate.
+
+- **3:** No identity. The image could be any app, or its parts pull in different directions.
+- **5:** Some identity, in one or two places (a colour, a mark, a typeface), while the rest is generic or inconsistent with it.
+- **7:** A recognisable identity that most of the image follows. Localized defects: one region that does not fit.
+- **9:** A distinct, coherent identity in every part of the image, without costing legibility.
 
 ### 3.11 `overall`
 
-Overall is its own judgment, not an average. Ask: would you want to work in this screen all day, on a 1x external monitor? It cannot be more than 2 points above the lowest score of the other ten categories for the same image.
+Overall is its own judgment, not an average. Ask: would you choose to work in this screen? Section 4 has a consistency note for when it differs from the other categories.
 
 - **3:** You would not choose to work in it. At least one category obstructs use or reading.
 - **5:** Workable. You notice repeated rough edges in several categories.
 - **7:** Pleasant and coherent. The defects are localized and a fix list would clear them.
-- **9:** Polished and comfortable for a full day at 1x. No category is below 8 for this image.
+- **9:** Polished and comfortable to work in. You looked for defects in every category and found none worth a fix.
 
 ## 4. Scoring rules
 
 - **Evidence.** Every score cites visible evidence: the image's file name, which tells the screen, theme and scale, and a region in that image's own pixels (x, y, width, height) or an element described by name. "The sidebar looks fine" is not evidence.
 - **Unassessable.** `null` with a reason is a valid answer for any category and image. Use it when the image does not show what the category needs. Never invent a score to fill a gap.
-- **Fixes and scores agree.** The cap in section 3 applies.
+- **Fixes and scores agree.** This is a consistency note, not a mechanical cap:
+  - A category with a MUST fix should rarely score above 6 on the images the fix cites.
+  - A score of 9 or more means you looked for defects and found none worth a fix in that category.
+  - When `overall` differs by more than 2 points from the average of the other non-null categories of the same image, say why in one sentence in that image's `overall_note`. Otherwise `overall_note` is `null`.
+  - A `null` (unassessable) category is ignored by every aggregate: this average, the coordinator's means and the drift check.
 - **Do not inflate.** A score of 9 means you looked for defects and found none worth a fix. Scores that drift upward over rounds with no change in the images are a failure the calibration set detects.
 - **Stay inside the owner decisions** (section 8).
 - **One image at a time.** Do not anchor on the previous image or on a score you gave earlier in the thread.
@@ -195,14 +207,16 @@ Category ids, in the order to use:
 
 **Absolute output, in this order:**
 
-1. **Scores.** One entry per image, with one score entry per category (11). Each has the score (0 to 10, or `null`), the reason when it is `null`, and the evidence.
+1. **Scores.** One entry per image, with one score entry per category (11) and the `overall_note`. Each score entry has the score (0 to 10, or `null`), the reason when it is `null`, and the evidence.
 2. **A prioritized fix list**: MUST, then SHOULD, then COULD.
    - **MUST:** obstructs use or reading, or breaks a scripted target.
    - **SHOULD:** a repeated defect.
    - **COULD:** localized polish.
+   - **A fix may cite only images with `set` `hercule`.** Images of other apps and calibration images never produce a fix. What you see in them goes only in the evidence of a score.
    - Each fix has:
      - the category;
-     - the screens and themes;
+     - the images: the exact file names from the prompt of the `hercule` images that show the problem;
+     - the screens and themes of those images;
      - the visible problem with its evidence (image file name and region in pixels);
      - a proposed change with exact values (for example `--line` from `oklch(0.32 0.012 60)` to `oklch(0.40 0.012 60)`), and the file and line;
      - the scripted metric it should move: `text-contrast`, `wcag-text-contrast`, `non-text-contrast`, `line-visibility`, `surface-separation`, `opacity-dimming`, `type-scale`, `weights`, `radii`, `spacing-grid`, `target-size`, `focus`, `text-spacing`, `text-size-zoom`, `prose-measure`, `glyph-confusion`, or `none`.
@@ -241,7 +255,8 @@ The source is the header comment of [`apps/desktop/src/renderer/styles/tokens.cs
   - `--ok`, green: added lines and passed tests.
 - **Places get tints, not hues.** Projects are low-chroma inlays (`--proj-*`), so rooms never compete with the people in them.
 - **Brass (`--brass`) is ornament only:** the office's lamps and tubes, the book's rules. Never text, never a state.
-- The same file keeps two typeface rules: the Deco face (Limelight) is only for the wordmark, the logo lettering and a few large numerals, and the code face (Recursive) is only for code, diffs, commands and branch names.
+- The same file keeps two typeface rules: the Deco face (Limelight) is only for the wordmark, the logo lettering and a few large numerals, and the code face (Recursive) is only for code, diffs and commands. The file's comment also lists branch names as code. That is out of date: [spec 17](../../spec/17-desktop-app.md) (Design system, item 2) sets branch values, time separators and workspace labels in the UI face, and spec 17 decides. Where spec 17 itself sets something in the code face, such as a path or a command, that is correct.
+- So a label, a count, a state or a branch value set in the code face is a defect. A branch value set in the UI face is correct. Never propose a fix that moves a branch value into the code face.
 
 **A change that breaks one of these rules needs Rogier's call, not the council's.** Do not propose it.
 
@@ -316,13 +331,43 @@ The step that generates them also writes `docs/design/ui-council/calibration/man
 
 **Blind names.** Do not give the reviewer the variant names. Copy each broken image to a neutral name (`cal-01.png` and so on), keep the mapping, and tell the reviewer only that the image is a calibration image. In the output its `set` is `calibration`.
 
-### 9.2 Drift
+### 9.2 Checking an answer before using it
 
-- Score the whole calibration set in every absolute round and keep the scores with the round's record.
-- **If any category's calibration score moves by more than 1 point between two rounds, the reviewer drifted, not the UI.** Mark that round's absolute scores unreliable. Record this in the round's record.
-- Expected shape of the broken variants, for the coordinator only: `max-contrast` should score low on `eye-comfort`, `cramped` on `spacing-density`, `noisy` on `colour-contrast`, `character` and `consistency-polish`. A round where they do not is also suspect.
+The schema cannot enforce everything. Before an answer is used, check each point below. When one fails, ask again in the same session: name the failed check and ask for the corrected output. Do not repair the answer by hand.
 
-### 9.3 How to run a round
+**Whole answer:**
+
+- `mode` is the mode of the session, and `reviewer` matches the spawn command.
+- The images in `inputs` and in `images` are exactly the images sent in this turn: the same file names, in the same order, each once. The sha256 values equal the ones in the prompt.
+- Each image's `set` matches what the coordinator knows: `hercule`, `other-app` or `calibration`.
+
+**Each image:**
+
+- Every one of the 11 categories appears exactly once, in the order of the brief.
+- Each score is an integer from 0 to 10, or `null`.
+- A `null` score has an `unassessable_reason`. A number has `null` there.
+- For Codex images, `typography` and `spacing-density` are `null`, in every round.
+- `overall_note` is not `null` when `overall` differs by more than 2 from the average of the other non-null categories of the image.
+
+**Each fix:**
+
+- Every entry in `images` is a file name from `inputs`, and its image has `set` `hercule`. A fix that cites a calibration or other-app image is rejected.
+- `screens` and `themes` are the ones of the cited images.
+- Ids are unique, and the fixes are in the order MUST, SHOULD, COULD.
+
+### 9.3 Drift
+
+The calibration set shows whether the reviewer's scale moves from round to round. The repeat spread says how much it moves by itself.
+
+- **Baseline.** In each of the first two rounds, score the calibration set twice, in two fresh sessions on the same images. That gives four scores of every calibration image in every category.
+  - The baseline score of an image and category is the mean of its four scores.
+  - The repeat spread of a category is the largest difference between two scores of one image in the same round, over all calibration images and both rounds.
+- **Later rounds.** Score the calibration set once and keep the scores with the round's record. A calibration score has moved when it differs from its baseline score by more than `max(1, repeat spread of its category)`. A `null` that was a number, or a number that was `null`, also counts as moved.
+- **If any calibration score has moved, the reviewer drifted, not the UI.** Mark that round's absolute scores unreliable and record this in the round's record. A `null` score is ignored in every mean and spread.
+- **Expected shape of the broken variants,** for the coordinator only: `max-contrast` should score low on `eye-comfort`, `cramped` on `spacing-density`, `noisy` on `colour-contrast`, `character` and `consistency-polish`. A round where they do not is suspect.
+  - **One exception.** The cramped sidebar is a weak variant, because the sidebar's fixed row heights keep its layout. It is a frozen reference, not a guaranteed negative control. A round is not suspect only because that image still scores as usable.
+
+### 9.4 How to run a round
 
 From a session, spawn the reviewer in the session's own workspace, so it sees the same captures and code:
 
