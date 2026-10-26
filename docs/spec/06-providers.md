@@ -178,7 +178,7 @@ interface SessionSpec {                       // controller-authored - carries i
 
 interface ProviderRunnerContext {             // the facts the runner resolved for this session on this machine
   cwd: string | null                          // workspace or scratch dir; null only as the controller-side "no workspace" marker (§9.1)
-  env: Record<string, string>                 // session env: HERCULE_*, GH_TOKEN, GIT_CONFIG_*, PATH prepend (§9.3)
+  env: Record<string, string>                 // session env: HERCULE_*, GH_TOKEN (as set at start), GIT_CONFIG_*, PATH prepend with the `hercule` and `gh` shims (§9.3)
   home: string                                // this instance's provider home on this runner (CLAUDE_CONFIG_DIR / CODEX_HOME / PI_CODING_AGENT_DIR)
   binary: string                              // resolved harness binary path on this runner (§11)
   attachmentsDir: string | null               // added 2026-10-08, #465: this session's attachment cache, below; null outside a session
@@ -668,7 +668,7 @@ Never the first user turn: memory is standing context, and a synthetic first mes
 
 ### 9.3 Session environment and skills
 
-The runner injects, per session: `HERCULE_API_URL`, `HERCULE_TOKEN` (the session token; dies with the session), `HERCULE_SESSION=1` (makes the `hercule` CLI refuse file credentials), plus the git credential material (`GH_TOKEN`, `GIT_CONFIG_*`) whose mechanics [./13-security.md](./13-security.md) owns (session token: [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). The runner makes the `hercule` binary reachable from the session by prepending its own bin directory to `PATH` ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §2), so `which hercule` works and the skill text stays portable. One provider-agnostic skill source describes hercule-as-a-tool, and each adapter has exactly one function mapping it to its harness's own channel.
+The runner injects, per session: `HERCULE_API_URL`, `HERCULE_TOKEN` (the session token; dies with the session), `HERCULE_SESSION=1` (makes the `hercule` CLI refuse file credentials), plus the git credential material (`GH_TOKEN`, `GIT_CONFIG_*`) whose mechanics [./13-security.md](./13-security.md) owns (session token: [./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). The runner makes the `hercule` binary reachable from the session by prepending its own bin directory to `PATH` ([./15-packaging-and-operations.md](./15-packaging-and-operations.md) §2), so `which hercule` works and the skill text stays portable. *(Amended 2026-10-26, [#613](https://github.com/theagenticage/hercule/issues/613).)* The same directory holds a `gh` shim, which swaps in a fresh `GH_TOKEN` for each `gh` process; `GH_TOKEN` itself stays as set at start for tools that read it directly ([./13-security.md](./13-security.md) section 9.3). One provider-agnostic skill source describes hercule-as-a-tool, and each adapter has exactly one function mapping it to its harness's own channel.
 
 *(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* This section covers the built-in `hercule` skill only, which stays as described here. A Thread's other skills come from the Skill Library, section 9.4. On Claude they arrive as a second plugin, named `skills`, beside the `hercule` plugin.
 
