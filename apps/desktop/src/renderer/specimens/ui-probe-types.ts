@@ -53,12 +53,13 @@ export interface TextFragment {
    * ancestor):
    *
    * - It hides the point when the effective opacity is at least 0.95 and the
-   *   element has a background colour with alpha of at least 0.95, a
-   *   background image, replaced content, or a backdrop filter that blurs
-   *   (radius above 0). A fragment whose five points are all hidden is not
-   *   collected.
-   * - It covers the point partly when it paints with any of those four but
-   *   does not hide the point, and its paint alpha (the background alpha, or
+   *   element has a background colour with alpha of at least 0.95 or a
+   *   backdrop filter that blurs (radius above 0). A background image or
+   *   replaced content never hides, because its transparency at the point is
+   *   unknown. A fragment whose five points are all hidden is not collected.
+   * - It covers the point partly when it paints (a background colour, a
+   *   background image, replaced content or a blurring backdrop) but does not
+   *   hide the point, and its paint alpha (the background alpha, or
    *   1 for the other three, times the effective opacity) is above 0.05.
    * - Anything fainter is ignored.
    *

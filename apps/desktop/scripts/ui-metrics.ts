@@ -202,7 +202,10 @@ async function runUiMetrics(): Promise<number> {
     );
     return 1;
   }
-  const ratchet = compareWithBaseline(current, selectBaselineForThemes(baseline, themes));
+  // A full run compares the whole baseline, so a key that no run measures any
+  // more is reported as missing rather than filtered away.
+  const comparedBaseline = isFullRun(themes) ? baseline : selectBaselineForThemes(baseline, themes);
+  const ratchet = compareWithBaseline(current, comparedBaseline);
   const report = formatReport(current, ratchet, checkTargets(current));
   await writeFile(join(outputDir, "report.md"), report);
   process.stdout.write(`${report}\n${summary}`);
@@ -219,3 +222,8 @@ async function runUiMetrics(): Promise<number> {
 }
 
 await runAndSetExitCode(runUiMetrics);
+
+/** Returns whether `themes` is every theme, which is a full run rather than a shard. */
+function isFullRun(themes: ReadonlyArray<string>): boolean {
+  return ALL_THEMES.every((theme) => themes.includes(theme));
+}

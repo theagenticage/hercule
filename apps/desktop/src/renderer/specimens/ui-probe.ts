@@ -782,7 +782,7 @@ function readEffectiveOpacity(element: Element, readFacts: ReadFacts): number {
   return opacity;
 }
 
-/** Returns whether an element is replaced content, which the browser draws whole over what lies behind it. */
+/** Returns whether an element is replaced content (an image, svg, canvas, video or iframe), whose own pixels decide what shows through it. */
 function isReplacedElement(element: Element): boolean {
   return (
     element instanceof HTMLImageElement ||
@@ -830,23 +830,23 @@ type Coverage = "hidden" | "partly" | "clear";
  * opacity.
  *
  * - "hidden": the effective opacity is at least 0.95 and the element has a
- *   background colour with alpha of at least 0.95, or one of the other three
- *   kinds of paint. A frosted layer (a blurring backdrop filter) counts,
- *   because it blurs what is behind it past reading.
+ *   background colour with alpha of at least 0.95, or a backdrop filter that
+ *   blurs (a frosted layer blurs what is behind it past reading).
  * - "partly": the element does not hide the point, but its paint alpha is
- *   above 0.05. A wash of 50 % is an example.
+ *   above 0.05. A wash of 50 % is an example. A background image or replaced
+ *   content is never taken as hiding, because whether it is transparent at
+ *   the point cannot be read from its style: a gradient of `transparent`
+ *   hides nothing. Text under it stays measured, as unsupported.
  * - "clear": anything else, including an element that paints nothing, such
  *   as one with only text or a border.
  */
 function readCoverageOfPoint(element: Element, readFacts: ReadFacts): Coverage {
   const { style } = readFacts(element);
   const backgroundAlpha = resolveColour(style.backgroundColor)[3];
-  const paintsOtherwise =
-    isReplacedElement(element) ||
-    style.backgroundImage !== "none" ||
-    blursBackdrop(style.backdropFilter);
+  const blurs = blursBackdrop(style.backdropFilter);
+  const paintsOtherwise = isReplacedElement(element) || style.backgroundImage !== "none" || blurs;
   const opacity = readEffectiveOpacity(element, readFacts);
-  if (opacity >= HIDING_ALPHA && (paintsOtherwise || backgroundAlpha >= HIDING_ALPHA)) {
+  if (opacity >= HIDING_ALPHA && (blurs || backgroundAlpha >= HIDING_ALPHA)) {
     return "hidden";
   }
   const paintAlpha = (paintsOtherwise ? 1 : backgroundAlpha) * opacity;

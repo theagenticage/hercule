@@ -162,6 +162,12 @@ describe("selectBaselineForThemes", () => {
     ]);
   });
 
+  it("fails on a key of a theme that does not exist, instead of dropping it", () => {
+    expect(() =>
+      selectBaselineForThemes({ ...baseline, "old-theme/thread/target.under24": 0 }, ["nile"]),
+    ).toThrow(/old-theme\/thread\/target.under24/);
+  });
+
   it("makes a shard report a missing key of its own themes but not those of other themes", () => {
     const shard = selectBaselineForThemes(baseline, ["nile", "end-house"]);
     const current = { "nile/thread/contrast.ink.minLc": 80 };

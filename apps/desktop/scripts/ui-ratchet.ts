@@ -215,9 +215,11 @@ function readContext(key: string): { readonly dark: boolean } {
 /**
  * Returns the part of the baseline that a run of `themes` is compared with:
  * the keys of those themes, and the `run/...` keys if and only if `themes`
- * includes `RUN_WIDE_THEME`. A key of another theme is dropped, so a run that
- * measures only some themes does not report the others as missing. Fails when
- * a key is not a metric key.
+ * includes `RUN_WIDE_THEME`. A key of another known theme is dropped, so a
+ * run that measures only some themes does not report the others as missing.
+ * Fails when a key is not a metric key, or names a theme that does not exist:
+ * no shard would measure such a key, so dropping it would let it vanish from
+ * every comparison unseen.
  */
 export function selectBaselineForThemes(
   baseline: Readonly<Record<string, number>>,
@@ -227,6 +229,11 @@ export function selectBaselineForThemes(
   return Object.fromEntries(
     Object.entries(baseline).filter(([key]) => {
       const { theme } = parseKey(key);
+      if (theme !== null && !ALL_THEMES.includes(theme)) {
+        throw new Error(
+          `The baseline holds ${key}, of a theme that does not exist. Write the baseline again from a full run.`,
+        );
+      }
       return theme === null ? includesRunWide : themes.includes(theme);
     }),
   );
