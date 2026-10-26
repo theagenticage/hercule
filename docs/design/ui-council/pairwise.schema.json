@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UI council: one turn of a pairwise vote",
+  "description": "Which image is better, per category, for each pair shown in one turn. Written for docs/design/ui-council/BRIEF.md, section Pairwise vote.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "mode",
+    "reviewer",
+    "inputs",
+    "comparisons"
+  ],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "const": "pairwise",
+      "description": "Always pairwise."
+    },
+    "reviewer": {
+      "type": "object",
+      "description": "Who reviewed. The coordinator checks it against the spawn command.",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "version",
+        "effort"
+      ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "The model id the reviewer runs as, such as gpt-6.1-sol."
+        },
+        "version": {
+          "type": "string",
+          "description": "The model version or build the reviewer reports for itself. Write unknown if it cannot tell."
+        },
+        "effort": {
+          "type": "string",
+          "description": "The reasoning effort of the session, such as high."
+        }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "description": "Every image sent in this turn, in the order attached.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label",
+          "file_name",
+          "sha256"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "enum": [
+              "A",
+              "B"
+            ],
+            "description": "The neutral label the image was shown under."
+          },
+          "file_name": {
+            "type": "string",
+            "description": "The image's file name exactly as listed in the prompt."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "The image's sha256 as listed in the prompt, 64 lowercase hex characters. Copy it from the prompt; never compute or invent one."
+          }
+        }
+      }
+    },
+    "comparisons": {
+      "type": "array",
+      "description": "One entry per pair shown. A pair is two images of the same screen, theme and scale.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "image_a",
+          "image_b",
+          "screen",
+          "theme",
+          "scale",
+          "votes"
+        ],
+        "properties": {
+          "image_a": {
+            "type": "string",
+            "description": "The file name of the image shown as A."
+          },
+          "image_b": {
+            "type": "string",
+            "description": "The file name of the image shown as B."
+          },
+          "screen": {
+            "type": "string",
+            "enum": [
+              "sidebar",
+              "thread",
+              "thread-long",
+              "draft",
+              "conversation",
+              "intake",
+              "tracking-pane",
+              "workflows",
+              "run",
+              "discussions",
+              "wiki",
+              "settings-appearance"
+            ],
+            "description": "The screen's name from ui-screens.ts."
+          },
+          "theme": {
+            "type": "string",
+            "enum": [
+              "whitehaven",
+              "styles",
+              "orient-express",
+              "nile",
+              "end-house"
+            ],
+            "description": "The theme of both captures."
+          },
+          "scale": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "description": "The device pixel ratio of both captures."
+          },
+          "votes": {
+            "type": "array",
+            "description": "Exactly one entry per category, 11 in all, in the order of the brief.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "category",
+                "verdict",
+                "evidence"
+              ],
+              "properties": {
+                "category": {
+                  "type": "string",
+                  "enum": [
+                    "typography",
+                    "hierarchy",
+                    "spacing-density",
+                    "colour-contrast",
+                    "eye-comfort",
+                    "iconography",
+                    "state-visibility",
+                    "consistency-polish",
+                    "clarity-copy",
+                    "character",
+                    "overall"
+                  ],
+                  "description": "The category's id."
+                },
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "A",
+                    "B",
+                    "tie",
+                    "unassessable"
+                  ],
+                  "description": "A or B: that image is better on this category alone. tie: no visible difference, or none that matters. unassessable: the pair does not show this category."
+                },
+                "evidence": {
+                  "type": "string",
+                  "description": "The visible evidence: region in pixels and what differs. For tie or unassessable, what was compared."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

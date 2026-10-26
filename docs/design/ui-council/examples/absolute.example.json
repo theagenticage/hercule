@@ -1,0 +1,207 @@
+{
+  "mode": "absolute",
+  "reviewer": {
+    "model": "gpt-6.1-sol",
+    "version": "unknown",
+    "effort": "high"
+  },
+  "inputs": [
+    {
+      "file_name": "thread-1x-glass40.png",
+      "sha256": "40de09d29e53164df06a74d4c30e258d136a2abe18965962d588cf5f764a6b84"
+    },
+    {
+      "file_name": "codex-light-1x.png",
+      "sha256": "a0d91df0eea1535ae68b7463c9a795e2c4c90d683e12c08239fd9c8a3a2f2744"
+    }
+  ],
+  "images": [
+    {
+      "file_name": "thread-1x-glass40.png",
+      "set": "hercule",
+      "screen": "thread",
+      "theme": "whitehaven",
+      "scale": 1,
+      "scores": [
+        {
+          "category": "typography",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "thread-1x-glass40.png (x 520, y 214, w 560, h 96): transcript prose is 14px with even line spacing and about 68 characters per line."
+        },
+        {
+          "category": "hierarchy",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "thread-1x-glass40.png (x 520, y 120, w 560, h 40): the latest message heading is the strongest element; two levels of emphasis in the region."
+        },
+        {
+          "category": "spacing-density",
+          "score": 6,
+          "unassessable_reason": null,
+          "evidence": "thread-1x-glass40.png (x 16, y 180, w 240, h 120): sidebar row gaps are 6px between two rows and 8px between two others."
+        },
+        {
+          "category": "colour-contrast",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "thread-1x-glass40.png (x 520, y 330, w 200, h 16): the timestamp is readable but close to the background."
+        },
+        {
+          "category": "eye-comfort",
+          "score": 8,
+          "unassessable_reason": null,
+          "evidence": "thread-1x-glass40.png (whole image): no glare; the sidebar and the transcript separate gently."
+        },
+        {
+          "category": "iconography",
+          "score": 6,
+          "unassessable_reason": null,
+          "evidence": "thread-1x-glass40.png (x 24, y 40, w 20, h 20): the sidebar icons are 1px lower than the row text centre."
+        },
+        {
+          "category": "state-visibility",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "thread-1x-glass40.png (x 16, y 200, w 240, h 28): the selected row has a fill and a bar; the working row has a mark as well as a hue."
+        },
+        {
+          "category": "consistency-polish",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "thread-1x-glass40.png (x 1100, y 60, w 80, h 28): the header button radius is 9px, the composer button radius is 7px."
+        },
+        {
+          "category": "clarity-copy",
+          "score": 8,
+          "unassessable_reason": null,
+          "evidence": "thread-1x-glass40.png (x 520, y 820, w 400, h 32): the composer placeholder says what Enter does."
+        },
+        {
+          "category": "character",
+          "score": 8,
+          "unassessable_reason": null,
+          "evidence": "thread-1x-glass40.png (x 16, y 16, w 240, h 48): the wordmark and the colleague faces read as Hercule."
+        },
+        {
+          "category": "overall",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "thread-1x-glass40.png (whole image): coherent, with the localized defects listed in the fixes."
+        }
+      ]
+    },
+    {
+      "file_name": "codex-light-1x.png",
+      "set": "other-app",
+      "screen": "reference-app",
+      "theme": "reference-light",
+      "scale": 1,
+      "scores": [
+        {
+          "category": "typography",
+          "score": null,
+          "unassessable_reason": "This Codex draws its UI in a monospace font, so its typography is not a reference.",
+          "evidence": "codex-light-1x.png (x 480, y 380, w 480, h 60): the heading and the composer text are monospace."
+        },
+        {
+          "category": "hierarchy",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "codex-light-1x.png (whole image): illustrative evidence for hierarchy."
+        },
+        {
+          "category": "spacing-density",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "codex-light-1x.png (whole image): illustrative evidence for spacing-density."
+        },
+        {
+          "category": "colour-contrast",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "codex-light-1x.png (whole image): illustrative evidence for colour-contrast."
+        },
+        {
+          "category": "eye-comfort",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "codex-light-1x.png (whole image): illustrative evidence for eye-comfort."
+        },
+        {
+          "category": "iconography",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "codex-light-1x.png (whole image): illustrative evidence for iconography."
+        },
+        {
+          "category": "state-visibility",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "codex-light-1x.png (whole image): illustrative evidence for state-visibility."
+        },
+        {
+          "category": "consistency-polish",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "codex-light-1x.png (whole image): illustrative evidence for consistency-polish."
+        },
+        {
+          "category": "clarity-copy",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "codex-light-1x.png (whole image): illustrative evidence for clarity-copy."
+        },
+        {
+          "category": "character",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "codex-light-1x.png (whole image): illustrative evidence for character."
+        },
+        {
+          "category": "overall",
+          "score": 7,
+          "unassessable_reason": null,
+          "evidence": "codex-light-1x.png (whole image): illustrative evidence for overall."
+        }
+      ]
+    }
+  ],
+  "fixes": [
+    {
+      "id": "F1",
+      "priority": "SHOULD",
+      "category": "spacing-density",
+      "screens": [
+        "thread",
+        "sidebar"
+      ],
+      "themes": [
+        "whitehaven"
+      ],
+      "problem": "thread-1x-glass40.png (x 16, y 180, w 240, h 120): the gap between sidebar rows is 6px in one group and 8px in the next.",
+      "change": "Set the row gap of the second group to var(--s-2), 8px, as the first group has.",
+      "file": "apps/desktop/src/renderer/styles/sidebar.css",
+      "line": 142,
+      "metric": "spacing-grid"
+    },
+    {
+      "id": "F2",
+      "priority": "COULD",
+      "category": "consistency-polish",
+      "screens": [
+        "thread"
+      ],
+      "themes": [
+        "whitehaven",
+        "orient-express"
+      ],
+      "problem": "thread-1x-glass40.png (x 1100, y 60, w 80, h 28): the header button has a 9px radius and the composer button 7px.",
+      "change": "Use var(--r-btn), 7px, for the header button.",
+      "file": null,
+      "line": null,
+      "metric": "radii"
+    }
+  ],
+  "summary": "An illustrative example. The thread screen is coherent. The defects are small gaps and radii."
+}

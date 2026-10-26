@@ -43,7 +43,25 @@
  * the process, so the process needs no `TZ=UTC` as the Electron captures do.
  *
  * It needs no build: the specimens are served from source.
+ *
+ * With `--calibration` it does something else, and nothing of the above:
+ * `pnpm --filter @hercule/desktop capture:ui --calibration` writes the UI
+ * council's calibration images (docs/design/ui-council/BRIEF.md, section 9).
+ * Those are the deliberately broken looks `max-contrast`, `cramped` and
+ * `noisy` (see src/renderer/specimens/broken-variants.ts), each in Whitehaven
+ * and Orient Express, on the thread, sidebar and intake screens, at 1x and
+ * glass 40 %. It deletes `docs/design/ui-council/calibration/` and writes
+ * there `broken-<variant>-<theme>-<screen>-1x.png` (18 files) and
+ * `manifest.json`: the commit the images were made from, this command, and
+ * each file with its sha256, sorted by file name.
+ *
+ * The calibration images are frozen: they exist to detect drift of the
+ * reviewer, so they must not move with the UI. Running `--calibration` is an
+ * explicit calibration revision, a pull request of its own that says why. It
+ * is never part of a normal run, and nothing runs it automatically.
  */
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,7 +76,18 @@ import {
   WINDOW_SIZE,
   type UiVariant,
 } from "./ui-screens.ts";
-import { ALL_THEMES } from "../src/renderer/specimens/sheet-themes.ts";
+import { BROKEN_VARIANTS, type BrokenVariant } from "../src/renderer/specimens/broken-variants.ts";
+import { ALL_THEMES, THEMES } from "../src/renderer/specimens/sheet-themes.ts";
+
+const calibrationDir = fileURLToPath(
+  new URL("../../../docs/design/ui-council/calibration/", import.meta.url),
+);
+
+/** The command that writes the calibration images, as manifest.json records it. */
+const CALIBRATION_COMMAND = "pnpm --filter @hercule/desktop capture:ui --calibration";
+
+/** The screens of the calibration images. */
+const CALIBRATION_SCREENS = ["thread", "sidebar", "intake"];
 
 const outputDir = fileURLToPath(new URL("../out/ui/", import.meta.url));
 
@@ -172,12 +201,70 @@ async function writeContactSheet(browser: Browser, theme: string): Promise<void>
   }
 }
 
-/** Runs the capture. Returns 0, or fails with a message that names the variant that failed. */
-async function captureUi(): Promise<number> {
-  const startedAt = performance.now();
-  await rm(outputDir, { recursive: true, force: true });
-  await Promise.all(ALL_THEMES.map((theme) => mkdir(join(outputDir, theme), { recursive: true })));
+/** One line of the calibration manifest: an image on disk. */
+interface CalibrationFile {
+  readonly file: string;
+  readonly sha256: string;
+}
 
+/**
+ * Captures the calibration images of one broken look (see the docstring of
+ * this file) into the calibration folder, and returns them with their sha256.
+ * The look reaches the page through `?broken=` in the screen's path.
+ */
+async function captureBrokenVariant(
+  browser: Browser,
+  specimensUrl: string,
+  broken: BrokenVariant,
+): Promise<CalibrationFile[]> {
+  const screens = CALIBRATION_SCREENS.map((name) => {
+    const screen = UI_SCREENS.find((each) => each.name === name);
+    if (screen === undefined)
+      throw new Error(`The calibration screen "${name}" is not in UI_SCREENS.`);
+    return { ...screen, path: `${screen.path}?broken=${broken}` };
+  });
+  const variants: UiVariant[] = THEMES.flatMap((theme) =>
+    screens.map((screen) => ({ screen, theme, scale: 1, glassPercent: 40 }) as const),
+  );
+  return captureVariants(browser, specimensUrl, variants, async (page, variant) => {
+    const { png } = await screenshotVariant(page, variant);
+    const file = `broken-${broken}-${variant.theme}-${variant.screen.name}-1x.png`;
+    await writeFile(join(calibrationDir, file), png);
+    return { file, sha256: createHash("sha256").update(png).digest("hex") };
+  });
+}
+
+/**
+ * Writes the calibration images and their manifest.json (see the docstring of
+ * this file). Returns 0. Fails like `captureUi`.
+ */
+async function captureCalibration(): Promise<number> {
+  await rm(calibrationDir, { recursive: true, force: true });
+  await mkdir(calibrationDir, { recursive: true });
+  const generatedFrom = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  return withBrowser(async (browser, server) => {
+    const files: CalibrationFile[] = [];
+    for (const broken of BROKEN_VARIANTS) {
+      files.push(...(await captureBrokenVariant(browser, server.specimensUrl, broken)));
+    }
+    files.sort((a, b) => a.file.localeCompare(b.file));
+    const manifest = { generatedFrom, command: CALIBRATION_COMMAND, files };
+    await writeFile(
+      join(calibrationDir, "manifest.json"),
+      `${JSON.stringify(manifest, null, 2)}\n`,
+    );
+    process.stdout.write(`Wrote ${String(files.length)} calibration images to ${calibrationDir}\n`);
+    return 0;
+  });
+}
+
+/**
+ * Starts the specimen server and the capture browser, calls `work` with them,
+ * and returns what it returns. Closes both in every case, also on Ctrl-C.
+ */
+async function withBrowser(
+  work: (browser: Browser, server: SpecimenServer) => Promise<number>,
+): Promise<number> {
   let server: SpecimenServer | undefined;
   let browser: Browser | undefined;
   const closeAll = async (): Promise<void> => {
@@ -195,15 +282,7 @@ async function captureUi(): Promise<number> {
   try {
     server = await startSpecimenServer();
     browser = await launchCaptureBrowser();
-    const variants = listUiVariants();
-    const records = await captureVariants(browser, server.specimensUrl, variants, writeCapture);
-    await writeFile(join(outputDir, "manifest.json"), `${JSON.stringify(records, null, 2)}\n`);
-    await Promise.all(ALL_THEMES.map((theme) => writeContactSheet(browser!, theme)));
-    const seconds = (performance.now() - startedAt) / 1000;
-    process.stdout.write(
-      `Wrote ${String(records.length)} captures and ${String(ALL_THEMES.length)} contact sheets to ${outputDir} in ${seconds.toFixed(1)} s.\n`,
-    );
-    return 0;
+    return await work(browser, server);
   } finally {
     process.off("SIGINT", exitOnSignal);
     process.off("SIGTERM", exitOnSignal);
@@ -211,4 +290,30 @@ async function captureUi(): Promise<number> {
   }
 }
 
-await runAndSetExitCode(captureUi);
+/** Runs the normal capture. Returns 0, or fails with a message that names the variant that failed. */
+async function captureUi(): Promise<number> {
+  const startedAt = performance.now();
+  await rm(outputDir, { recursive: true, force: true });
+  await Promise.all(ALL_THEMES.map((theme) => mkdir(join(outputDir, theme), { recursive: true })));
+  return withBrowser(async (browser, server) => {
+    const variants = listUiVariants();
+    const records = await captureVariants(browser, server.specimensUrl, variants, writeCapture);
+    await writeFile(join(outputDir, "manifest.json"), `${JSON.stringify(records, null, 2)}\n`);
+    await Promise.all(ALL_THEMES.map((theme) => writeContactSheet(browser, theme)));
+    const seconds = (performance.now() - startedAt) / 1000;
+    process.stdout.write(
+      `Wrote ${String(records.length)} captures and ${String(ALL_THEMES.length)} contact sheets to ${outputDir} in ${seconds.toFixed(1)} s.\n`,
+    );
+    return 0;
+  });
+}
+
+/** Runs the calibration capture with `--calibration`, the normal capture with no argument. Fails on any other argument. */
+async function run(): Promise<number> {
+  const args = process.argv.slice(2);
+  if (args.length === 0) return captureUi();
+  if (args.length === 1 && args[0] === "--calibration") return captureCalibration();
+  throw new Error(`Unknown arguments: ${args.join(" ")}. The only argument is --calibration.`);
+}
+
+await runAndSetExitCode(run);

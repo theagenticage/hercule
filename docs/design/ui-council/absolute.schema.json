@@ -1,0 +1,329 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UI council: one turn of an absolute scoring round",
+  "description": "Scores for the images of one turn, then a prioritized fix list. Written for docs/design/ui-council/BRIEF.md, section Absolute scoring.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "mode",
+    "reviewer",
+    "inputs",
+    "images",
+    "fixes",
+    "summary"
+  ],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "const": "absolute",
+      "description": "Always absolute."
+    },
+    "reviewer": {
+      "type": "object",
+      "description": "Who reviewed. The coordinator checks it against the spawn command.",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "version",
+        "effort"
+      ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "The model id the reviewer runs as, such as gpt-6.1-sol."
+        },
+        "version": {
+          "type": "string",
+          "description": "The model version or build the reviewer reports for itself. Write unknown if it cannot tell."
+        },
+        "effort": {
+          "type": "string",
+          "description": "The reasoning effort of the session, such as high."
+        }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "description": "Every image sent in this turn, in the order attached.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "file_name",
+          "sha256"
+        ],
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "description": "The image's file name exactly as listed in the prompt."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "The image's sha256 as listed in the prompt, 64 lowercase hex characters. Copy it from the prompt; never compute or invent one."
+          }
+        }
+      }
+    },
+    "images": {
+      "type": "array",
+      "description": "One entry per scored image, in the order attached.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "file_name",
+          "set",
+          "screen",
+          "theme",
+          "scale",
+          "scores"
+        ],
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "description": "The file name of the scored image, as in inputs."
+          },
+          "set": {
+            "type": "string",
+            "enum": [
+              "hercule",
+              "other-app",
+              "calibration"
+            ],
+            "description": "hercule: a capture of the app under review. other-app: a screenshot of another app. calibration: an image of the app that the prompt marks as calibration."
+          },
+          "screen": {
+            "type": "string",
+            "enum": [
+              "sidebar",
+              "thread",
+              "thread-long",
+              "draft",
+              "conversation",
+              "intake",
+              "tracking-pane",
+              "workflows",
+              "run",
+              "discussions",
+              "wiki",
+              "settings-appearance",
+              "reference-app"
+            ],
+            "description": "The screen's name from ui-screens.ts. Use reference-app for a screenshot of another app (set other-app)."
+          },
+          "theme": {
+            "type": "string",
+            "enum": [
+              "whitehaven",
+              "styles",
+              "orient-express",
+              "nile",
+              "end-house",
+              "reference-light",
+              "reference-dark",
+              "reference-ocean"
+            ],
+            "description": "The theme of the capture. Use the reference-* value for a screenshot of another app."
+          },
+          "scale": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ],
+            "description": "The device pixel ratio of the capture."
+          },
+          "scores": {
+            "type": "array",
+            "description": "Exactly one entry per category, 11 in all, in the order of the brief.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "category",
+                "score",
+                "unassessable_reason",
+                "evidence"
+              ],
+              "properties": {
+                "category": {
+                  "type": "string",
+                  "enum": [
+                    "typography",
+                    "hierarchy",
+                    "spacing-density",
+                    "colour-contrast",
+                    "eye-comfort",
+                    "iconography",
+                    "state-visibility",
+                    "consistency-polish",
+                    "clarity-copy",
+                    "character",
+                    "overall"
+                  ],
+                  "description": "The category's id."
+                },
+                "score": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "A whole number from 0 to 10, or null when the category cannot be assessed from this image. Values outside 0 to 10 are rejected by the coordinator."
+                },
+                "unassessable_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Null when score is a number. Otherwise why the image cannot show this category."
+                },
+                "evidence": {
+                  "type": "string",
+                  "description": "The visible evidence for the score: the element or region, with pixel coordinates in this image (x, y, width, height), and what is seen there. For a null score, what was looked for."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fixes": {
+      "type": "array",
+      "description": "Prioritized: all MUST first, then SHOULD, then COULD. Empty when this turn found nothing to fix.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "priority",
+          "category",
+          "screens",
+          "themes",
+          "problem",
+          "change",
+          "file",
+          "line",
+          "metric"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A short id that is unique in this output, such as F1."
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "MUST",
+              "SHOULD",
+              "COULD"
+            ],
+            "description": "MUST: obstructs use or reading. SHOULD: repeated defect. COULD: localized polish."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "typography",
+              "hierarchy",
+              "spacing-density",
+              "colour-contrast",
+              "eye-comfort",
+              "iconography",
+              "state-visibility",
+              "consistency-polish",
+              "clarity-copy",
+              "character",
+              "overall"
+            ],
+            "description": "The category the fix improves."
+          },
+          "screens": {
+            "type": "array",
+            "description": "The screens where the problem is seen.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "sidebar",
+                "thread",
+                "thread-long",
+                "draft",
+                "conversation",
+                "intake",
+                "tracking-pane",
+                "workflows",
+                "run",
+                "discussions",
+                "wiki",
+                "settings-appearance"
+              ],
+              "description": "A screen name."
+            }
+          },
+          "themes": {
+            "type": "array",
+            "description": "The themes where the problem is seen.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "whitehaven",
+                "styles",
+                "orient-express",
+                "nile",
+                "end-house"
+              ],
+              "description": "A theme."
+            }
+          },
+          "problem": {
+            "type": "string",
+            "description": "The visible problem, with its evidence: image file name, region in pixels, and what is seen."
+          },
+          "change": {
+            "type": "string",
+            "description": "The proposed change with exact values, such as a token and its new value. A hypothesis: ui:metrics measures it before it counts."
+          },
+          "file": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The repo path of the file to change, or null when the reviewer could not find it."
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The line in file, or null when file is null."
+          },
+          "metric": {
+            "type": "string",
+            "enum": [
+              "text-contrast",
+              "wcag-text-contrast",
+              "non-text-contrast",
+              "line-visibility",
+              "surface-separation",
+              "opacity-dimming",
+              "type-scale",
+              "weights",
+              "radii",
+              "spacing-grid",
+              "target-size",
+              "focus",
+              "text-spacing",
+              "text-size-zoom",
+              "prose-measure",
+              "glyph-confusion",
+              "none"
+            ],
+            "description": "The scripted metric this change should move, or none."
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "string",
+      "description": "Two or three plain sentences on what the images show. No scores here."
+    }
+  }
+}

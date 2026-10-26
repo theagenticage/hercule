@@ -13,6 +13,7 @@ import {
 import type { Appearance } from "../../ipc/contract";
 import { waitForPresentedFrame } from "../app/presented-frame";
 import type { Look } from "../faces/look";
+import { BROKEN_VARIANTS, buildBrokenVariantCss, type BrokenVariant } from "./broken-variants";
 import { ALL_THEMES } from "./sheet-themes";
 
 /**
@@ -44,11 +45,31 @@ function readSheetGlass(): number | undefined {
 }
 
 /**
+ * Returns the broken look the page's `?broken=` names, or `undefined` when the
+ * URL names none. Fails on a name that is not one of the broken looks.
+ */
+function readSheetBroken(): BrokenVariant | undefined {
+  const name = new URLSearchParams(location.search).get("broken");
+  if (name === null) return undefined;
+  const variant = BROKEN_VARIANTS.find((each) => each === name);
+  if (variant === undefined) {
+    throw new Error(
+      `Unknown broken look "${name}" in the URL. Use one of: ${BROKEN_VARIANTS.join(", ")}.`,
+    );
+  }
+  return variant;
+}
+
+/**
  * Draws the page in the look its URL names: the theme of `?theme=`
  * (Whitehaven when the URL names none) and the Glass level of `?glass=`, a
  * whole number from 0 to 100 (the 40 of base.css when the URL names none).
  * Fails on a theme that is not one of the five, or a glass that is not a
  * whole number from 0 to 100.
+ *
+ * `?broken=` (`max-contrast`, `cramped` or `noisy`) also overrides tokens, for
+ * the UI council's calibration images; without it the page is untouched. Fails
+ * on any other value.
  *
  * Glass is set the way `public/theme-init.js` sets it in the app, and both
  * parts are needed: `--glass-percent` sets the glass level of every surface,
@@ -58,6 +79,12 @@ function readSheetGlass(): number | undefined {
 export function applySheetAppearance(): void {
   const root = document.documentElement;
   root.dataset.theme = readSheetTheme();
+  const broken = readSheetBroken();
+  if (broken !== undefined) {
+    const style = document.createElement("style");
+    style.textContent = buildBrokenVariantCss(broken, { day: DAY_THEMES, night: NIGHT_THEMES });
+    document.head.append(style);
+  }
   const glassPercent = readSheetGlass();
   if (glassPercent === undefined) return;
   root.style.setProperty("--glass-percent", String(glassPercent));
