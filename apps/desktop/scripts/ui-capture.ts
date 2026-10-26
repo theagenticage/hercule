@@ -28,6 +28,13 @@ import {
 /** How long a page may take to load, draw and set `data-ready`. */
 const READY_TIMEOUT_MS = 30_000;
 
+/**
+ * How long the work on one ready page may take. The slowest page of
+ * `ui:metrics` takes a few seconds; a call into the page that never answers
+ * would otherwise hold the run until CI's job timeout, with no message.
+ */
+const CALLBACK_TIMEOUT_MS = 120_000;
+
 /** How many pages load at once when the caller does not say: one per CPU, at most 8. */
 const DEFAULT_CONCURRENCY = Math.min(availableParallelism(), 8);
 
@@ -172,7 +179,11 @@ async function loadVariant<Result>(
     await page.waitForSelector("html[data-ready]", { state: "attached" });
     await page.waitForSelector(variant.screen.contentSelector, { state: "visible" });
     if (problems.length > 0) throw new Error(problems.join("\n"));
-    const result = await onReadyPage(page, variant);
+    const result = await failAfter(
+      onReadyPage(page, variant),
+      CALLBACK_TIMEOUT_MS,
+      `The work on the ready page did not finish within ${String(CALLBACK_TIMEOUT_MS / 1000)} s.`,
+    );
     // The callback may take a screenshot or measure for a while, and the page
     // can fail meanwhile.
     if (problems.length > 0) throw new Error(problems.join("\n"));
@@ -313,4 +324,25 @@ function hasTwoColoursIn(image: PNG, boxes: ReadonlyArray<Box>, scale: number): 
     }
   }
   return false;
+}
+
+/**
+ * Returns what `work` resolves to, or fails with `message` when it has not
+ * settled after `milliseconds`. The work itself is not stopped; the caller
+ * closes the browser context it runs in.
+ */
+async function failAfter<Result>(
+  work: Promise<Result>,
+  milliseconds: number,
+  message: string,
+): Promise<Result> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), milliseconds);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
