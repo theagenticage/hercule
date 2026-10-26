@@ -133,9 +133,17 @@
   font-size: var(--t-11);
   font-variant-numeric: tabular-nums;
 }
+/* An async question's text is the agent's whole title, which can run to
+   several paragraphs. It keeps its line breaks and scrolls past about eight
+   lines, as the request's own text above does, rather than push the
+   transcript out of the window. */
 .dock-question-text {
+  max-height: 8lh;
   margin-top: 2px;
   padding: 0 4px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 /* Options scroll within about six rows, rather than push the composer off
    the screen. */
@@ -154,6 +162,11 @@
   padding: 5px 12px 5px 4px;
   border-radius: var(--r-md);
   transition: background var(--dur-1);
+}
+/* Options with no description have no second column to line up with, so
+   their labels take the whole row instead of wrapping in the first column. */
+.dock-options:not(:has(.ans-desc)) .dock-option {
+  grid-template-columns: 1fr;
 }
 .dock-option:hover {
   background: var(--hover);
