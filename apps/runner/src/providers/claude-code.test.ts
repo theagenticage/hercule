@@ -42,6 +42,7 @@ import { buildClaudePromptParts, makeClaudeCodeAdapter, type ClaudeSeam } from "
 import { PROBE_DEADLINE } from "./probe";
 import { resolveSkillReferences, type LoadedSkills } from "../skills";
 import type { AdapterTurnInput, EditMarks, ProviderAdapter, ProviderRunnerContext } from "./index";
+import { AnswerNotDelivered } from "./answer-not-delivered";
 import { SteerRefused } from "./steer-refused";
 import * as testing from "./testing";
 import {
@@ -2527,6 +2528,14 @@ const respondWithAnswers = (
   answers: QuestionAnswers,
 ): Promise<void> => Effect.runPromise(run.adapter.respondToQuestion(SESSION, requestId, answers));
 
+/** Sends answers the adapter must refuse, and returns its failure. Rejects when the adapter accepts them. */
+const refuseAnswers = (
+  run: Driving,
+  requestId: string,
+  answers: QuestionAnswers,
+): Promise<AnswerNotDelivered> =>
+  Effect.runPromise(Effect.flip(run.adapter.respondToQuestion(SESSION, requestId, answers)));
+
 /** Returns the input an allow handed back to the harness, or `undefined` for any other result. */
 const readUpdatedInput = (settled: PermissionResult | null | undefined): unknown =>
   settled !== null && settled !== undefined && settled.behavior === "allow"
@@ -2579,26 +2588,42 @@ describe("answering a question the harness asks", () => {
     });
   });
 
-  it("ignores answers to an approval request", async () => {
+  it("fails to deliver answers to an approval request, and leaves the approval parked", async () => {
     const run = await startApprovalSession();
     const { park, request } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
 
-    await respondWithAnswers(run, request.requestId, { Storage: "localStorage" });
+    const failure = await refuseAnswers(run, request.requestId, { Storage: "localStorage" });
 
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
     expect(park.settled()).toBeUndefined();
     expect(listResolutions(run.seen)).toEqual([]);
   });
 
-  it("ignores answers to a request id that is not the open one", async () => {
+  it("fails to deliver answers to a request id that is not the open one", async () => {
     const run = await startApprovalSession();
     const { park } = await parkAndAwaitRequest(run, "AskUserQuestion", {
       questions: [STORAGE_QUESTION],
     });
 
-    await respondWithAnswers(run, "r-nobody-asked", { Storage: "localStorage" });
+    const failure = await refuseAnswers(run, "r-nobody-asked", { Storage: "localStorage" });
 
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
     expect(park.settled()).toBeUndefined();
     expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  it("fails to deliver a second answer to a question that was already answered", async () => {
+    const run = await startApprovalSession();
+    const { park, request } = await parkAndAwaitRequest(run, "AskUserQuestion", {
+      questions: [STORAGE_QUESTION],
+    });
+    await respondWithAnswers(run, request.requestId, { Storage: "localStorage" });
+    await waitUntil("resolved the park", () => park.settled() !== undefined);
+
+    const failure = await refuseAnswers(run, request.requestId, { Storage: "IndexedDB" });
+
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
+    expect(failure.message).toContain("no longer open");
   });
 
   for (const decision of ["deny", "cancel"] as const) {

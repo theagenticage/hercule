@@ -343,11 +343,11 @@ export interface ProviderAdapter {
   /**
    * Answers the questions one agent of the session is parked on, by the id the
    * adapter gave the request. That agent resumes, and `request.resolved` follows on
-   * `events`, with the answers, as the only report. Does nothing when the
-   * adapter is not holding that question: it was never opened here, it was
-   * already answered, or it is an approval.
+   * `events`, with the answers, as the only report.
    *
-   * Fails with `AnswerNotDelivered` when the answer did not reach the agent,
+   * Fails with `AnswerNotDelivered` when the adapter is not holding that
+   * question (it was never opened here, it was already answered, it is an
+   * approval, or its agent stopped), when the answer did not reach the agent,
    * or when the adapter cannot confirm that it did.
    */
   readonly respondToQuestion: (

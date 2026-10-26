@@ -69,6 +69,7 @@ import {
   type RequestOpened,
 } from "./claude-code-subagents";
 import type { AttachmentUploader } from "../attachments";
+import { AnswerNotDelivered } from "./answer-not-delivered";
 import type { ResolvedSkillReference } from "../skills";
 import { buildSkillSteerRefusedMessage, SteerRefused } from "./steer-refused";
 import { readAttachmentBase64 } from "./attachments";
@@ -1678,11 +1679,19 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       sessionId: string,
       requestId: string,
       answers: QuestionAnswers,
-    ): Effect.Effect<void> =>
-      Effect.sync(() => {
+    ): Effect.Effect<void, AnswerNotDelivered> =>
+      Effect.suspend(() => {
         const park = live.get(sessionId)?.parks.get(requestId);
-        if (park?.kind !== "question") return;
+        if (park?.kind !== "question") {
+          return Effect.fail(
+            new AnswerNotDelivered({
+              message:
+                "The question is no longer open: it was already answered, or the agent that asked it stopped.",
+            }),
+          );
+        }
         park.answer(answers);
+        return Effect.void;
       }),
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),

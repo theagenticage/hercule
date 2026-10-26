@@ -61,6 +61,7 @@ import { writeStartMark } from "../edit-marks/testing";
 import { makeSupervising, type SessionSupervisor, type Supervising } from "./supervisor";
 import { makeAttachmentCache, type AttachmentCache } from "../attachments";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
+import { AnswerNotDelivered } from "../providers/answer-not-delivered";
 import { SteerRefused } from "../providers/steer-refused";
 import { makeSessionSkillsFolders } from "../skills";
 import {
@@ -161,6 +162,8 @@ interface Fake {
   readonly emit: (event: ProviderEvent) => void;
   /** The error every later start and input fails with, when set. */
   fails: string | undefined;
+  /** The message every `respondToQuestion` call fails with, when set. */
+  answerFails: string | undefined;
   /** A harness that throws where nothing declared it could. */
   dies: boolean;
   /**
@@ -190,6 +193,7 @@ const createFake = (): Fake => {
     answered,
     stops,
     fails: undefined,
+    answerFails: undefined,
     dies: false,
     stopsSilently: false,
     emit: (event) => {
@@ -257,7 +261,9 @@ const createFake = (): Fake => {
       respondToApprovalRequest: (sessionId, requestId, decision) =>
         Effect.sync(() => void answered.push([sessionId, requestId, { decision }])),
       respondToQuestion: (sessionId, requestId, answers) =>
-        Effect.sync(() => void answered.push([sessionId, requestId, { answers }])),
+        fake.answerFails === undefined
+          ? Effect.sync(() => void answered.push([sessionId, requestId, { answers }]))
+          : Effect.fail(new AnswerNotDelivered({ message: fake.answerFails })),
       /**
        * The exit reason comes from the caller, not from this adapter: the
        * supervisor knows why it stopped a session, and the exit event is the
@@ -1384,6 +1390,62 @@ describe("what the runner sends back for input, interrupts and answers", () => {
 
     expect(fake.answered).toEqual([[SESSION, PARK, { answers }]]);
   });
+
+  /** Sends one `sessionRespondToQuestion` frame and returns the result frames the runner replied with. */
+  const answerQuestion = async (
+    sessionId: string,
+    arrange?: (fake: Fake) => void,
+  ): Promise<ReadonlyArray<RunnerToController>> => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    arrange?.(fake);
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* supervisor.respondToQuestion({
+          _tag: "sessionRespondToQuestion",
+          sessionId,
+          requestId: PARK,
+          answerId: "answer-1",
+          answers: { Storage: "localStorage" },
+        });
+      }),
+    );
+    return sent.filter((frame) => frame._tag === "sessionRespondToQuestionResult");
+  };
+
+  it("replies ok to an answer the adapter delivered", async () => {
+    expect(await answerQuestion(SESSION)).toEqual([
+      { _tag: "sessionRespondToQuestionResult", answerId: "answer-1", ok: true },
+    ]);
+  });
+
+  it("replies with the adapter's message when it did not deliver the answer", async () => {
+    const message = "The question is no longer open.";
+
+    const replies = await answerQuestion(SESSION, (fake) => {
+      fake.answerFails = message;
+    });
+
+    expect(replies).toEqual([
+      { _tag: "sessionRespondToQuestionResult", answerId: "answer-1", ok: false, message },
+    ]);
+  });
+
+  it("replies not ok to an answer for a session it does not hold", async () => {
+    const replies = await answerQuestion("0199e0e7-0000-7000-8000-0000000000aa");
+
+    expect(replies).toEqual([
+      {
+        _tag: "sessionRespondToQuestionResult",
+        answerId: "answer-1",
+        ok: false,
+        message: expect.stringContaining("no longer running"),
+      },
+    ]);
+  });
 });
 
 /**
@@ -1606,6 +1668,34 @@ const emitRequestOpened = (fake: Fake, requestId: string, subagentId?: string): 
     },
   });
 
+/**
+ * Emits a `request.opened` for an async question: the asking agent does not
+ * wait on it, so it holds off the idle unload but not the inactivity watch.
+ */
+const emitAsyncQuestionOpened = (fake: Fake, requestId: string): void =>
+  fake.emit({
+    _tag: "request.opened",
+    eventId: `e-${requestId}-opened`,
+    sessionId: SESSION,
+    at,
+    request: {
+      requestId,
+      itemId: "i-1",
+      kind: "question",
+      detail: {
+        questions: [
+          {
+            question: "Which storage should drafts use?",
+            header: "Question",
+            options: [{ label: "localStorage" }],
+            multiSelect: false,
+          },
+        ],
+      },
+      async: true,
+    },
+  });
+
 const emitRequestResolved = (fake: Fake, requestId: string, subagentId?: string): void =>
   fake.emit({
     _tag: "request.resolved",
@@ -1623,7 +1713,12 @@ const emitRequestResolved = (fake: Fake, requestId: string, subagentId?: string)
  * when it is not the session's own agent's.
  */
 type Step = readonly [
-  tag: "turn.started" | "request.opened" | "request.resolved" | "turn.completed",
+  tag:
+    | "turn.started"
+    | "request.opened"
+    | "async_question.opened"
+    | "request.resolved"
+    | "turn.completed",
   id: string,
   subagentId?: string,
 ];
@@ -1632,6 +1727,7 @@ const emitStep = (fake: Fake, [tag, id, subagentId]: Step): void => {
   if (tag === "turn.started") return emitTurnStarted(fake, id, subagentId);
   if (tag === "turn.completed") return emitTurnCompleted(fake, id, subagentId);
   if (tag === "request.opened") return emitRequestOpened(fake, id, subagentId);
+  if (tag === "async_question.opened") return emitAsyncQuestionOpened(fake, id);
   return emitRequestResolved(fake, id, subagentId);
 };
 
@@ -1792,6 +1888,43 @@ describe("a session parked on an open request", () => {
         ["turn.completed", "t-2", SUBAGENT],
       ],
       false,
+    ],
+    // An async question does not make its agent wait, so it never pauses the
+    // clock, and it outlives the turn that was running when it was asked.
+    [
+      [
+        ["turn.started", "t-1"],
+        ["async_question.opened", "r-1"],
+      ],
+      true,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["async_question.opened", "r-1"],
+        ["turn.completed", "t-1"],
+        ["turn.started", "t-2"],
+      ],
+      true,
+    ],
+    // A blocking Request next to an async question still pauses the clock,
+    // and its end resumes it. The async question stays open throughout.
+    [
+      [
+        ["turn.started", "t-1"],
+        ["async_question.opened", "r-1"],
+        ["request.opened", "r-2"],
+      ],
+      false,
+    ],
+    [
+      [
+        ["turn.started", "t-1"],
+        ["async_question.opened", "r-1"],
+        ["request.opened", "r-2"],
+        ["request.resolved", "r-2"],
+      ],
+      true,
     ],
   ];
 
@@ -2288,6 +2421,62 @@ describe("a session that sits idle between turns", () => {
         yield* Effect.sync(() => emitTurnStarted(fake, "t-1", SUBAGENT));
         yield* awaitForwarded(sent, 2);
         yield* TestClock.adjust(IDLE_MS);
+        expect(fake.stops).toEqual([]);
+      }),
+    );
+
+    expect(fake.stops).toEqual([]);
+  });
+
+  it("is not unloaded while an async question is open after its turn ended, and waits idleMs once it is answered", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(IDLE_START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitAsyncQuestionOpened(fake, "r-1"));
+        yield* awaitForwarded(sent, 3);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 4);
+
+        // The user may still answer, so the session stays loaded.
+        yield* TestClock.adjust(IDLE_MS * 2);
+        expect(fake.stops).toEqual([]);
+
+        // Answering it while the session is idle starts the wait: no turn
+        // ends after this, so nothing else would.
+        yield* Effect.sync(() => emitRequestResolved(fake, "r-1"));
+        yield* awaitForwarded(sent, 5);
+        yield* TestClock.adjust(IDLE_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* TestClock.adjust(1);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
+    expect(listExitReasons(sent)).toEqual(["idle_unload"]);
+  });
+
+  it("is not unloaded while a blocking Request is open with no turn", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(IDLE_START);
+        yield* Effect.sync(() => emitRequestOpened(fake, "r-1", SUBAGENT));
+        yield* awaitForwarded(sent, 2);
+
+        yield* TestClock.adjust(IDLE_MS * 2);
         expect(fake.stops).toEqual([]);
       }),
     );

@@ -174,20 +174,29 @@ interface Live {
    */
   readonly openTurns: Set<string>;
   /**
-   * The open Requests the agents of the session wait on, by request id, each
-   * with the subagent that asked it, or `undefined` when the session's own
-   * agent did. A session waiting for its user is not stuck, however long it
-   * waits, so it is not watched while any Request is open. Several agents can
-   * each wait at once (spec 06 section 13.3).
+   * Every Request the agents of the session have opened and not yet closed,
+   * by request id, each with the subagent that asked it (`undefined` when the
+   * session's own agent did) and whether it is async. Several agents can each
+   * have one open at once (spec 06 section 13.3).
+   *
+   * A blocking Request means its agent waits on the user. A session waiting
+   * for its user is not stuck, however long it waits, so it is not watched
+   * while any blocking Request is open. An async question does not block its
+   * agent, so it does not stop the watch, but it does hold off the idle
+   * unload: the user may still answer it.
    *
    * A Request leaves this map on exactly the events that close it at the
-   * controller: its `request.resolved`, the end of its own agent's turn, and
-   * the session's exit, which removes this whole entry. The runner must never
-   * drop one earlier. If the controller still showed that Request as open,
-   * the inactivity watch would be running, and a session whose user has not
-   * answered yet would be stopped as stuck.
+   * controller: its `request.resolved`, the end of its own agent's turn (for
+   * a blocking Request only; an async question outlives the turn), and the
+   * session's exit, which removes this whole entry. The runner must never
+   * drop one earlier. If the controller still showed a blocking Request as
+   * open, the inactivity watch would be running, and a session whose user has
+   * not answered yet would be stopped as stuck.
    */
-  readonly parkedRequests: Map<string, SubagentId | undefined>;
+  readonly openRequests: Map<
+    string,
+    { readonly asker: SubagentId | undefined; readonly async: boolean }
+  >;
   /**
    * The fiber that stops the session at its spec's absolute deadline. It is
    * interrupted when this entry is torn down. Undefined before the fiber is
@@ -294,19 +303,21 @@ const findLibrarySkillsFolder = (arrived: ArrivedStart): string | undefined =>
   arrived.librarySkills.length === 0 ? undefined : arrived.sessionSkillsFolder;
 
 /**
- * Checks that no agent of the session has a turn open or waits on its user,
- * which is when the idle wait may run.
+ * Checks that no agent of the session has a turn open and no Request is open,
+ * which is when the idle wait may run. An open async question counts: the
+ * user may still answer it, so the session is not unloaded under it.
  */
-const isIdle = (held: Live): boolean => held.openTurns.size === 0 && held.parkedRequests.size === 0;
+const isIdle = (held: Live): boolean => held.openTurns.size === 0 && held.openRequests.size === 0;
 
 /**
  * Checks that a turn of some agent of the session is open and no agent waits
- * on its user, which is when the inactivity watch runs. This is not the
- * opposite of `isIdle`: a session with an open turn and an open Request is
- * neither watched nor idle.
+ * on its user, which is when the inactivity watch runs. Only a blocking
+ * Request stops the watch: the turn does not wait on an async question. This
+ * is not the opposite of `isIdle`: a session with an open turn and an open
+ * blocking Request is neither watched nor idle.
  */
 const isWatched = (held: Live): boolean =>
-  held.openTurns.size > 0 && held.parkedRequests.size === 0;
+  held.openTurns.size > 0 && ![...held.openRequests.values()].some((request) => !request.async);
 
 /** What a connection gives the supervisor while the connection is up. */
 export interface Connection {
@@ -773,13 +784,16 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             break;
           case "turn.completed":
             held.openTurns.delete(event.turnId);
-            // A Request cannot outlive its agent's turn. The controller
-            // also closes them on this event, and a Request left here
-            // would stop every later turn from being watched. Only this
+            // A blocking Request cannot outlive its agent's turn. The
+            // controller also closes them on this event, and a Request left
+            // here would stop every later turn from being watched. Only this
             // agent's Requests close: another agent may still wait on its
-            // user, even after the session's own turn has ended.
-            for (const [requestId, asker] of held.parkedRequests) {
-              if (asker === event.subagentId) held.parkedRequests.delete(requestId);
+            // user, even after the session's own turn has ended. An async
+            // question stays open until it is answered or its agent stops.
+            for (const [requestId, request] of held.openRequests) {
+              if (!request.async && request.asker === event.subagentId) {
+                held.openRequests.delete(requestId);
+              }
             }
             if (isIdle(held)) yield* armIdleUnload(held, event.sessionId);
             // A step's turn is a turn of the session's own agent. A
@@ -826,13 +840,20 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             break;
           }
           case "request.opened":
-            held.parkedRequests.set(event.request.requestId, event.subagentId);
+            held.openRequests.set(event.request.requestId, {
+              asker: event.subagentId,
+              async: "async" in event.request && event.request.async === true,
+            });
             // A session waiting on its user is in use, however long the
             // user takes to answer.
             yield* cancelIdleUnload(held);
             break;
           case "request.resolved":
-            held.parkedRequests.delete(event.requestId);
+            // An async question can be answered or cancelled while the
+            // session is idle, and then nothing else re-arms the idle wait.
+            if (held.openRequests.delete(event.requestId) && isIdle(held)) {
+              yield* armIdleUnload(held, event.sessionId);
+            }
             break;
           default:
             break;
@@ -1422,7 +1443,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           lastEventAt: 0,
           inactivity: undefined,
           openTurns: new Set(),
-          parkedRequests: new Map(),
+          openRequests: new Map(),
           absolute: undefined,
           idleMs: frame.spec.timeouts.idleMs,
           idle: undefined,
@@ -1794,25 +1815,37 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         }),
 
       /**
-       * Passes the user's answers to an open question to the adapter, with the
-       * same idempotence and the same report as `respondToApprovalRequest`.
+       * Passes the user's answers to an open question to the adapter, and
+       * always replies with a `sessionRespondToQuestionResult` under the
+       * frame's `answerId`: the controller waits for it. The reply is a
+       * refusal when the session is not running here or when the adapter
+       * does not deliver the answer. It never claims success otherwise.
        */
       respondToQuestion: (frame: SessionRespondToQuestion): Effect.Effect<void> =>
-        Effect.suspend(
-          () =>
-            live
-              .get(frame.sessionId)
-              ?.adapter.respondToQuestion(frame.sessionId, frame.requestId, frame.answers)
-              .pipe(
-                // Until the runner replies with a `SessionRespondToQuestionResult`,
-                // a failed delivery can only be logged.
-                Effect.catchTag("AnswerNotDelivered", (error) =>
-                  Effect.logWarning(
-                    `answer to question ${frame.requestId} was not delivered: ${error.message}`,
-                  ),
-                ),
-              ) ?? Effect.void,
-        ),
+        Effect.suspend(() => {
+          const sendResult = (ok: boolean, message?: string) =>
+            reply({
+              _tag: "sessionRespondToQuestionResult",
+              answerId: frame.answerId,
+              ok,
+              ...(message === undefined ? {} : { message: message.slice(0, MAX_MESSAGE_LENGTH) }),
+            });
+          const held = live.get(frame.sessionId);
+          if (held === undefined) {
+            return sendResult(
+              false,
+              "The session is no longer running on its runner, so your answer was not delivered.",
+            );
+          }
+          return held.adapter
+            .respondToQuestion(frame.sessionId, frame.requestId, frame.answers)
+            .pipe(
+              Effect.matchEffect({
+                onFailure: (error) => sendResult(false, error.message),
+                onSuccess: () => sendResult(true),
+              }),
+            );
+        }),
 
       stop: (frame: SessionStop): Effect.Effect<void> => {
         for (const arrived of arrivedStarts) {
