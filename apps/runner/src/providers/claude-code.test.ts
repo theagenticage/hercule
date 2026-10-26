@@ -1022,13 +1022,9 @@ describe("a Claude Code session", () => {
 
       expect(run.options[0]?.permissionMode).toBe(permissionMode);
       expect(run.options[0]?.allowDangerouslySkipPermissions).toBe(dangerous);
-      // The callback is passed in every mode except full-access, not only in
-      // `approval-required`: the harness decides whether to ask, and a mode
-      // that asks about nothing never calls it. When permissions are skipped
-      // the SDK ignores the callback and logs a warning, so it is left out.
-      expect(typeof run.options[0]?.canUseTool).toBe(
-        accessMode === "full-access" ? "undefined" : "function",
-      );
+      // The callback is passed in every mode, full-access included: without
+      // it the harness leaves out `AskUserQuestion`.
+      expect(typeof run.options[0]?.canUseTool).toBe("function");
     });
   }
 
@@ -1786,17 +1782,18 @@ const readDenial = (
     : { message: "", interrupt: true };
 
 /**
- * Starts a session in `approval-required` with a turn open, ready for a tool
- * call to be asked about.
+ * Starts a session in `accessMode` with a turn open, ready for a tool call to
+ * be asked about.
  */
-const startApprovalSession = async (): Promise<Driving> => {
+const startSessionWithTurn = async (accessMode: SessionSpec["accessMode"]): Promise<Driving> => {
   const run = createDriving();
-  await Effect.runPromise(
-    run.adapter.startSession(SESSION, { ...SPEC, accessMode: "approval-required" }, WORKING),
-  );
+  await Effect.runPromise(run.adapter.startSession(SESSION, { ...SPEC, accessMode }, WORKING));
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "list the files" }));
   return run;
 };
+
+/** Starts a session in `approval-required` with a turn open. */
+const startApprovalSession = (): Promise<Driving> => startSessionWithTurn("approval-required");
 
 /** Parks on one tool call and returns the park and the request the adapter emitted. */
 const parkAndAwaitRequest = async (
@@ -2679,6 +2676,42 @@ describe("answering a question the harness asks", () => {
         "Which storage should drafts use?": "IndexedDB",
         "Which features should ship first?": "Export",
       },
+    });
+  });
+});
+
+/**
+ * In `full-access` the harness still calls `canUseTool` for a question, and
+ * for a tool call that always needs the user's approval (for example one an
+ * `ask` rule of the settings covers). The question is asked like in any mode;
+ * the tool call must not become an approval.
+ */
+describe("the harness asking in full-access", () => {
+  it("refuses a tool call at once, without opening a request", async () => {
+    const run = await startSessionWithTurn("full-access");
+
+    const park = parkToolCall(run, "Bash", { command: "echo hi" });
+
+    await waitUntil("refused the call", () => park.settled() !== undefined);
+    expect(readDenial(park.settled())).toEqual({
+      message: expect.stringContaining("full access"),
+      interrupt: false,
+    });
+    expect(listOpenedRequests(run.seen)).toEqual([]);
+  });
+
+  it("opens a question request for a question and passes the answer on", async () => {
+    const run = await startSessionWithTurn("full-access");
+    const input = { questions: [STORAGE_QUESTION] };
+
+    const { park, request } = await parkAndAwaitRequest(run, "AskUserQuestion", input);
+    expect(request.kind).toBe("question");
+    await respondWithAnswers(run, request.requestId, { Storage: "IndexedDB" });
+
+    await waitUntil("resolved the park", () => park.settled() !== undefined);
+    expect(readUpdatedInput(park.settled())).toEqual({
+      ...input,
+      answers: { "Which storage should drafts use?": "IndexedDB" },
     });
   });
 });
