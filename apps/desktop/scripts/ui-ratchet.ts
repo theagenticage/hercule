@@ -1,4 +1,4 @@
-import { UI_SCREENS, isDarkTheme } from "./ui-screens.ts";
+import { UI_SCREENS, RUN_WIDE_THEME, isDarkTheme } from "./ui-screens.ts";
 import { ALL_THEMES } from "../src/renderer/specimens/sheet-themes.ts";
 
 /**
@@ -210,6 +210,26 @@ function readDefinition(key: string): MetricDefinition {
 function readContext(key: string): { readonly dark: boolean } {
   const { theme } = parseKey(key);
   return { dark: theme !== null && isDarkTheme(theme) };
+}
+
+/**
+ * Returns the part of the baseline that a run of `themes` is compared with:
+ * the keys of those themes, and the `run/...` keys if and only if `themes`
+ * includes `RUN_WIDE_THEME`. A key of another theme is dropped, so a run that
+ * measures only some themes does not report the others as missing. Fails when
+ * a key is not a metric key.
+ */
+export function selectBaselineForThemes(
+  baseline: Readonly<Record<string, number>>,
+  themes: ReadonlyArray<string>,
+): Record<string, number> {
+  const includesRunWide = themes.includes(RUN_WIDE_THEME);
+  return Object.fromEntries(
+    Object.entries(baseline).filter(([key]) => {
+      const { theme } = parseKey(key);
+      return theme === null ? includesRunWide : themes.includes(theme);
+    }),
+  );
 }
 
 /** One value that moved between the baseline and the current run. */

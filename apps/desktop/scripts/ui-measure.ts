@@ -29,11 +29,11 @@ import { screenshotVariant } from "./ui-capture.ts";
 import {
   GLASS_PERCENTS,
   isDarkTheme,
+  RUN_WIDE_THEME,
   UI_SCREENS,
   WINDOW_SIZE,
   type UiVariant,
 } from "./ui-screens.ts";
-import { ALL_THEMES } from "../src/renderer/specimens/sheet-themes.ts";
 import {
   checkFocusRing,
   checkNonTextPart,
@@ -414,9 +414,6 @@ export interface PageMeasurement {
   readonly timings: PageTimings;
 }
 
-/** The theme whose first screen also measures what does not depend on the theme: the glyphs. */
-const FIRST_THEME = ALL_THEMES[0];
-
 /** Returns whether `variant` is the first screen of its theme, which also measures the theme's tokens. */
 function isFirstScreen(variant: UiVariant): boolean {
   return variant.screen === UI_SCREENS[0];
@@ -511,7 +508,7 @@ export async function measurePage(
     for (const [name, value] of Object.entries(summarizeTokens(await probe.resolveThemeTokens()))) {
       values[`${variant.theme}/tokens/${name}`] = value;
     }
-    if (variant.theme === FIRST_THEME) {
+    if (variant.theme === RUN_WIDE_THEME) {
       const glyphs = summarizeGlyphs(await measureGlyphPairs(camera, probe));
       for (const [name, value] of Object.entries(glyphs)) values[`run/${name}`] = value;
     }

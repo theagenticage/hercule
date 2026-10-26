@@ -187,8 +187,13 @@ jobs:
   #
   # It runs on Linux in Playwright's Chromium, with no Electron and no
   # controller, so it needs no macOS runner. Its budget is 3 minutes of
-  # wall-clock time: it must add nothing to the longest job of this workflow.
-  # If a change makes it slower, move the slowest variants to a nightly run
+  # wall-clock time per shard: it must add nothing to the longest job of this
+  # workflow. The themes are split over two shards that run in parallel, each
+  # a runner of its own, and each shard compares only the baseline keys of its
+  # themes. The first shard holds the first theme, which also measures the
+  # metrics of the whole run (`run/...`), so every key is checked on every
+  # change. Balance the shards by their measured time. If a change makes a
+  # shard slower, add a shard or move the slowest variants to a nightly run
   # rather than raising the bound.
   #
   # It runs only when something it reads can have changed. On `main` it
@@ -196,8 +201,16 @@ jobs:
   # later steps skip when it says no, so the job still succeeds and a
   # required check on it can pass.
   ui-metrics:
+    name: ui-metrics (${{ matrix.themes }})
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    strategy:
+      # A failure in one shard must not hide the numbers of the other.
+      fail-fast: false
+      matrix:
+        themes:
+          - whitehaven,styles,orient-express
+          - nile,end-house
     steps:
       - uses: actions/checkout@v7
         with:
@@ -248,7 +261,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - if: steps.changes.outputs.run == 'true'
-        run: pnpm --filter @hercule/desktop ui:metrics
+        run: pnpm --filter @hercule/desktop ui:metrics --themes ${{ matrix.themes }}
 
       # The log shows the report. The goldens and the numbers of the run show
       # what moved, and `metrics.json` is what to write into the baseline when
@@ -256,7 +269,7 @@ jobs:
       - if: failure() && steps.changes.outputs.run == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: ui-metrics
+          name: ui-metrics-${{ matrix.themes }}
           path: apps/desktop/out/ui-metrics
           retention-days: 7
 

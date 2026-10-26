@@ -7,6 +7,7 @@ import {
   METRICS,
   parseBaseline,
   readMetricName,
+  selectBaselineForThemes,
 } from "./ui-ratchet.ts";
 
 // One key per kind of metric, so each test names what it exercises.
@@ -134,6 +135,39 @@ describe("METRICS", () => {
       expect(definition.label, name).not.toBe("");
       expect(definition.tolerance, name).toBeGreaterThanOrEqual(0);
     }
+  });
+});
+
+describe("selectBaselineForThemes", () => {
+  const baseline = {
+    "whitehaven/thread/contrast.ink.minLc": 85,
+    "whitehaven/tokens/line.minLc": 30,
+    "nile/thread/contrast.ink.minLc": 80,
+    "end-house/thread/contrast.ink.minLc": 81,
+    "run/glyphs.confusablePairs": 0,
+  };
+
+  it("keeps the keys of the given themes and the run keys when the first theme is among them", () => {
+    expect(Object.keys(selectBaselineForThemes(baseline, ["whitehaven", "styles"]))).toEqual([
+      "whitehaven/thread/contrast.ink.minLc",
+      "whitehaven/tokens/line.minLc",
+      "run/glyphs.confusablePairs",
+    ]);
+  });
+
+  it("drops the run keys when the first theme is not among the themes", () => {
+    expect(Object.keys(selectBaselineForThemes(baseline, ["nile", "end-house"]))).toEqual([
+      "nile/thread/contrast.ink.minLc",
+      "end-house/thread/contrast.ink.minLc",
+    ]);
+  });
+
+  it("makes a shard report a missing key of its own themes but not those of other themes", () => {
+    const shard = selectBaselineForThemes(baseline, ["nile", "end-house"]);
+    const current = { "nile/thread/contrast.ink.minLc": 80 };
+    expect(compareWithBaseline(current, shard).missingFromCurrent).toEqual([
+      "end-house/thread/contrast.ink.minLc",
+    ]);
   });
 });
 

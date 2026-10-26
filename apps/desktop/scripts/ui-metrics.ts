@@ -20,6 +20,13 @@
  * reason in the pull request. `--write-baseline` writes the baseline from this
  * run and exits with 0. There is no other way to skip the check.
  *
+ * `--themes <theme,theme,...>` measures only those themes, so that CI can run
+ * the themes in parallel shards (.github/workflows/ci.yml). A shard compares
+ * only the baseline keys of its themes, plus the `run/...` keys when it holds
+ * the first theme of ALL_THEMES (RUN_WIDE_THEME in scripts/ui-screens.ts),
+ * which measures them. Together the shards check every key. A shard cannot
+ * write the baseline: `--write-baseline` needs a full run.
+ *
  * Setup and the library path on a Linux machine without sudo are the same as
  * for `capture:ui` (scripts/capture-ui.ts).
  */
@@ -37,8 +44,9 @@ import {
   formatBaseline,
   formatReport,
   parseBaseline,
+  selectBaselineForThemes,
 } from "./ui-ratchet.ts";
-import { GLASS_PERCENTS, listUiVariants } from "./ui-screens.ts";
+import { GLASS_PERCENTS, listUiVariants, parseThemeList } from "./ui-screens.ts";
 import { ALL_THEMES } from "../src/renderer/specimens/sheet-themes.ts";
 
 const outputDir = fileURLToPath(new URL("../out/ui-metrics/", import.meta.url));
@@ -46,6 +54,9 @@ const baselineFile = fileURLToPath(new URL("../ui-metrics.baseline.json", import
 
 /** The flag that writes the baseline instead of comparing with it. */
 const WRITE_BASELINE_FLAG = "--write-baseline";
+
+/** The option that measures only some themes, one shard of a CI run. */
+const THEMES_OPTION = "--themes";
 
 /** What to do when a number is worse, or a baseline is missing, in the words the run prints. */
 const HOW_TO_ACCEPT =
@@ -85,23 +96,52 @@ async function readBaselineFile(): Promise<Record<string, number> | null> {
 }
 
 /**
+ * Parses the command line. Returns whether to write the baseline and the
+ * themes to measure (all of them without `--themes`). Fails on an unknown argument, a bad theme list, and
+ * on `--write-baseline` together with `--themes`, because a baseline written
+ * from some themes would drop the keys of the others.
+ */
+function parseArguments(args: ReadonlyArray<string>): {
+  readonly shouldWriteBaseline: boolean;
+  readonly themes: ReadonlyArray<string>;
+} {
+  const options = `The options are ${WRITE_BASELINE_FLAG} and ${THEMES_OPTION} <theme,theme,...>.`;
+  let shouldWriteBaseline = false;
+  let themes: ReadonlyArray<string> = ALL_THEMES;
+  let isShard = false;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === WRITE_BASELINE_FLAG) {
+      shouldWriteBaseline = true;
+    } else if (arg === THEMES_OPTION) {
+      const value = args[++index];
+      if (value === undefined)
+        throw new Error(`${THEMES_OPTION} needs a list of themes. ${options}`);
+      themes = parseThemeList(value);
+      isShard = true;
+    } else {
+      throw new Error(`Unknown argument ${String(arg)}. ${options}`);
+    }
+  }
+  if (shouldWriteBaseline && isShard) {
+    throw new Error(
+      `${WRITE_BASELINE_FLAG} cannot be combined with ${THEMES_OPTION}: write the baseline from a full run, because a partial run would drop the keys of the other themes.`,
+    );
+  }
+  return { shouldWriteBaseline, themes };
+}
+
+/**
  * Runs the measurement. Returns 0 when the run passes, or writes the
  * baseline, and 1 when a number is worse or a key is missing. Fails with a
  * message that names the variant when a page cannot be measured.
  */
 async function runUiMetrics(): Promise<number> {
-  const args = process.argv.slice(2);
-  const unknown = args.filter((arg) => arg !== WRITE_BASELINE_FLAG);
-  if (unknown.length > 0) {
-    throw new Error(
-      `Unknown argument ${unknown.join(", ")}. The only option is ${WRITE_BASELINE_FLAG}.`,
-    );
-  }
-  const shouldWriteBaseline = args.includes(WRITE_BASELINE_FLAG);
+  const { shouldWriteBaseline, themes } = parseArguments(process.argv.slice(2));
 
   const startedAt = performance.now();
   await rm(outputDir, { recursive: true, force: true });
-  await Promise.all(ALL_THEMES.map((theme) => mkdir(join(outputDir, theme), { recursive: true })));
+  await Promise.all(themes.map((theme) => mkdir(join(outputDir, theme), { recursive: true })));
 
   let server: SpecimenServer | undefined;
   let browser: Browser | undefined;
@@ -123,7 +163,10 @@ async function runUiMetrics(): Promise<number> {
     browser = await launchCaptureBrowser();
     // Only the default glass level is loaded: glass 0 % is measured on the same page.
     const variants = listUiVariants().filter(
-      (variant) => variant.scale === METRICS_SCALE && variant.glassPercent === GLASS_PERCENTS[0],
+      (variant) =>
+        themes.includes(variant.theme) &&
+        variant.scale === METRICS_SCALE &&
+        variant.glassPercent === GLASS_PERCENTS[0],
     );
     measurements = await captureVariants(browser, server.specimensUrl, variants, (page, variant) =>
       measurePage(page, variant, outputDir),
@@ -138,7 +181,7 @@ async function runUiMetrics(): Promise<number> {
   const metricsText = formatBaseline(current);
   await writeFile(join(outputDir, "metrics.json"), metricsText);
   const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
-  const summary = `Measured ${String(measurements.length)} pages, ${String(Object.keys(current).length)} numbers, in ${seconds} s.\n${describeTimings(measurements)}\n`;
+  const summary = `Measured ${themes.join(", ")}: ${String(measurements.length)} pages, ${String(Object.keys(current).length)} numbers, in ${seconds} s.\n${describeTimings(measurements)}\n`;
 
   if (shouldWriteBaseline) {
     await writeFile(baselineFile, metricsText);
@@ -159,7 +202,7 @@ async function runUiMetrics(): Promise<number> {
     );
     return 1;
   }
-  const ratchet = compareWithBaseline(current, baseline);
+  const ratchet = compareWithBaseline(current, selectBaselineForThemes(baseline, themes));
   const report = formatReport(current, ratchet, checkTargets(current));
   await writeFile(join(outputDir, "report.md"), report);
   process.stdout.write(`${report}\n${summary}`);

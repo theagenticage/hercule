@@ -199,6 +199,35 @@ export function listUiVariants(screens: ReadonlyArray<UiScreen> = UI_SCREENS): U
   );
 }
 
+/**
+ * The theme whose shard measures the metrics of the whole run (the `run/...`
+ * keys, such as the glyph pairs), because they do not depend on the theme and
+ * one measurement is enough. It is the first of `ALL_THEMES`. A run that
+ * measures only some themes (`ui:metrics --themes`) measures and compares the
+ * run-wide metrics if and only if it includes this theme.
+ */
+export const RUN_WIDE_THEME: string = ALL_THEMES[0] ?? "";
+
+/**
+ * Parses the value of `--themes`, a comma-separated list of theme names, and
+ * returns the names in the order given. Fails when the list is empty, names a
+ * theme twice, or names a theme that is not in `ALL_THEMES`; the message lists
+ * the valid names.
+ */
+export function parseThemeList(text: string): string[] {
+  const names = text.split(",").map((name) => name.trim());
+  const unknown = names.filter((name) => !ALL_THEMES.includes(name));
+  if (unknown.length > 0) {
+    const shown = unknown.map((name) => `"${name}"`).join(", ");
+    throw new Error(`Unknown theme ${shown} in --themes. The themes are ${ALL_THEMES.join(", ")}.`);
+  }
+  const repeated = names.find((name, index) => names.indexOf(name) !== index);
+  if (repeated !== undefined) {
+    throw new Error(`The theme "${repeated}" appears twice in --themes.`);
+  }
+  return names;
+}
+
 /** Returns whether `theme` is a dark theme, which a Mac in dark appearance shows. */
 export function isDarkTheme(theme: string): boolean {
   return (NIGHT_THEMES as ReadonlyArray<string>).includes(theme);
