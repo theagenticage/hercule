@@ -9,14 +9,15 @@ import { describe, expect, it } from "vitest";
 import { ROOT } from "../scripts/controller-process";
 
 /**
- * One limit for every target, so it has to fit the biggest one. The same
- * source compiles to 68 MiB on darwin-arm64 and 83 MiB on both Linux targets:
- * the Bun runtime makes the difference, not our code, and CI measures the
- * Linux build. 95 leaves room to grow and is still well under the ~107 that
- * one per-platform CLI package would add, which is what this test is really
- * watching for. Raise it only after finding out why the binary grew.
+ * One limit for every target, so it has to fit the biggest one. The Bun
+ * runtime makes up most of the binary, not our code, and CI measures the Linux
+ * build. With Bun 1.4.3 that build was 94.7 MiB; Bun 1.4.4 ships a runtime
+ * 17.5 MiB bigger, and the same source now compiles to 112.2 MiB. 125 leaves
+ * room to grow and is still well under the ~136 that one per-platform CLI
+ * package would add, which is what this test is really watching for. Raise it
+ * only after finding out why the binary grew.
  */
-const SIZE_BUDGET_BYTES = 95 * 1024 * 1024;
+const SIZE_BUDGET_BYTES = 125 * 1024 * 1024;
 
 const binary = join(ROOT, "hercule");
 

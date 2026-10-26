@@ -307,10 +307,11 @@ const readStateTransitions = async (harness: ServerHarness): Promise<ReadonlyArr
 const PROTOCOL_ERROR = 1002;
 const GOING_AWAY = 1001;
 /**
- * RFC 6455's "abnormal closure": the connection ended without a close frame.
- * Bun ends a connection that way when a frame exceeds its `maxPayloadLength`.
+ * RFC 6455's "message too big": Bun closes a connection with this code when a
+ * frame exceeds its `maxPayloadLength`. Before Bun 1.4.4 it dropped the
+ * connection without a close frame instead.
  */
-const ABNORMAL_CLOSURE = 1006;
+const MESSAGE_TOO_BIG = 1009;
 
 /** A short ping interval a test can wait for, with a silence limit it will not reach. */
 const FAST = { interval: Duration.millis(40), silence: Duration.seconds(30) };
@@ -581,7 +582,7 @@ describe("what a connection leaves behind", () => {
         wire.send({ _tag: "pong", padding } as unknown as RunnerMessage);
 
         const ending = await wire.closed();
-        expect(ending.code, "the transport dropped the connection").toBe(ABNORMAL_CLOSURE);
+        expect(ending.code, "the transport rejected the frame").toBe(MESSAGE_TOO_BIG);
         const row = await waitForRunner(
           harness.base,
           token,
