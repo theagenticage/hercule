@@ -364,6 +364,7 @@ const claimStarting = (
       sql,
       sessions.claimStarts(runnerId, room, {
         readGithubAccount: () => Effect.succeed(undefined),
+        readGitIdentity: () => Effect.succeed(undefined),
         readSecrets: NO_SECRETS,
         buildCoordination: () => Effect.succeed(coordination),
         runner: { name: "a runner", negotiatedCapabilities: [] },
@@ -759,6 +760,7 @@ describe("SessionService.claimStarts", () => {
             sql,
             sessions.claimStarts(runnerId, 1, {
               readGithubAccount: accounts.readGithubAccount,
+              readGitIdentity: accounts.readGitIdentity,
               readSecrets: NO_SECRETS,
               buildCoordination: () => Effect.succeed(undefined),
               runner: { name: "a runner", negotiatedCapabilities: [] },
@@ -786,45 +788,6 @@ describe("SessionService.claimStarts", () => {
     // claim.
     expect(result.after?.status).toBe("queued");
     expect(result.hash).toBeNull();
-  });
-});
-
-describe("SessionService.listQueuedGithubConnectionIds", () => {
-  it("lists each Connection once, from every queued session of the runner and no other", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const sessions = yield* SessionService;
-        const instanceId = yield* insertInstance("an-adapter", {});
-        const runnerId = mintId();
-        const connectionId = yield* aGithubConnection;
-        const spec = buildSpec(instanceId, "clever");
-        yield* insertQueuedSession(runnerId, { instanceId, spec });
-        yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec,
-          githubConnectionId: connectionId,
-        });
-        yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec,
-          githubConnectionId: connectionId,
-        });
-        // Another runner's queue is not this runner's to claim.
-        yield* insertQueuedSession(mintId(), {
-          instanceId,
-          spec,
-          githubConnectionId: connectionId,
-        });
-        return {
-          connectionId,
-          own: yield* sessions.listQueuedGithubConnectionIds(runnerId),
-          other: yield* sessions.listQueuedGithubConnectionIds(mintId()),
-        };
-      }),
-    );
-
-    expect(result.own).toEqual([result.connectionId]);
-    expect(result.other).toEqual([]);
   });
 });
 

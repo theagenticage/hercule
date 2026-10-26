@@ -907,16 +907,20 @@ export const SessionStart = Schema.Struct({
    */
   token: Schema.String.check(Schema.isLengthBetween(1, MAX_TOKEN_LENGTH)),
   /**
-   * `GH_TOKEN` for this session, when a GitHub Connection backs it. The runner
-   * also keeps it in memory as the first copy of that Connection's token, and
-   * asks the controller for a new one with `GithubTokenRequest` when the copy
-   * goes stale.
+   * `GH_TOKEN` for this session. Present only when a GitHub Connection backs
+   * the session and the controller read a usable token from it: an expired
+   * token, a disabled Connection, or one that needs reconnecting leaves it
+   * off. The runner keeps it in memory as the first copy of that Connection's
+   * token. A token close to its expiry is sent as it is; the runner replaces it by
+   * sending `GithubTokenRequest` when it prepares the session.
    */
   ghToken: Schema.optionalKey(Fact),
   /**
-   * The Connection `ghToken` belongs to. The runner keys its in-memory copy of
-   * the token by it, so sessions that share a Connection share one copy.
-   * Present only when `ghToken` is.
+   * The GitHub Connection that backs the session. Present whenever there is
+   * one, even without a `ghToken`: when the start token is missing or stale,
+   * the runner asks the controller for that Connection's token. The runner
+   * keys its in-memory copy of the token by it, so sessions that share a
+   * Connection share one copy.
    */
   githubConnectionId: Schema.optionalKey(Fact),
   /**
@@ -925,9 +929,10 @@ export const SessionStart = Schema.Struct({
    */
   ghTokenExpiresAt: Schema.optionalKey(Timestamp),
   /**
-   * Who the session commits as: the account its Connection belongs to. Absent
-   * when no Connection backs it; the machine then leaves git's own identity
-   * unchanged rather than inventing one.
+   * Who the session commits as: the account its Connection belongs to. Present
+   * whenever a Connection backs the session, even without a `ghToken`, because
+   * the runner may fetch a token later. Absent when no Connection backs it; the
+   * machine then leaves git's own identity unchanged rather than inventing one.
    */
   gitIdentity: Schema.optionalKey(GitIdentity),
   /** The branch the session's checkout is switched to before the harness starts. */

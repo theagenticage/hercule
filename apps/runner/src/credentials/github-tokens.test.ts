@@ -134,6 +134,25 @@ describe("serving the copy", () => {
     expect(runner.asked).toHaveLength(1);
   });
 
+  it("asks the controller for a session held without a start token", async () => {
+    const runner = setUp();
+    runner.tokens.hold({ sessionToken: "session-1", connectionId: "connection-1" });
+
+    const read = runner.tokens.read("session-1");
+    expect(runner.asked).toEqual(["session-1"]);
+    runner.answer({ token: "asked-token" });
+    expect(await read).toEqual({ token: "asked-token" });
+  });
+
+  it("does not let a session held without a start token drop the copy another session seeded", async () => {
+    const runner = setUp();
+    startSession(runner, { expiresAt: isoAfter(8 * 60) });
+    runner.tokens.hold({ sessionToken: "session-2", connectionId: "connection-1" });
+
+    expect(await runner.tokens.read("session-2")).toEqual({ token: "start-token" });
+    expect(runner.asked).toEqual([]);
+  });
+
   it("asks separately for separate Connections", () => {
     const runner = setUp();
     startSession(runner);

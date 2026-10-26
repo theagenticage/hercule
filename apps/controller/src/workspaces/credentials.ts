@@ -80,13 +80,13 @@ const buildGitIdentity = (login: string): GitIdentity => ({
 });
 
 /**
- * A GitHub account as work uses it: the token it pushes with, when that token
- * expires (`undefined` when it never does), and the identity it commits as.
+ * A GitHub account as work uses it: the token it pushes with, and when that
+ * token expires (`undefined` when it never does). The identity it commits as is
+ * read apart (`readGitIdentity`), because it does not depend on the token.
  */
 export interface GithubAccount {
   readonly token: string;
   readonly expiresAt: string | undefined;
-  readonly gitIdentity: GitIdentity;
 }
 
 /**
@@ -116,8 +116,7 @@ export const githubAccounts = Effect.gen(function* () {
 
     /**
      * Returns the GitHub account of a Connection, for work that starts with
-     * it: the token it pushes with, its expiry and the identity it commits
-     * as. Returns `undefined` if the connection has no usable token. A
+     * it: the token it pushes with and its expiry. Returns `undefined` if the connection has no usable token. A
      * connection that cannot be read is logged and treated the same way,
      * because work that starts without an account is better than work that
      * does not start.
@@ -142,7 +141,6 @@ export const githubAccounts = Effect.gen(function* () {
             : {
                 token: credential.value.token,
                 expiresAt: credential.value.expiresAt,
-                gitIdentity: buildGitIdentity(credential.value.login),
               },
       ),
   };

@@ -137,10 +137,11 @@ const readInstanceEnv = (config: unknown): Record<string, string> => {
  * Hercule's layer comes last, so instance config can never replace the
  * session's token, its controller, or the `hercule` the session calls.
  *
- * The token, `GH_TOKEN` and the git identity come only from the frame; the
- * runner never makes them up. They are passed through the environment and
+ * The token and the git identity come only from the frame. `GH_TOKEN` is the
+ * token the caller resolved (see `resolveSessionContext`); the runner never
+ * makes one up. They are passed through the environment and
  * nowhere else, because anything written to disk would outlive the session
- * (spec 06 section 9.3). When the frame has no `GH_TOKEN`, the variable is left
+ * (spec 06 section 9.3). When there is no GitHub token, the variable is left
  * out: `gh` would read an empty one as a credential that failed, not as no
  * credential at all.
  *
@@ -154,11 +155,15 @@ const readInstanceEnv = (config: unknown): Record<string, string> => {
  * that removal: by the instance's extra environment, by the credential
  * helper's variables, or by the lines below.
  */
-const buildEnv = (machine: Machine, frame: SessionStart): Record<string, string | undefined> => ({
+const buildEnv = (
+  machine: Machine,
+  frame: SessionStart,
+  githubToken: string | undefined,
+): Record<string, string | undefined> => ({
   ...buildSubstrateEnv(machine.baseEnv),
   ...readInstanceEnv(frame.config),
   ...buildGitCredentialEnv({ socketPath: machine.socketPath, identity: frame.gitIdentity }),
-  ...(frame.ghToken === undefined ? {} : { GH_TOKEN: frame.ghToken }),
+  ...(githubToken === undefined ? {} : { GH_TOKEN: githubToken }),
   HERCULE_API_URL: machine.controllerUrl,
   HERCULE_TOKEN: frame.token,
   HERCULE_SESSION: "1",
@@ -321,11 +326,17 @@ const placeSession = (
  * On success the caller owns the scratch, images and marks directories in the
  * result. On failure, or when the work is interrupted, this function removes
  * the ones it had made, so a refused start leaves none behind.
+ *
+ * `githubToken` becomes the session's `GH_TOKEN`; when it is undefined,
+ * `GH_TOKEN` is left unset. The caller resolves it and the frame's own
+ * `ghToken` is not used here, because only the caller knows the runner's
+ * GitHub token copies.
  */
 export const resolveSessionContext = (
   frame: SessionStart,
   machine: Machine,
   binaryName: string,
+  githubToken?: string,
 ): Effect.Effect<Resolved, string> =>
   Effect.gen(function* () {
     const placed = yield* placeSession(frame, machine);
@@ -381,7 +392,7 @@ export const resolveSessionContext = (
           cwd: placed.cwd,
           home,
           binary: machine.findBinary(binaryName),
-          env: buildEnv(machine, frame),
+          env: buildEnv(machine, frame, githubToken),
           // Passed to the adapter as they are, not added to the environment:
           // only the adapter knows which variable its harness reads a credential
           // from.

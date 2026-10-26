@@ -30,6 +30,7 @@ import {
   type ContinuedSubagent,
   type Delivery,
   type FilesEdited,
+  type GitIdentity,
   SubagentId,
   type ModelSelection,
   type ProviderEvent,
@@ -308,11 +309,20 @@ export interface StartNeeds {
   /**
    * Returns the GitHub account of a Connection with its token and the token's
    * expiry, or `undefined` when the Connection has no usable token. This is a
-   * plain read: it never refreshes. The daemon refreshes the Connections'
-   * tokens before the claim, outside the transaction, because a refresh calls
-   * GitHub and a transaction never waits on anything outside the database.
+   * plain read: it never refreshes, because a refresh calls GitHub and a
+   * transaction never waits on anything outside the database. The runner asks
+   * the controller for a fresh token when it prepares the session.
    */
   readonly readGithubAccount: (connectionId: string) => Effect.Effect<GithubAccount | undefined>;
+  /**
+   * Returns the identity a Connection's account commits as, or `undefined`
+   * when the Connection does not exist or is not a GitHub Connection. It does
+   * not depend on the token: a Connection whose token is unusable still has
+   * its login, and the runner commits as it once it has fetched a new token.
+   */
+  readonly readGitIdentity: (
+    connectionId: string,
+  ) => Effect.Effect<GitIdentity | undefined, SqlError>;
   /**
    * Returns the provider instance's credentials, decrypted for this frame and
    * stored nowhere. Fails when they cannot be decrypted, which skips the
@@ -1947,28 +1957,21 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns the ids of the GitHub Connections that this runner's queued
-     * sessions use, each once. The daemon refreshes their tokens before it
-     * claims, so whichever sessions the claim takes, their tokens are fresh.
-     */
-    listQueuedGithubConnectionIds: (
-      runnerId: string,
-    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
-      sessions.listQueuedGithubConnectionIds(runnerId),
-
-    /**
      * Moves up to `room` of this runner's oldest queued sessions to
      * `starting`, and returns the complete start frame for each: the token,
      * the spec, the input the session starts with, the GitHub account it
-     * pushes as (token, its expiry, the Connection's id and the git identity),
-     * when a Connection is set and holds a usable token, and the
-     * `userMaterial` flag that lets a Thread on the local runner see User
-     * Material. In the same write it records the library skills each session
-     * got (`recordLibrarySkills`).
+     * pushes as, when a Connection is set, and the `userMaterial` flag that
+     * lets a Thread on the local runner see User Material. In the same write
+     * it records the library skills each session got (`recordLibrarySkills`).
      *
-     * The account is read plainly, so a token that is expired or inside the
-     * refresh margin is left off the frame. The daemon refreshes the tokens of
-     * the Connections before the claim (`dispatch`), outside the transaction.
+     * The account is read plainly. A session with a GitHub Connection always
+     * gets the Connection's id and the git identity it commits as on its
+     * frame, whatever state its token is in: the runner can ask for a fresh
+     * token while it prepares the session, and the commits are made as the
+     * Connection's account either way. The token and its expiry are on the
+     * frame only when the read gave a usable token: it gives none for an
+     * expired token or a Connection that is disabled or needs reconnecting. A
+     * token inside the refresh margin but not yet expired is passed as it is.
      *
      * The input is the session's oldest waiting input. It is claimed in the
      * same write, exactly as an input sent on its own is, so the runner's
@@ -2079,6 +2082,8 @@ const make = Effect.gen(function* () {
             const connectionId = row.githubConnectionId;
             const account =
               connectionId === null ? undefined : yield* needs.readGithubAccount(connectionId);
+            const gitIdentity =
+              connectionId === null ? undefined : yield* needs.readGitIdentity(connectionId);
             // Built at every start rather than stored, so a resume or a fork
             // sees the session's grants and repositories as they are now.
             const coordination = yield* needs.buildCoordination(row.id);
@@ -2125,15 +2130,15 @@ const make = Effect.gen(function* () {
                 secrets: secrets.value,
                 spec: coordination === undefined ? spec.value : { ...spec.value, coordination },
                 token,
-                ...(connectionId === null || account === undefined
+                ...(connectionId === null ? {} : { githubConnectionId: connectionId }),
+                ...(gitIdentity === undefined ? {} : { gitIdentity }),
+                ...(account === undefined
                   ? {}
                   : {
                       ghToken: account.token,
-                      githubConnectionId: connectionId,
                       ...(account.expiresAt === undefined
                         ? {}
                         : { ghTokenExpiresAt: account.expiresAt }),
-                      gitIdentity: account.gitIdentity,
                     }),
                 ...(row.checkoutBranch === null ? {} : { checkoutBranch: row.checkoutBranch }),
                 // Only a Thread on the local runner sees User Material (spec

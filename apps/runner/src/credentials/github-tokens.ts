@@ -35,21 +35,26 @@ export type GithubTokenResult = { readonly token: string } | { readonly reason: 
 /** The runner's per-Connection copies of GitHub tokens, and the sessions bound to them. */
 export interface GithubTokenCopies {
   /**
-   * Binds a session to its Connection and seeds the Connection's copy with the
-   * session's start token. The start token replaces an existing copy only when
-   * it expires later than the copy. A session can take a long time to
-   * prepare before it is held, so its start token may be older than a copy
-   * that another session refreshed in the meantime. A start token with no
-   * expiry (a pasted token) never replaces a copy; the copy is asked for again
-   * within 5 minutes anyway. A copy
-   * that is kept keeps its `fetchedAt`. Returns a function that releases the
-   * session. It is safe to call more than once. Releasing
-   * the last session of a Connection drops the Connection's copy.
+   * Binds a session to its Connection. When the session has a start token,
+   * that token seeds the Connection's copy: it replaces an existing copy only
+   * when there is none or it expires later. A session can take a long time to
+   * prepare, so its start token may be older than a copy that another session
+   * refreshed in the meantime. A start token with no expiry (a pasted token)
+   * never replaces a copy; the copy is asked for again within 5 minutes
+   * anyway. A copy that is kept keeps its `fetchedAt`.
+   *
+   * A session without a start token (its Connection had no usable token when
+   * the controller sent the start) is bound and seeds nothing; its first
+   * `read` asks the controller.
+   *
+   * Returns a function that releases the session. It is safe to call more
+   * than once. Releasing the last session of a Connection drops the
+   * Connection's copy.
    */
   readonly hold: (session: {
     readonly sessionToken: string;
     readonly connectionId: string;
-    readonly githubToken: string;
+    readonly githubToken?: string;
     readonly expiresAt?: string;
   }) => () => void;
   /**
@@ -143,14 +148,16 @@ export const makeGithubTokenCopies = (dependencies: {
       const held = entry;
       held.sessions.add(sessionToken);
       connectionOfSession.set(sessionToken, connectionId);
-      const started = buildCopy(githubToken, expiresAt);
-      const copy = held.copy;
-      if (
-        copy === undefined ||
-        (started.expiresAt !== undefined &&
-          (copy.expiresAt === undefined || started.expiresAt > copy.expiresAt))
-      ) {
-        held.copy = started;
+      if (githubToken !== undefined) {
+        const started = buildCopy(githubToken, expiresAt);
+        const copy = held.copy;
+        if (
+          copy === undefined ||
+          (started.expiresAt !== undefined &&
+            (copy.expiresAt === undefined || started.expiresAt > copy.expiresAt))
+        ) {
+          held.copy = started;
+        }
       }
 
       return () => {
