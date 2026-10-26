@@ -17,6 +17,7 @@ import {
 } from "@hercule/client-core";
 import { useLiveInvalidation } from "../app/live-invalidation";
 import { providersQuery } from "../app/queries";
+import { copyText } from "./clipboard";
 import { DeviceCode } from "./device-code";
 
 /**
@@ -157,9 +158,8 @@ export function ProviderLogin({
             <Button
               className="-ml-2"
               onClick={() => {
-                // `clipboard` is undefined over plain HTTP except on
-                // localhost. The address is on screen anyway.
-                void navigator.clipboard?.writeText(url ?? "");
+                // A refused copy is not reported: the address is on screen anyway.
+                void copyText(url ?? "");
               }}
             >
               Copy address

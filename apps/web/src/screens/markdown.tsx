@@ -16,6 +16,7 @@
 import { parseMarkdown } from "@hercule/client-core";
 import type { MarkdownBlock, MarkdownInline, MarkdownTableCell } from "@hercule/client-core";
 import { Component, Fragment, memo, useId, type JSX, type ReactNode } from "react";
+import { CodeBlock } from "./code-block";
 
 /** The gap between two blocks, with no gap above the first block in its container. */
 const STACKED = "mt-3 first:mt-0";
@@ -49,17 +50,6 @@ const INLINE_TAGS = { strong: "strong", emphasis: "em", strikethrough: "del" } a
 // appears both on the page and inside the user's bubble. A translucent
 // colour shows on both backgrounds; an opaque one would vanish on one of them.
 const INLINE_CODE = "rounded-control bg-line-soft px-1 py-px font-mono text-[0.92em]";
-
-/**
- * The classes for a fenced code block, the only card in the prose. It uses the
- * same tokens as the user's message bubble. The `<code>` inside it keeps the
- * inline-code class, and these overrides remove its chip styling, because a
- * fenced block is already in a card.
- */
-const FENCE =
-  `${STACKED} overflow-x-auto rounded-card border border-line-soft bg-surface px-3 py-2.5 ` +
-  "font-mono text-fine leading-relaxed [&_code]:rounded-none [&_code]:bg-transparent " +
-  "[&_code]:px-0 [&_code]:py-0 [&_code]:text-[length:inherit]";
 
 const BULLETED_LIST = `${STACKED} list-disc space-y-1 pl-5 marker:text-faint`;
 const NUMBERED_LIST = `${STACKED} list-decimal space-y-1 pl-5 marker:text-faint`;
@@ -260,11 +250,7 @@ const drawBlock = (block: MarkdownBlock, idPrefix: string): JSX.Element => {
     case "blockquote":
       return <blockquote className={QUOTE}>{drawBlocks(block.children, idPrefix)}</blockquote>;
     case "code":
-      return (
-        <pre className={FENCE}>
-          <code className={INLINE_CODE}>{block.text}</code>
-        </pre>
-      );
+      return <CodeBlock text={block.text} language={block.language} className={STACKED} />;
     case "table":
       return (
         <div className={TABLE_SCROLLER}>

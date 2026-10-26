@@ -1,5 +1,6 @@
 import type { JSX } from "react";
 import { Button } from "@hercule/ui";
+import { copyText } from "./clipboard";
 
 /**
  * A one-time code the user types in at a provider, shown large enough to read
@@ -13,9 +14,8 @@ export function DeviceCode({ code }: { readonly code: string }): JSX.Element {
       <Button
         className="-ml-2"
         onClick={() => {
-          // `clipboard` is undefined over plain HTTP except on localhost. The
-          // code is on screen anyway.
-          void navigator.clipboard?.writeText(code);
+          // A refused copy is not reported: the code is on screen anyway.
+          void copyText(code);
         }}
       >
         Copy code
