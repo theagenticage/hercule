@@ -91,8 +91,10 @@ import {
   buildMatchExpression,
   nowIso,
   buildPageInputFields,
+  mintUuid,
   refuseCursor,
   resolveSortDirection,
+  uuidToString,
   withTransaction,
   type Page,
 } from "../db";
@@ -2223,6 +2225,7 @@ const make = Effect.gen(function* () {
       _tag: "sessionRespondToQuestion",
       sessionId,
       requestId,
+      answerId: uuidToString(mintUuid()),
       answers,
     }),
 

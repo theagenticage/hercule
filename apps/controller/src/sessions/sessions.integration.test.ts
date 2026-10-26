@@ -56,7 +56,7 @@ import {
   type ServerHarness,
 } from "../http/testing";
 import { Live } from "../daemon";
-import { withTransaction } from "../db";
+import { UUID_PATTERN, withTransaction } from "../db";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import { importTestSkill } from "../skills/testing";
 import { sessionRepository } from "./repository";
@@ -4996,11 +4996,14 @@ describe("session.respondToQuestion", () => {
         "sessionRespondToQuestion",
         1,
       );
+      // The answer id is new for every attempt, so it is checked apart.
+      expect(sent[0]?.answerId).toMatch(UUID_PATTERN);
       expect(sent).toStrictEqual([
         {
           _tag: "sessionRespondToQuestion",
           sessionId: session.id,
           requestId: REQUEST_ID,
+          answerId: sent[0]?.answerId,
           answers: ANSWERS,
         },
       ]);

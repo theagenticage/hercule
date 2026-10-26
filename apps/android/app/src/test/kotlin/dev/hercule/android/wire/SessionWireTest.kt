@@ -72,6 +72,21 @@ class SessionWireTest {
     }
 
     @Test
+    fun `decodes an async question whose options have no description`() {
+        val request = WireJson.decodeFromString<SessionRequest>(
+            """
+            {"requestId":"r6","itemId":"i6","kind":"question","async":true,"detail":{"questions":[
+              {"question":"Ship it?","header":"Ship","options":[{"label":"Yes"},{"label":"No"}],"multiSelect":false}
+            ]}}
+            """,
+        )
+        val asked = assertIs<QuestionRequest>(request)
+        assertEquals(true, asked.async)
+        assertEquals(listOf("Yes", "No"), asked.detail.questions.single().options.map { it.label })
+        assertEquals(listOf(null, null), asked.detail.questions.single().options.map { it.description })
+    }
+
+    @Test
     fun `decodes a status and an access mode this build does not know`() {
         val session = WireJson.decodeFromString<Session>(
             BUSY_THREAD.replace("\"status\": \"busy\"", "\"status\": \"paused\"")

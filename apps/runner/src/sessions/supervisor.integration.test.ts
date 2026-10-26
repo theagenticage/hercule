@@ -1376,6 +1376,7 @@ describe("what the runner sends back for input, interrupts and answers", () => {
           _tag: "sessionRespondToQuestion",
           sessionId: SESSION,
           requestId: PARK,
+          answerId: "answer-1",
           answers,
         });
       }),

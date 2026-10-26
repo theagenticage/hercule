@@ -8,6 +8,7 @@ import {
   SessionBinding,
   SessionInterrupt,
   SessionRespondToQuestion,
+  SessionRespondToQuestionResult,
   SessionSpec,
   SessionStart,
   SessionStop,
@@ -321,6 +322,49 @@ describe("the normalized event taxonomy", () => {
     expect(decodeQuestionRequest([{ ...one, header: "" }])).toBe("Failure");
   });
 
+  it("keeps the async mark on a question request, and accepts options with no description", () => {
+    const opened = {
+      _tag: "request.opened",
+      ...baseFields,
+      request: {
+        requestId: "r1",
+        itemId: "i1",
+        kind: "question",
+        async: true,
+        detail: {
+          questions: [
+            {
+              question: "Should the migration run now?",
+              header: "Migration",
+              options: [{ label: "Yes" }, { label: "No" }],
+              multiSelect: false,
+            },
+          ],
+        },
+      },
+    };
+
+    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(opened))).toEqual(opened);
+  });
+
+  it("refuses an async mark that is not true", () => {
+    expect(
+      decode(ProviderEvent, {
+        _tag: "request.opened",
+        ...baseFields,
+        request: {
+          requestId: "r1",
+          itemId: "i1",
+          kind: "question",
+          async: false,
+          detail: {
+            questions: [{ question: "Q?", header: "Q", options: [], multiSelect: false }],
+          },
+        },
+      })._tag,
+    ).toBe("Failure");
+  });
+
   it("keeps the mark on a question whose answer the harness asked to keep secret", () => {
     const secret = {
       question: "Which token should this use?",
@@ -620,6 +664,7 @@ describe("the frames that answer a Request an agent is parked on", () => {
       _tag: "sessionRespondToQuestion",
       sessionId: SESSION_ID,
       requestId: "r1",
+      answerId: "a1",
       answers: { Storage: "localStorage", Features: ["Sync", "Search"] },
     };
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionRespondToQuestion)(frame))).toEqual(
@@ -627,11 +672,39 @@ describe("the frames that answer a Request an agent is parked on", () => {
     );
   });
 
+  it("requires an answer id on the frame", () => {
+    expect(
+      Effect.runSyncExit(
+        Schema.decodeUnknownEffect(SessionRespondToQuestion)({
+          _tag: "sessionRespondToQuestion",
+          sessionId: SESSION_ID,
+          requestId: "r1",
+          answers: { Storage: "localStorage" },
+        }),
+      )._tag,
+    ).toBe("Failure");
+  });
+
+  it("decodes the result of an attempt to answer, with a message only when it failed", () => {
+    const decodeResult = (frame: unknown) =>
+      Effect.runSync(Schema.decodeUnknownEffect(SessionRespondToQuestionResult)(frame));
+    const delivered = { _tag: "sessionRespondToQuestionResult", answerId: "a1", ok: true };
+    const failed = {
+      _tag: "sessionRespondToQuestionResult",
+      answerId: "a1",
+      ok: false,
+      message: "The agent has stopped, so it did not get your answer.",
+    };
+    expect(decodeResult(delivered)).toEqual(delivered);
+    expect(decodeResult(failed)).toEqual(failed);
+  });
+
   it("refuses an answer that is only spaces", () => {
     const frame = {
       _tag: "sessionRespondToQuestion",
       sessionId: SESSION_ID,
       requestId: "r1",
+      answerId: "a1",
       answers: { Storage: "  " },
     };
     expect(
@@ -647,6 +720,7 @@ describe("the frames that answer a Request an agent is parked on", () => {
       _tag: "sessionRespondToQuestion",
       sessionId: SESSION_ID,
       requestId: "r1",
+      answerId: "a1",
       answers: {
         F: [
           ...Array.from({ length: MAX_ANSWERS_LENGTH / MAX_MESSAGE_LENGTH - 1 }, () => full),
@@ -670,6 +744,7 @@ describe("the frames that answer a Request an agent is parked on", () => {
       _tag: "sessionRespondToQuestion",
       sessionId: SESSION_ID,
       requestId: "r1",
+      answerId: "a1",
       answers: { "": "x", ["h".repeat(600)]: "y", Storage: "localStorage" },
     };
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionRespondToQuestion)(frame))).toEqual(

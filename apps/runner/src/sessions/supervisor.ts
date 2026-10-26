@@ -1802,8 +1802,16 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           () =>
             live
               .get(frame.sessionId)
-              ?.adapter.respondToQuestion(frame.sessionId, frame.requestId, frame.answers) ??
-            Effect.void,
+              ?.adapter.respondToQuestion(frame.sessionId, frame.requestId, frame.answers)
+              .pipe(
+                // Until the runner replies with a `SessionRespondToQuestionResult`,
+                // a failed delivery can only be logged.
+                Effect.catchTag("AnswerNotDelivered", (error) =>
+                  Effect.logWarning(
+                    `answer to question ${frame.requestId} was not delivered: ${error.message}`,
+                  ),
+                ),
+              ) ?? Effect.void,
         ),
 
       stop: (frame: SessionStop): Effect.Effect<void> => {

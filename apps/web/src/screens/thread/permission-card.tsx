@@ -252,7 +252,9 @@ function QuestionForm({
                 />
                 <span className="text-meta font-emph text-ink wrap-anywhere">{option.label}</span>
               </span>
-              <span className="text-fine text-muted wrap-anywhere">{option.description}</span>
+              {option.description === undefined ? null : (
+                <span className="text-fine text-muted wrap-anywhere">{option.description}</span>
+              )}
             </label>
           ))}
         </div>

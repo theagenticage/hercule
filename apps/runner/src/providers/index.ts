@@ -26,6 +26,7 @@ import { CODEX, codex } from "./codex";
 import { PI, pi } from "./pi";
 import { makeLogins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
+import type { AnswerNotDelivered } from "./answer-not-delivered";
 import type { SteerRefused } from "./steer-refused";
 
 export interface ProviderRunnerContext {
@@ -345,12 +346,15 @@ export interface ProviderAdapter {
    * `events`, with the answers, as the only report. Does nothing when the
    * adapter is not holding that question: it was never opened here, it was
    * already answered, or it is an approval.
+   *
+   * Fails with `AnswerNotDelivered` when the answer did not reach the agent,
+   * or when the adapter cannot confirm that it did.
    */
   readonly respondToQuestion: (
     sessionId: string,
     requestId: string,
     answers: QuestionAnswers,
-  ) => Effect.Effect<void>;
+  ) => Effect.Effect<void, AnswerNotDelivered>;
 
   /**
    * Stops the harness cleanly. `session.exited { reason }` follows on
@@ -385,6 +389,7 @@ export const findAdapter = (providerId: string): ProviderAdapter | undefined =>
 export const providerLogins = makeLogins(spawnLogin);
 
 export { PROBE_DEADLINE, buildFailedProbe } from "./probe";
+export type { AnswerNotDelivered } from "./answer-not-delivered";
 export type { SteerRefused } from "./steer-refused";
 
 export { CLAUDE_CODE, CODEX, PI };

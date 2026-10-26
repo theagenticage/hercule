@@ -404,7 +404,9 @@ export function RequestDock({
                       </span>
                       {option.label}
                     </span>
-                    <span className="ans-desc">{option.description}</span>
+                    {option.description === undefined ? null : (
+                      <span className="ans-desc">{option.description}</span>
+                    )}
                   </label>
                 ))}
               </div>
