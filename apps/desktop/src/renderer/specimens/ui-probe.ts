@@ -789,19 +789,41 @@ function isReplacedElement(element: Element): boolean {
 }
 
 /**
- * Returns whether an element paints something of its own inside its box, so
- * that what lies behind the box is not seen through it: a background colour
- * with alpha above 0, a background image, a backdrop filter, or replaced
- * content. An element that draws only text, a border or nothing at all does
- * not hide what is behind it.
+ * The least alpha of a background colour that hides what lies behind it. The
+ * text under a layer this opaque cannot be read, while the text under a faint
+ * wash (a hover tint at 1 % or 8 %) still can, and the glass of the UI is
+ * about 0.9. Half is the point where the layer, and not what is behind it,
+ * decides the colour a reader sees.
  */
-function paintsInsideBox(element: Element, readFacts: ReadFacts): boolean {
+const OPAQUE_BACKGROUND_ALPHA = 0.5;
+
+/** Returns whether a computed `backdrop-filter` value blurs: it holds a `blur()` with a radius above 0. */
+function blursBackdrop(backdropFilter: string): boolean {
+  return Array.from(backdropFilter.matchAll(/blur\(\s*([\d.]+)/g)).some(
+    ([, radius]) => Number.parseFloat(radius ?? "0") > 0,
+  );
+}
+
+/**
+ * Returns whether an element hides what lies behind its box, so that text
+ * behind it cannot be read. It does when it has any of these:
+ *
+ * - a background colour with alpha of 0.5 or more (see `OPAQUE_BACKGROUND_ALPHA`);
+ * - a background image of any kind;
+ * - replaced content (an image, svg, canvas, video or iframe);
+ * - a backdrop filter with a blur radius above 0, which smears what is behind.
+ *
+ * A fainter background colour, a backdrop filter without a blur (`blur(0px)`,
+ * `saturate(1.2)`) and an element that draws only text, a border or nothing
+ * leave the text behind readable, so they do not hide it.
+ */
+function hidesContentBehind(element: Element, readFacts: ReadFacts): boolean {
   const { style } = readFacts(element);
   return (
     isReplacedElement(element) ||
     style.backgroundImage !== "none" ||
-    style.backdropFilter !== "none" ||
-    resolveColour(style.backgroundColor)[3] > 0
+    blursBackdrop(style.backdropFilter) ||
+    resolveColour(style.backgroundColor)[3] >= OPAQUE_BACKGROUND_ALPHA
   );
 }
 
@@ -813,10 +835,10 @@ function paintsInsideBox(element: Element, readFacts: ReadFacts): boolean {
  * fragment is covered when every point is covered.
  *
  * A point is covered when, walking down the elements at that point from the
- * topmost, an element that paints inside its box (see `paintsInsideBox`)
- * comes before the owner of the fragment. The walk skips elements that paint
- * nothing there, because the text shows through them: a transparent overlay
- * over the whole page, or a second block of text at the same place. It also
+ * topmost, an element that hides what is behind it (see `hidesContentBehind`)
+ * comes before the owner of the fragment. The walk skips elements that do
+ * not, because the text shows through them: a transparent or faintly tinted
+ * overlay over the whole page, or a second block of text at the same place. It also
  * skips elements that are not drawn (opacity 0 or hidden), such as the
  * sidebar's hover buttons over the row text. The walk ends, and the point is
  * not covered, at the owner, an element inside it, or an element around it.
@@ -845,7 +867,7 @@ function isCoveredByOtherElement(
   return points.every(([x, y]) => {
     for (const element of document.elementsFromPoint(x, y)) {
       if (element === owner || owner.contains(element) || element.contains(owner)) return false;
-      if (isDrawn(element, readFacts) && paintsInsideBox(element, readFacts)) return true;
+      if (isDrawn(element, readFacts) && hidesContentBehind(element, readFacts)) return true;
     }
     return false;
   });
@@ -1496,12 +1518,14 @@ function isInProse(element: Element): boolean {
  * Returns the elements a user can click or focus that are visible (part of
  * the box is in the window and not clipped), enabled, and not inside an inert
  * subtree, in document order. Each gets a `data-ui-probe-target` attribute
- * with its id, for `focusTarget`; the ids of an earlier call are dropped.
+ * with its id, for `focusTarget`; the ids of an earlier call are dropped, and
+ * so are the scroll containers `focusTarget` found.
  *
  * `inWindow` is true when nothing of the box is cut, by the window or by a
  * clipping ancestor, because the focus check needs the whole ring in view.
  */
 export function collectTargets(): ProbeTarget[] {
+  scrollContainers = undefined;
   for (const marked of document.querySelectorAll(`[${TARGET_ATTRIBUTE}]`)) {
     marked.removeAttribute(TARGET_ATTRIBUTE);
   }
@@ -1532,7 +1556,17 @@ export function collectTargets(): ProbeTarget[] {
   return targets;
 }
 
-/** The scroll positions `focusTarget` found, and the element it focused, for `blurTarget`. */
+/**
+ * The elements that have scrolled content, found once for the page by the
+ * first `focusTarget` after a `collectTargets` (which forgets them). Only
+ * these can change their scroll position when an element gets the focus, so
+ * `focusTarget` and `blurTarget` save and restore only these instead of
+ * looking at every element each time. They stay valid because nothing changes
+ * the page's layout while the focus is measured.
+ */
+let scrollContainers: ReadonlyArray<Element> | undefined;
+
+/** The element `focusTarget` focused, with the scroll positions to put back when it is blurred. */
 let focusSnapshot:
   | {
       readonly element: HTMLElement;
@@ -1545,30 +1579,40 @@ let focusSnapshot:
     }
   | undefined;
 
+/** Returns every element under the body whose content is larger than its box, so that it has a scroll position. */
+function findScrollContainers(): Element[] {
+  return Array.from(document.body.querySelectorAll("*")).filter(
+    (each) => each.scrollHeight > each.clientHeight || each.scrollWidth > each.clientWidth,
+  );
+}
+
 /**
  * Focuses the target `collectTargets` gave this id, as a keyboard user would
  * (`focusVisible`), without scrolling anything into view. Returns whether the
  * element is now the active element and matches `:focus-visible`. Fails when
- * no element has the id, or when another target is still focused (call
- * `blurTarget` first).
+ * no element has the id.
+ *
+ * A target focused by an earlier call is blurred first, so a caller that
+ * checks many targets in a row needs one call per target, and one
+ * `blurTarget` at the end.
  */
 export function focusTarget(id: number): FocusOutcome {
-  if (focusSnapshot !== undefined) {
-    throw new Error("A target is still focused. Call blurTarget before focusing the next one.");
-  }
   const element = document.querySelector(`[${TARGET_ATTRIBUTE}="${id}"]`);
   if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {
     throw new Error(`No focusable element carries the target id ${id}. Call collectTargets first.`);
   }
+  if (focusSnapshot !== undefined) blurTarget();
+  scrollContainers ??= findScrollContainers();
   // `preventScroll` should keep every scroll position, but a script can scroll
   // on focus all the same, and the screenshots must see the page where it was.
-  const scrolled = Array.from(document.body.querySelectorAll("*"))
-    .filter((each) => each.scrollTop !== 0 || each.scrollLeft !== 0)
-    .map((each) => ({ element: each, left: each.scrollLeft, top: each.scrollTop }));
   focusSnapshot = {
     element: element as HTMLElement,
     window: { left: window.scrollX, top: window.scrollY },
-    scrolled,
+    scrolled: scrollContainers.map((each) => ({
+      element: each,
+      left: each.scrollLeft,
+      top: each.scrollTop,
+    })),
   };
   const options: FocusOptions & { focusVisible: boolean } = {
     focusVisible: true,
@@ -1589,14 +1633,12 @@ export function blurTarget(): void {
   const snapshot = focusSnapshot;
   focusSnapshot = undefined;
   snapshot.element.blur();
-  window.scrollTo(snapshot.window.left, snapshot.window.top);
-  const scrolledBefore = new Set(snapshot.scrolled.map((entry) => entry.element));
-  for (const element of document.body.querySelectorAll("*")) {
-    if (!scrolledBefore.has(element) && (element.scrollTop !== 0 || element.scrollLeft !== 0)) {
-      element.scrollTo(0, 0);
-    }
+  if (window.scrollX !== snapshot.window.left || window.scrollY !== snapshot.window.top) {
+    window.scrollTo(snapshot.window.left, snapshot.window.top);
   }
-  for (const { element, left, top } of snapshot.scrolled) element.scrollTo(left, top);
+  for (const { element, left, top } of snapshot.scrolled) {
+    if (element.scrollLeft !== left || element.scrollTop !== top) element.scrollTo(left, top);
+  }
 }
 
 /**

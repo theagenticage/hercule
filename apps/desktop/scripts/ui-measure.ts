@@ -42,7 +42,6 @@ import {
   type DecodedImage,
 } from "./ui-pixels.ts";
 import {
-  selectOneTargetPerKind,
   summarizeContrast,
   summarizeDiscipline,
   summarizeGlyphs,
@@ -297,36 +296,6 @@ function buildFocusClip(box: ProbeRect): ProbeRect {
 }
 
 /**
- * The attribute the probe's `collectTargets` puts on each target, holding its
- * id (src/renderer/specimens/ui-probe.ts).
- */
-const TARGET_ID_ATTRIBUTE = "data-ui-probe-target";
-
-/**
- * Returns the kind of each target that `collectTargets` last marked, by id.
- * Controls of one kind look and behave alike: the same tag, classes, role and
- * type attribute, and the same size in whole CSS px.
- */
-async function readTargetKinds(page: Page): Promise<Record<number, string>> {
-  // A string, because this program has no DOM types.
-  return page.evaluate<Record<number, string>>(`(() => {
-    const kinds = {};
-    for (const element of document.querySelectorAll("[${TARGET_ID_ATTRIBUTE}]")) {
-      const box = element.getBoundingClientRect();
-      kinds[element.getAttribute("${TARGET_ID_ATTRIBUTE}")] = [
-        element.tagName,
-        [...element.classList].sort().join("."),
-        element.getAttribute("role") ?? "",
-        element.getAttribute("type") ?? "",
-        Math.round(box.width),
-        Math.round(box.height),
-      ].join("|");
-    }
-    return kinds;
-  })()`);
-}
-
-/**
  * Takes the focus off whatever has it and waits for the page to settle, so
  * that no control shows a focus ring. Fails when a control still matches
  * `:focus-visible` afterwards, because the page took the focus back.
@@ -347,44 +316,44 @@ async function removeFocusFromPage(page: Page): Promise<void> {
 }
 
 /**
- * Focuses one target of each kind of control that lies wholly in the window,
- * as a keyboard user does, and returns how many kinds show no focus ring: the
- * focus did not land, or the pixels around the target did not change enough
- * from an unfocused capture of the page. One small screenshot per kind.
- *
- * It counts kinds, not controls, because the rows of one component share one
- * focus style, and a screenshot for each of a hundred rows is most of the
- * time of a measurement. A control that styles its focus differently from
- * others of its kind (the same tag, classes, role, type and size) goes
- * unseen.
+ * Focuses each target that lies wholly in the window, as a keyboard user
+ * does, and returns how many show no focus ring: the focus did not land, or
+ * the pixels around the target did not change enough from an unfocused
+ * capture of the page. Every control is checked on its own, because a
+ * component can style its focus differently in one place than in another.
  *
  * It takes the focus off the page first and compares with a capture taken
  * after that, never with the golden. The golden may show the ring of a control
  * that had the focus when the page loaded, and a control without a ring of
  * its own, next to it, would then pass on the pixels where that ring was.
+ *
+ * Each control costs one call into the page (`focusTarget`, which also blurs
+ * the control before it) and one small screenshot of the clip around it.
  * Leaves the page with nothing focused.
  */
-async function countKindsWithoutFocusRing(
+async function countTargetsWithoutFocusRing(
   page: Page,
   camera: Camera,
   probe: PageProbe,
   targets: ReadonlyArray<ProbeTarget>,
 ): Promise<number> {
-  const sampled = selectOneTargetPerKind(targets, await readTargetKinds(page));
   await removeFocusFromPage(page);
   const unfocused = await camera.capture();
   let missing = 0;
-  for (const target of sampled) {
+  let hasFocusedTarget = false;
+  for (const target of targets) {
+    if (!target.inWindow) continue;
     const { focused } = await probe.focusTarget(target.id);
+    hasFocusedTarget = true;
     let hasRing = false;
     if (focused) {
       const clip = buildFocusClip(target.box);
       const clipped = await camera.capture(clip);
       hasRing = checkFocusRing(unfocused, clipped, clip, target.box, METRICS_SCALE).visible;
     }
-    await probe.blurTarget();
     if (!hasRing) missing += 1;
   }
+  if (hasFocusedTarget) await probe.blurTarget();
   return missing;
 }
 
@@ -532,7 +501,7 @@ export async function measurePage(
   const targets = await probe.collectTargets();
   add(summarizeTargets(targets));
   lap("other");
-  add({ "focus.missing": await countKindsWithoutFocusRing(page, camera, probe, targets) });
+  add({ "focus.missing": await countTargetsWithoutFocusRing(page, camera, probe, targets) });
   lap("focus");
 
   if (variant.screen.name === "thread-long") {

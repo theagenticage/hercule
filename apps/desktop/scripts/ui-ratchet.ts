@@ -136,9 +136,7 @@ export const METRICS: Readonly<Record<string, MetricDefinition>> = {
   // Reported against the product's stricter 28px threshold; it never fails.
   "target.under28": reported("Click targets under 28px", "lower"),
 
-  // Counts kinds of control, not controls: the rows of one component share one
-  // focus style, and measuring the focus costs a screenshot each.
-  "focus.missing": none("Kinds of control without a visible focus ring"),
+  "focus.missing": none("Controls without a visible focus ring"),
 
   "resilience.textSpacing.clippedCharacters": none("Clipped characters with text spacing"),
   "resilience.textSpacing.overlaps": none("Overlaps with text spacing"),

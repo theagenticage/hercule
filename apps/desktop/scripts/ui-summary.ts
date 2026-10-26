@@ -174,33 +174,6 @@ export function summarizeTargets(targets: ReadonlyArray<ProbeTarget>): MetricVal
 }
 
 /**
- * Returns the first target of each kind of control, in document order, among
- * the targets that lie wholly in the window. `kinds` maps a target's id to its
- * kind: a text that is the same for controls that look and behave alike (tag,
- * classes, role, type and size). The rows of one component share one focus
- * style, so one of them says as much as all of them, and the focus check costs
- * a screenshot for each control it looks at. Fails when a target has no kind.
- */
-export function selectOneTargetPerKind(
-  targets: ReadonlyArray<ProbeTarget>,
-  kinds: Readonly<Record<number, string>>,
-): ProbeTarget[] {
-  const seen = new Set<string>();
-  const selected: ProbeTarget[] = [];
-  for (const target of targets) {
-    if (!target.inWindow) continue;
-    const kind = kinds[target.id];
-    if (kind === undefined) {
-      throw new Error(`The target ${String(target.id)} (${target.name}) has no kind.`);
-    }
-    if (seen.has(kind)) continue;
-    seen.add(kind);
-    selected.push(target);
-  }
-  return selected;
-}
-
-/**
  * Summarizes how a page's text survives a change: `prefix` is the metrics'
  * name for the change (`textSpacing`, `textSize`, `reflow` or `rest`), and
  * the result holds the clipped characters and the overlapping pairs.

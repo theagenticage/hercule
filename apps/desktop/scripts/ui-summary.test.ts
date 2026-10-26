@@ -11,7 +11,6 @@ import {
   summarizeDiscipline,
   summarizeGlyphs,
   summarizeProse,
-  selectOneTargetPerKind,
   summarizeTargets,
   summarizeText,
   summarizeTokens,
@@ -182,34 +181,6 @@ describe("summarizeTargets", () => {
       buildTarget(23.995, 24),
     ]);
     expect(values).toEqual({ "coverage.controls": 5, "target.under24": 1, "target.under28": 4 });
-  });
-});
-
-describe("selectOneTargetPerKind", () => {
-  function buildTarget(id: number, inWindow = true): ProbeTarget {
-    return {
-      id,
-      box: { left: 0, top: 0, right: 30, bottom: 30 },
-      name: `target ${String(id)}`,
-      inlineInProse: false,
-      inWindow,
-    };
-  }
-
-  it("keeps the first target of each kind, in document order", () => {
-    const targets = [buildTarget(0), buildTarget(1), buildTarget(2), buildTarget(3)];
-    const kinds = { 0: "button", 1: "row", 2: "button", 3: "row" };
-    expect(selectOneTargetPerKind(targets, kinds).map(({ id }) => id)).toEqual([0, 1]);
-  });
-
-  it("leaves out targets that are not wholly in the window, even the first of a kind", () => {
-    const targets = [buildTarget(0, false), buildTarget(1), buildTarget(2)];
-    const kinds = { 0: "button", 1: "button", 2: "row" };
-    expect(selectOneTargetPerKind(targets, kinds).map(({ id }) => id)).toEqual([1, 2]);
-  });
-
-  it("fails on a target without a kind", () => {
-    expect(() => selectOneTargetPerKind([buildTarget(4)], {})).toThrow(/no kind/);
   });
 });
 
