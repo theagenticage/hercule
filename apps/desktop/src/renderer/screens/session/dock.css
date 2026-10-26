@@ -165,7 +165,7 @@
 }
 /* Options with no description have no second column to line up with, so
    their labels take the whole row instead of wrapping in the first column. */
-.dock-options:not(:has(.ans-desc)) .dock-option {
+.dock-options--plain .dock-option {
   grid-template-columns: 1fr;
 }
 .dock-option:hover {
