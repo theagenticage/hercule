@@ -1,0 +1,78 @@
+{
+  "generatedFrom": "d576eb70f2024cc7309d64baa8cafa17728537df",
+  "command": "pnpm --filter @hercule/desktop capture:ui --calibration",
+  "files": [
+    {
+      "file": "broken-cramped-orient-express-intake-1x.png",
+      "sha256": "37f0468db210874ee93da19101a54e260efbdc2ce5ca1eebc3b8bde40bad81ec"
+    },
+    {
+      "file": "broken-cramped-orient-express-sidebar-1x.png",
+      "sha256": "f67ddbcedf1cf9d62ffa93669688cc31c09c3879e46728ea72a95052874b0d6d"
+    },
+    {
+      "file": "broken-cramped-orient-express-thread-1x.png",
+      "sha256": "c1bba354f5056cdd8b356ca4edcc3f0c8c44647ca9f53bdb4b8243283c5b0cd3"
+    },
+    {
+      "file": "broken-cramped-whitehaven-intake-1x.png",
+      "sha256": "8a799e6ed9159c91172752aa44aca6f7e669d6d7963213fefe3b415338ccc338"
+    },
+    {
+      "file": "broken-cramped-whitehaven-sidebar-1x.png",
+      "sha256": "518627cc8694488240b44836afe862fecfc676d517cb37af93e3859846e63452"
+    },
+    {
+      "file": "broken-cramped-whitehaven-thread-1x.png",
+      "sha256": "3d542d7ed7df07a0d4ca432bd64a25e0ef74624916e2e5af69245d4b672ee513"
+    },
+    {
+      "file": "broken-max-contrast-orient-express-intake-1x.png",
+      "sha256": "aeaafb5e2512201a596d6d4ba63e90bd3cb4b322483fa0a9ad4c0b214e401e38"
+    },
+    {
+      "file": "broken-max-contrast-orient-express-sidebar-1x.png",
+      "sha256": "a953cd35626276c4c464df24789893d67646c0009863408f13707014a7db1859"
+    },
+    {
+      "file": "broken-max-contrast-orient-express-thread-1x.png",
+      "sha256": "094aade9c1b4e410559783fb5fac3f420ab1d1d6cb889eecabeb5cfd71927a6f"
+    },
+    {
+      "file": "broken-max-contrast-whitehaven-intake-1x.png",
+      "sha256": "93f80f9246ab43c6f8a839853c569b91500de3f82df20206a69fca1321c964e1"
+    },
+    {
+      "file": "broken-max-contrast-whitehaven-sidebar-1x.png",
+      "sha256": "2d2c856ca63d1a11c8fd6d7a8e8e3be2ac52acb487a41a753ac5a2d562b10e72"
+    },
+    {
+      "file": "broken-max-contrast-whitehaven-thread-1x.png",
+      "sha256": "a3ee43cda4112f4e9eb477ea0e26b177470b7357f49871101d80582615ae0aff"
+    },
+    {
+      "file": "broken-noisy-orient-express-intake-1x.png",
+      "sha256": "d09b17cc11f57bbef20d49f24f99e0bffc7769cdaa064e015d76bf9b73deb9fe"
+    },
+    {
+      "file": "broken-noisy-orient-express-sidebar-1x.png",
+      "sha256": "65314dff943ce16f7683de58bb07a335129c23285e6d9b40fd8e33e2de5ed506"
+    },
+    {
+      "file": "broken-noisy-orient-express-thread-1x.png",
+      "sha256": "5f5891628f2be0b788714d1362521caafc19d889174f4f2b1607ff19afba33cb"
+    },
+    {
+      "file": "broken-noisy-whitehaven-intake-1x.png",
+      "sha256": "6c0f98913d6cff280333557063fa657077c91dd395d8ad730d12ead52af0b358"
+    },
+    {
+      "file": "broken-noisy-whitehaven-sidebar-1x.png",
+      "sha256": "a389447fc8cbf2cfd881ec4db55c841559ba6a969c872ad82420520c477ddb43"
+    },
+    {
+      "file": "broken-noisy-whitehaven-thread-1x.png",
+      "sha256": "fc0b3a8dbd61434c87af718bf29cc39f9d796fc44710c7d0dc8d63b2ea4768c2"
+    }
+  ]
+}
