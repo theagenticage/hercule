@@ -178,6 +178,87 @@ jobs:
           path: apps/desktop/out/bureau-compare
           retention-days: 7
 
+  # The ratchet of the desktop UI hill climb (docs/research/ui-hill-climb.md,
+  # section 4.1): `ui:metrics` measures contrast, edges, discipline, targets,
+  # focus, resilience and reading on the specimen pages, in five themes, and
+  # fails when any number is worse than `apps/desktop/ui-metrics.baseline.json`.
+  # A regression is accepted only by editing the baseline in the pull request
+  # and giving the reason in its body.
+  #
+  # It runs on Linux in Playwright's Chromium, with no Electron and no
+  # controller, so it needs no macOS runner. Its budget is 3 minutes of
+  # wall-clock time: it must add nothing to the longest job of this workflow.
+  # If a change makes it slower, move the slowest variants to a nightly run
+  # rather than raising the bound.
+  #
+  # It runs only when something it reads can have changed. On `main` it
+  # always runs. The first step decides, without a third-party action, and the
+  # later steps skip when it says no, so the job still succeeds and a
+  # required check on it can pass.
+  ui-metrics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The first step diffs against the pull request's base. A shallow
+          # clone does not have that history.
+          fetch-depth: 0
+
+      - name: Decide whether the UI metrics apply
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # What the metrics read: the renderer (its styles, tokens and
+          # fonts), the scripts that load, measure and compare it, what the
+          # specimens import from other packages, and the toolchain.
+          touched=$(git diff --name-only "$BASE_SHA"...HEAD | grep -E '^(apps/desktop/src/renderer/|apps/desktop/scripts/ui-|apps/desktop/scripts/capture-ui\.ts$|apps/desktop/scripts/sheet-server\.ts$|apps/desktop/vite\.renderer\.config\.ts$|apps/desktop/package\.json$|apps/desktop/ui-metrics\.baseline\.json$|pnpm-lock\.yaml$|package\.json$|\.bun-version$|packages/client-core/|packages/contract/|\.github/workflows/ci\.yml$|\.github/actions/)' || true)
+          if [ -n "$touched" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "The UI metrics apply, because of:"
+            echo "$touched"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No file the UI metrics read changed, so they are skipped."
+          fi
+
+      - if: steps.changes.outputs.run == 'true'
+        uses: ./.github/actions/setup
+
+      # Chromium is about 150 MB, and changes only with Playwright's version,
+      # which the lockfile pins. The system libraries are not cached: they
+      # come from apt, and `install` below fetches them in seconds.
+      - name: Read the Playwright version
+        if: steps.changes.outputs.run == 'true'
+        id: playwright
+        run: echo "version=$(grep -m1 -oE '^  playwright@[0-9.]+' pnpm-lock.yaml | cut -d@ -f2)" >> "$GITHUB_OUTPUT"
+      - if: steps.changes.outputs.run == 'true'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - if: steps.changes.outputs.run == 'true'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - if: steps.changes.outputs.run == 'true'
+        run: pnpm --filter @hercule/desktop ui:metrics
+
+      # The log shows the report. The goldens and the numbers of the run show
+      # what moved, and `metrics.json` is what to write into the baseline when
+      # the change is meant. They are kept for a week.
+      - if: failure() && steps.changes.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-metrics
+          path: apps/desktop/out/ui-metrics
+          retention-days: 7
+
   # The Android app's check (spec 18, Testing). It runs on every change, like
   # every other job: the path filter at the top applies to the whole
   # workflow, not to single jobs.

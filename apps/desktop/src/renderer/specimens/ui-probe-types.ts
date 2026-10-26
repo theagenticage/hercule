@@ -1,0 +1,125 @@
+/**
+ * What the UI probe (ui-probe.ts) reads from a specimen page, as plain data
+ * that crosses from the page to Node: `pnpm ui:metrics`
+ * (scripts/ui-metrics.ts) loads the probe into each captured page, calls its
+ * functions, and turns their results into the scripted metrics of the desktop
+ * UI hill climb (docs/research/ui-hill-climb.md, section 4.1).
+ *
+ * The page code and the Node code both import this file, so it holds only
+ * types and uses nothing of the DOM.
+ */
+
+/** A rectangle in CSS pixels, measured from the top left of the window. */
+export interface ProbeRect {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+/** A colour in sRGB: red, green and blue from 0 to 255, and alpha from 0 to 1. */
+export type ProbeColour = readonly [red: number, green: number, blue: number, alpha: number];
+
+/**
+ * The role of a piece of text, decided from its colour before any opacity:
+ * the theme's `--ink`, `--muted` or `--faint`, compared in the nearest themed
+ * scope. A placeholder or a disabled control wins over its colour. Any other
+ * colour, such as a crew hue, `--you-ink` or `--accent-ink`, is `other`.
+ */
+export type TextRole = "ink" | "muted" | "faint" | "placeholder" | "disabled" | "other";
+
+/** One line of one piece of text, as the browser lays it out. */
+export interface TextFragment {
+  /** The piece of text this fragment belongs to: the same number for every line of one text node, input or pseudo-element. */
+  readonly sourceId: number;
+  /** How many characters the fragment holds. */
+  readonly length: number;
+  /** The fragment's box as laid out, which may reach outside what is visible. */
+  readonly box: ProbeRect;
+  /** The part of `box` that is visible: cut to the window and to every ancestor that clips its content. Null when nothing is visible. */
+  readonly visibleBox: ProbeRect | null;
+  readonly fontSize: number;
+  readonly fontWeight: number;
+  readonly colour: ProbeColour;
+  readonly role: TextRole;
+  /** The ancestors with an opacity below 1, outermost first, as the ids `markOpacityGroups` gave them. Empty for most text. */
+  readonly opacityGroups: ReadonlyArray<{ readonly id: number; readonly opacity: number }>;
+  /** Whether the text is prose of a transcript message, which the prose measure reads. */
+  readonly isProse: boolean;
+}
+
+/** The theme tokens a metric compares with, resolved to sRGB in the page's top-level theme. */
+export interface ThemeTokens {
+  readonly bg: ProbeColour;
+  readonly surface: ProbeColour;
+  readonly raised: ProbeColour;
+  readonly line: ProbeColour;
+  readonly ink: ProbeColour;
+  readonly muted: ProbeColour;
+  readonly faint: ProbeColour;
+}
+
+/** The type, shape and spacing values the page uses, for the discipline metrics. */
+export interface DisciplineFacts {
+  /** Every computed font size of visible text, in px, without repeats, sorted. */
+  readonly fontSizes: ReadonlyArray<number>;
+  /** Every computed font weight of visible text, without repeats, sorted. */
+  readonly fontWeights: ReadonlyArray<number>;
+  /** Every computed non-zero corner radius of a visible element, as CSS text, without repeats, sorted. */
+  readonly radii: ReadonlyArray<string>;
+  /** Authored font-size declarations that apply to a visible element and are not a `var(--t-*)`: "selector { font-size: value }", without repeats. */
+  readonly offScaleFontSizes: ReadonlyArray<string>;
+  /** Authored border-radius declarations that apply to a visible element and are not a `var(--r-*)`, a pill or a circle, without repeats. */
+  readonly offTokenRadii: ReadonlyArray<string>;
+  /** Every non-zero computed padding, margin and gap value of a visible element, in px, repeats kept. */
+  readonly spacingValues: ReadonlyArray<number>;
+}
+
+/** An element a user can click or focus. */
+export interface ProbeTarget {
+  /** The id `collectTargets` gave the element, which `focusTarget` takes. */
+  readonly id: number;
+  readonly box: ProbeRect;
+  /** A short name for reports: its accessible name or its text, else its tag and classes. */
+  readonly name: string;
+  /** Whether it is a link inside prose, which WCAG 2.5.8 exempts from the target size. */
+  readonly inlineInProse: boolean;
+  /** Whether its box is fully inside the window. */
+  readonly inWindow: boolean;
+}
+
+/** What happened when `focusTarget` focused an element. */
+export interface FocusOutcome {
+  /** Whether the element is `document.activeElement` and matches `:focus-visible`. */
+  readonly focused: boolean;
+}
+
+/** A change to the page that tests how its text survives (WCAG 1.4.12, larger text, reflow). */
+export type Perturbation = "text-spacing" | "largest-text-size";
+
+/** How much text is lost or overlapping in the page as it is now. */
+export interface ClippingFacts {
+  /**
+   * Characters of text that are lost: per fragment, its length times the share of its box that is cut off for good, rounded.
+   * Ancestors with overflow `hidden` or `clip` cut it; ancestors that scroll do not, and the window cuts it only when no ancestor scrolls.
+   */
+  readonly clippedCharacters: number;
+  /** Pairs of fragments of different sources whose visible boxes overlap by more than 2 square px. Pseudo-element strings are left out. */
+  readonly overlappingPairs: number;
+}
+
+/** The measure of the transcript's prose. */
+export interface ProseFacts {
+  /** Full lines measured: every line of a paragraph but its last. */
+  readonly lines: number;
+  /** Mean characters per full line, or null when there are none. */
+  readonly meanCharactersPerLine: number | null;
+}
+
+/** How different two easily confused glyphs draw in the UI font. */
+export interface GlyphPair {
+  /** The two characters, such as "Il". */
+  readonly pair: string;
+  /** Canvas pixels that differ between the two glyphs at 13px. */
+  readonly differingPixels: number;
+}
