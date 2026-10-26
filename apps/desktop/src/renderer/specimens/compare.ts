@@ -7,10 +7,11 @@
  *
  * The page loads `compare/fonts.css` and `compare/dark.css` into each
  * specimen and switches them with attributes on the specimen's `<html>`:
- * - `data-ui-font`: `inter`, `plex` or `geist`; absent means Bricolage Grotesque.
+ * - `data-ui-font`: `inter`, `plex`, `geist` or `system` (SF Pro, the Mac's own font); absent
+ *   means Bricolage Grotesque.
  * - `data-title-font`: `bricolage`; absent means titles use the UI font.
- * - `data-code-font`: `recursive-casl0`, `jetbrains` or `geist-mono`; absent
- *   means Recursive CASL 0.5.
+ * - `data-code-font`: `recursive-casl0`, `jetbrains`, `geist-mono` or `sf-mono` (the Mac's own
+ *   font); absent means Recursive CASL 0.5.
  * - `data-dark`: `b`, `c` or `d`; absent means variant (a), Orient Express as it is.
  *
  * Changing a font, the titles or the dark variant sets those attributes in the
@@ -52,6 +53,7 @@ const UI_FONTS: readonly Choice[] = [
   { value: "inter", label: "Inter", key: "2" },
   { value: "plex", label: "IBM Plex Sans", key: "3" },
   { value: "geist", label: "Geist", key: "4" },
+  { value: "system", label: "SF Pro (system)", key: "9" },
 ];
 
 const TITLE_FONTS: readonly Choice[] = [
@@ -64,6 +66,7 @@ const CODE_FONTS: readonly Choice[] = [
   { value: "casl0", label: "Recursive CASL 0", key: "6" },
   { value: "jetbrains", label: "JetBrains Mono", key: "7" },
   { value: "geist-mono", label: "Geist Mono", key: "8" },
+  { value: "sf-mono", label: "SF Mono (system)", key: "m" },
 ];
 
 const DARK_VARIANTS: readonly Choice[] = [
@@ -79,12 +82,14 @@ const UI_FONT_WORDS: Readonly<Record<string, string>> = {
   inter: "Inter 4 (cv05 cv08 zero, tnum on numbers)",
   plex: "IBM Plex Sans",
   geist: "Geist",
+  system: "SF Pro, the system font (Mac only)",
 };
 const CODE_FONT_WORDS: Readonly<Record<string, string>> = {
   recursive: "Recursive CASL 0.5 (today)",
   casl0: "Recursive CASL 0",
   jetbrains: "JetBrains Mono",
   "geist-mono": "Geist Mono",
+  "sf-mono": "SF Mono, the system font (Mac only)",
 };
 const DARK_WORDS: Readonly<Record<string, string>> = {
   a: "(a) Orient Express as it is",
@@ -99,12 +104,14 @@ const UI_ATTRIBUTE: Readonly<Record<string, string | null>> = {
   inter: "inter",
   plex: "plex",
   geist: "geist",
+  system: "system",
 };
 const CODE_ATTRIBUTE: Readonly<Record<string, string | null>> = {
   recursive: null,
   casl0: "recursive-casl0",
   jetbrains: "jetbrains",
   "geist-mono": "geist-mono",
+  "sf-mono": "sf-mono",
 };
 
 /** The fonts and the dark variant: what a swap or an A/B toggle changes without a reload. */
@@ -254,13 +261,18 @@ function describeState(state: State): string {
     state.theme === "orient-express"
       ? DARK_WORDS[state.dark]
       : `${DARK_WORDS[state.dark]}, no effect in Whitehaven`;
-  return [
+  const words = [
     `Theme: ${findChoice(THEMES, state.theme)?.label}`,
     `UI: ${UI_FONT_WORDS[state.ui]}`,
     `titles: ${titles}`,
     `code: ${CODE_FONT_WORDS[state.code]}`,
     `dark: ${dark}`,
   ].join(" / ");
+  // The page cannot read which family was drawn, so it cannot tell Rogier whether the system
+  // font is really showing. It says where the system fonts exist instead.
+  return state.ui === "system" || state.code === "sf-mono"
+    ? `${words} (system font: only on a Mac)`
+    : words;
 }
 
 /**
@@ -338,7 +350,12 @@ async function ensureStylesheets(doc: Document): Promise<void> {
   await Promise.all(pending);
 }
 
-/** The font families the look draws with, as the page's CSS names them. */
+/**
+ * The font families the look draws with, as the page's CSS names them. The
+ * two system fonts (`system` and `sf-mono`) are left out on purpose: they have
+ * no font face to load, and a machine without them falls back to a generic
+ * family.
+ */
 function listFamilies(look: Look): string[] {
   const ui = {
     bricolage: "Bricolage Grotesque",
@@ -459,9 +476,9 @@ function buildBar(): void {
   first.append(
     createSelect("screen", "Screen", "[ ]", SCREENS),
     createSelect("theme", "Theme", "t", THEMES),
-    createSelect("ui", "UI font", "1-4", UI_FONTS),
+    createSelect("ui", "UI font", "1-4, 9", UI_FONTS),
     createSelect("titles", "Titles", "b", TITLE_FONTS),
-    createSelect("code", "Code", "5-8", CODE_FONTS),
+    createSelect("code", "Code", "5-8, m", CODE_FONTS),
     createSelect("dark", "Dark", "q w e r", DARK_VARIANTS),
     createButton("view", "v  Side by side", toggleView),
     createButton("swap", "x  A/B", swapLooks),
