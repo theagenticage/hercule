@@ -221,13 +221,16 @@ function writeStateQuery(state: State): string {
 
 /**
  * Returns the URL, relative to this page, of a screen in a theme. The theme
- * is merged into the screen's own query, such as `?state=steps`.
+ * is merged into the screen's own query, such as `?state=steps`. The URL also
+ * turns Follow the system off in the specimen's Settings > Appearance, so the
+ * pressed theme card is the theme the page is painted in.
  */
 function buildScreenUrl(screen: string, theme: string): string {
   const entry = SCREENS.find((each) => each.value === screen);
   if (entry === undefined) throw new Error(`Unknown screen "${screen}".`);
   const url = new URL(entry.path, location.href);
   url.searchParams.set("theme", theme);
+  url.searchParams.set("follow", "0");
   return `${url.pathname}${url.search}`;
 }
 
@@ -260,12 +263,19 @@ function describeState(state: State): string {
   ].join(" / ");
 }
 
+/**
+ * Returns true when the key event's target is a field that takes typed text.
+ * Checks `nodeType` instead of `instanceof Element`, because an element in a
+ * specimen's iframe belongs to the iframe's window and is not an instance of
+ * this window's `Element`.
+ */
 function isEditable(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
+  if (target === null || (target as Node).nodeType !== Node.ELEMENT_NODE) return false;
   // A focused select takes the keys for itself, to move through its options.
   return (
-    target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])") !==
-    null
+    (target as Element).closest(
+      "input, textarea, select, [contenteditable]:not([contenteditable=false])",
+    ) !== null
   );
 }
 
@@ -277,30 +287,95 @@ function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+/** The loading of each stylesheet in each document, so every refresh waits for the same load. */
+const stylesheetLoads = new WeakMap<Document, Map<string, Promise<void>>>();
+
 /**
- * Returns once the stylesheet link has loaded or failed. A failed link (the
- * file does not exist yet) is fine: the page then shows today's look.
+ * Returns a promise that resolves when the stylesheet link has loaded and
+ * rejects with a plain message when it fails to load.
  */
-function waitForStylesheet(link: HTMLLinkElement): Promise<void> {
-  return new Promise((resolve) => {
+function waitForStylesheet(link: HTMLLinkElement, href: string): Promise<void> {
+  return new Promise((resolve, reject) => {
     link.addEventListener("load", () => resolve(), { once: true });
-    link.addEventListener("error", () => resolve(), { once: true });
+    link.addEventListener(
+      "error",
+      () => reject(new Error(`The stylesheet ${href} did not load.`)),
+      { once: true },
+    );
   });
 }
 
-/** Appends the two stylesheets to the end of the document's head, once per document. */
+/**
+ * Appends the two stylesheets to the end of the document's head, once per
+ * document, and returns when both have loaded. A second call while a link is
+ * still loading waits for the same load. Fails when a stylesheet does not
+ * load; the failed link is removed, so the next call tries again.
+ */
 async function ensureStylesheets(doc: Document): Promise<void> {
+  let loads = stylesheetLoads.get(doc);
+  if (loads === undefined) {
+    loads = new Map();
+    stylesheetLoads.set(doc, loads);
+  }
   const pending: Promise<void>[] = [];
   for (const sheet of STYLESHEETS) {
-    if (doc.head.querySelector(`link[data-compare="${sheet.name}"]`) !== null) continue;
-    const link = doc.createElement("link");
-    link.rel = "stylesheet";
-    link.href = sheet.href;
-    link.dataset.compare = sheet.name;
-    pending.push(waitForStylesheet(link));
-    doc.head.append(link);
+    let load = loads.get(sheet.name);
+    if (load === undefined) {
+      const link = doc.createElement("link");
+      link.rel = "stylesheet";
+      link.href = sheet.href;
+      const known = loads;
+      load = waitForStylesheet(link, sheet.href).catch((error: unknown) => {
+        known.delete(sheet.name);
+        link.remove();
+        throw error;
+      });
+      loads.set(sheet.name, load);
+      doc.head.append(link);
+    }
+    pending.push(load);
   }
   await Promise.all(pending);
+}
+
+/** The font families the look draws with, as the page's CSS names them. */
+function listFamilies(look: Look): string[] {
+  const ui = {
+    bricolage: "Bricolage Grotesque",
+    inter: "Inter Compare",
+    plex: "IBM Plex Sans Compare",
+    geist: "Geist Compare",
+  }[look.ui];
+  const code = {
+    recursive: "Recursive",
+    casl0: "Recursive",
+    jetbrains: "JetBrains Mono Compare",
+    "geist-mono": "Geist Mono Compare",
+  }[look.code];
+  const families = [ui, code];
+  if (look.titles === "bricolage") families.push("Bricolage Grotesque");
+  return families.filter((each): each is string => each !== undefined);
+}
+
+/**
+ * Loads the font files of the look's families and returns when each one is
+ * usable. Fails, naming the family, when a family has no font face or its
+ * file did not load. `fonts.ready` alone does not guarantee this: it also
+ * resolves when a face failed.
+ */
+async function loadFamilies(doc: Document, look: Look): Promise<void> {
+  for (const family of listFamilies(look)) {
+    const query = `13px "${family}"`;
+    let faces: FontFace[] = [];
+    try {
+      faces = await doc.fonts.load(query);
+    } catch {
+      // The failure is reported below.
+    }
+    if (faces.length === 0 || !doc.fonts.check(query)) {
+      throw new Error(`The font ${family} did not load.`);
+    }
+  }
 }
 
 /** Sets or removes one attribute on the document's `<html>`. */
@@ -332,6 +407,9 @@ const buttons = new Map<string, HTMLButtonElement>();
 const warningText = document.createElement("span");
 const valuesText = document.createElement("span");
 const infoText = document.createElement("span");
+const errorText = document.createElement("span");
+/** Why each covered pane cannot be shown, such as a stylesheet that did not load. */
+const loadErrors = new Map<Pane, string>();
 let statusMessage: { text: string; until: number } | null = null;
 
 function createSelect(
@@ -394,7 +472,8 @@ function buildBar(): void {
   infoText.className = "bar-info";
   const second = document.createElement("div");
   second.className = "bar-row";
-  second.append(warningText, valuesText, infoText);
+  errorText.className = "bar-warning";
+  second.append(warningText, errorText, valuesText, infoText);
   bar.append(first, second);
 }
 
@@ -439,6 +518,13 @@ function showWindow(): void {
   if (zoomed) warnings.push(`DPR ${ratio}: the browser is zoomed or scaled. Press Ctrl+0.`);
   warningText.textContent = warnings.join(" ");
   infoText.textContent = `Window ${window.innerWidth} x ${window.innerHeight}, DPR ${ratio} (1 on the HP, 2 on Retina; any other value means browser zoom)`;
+}
+
+/** Shows or clears (with null) the reason a pane stays covered, in red in the bar. */
+function showLoadError(pane: Pane, message: string | null): void {
+  if (message === null) loadErrors.delete(pane);
+  else loadErrors.set(pane, message);
+  errorText.textContent = [...loadErrors.values()].join(" ");
 }
 
 function writeUrl(): void {
@@ -492,19 +578,29 @@ async function refreshPane(pane: Pane): Promise<void> {
   pane.generation += 1;
   const generation = pane.generation;
   coverPane(pane);
+  showLoadError(pane, null);
   const ready = await waitUntilReady(pane, generation);
   if (pane.generation !== generation) return;
   const doc = pane.frame.contentDocument;
   const view = pane.frame.contentWindow;
   if (doc === null || view === null) return;
   if (!ready) say(`${pane.screen} never set data-ready; showing it as it is.`);
-  await ensureStylesheets(doc);
-  if (pane.generation !== generation) return;
-  applyLook(doc, state);
-  // Font files load when a layout first needs them. Forcing the layout now
-  // makes `fonts.ready` wait for them.
-  doc.documentElement.getBoundingClientRect();
-  await doc.fonts.ready;
+  try {
+    await ensureStylesheets(doc);
+    if (pane.generation !== generation) return;
+    applyLook(doc, state);
+    // Font files load when a layout first needs them. Forcing the layout now
+    // makes `fonts.ready` wait for them.
+    doc.documentElement.getBoundingClientRect();
+    await loadFamilies(doc, state);
+    await doc.fonts.ready;
+  } catch (error) {
+    // The cover stays on: a fallback font must never look like a candidate.
+    if (pane.generation === generation) {
+      showLoadError(pane, error instanceof Error ? error.message : String(error));
+    }
+    return;
+  }
   await nextFrame(view);
   if (pane.generation !== generation) return;
   uncoverPane(pane);
@@ -608,6 +704,8 @@ function createPane(screen: string, left: number, width: number): Pane {
 
 function buildPanes(): void {
   panes.length = 0;
+  loadErrors.clear();
+  errorText.textContent = "";
   stage.replaceChildren();
   const layout =
     state.view === "side" ? SIDE_BY_SIDE : [{ screen: state.screen, left: 0, width: FRAME_WIDTH }];

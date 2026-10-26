@@ -70,15 +70,22 @@ export function applySheetAppearance(): void {
  * default Appearance with the Glass level of `?glass=`, and the page's theme
  * set as the theme Follow the system would use: the day theme for a light
  * theme, the night theme for a dark one. Fails like `applySheetAppearance`.
+ *
+ * With `?follow=0` Follow the system is off and the page's theme is the
+ * chosen theme. The comparison page adds it, so that the pressed theme card
+ * is the painted theme whatever the machine's own light or dark setting is.
+ * Without the parameter nothing changes.
  */
 export function readSheetAppearance(): Appearance {
   const theme = readSheetTheme();
   const glassPercent = readSheetGlass() ?? DEFAULT_APPEARANCE.glassPercent;
   const dayTheme = DAY_THEMES.find((each) => each === theme);
   const nightTheme = NIGHT_THEMES.find((each) => each === theme);
+  const followSystem = new URLSearchParams(location.search).get("follow") !== "0";
   return {
     ...DEFAULT_APPEARANCE,
     theme,
+    followSystem,
     glassPercent,
     dayTheme: dayTheme ?? DEFAULT_APPEARANCE.dayTheme,
     nightTheme: nightTheme ?? DEFAULT_APPEARANCE.nightTheme,
