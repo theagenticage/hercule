@@ -97,7 +97,6 @@ import {
   type Live,
   type ThreadPicks,
 } from "@hercule/client-core";
-import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
 import type { Bridge } from "../../ipc/bridge";
 import {
   agentsQuery,
@@ -187,7 +186,7 @@ import { Route as OpenDiscussionRoute } from "../routes/_connected/_shell/discus
 import { Route as WikiRoute } from "../routes/_connected/_shell/wiki/route";
 import { Route as OpenWikiPageRoute } from "../routes/_connected/_shell/wiki/$pageId";
 import { Shell } from "../shell";
-import { applySheetTheme } from "./sheet-page";
+import { applySheetAppearance, readSheetAppearance } from "./sheet-page";
 import type { DiscussionsRecords } from "./discussions-fixture";
 import type { RunRecords } from "./run-fixture";
 import type { WikiRecords } from "./wiki-fixture";
@@ -517,7 +516,7 @@ const REFUSING_BRIDGE: Bridge = {
     save: () => Promise.reject(buildBridgeCallError("firstRunProgress.save")),
   },
   appearance: {
-    read: () => DEFAULT_APPEARANCE,
+    read: readSheetAppearance,
     save: () => Promise.reject(buildBridgeCallError("appearance.save")),
   },
   link: {
@@ -1239,7 +1238,7 @@ async function mountShellSpecimen(
   screens: OpenScreens,
   unsentThreadIds: readonly string[] = [],
 ): Promise<void> {
-  applySheetTheme();
+  applySheetAppearance();
   const answerMove = screens.intake?.answerMove;
   const client = createClient({
     baseUrl: CONTROLLER_URL,

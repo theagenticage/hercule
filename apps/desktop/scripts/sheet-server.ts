@@ -115,10 +115,40 @@ async function runElectron(
   return signal === null ? (code ?? 1) : exitCodeForSignal(signal);
 }
 
+/** A running Vite dev server that serves the specimen sheets. */
+export interface SpecimenServer {
+  /** The address of the sheets, with a trailing slash: `http://127.0.0.1:<port>/specimens/`. */
+  readonly specimensUrl: string;
+  /** Stops the server. */
+  close(): Promise<void>;
+}
+
 /**
- * Runs a capture: starts the renderer's Vite dev server on a free loopback
- * port, serving the specimen sheets under /specimens/ and docs/design under
- * /design/, then runs Electron with `captureScript` as its main file (see
+ * Starts the renderer's Vite dev server on a free loopback port, serving the
+ * specimen sheets under /specimens/ and docs/design under /design/. Returns
+ * the sheets' address and a function that stops the server. Fails when the
+ * server cannot start.
+ */
+export async function startSpecimenServer(): Promise<SpecimenServer> {
+  const port = await findFreePort();
+  const server = await createServer({
+    configFile: `${packageDir}/vite.renderer.config.ts`,
+    // No file watching: nothing is edited while the sheets are captured,
+    // and a change made elsewhere during the run must not reload a sheet.
+    server: { port, watch: null },
+    plugins: [serveDesigns()],
+    logLevel: "warn",
+  });
+  await server.listen();
+  return {
+    specimensUrl: `http://127.0.0.1:${String(port)}/specimens/`,
+    close: () => server.close(),
+  };
+}
+
+/**
+ * Runs a capture: starts the specimen server (see `startSpecimenServer`),
+ * then runs Electron with `captureScript` as its main file (see
  * scripts/sheet-window.ts). Once Electron exits, it stops the server and
  * deletes the temporary folder Electron kept its settings in. Returns
  * Electron's exit code. Fails when the server cannot start.
@@ -126,22 +156,9 @@ async function runElectron(
 export async function runSheetCapture(captureScript: URL): Promise<number> {
   const userDataDir = await mkdtemp(join(tmpdir(), "sheet-capture-user-data-"));
   try {
-    const port = await findFreePort();
-    const server = await createServer({
-      configFile: `${packageDir}/vite.renderer.config.ts`,
-      // No file watching: nothing is edited while the sheets are captured,
-      // and a change made elsewhere during the run must not reload a sheet.
-      server: { port, watch: null },
-      plugins: [serveDesigns()],
-      logLevel: "warn",
-    });
-    await server.listen();
+    const server = await startSpecimenServer();
     try {
-      return await runElectron(
-        captureScript,
-        `http://127.0.0.1:${String(port)}/specimens/`,
-        userDataDir,
-      );
+      return await runElectron(captureScript, server.specimensUrl, userDataDir);
     } finally {
       await server.close();
     }

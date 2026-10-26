@@ -28,7 +28,11 @@
  * by eye with its dock. With `?state=syncing`, the thread was opened from its
  * saved copy and the read that brings it up to date never answers, so the
  * header says "Syncing…" once 400 ms have passed; the book draws no such
- * state either.
+ * state either. With `?state=long`, the thread has finished three turns of
+ * long messages, with headings, lists, code and a link, enough to fill about
+ * three windows of 900 px, and waits on nothing; the transcript opens at its
+ * bottom. The book draws no such state, so `pnpm compare:bureau` does not
+ * compare it.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
@@ -42,7 +46,8 @@ import {
   SENDERS_PAGE_RECORDS,
   THREAD_PAGE_RECORDS,
 } from "./thread-fixture";
-import { mountThreadSpecimen } from "./shell-page";
+import { FIX_THREAD_LONG } from "./thread-long-fixture";
+import { mountThreadSpecimen, type ThreadScreenRecords } from "./shell-page";
 import { computeScrolledTop, markSheetReady } from "./sheet-page";
 
 /**
@@ -69,6 +74,22 @@ async function scrollTranscriptAway(computeTop: (transcript: Element) => number)
   }
 }
 
+/**
+ * Mounts the shell with `thread` open and its session in the sidebar, so the
+ * sidebar draws the same Requests the thread does.
+ */
+async function mountWithSidebarSession(thread: ThreadScreenRecords): Promise<void> {
+  await mountThreadSpecimen(
+    {
+      ...THREAD_PAGE_RECORDS,
+      threads: THREAD_PAGE_RECORDS.threads.map((each) =>
+        each.id === thread.session.id ? thread.session : each,
+      ),
+    },
+    thread,
+  );
+}
+
 const state = new URLSearchParams(location.search).get("state");
 if (state === "senders") {
   await mountThreadSpecimen(SENDERS_PAGE_RECORDS, FIX_THREAD_WITH_SENDERS);
@@ -86,15 +107,9 @@ if (state === "senders") {
             })),
           }
         : withRequests;
-  await mountThreadSpecimen(
-    {
-      ...THREAD_PAGE_RECORDS,
-      threads: THREAD_PAGE_RECORDS.threads.map((each) =>
-        each.id === thread.session.id ? thread.session : each,
-      ),
-    },
-    thread,
-  );
+  await mountWithSidebarSession(thread);
+} else if (state === "long") {
+  await mountWithSidebarSession(FIX_THREAD_LONG);
 } else if (state === "syncing") {
   await mountThreadSpecimen(THREAD_PAGE_RECORDS, { ...FIX_THREAD, syncing: true });
 } else {

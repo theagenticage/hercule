@@ -23,7 +23,7 @@ import { buildRouterContext } from "../app/context";
 import { createAppRouter } from "../app/router";
 import { FIRST_RUN_SCENES } from "./first-run-fixture";
 import { FIRST_RUN_STATES, type FirstRunStateName } from "./first-run-states";
-import { applySheetTheme, markSheetReady } from "./sheet-page";
+import { applySheetAppearance, markSheetReady } from "./sheet-page";
 
 /** Returns the state the page's `?step=` and `?state=` name. Fails when they name none. */
 function readStateName(): FirstRunStateName {
@@ -45,7 +45,7 @@ const waitTwoFrames = (): Promise<void> =>
   });
 
 const scene = FIRST_RUN_SCENES[readStateName()]();
-applySheetTheme();
+applySheetAppearance();
 // The app's client sends its requests through the global `fetch`, always
 // with the URL as a string.
 globalThis.fetch = (input, init) => scene.fetch(input as string, init);

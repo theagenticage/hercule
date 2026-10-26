@@ -17,7 +17,7 @@ import { createRoot } from "react-dom/client";
 import { OfficeRoom } from "../screens/office";
 import { ROOM_PROJECTS, ROOM_STEPS, type RoomStep } from "./room-fixture";
 import { ROOM_STEP_NAMES } from "./room-steps";
-import { applySheetTheme, markSheetReady } from "./sheet-page";
+import { applySheetAppearance, markSheetReady } from "./sheet-page";
 import { THEMES } from "./sheet-themes";
 
 /** Returns the step the page's `?step=` names, or `null` without one. Fails when it names no step. */
@@ -34,7 +34,7 @@ function readStep(): RoomStep | null {
 }
 
 const step = readStep();
-applySheetTheme();
+applySheetAppearance();
 const root = createRoot(document.getElementById("root")!);
 // The room measures its stage once it is in the document, so the first
 // render is flushed before the sheet waits for its frame.
