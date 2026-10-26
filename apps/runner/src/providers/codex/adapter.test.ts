@@ -1136,9 +1136,20 @@ describe("what an input does to a Codex session", () => {
     expect(listSentParams(run.requests, "turn/start")).toHaveLength(2);
   });
 
-  it("fails and starts no turn when the steer fails in a way that may have delivered the input", async () => {
+  it("starts a new turn instead for any steer refusal that carries an error code", async () => {
     const run = await startBusySession({
-      "turn/steer": () => buildRefusal("failed to steer turn: the thread is gone", -32603),
+      "turn/steer": () => buildRefusal("failed to steer turn: something new", -32603),
+    });
+
+    const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "carry on" }));
+
+    expect(sent.delivery).toBe("opened");
+    expect(listSentParams(run.requests, "turn/start")).toHaveLength(2);
+  });
+
+  it("fails and starts no turn when the steer fails with no error code", async () => {
+    const run = await startBusySession({
+      "turn/steer": () => ({ error: { message: "failed to steer turn: the thread is gone" } }),
     });
 
     const failure = await Effect.runPromise(

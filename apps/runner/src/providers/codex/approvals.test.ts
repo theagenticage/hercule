@@ -398,7 +398,7 @@ const openAndAnswerQuestion = async (
   const run = await pushServerRequest(USER_INPUT, params);
   const opened = await awaitOpenedRequest(run);
   await Effect.runPromise(
-    run.adapter.respondToQuestion(SESSION, opened.request.requestId, answers),
+    run.adapter.respondToQuestion(SESSION, opened.request.requestId, answers, SPEC.modelSelection),
   );
   return { run, answered: await awaitAnswer(run) };
 };
@@ -458,9 +458,14 @@ describe("answering a question the agent asks", () => {
     const question = filterByTag(run.seen, "request.opened")[0]!;
 
     await Effect.runPromise(
-      run.adapter.respondToQuestion(SESSION, question.request.requestId, {
-        "Deploy target": "production",
-      }),
+      run.adapter.respondToQuestion(
+        SESSION,
+        question.request.requestId,
+        {
+          "Deploy target": "production",
+        },
+        SPEC.modelSelection,
+      ),
     );
 
     expect((await awaitAnswer(run, ID)).result).toEqual({
@@ -479,9 +484,14 @@ describe("answering a question the agent asks", () => {
 
     const failure = await Effect.runPromise(
       Effect.flip(
-        run.adapter.respondToQuestion(SESSION, opened.request.requestId, {
-          "Deploy target": "staging",
-        }),
+        run.adapter.respondToQuestion(
+          SESSION,
+          opened.request.requestId,
+          {
+            "Deploy target": "staging",
+          },
+          SPEC.modelSelection,
+        ),
       ),
     );
 
@@ -500,9 +510,14 @@ describe("answering a question the agent asks", () => {
 
     const failure = await Effect.runPromise(
       Effect.flip(
-        run.adapter.respondToQuestion(SESSION, opened.request.requestId, {
-          "Deploy target": "staging",
-        }),
+        run.adapter.respondToQuestion(
+          SESSION,
+          opened.request.requestId,
+          {
+            "Deploy target": "staging",
+          },
+          SPEC.modelSelection,
+        ),
       ),
     );
 
@@ -517,11 +532,18 @@ describe("answering a question the agent asks", () => {
     const opened = await awaitOpenedRequest(run);
     const answer = { "Deploy target": "staging" };
     await Effect.runPromise(
-      run.adapter.respondToQuestion(SESSION, opened.request.requestId, answer),
+      run.adapter.respondToQuestion(SESSION, opened.request.requestId, answer, SPEC.modelSelection),
     );
 
     const failure = await Effect.runPromise(
-      Effect.flip(run.adapter.respondToQuestion(SESSION, opened.request.requestId, answer)),
+      Effect.flip(
+        run.adapter.respondToQuestion(
+          SESSION,
+          opened.request.requestId,
+          answer,
+          SPEC.modelSelection,
+        ),
+      ),
     );
 
     expect(failure).toBeInstanceOf(AnswerNotDelivered);

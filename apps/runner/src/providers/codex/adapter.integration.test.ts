@@ -1276,7 +1276,12 @@ describe.skipIf(binary === undefined)("a real Codex async question", () => {
       expect(seen.filter((event) => event._tag === "request.resolved")).toEqual([]);
 
       await Effect.runPromise(
-        adapter.respondToQuestion(sessionId, request.requestId, { Question: "Beta" }),
+        adapter.respondToQuestion(
+          sessionId,
+          request.requestId,
+          { Question: "Beta" },
+          { model: "gpt-5.4", options: {} },
+        ),
       );
       await waitForFixture(seen, "the answering turn", () => completedTurns() === 2);
 

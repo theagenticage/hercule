@@ -131,6 +131,10 @@ export const makeCodexThreads = (options: {
   const pending = new Set<Discovery>();
   const background = new Set<Fiber.Fiber<void>>();
   const turns = new Map<CodexThreadState, CodexTurn>();
+  // Ids of turns the user stopped. A turn leaves `turns` when it ends or a
+  // newer turn replaces it, and a late item of the stopped turn can still
+  // arrive after that. The ids let `isStoppedTurn` tell it from the new turn's.
+  const stoppedTurnIds = new Set<string>();
   const restoreIds = new Set<string>();
   const admissionStops = new Map<string | undefined, CodexStop>();
   // Queued frames share the cohort in effect when they arrived. A continuation
@@ -405,7 +409,10 @@ export const makeCodexThreads = (options: {
     }
     const existing = turns.get(root);
     const stops = new Set(existing?.id === turnId ? existing.stops : []);
-    if (ticket.stop !== undefined) stops.add(ticket.stop);
+    if (ticket.stop !== undefined) {
+      stops.add(ticket.stop);
+      stoppedTurnIds.add(turnId);
+    }
     turns.set(root, { id: turnId, stops });
   };
 
@@ -790,7 +797,11 @@ export const makeCodexThreads = (options: {
         cancelPreparation();
       }
       const selected = [...threads.values()].filter((thread) => appliesStop(thread, stop));
-      for (const turn of turns.values()) turn.stops.add(stop);
+      for (const [thread, turn] of turns) {
+        turn.stops.add(stop);
+        // Stopping a subagent leaves the other threads' turns running.
+        if (appliesStop(thread, stop, turn.id)) stoppedTurnIds.add(turn.id);
+      }
       // Metadata may reveal ancestry later. Retain this Stop on already-received
       // work even after a continuation closes its future admission fence.
       for (const discovery of pending)
@@ -829,6 +840,13 @@ export const makeCodexThreads = (options: {
       inputs.delete(ticket);
     },
     isStopped,
+    /**
+     * Checks whether work of this turn belongs to a stop: the thread is
+     * stopped now, or the turn was running when a stop arrived. The second
+     * test still holds after the turn ended or a newer turn began.
+     */
+    isStoppedTurn: (thread: CodexThreadState, turnId: string): boolean =>
+      isStopped(thread) || stoppedTurnIds.has(turnId),
     /** Emits each child's report and a fresh aggregate envelope for its session. */
     recordUsage: (
       thread: CodexThreadState,
@@ -876,6 +894,7 @@ export const makeCodexThreads = (options: {
       pending.clear();
       threads.clear();
       turns.clear();
+      stoppedTurnIds.clear();
       inputs.clear();
     },
   };
