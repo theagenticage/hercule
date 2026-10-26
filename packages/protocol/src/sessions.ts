@@ -433,9 +433,10 @@ const Question = Schema.Struct({
 });
 
 /**
- * Questions one agent of a session is parked on. A harness asks one to four
- * questions at a time, so the request holds a list. It accepts answers only,
- * never a decision. To turn the questions down, the user stops the turn, and
+ * Questions one agent of a session asks the user: it is parked on them, unless
+ * the request is async (below). A harness asks one to four questions at a
+ * time, so the request holds a list. It accepts answers only, never a
+ * decision. To turn the questions down, the user stops the asking agent, and
  * the request resolves as `cancel`.
  *
  * `async` is present, and true, on an async question: one the asking agent
@@ -521,6 +522,14 @@ export const OpenRequest = Schema.Union([
 ]);
 
 export type OpenRequest = Schema.Schema.Type<typeof OpenRequest>;
+
+/**
+ * Checks whether a request is an async question: one the asking agent does not
+ * wait on. Such a request stays open after its agent's turn ends, and it does
+ * not stop the session's inactivity watch.
+ */
+export const isAsyncQuestion = (request: OpenRequest): boolean =>
+  request.kind === "question" && request.async === true;
 
 /** An open request that is an approval: any kind but `question`. It takes a decision. */
 export type ApprovalRequest = Exclude<OpenRequest, { readonly kind: "question" }>;
@@ -1026,6 +1035,13 @@ export const SessionRespondToQuestion = Schema.Struct({
   requestId: Fact,
   answerId: Fact,
   answers: QuestionAnswers,
+  /**
+   * The session's current model, sent on every input frame too. A harness
+   * takes a model change only on the input that starts a turn, and an answer
+   * can start one, so the adapter applies this there and ignores it the rest
+   * of the time.
+   */
+  modelSelection: ModelSelection,
 });
 
 export type SessionRespondToQuestion = Schema.Schema.Type<typeof SessionRespondToQuestion>;
@@ -1034,16 +1050,23 @@ export type SessionRespondToQuestion = Schema.Schema.Type<typeof SessionRespondT
  * What happened to one attempt to answer a question, with the `answerId` it
  * was sent with. Sent by the runner for every `SessionRespondToQuestion`.
  */
-export const SessionRespondToQuestionResult = Schema.Struct({
-  _tag: Schema.Literal("sessionRespondToQuestionResult"),
-  answerId: Fact,
-  ok: Schema.Boolean,
-  /**
-   * Present when `ok` is false. Written for the user: it says why the answer
-   * did not reach the agent, or that it is not known whether it did.
-   */
-  message: Schema.optionalKey(Message),
-});
+export const SessionRespondToQuestionResult = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal("sessionRespondToQuestionResult"),
+    answerId: Fact,
+    ok: Schema.Literal(true),
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("sessionRespondToQuestionResult"),
+    answerId: Fact,
+    ok: Schema.Literal(false),
+    /**
+     * Written for the user: says why the answer did not reach the agent, or
+     * that it is not known whether it did.
+     */
+    message: Message,
+  }),
+]);
 
 export type SessionRespondToQuestionResult = Schema.Schema.Type<
   typeof SessionRespondToQuestionResult

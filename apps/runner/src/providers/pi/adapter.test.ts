@@ -527,7 +527,14 @@ describe("answering a question to pi", () => {
     const run = await startTestSession();
 
     const failure = await Effect.runPromise(
-      Effect.flip(run.adapter.respondToQuestion(SESSION, "r-1", { Storage: "localStorage" })),
+      Effect.flip(
+        run.adapter.respondToQuestion(
+          SESSION,
+          "r-1",
+          { Storage: "localStorage" },
+          { model: "glm-5.3-flash", options: {} },
+        ),
+      ),
     );
 
     expect(failure).toBeInstanceOf(AnswerNotDelivered);

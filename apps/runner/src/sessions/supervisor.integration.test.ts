@@ -1384,6 +1384,7 @@ describe("what the runner sends back for input, interrupts and answers", () => {
           requestId: PARK,
           answerId: "answer-1",
           answers,
+          modelSelection: START.spec.modelSelection,
         });
       }),
     );
@@ -1410,6 +1411,7 @@ describe("what the runner sends back for input, interrupts and answers", () => {
           requestId: PARK,
           answerId: "answer-1",
           answers: { Storage: "localStorage" },
+          modelSelection: START.spec.modelSelection,
         });
       }),
     );
@@ -1437,14 +1439,16 @@ describe("what the runner sends back for input, interrupts and answers", () => {
   it("replies not ok to an answer for a session it does not hold", async () => {
     const replies = await answerQuestion("0199e0e7-0000-7000-8000-0000000000aa");
 
-    expect(replies).toEqual([
-      {
-        _tag: "sessionRespondToQuestionResult",
-        answerId: "answer-1",
-        ok: false,
-        message: expect.stringContaining("no longer running"),
-      },
-    ]);
+    expect(replies).toHaveLength(1);
+    const [reply] = replies;
+    expect(reply).toMatchObject({
+      _tag: "sessionRespondToQuestionResult",
+      answerId: "answer-1",
+      ok: false,
+    });
+    expect(reply !== undefined && "message" in reply ? reply.message : "").toContain(
+      "no longer running",
+    );
   });
 });
 
@@ -1670,7 +1674,8 @@ const emitRequestOpened = (fake: Fake, requestId: string, subagentId?: string): 
 
 /**
  * Emits a `request.opened` for an async question: the asking agent does not
- * wait on it, so it holds off the idle unload but not the inactivity watch.
+ * wait on it, so the supervisor ignores it: it stops neither the inactivity
+ * watch nor the idle unload.
  */
 const emitAsyncQuestionOpened = (fake: Fake, requestId: string): void =>
   fake.emit({
@@ -1889,8 +1894,8 @@ describe("a session parked on an open request", () => {
       ],
       false,
     ],
-    // An async question does not make its agent wait, so it never pauses the
-    // clock, and it outlives the turn that was running when it was asked.
+    // An async question does not make its agent wait, so the supervisor
+    // ignores it and the clock keeps running.
     [
       [
         ["turn.started", "t-1"],
@@ -2428,7 +2433,7 @@ describe("a session that sits idle between turns", () => {
     expect(fake.stops).toEqual([]);
   });
 
-  it("is not unloaded while an async question is open after its turn ended, and waits idleMs once it is answered", async () => {
+  it("is unloaded idleMs after its turn completed, even with an async question open", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
@@ -2444,14 +2449,8 @@ describe("a session that sits idle between turns", () => {
         yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
         yield* awaitForwarded(sent, 4);
 
-        // The user may still answer, so the session stays loaded.
-        yield* TestClock.adjust(IDLE_MS * 2);
-        expect(fake.stops).toEqual([]);
-
-        // Answering it while the session is idle starts the wait: no turn
-        // ends after this, so nothing else would.
-        yield* Effect.sync(() => emitRequestResolved(fake, "r-1"));
-        yield* awaitForwarded(sent, 5);
+        // An unanswered async question must not pin the runner slot: the
+        // session's exit closes it.
         yield* TestClock.adjust(IDLE_MS - 1);
         expect(fake.stops).toEqual([]);
 
@@ -2461,10 +2460,19 @@ describe("a session that sits idle between turns", () => {
     );
 
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
-    expect(listExitReasons(sent)).toEqual(["idle_unload"]);
   });
 
-  it("is not unloaded while a blocking Request is open with no turn", async () => {
+  /** The frame that answers the open question `PARK`. */
+  const ANSWER_FRAME = {
+    _tag: "sessionRespondToQuestion",
+    sessionId: SESSION,
+    requestId: PARK,
+    answerId: "answer-1",
+    answers: { Storage: "localStorage" },
+    modelSelection: START.spec.modelSelection,
+  } as const;
+
+  it("is kept by an answer frame, and waits idleMs again after the turn that answer opened", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
@@ -2473,15 +2481,64 @@ describe("a session that sits idle between turns", () => {
       supervisor,
       Effect.gen(function* () {
         yield* supervisor.start(IDLE_START);
-        yield* Effect.sync(() => emitRequestOpened(fake, "r-1", SUBAGENT));
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
         yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
 
-        yield* TestClock.adjust(IDLE_MS * 2);
+        yield* TestClock.adjust(IDLE_MS / 2);
+        yield* supervisor.respondToQuestion(ANSWER_FRAME);
+
+        // The first timer would fire now. The answer's turn has not started
+        // yet, so only the answer frame can have cancelled the timer.
+        yield* TestClock.adjust(IDLE_MS / 2);
         expect(fake.stops).toEqual([]);
+
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-2"));
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-2"));
+        yield* awaitForwarded(sent, 5);
+
+        yield* TestClock.adjust(IDLE_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* TestClock.adjust(1);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
       }),
     );
 
-    expect(fake.stops).toEqual([]);
+    expect(fake.answered).toEqual([[SESSION, PARK, { answers: ANSWER_FRAME.answers }]]);
+    expect(listExitReasons(sent)).toEqual(["idle_unload"]);
+  });
+
+  it("waits idleMs again after the adapter refuses an answer", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(IDLE_START);
+        yield* Effect.sync(() => emitTurnStarted(fake, "t-1"));
+        yield* awaitForwarded(sent, 2);
+        yield* Effect.sync(() => emitTurnCompleted(fake, "t-1"));
+        yield* awaitForwarded(sent, 3);
+
+        // The answer frame cancels the wait, and the refused answer opens no
+        // turn, so the session is idle again from the refusal on.
+        yield* TestClock.adjust(IDLE_MS / 2);
+        fake.answerFails = "The question is no longer open.";
+        yield* supervisor.respondToQuestion(ANSWER_FRAME);
+
+        yield* TestClock.adjust(IDLE_MS - 1);
+        expect(fake.stops).toEqual([]);
+
+        yield* TestClock.adjust(1);
+        yield* waitOnWallClock("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(listExitReasons(sent)).toEqual(["idle_unload"]);
   });
 
   it("is never unloaded when its spec has no idleMs", async () => {

@@ -25,7 +25,13 @@
  * session's own agent moves the session's status and closes its own Requests
  * at the end of a turn (spec 06 section 13.1).
  */
-import type { ItemKind, ProviderEvent, StreamKind, SubagentId } from "@hercule/protocol";
+import {
+  isAsyncQuestion,
+  type ItemKind,
+  type ProviderEvent,
+  type StreamKind,
+  type SubagentId,
+} from "@hercule/protocol";
 import type { SessionRequest, SessionStatus } from "@hercule/contract";
 
 /**
@@ -218,11 +224,7 @@ export const computeOpenRequestsAfter = (
     case "request.resolved":
       return keep((request) => request.requestId !== event.requestId);
     case "turn.completed":
-      return keep(
-        (request) =>
-          request.subagentId !== event.subagentId ||
-          (request.kind === "question" && request.async === true),
-      );
+      return keep((request) => request.subagentId !== event.subagentId || isAsyncQuestion(request));
     case "session.exited":
       return open.length === 0 ? open : [];
   }

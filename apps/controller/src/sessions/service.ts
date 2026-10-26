@@ -2214,19 +2214,23 @@ const make = Effect.gen(function* () {
     }),
 
     /**
-     * Builds the frame that answers the question a session's harness is
-     * waiting on, with the same report as `respondingToApprovalRequest`.
+     * Builds the frame that answers an open question of a session's harness.
+     * Every frame carries a new `answerId`, which the runner's result echoes.
+     * `modelSelection` is the session's current model, which the harness
+     * applies if the answer starts a turn.
      */
     respondingToQuestion: (
       sessionId: string,
       requestId: string,
       answers: QuestionAnswers,
+      modelSelection: ModelSelection,
     ): SessionRespondToQuestion => ({
       _tag: "sessionRespondToQuestion",
       sessionId,
       requestId,
       answerId: uuidToString(mintUuid()),
       answers,
+      modelSelection,
     }),
 
     /**

@@ -160,19 +160,13 @@ const ANSWER_ON_ITS_WAY =
   "then read the session again to see whether the question is still open";
 
 /**
- * The runner refused an answer without saying why. A refusal that comes with
- * a reason from the runner uses that reason instead.
- */
-const ANSWER_REFUSED =
-  "the agent's harness did not accept the answer; the question is still open, so answer it again";
-
-/**
  * The runner did not confirm an answer in time, or its connection dropped
- * while the controller waited. The answer may have reached the agent.
+ * while the controller waited. Nothing says whether the agent got the answer.
  */
 const ANSWER_NOT_CONFIRMED =
   "that session's runner did not confirm the answer, so it is not known whether the agent got it; " +
-  "if it did, the question closes by itself, and if it did not, the question stays open and can be answered again";
+  "if the runner later finds it may not have arrived, it closes the question and says so in the thread, " +
+  "otherwise the question closes by itself when the answer arrives";
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
@@ -1286,18 +1280,20 @@ const make = Effect.gen(function* () {
      *   runner's result, so two answers never race;
      * - the runner is not connected.
      *
-     * After the send it fails with `InvalidState` when the harness refused the
-     * answer (the question stays open), or when no result came before the
-     * deadline or the runner's connection dropped (it is then not known
-     * whether the agent got the answer). The deadline is the one inputs get:
-     * it is the time a harness has to accept a message.
+     * After the send it fails with `InvalidState` when the runner reports the
+     * answer did not reach the agent (the runner's message says whether the
+     * question is still open), or when no result came before the deadline or
+     * the runner's connection dropped (it is then not known whether the agent
+     * got the answer). The deadline is the one inputs get: it is the time a
+     * harness has to accept a message.
      *
      * A question takes no decision. To turn it down, the user stops the turn
      * with `interrupt`, and the adapter resolves the question as cancelled.
      *
-     * The audit entry is written in a transaction of its own that commits
-     * before the send, so the wait for the runner never holds a transaction
-     * open.
+     * The audit entry (`session.answered`) records the attempt. It is written
+     * in a transaction of its own that commits before the send, so it exists
+     * before the outcome is known, and the wait for the runner never holds a
+     * transaction open.
      */
     respondToQuestion: (input: RespondToQuestionInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
@@ -1339,7 +1335,7 @@ const make = Effect.gen(function* () {
               );
               const sent = yield* connections.sendAnswerToQuestion(
                 session.runnerId,
-                sessions.respondingToQuestion(id, requestId, answers),
+                sessions.respondingToQuestion(id, requestId, answers, session.modelSelection),
                 deadline,
               );
               if (sent._tag === "notSent") return yield* Effect.fail(createInvalidStateError(GONE));
@@ -1347,9 +1343,7 @@ const make = Effect.gen(function* () {
                 return yield* Effect.fail(createInvalidStateError(ANSWER_NOT_CONFIRMED));
               }
               if (!sent.answer.value.ok) {
-                return yield* Effect.fail(
-                  createInvalidStateError(sent.answer.value.message ?? ANSWER_REFUSED),
-                );
+                return yield* Effect.fail(createInvalidStateError(sent.answer.value.message));
               }
             }),
           () => Effect.sync(() => answersOnTheirWay.delete(key)),

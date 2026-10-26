@@ -5013,6 +5013,8 @@ describe("session.respondToQuestion", () => {
           requestId: REQUEST_ID,
           answerId: sent[0]?.answerId,
           answers: ANSWERS,
+          // The session's current model, which the harness applies if the answer starts a turn.
+          modelSelection: { model: "clever", options: {} },
         },
       ]);
 

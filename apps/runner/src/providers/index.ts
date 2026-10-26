@@ -10,6 +10,7 @@ import type {
   ProbeResult,
   TextGenerationOutcome,
   TextGenerationSpec,
+  ModelSelection,
   ProviderEvent,
   QuestionAnswers,
   SendResult,
@@ -349,11 +350,17 @@ export interface ProviderAdapter {
    * question (it was never opened here, it was already answered, it is an
    * approval, or its agent stopped), when the answer did not reach the agent,
    * or when the adapter cannot confirm that it did.
+   *
+   * `modelSelection` is the session's current model. A harness takes a model
+   * change only on the input that starts a turn, and an answer can start one,
+   * so an adapter that starts a turn for the answer applies it there and
+   * ignores it otherwise.
    */
   readonly respondToQuestion: (
     sessionId: string,
     requestId: string,
     answers: QuestionAnswers,
+    modelSelection: ModelSelection,
   ) => Effect.Effect<void, AnswerNotDelivered>;
 
   /**

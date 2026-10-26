@@ -1488,9 +1488,12 @@ describe.skipIf(binary === undefined)("full-access in a real Claude Code session
         expect(others).toEqual([]);
 
         await Effect.runPromise(
-          session.adapter.respondToQuestion(SESSION_IDS[0], question!.requestId, {
-            Storage: "IndexedDB",
-          }),
+          session.adapter.respondToQuestion(
+            SESSION_IDS[0],
+            question!.requestId,
+            { Storage: "IndexedDB" },
+            SPEC.modelSelection,
+          ),
         );
         await waitForEvent(session.seen, "turn.completed");
 

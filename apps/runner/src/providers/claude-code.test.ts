@@ -2526,7 +2526,10 @@ const respondWithAnswers = (
   run: Driving,
   requestId: string,
   answers: QuestionAnswers,
-): Promise<void> => Effect.runPromise(run.adapter.respondToQuestion(SESSION, requestId, answers));
+): Promise<void> =>
+  Effect.runPromise(
+    run.adapter.respondToQuestion(SESSION, requestId, answers, SPEC.modelSelection),
+  );
 
 /** Sends answers the adapter must refuse, and returns its failure. Rejects when the adapter accepts them. */
 const refuseAnswers = (
@@ -2534,7 +2537,9 @@ const refuseAnswers = (
   requestId: string,
   answers: QuestionAnswers,
 ): Promise<AnswerNotDelivered> =>
-  Effect.runPromise(Effect.flip(run.adapter.respondToQuestion(SESSION, requestId, answers)));
+  Effect.runPromise(
+    Effect.flip(run.adapter.respondToQuestion(SESSION, requestId, answers, SPEC.modelSelection)),
+  );
 
 /** Returns the input an allow handed back to the harness, or `undefined` for any other result. */
 const readUpdatedInput = (settled: PermissionResult | null | undefined): unknown =>
@@ -2718,10 +2723,9 @@ describe("the harness asking in full-access", () => {
     const park = parkToolCall(run, "Bash", { command: "echo hi" });
 
     await waitUntil("refused the call", () => park.settled() !== undefined);
-    expect(readDenial(park.settled())).toEqual({
-      message: expect.stringContaining("full access"),
-      interrupt: false,
-    });
+    const denial = readDenial(park.settled());
+    expect(denial.message).toContain("full access");
+    expect(denial.interrupt).toBe(false);
     expect(listOpenedRequests(run.seen)).toEqual([]);
   });
 

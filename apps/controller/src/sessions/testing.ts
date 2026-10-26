@@ -37,6 +37,7 @@ import {
   type RepositorySkillsInspection,
   type RepositorySkillsPreview,
   type SessionRespondToQuestion,
+  type SessionRespondToQuestionResult,
   type SessionStart,
   type TextGenerationOutcome,
   type TextGenerationRequest,
@@ -113,8 +114,16 @@ type Answer = Delivery | { readonly message: string };
 
 type Answered = Answer | undefined;
 
-/** A runner's result for an attempt to answer a question, without the answer id it is sent under. */
-type QuestionResult = { readonly ok: true } | { readonly ok: false; readonly message?: string };
+/**
+ * A runner's result for an attempt to answer a question, without the tag and
+ * the answer id the fake adds. `Omit` is applied to each member of the union,
+ * so the message stays tied to `ok: false`.
+ */
+type QuestionResult = SessionRespondToQuestionResult extends infer Result
+  ? Result extends unknown
+    ? Omit<Result, "_tag" | "answerId">
+    : never
+  : never;
 
 /** Checks whether a frame sent to a runner carries an input the runner answers. */
 export const carriesInput = (frame: ControllerMessage): frame is FrameCarryingInput =>

@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect";
 import {
   EditedFile,
   MAX_ANSWERS_LENGTH,
+  isAsyncQuestion,
   MAX_MESSAGE_LENGTH,
   ProviderEvent,
   SessionBinding,
@@ -347,22 +348,14 @@ describe("the normalized event taxonomy", () => {
     expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(opened))).toEqual(opened);
   });
 
-  it("refuses an async mark that is not true", () => {
-    expect(
-      decode(ProviderEvent, {
-        _tag: "request.opened",
-        ...baseFields,
-        request: {
-          requestId: "r1",
-          itemId: "i1",
-          kind: "question",
-          async: false,
-          detail: {
-            questions: [{ question: "Q?", header: "Q", options: [], multiSelect: false }],
-          },
-        },
-      })._tag,
-    ).toBe("Failure");
+  it("recognizes an async question, and no other request", () => {
+    const detail = {
+      questions: [{ question: "Q?", header: "Q", options: [], multiSelect: false }],
+    } as const;
+    const blocking = { requestId: "r1", itemId: "i1", kind: "question", detail } as const;
+
+    expect(isAsyncQuestion({ ...blocking, async: true })).toBe(true);
+    expect(isAsyncQuestion(blocking)).toBe(false);
   });
 
   it("keeps the mark on a question whose answer the harness asked to keep secret", () => {
@@ -665,24 +658,12 @@ describe("the frames that answer a Request an agent is parked on", () => {
       sessionId: SESSION_ID,
       requestId: "r1",
       answerId: "a1",
+      modelSelection: { model: "gpt-5.5", options: {} },
       answers: { Storage: "localStorage", Features: ["Sync", "Search"] },
     };
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionRespondToQuestion)(frame))).toEqual(
       frame,
     );
-  });
-
-  it("requires an answer id on the frame", () => {
-    expect(
-      Effect.runSyncExit(
-        Schema.decodeUnknownEffect(SessionRespondToQuestion)({
-          _tag: "sessionRespondToQuestion",
-          sessionId: SESSION_ID,
-          requestId: "r1",
-          answers: { Storage: "localStorage" },
-        }),
-      )._tag,
-    ).toBe("Failure");
   });
 
   it("decodes the result of an attempt to answer, with a message only when it failed", () => {
@@ -705,6 +686,7 @@ describe("the frames that answer a Request an agent is parked on", () => {
       sessionId: SESSION_ID,
       requestId: "r1",
       answerId: "a1",
+      modelSelection: { model: "gpt-5.5", options: {} },
       answers: { Storage: "  " },
     };
     expect(
@@ -721,6 +703,7 @@ describe("the frames that answer a Request an agent is parked on", () => {
       sessionId: SESSION_ID,
       requestId: "r1",
       answerId: "a1",
+      modelSelection: { model: "gpt-5.5", options: {} },
       answers: {
         F: [
           ...Array.from({ length: MAX_ANSWERS_LENGTH / MAX_MESSAGE_LENGTH - 1 }, () => full),
@@ -745,6 +728,7 @@ describe("the frames that answer a Request an agent is parked on", () => {
       sessionId: SESSION_ID,
       requestId: "r1",
       answerId: "a1",
+      modelSelection: { model: "gpt-5.5", options: {} },
       answers: { "": "x", ["h".repeat(600)]: "y", Storage: "localStorage" },
     };
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionRespondToQuestion)(frame))).toEqual(

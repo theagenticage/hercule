@@ -176,6 +176,11 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   {
     _tag: "sessionRespondToQuestionResult",
     answerId: "0199e0e7-0000-7000-8000-000000000010",
+    ok: true,
+  },
+  {
+    _tag: "sessionRespondToQuestionResult",
+    answerId: "0199e0e7-0000-7000-8000-000000000010",
     ok: false,
     message: "Codex has stopped, so the answer did not reach it.",
   },
@@ -298,6 +303,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     sessionId: SESSION_ID,
     requestId: "0199e0e7-0000-7000-8000-00000000000f",
     answerId: "0199e0e7-0000-7000-8000-000000000010",
+    modelSelection: { model: "gpt-5.5", options: {} },
     answers: { Storage: "localStorage", Features: ["Sync", "Search"] },
   },
   {

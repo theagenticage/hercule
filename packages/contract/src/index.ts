@@ -266,6 +266,7 @@ export {
   MAX_PROMPT_LENGTH,
   MAX_SPAWN_CHECKOUTS,
   OpenRequest,
+  isAsyncQuestion,
   QuestionAnswers,
   SESSION_CONTINUE_FIELDS,
   SESSION_INPUT_FIELDS,

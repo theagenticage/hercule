@@ -11,7 +11,7 @@
  * So each message is placed by its `item.started` row, and its text is
  * gathered from its rows wherever they sit.
  */
-import type { Input, TranscriptRow } from "@hercule/contract";
+import { isAsyncQuestion, type Input, type TranscriptRow } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
 import type { AgentState } from "./agent-state";
 import { findOpenItem } from "./open-item";
@@ -347,9 +347,7 @@ export const buildThreadBlocks = (
   // The Requests the agent is parked on. An async question is not one: the
   // agent keeps working, so it must not freeze a stretch, hide the working
   // face or mark an item as awaiting.
-  const parkedRequests = agent.openRequests.filter(
-    (request) => request.kind !== "question" || request.async !== true,
-  );
+  const parkedRequests = agent.openRequests.filter((request) => !isAsyncQuestion(request));
   const openRequestIds = new Set(parkedRequests.map((request) => request.requestId));
   const awaitingItemIds = new Set(parkedRequests.map((request) => request.itemId));
   const slots: Slot[] = [];
