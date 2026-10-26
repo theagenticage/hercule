@@ -1,0 +1,174 @@
+{
+ "mode": "absolute",
+ "reviewer": {
+  "model": "gpt-6.1-sol",
+  "version": "unknown",
+  "effort": "high"
+ },
+ "inputs": [
+  {
+   "file_name": "cal-17.png",
+   "sha256": "a389447fc8cbf2cfd881ec4db55c841559ba6a969c872ad82420520c477ddb43"
+  },
+  {
+   "file_name": "cal-18.png",
+   "sha256": "fc0b3a8dbd61434c87af718bf29cc39f9d796fc44710c7d0dc8d63b2ea4768c2"
+  }
+ ],
+ "images": [
+  {
+   "file_name": "cal-17.png",
+   "set": "calibration",
+   "screen": "sidebar",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png (21, 267, 234, 422): titles remain readable, but small metadata is delicate and difficult to isolate inside the surrounding fine boxes."
+    },
+    {
+     "category": "hierarchy",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png (12, 125, 248, 571): equally prominent frames surround project headings, titles and metadata, overwhelming their intended levels."
+    },
+    {
+     "category": "spacing-density",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png (12, 260, 248, 436): nested boundaries press against text and neighbouring borders, making the rows feel cramped."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png (0, 0, 1440, 900): fluorescent green, coral, cyan and magenta fill structural regions without semantic meaning; grey sidebar metadata is weak against coral."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 0,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png (272, 0, 1168, 900): the enormous fluorescent green field is intolerably glaring, alongside dense outlined coral navigation."
+    },
+    {
+     "category": "iconography",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png (12, 86, 248, 31) and (21, 289, 14, 400): enclosing boxes crowd small navigation and provider marks, interfering with their silhouettes."
+    },
+    {
+     "category": "state-visibility",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png (12, 149, 248, 214): selected thread surfaces disappear among uniformly coral outlined rows; tab selection depends heavily on cyan hue."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png (12, 125, 248, 571): individual text, icon and layout boundaries remain exposed throughout, resembling a broken debug rendering."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png (21, 267, 234, 207): questions remain understandable, but several titles and the Approval label are tightly truncated."
+    },
+    {
+     "category": "character",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png (0, 0, 1440, 900): faces remain recognizable, but fluorescent fields and pervasive framing overwhelm crew hues and the intended warm identity."
+    },
+    {
+     "category": "overall",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png (0, 0, 1440, 900): glare and nested boxes obstruct comfortable reading and selection; the visible treatment may originate in a capture overlay."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-18.png",
+   "set": "calibration",
+   "screen": "thread",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png (522, 205, 714, 59): body and code faces remain distinguishable, but prose lines are long and small metadata is crowded by frames."
+    },
+    {
+     "category": "hierarchy",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png (476, 278, 760, 580): the magenta code block and cyan composer compete strongly with the approval question and suggested answer."
+    },
+    {
+     "category": "spacing-density",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png (490, 594, 734, 158): text-span and row boundaries press against the command and explanations, obscuring useful gaps."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png (0, 0, 1440, 900): fluorescent green, coral, magenta and cyan carry unrelated structural meanings, while grey metadata becomes weak against the saturated surfaces."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 0,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png (272, 0, 1168, 900): a huge fluorescent green field, magenta code block and cyan composer create intolerable glare and saturation."
+    },
+    {
+     "category": "iconography",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png (484, 819, 744, 32): multiple enclosing boxes crowd composer icons and make their shapes harder to isolate."
+    },
+    {
+     "category": "state-visibility",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png (12, 188, 248, 123) and (494, 648, 155, 62): selected rows lose their surface distinction, while ordinary and suggested actions receive competing filled treatments."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png (476, 116, 760, 766): exposed layout and text boundaries run throughout the transcript and composer, giving a broken debug-rendering appearance."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png (530, 610, 553, 130): command and explanations still clearly distinguish allowing once, allowing within this thread and denying."
+    },
+    {
+     "category": "character",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png (481, 183, 23, 305) and (272, 0, 1168, 900): expressive faces remain, but fluorescent area fills overwhelm their signature hues and the intended warmth."
+    },
+    {
+     "category": "overall",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png (0, 0, 1440, 900): glare and pervasive boxes obstruct usable reading despite understandable wording; a capture overlay may be responsible."
+    }
+   ],
+   "overall_note": null
+  }
+ ],
+ "fixes": [],
+ "summary": "Both captures contain fluorescent fills and nested bounding boxes that obscure hierarchy and selection. These debug-like treatments may originate in capture overlays; both images are calibration and produce no fixes."
+}

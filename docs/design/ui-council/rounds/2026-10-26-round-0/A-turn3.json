@@ -1,0 +1,979 @@
+{
+ "mode": "absolute",
+ "reviewer": {
+  "model": "gpt-6.1-sol",
+  "version": "unknown",
+  "effort": "high"
+ },
+ "inputs": [
+  {
+   "file_name": "hercule-orient-express-wiki-1x.png",
+   "sha256": "1915fde5a6620831e3015bcf07d0e38dff112008175d6901da0af17c2caa1c9a"
+  },
+  {
+   "file_name": "hercule-orient-express-workflows-1x.png",
+   "sha256": "dcb2f75cbae1a56b27517e99464047abc5e27fd92a9ea1ca67523f49fc3901a3"
+  },
+  {
+   "file_name": "hercule-whitehaven-conversation-1x.png",
+   "sha256": "371db4b22b4ae53d953e4c22ef3e5eb19d3d19639d97a2138e2c6fc20e412657"
+  },
+  {
+   "file_name": "hercule-whitehaven-discussions-1x.png",
+   "sha256": "a73775f31cfb6c2b288059bdb066a50df97ac3b620c0512a7e8b2e5c3f13cdf3"
+  },
+  {
+   "file_name": "hercule-whitehaven-draft-1x.png",
+   "sha256": "cd9a7e07d68365cabfcb78bb2ded7615cfd7b684c03abba0cf7158a01412793c"
+  },
+  {
+   "file_name": "cal-07.png",
+   "sha256": "aeaafb5e2512201a596d6d4ba63e90bd3cb4b322483fa0a9ad4c0b214e401e38"
+  },
+  {
+   "file_name": "cal-08.png",
+   "sha256": "a953cd35626276c4c464df24789893d67646c0009863408f13707014a7db1859"
+  },
+  {
+   "file_name": "cal-09.png",
+   "sha256": "094aade9c1b4e410559783fb5fac3f420ab1d1d6cb889eecabeb5cfd71927a6f"
+  },
+  {
+   "file_name": "codex-dark-1x.png",
+   "sha256": "b56e44647ec8b3603a58d87bb8a7b70129993b31b2e8f3751ed731aa77a3e20c"
+  },
+  {
+   "file_name": "codex-dark-2x.png",
+   "sha256": "be6178976492c74f94cee4c8f7d89bef90103fb67670ac1f5dc2e25b219c9615"
+  }
+ ],
+ "images": [
+  {
+   "file_name": "hercule-orient-express-wiki-1x.png",
+   "set": "hercule",
+   "screen": "wiki",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-wiki-1x.png (300, 162, 507, 132): titles read clearly, but substantial page summaries are repeatedly small and light."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-wiki-1x.png (299, 105, 508, 189): project, repository, title and summary levels are distinguishable, though summaries are weaker than their usefulness warrants."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-wiki-1x.png (292, 150, 1128, 156): page rows have consistent heights and aligned title, provenance and date columns."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-wiki-1x.png (300, 177, 507, 418) and (1380, 169, 34, 418): summaries and change dates are repeatedly faint."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-wiki-1x.png (272, 0, 1168, 900): warm dark surfaces avoid glare, but faint rules and supporting text make the table somewhat flat."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-wiki-1x.png (22, 267, 16, 231) and (1128, 273, 14, 14): navigation icons are coherent; the small run provenance mark is less immediately recognizable."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-wiki-1x.png (12, 383, 248, 30) and (21, 130, 235, 93): selected navigation has a distinct surface, while waiting items have explicit headings and questions."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-wiki-1x.png (292, 87, 1128, 517): indentation, rules and provenance baselines repeat cleanly without clipping."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-wiki-1x.png (300, 265, 937, 29): page descriptions predict their content, but 'run 4f2a91c0' gives little useful provenance context."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-wiki-1x.png (1126, 169, 171, 299): small crew faces and identifiable mint, sky and iris hues add identity within the warm table."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-wiki-1x.png (292, 64, 1128, 540): the grouped page list is coherent and easy to scan, with faint summaries its main repeated weakness."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "hercule-orient-express-workflows-1x.png",
+   "set": "hercule",
+   "screen": "workflows",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-workflows-1x.png (570, 139, 844, 259): trigger text, percentages and times repeatedly combine small size with light weight."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-workflows-1x.png (299, 106, 1115, 292): Needs you and Failing correctly lead, although dense history marks compete with row information."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-workflows-1x.png (292, 252, 1128, 160): rows and columns align regularly, but the history column packs marks very tightly."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-workflows-1x.png (1294, 139, 120, 746) and (570, 139, 168, 746): times, next-run details and trigger metadata are repeatedly faint."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-workflows-1x.png (272, 0, 1168, 900): warm surfaces are calm overall; hundreds of small coloured history marks create a locally busy band."
+    },
+    {
+     "category": "iconography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-workflows-1x.png (748, 267, 219, 131): tiny history checks and crosses are difficult to distinguish by shape at 1x."
+    },
+    {
+     "category": "state-visibility",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-workflows-1x.png (299, 106, 88, 344) and (748, 267, 219, 131): group states have words and marks, but history outcomes depend heavily on colour because their shapes are so small."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-workflows-1x.png (292, 126, 1128, 760): row heights, separators and numeric alignment repeat consistently."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-workflows-1x.png (589, 265, 151, 133) and (1039, 265, 238, 15): raw event keys and 'issue_opened: No such key: labels' require technical interpretation."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-workflows-1x.png (20, 131, 235, 93) and (296, 106, 1118, 86): colleague faces, warm surfaces and marigold requests preserve a recognizable identity."
+    },
+    {
+     "category": "overall",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-workflows-1x.png (292, 64, 1128, 822): grouping is useful, but tiny histories, faint metadata and raw trigger labels create repeated reading work."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "hercule-whitehaven-conversation-1x.png",
+   "set": "hercule",
+   "screen": "conversation",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-conversation-1x.png (522, 275, 716, 59): body strokes are clear, but prose lines approach or exceed 100 characters; timestamps are small."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-conversation-1x.png (478, 592, 760, 62): Ada's name, answering label and latest response form a clear reading order."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-conversation-1x.png (476, 251, 761, 404): message edges align consistently, with comfortable separation; the date and interruption area has a looser rhythm."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-conversation-1x.png (21, 343, 234, 346): workspace labels and green Working text are faint, despite clear conversation text and readable name ink."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-conversation-1x.png (272, 0, 1168, 900): warm off-white surfaces, soft bubbles and a gently elevated composer are calm, though the large canvas is somewhat flat."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-conversation-1x.png (491, 846, 739, 30): composer icons have coherent optical sizes, stroke weights and alignment."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-conversation-1x.png (576, 144, 560, 50) and (521, 591, 108, 17): failure and answering states use explicit words and marks beyond colour."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-conversation-1x.png (478, 251, 760, 404): face placement, author lines and message edges repeat cleanly without clipping."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-conversation-1x.png (621, 153, 487, 34): the failure notice explains that the message was kept, but repeated failure wording and provider terminology are cumbersome."
+    },
+    {
+     "category": "character",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-conversation-1x.png (478, 252, 72, 368): expressive iris faces and matching Ada name ink remain distinct within the warm light palette."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-conversation-1x.png (272, 0, 1168, 900): the conversation is welcoming and coherent, with wide prose measures and weak sidebar metadata remaining."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "hercule-whitehaven-discussions-1x.png",
+   "set": "hercule",
+   "screen": "discussions",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-discussions-1x.png (327, 158, 1087, 99): subjects and aligned numeric columns read clearly; the small column headings are a little delicate."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-discussions-1x.png (297, 105, 410, 260): project, repository and subject levels are distinguishable, with repository labels relatively subdued."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-discussions-1x.png (292, 150, 1128, 120): rows share a regular height and aligned subject, session, post and date columns."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-discussions-1x.png (1218, 64, 200, 543): counts and dates are readable; thin table rules provide gentle but slightly weak separation."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-discussions-1x.png (272, 0, 1168, 900): text avoids harsh weight, but the broad bright table and empty lower area read as one flat sheet."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-discussions-1x.png (22, 267, 16, 231) and (299, 164, 15, 328): navigation and overlap icons have coherent sizes and alignment."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-discussions-1x.png (12, 352, 248, 30) and (21, 130, 235, 93): selected navigation has a clear surface, while waiting work has explicit labels and questions."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-discussions-1x.png (292, 87, 1128, 530): rules, indentation and numeric baselines repeat cleanly without collisions."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-discussions-1x.png (327, 309, 412, 61): overlap subjects identify the issue and retain useful file endings; the shortened refund path needs some interpretation."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-discussions-1x.png (20, 131, 235, 93) and (297, 104, 102, 440): expressive faces, warm neutrals and restrained project inlays preserve Hercule's identity."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-discussions-1x.png (292, 64, 1128, 553): the grouped table is clear and coherent, with localized faint rules and a flat bright canvas."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "hercule-whitehaven-draft-1x.png",
+   "set": "hercule",
+   "screen": "draft",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-draft-1x.png (506, 298, 700, 205): heading, prompt and settings have clear roles; workspace metadata is locally small and delicate."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-draft-1x.png (506, 298, 700, 183): the question leads directly to the composer, with intake suggestions clearly subordinate."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-draft-1x.png (506, 375, 700, 274): composer, workspace row and suggestion cards share aligned edges and regular gaps."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-draft-1x.png (521, 488, 664, 15) and (21, 429, 233, 313): workspace labels and sidebar Working states are weak against their pale surfaces."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-draft-1x.png (506, 184, 700, 465): warm off-white surfaces and soft card fills are calm; the composer shadow forms a slightly heavy band."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-draft-1x.png (519, 443, 675, 29) and (699, 576, 493, 16): toolbar icons are coherent, but tiny priority bars are less immediately interpretable."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-draft-1x.png (12, 259, 248, 52) and (1166, 441, 33, 33): the selected draft has words and a surface; the inactive send control is conveyed mainly by dimming."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-draft-1x.png (506, 563, 700, 86): suggestion cards repeat matching heights, radii and internal alignment without clipping."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-draft-1x.png (628, 331, 461, 17) and (650, 488, 112, 15): worktree and repeated remote default terminology require repository knowledge."
+    },
+    {
+     "category": "character",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-draft-1x.png (806, 184, 100, 101): the expressive orchid colleague face and restrained circular framing give the light screen a clear identity."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-whitehaven-draft-1x.png (506, 184, 700, 465): the starting point is inviting and ordered, with supporting contrast and technical setup wording needing refinement."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-07.png",
+   "set": "calibration",
+   "screen": "intake",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png (741, 77, 663, 215): text is legible, but bright metadata has little weight separation from body text and several small roles remain delicate."
+    },
+    {
+     "category": "hierarchy",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png (282, 65, 1122, 495): white metadata, outlines and long separators compete with titles and action content."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png (745, 346, 649, 205): buttons and explanations align in regular columns, with only the wrapped review explanation locally tighter."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png (271, 52, 1169, 1), (741, 322, 663, 1) and (282, 510, 412, 1): near-white rules produce harsh separation against the dark background."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png (0, 0, 1440, 900): bright text and white framing across nearly every region create a hard, tiring appearance."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png (291, 148, 21, 339): source icons remain distinct and consistently aligned at 1x."
+    },
+    {
+     "category": "state-visibility",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png (282, 65, 412, 29) and (745, 388, 156, 75): ordinary control outlines resemble prominent selection outlines, though selected fills and state words remain."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png (282, 65, 412, 29): geometry is coherent, but the selected segmented control has a conspicuous doubled outline."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png (915, 350, 446, 198): explanations identify which actions affect GitHub, start a review or only change the user's list."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png (20, 131, 235, 93): crew faces and warm hues remain identifiable, although white framing gives the screen a more mechanical tone."
+    },
+    {
+     "category": "overall",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png (282, 65, 1122, 495): actions and content are understandable, but hard outlines and uniformly bright supporting text create repeated discomfort."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-08.png",
+   "set": "calibration",
+   "screen": "sidebar",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png (21, 267, 234, 422): text is readable, but bright workspace labels and durations have limited typographic separation from titles."
+    },
+    {
+     "category": "hierarchy",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png (21, 323, 234, 88): studio-mac metadata and durations are nearly as prominent as thread titles."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png (12, 239, 248, 450): thread rows have a regular rhythm and aligned edges, with some title space consumed by status labels."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png (12, 48, 248, 30), (271, 0, 1, 900) and (0, 833, 272, 1): white boundaries are harsh against the dark sidebar."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png (0, 0, 272, 900): bright small text and white structural lines create a hard, tiring frame."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png (21, 94, 231, 16) and (21, 289, 14, 400): navigation and provider marks remain crisp and consistently sized."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png (12, 149, 248, 162): waiting and selected work have labels and filled surfaces; heavy ordinary outlines make selection less economical to read."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png (12, 48, 248, 30): repeated rows align cleanly, but the segmented header has a doubled white boundary."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png (21, 267, 234, 207): checkout, changelog and payout titles repeatedly lose information through truncation."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png (20, 154, 234, 66): crew faces and marigold requests remain recognizable, though strong white framing competes with the warm character."
+    },
+    {
+     "category": "overall",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png (0, 0, 272, 900): the sidebar remains usable, but hard boundaries and bright metadata repeatedly weaken hierarchy and comfort."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-09.png",
+   "set": "calibration",
+   "screen": "thread",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png (522, 205, 714, 59): body text and inline code are distinguishable, but prose lines are long and metadata remains small."
+    },
+    {
+     "category": "hierarchy",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png (522, 140, 714, 352): bright work summaries, long white rules and the code outline compete with the assistant's messages."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png (494, 648, 718, 95): approval buttons and explanations have aligned columns and comfortable gaps; the stacked lower panels are tighter."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png (522, 278, 714, 84) and (476, 760, 760, 98): near-white borders make code and composer edges disproportionately hard against their dark surfaces."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png (476, 140, 760, 718): bright text, separators and outlined panels create a tiring wireframe effect around otherwise warm content."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png (492, 819, 736, 31): composer icons remain distinct, consistently sized and aligned."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png (522, 524, 205, 16) and (490, 554, 732, 40): waiting and queued states have explicit words and marks; ordinary white outlines compete with selection treatment."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png (476, 594, 760, 264): controls repeat clean geometry, while the composer overlaps the approval panel's lower decorative edge."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png (530, 610, 553, 130): command text and explanations clearly distinguish allowing once, allowing within this thread and denying."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png (481, 183, 23, 305) and (494, 609, 29, 27): expressive peach faces and warm attention styling remain, but white framing reduces their prominence."
+    },
+    {
+     "category": "overall",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png (476, 140, 760, 741): the pending decision is understandable, but harsh outlines and overly prominent metadata make the screen tiring."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "codex-dark-1x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-dark",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": null,
+     "unassessable_reason": "The brief excludes typography for this Codex capture, whose UI uses a configured monospace font.",
+     "evidence": "codex-dark-1x.png (52, 44, 1384, 852): the configured monospace UI is visible, but it is excluded from typography scoring."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png (614, 429, 538, 28) and (515, 782, 736, 98): the central question leads, though the faint composer prompt weakens the next step."
+    },
+    {
+     "category": "spacing-density",
+     "score": null,
+     "unassessable_reason": "The brief excludes density for Codex's empty new-chat screen because it shows no conversation content.",
+     "evidence": "codex-dark-1x.png (330, 44, 1106, 852): the empty main canvas shows no populated conversation from which to assess density."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png (527, 798, 178, 68): the input placeholder and Approve for me label are faint against the composer."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png (0, 0, 1440, 900): neutral dark layers separate gently; the white voice button is a localized bright patch."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png (8, 52, 36, 303) and (257, 180, 43, 14): navigation icons are coherent, with some tiny secondary thread marks harder to distinguish."
+    },
+    {
+     "category": "state-visibility",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png (60, 252, 250, 30) and (94, 15, 51, 15): selected project and home states have surfaces, while inactive navigation arrows rely on dimming."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png (515, 744, 736, 136): context strip and composer align cleanly, with consistent rounded geometry and no stray clipping."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png (92, 290, 216, 108) and (583, 849, 113, 18): repeated truncated thread titles are indistinguishable, and Approve for me does not explain its scope."
+    },
+    {
+     "category": "character",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png (68, 62, 1084, 395): the Codex wordmark, terminal-flower symbol and consistent terminal-like treatment form a distinct, coherent identity."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png (52, 44, 1384, 852): the visible shell is calm and coherent, with faint composer text and uninformative thread truncation remaining."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "codex-dark-2x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-dark",
+   "scale": 2,
+   "scores": [
+    {
+     "category": "typography",
+     "score": null,
+     "unassessable_reason": "The brief excludes typography for this Codex capture, whose UI uses a configured monospace font.",
+     "evidence": "codex-dark-2x.png (104, 88, 2768, 1704): the configured monospace UI is visible at 2x, but it is excluded from typography scoring."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png (1228, 858, 1076, 56) and (1030, 1564, 1472, 196): the central question leads, while the weak composer prompt makes the next step less prominent."
+    },
+    {
+     "category": "spacing-density",
+     "score": null,
+     "unassessable_reason": "The brief excludes density for Codex's empty new-chat screen because it shows no conversation content.",
+     "evidence": "codex-dark-2x.png (660, 88, 2212, 1704): the empty main canvas provides no populated conversation for density assessment."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png (1054, 1596, 356, 136): placeholder and approval-mode text remain faint against the composer surface."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png (0, 0, 2880, 1800): neutral dark layers step gently, with a localized bright white voice button."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png (16, 104, 72, 606) and (514, 360, 86, 28): navigation shapes are coherent; small secondary thread marks are less immediately recognizable."
+    },
+    {
+     "category": "state-visibility",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png (120, 504, 500, 60) and (188, 30, 102, 30): selection uses surfaces, while inactive navigation arrows are communicated through dimming."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png (1030, 1488, 1472, 272): context and composer edges align precisely, with coherent rounded corners."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png (184, 580, 432, 216) and (1166, 1698, 226, 36): repeated truncated thread titles lack distinguishing information, and Approve for me leaves its scope unclear."
+    },
+    {
+     "category": "character",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png (136, 124, 2168, 790): wordmark, terminal-flower symbol and terminal-like presentation maintain a distinct coherent identity."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png (104, 88, 2768, 1704): the shell is calm and polished in its visible geometry, with weak composer contrast and thread-label clarity."
+    }
+   ],
+   "overall_note": null
+  }
+ ],
+ "fixes": [
+  {
+   "id": "F1",
+   "priority": "SHOULD",
+   "category": "colour-contrast",
+   "images": [
+    "hercule-orient-express-wiki-1x.png",
+    "hercule-orient-express-workflows-1x.png",
+    "hercule-whitehaven-conversation-1x.png",
+    "hercule-whitehaven-draft-1x.png"
+   ],
+   "screens": [
+    "wiki",
+    "workflows",
+    "conversation",
+    "draft"
+   ],
+   "themes": [
+    "orient-express",
+    "whitehaven"
+   ],
+   "problem": "Supporting text is repeatedly faint in hercule-orient-express-wiki-1x.png (300, 177, 507, 418), hercule-orient-express-workflows-1x.png (1294, 139, 120, 746), hercule-whitehaven-conversation-1x.png (21, 343, 234, 346), and hercule-whitehaven-draft-1x.png (521, 488, 664, 15).",
+   "change": "Set secondary text ink to oklch(0.70 0.018 65) in Orient Express and oklch(0.52 0.012 80) in Whitehaven, at opacity 1. Verify at least 4.5:1 contrast for summaries, timestamps, workspace labels and supporting state text against their actual backgrounds.",
+   "file": null,
+   "line": null,
+   "metric": "text-contrast"
+  },
+  {
+   "id": "F2",
+   "priority": "SHOULD",
+   "category": "typography",
+   "images": [
+    "hercule-orient-express-wiki-1x.png",
+    "hercule-orient-express-workflows-1x.png",
+    "hercule-whitehaven-conversation-1x.png"
+   ],
+   "screens": [
+    "wiki",
+    "workflows",
+    "conversation"
+   ],
+   "themes": [
+    "orient-express",
+    "whitehaven"
+   ],
+   "problem": "Small supporting roles repeat in hercule-orient-express-wiki-1x.png (300, 177, 507, 418), hercule-orient-express-workflows-1x.png (570, 139, 844, 259), and hercule-whitehaven-conversation-1x.png (1204, 404, 35, 163).",
+   "change": "Use font-size 12px, line-height 16px and font-weight 400 as the minimum supporting-text role for page summaries, trigger metadata, percentages and timestamps.",
+   "file": null,
+   "line": null,
+   "metric": "type-scale"
+  },
+  {
+   "id": "F3",
+   "priority": "SHOULD",
+   "category": "typography",
+   "images": [
+    "hercule-whitehaven-conversation-1x.png"
+   ],
+   "screens": [
+    "conversation"
+   ],
+   "themes": [
+    "whitehaven"
+   ],
+   "problem": "hercule-whitehaven-conversation-1x.png (522, 275, 716, 59) and (522, 614, 716, 37): assistant prose repeatedly approaches or exceeds 100 characters per line.",
+   "change": "Set assistant prose max-inline-size to 64ch and line-height to 22px. Measure the rendered result against the 60\u201375-character target.",
+   "file": null,
+   "line": null,
+   "metric": "prose-measure"
+  },
+  {
+   "id": "F4",
+   "priority": "SHOULD",
+   "category": "iconography",
+   "images": [
+    "hercule-orient-express-workflows-1x.png"
+   ],
+   "screens": [
+    "workflows"
+   ],
+   "themes": [
+    "orient-express"
+   ],
+   "problem": "hercule-orient-express-workflows-1x.png (748, 267, 219, 131): history checks and crosses are too small to distinguish reliably by shape at 1x.",
+   "change": "Render history marks at 12\u00d712px with 2px strokes. Arrange the 20 marks in two rows of ten with 4px horizontal and vertical gaps, filling left-to-right with the older row first. The group occupies 156\u00d728px within a 40px table row.",
+   "file": null,
+   "line": null,
+   "metric": "none"
+  },
+  {
+   "id": "F5",
+   "priority": "SHOULD",
+   "category": "clarity-copy",
+   "images": [
+    "hercule-orient-express-workflows-1x.png"
+   ],
+   "screens": [
+    "workflows"
+   ],
+   "themes": [
+    "orient-express"
+   ],
+   "problem": "hercule-orient-express-workflows-1x.png (589, 265, 151, 620): Starts on repeatedly displays raw event keys instead of plain event names.",
+   "change": "Display github.issue.opened as 'GitHub issue opened', github.issue.labeled as 'GitHub issue labeled', github.issue.assigned as 'GitHub issue assigned', github.pr.opened as 'GitHub pull request opened', github.pr.merged as 'GitHub pull request merged', github.issue.closed as 'GitHub issue closed', and run.failed as 'Run failed'. Allow two lines at 12px/16px within the 40px row.",
+   "file": null,
+   "line": null,
+   "metric": "none"
+  },
+  {
+   "id": "F6",
+   "priority": "SHOULD",
+   "category": "clarity-copy",
+   "images": [
+    "hercule-whitehaven-draft-1x.png"
+   ],
+   "screens": [
+    "draft"
+   ],
+   "themes": [
+    "whitehaven"
+   ],
+   "problem": "hercule-whitehaven-draft-1x.png (628, 331, 461, 17) and (650, 488, 112, 15): setup guidance uses worktree and remote default terminology without plainly explaining the result.",
+   "change": "Replace the guidance with 'The agent starts in a new workspace, on a branch from the repository\u2019s default branch.' Replace the branch-row label 'remote default' with 'Repository default branch'.",
+   "file": null,
+   "line": null,
+   "metric": "none"
+  },
+  {
+   "id": "F7",
+   "priority": "COULD",
+   "category": "clarity-copy",
+   "images": [
+    "hercule-orient-express-wiki-1x.png"
+   ],
+   "screens": [
+    "wiki"
+   ],
+   "themes": [
+    "orient-express"
+   ],
+   "problem": "hercule-orient-express-wiki-1x.png (1128, 272, 110, 16): 'run 4f2a91c0' exposes an identifier without identifying the workflow responsible for the change.",
+   "change": "Use the owning workflow's display name followed by ' \u00b7 run' as the primary provenance label. Put 'Run 4f2a91c0' on a secondary line at 12px font-size and 16px line-height.",
+   "file": null,
+   "line": null,
+   "metric": "none"
+  },
+  {
+   "id": "F8",
+   "priority": "COULD",
+   "category": "clarity-copy",
+   "images": [
+    "hercule-whitehaven-conversation-1x.png"
+   ],
+   "screens": [
+    "conversation"
+   ],
+   "themes": [
+    "whitehaven"
+   ],
+   "problem": "hercule-whitehaven-conversation-1x.png (621, 153, 487, 34): the interruption notice repeats failure information and uses cumbersome provider terminology.",
+   "change": "Replace the notice with 'Ada\u2019s turn timed out after 120 seconds. Your message was kept.'",
+   "file": null,
+   "line": null,
+   "metric": "none"
+  }
+ ],
+ "summary": "Hercule retains its warm surfaces and expressive crew identity, with clear primary content. Small metadata, wide conversation lines and tiny workflow history marks remain visible weaknesses. The calibration captures show how hard white text and borders can flatten hierarchy and tire the eye."
+}

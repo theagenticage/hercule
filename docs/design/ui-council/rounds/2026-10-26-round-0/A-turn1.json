@@ -1,0 +1,960 @@
+{
+ "mode": "absolute",
+ "reviewer": {
+  "model": "gpt-6.1-sol",
+  "version": "unknown",
+  "effort": "high"
+ },
+ "inputs": [
+  {
+   "file_name": "hercule-orient-express-conversation-1x.png",
+   "sha256": "f4a3e2f2104d78bf477789ae1dde7e064dc8c55e15da325a5cde0d86e8d5bbb7"
+  },
+  {
+   "file_name": "hercule-orient-express-discussions-1x.png",
+   "sha256": "b6e53fb14c5220104b1e51753f51c38f404eec2a756b7461c9f01de32d109561"
+  },
+  {
+   "file_name": "hercule-orient-express-draft-1x.png",
+   "sha256": "d557e15dad63d1afbd60e713b4cb25908de54a43e8134d177b59cf9ef563e735"
+  },
+  {
+   "file_name": "hercule-orient-express-intake-1x.png",
+   "sha256": "1365dbce03042bfa8224f16f3e29b6d241eb3a3b6b780ca116ca63565214d4b4"
+  },
+  {
+   "file_name": "hercule-orient-express-run-1x.png",
+   "sha256": "efc1001a28867664a72d259a5c9bba3803d84776c8fe9a3e04501361e39d4f16"
+  },
+  {
+   "file_name": "cal-01.png",
+   "sha256": "37f0468db210874ee93da19101a54e260efbdc2ce5ca1eebc3b8bde40bad81ec"
+  },
+  {
+   "file_name": "cal-02.png",
+   "sha256": "f67ddbcedf1cf9d62ffa93669688cc31c09c3879e46728ea72a95052874b0d6d"
+  },
+  {
+   "file_name": "cal-03.png",
+   "sha256": "c1bba354f5056cdd8b356ca4edcc3f0c8c44647ca9f53bdb4b8243283c5b0cd3"
+  },
+  {
+   "file_name": "claude-dark-1x.png",
+   "sha256": "3815c0ebc883eee030f2973b22a03fa4f48912312c839e4761d4234efb9eeaaa"
+  },
+  {
+   "file_name": "claude-dark-2x.png",
+   "sha256": "43ef0cb0c9d98034a9f1f3e4d79589d8c09885a66d147d4e73cbe0cd9e29e2fe"
+  }
+ ],
+ "images": [
+  {
+   "file_name": "hercule-orient-express-conversation-1x.png",
+   "set": "hercule",
+   "screen": "conversation",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-conversation-1x.png (522, 254, 716, 82): body strokes are readable, but prose lines approach or exceed 100 characters; timestamps are small and light."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-conversation-1x.png (478, 592, 760, 62): Ada's name, answering label and latest response establish a clear reading order."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-conversation-1x.png (476, 251, 761, 404): messages align consistently and have breathing room; the date and interruption area has a relatively loose rhythm."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-conversation-1x.png (1204, 404, 35, 163) and (21, 343, 96, 67): timestamps and workspace metadata are repeatedly faint."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-conversation-1x.png (272, 0, 1168, 900): warm dark surfaces and off-white prose are calm; composer separation is slightly muddy."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-conversation-1x.png (491, 846, 739, 30): composer icons have consistent optical sizes and alignment; sidebar navigation uses a coherent outline family."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-conversation-1x.png (576, 144, 560, 50) and (521, 591, 108, 17): interruption and answering states have explicit words as well as visual marks."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-conversation-1x.png (478, 251, 760, 404): assistant faces, name lines and message edges repeat cleanly without clipping."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-conversation-1x.png (621, 153, 487, 34): the failure notice explains that the message was kept, although its repeated failure wording and provider terminology are cumbersome."
+    },
+    {
+     "category": "character",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-conversation-1x.png (478, 252, 72, 368): expressive iris faces and matching name ink establish Ada's identity within a warm palette."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-conversation-1x.png (272, 0, 1168, 900): the conversation is coherent and welcoming, with long prose measures and faint metadata remaining visible weaknesses."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "hercule-orient-express-discussions-1x.png",
+   "set": "hercule",
+   "screen": "discussions",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-discussions-1x.png (327, 153, 1087, 105): subject text reads clearly and numeric columns align, but counts and dates are small and light."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-discussions-1x.png (297, 105, 410, 260): project, repository and subject levels are distinguishable, although the repository labels are weak."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-discussions-1x.png (292, 150, 1128, 120): discussion rows share a regular height and aligned subject, count and date columns."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-discussions-1x.png (1218, 64, 200, 543): headings, counts and dates repeatedly have weak contrast; horizontal separators are also faint."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-discussions-1x.png (272, 0, 1168, 900): restrained warm surfaces avoid glare, but the table's layers and rules are somewhat flat."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-discussions-1x.png (22, 267, 16, 231) and (299, 164, 15, 328): navigation and overlap icons are consistently aligned and compact."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-discussions-1x.png (12, 352, 248, 30) and (21, 130, 235, 93): selected navigation has a distinct surface, while waiting items have an explicit heading and question text."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-discussions-1x.png (292, 87, 1128, 530): row rules, indentation and right-aligned table values are consistent without visible collisions."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-discussions-1x.png (327, 309, 412, 61): overlap subjects explain the issue and retain useful file endings, though the shortened refund path needs interpretation."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-discussions-1x.png (20, 131, 235, 93) and (297, 104, 102, 440): colleague faces, warm neutrals and restrained project inlays preserve Hercule's identity."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-discussions-1x.png (292, 64, 1128, 553): the grouped table is easy to scan, with repeated faint metadata limiting its finish."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "hercule-orient-express-draft-1x.png",
+   "set": "hercule",
+   "screen": "draft",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-draft-1x.png (506, 298, 700, 205): heading and prompt roles are clear; workspace labels and composer settings are small and light."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-draft-1x.png (506, 298, 700, 183): the question leads directly to the large composer, with intake suggestions clearly subordinate."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-draft-1x.png (506, 375, 700, 274): composer, workspace row and three suggestion cards share clean edges and regular gaps."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-draft-1x.png (521, 392, 664, 111): placeholder, workspace labels and device metadata are faint; the composer edge is weak."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-draft-1x.png (506, 184, 700, 465): the warm dark composition is calm and the face supplies a small accent; adjacent dark surfaces separate only softly."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-draft-1x.png (519, 443, 675, 29) and (699, 576, 493, 16): toolbar icons are coherent, but the tiny priority bars are harder to interpret."
+    },
+    {
+     "category": "state-visibility",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-draft-1x.png (12, 259, 248, 52) and (1166, 441, 33, 33): the draft is labelled and selected; the send control communicates inactivity mainly through dimming."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-draft-1x.png (506, 563, 700, 86): suggestion cards use matching radii, heights and internal alignment without clipping."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-draft-1x.png (628, 331, 461, 17) and (650, 488, 112, 15): 'worktree' and the repeated 'remote default' wording require repository knowledge."
+    },
+    {
+     "category": "character",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-draft-1x.png (806, 184, 100, 101): the expressive orchid colleague face and restrained framing give the warm screen a clear identity."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-draft-1x.png (506, 184, 700, 465): the starting point is inviting and well ordered, with faint supporting text and technical setup wording needing attention."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "hercule-orient-express-intake-1x.png",
+   "set": "hercule",
+   "screen": "intake",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-intake-1x.png (741, 110, 662, 103): title and prose roles separate clearly; the branch value appears in the code face, and supporting metadata is small."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-intake-1x.png (741, 110, 662, 267): the selected signal title leads the detail pane and the filled Approve button clearly leads its actions."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-intake-1x.png (745, 346, 649, 205): action buttons align and explanations have a consistent gutter; the wrapped review explanation makes that row somewhat tighter."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-intake-1x.png (291, 527, 395, 33) and (740, 871, 575, 17): summary text and shortcut hints are faint despite clear primary content."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-intake-1x.png (272, 53, 1168, 809): small semantic colour accents sit comfortably on warm surfaces, although pane boundaries are subdued."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-intake-1x.png (291, 148, 21, 339): source icons have consistent optical size and alignment; the passed-check mark remains distinct."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-intake-1x.png (282, 287, 412, 53), (1269, 186, 119, 17) and (324, 260, 359, 17): selection, passed checks and returned work have surfaces, marks or words beyond colour."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-intake-1x.png (745, 346, 156, 117): action controls share widths, radii and alignment; list rows and source icons also repeat cleanly."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-intake-1x.png (915, 350, 446, 198): explanations identify which actions affect GitHub, start a review or only change the user's list."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-intake-1x.png (20, 130, 235, 94) and (745, 346, 156, 30): expressive sidebar faces, warmth and a restrained lacquer-green suggested action remain coherent."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-intake-1x.png (282, 65, 1122, 496): signal selection and action consequences are clear, with metadata legibility and a branch typeface inconsistency remaining."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "hercule-orient-express-run-1x.png",
+   "set": "hercule",
+   "screen": "run",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-run-1x.png (297, 333, 1132, 209): node subtitles and edge conditions are extremely small at 1x, making the graph difficult to read at normal distance."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-run-1x.png (296, 68, 700, 70): the waiting heading and named security question correctly lead the screen, but graph details are much weaker."
+    },
+    {
+     "category": "spacing-density",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-run-1x.png (1279, 420, 161, 43): the graph extends past the right edge and clips the final node's description; node internals are tightly packed."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-run-1x.png (1003, 420, 437, 43) and (297, 456, 140, 40): future and inactive nodes have text and edges close to the background."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-run-1x.png (296, 332, 1144, 211): the graph becomes a muddy brown-black layer with dim labels, despite a calm surrounding canvas."
+    },
+    {
+     "category": "iconography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-run-1x.png (500, 333, 432, 209): completion marks and node glyphs are repeatedly too small to distinguish comfortably at 1x."
+    },
+    {
+     "category": "state-visibility",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-run-1x.png (500, 447, 142, 40) and (1003, 420, 437, 43): the waiting step has an outline and matching question above, but future steps are communicated chiefly through heavy dimming."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-run-1x.png (297, 333, 1143, 209): node shapes and connector routing are orderly, but the clipped rightmost node and compressed labels weaken the finish."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-run-1x.png (297, 402, 140, 40), (1003, 420, 140, 41) and (1348, 420, 92, 41): raw step identifiers and shortened descriptions require interpretation."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-run-1x.png (20, 130, 235, 94) and (296, 96, 700, 42): warm surfaces, colleague faces and marigold attention styling retain Hercule's identity."
+    },
+    {
+     "category": "overall",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "hercule-orient-express-run-1x.png (296, 68, 1144, 512): the pending question is actionable, but the graph's tiny, dim content obstructs understanding the run."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-01.png",
+   "set": "calibration",
+   "screen": "intake",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png (747, 151, 658, 72): change counts, branch information and author metadata have cramped spacing and a tight line rhythm."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png (747, 93, 659, 189): the signal title and green Approve button lead, although compressed surrounding metadata weakens separation."
+    },
+    {
+     "category": "spacing-density",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png (751, 252, 646, 110) and (747, 151, 658, 18): button explanations nearly touch their controls, and change-summary tokens run together."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png (294, 488, 397, 29) and (749, 884, 470, 16): list summary and bottom shortcuts are faint on the warm background."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png (711, 55, 729, 399): colours avoid glare, but closely packed detail text forms a tiring band near the top."
+    },
+    {
+     "category": "iconography",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png (296, 139, 21, 326) and (747, 153, 131, 17): source icons remain recognizable, but several icon-label gaps are too tight."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png (284, 268, 412, 52) and (1279, 152, 116, 17): selected work and passed checks have surfaces, words and marks beyond colour."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png (747, 151, 659, 211) and (294, 884, 925, 16): multiple text groups crowd their neighbours, and bottom content meets the capture edge."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png (909, 258, 480, 187): action consequences are explicit, although collapsed visual spacing makes some sentences harder to separate from controls."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png (20, 132, 235, 92): expressive colleague faces, marigold requests and warm neutrals retain a recognizable identity."
+    },
+    {
+     "category": "overall",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png (284, 55, 1122, 462): the selected signal and actions are understandable, but repeated crowding and faint small text make the screen rough."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-02.png",
+   "set": "calibration",
+   "screen": "sidebar",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png (21, 271, 234, 415): thread titles remain readable, but workspace labels, times and status text are repeatedly small and light."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png (12, 132, 248, 182): waiting work precedes project groups, and selected thread surfaces separate important items from ordinary rows."
+    },
+    {
+     "category": "spacing-density",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png (16, 858, 244, 42): the status summary and account row are cramped against the bottom edge, despite more comfortable spacing in the thread list."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png (21, 346, 234, 339): workspace names and Working labels are weak against the dark sidebar."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png (0, 0, 273, 900): warm surfaces and restrained selected rows are calm; lower-priority text can look muddy."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png (21, 94, 231, 16) and (21, 241, 13, 443): navigation icons align consistently, while the smallest provider marks have limited detail."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png (12, 151, 248, 163) and (22, 602, 232, 34): waiting, selection, Approval and Question states have explicit words or distinct surfaces."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png (12, 261, 248, 423) and (16, 858, 244, 42): thread rows repeat coherently, but footer padding is visibly tighter than the other sidebar regions."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png (21, 154, 234, 63): questions communicate the needed decision; the long checkout title loses some distinguishing information through truncation."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png (20, 154, 234, 66): readable peach and mint faces, marigold requests and warm project inlays retain Hercule's identity."
+    },
+    {
+     "category": "overall",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png (0, 0, 273, 900): the sidebar organizes work clearly, but repeated faint metadata and a compressed footer reduce comfort."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-03.png",
+   "set": "calibration",
+   "screen": "thread",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png (513, 80, 724, 45) and (513, 207, 302, 28): prose has a long measure, while work summaries and author metadata are small and tightly spaced."
+    },
+    {
+     "category": "hierarchy",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png (477, 640, 760, 245): the approval request leads the bottom region, but queued-message, approval and composer controls form a crowded stack."
+    },
+    {
+     "category": "spacing-density",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png (495, 709, 720, 94): explanations nearly meet button edges, and the final approval row sits tightly against the composer."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png (521, 51, 512, 24): the upper work-summary text is almost indistinguishable from its background; lower metadata is also faint."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png (477, 640, 760, 245): overlapping warm brown surfaces and dim supporting text make the action stack muddy."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png (494, 853, 737, 31): composer controls use a coherent outline treatment, though the smallest settings icons are delicate."
+    },
+    {
+     "category": "state-visibility",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png (523, 256, 199, 15) and (477, 640, 760, 162): waiting and queued states are labelled, but completed-work context near the top is heavily dimmed."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png (477, 668, 760, 217) and (498, 886, 728, 14): the composer covers the approval panel's lower edge, and workspace metadata crowds the window bottom."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png (495, 674, 717, 128): the command and scope of Allow always are explained plainly; the queued and waiting messages require a little cross-reading."
+    },
+    {
+     "category": "character",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png (481, 68, 25, 187) and (477, 668, 760, 42): expressive peach faces and warm marigold attention styling make the screen recognizably Hercule."
+    },
+    {
+     "category": "overall",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png (477, 51, 760, 849): the pending decision can be understood, but near-invisible history metadata and the crowded bottom stack hinder reading."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "claude-dark-1x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-dark",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png (397, 211, 635, 486): body text and code are clearly differentiated, with even line spacing and generally comfortable prose lengths."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png (393, 211, 639, 486) and (1127, 64, 305, 424): central prose is easy to follow, although similarly weighted utility headings attract some attention."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png (393, 363, 639, 334) and (749, 761, 342, 95): prose and code have regular spacing, but the latest user bubble nearly meets the input boundary."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png (1127, 274, 305, 116) and (364, 808, 727, 48): content and card edges are readable; input placeholder and secondary utility labels are weaker."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png (329, 49, 1111, 851): soft off-white text and gently stepped neutral surfaces avoid glare; syntax colours are concentrated within the code block."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png (19, 62, 23, 204) and (1225, 8, 201, 31): navigation and toolbar icons share coherent strokes and optical sizes."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png (1127, 214, 305, 176) and (1058, 869, 18, 18): toggle position, percentage and reconnect wording explain states, but the bottom activity ring has no adjacent state label."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png (1127, 64, 305, 424): utility cards repeat aligned edges, radii and padding with crisp boundaries."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png (1146, 84, 267, 387) and (381, 870, 37, 18): Environment, Connectors and Commit changes are clear; the isolated Auto label does not explain its scope."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png (0, 0, 1440, 900): restrained neutral surfaces, rounded utilities and consistent conversational typography form a coherent, quiet identity."
+    },
+    {
+     "category": "overall",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png (364, 64, 1068, 824): readable prose, orderly utilities and calm surfaces make this comfortable to work in, with localized input and status-label weaknesses."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "claude-dark-2x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-dark",
+   "scale": 2,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png (794, 422, 1270, 972): prose and monospace code have clear strokes and even line rhythm at 2x; text roles are easy to distinguish."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png (786, 422, 1278, 972) and (2254, 128, 610, 848): central content leads its column, while utility headings have nearly the same emphasis as prose headings."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png (786, 726, 1278, 668) and (1498, 1522, 684, 190): paragraphs and code have generous regular gaps; the user bubble sits very close to the composer."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png (2254, 548, 610, 232) and (728, 1616, 1454, 96): utility text and borders remain readable, with weaker placeholder and secondary labels."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png (658, 98, 2222, 1702): neutral surface steps and off-white text are calm, with saturated syntax colour confined to a limited region."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png (38, 124, 46, 408) and (2450, 16, 402, 62): icons retain coherent stroke weights, recognizable shapes and alignment at 2x."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png (2254, 428, 610, 352) and (2116, 1738, 36, 36): states use toggle position, numeric context and reconnect wording; the activity ring remains unexplained by text."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png (2254, 128, 610, 848): utility cards share precise edges, rounded corners and repeated internal alignment."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png (2292, 168, 534, 774) and (762, 1740, 74, 36): main utility labels predict their purpose, but Auto remains an ambiguous standalone setting."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png (0, 0, 2880, 1800): a consistent restrained identity runs through the neutral sidebar, rounded cards, typography and composer."
+    },
+    {
+     "category": "overall",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png (728, 128, 2136, 1648): the visible content is comfortable and orderly, with localized weaknesses in secondary labels and composer spacing."
+    }
+   ],
+   "overall_note": null
+  }
+ ],
+ "fixes": [
+  {
+   "id": "F1",
+   "priority": "MUST",
+   "category": "typography",
+   "images": [
+    "hercule-orient-express-run-1x.png"
+   ],
+   "screens": [
+    "run"
+   ],
+   "themes": [
+    "orient-express"
+   ],
+   "problem": "hercule-orient-express-run-1x.png (297, 333, 1132, 209): graph node subtitles and connector conditions are too small to read comfortably at the displayed 80% zoom.",
+   "change": "Set the displayed minimum size of node titles and subtitles to 12px with 16px line height, and connector labels to 11px with 16px line height. Apply these minimums after graph zoom; increase node padding to 12px horizontally and 8px vertically to contain the text.",
+   "file": null,
+   "line": null,
+   "metric": "type-scale"
+  },
+  {
+   "id": "F2",
+   "priority": "MUST",
+   "category": "colour-contrast",
+   "images": [
+    "hercule-orient-express-run-1x.png"
+   ],
+   "screens": [
+    "run"
+   ],
+   "themes": [
+    "orient-express"
+   ],
+   "problem": "hercule-orient-express-run-1x.png (1003, 420, 437, 43) and (297, 456, 140, 40): future and inactive graph nodes are dimmed until their labels and boundaries nearly disappear.",
+   "change": "Set graph node and connector group opacity to 1. Use oklch(0.70 0.018 65) for secondary node text and oklch(0.40 0.016 60) for node borders. Preserve state distinctions with a 12px outlined state mark and explicit Pending or Not triggered text.",
+   "file": null,
+   "line": null,
+   "metric": "opacity-dimming"
+  },
+  {
+   "id": "F3",
+   "priority": "SHOULD",
+   "category": "colour-contrast",
+   "images": [
+    "hercule-orient-express-conversation-1x.png",
+    "hercule-orient-express-discussions-1x.png",
+    "hercule-orient-express-draft-1x.png",
+    "hercule-orient-express-intake-1x.png",
+    "hercule-orient-express-run-1x.png"
+   ],
+   "screens": [
+    "conversation",
+    "discussions",
+    "draft",
+    "intake",
+    "run"
+   ],
+   "themes": [
+    "orient-express"
+   ],
+   "problem": "Repeated faint supporting text: conversation (1204, 404, 35, 163), discussions (1218, 64, 200, 543), draft (521, 488, 664, 15), intake (291, 527, 395, 33), and run (296, 190, 158, 45), in their respective hercule-orient-express-*-1x.png images.",
+   "change": "Set secondary text ink to oklch(0.70 0.018 65) at opacity 1 for timestamps, workspace labels, table metadata and explanatory footers. Verify a minimum 4.5:1 text contrast against each actual background.",
+   "file": null,
+   "line": null,
+   "metric": "text-contrast"
+  },
+  {
+   "id": "F4",
+   "priority": "SHOULD",
+   "category": "typography",
+   "images": [
+    "hercule-orient-express-conversation-1x.png",
+    "hercule-orient-express-discussions-1x.png",
+    "hercule-orient-express-draft-1x.png"
+   ],
+   "screens": [
+    "conversation",
+    "discussions",
+    "draft"
+   ],
+   "themes": [
+    "orient-express"
+   ],
+   "problem": "hercule-orient-express-conversation-1x.png (1204, 404, 35, 163), hercule-orient-express-discussions-1x.png (1257, 158, 157, 99), and hercule-orient-express-draft-1x.png (521, 488, 664, 15): small metadata combines delicate strokes with limited size.",
+   "change": "Use font-size 12px, line-height 16px and font-weight 400 as the minimum metadata role for timestamps, discussion counts and workspace labels.",
+   "file": null,
+   "line": null,
+   "metric": "type-scale"
+  },
+  {
+   "id": "F5",
+   "priority": "SHOULD",
+   "category": "typography",
+   "images": [
+    "hercule-orient-express-conversation-1x.png"
+   ],
+   "screens": [
+    "conversation"
+   ],
+   "themes": [
+    "orient-express"
+   ],
+   "problem": "hercule-orient-express-conversation-1x.png (522, 275, 716, 59) and (522, 614, 716, 37): assistant prose repeatedly runs to approximately 100 characters per line.",
+   "change": "Set assistant prose max-inline-size to 64ch and line-height to 22px. Measure the rendered result against the 60\u201375-character target.",
+   "file": null,
+   "line": null,
+   "metric": "prose-measure"
+  },
+  {
+   "id": "F6",
+   "priority": "SHOULD",
+   "category": "clarity-copy",
+   "images": [
+    "hercule-orient-express-draft-1x.png"
+   ],
+   "screens": [
+    "draft"
+   ],
+   "themes": [
+    "orient-express"
+   ],
+   "problem": "hercule-orient-express-draft-1x.png (628, 331, 461, 17) and (650, 488, 112, 15): setup guidance uses worktree and remote default terminology without explaining the result plainly.",
+   "change": "Replace the guidance with 'The agent starts in a new workspace, on a branch from the repository\u2019s default branch.' Replace the branch-row label 'remote default' with 'Repository default branch'.",
+   "file": null,
+   "line": null,
+   "metric": "none"
+  },
+  {
+   "id": "F7",
+   "priority": "COULD",
+   "category": "typography",
+   "images": [
+    "hercule-orient-express-intake-1x.png"
+   ],
+   "screens": [
+    "intake"
+   ],
+   "themes": [
+    "orient-express"
+   ],
+   "problem": "hercule-orient-express-intake-1x.png (924, 186, 203, 18): the branch value marta/webhook-backoff \u2192 main appears in the code face, contrary to the protected typeface roles.",
+   "change": "Use the existing UI font family for branch values, at font-size 12px, line-height 16px and font-weight 400.",
+   "file": null,
+   "line": null,
+   "metric": "type-scale"
+  }
+ ],
+ "summary": "Hercule's warm palette and expressive colleague faces give the screens a coherent identity. Small, faint metadata is a repeated weakness, and the run graph has obstructive label sizing and dimming. The calibration and reference images are scored independently and produce no fixes."
+}

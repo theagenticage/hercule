@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""Runs one absolute council round: python3 run_round.py <round-dir> <label> <images-file>.
+
+images-file lines: file_name set screen theme scale. Batches of 10. Saves each turn's
+answer to <round-dir>/<label>-turn<N>.json and the session id to <label>.session.
+"""
+import hashlib, json, subprocess, sys, time, pathlib
+
+BRIEF = "/home/rogier/hc-worktrees/856-brief/docs/design/ui-council/BRIEF.md"
+SCHEMA = "/home/rogier/hc-worktrees/856-brief/docs/design/ui-council/absolute.schema.json"
+CATS = ["typography", "hierarchy", "spacing-density", "colour-contrast", "eye-comfort", "iconography",
+        "state-visibility", "consistency-polish", "clarity-copy", "character", "overall"]
+
+rdir = pathlib.Path(sys.argv[1]); label = sys.argv[2]
+rows = [l.split() for l in pathlib.Path(sys.argv[3]).read_text().splitlines() if l.strip()]
+img = rdir / "img"
+def sha(f): return hashlib.sha256((img / f).read_bytes()).hexdigest()
+batches = [rows[i:i + 10] for i in range(0, len(rows), 10)]
+
+def prompt(batch, first):
+    head = ""
+    if first:
+        head = (f"You are the UI council for the Hercule desktop app. Read sections 1 to 8 of {BRIEF} "
+                "and nothing more of it (section 9 is for the coordinator). Do not read the repository's code, "
+                "git history or PRs to judge. Never edit, create or delete files. Mode: absolute (this is a trial "
+                "round: today's app at 1x in Whitehaven and Orient Express, plus calibration and other-app images). "
+                "Each turn sends up to 10 images; return the section 7 output for that turn's images only.\n\n")
+    lines = "\n".join(f"{i+1}. file_name={r[0]} sha256={sha(r[0])} set={r[1]} screen={r[2]} theme={r[3]} scale={r[4]}"
+                      for i, r in enumerate(batch))
+    return head + "Images attached in this order:\n" + lines + "\n"
+
+def events(sid):
+    out = subprocess.run(["hercule", "transcript", "read", sid, "--all", "--json"], capture_output=True, text=True).stdout
+    # --all may print several pages of JSON objects; collect every item.
+    items, dec, pos = [], json.JSONDecoder(), 0
+    while pos < len(out):
+        while pos < len(out) and out[pos].isspace(): pos += 1
+        if pos >= len(out): break
+        obj, pos = dec.raw_decode(out, pos)
+        items += obj.get("items", [])
+    return [i["event"] for i in items]
+
+def wait_turns(sid, n):
+    while True:
+        ev = events(sid)
+        done = [e for e in ev if e["_tag"] == "turn.completed"]
+        if len(done) >= n: return ev
+        time.sleep(30)
+
+def last_answer(ev):
+    starts = [i for i, e in enumerate(ev) if e["_tag"] == "turn.started"]
+    tail = ev[starts[-1]:]
+    done = [e for e in tail if e["_tag"] == "turn.completed"]
+    for key in ("output", "structuredOutput", "result"):
+        if done and done[-1].get(key) is not None:
+            v = done[-1][key]; return v if isinstance(v, (dict, list)) else json.loads(v)
+    text = "".join(e.get("delta", "") for e in tail if e["_tag"] == "content.delta" and e.get("streamKind") == "assistant_text")
+    s, e2 = text.find("{"), text.rfind("}")
+    return json.loads(text[s:e2 + 1])
+
+def check(ans, batch):
+    errs = []
+    names = [r[0] for r in batch]
+    if [i["file_name"] for i in ans["inputs"]] != names: errs.append("inputs do not match the images sent, in order")
+    if [i["file_name"] for i in ans["images"]] != names: errs.append("images do not match the images sent, in order")
+    sets = {r[0]: r[1] for r in batch}
+    for im in ans["images"]:
+        cats = [s["category"] for s in im["scores"]]
+        if cats != CATS: errs.append(f"{im['file_name']}: categories are not the 11 in the brief's order")
+        for s in im["scores"]:
+            sc = s["score"]
+            if sc is None and not s.get("unassessable_reason"): errs.append(f"{im['file_name']} {s['category']}: null without reason")
+            if sc is not None and not (isinstance(sc, int) and 0 <= sc <= 10): errs.append(f"{im['file_name']} {s['category']}: score out of range")
+            if sc is not None and s.get("unassessable_reason"): errs.append(f"{im['file_name']} {s['category']}: score with a reason")
+        if im["file_name"].startswith("codex"):
+            for s in im["scores"]:
+                if s["category"] in ("typography", "spacing-density") and s["score"] is not None:
+                    errs.append(f"{im['file_name']}: {s['category']} must be null for Codex")
+    for f in ans["fixes"]:
+        for n in f["images"]:
+            if sets.get(n) != "hercule": errs.append(f"fix {f.get('id')} cites {n}, which is not a hercule image of this turn")
+    return errs
+
+sid = None
+expected = 0
+for n, batch in enumerate(batches, 1):
+    p = prompt(batch, n == 1)
+    imgs = sum([["--image", str(img / r[0])] for r in batch], [])
+    if n == 1:
+        out = subprocess.run(["hercule", "session", "spawn", "--instance", "83fb775f", "--model", "gpt-6.1-sol",
+                              "--options", '{"effort":"high"}', "--access-mode", "full-access",
+                              "--role", f"ui council {label}"[:24], "--output-schema", pathlib.Path(SCHEMA).read_text(), *imgs],
+                             input=p, capture_output=True, text=True)
+        sid = [l.split()[1] for l in out.stdout.splitlines() if l.startswith("id ")][0]
+        (rdir / f"{label}.session").write_text(sid + "\n")
+        print("spawned", sid, flush=True)
+    else:
+        subprocess.run(["hercule", "session", "input", sid, *imgs], input=p, capture_output=True, text=True)
+    expected += 1
+    for attempt in range(2):
+        ev = wait_turns(sid, expected)
+        try:
+            ans = last_answer(ev); errs = check(ans, batch)
+        except Exception as e:  # noqa
+            ans, errs = None, [f"the answer is not valid JSON in the schema: {e}"]
+        if not errs: break
+        print(f"turn {n} failed checks: {errs[:5]}", flush=True)
+        if attempt == 0:
+            subprocess.run(["hercule", "session", "input", sid], input="Your last answer failed these checks:\n- " + "\n- ".join(errs) +
+                           "\nReturn the corrected section 7 output for the same images.", capture_output=True, text=True)
+            expected += 1
+    (rdir / f"{label}-turn{n}.json").write_text(json.dumps(ans, indent=1) if ans else "null")
+    print(f"turn {n} saved, {len(errs)} problems", flush=True)
+print("round done", flush=True)

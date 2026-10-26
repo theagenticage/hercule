@@ -1,0 +1,814 @@
+{
+ "mode": "absolute",
+ "reviewer": {
+  "model": "gpt-6.1-sol",
+  "version": "unknown",
+  "effort": "high"
+ },
+ "inputs": [
+  {
+   "file_name": "cal-01.png",
+   "sha256": "37f0468db210874ee93da19101a54e260efbdc2ce5ca1eebc3b8bde40bad81ec"
+  },
+  {
+   "file_name": "cal-02.png",
+   "sha256": "f67ddbcedf1cf9d62ffa93669688cc31c09c3879e46728ea72a95052874b0d6d"
+  },
+  {
+   "file_name": "cal-03.png",
+   "sha256": "c1bba354f5056cdd8b356ca4edcc3f0c8c44647ca9f53bdb4b8243283c5b0cd3"
+  },
+  {
+   "file_name": "cal-04.png",
+   "sha256": "8a799e6ed9159c91172752aa44aca6f7e669d6d7963213fefe3b415338ccc338"
+  },
+  {
+   "file_name": "cal-05.png",
+   "sha256": "518627cc8694488240b44836afe862fecfc676d517cb37af93e3859846e63452"
+  },
+  {
+   "file_name": "cal-06.png",
+   "sha256": "3d542d7ed7df07a0d4ca432bd64a25e0ef74624916e2e5af69245d4b672ee513"
+  },
+  {
+   "file_name": "cal-07.png",
+   "sha256": "aeaafb5e2512201a596d6d4ba63e90bd3cb4b322483fa0a9ad4c0b214e401e38"
+  },
+  {
+   "file_name": "cal-08.png",
+   "sha256": "a953cd35626276c4c464df24789893d67646c0009863408f13707014a7db1859"
+  },
+  {
+   "file_name": "cal-09.png",
+   "sha256": "094aade9c1b4e410559783fb5fac3f420ab1d1d6cb889eecabeb5cfd71927a6f"
+  },
+  {
+   "file_name": "cal-10.png",
+   "sha256": "93f80f9246ab43c6f8a839853c569b91500de3f82df20206a69fca1321c964e1"
+  }
+ ],
+ "images": [
+  {
+   "file_name": "cal-01.png",
+   "set": "calibration",
+   "screen": "intake",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png: (746, 117, 661, 106) has small metadata, tightly stacked author and body lines, and a long prose line. At (293, 491, 398, 26), small, light text requires effort."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png: (746, 92, 514, 190) gives the open signal a strong title and makes Approve the strongest action. In (284, 268, 412, 53), the selected signal is readily located."
+    },
+    {
+     "category": "spacing-density",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png: (747, 153, 661, 73) compresses change counts, branch, author and message into closely stacked lines. In (751, 252, 647, 110), explanations begin almost against the button edges."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png: (294, 489, 400, 30) and (747, 886, 474, 14) contain faint supporting text. The panel boundary at (708, 55, 5, 830) is difficult to distinguish against the warm dark surfaces."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png: (274, 55, 1166, 830) reads as a broad brown-black field with little layer separation. The small green action at (751, 252, 156, 30) is restrained, but surrounding secondary content looks muddy."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png: (21, 262, 18, 232) uses a coherent outline navigation family. Source marks at (294, 136, 20, 333) remain identifiable, though their optical weight varies."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png: (20, 131, 237, 91) labels waiting requests in words, and (316, 349, 302, 16) explicitly names checks failed. The selected signal at (284, 268, 412, 53) has a subtle fill without an additional selection mark."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png: (751, 252, 156, 110) has consistent action widths and radii, but counts run together in the change strip at (775, 153, 87, 16), and the shortcut footer at (747, 886, 474, 14) sits against the image edge."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png: (751, 252, 648, 197) explains what Approve, Comment, Start Review PR, Done and Snooze do. The waiting title at (43, 155, 208, 17) loses its ending to truncation."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png: (20, 154, 232, 69) shows distinct peach and mint colleague faces with marigold requests. Warm surfaces across (0, 0, 1440, 900) preserve identity, though the main detail area has little distinctive ornament."
+    },
+    {
+     "category": "overall",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-01.png: (284, 92, 1124, 426) provides a clear selected signal and primary action, but compact metadata, weak edges and tight action explanations create repeated reading friction."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-02.png",
+   "set": "calibration",
+   "screen": "sidebar",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png: (22, 325, 231, 363) uses readable titles but repeatedly small, light workspace labels and timestamps. Narrow title measures at (22, 270, 231, 18) force early truncation."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png: (12, 131, 248, 94) puts requests needing attention first. Project headings at (21, 240, 232, 347) separate the remaining threads, and selected fills identify the open request."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png: (12, 239, 248, 450) gives thread titles and supporting lines consistent spacing and separates projects with clear gaps. The selected row at (12, 262, 248, 51) has adequate padding."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png: (22, 342, 91, 15), (22, 396, 91, 15) and (22, 674, 91, 15) repeatedly render workspace metadata faintly. The selected fill at (12, 151, 248, 38) is only weakly separated from the sidebar."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png: (0, 0, 1440, 900) is calm in saturation but dominated by nearly flat warm dark surfaces. Within (12, 239, 248, 450), subdued labels and weak layer steps make the sidebar muddy."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png: (22, 94, 231, 15) has crisp, consistent outline controls. Small provider marks at (21, 288, 14, 400) vary in optical weight, with the spiral reading softer than the starburst."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png: (164, 240, 91, 431) uses explicit needs you, Approval, Question and Working labels. Selected rows at (12, 151, 248, 162) have subtle fills, and working titles are visibly dimmed."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png: (12, 239, 248, 450) repeats coherent title, metadata and trailing-status alignment. The approval title and its status at (22, 269, 230, 18) are tightly fitted."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png: (22, 154, 230, 30) and (22, 270, 231, 32) both truncate the checkout title, hiding its ending. Run git push? and Keep the old Grafana folder? make the pending requests clear."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png: (20, 153, 233, 69) contains readable peach and mint faces, while project inlays at (20, 241, 14, 346) remain restrained. Warm dark surfaces carry the identity without much ornament."
+    },
+    {
+     "category": "overall",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-02.png: (12, 131, 248, 558) organizes requests and projects clearly, but faint metadata, dimmed working rows and repeated title truncation remain noticeable."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-03.png",
+   "set": "calibration",
+   "screen": "thread",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png: (513, 65, 724, 203) packs prose, code, work summaries and metadata into tight line spacing. The prose line at (513, 82, 724, 17) is long, and top metadata is barely legible."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png: (477, 668, 760, 145) makes the permission request and filled Allow button prominent. The thread content at (513, 193, 724, 77) crowds work summaries against messages, weakening their separation."
+    },
+    {
+     "category": "spacing-density",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png: (513, 193, 724, 75) nearly joins the prose, work summary, author label and next message. At (477, 789, 760, 38), the composer begins against the Deny row and covers the permission card's lower edge."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png: (514, 50, 293, 27) contains metadata almost indistinguishable from the background. Sidebar workspace labels at (22, 287, 93, 294) and the boundary around (513, 139, 724, 43) are also weak."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png: (274, 46, 1166, 595) forms a largely flat brown-black field. The amber permission area at (477, 668, 760, 145) adds separation, but the message region remains muddy."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png: (1275, 10, 151, 36) uses consistent outline controls. Marks at (493, 856, 731, 24) are recognizable, though the small provider and workspace symbols have different optical weights."
+    },
+    {
+     "category": "state-visibility",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png: (523, 256, 215, 15) explicitly names waiting, and (491, 641, 732, 28) labels the queued message. The composer says Queued until the turn finishes while a command is awaiting permission, leaving two visible waiting states to interpret."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png: (477, 789, 760, 96) has the composer overlapping the permission panel boundary. At (498, 886, 721, 14), branch and workspace information is squeezed against the image bottom."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png: (495, 676, 719, 126) shows the exact command and explains Allow, Allow always and Deny. The composer message at (493, 807, 313, 18) does not explain its relationship to the pending permission."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png: (481, 68, 25, 186) contains expressive peach faces, including the raised-hand face at (495, 671, 27, 27). Warm brown surfaces and marigold waiting text preserve a recognizable identity."
+    },
+    {
+     "category": "overall",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-03.png: (477, 50, 760, 850) contains readable primary prose and a clear Allow action, but near-invisible metadata, compressed message spacing and overlapping bottom panels obstruct comfortable reading."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-04.png",
+   "set": "calibration",
+   "screen": "intake",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-04.png: (746, 118, 661, 105) has small metadata and tightly stacked author and message lines. Supporting text at (293, 490, 403, 27) is small and light."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-04.png: (746, 93, 661, 189) makes the signal title and green Approve button the strongest elements in the detail region. The selected row at (284, 268, 412, 53) is easy to locate."
+    },
+    {
+     "category": "spacing-density",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-04.png: (747, 153, 661, 70) compresses the change strip, author and prose. In (751, 252, 651, 110), action explanations start almost flush with the button edges."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-04.png: (746, 93, 661, 130) has clear primary text. Metadata at (293, 490, 403, 27) and the shortcut footer at (747, 886, 474, 14) is pale, while thin panel boundaries are weak."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-04.png: (274, 55, 1166, 830) presents a large, nearly uniform bright sheet. The sidebar at (0, 0, 273, 900) and selected row at (284, 268, 412, 53) add gentle tonal separation."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-04.png: (21, 262, 18, 232) uses coherent outline navigation icons. Source marks at (294, 136, 20, 333) remain identifiable but have uneven optical weight."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-04.png: (20, 131, 236, 91) shows waiting requests through words and faces. Checks failed at (316, 348, 302, 17) is explicit; selection at (284, 268, 412, 53) depends on a quiet background fill."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-04.png: (751, 252, 156, 110) repeats action widths cleanly, but the change counts at (775, 153, 87, 16) run together and the shortcut footer at (747, 886, 474, 14) is pressed against the bottom edge."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-04.png: (751, 252, 651, 197) explains the effects of each action, including that Done does not notify GitHub. The waiting title at (43, 155, 208, 17) loses its ending."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-04.png: (20, 154, 232, 69) retains distinct peach and mint faces and marigold requests. The warm sidebar and green primary action are recognizable, though the main white region has little distinctive ornament."
+    },
+    {
+     "category": "overall",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-04.png: (284, 93, 1124, 424) offers a clear selected item and primary action. Small supporting text, compressed detail spacing and bottom-edge crowding create repeated rough edges."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-05.png",
+   "set": "calibration",
+   "screen": "sidebar",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-05.png: (22, 325, 231, 363) repeatedly uses small, light workspace labels and timestamps beneath readable titles. At (22, 271, 231, 17), the selected title has little room beside Approval."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-05.png: (12, 131, 248, 94) places waiting requests above project groups. Selected fills at (12, 151, 248, 162) and trailing status words distinguish the active request."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-05.png: (12, 239, 248, 450) maintains consistent title and metadata spacing with clear gaps between projects. The selected row at (12, 262, 248, 51) has comfortable internal padding."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-05.png: (22, 342, 91, 15), (22, 396, 91, 15) and (22, 674, 91, 15) show pale metadata. Working labels at (206, 378, 47, 292) are also light against the warm sidebar."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-05.png: (0, 0, 273, 900) uses soft warm layers and restrained selection fills. The empty main area at (274, 0, 1166, 900) is a broad bright field, without additional visual structure."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-05.png: (22, 94, 231, 15) has crisp outline controls. Provider symbols at (21, 288, 14, 400) are recognizable, but the spiral marks are optically softer than the starbursts."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-05.png: (164, 240, 91, 431) spells out needs you, Approval, Question and Working. Selected rows have a discernible fill, but working titles at (22, 378, 177, 17) are dimmed."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-05.png: (12, 239, 248, 450) consistently aligns project headings, thread titles and trailing statuses. At (22, 271, 231, 17), the truncated approval title and status fit tightly together."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-05.png: (22, 154, 230, 30) and (22, 270, 231, 32) truncate the checkout title in both appearances. The pending questions themselves remain plain and specific."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-05.png: (20, 153, 233, 69) retains peach and mint colleague faces. Warm off-white surfaces, marigold requests and low-chroma project inlays at (20, 241, 14, 346) preserve identity."
+    },
+    {
+     "category": "overall",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-05.png: (12, 131, 248, 558) is organized and easy to scan for pending requests. Repeated pale metadata, dimmed working titles and truncated thread names keep it from feeling fully resolved."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-06.png",
+   "set": "calibration",
+   "screen": "thread",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-06.png: (513, 65, 724, 203) tightly stacks prose, code, summaries and author labels. The long opening prose line and small, pale metadata make several text roles harder to read."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-06.png: (477, 668, 760, 145) clearly emphasizes the permission request and filled Allow action. At (513, 193, 724, 61), summaries and author labels crowd the messages and weaken the reading rhythm."
+    },
+    {
+     "category": "spacing-density",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-06.png: (513, 193, 724, 75) places prose, work summary, author and next message almost against one another. At (477, 789, 760, 38), the composer begins directly against the Deny row and overlaps the permission card."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-06.png: (514, 50, 293, 27) has nearly invisible work and author metadata. Workspace labels in (22, 287, 93, 294) are also faint, although the main prose and Allow button are clear."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-06.png: (274, 46, 1166, 595) is a large bright field. The pale amber permission card at (477, 668, 760, 145) and warm sidebar separate softly, without a harsh saturated area."
+    },
+    {
+     "category": "iconography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-06.png: (1275, 10, 151, 36) uses a coherent outline control family. Small provider and workspace symbols at (493, 856, 731, 24) remain recognizable but vary in optical weight."
+    },
+    {
+     "category": "state-visibility",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-06.png: (523, 256, 215, 15) explicitly labels waiting and (491, 641, 732, 28) labels the queued message. Queued until the turn finishes at (493, 807, 313, 18) is ambiguous beside the pending permission request."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-06.png: (477, 789, 760, 96) shows the composer covering the permission panel's lower boundary. Branch and workspace information at (498, 886, 721, 14) is crowded against the image bottom."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-06.png: (495, 676, 719, 126) names the exact command and explains the three permission outcomes. The queued composer message at (493, 807, 313, 18) leaves its relationship to approval unclear."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-06.png: (481, 68, 25, 186) shows expressive peach colleague faces, repeated as a raised-hand face at (495, 671, 27, 27). Warm off-white surfaces and marigold waiting cues retain the product's character."
+    },
+    {
+     "category": "overall",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-06.png: (477, 50, 760, 850) offers readable main prose and an obvious Allow action, but almost invisible metadata, crowded message lines and overlapping bottom panels obstruct comfortable use."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-07.png",
+   "set": "calibration",
+   "screen": "intake",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png: (741, 110, 663, 189) separates title, metadata and prose clearly with even line spacing. The first prose line is long, and the branch value at (924, 188, 202, 15) visibly uses the code face."
+    },
+    {
+     "category": "hierarchy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png: (741, 110, 663, 266) makes the signal title and filled Approve button clear. Bright outlines around the tabs at (282, 64, 412, 30) compete with content for attention."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png: (741, 176, 663, 378) gives the change strip, quotation and actions clear separation. In (282, 287, 412, 209), list rows align consistently; the main prose measure remains long."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png: (741, 176, 663, 378) has readable text, distinct action edges and legible status marks. Near-white rules at (271, 52, 1169, 1) and (741, 322, 663, 1) are harder than necessary on the dark field."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png: (271, 52, 1169, 811) is divided by bright, long rules, while outlined tabs at (282, 64, 412, 30) and white body text create a stark pattern against brown-black surfaces."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png: (22, 266, 16, 234) uses crisp outline navigation icons aligned with their labels. Source logos at (293, 155, 20, 330) are recognizable, though the Slack mark is optically heavier."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png: (282, 64, 412, 30) clearly outlines the selected To do tab. The selected signal at (282, 287, 412, 53) has a distinct fill; waiting, checks failed and passed checks also have explicit words."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png: (745, 346, 156, 116) repeats action widths and radii cleanly. The nested outlines at (12, 48, 248, 30) create a doubled contour, and the branch value at (924, 188, 202, 15) has a visibly different text role."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png: (745, 346, 650, 208) explains each action and distinguishes removing a signal from notifying GitHub. The waiting title at (49, 153, 203, 17) is truncated before its full meaning is visible."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png: (20, 152, 232, 70) shows peach and mint faces, with marigold requests. Warm dark surfaces remain recognizable, though the prominent white rules make the main region feel severe."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-07.png: (282, 110, 1122, 448) has clear signal organization, readable detail and well-separated actions. Bright outlines and rules reduce comfort, and a few text-role and truncation issues remain."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-08.png",
+   "set": "calibration",
+   "screen": "sidebar",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png: (22, 271, 230, 417) has readable title and metadata roles with even line rhythm. Several title lines at (22, 271, 174, 204) truncate early beside trailing statuses."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png: (12, 130, 248, 94) gives waiting requests priority, with project groups below. The tab outline at (12, 48, 248, 30) is somewhat prominent beside the thread content."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png: (12, 239, 248, 449) consistently spaces titles, metadata and project groups. Trailing statuses reduce title space at (22, 271, 230, 17), but rows remain distinct and padded."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png: (22, 271, 230, 417) keeps titles, workspace labels and status words readable. The bright sidebar boundary at (271, 0, 1, 900) and tab border at (12, 48, 248, 30) are visually hard."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png: (12, 48, 248, 30), (271, 0, 1, 900) and (0, 833, 272, 1) use near-white outlines against brown-black. The large main surface at (272, 0, 1168, 900) has little layer variation."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png: (22, 94, 230, 15) presents crisp outline controls aligned with labels. Provider symbols at (21, 289, 14, 399) remain distinguishable, although their optical weights differ slightly."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png: (12, 48, 248, 30) clearly outlines the active tab. In (12, 149, 248, 539), selected fills and explicit Approval, Question, Working and needs you labels communicate states; working titles are still dimmed."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png: (12, 239, 248, 449) repeats coherent row alignment and selection radii. The active tab at (12, 48, 123, 30) has a doubled-looking nested border."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png: (22, 271, 174, 17), (22, 323, 174, 17) and (22, 460, 174, 17) cut off informative title endings. Pending questions and status words remain clear."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png: (20, 152, 232, 70) retains expressive peach and mint faces. Warm surfaces and restrained project tints at (20, 239, 14, 345) carry identity, while stark outlines add a severe note."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-08.png: (12, 130, 248, 558) is orderly, readable and clear about pending requests. Repeated title truncation and hard white boundaries are the main visible weaknesses."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-09.png",
+   "set": "calibration",
+   "screen": "thread",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png: (521, 182, 715, 313) clearly separates author labels, prose, code and work summaries with even line spacing. The prose measure is long, and the initial message at (657, 49, 566, 36) is difficult to read."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png: (476, 594, 760, 166) makes the command request and filled Allow button prominent. Messages at (521, 182, 715, 313) have a clear reading order, though bright enclosing outlines also attract attention."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png: (521, 182, 715, 356) gives prose, code, work summaries and waiting status distinct gaps. At (476, 554, 760, 304), the queue, permission card and composer are tightly stacked but readable."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png: (521, 182, 715, 356) contains clear main text and code. The initial message at (657, 49, 566, 36) is nearly lost against its background, while code and composer outlines are very bright."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png: (521, 278, 715, 147) has bright code and summary rules against dark brown. Further white outlines around (476, 554, 760, 304) create a persistent high-contrast framework around the content."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png: (1258, 10, 168, 36) uses consistent outline controls, and (494, 818, 734, 32) aligns composer icons cleanly. Small provider marks in the sidebar have slightly different optical weights."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png: (523, 525, 216, 13) explicitly labels waiting; (490, 554, 732, 40) labels the queued message and its next position. Working rows in (22, 268, 230, 314) remain visibly dimmed."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png: (494, 648, 156, 62) repeats action widths and aligned labels. The permission card and composer at (476, 594, 760, 264) meet in a visually busy stack of rounded boundaries."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png: (494, 611, 718, 129) shows the exact command and explains each permission outcome. The composer at (491, 778, 231, 16) says it is queued until the turn finishes without explaining the approval dependency."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png: (480, 183, 24, 305) has expressive peach faces, including a raised-hand face at (494, 607, 28, 28). Warm surfaces and marigold waiting cues preserve identity, although white outlines dominate the framing."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-09.png: (476, 182, 760, 676) presents messages and permission actions coherently with readable spacing. A faint initial message, long prose lines and stark outlines are the remaining visible defects."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-10.png",
+   "set": "calibration",
+   "screen": "intake",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-10.png: (741, 110, 663, 189) has clearly separated title, metadata and prose roles with even line spacing. The prose line is long, and the branch value at (924, 188, 202, 15) visibly uses the code face."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-10.png: (741, 110, 663, 266) gives the signal title and filled Approve button clear priority. Strong outlines around tabs at (282, 64, 412, 30) introduce a small competing emphasis."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-10.png: (741, 176, 663, 378) separates change information, quotation and actions cleanly. List rows in (282, 287, 412, 209) share aligned edges and consistent rhythm; the detail prose remains wide."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-10.png: (741, 176, 663, 378) keeps metadata, prose, controls and state marks clear. Black rules at (271, 52, 1169, 1) and (741, 322, 663, 1) are visually stronger than the panel structure requires."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-10.png: (272, 53, 1168, 809) is a broad bright field with hard black dividing rules. Soft selected fills at (12, 289, 248, 32) and (282, 287, 412, 53) add restrained surface separation."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-10.png: (22, 266, 16, 234) uses crisp, consistently aligned outline navigation icons. Source logos at (293, 155, 20, 330) are identifiable, though the Slack mark reads heavier."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-10.png: (282, 64, 412, 30) outlines the selected To do tab, and (282, 287, 412, 53) clearly fills the selected signal. Waiting, failed checks and passed checks also use explicit words; the selected signal has no additional selection mark."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-10.png: (745, 346, 156, 116) repeats aligned action widths and radii. Nested contours at (12, 48, 248, 30) make the segmented control look doubled, and the branch value at (924, 188, 202, 15) uses an inconsistent text role."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-10.png: (745, 346, 650, 208) explains the action outcomes, including the distinction between Done and notifying GitHub. The waiting title at (49, 153, 203, 17) truncates before its full subject is visible."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-10.png: (20, 152, 232, 70) retains peach and mint faces, with marigold requests and restrained green action color. Warm sidebar surfaces preserve identity, though the main detail area is visually plain."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-10.png: (282, 110, 1122, 448) is readable and well organized, with a clear selected signal and primary action. Hard rules, wide prose and a few text-role and truncation defects remain."
+    }
+   ],
+   "overall_note": null
+  }
+ ],
+ "fixes": [],
+ "summary": "Repeated issues include small metadata, compressed vertical spacing, and prominent outlines. Faces, warm surfaces, and marigold waiting cues preserve the product\u2019s character. All supplied images are calibration captures, so the fix list is empty."
+}
