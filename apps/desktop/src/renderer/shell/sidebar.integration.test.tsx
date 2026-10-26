@@ -578,6 +578,34 @@ describe("the sidebar", () => {
     expect(readFocusedKey()).toBe(`group:session:${threads[5]!.id}`);
   });
 
+  it("collapses an expanded project again from its Show fewer row, and keeps working after another expand", async () => {
+    const webshop = SINGLE_THREADS_FIXTURE.projects[0]!;
+    const threads = buildThreads(8, { projectId: webshop.id });
+    const { nav } = await startSidebar({
+      records: { ...SINGLE_THREADS_FIXTURE, threads },
+    });
+    const groupCount = () => nav.querySelectorAll("a[data-key^='group:']").length;
+
+    expect(within(nav).getByRole("button", { name: "3 more" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    await userEvent.click(within(nav).getByRole("button", { name: "3 more" }));
+    expect(groupCount()).toBe(8);
+
+    const fewer = within(nav).getByRole("button", { name: `Show fewer in ${webshop.name}` });
+    expect(fewer.textContent).toBe("Show fewer");
+    expect(fewer.getAttribute("aria-expanded")).toBe("true");
+    fewer.focus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(groupCount()).toBe(5);
+    expect(within(nav).queryByRole("button", { name: /Show fewer/ })).toBeNull();
+    expect(readFocusedKey()).toBe("more:project:" + webshop.id);
+
+    await userEvent.click(within(nav).getByRole("button", { name: "3 more" }));
+    expect(groupCount()).toBe(8);
+  });
+
   it("mounts only the rows near the visible part of a long list, and keeps the focused row mounted", async () => {
     const webshop = SINGLE_THREADS_FIXTURE.projects[0]!;
     const threads = buildThreads(500, { projectId: webshop.id });
@@ -1355,6 +1383,11 @@ describe(`the sidebar's "From runs"`, () => {
     await userEvent.click(within(nav).getByRole("button", { name: "2 more waiting on you" }));
 
     expect(nav.querySelectorAll("[data-key^='waiting-run:']")).toHaveLength(5);
+
+    await userEvent.click(within(nav).getByRole("button", { name: "Show fewer waiting on you" }));
+
+    expect(nav.querySelectorAll("[data-key^='waiting-run:']")).toHaveLength(3);
+    expect(readFocusedKey()).toBe("more:waiting");
   });
 
   it("opens a run's waiting session in the Office's drawer while the Office is open", async () => {

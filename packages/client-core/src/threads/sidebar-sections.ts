@@ -13,7 +13,8 @@
  * - The group that holds the selected session is always shown in its
  *   project, so a project shows at most 6. Unfolded lines never count toward
  *   the cap.
- * - A section the user expanded shows every group.
+ * - A section the user expanded shows every group, and says it can be
+ *   collapsed again once the cap would hide some.
  * - A group is in its project's list until it is done: every Thread marked
  *   Done and every Agent session ended. The Done shelf at the bottom lists
  *   the done groups, closed until the user opens it, then 10 at a time and 25
@@ -101,6 +102,8 @@ export interface WaitingSection {
   readonly rows: readonly Waiting[];
   /** How many entries it hides: the number on its "more" row, or 0 for none. */
   readonly hiddenCount: number;
+  /** Whether the user expanded it and the cap would hide some entries, so a "Show fewer" row collapses it again. */
+  readonly canCollapse: boolean;
 }
 
 /** A project's section: the rows it shows, and what it hides. */
@@ -113,6 +116,8 @@ export interface ProjectSection {
   readonly rows: readonly SidebarRow[];
   /** How many groups it hides: the number on its "more" row, or 0 for none. */
   readonly hiddenCount: number;
+  /** Whether the user expanded it and the cap would hide some groups, so a "Show fewer" row collapses it again. */
+  readonly canCollapse: boolean;
   /**
    * How many counted sessions of the project wait on the user, shown or
    * hidden: the number in the header's "2 need you". The rows only say it one
@@ -171,15 +176,13 @@ const findRecency = (row: GroupRow): number =>
   );
 
 /**
- * Returns a project's rows: the groups it picks by priority, plus the open
- * row, which is `undefined` when the open session is in none.
+ * Returns a project's capped rows: the groups it picks by priority, plus the
+ * open row, which is `undefined` when the open session is in none.
  */
 const pickProjectRows = (
   rows: readonly GroupRow[],
-  expanded: boolean,
   openRow: GroupRow | undefined,
 ): readonly GroupRow[] => {
-  if (expanded) return rows;
   const picked = new Set(
     rows
       .map((row) => ({ row, recency: findRecency(row) }))
@@ -235,12 +238,15 @@ const buildProjectSections = (
     )
     .map((projectId) => {
       const held = rowsByProject.get(projectId) ?? [];
-      const shown = pickProjectRows(held, expanded.projectIds.has(projectId), openRow);
+      const capped = pickProjectRows(held, openRow);
+      const isExpanded = expanded.projectIds.has(projectId);
+      const shown = isExpanded ? held : capped;
       return {
         projectId,
         holdsDraft: projectId === draftProjectId,
         rows: shown.map(showRow),
         hiddenCount: held.length - shown.length,
+        canCollapse: isExpanded && capped.length < held.length,
         waitingCount: held.reduce(
           (sum, row) => sum + row.members.filter((member) => member.dot === "waiting").length,
           0,
@@ -368,7 +374,11 @@ export const selectSidebar = (
     waiting:
       waiting.length === 0
         ? null
-        : { rows: shownWaiting, hiddenCount: waiting.length - shownWaiting.length },
+        : {
+            rows: shownWaiting,
+            hiddenCount: waiting.length - shownWaiting.length,
+            canCollapse: choices.expanded.waiting && waiting.length > WAITING_LIMIT,
+          },
     projects: buildProjectSections(
       groupRows.filter((row) => row.doneAt === null),
       presentation,

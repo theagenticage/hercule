@@ -665,7 +665,8 @@
   width: 24px;
   height: 24px;
 }
-.side-row--more {
+.side-row--more,
+.side-row--fewer {
   min-height: 28px;
   color: var(--muted);
   font-size: var(--t-12);
@@ -673,8 +674,11 @@
 /* The book draws a "more" row as a link, which leads to Intake. Here it
    expands its section in place and goes nowhere, so it is a button, drawn as
    the link is: the full width, the text at the start, and the page's text
-   rendering, where Chromium gives a button its own. */
-button.side-row--more {
+   rendering, where Chromium gives a button its own. The "Show fewer" row that
+   collapses an expanded section is not in the book: it is drawn as the "more"
+   row is, at the end of the section. */
+button.side-row--more,
+button.side-row--fewer {
   width: 100%;
   text-align: left;
   text-rendering: inherit;
