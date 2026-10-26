@@ -295,6 +295,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           case "loginFailed":
           case "loginResult":
           case "textGenerationReport":
+          case "sessionRespondToQuestionResult":
             if (!greeted) return;
             return yield* connections.reportedAnswer(runnerId, mine, message);
           case "sessionInputResult":
@@ -331,10 +332,6 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           case "loginEnded":
             if (!greeted) return;
             return yield* connections.reportedLoginEnded(runnerId, mine, message);
-          case "sessionRespondToQuestionResult":
-            // Only an answer to the caller that sent the question's answers.
-            if (!greeted) return;
-            return yield* connections.reportedQuestionAnswer(runnerId, mine, message);
           case "goodbye":
             departure = "offline";
             return;

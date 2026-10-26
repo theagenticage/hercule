@@ -1333,17 +1333,22 @@ const make = Effect.gen(function* () {
                   });
                 }),
               );
-              const sent = yield* connections.sendAnswerToQuestion(
+              const sent = yield* connections.sendRequest(
                 session.runnerId,
                 sessions.respondingToQuestion(id, requestId, answers, session.modelSelection),
                 deadline,
               );
               if (sent._tag === "notSent") return yield* Effect.fail(createInvalidStateError(GONE));
-              if (Option.isNone(sent.answer)) {
+              // An answer of another type under this id is no confirmation.
+              const result = Option.filter(
+                sent.answer,
+                (answer) => answer._tag === "sessionRespondToQuestionResult",
+              );
+              if (Option.isNone(result)) {
                 return yield* Effect.fail(createInvalidStateError(ANSWER_NOT_CONFIRMED));
               }
-              if (!sent.answer.value.ok) {
-                return yield* Effect.fail(createInvalidStateError(sent.answer.value.message));
+              if (!result.value.ok) {
+                return yield* Effect.fail(createInvalidStateError(result.value.message));
               }
             }),
           () => Effect.sync(() => answersOnTheirWay.delete(key)),

@@ -107,9 +107,10 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
 );
 
 /**
- * A frame the runner answers under its `requestId`, other than a frame that
- * carries an input. Those go through `sendFrameCarryingInput`, whose answer
- * is always a `SessionInputResult`.
+ * A frame the runner answers under its `requestId`, or under its `answerId`
+ * for `SessionRespondToQuestion`, other than a frame that carries an input.
+ * Those go through `sendFrameCarryingInput`, whose answer is always a
+ * `SessionInputResult`.
  */
 export type Request =
   | ProbeRequest
@@ -119,7 +120,8 @@ export type Request =
   | WorkspaceInspect
   | RepositorySkillsInspect
   | RepositorySkillsPreview
-  | TextGenerationRequest;
+  | TextGenerationRequest
+  | SessionRespondToQuestion;
 
 /**
  * What came of sending a frame the runner answers:
@@ -210,7 +212,7 @@ export type FleetTraffic =
     }
   | { readonly _tag: "placementsChanged"; readonly runnerId: string };
 
-/** A runner's answer to a `Request`, matched to it by the request's id. */
+/** A runner's answer to a `Request`, matched to it by the id `readAnswerKey` reads. */
 export type Answer =
   | ProbeReport
   | InstallResult
@@ -220,7 +222,17 @@ export type Answer =
   | SessionInputResult
   | WorkspaceInspection
   | RepositorySkillsInspection
-  | TextGenerationReport;
+  | TextGenerationReport
+  | SessionRespondToQuestionResult;
+
+/**
+ * Returns the id a request and its answer are matched by. A question's answers
+ * use their own `answerId`, new for every attempt, because the `requestId` of
+ * the question is the same for a retry, and a late result for an earlier
+ * attempt must wake nobody. Every other frame uses its `requestId`.
+ */
+const readAnswerKey = (frame: Request | Answer): string =>
+  "answerId" in frame ? frame.answerId : frame.requestId;
 
 /**
  * The key callers of `refreshedFacts` wait under. The facts report has no
@@ -242,7 +254,7 @@ interface FactsReported {
 
 const FACTS_REPORTED: FactsReported = { _tag: "factsReported" };
 
-type Reported = Answer | FactsReported | SessionRespondToQuestionResult;
+type Reported = Answer | FactsReported;
 
 /** The callbacks this service uses to reach a runner's open connection. */
 export interface Connected {
@@ -484,7 +496,7 @@ const make = Effect.gen(function* () {
     Effect.map(
       sendAndAwaitReport(
         id,
-        request.requestId,
+        readAnswerKey(request),
         (held) => held.ask(request),
         deadline,
         readRequiredCapability(request),
@@ -498,9 +510,7 @@ const make = Effect.gen(function* () {
               // an answer can arrive under this key.
               answer: Option.filter(
                 outcome.answer,
-                (reported): reported is Answer =>
-                  reported._tag !== "factsReported" &&
-                  reported._tag !== "sessionRespondToQuestionResult",
+                (reported): reported is Answer => reported._tag !== "factsReported",
               ),
             },
     );
@@ -663,54 +673,6 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Sends the answers to a question and waits for the runner's result for
-     * that attempt, up to `deadline`. Returns `notSent`, sending nothing,
-     * when the runner has no connection. Otherwise returns `sent`, with the
-     * result, or with `none` when the connection ended or no result came in
-     * time. With `Duration.infinity` the wait ends only on the result or on
-     * the end of the connection, which ends every wait on it.
-     *
-     * The wait is keyed by the frame's `answerId`, which is new for every
-     * attempt, so a late result for an earlier attempt wakes nobody.
-     */
-    sendAnswerToQuestion: (
-      id: string,
-      frame: SessionRespondToQuestion,
-      deadline: Duration.Duration,
-    ): Effect.Effect<SendOutcome<SessionRespondToQuestionResult>> =>
-      Effect.map(
-        sendAndAwaitReport(id, frame.answerId, (held) => held.ask(frame), deadline),
-        (outcome) =>
-          outcome._tag === "notSent"
-            ? outcome
-            : {
-                _tag: "sent",
-                answer: Option.filter(
-                  outcome.answer,
-                  (reported): reported is SessionRespondToQuestionResult =>
-                    reported._tag === "sessionRespondToQuestionResult",
-                ),
-              },
-      ),
-
-    /**
-     * Passes the runner's result for an attempt to answer a question to the
-     * caller waiting for it. A result with an `answerId` nobody is waiting on,
-     * such as one that arrives after its caller gave up, or one from a
-     * replaced connection, is dropped.
-     */
-    reportedQuestionAnswer: (
-      id: string,
-      connection: Connection,
-      result: SessionRespondToQuestionResult,
-    ): Effect.Effect<void> =>
-      Effect.sync(() => {
-        const held = reachable.get(id);
-        if (held?.connection !== connection) return;
-        wakeWaiters(held, result.answerId, result);
-      }),
-
-    /**
      * Passes a runner's answer to the callers waiting for it. An answer with
      * an id nobody sent, or from a replaced connection, is dropped: either
      * would let a runner write something it was not asked for.
@@ -719,7 +681,7 @@ const make = Effect.gen(function* () {
       Effect.sync(() => {
         const held = reachable.get(id);
         if (held?.connection !== connection) return;
-        wakeWaiters(held, answer.requestId, answer);
+        wakeWaiters(held, readAnswerKey(answer), answer);
       }),
 
     /**
