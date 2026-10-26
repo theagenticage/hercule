@@ -233,6 +233,18 @@ describe("goldens on disk", () => {
     ]);
   });
 
+  it("fails on a damaged provenance.json even when every pixel matches", async () => {
+    const image = buildImage(2, 2);
+    for (const name of names) {
+      await put("screenshots", name, image);
+      await put("goldens", name, image);
+    }
+    await writeFile(join(location.goldensDir, "provenance.json"), "not JSON");
+    await expect(checkGoldens(location, PROVENANCE)).rejects.toThrow(
+      "provenance.json is not valid JSON",
+    );
+  });
+
   it("fails when there is no provenance.json", async () => {
     for (const name of names) await put("screenshots", name, buildImage(2, 2));
     await expect(checkGoldens(location, PROVENANCE)).rejects.toThrow("provenance.json");

@@ -120,7 +120,15 @@ export function formatProvenance(provenance: Provenance): string {
 
 /** Parses the text of `provenance.json`. Fails when it is not a provenance, naming the field that is wrong. */
 export function parseProvenance(text: string): Provenance {
-  const parsed: unknown = JSON.parse(text);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error(
+      `${PROVENANCE_FILE} is not valid JSON. Record the goldens again with \`pnpm --filter @hercule/desktop ui:metrics --write-goldens\`.`,
+      { cause: error },
+    );
+  }
   const record =
     typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
   const field = (name: keyof Provenance): string => {
@@ -316,10 +324,10 @@ export async function checkGoldens(
         "Record them with `pnpm --filter @hercule/desktop ui:metrics --write-goldens`.",
     );
   }
+  // Parsed on every run, so a damaged file fails even when every pixel matches.
+  const recorded = parseProvenance(provenanceBytes.toString("utf8"));
   const provenanceWarning =
-    problems.length === 0
-      ? null
-      : describeProvenanceMismatch(parseProvenance(provenanceBytes.toString("utf8")), current);
+    problems.length === 0 ? null : describeProvenanceMismatch(recorded, current);
   return { checked: location.names.length, problems, provenanceWarning, diffDir: location.diffDir };
 }
 
