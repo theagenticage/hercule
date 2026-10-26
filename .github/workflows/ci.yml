@@ -217,8 +217,9 @@ jobs:
           fi
           # What the metrics read: the renderer (its styles, tokens and
           # fonts), the scripts that load, measure and compare it, what the
-          # specimens import from other packages, and the toolchain.
-          touched=$(git diff --name-only "$BASE_SHA"...HEAD | grep -E '^(apps/desktop/src/renderer/|apps/desktop/scripts/ui-|apps/desktop/scripts/capture-ui\.ts$|apps/desktop/scripts/sheet-server\.ts$|apps/desktop/vite\.renderer\.config\.ts$|apps/desktop/package\.json$|apps/desktop/ui-metrics\.baseline\.json$|pnpm-lock\.yaml$|package\.json$|\.bun-version$|packages/client-core/|packages/contract/|\.github/workflows/ci\.yml$|\.github/actions/)' || true)
+          # specimens import from other packages (the IPC types and the
+          # default appearance, the theme lists), and the toolchain.
+          touched=$(git diff --name-only "$BASE_SHA"...HEAD | grep -E '^(apps/desktop/src/renderer/|apps/desktop/src/ipc/|apps/desktop/scripts/ui-|apps/desktop/scripts/capture-ui\.ts$|apps/desktop/scripts/sheet-server\.ts$|apps/desktop/vite\.renderer\.config\.ts$|apps/desktop/package\.json$|apps/desktop/ui-metrics\.baseline\.json$|pnpm-lock\.yaml$|package\.json$|\.bun-version$|packages/client-core/|packages/contract/|\.github/workflows/ci\.yml$|\.github/actions/)' || true)
           if [ -n "$touched" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "The UI metrics apply, because of:"

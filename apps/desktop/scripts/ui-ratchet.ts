@@ -28,6 +28,13 @@ export interface MetricDefinition {
   readonly ratchet: boolean;
   /** Returns whether `value` meets the target. `dark` is whether the theme is a dark one. */
   readonly target: (value: number, context: { readonly dark: boolean }) => boolean;
+  /**
+   * For a metric where higher is better: returns the highest value the ratchet
+   * tells apart. Both the baseline and the run are cut to it before they are
+   * compared, so a value above it may fall to it without being worse. Without
+   * this function, every value counts.
+   */
+  readonly ratchetCap?: (context: { readonly dark: boolean }) => number;
 }
 
 /** Two values closer than this are equal: it absorbs floating point noise at a tolerance boundary. */
@@ -72,9 +79,18 @@ function reported(label: string, direction: "higher" | "lower"): MetricDefinitio
 /** The Lc tolerance: finer than the 4 decimals the baseline stores. */
 const LC_TOLERANCE = 0.05;
 
+/** The least Lc ink needs. In a dark theme the best ink lies between this and `contrast.ink.aboveCeiling`'s Lc 95. */
+const INK_MINIMUM_LC = 85;
+
 /** Every metric, keyed by its name: the last segment of its key, without `@glass0`. */
 export const METRICS: Readonly<Record<string, MetricDefinition>> = {
-  "contrast.ink.minLc": higher("Lowest ink contrast (Lc)", LC_TOLERANCE, 85),
+  "contrast.ink.minLc": {
+    ...higher("Lowest ink contrast (Lc)", LC_TOLERANCE, INK_MINIMUM_LC),
+    // In a dark theme, ink brighter than the band glares, and lowering it into
+    // the band is the aim. `contrast.ink.aboveCeiling` guards the top, so the
+    // ratchet here only guards the floor.
+    ratchetCap: ({ dark }) => (dark ? INK_MINIMUM_LC : Infinity),
+  },
   "contrast.ink.aboveCeiling": {
     label: "Ink text above Lc 95",
     direction: "lower",
@@ -118,9 +134,11 @@ export const METRICS: Readonly<Record<string, MetricDefinition>> = {
 
   "target.under24": none("Click targets under 24px"),
   // Reported against the product's stricter 28px threshold; it never fails.
-  "target.under28": { ...lower("Click targets under 28px", 0, 0), target: () => true },
+  "target.under28": reported("Click targets under 28px", "lower"),
 
-  "focus.missing": none("Controls without a visible focus ring"),
+  // Counts kinds of control, not controls: the rows of one component share one
+  // focus style, and measuring the focus costs a screenshot each.
+  "focus.missing": none("Kinds of control without a visible focus ring"),
 
   "resilience.textSpacing.clippedCharacters": none("Clipped characters with text spacing"),
   "resilience.textSpacing.overlaps": none("Overlaps with text spacing"),
@@ -190,6 +208,12 @@ function readDefinition(key: string): MetricDefinition {
   return definition;
 }
 
+/** Returns the context of a key's metric: whether the key's theme is a dark one. `run/` keys count as light. */
+function readContext(key: string): { readonly dark: boolean } {
+  const { theme } = parseKey(key);
+  return { dark: theme !== null && isDarkTheme(theme) };
+}
+
 /** One value that moved between the baseline and the current run. */
 export interface RatchetChange {
   readonly key: string;
@@ -248,11 +272,16 @@ export function compareWithBaseline(
     if (!definition.ratchet) {
       continue;
     }
+    const cap = definition.ratchetCap?.(readContext(key)) ?? Infinity;
+    const [comparedCurrent, comparedBaseline] = [
+      Math.min(currentValue, cap),
+      Math.min(baselineValue, cap),
+    ];
     // Positive when the value moved the right way.
     const improvement =
       definition.direction === "higher"
-        ? currentValue - baselineValue
-        : baselineValue - currentValue;
+        ? comparedCurrent - comparedBaseline
+        : comparedBaseline - comparedCurrent;
     const change = { key, baseline: baselineValue, current: currentValue };
     if (improvement < -(definition.tolerance + EPSILON)) {
       worse.push(change);
@@ -286,13 +315,8 @@ export interface TargetResult {
 export function checkTargets(current: Readonly<Record<string, number>>): TargetResult[] {
   return sortKeys(Object.keys(current)).map((key) => {
     const definition = readDefinition(key);
-    const { theme } = parseKey(key);
     const value = current[key] as number;
-    return {
-      key,
-      value,
-      met: definition.target(value, { dark: theme !== null && isDarkTheme(theme) }),
-    };
+    return { key, value, met: definition.target(value, readContext(key)) };
   });
 }
 

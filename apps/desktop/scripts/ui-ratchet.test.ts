@@ -70,6 +70,42 @@ describe("compareWithBaseline", () => {
     expect(result.passed).toBe(true);
   });
 
+  it("treats target.under28 as reported: a rise from 0 to 1 is not worse", () => {
+    const key = "whitehaven/thread/target.under28";
+    expect(METRICS["target.under28"]?.ratchet).toBe(false);
+    const result = compareWithBaseline({ [key]: 1 }, { [key]: 0 });
+    expect(result.worse).toEqual([]);
+    expect(result.passed).toBe(true);
+  });
+
+  describe("the ink floor in a dark theme", () => {
+    const dark = "nile/thread/contrast.ink.minLc";
+
+    it("does not call ink worse for falling from above the band into it", () => {
+      const result = compareWithBaseline({ [dark]: 90 }, { [dark]: 100 });
+      expect(result.worse).toEqual([]);
+      expect(result.better).toEqual([]);
+    });
+
+    it("calls ink worse for falling below the floor of the band", () => {
+      expect(compareWithBaseline({ [dark]: 84 }, { [dark]: 100 }).worse).toHaveLength(1);
+      expect(compareWithBaseline({ [dark]: 84 }, { [dark]: 86 }).worse).toHaveLength(1);
+    });
+
+    it("does not call ink better for rising above the floor", () => {
+      expect(compareWithBaseline({ [dark]: 100 }, { [dark]: 90 }).better).toEqual([]);
+    });
+
+    it("leaves a light theme as it is: every fall counts", () => {
+      expect(
+        compareWithBaseline(
+          { "whitehaven/thread/contrast.ink.minLc": 90 },
+          { "whitehaven/thread/contrast.ink.minLc": 100 },
+        ).worse,
+      ).toHaveLength(1);
+    });
+  });
+
   it("fails when a key is missing on either side, even for a reported metric", () => {
     const missingFromCurrent = compareWithBaseline({}, { [REPORTED]: 1 });
     expect(missingFromCurrent.missingFromCurrent).toEqual([REPORTED]);

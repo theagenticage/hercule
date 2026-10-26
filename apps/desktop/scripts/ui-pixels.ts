@@ -356,16 +356,21 @@ function buildContrastMemo(): (first: number, second: number) => boolean {
 /**
  * Checks that focusing a control draws something seen. `focusedClip` is a
  * screenshot of only the `clip` region (CSS px) taken with the control
- * focused, and `golden` is the full-window capture without focus. Each pixel
- * of `focusedClip` is compared with the same pixel of `golden`, and counts
- * when the two colours have a WCAG ratio of at least 3. The ring is visible
- * when the counted pixels number at least half of the perimeter of `target`
- * (CSS px) in device pixels, so a ring that wraps the control passes and a
- * lone changed pixel does not. `clip` must lie on the window, because the
- * pixel at the top left of `focusedClip` is taken to be the clip's top left.
+ * focused, and `unfocused` is the full-window capture taken with nothing
+ * focused. Each pixel of `focusedClip` is compared with the same pixel of
+ * `unfocused`, and counts when the two colours have a WCAG ratio of at least
+ * 3. The ring is visible when the counted pixels number at least half of the
+ * perimeter of `target` (CSS px) in device pixels, so a ring that wraps the
+ * control passes and a lone changed pixel does not. `clip` must lie on the
+ * window, because the pixel at the top left of `focusedClip` is taken to be
+ * the clip's top left.
+ *
+ * `unfocused` must have no focus ring anywhere. A capture in which another
+ * control still shows its ring would count that ring's disappearance, inside
+ * the clip, as a change, and a control without a ring could pass.
  */
 export function checkFocusRing(
-  golden: DecodedImage,
+  unfocused: DecodedImage,
   focusedClip: DecodedImage,
   clip: ProbeRect,
   target: ProbeRect,
@@ -377,13 +382,16 @@ export function checkFocusRing(
   let qualifyingPixels = 0;
   for (let y = 0; y < focusedClip.height; y += 1) {
     for (let x = 0; x < focusedClip.width; x += 1) {
-      const goldenX = originX + x;
-      const goldenY = originY + y;
-      if (goldenX >= golden.width || goldenY >= golden.height) {
+      const unfocusedX = originX + x;
+      const unfocusedY = originY + y;
+      if (unfocusedX >= unfocused.width || unfocusedY >= unfocused.height) {
         continue;
       }
       if (
-        hasContrast(readPackedPixel(golden, goldenX, goldenY), readPackedPixel(focusedClip, x, y))
+        hasContrast(
+          readPackedPixel(unfocused, unfocusedX, unfocusedY),
+          readPackedPixel(focusedClip, x, y),
+        )
       ) {
         qualifyingPixels += 1;
       }
@@ -391,6 +399,66 @@ export function checkFocusRing(
   }
   const requiredPixels = (target.right - target.left + (target.bottom - target.top)) * scale;
   return { visible: qualifyingPixels >= requiredPixels, qualifyingPixels, requiredPixels };
+}
+
+/** A pixel differs from another when any of its channels differs by more than this (of 255). */
+const MINIMUM_CHANNEL_DIFFERENCE = 32;
+
+/**
+ * Counts the pixels at which two boxes of the same image differ. `first` and
+ * `second` are boxes in CSS px of the same size; the pixel at an offset in the
+ * first is compared with the pixel at the same offset in the second. Two
+ * pixels differ when any of their four channels differs by more than 32.
+ * Fails when the boxes do not have the same size in device pixels, or when
+ * one reaches outside the image, because a count over part of a glyph says
+ * nothing about the glyph.
+ */
+export function countDifferingPixels(
+  image: DecodedImage,
+  first: ProbeRect,
+  second: ProbeRect,
+  scale: number,
+): number {
+  const firstPixels = toPixelRect(first, scale);
+  const secondPixels = toPixelRect(second, scale);
+  const width = firstPixels.right - firstPixels.left;
+  const height = firstPixels.bottom - firstPixels.top;
+  if (
+    width !== secondPixels.right - secondPixels.left ||
+    height !== secondPixels.bottom - secondPixels.top
+  ) {
+    throw new Error(
+      `The two boxes have different sizes (${String(width)}x${String(height)} and ${String(secondPixels.right - secondPixels.left)}x${String(secondPixels.bottom - secondPixels.top)} device pixels), so they cannot be compared pixel by pixel.`,
+    );
+  }
+  for (const pixels of [firstPixels, secondPixels]) {
+    const cut = cutToImage(pixels, image);
+    if (
+      cut.left !== pixels.left ||
+      cut.top !== pixels.top ||
+      cut.right !== pixels.right ||
+      cut.bottom !== pixels.bottom
+    ) {
+      throw new Error("A box to compare reaches outside the image.");
+    }
+  }
+  let differing = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const firstOffset = ((firstPixels.top + y) * image.width + firstPixels.left + x) * 4;
+      const secondOffset = ((secondPixels.top + y) * image.width + secondPixels.left + x) * 4;
+      for (let channel = 0; channel < 4; channel += 1) {
+        const difference = Math.abs(
+          (image.data[firstOffset + channel] ?? 0) - (image.data[secondOffset + channel] ?? 0),
+        );
+        if (difference > MINIMUM_CHANNEL_DIFFERENCE) {
+          differing += 1;
+          break;
+        }
+      }
+    }
+  }
+  return differing;
 }
 
 /**

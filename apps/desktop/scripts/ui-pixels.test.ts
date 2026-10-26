@@ -10,6 +10,7 @@ import {
   checkNonTextPart,
   computePercentile,
   countColours,
+  countDifferingPixels,
   findModeColour,
   measureFragmentContrast,
   type DecodedImage,
@@ -368,11 +369,48 @@ describe("checkFocusRing", () => {
     expect(result.qualifyingPixels).toBe(0);
   });
 
-  it("compares with the golden's pixels at the clip's position", () => {
-    // The golden is black where the clip is, so a white clip differs everywhere.
-    const golden = buildImage(60, 40, BLACK);
-    const result = checkFocusRing(golden, buildImage(44, 34, WHITE), clip, target, 1);
+  it("compares with the unfocused capture's pixels at the clip's position", () => {
+    // The capture is black where the clip is, so a white clip differs everywhere.
+    const unfocused = buildImage(60, 40, BLACK);
+    const result = checkFocusRing(unfocused, buildImage(44, 34, WHITE), clip, target, 1);
     expect(result.qualifyingPixels).toBe(44 * 34);
+  });
+});
+
+describe("countDifferingPixels", () => {
+  const first: ProbeRect = { left: 2, top: 2, right: 6, bottom: 6 };
+  const second: ProbeRect = { left: 10, top: 2, right: 14, bottom: 6 };
+
+  it("counts the pixels where any channel differs by more than 32", () => {
+    const image = buildImage(20, 10, WHITE);
+    paint(image, [2, 2, 3, 3], BLACK);
+    paint(image, [3, 2, 4, 3], [223, 255, 255, 1]);
+    paint(image, [4, 2, 5, 3], [222, 255, 255, 1]);
+    // Black against white differs, 32 off in one channel does not, 33 off does.
+    expect(countDifferingPixels(image, first, second, 1)).toBe(2);
+  });
+
+  it("is 0 for two identical cells", () => {
+    const image = buildImage(20, 10, WHITE);
+    paint(image, [2, 2, 4, 6], BLACK);
+    paint(image, [10, 2, 12, 6], BLACK);
+    expect(countDifferingPixels(image, first, second, 1)).toBe(0);
+  });
+
+  it("measures at the device scale", () => {
+    const image = buildImage(40, 20, WHITE);
+    paint(image, [4, 4, 6, 6], BLACK);
+    expect(countDifferingPixels(image, first, second, 2)).toBe(4);
+  });
+
+  it("fails when the cells differ in size or reach outside the image", () => {
+    const image = buildImage(20, 10, WHITE);
+    expect(() =>
+      countDifferingPixels(image, first, { ...second, right: second.right + 1 }, 1),
+    ).toThrow(/different sizes/);
+    expect(() =>
+      countDifferingPixels(image, first, { left: 18, top: 2, right: 22, bottom: 6 }, 1),
+    ).toThrow(/outside the image/);
   });
 });
 

@@ -17,7 +17,7 @@ import type {
   ClippingFacts,
   DisciplineFacts,
   FocusOutcome,
-  GlyphPair,
+  GlyphSpecimen,
   Perturbation,
   ProbeRect,
   ProbeTarget,
@@ -37,10 +37,12 @@ import { ALL_THEMES } from "../src/renderer/specimens/sheet-themes.ts";
 import {
   checkFocusRing,
   checkNonTextPart,
+  countDifferingPixels,
   measureFragmentContrast,
   type DecodedImage,
 } from "./ui-pixels.ts";
 import {
+  selectOneTargetPerKind,
   summarizeContrast,
   summarizeDiscipline,
   summarizeGlyphs,
@@ -50,6 +52,7 @@ import {
   summarizeText,
   summarizeTokens,
   type MeasuredFragment,
+  type MeasuredGlyphPair,
   type MetricValues,
 } from "./ui-summary.ts";
 
@@ -86,7 +89,8 @@ interface ProbeFunctions {
   removePerturbation(): void;
   measureClipping(): ClippingFacts;
   measureProse(): ProseFacts;
-  measureGlyphPairs(): GlyphPair[];
+  showGlyphSpecimen(): GlyphSpecimen[];
+  hideGlyphSpecimen(): void;
 }
 
 /** The probe as this program calls it: each function runs in the page and returns a promise. */
@@ -124,12 +128,80 @@ function bindProbe(page: Page): PageProbe {
 /** How many times the page is waited for or measured, at most, while it settles. */
 const MAXIMUM_SETTLE_ATTEMPTS = 20;
 
-/** What every screenshot of the measurement uses: finished animations and no caret, as the golden has. */
-const SCREENSHOT_OPTIONS = { animations: "disabled", caret: "hide" } as const;
+/** The id of the style element that stops the page's motion. */
+const FREEZE_STYLE_ID = "ui-metrics-freeze";
 
-/** Takes a screenshot of the whole window and returns it decoded. */
-async function captureWindow(page: Page): Promise<DecodedImage> {
-  return PNG.sync.read(await page.screenshot(SCREENSHOT_OPTIONS));
+/**
+ * The style that ends the page's motion at once: every animation and
+ * transition lasts no time, so the page shows what they end with, and the
+ * caret is hidden. It does not remove them (`animation: none` would drop the
+ * end state of an animation that fills forwards), and it is not what a
+ * screenshot with `animations: "disabled"` does to infinite animations, but
+ * it gives the same pixels on these pages.
+ */
+const FREEZE_STYLE =
+  "*, *::before, *::after { animation-duration: 0s !important; animation-delay: 0s !important; " +
+  "animation-iteration-count: 1 !important; transition-duration: 0s !important; " +
+  "transition-delay: 0s !important; caret-color: transparent !important; }";
+
+/** Takes screenshots of a page whose motion is stopped. */
+interface Camera {
+  /** Returns a screenshot of the window, or of the part of it in `clip` (CSS px, on the window), decoded. */
+  capture(clip?: ProbeRect): Promise<DecodedImage>;
+  /** Lets the page move again. The camera takes no more screenshots after this. */
+  release(): Promise<void>;
+}
+
+/**
+ * Stops the motion of the page and returns a camera for it. The golden is
+ * taken before, with Playwright's `animations: "disabled"`. Every screenshot
+ * after it comes from here, because Playwright prepares each screenshot with
+ * several round trips to the page (finish the animations, hide the caret, put
+ * it all back), and most of the measurement is screenshots. With nothing
+ * moving, that work has no effect, so the camera asks the browser for the
+ * picture directly and for the fast PNG encoding, which holds the same pixels
+ * in more bytes. The page also settles sooner after a change, because
+ * transitions have nothing to wait for.
+ *
+ * The text-resilience checks must not run while the page is stopped. On the
+ * intake and tracking-pane screens a narrow window measured about 650 more
+ * clipped characters with the motion stopped than with it running (the cause
+ * was not tracked down), and the measure should be what a user sees. Call
+ * `release` before them. Fails when the browser refuses a debugging session.
+ */
+async function stopPageMotion(page: Page): Promise<Camera> {
+  // A string, because this program has no DOM types.
+  await page.evaluate(`(() => {
+    const style = document.createElement("style");
+    style.id = ${JSON.stringify(FREEZE_STYLE_ID)};
+    style.textContent = ${JSON.stringify(FREEZE_STYLE)};
+    document.head.append(style);
+  })()`);
+  const session = await page.context().newCDPSession(page);
+  return {
+    capture: async (clip) => {
+      const { data } = await session.send("Page.captureScreenshot", {
+        format: "png",
+        optimizeForSpeed: true,
+        ...(clip === undefined
+          ? {}
+          : {
+              clip: {
+                x: clip.left,
+                y: clip.top,
+                width: clip.right - clip.left,
+                height: clip.bottom - clip.top,
+                scale: 1,
+              },
+            }),
+      });
+      return PNG.sync.read(Buffer.from(data, "base64"));
+    },
+    release: async () => {
+      await session.detach();
+      await page.evaluate(`document.getElementById(${JSON.stringify(FREEZE_STYLE_ID)})?.remove()`);
+    },
+  };
 }
 
 /**
@@ -189,10 +261,10 @@ async function measureSettledClipping(page: Page, probe: PageProbe): Promise<Cli
  * lines that have pixels to measure on; the others are scrolled away or
  * clipped. Leaves the page as it found it.
  */
-async function measureTextContrast(page: Page, probe: PageProbe): Promise<MeasuredFragment[]> {
+async function measureTextContrast(camera: Camera, probe: PageProbe): Promise<MeasuredFragment[]> {
   const fragments = await probe.collectText();
   await probe.hideText();
-  const textHidden = await captureWindow(page);
+  const textHidden = await camera.capture();
   const groupIds = [
     ...new Set(
       fragments.flatMap(({ opacityGroups }) => opacityGroups.slice(0, 1).map((g) => g.id)),
@@ -201,7 +273,7 @@ async function measureTextContrast(page: Page, probe: PageProbe): Promise<Measur
   let behind: DecodedImage | null = null;
   if (groupIds.length > 0) {
     await probe.hideOpacityGroups(groupIds);
-    behind = await captureWindow(page);
+    behind = await camera.capture();
     await probe.showOpacityGroups();
   }
   await probe.showText();
@@ -225,41 +297,110 @@ function buildFocusClip(box: ProbeRect): ProbeRect {
 }
 
 /**
- * Focuses each target that lies wholly in the window, as a keyboard user
- * does, and returns how many show no focus ring: the focus did not land, or
- * the pixels around the target did not change enough from `golden`. One small
- * screenshot per target. Leaves the page as it found it.
+ * The attribute the probe's `collectTargets` puts on each target, holding its
+ * id (src/renderer/specimens/ui-probe.ts).
  */
-async function countTargetsWithoutFocusRing(
+const TARGET_ID_ATTRIBUTE = "data-ui-probe-target";
+
+/**
+ * Returns the kind of each target that `collectTargets` last marked, by id.
+ * Controls of one kind look and behave alike: the same tag, classes, role and
+ * type attribute, and the same size in whole CSS px.
+ */
+async function readTargetKinds(page: Page): Promise<Record<number, string>> {
+  // A string, because this program has no DOM types.
+  return page.evaluate<Record<number, string>>(`(() => {
+    const kinds = {};
+    for (const element of document.querySelectorAll("[${TARGET_ID_ATTRIBUTE}]")) {
+      const box = element.getBoundingClientRect();
+      kinds[element.getAttribute("${TARGET_ID_ATTRIBUTE}")] = [
+        element.tagName,
+        [...element.classList].sort().join("."),
+        element.getAttribute("role") ?? "",
+        element.getAttribute("type") ?? "",
+        Math.round(box.width),
+        Math.round(box.height),
+      ].join("|");
+    }
+    return kinds;
+  })()`);
+}
+
+/**
+ * Takes the focus off whatever has it and waits for the page to settle, so
+ * that no control shows a focus ring. Fails when a control still matches
+ * `:focus-visible` afterwards, because the page took the focus back.
+ */
+async function removeFocusFromPage(page: Page): Promise<void> {
+  await page.evaluate(`(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  })()`);
+  await waitForPageToSettle(page);
+  const stillFocused = await page.evaluate<boolean>(
+    `document.querySelector(":focus-visible") !== null`,
+  );
+  if (stillFocused) {
+    throw new Error(
+      "A control kept the focus after it was removed, so no unfocused capture exists.",
+    );
+  }
+}
+
+/**
+ * Focuses one target of each kind of control that lies wholly in the window,
+ * as a keyboard user does, and returns how many kinds show no focus ring: the
+ * focus did not land, or the pixels around the target did not change enough
+ * from an unfocused capture of the page. One small screenshot per kind.
+ *
+ * It counts kinds, not controls, because the rows of one component share one
+ * focus style, and a screenshot for each of a hundred rows is most of the
+ * time of a measurement. A control that styles its focus differently from
+ * others of its kind (the same tag, classes, role, type and size) goes
+ * unseen.
+ *
+ * It takes the focus off the page first and compares with a capture taken
+ * after that, never with the golden. The golden may show the ring of a control
+ * that had the focus when the page loaded, and a control without a ring of
+ * its own, next to it, would then pass on the pixels where that ring was.
+ * Leaves the page with nothing focused.
+ */
+async function countKindsWithoutFocusRing(
   page: Page,
+  camera: Camera,
   probe: PageProbe,
-  golden: DecodedImage,
   targets: ReadonlyArray<ProbeTarget>,
 ): Promise<number> {
+  const sampled = selectOneTargetPerKind(targets, await readTargetKinds(page));
+  await removeFocusFromPage(page);
+  const unfocused = await camera.capture();
   let missing = 0;
-  for (const target of targets) {
-    if (!target.inWindow) continue;
+  for (const target of sampled) {
     const { focused } = await probe.focusTarget(target.id);
     let hasRing = false;
     if (focused) {
       const clip = buildFocusClip(target.box);
-      const clipped = PNG.sync.read(
-        await page.screenshot({
-          ...SCREENSHOT_OPTIONS,
-          clip: {
-            x: clip.left,
-            y: clip.top,
-            width: clip.right - clip.left,
-            height: clip.bottom - clip.top,
-          },
-        }),
-      );
-      hasRing = checkFocusRing(golden, clipped, clip, target.box, METRICS_SCALE).visible;
+      const clipped = await camera.capture(clip);
+      hasRing = checkFocusRing(unfocused, clipped, clip, target.box, METRICS_SCALE).visible;
     }
     await probe.blurTarget();
     if (!hasRing) missing += 1;
   }
   return missing;
+}
+
+/**
+ * Draws the confusable glyph pairs in the page, takes one screenshot, and
+ * returns how many pixels differ between the two glyphs of each pair. The
+ * specimen is removed again before this returns.
+ */
+async function measureGlyphPairs(camera: Camera, probe: PageProbe): Promise<MeasuredGlyphPair[]> {
+  const specimens = await probe.showGlyphSpecimen();
+  const image = await camera.capture();
+  await probe.hideGlyphSpecimen();
+  return specimens.map(({ pair, first, second }) => ({
+    pair,
+    differingPixels: countDifferingPixels(image, first, second, METRICS_SCALE),
+  }));
 }
 
 /**
@@ -293,6 +434,7 @@ async function countFailingNonTextParts(
 export interface PageTimings {
   readonly contrast: number;
   readonly focus: number;
+  readonly resilience: number;
   readonly other: number;
 }
 
@@ -319,11 +461,18 @@ function isFirstScreen(variant: UiVariant): boolean {
  * 1. the golden screenshot, written to `<outputDir>/<theme>/<screen>.png`;
  * 2. the contrast of the text at glass 40 and at glass 0;
  * 3. the type, shape and spacing values;
- * 4. the click targets and their focus rings;
- * 5. the borders and marks of the controls;
+ * 4. the borders and marks of the controls, against the golden;
+ * 5. the click targets and their focus rings, which first takes the focus off
+ *    the page;
  * 6. the prose measure (only on the long thread);
- * 7. how the text survives a narrow window, the spacing of WCAG 1.4.12 and
+ * 7. the theme's tokens and the glyphs, where the page is asked for them;
+ * 8. how the text survives a narrow window, the spacing of WCAG 1.4.12 and
  *    the largest Text size.
+ *
+ * Steps 2 to 7 run with the motion of the page stopped (see `stopPageMotion`)
+ * and step 8 with it running again. The one change that stays is the focus:
+ * step 5 takes it off the page, and the steps after it run on a page with
+ * nothing focused.
  *
  * The prose is read before the window shrinks, because a narrow window can
  * leave the scroll positions of a long transcript changed. The narrow window
@@ -350,7 +499,7 @@ export async function measurePage(
       values[`${prefix}${name}${suffix}`] = value;
     }
   };
-  const timings = { contrast: 0, focus: 0, other: 0 };
+  const timings = { contrast: 0, focus: 0, resilience: 0, other: 0 };
   const startedAt = performance.now();
   let mark = startedAt;
   const lap = (kind: keyof PageTimings): void => {
@@ -362,14 +511,15 @@ export async function measurePage(
   const { png } = await screenshotVariant(page, variant);
   await writeFile(join(outputDir, variant.theme, `${variant.screen.name}.png`), png);
   const golden: DecodedImage = PNG.sync.read(png);
+  const camera = await stopPageMotion(page);
   lap("other");
 
-  const measured = await measureTextContrast(page, probe);
+  const measured = await measureTextContrast(camera, probe);
   add(summarizeContrast(measured, dark));
   add(summarizeText(measured));
   await probe.setGlass(SOLID_GLASS_PERCENT);
   await waitForPageToSettle(page);
-  add(summarizeContrast(await measureTextContrast(page, probe), dark), "@glass0");
+  add(summarizeContrast(await measureTextContrast(camera, probe), dark), "@glass0");
   await probe.setGlass(DEFAULT_GLASS_PERCENT);
   await waitForPageToSettle(page);
   lap("contrast");
@@ -377,17 +527,28 @@ export async function measurePage(
   add(summarizeDiscipline(await probe.collectDiscipline()));
   lap("other");
 
+  add({ "nonText.failing": await countFailingNonTextParts(probe, golden, variant) });
+
   const targets = await probe.collectTargets();
   add(summarizeTargets(targets));
   lap("other");
-  add({ "focus.missing": await countTargetsWithoutFocusRing(page, probe, golden, targets) });
+  add({ "focus.missing": await countKindsWithoutFocusRing(page, camera, probe, targets) });
   lap("focus");
-
-  add({ "nonText.failing": await countFailingNonTextParts(probe, golden, variant) });
 
   if (variant.screen.name === "thread-long") {
     add(summarizeProse(await probe.measureProse()));
   }
+  if (isFirstScreen(variant)) {
+    for (const [name, value] of Object.entries(summarizeTokens(await probe.resolveThemeTokens()))) {
+      values[`${variant.theme}/tokens/${name}`] = value;
+    }
+    if (variant.theme === FIRST_THEME) {
+      const glyphs = summarizeGlyphs(await measureGlyphPairs(camera, probe));
+      for (const [name, value] of Object.entries(glyphs)) values[`run/${name}`] = value;
+    }
+  }
+  await camera.release();
+  lap("other");
 
   add(summarizeResilience("rest", await measureSettledClipping(page, probe)));
   await page.setViewportSize(REFLOW_WINDOW);
@@ -402,16 +563,6 @@ export async function measurePage(
     add(summarizeResilience(prefixName, await measureSettledClipping(page, probe)));
     await probe.removePerturbation();
   }
-
-  if (isFirstScreen(variant)) {
-    for (const [name, value] of Object.entries(summarizeTokens(await probe.resolveThemeTokens()))) {
-      values[`${variant.theme}/tokens/${name}`] = value;
-    }
-    if (variant.theme === FIRST_THEME) {
-      const glyphs = summarizeGlyphs(await probe.measureGlyphPairs());
-      for (const [name, value] of Object.entries(glyphs)) values[`run/${name}`] = value;
-    }
-  }
-  lap("other");
+  lap("resilience");
   return { values, timings };
 }

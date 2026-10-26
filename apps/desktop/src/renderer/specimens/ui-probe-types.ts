@@ -116,10 +116,17 @@ export interface ProseFacts {
   readonly meanCharactersPerLine: number | null;
 }
 
-/** How different two easily confused glyphs draw in the UI font. */
-export interface GlyphPair {
+/**
+ * Where two easily confused characters are drawn in the glyph specimen
+ * (`showGlyphSpecimen`): the boxes of their two cells. Both boxes have the
+ * same size, and each glyph starts at the same place in its cell, so equal
+ * shapes give equal pixels.
+ */
+export interface GlyphSpecimen {
   /** The two characters, such as "Il". */
   readonly pair: string;
-  /** Canvas pixels that differ between the two glyphs at 13px. */
-  readonly differingPixels: number;
+  /** The cell of the first character. */
+  readonly first: ProbeRect;
+  /** The cell of the second character. */
+  readonly second: ProbeRect;
 }

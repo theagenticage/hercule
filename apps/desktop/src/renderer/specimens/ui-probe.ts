@@ -17,7 +17,7 @@ import type {
   ClippingFacts,
   DisciplineFacts,
   FocusOutcome,
-  GlyphPair,
+  GlyphSpecimen,
   Perturbation,
   ProbeColour,
   ProbeRect,
@@ -96,10 +96,40 @@ const OVERLAP_THRESHOLD_PX2 = 2;
 /** Fragments whose tops differ by at most this many pixels sit on the same line. */
 const SAME_LINE_TOLERANCE_PX = 2;
 
-/** The differing alpha a glyph pixel needs before it counts as different from the other glyph. */
-const GLYPH_ALPHA_THRESHOLD = 32;
+/** The characters of the glyph specimen, in the order it draws them. */
+const GLYPH_CHARACTERS = ["I", "l", "1", "O", "0"] as const;
 
+/** The pairs of easily confused characters of the glyph specimen: each is two of `GLYPH_CHARACTERS`. */
 const GLYPH_PAIRS = ["Il", "I1", "l1", "O0"] as const;
+
+/** The side of the square cell that holds one glyph of the glyph specimen, in px. */
+const GLYPH_CELL_PX = 24;
+
+/** The gap between two cells, and around the cells, in px. It keeps the anti-aliasing of one glyph out of the next cell. */
+const GLYPH_GAP_PX = 8;
+
+/** How far a glyph starts from the left edge of its cell, in px. The same for every glyph, so equal shapes land on equal pixels. */
+const GLYPH_INDENT_PX = 6;
+
+/** The attribute that marks the element `showGlyphSpecimen` adds. */
+const GLYPH_SPECIMEN_ATTRIBUTE = "data-ui-probe-glyphs";
+
+/**
+ * The properties of the page's text that the glyph specimen copies from the
+ * element that holds the UI text. They are what changes the shape of a glyph:
+ * the font and its features and axes, the spacing and kerning, and how the
+ * browser smooths the glyph.
+ */
+const GLYPH_TYPOGRAPHY_PROPERTIES = [
+  "font-family",
+  "font-feature-settings",
+  "font-variation-settings",
+  "font-optical-sizing",
+  "font-kerning",
+  "letter-spacing",
+  "text-rendering",
+  "-webkit-font-smoothing",
+] as const;
 
 /** The attribute that names an element with a see-through ancestor group. */
 const GROUP_ATTRIBUTE = "data-ui-probe-group";
@@ -475,15 +505,81 @@ function moveAndCutAlongAxis(
       );
 }
 
+/** An ancestor that cuts or scrolls its content, with the area it clips the content to. */
+interface ClippingAncestor {
+  readonly facts: ElementFacts;
+  readonly clip: ProbeRect;
+}
+
+/**
+ * Returns the ancestors, from `from` outward, that clip the content of a box
+ * and apply to it: the ones that cut or scroll along some axis, innermost
+ * first. `from` and `escape` work as in `clipToAncestors`.
+ */
+function listClippingAncestors(
+  from: Element | null,
+  escape: Escape,
+  readFacts: ReadFacts,
+): ClippingAncestor[] {
+  const ancestors: ClippingAncestor[] = [];
+  let currentEscape = escape;
+  for (let element = from; element !== null; element = element.parentElement) {
+    const facts = readFacts(element);
+    if (
+      (currentEscape === "absolute" && facts.containsAbsolute) ||
+      (currentEscape === "fixed" && facts.containsFixed)
+    ) {
+      currentEscape = "none";
+    }
+    if (
+      currentEscape === "none" &&
+      (facts.cutsX || facts.cutsY || facts.scrollsX || facts.scrollsY)
+    ) {
+      ancestors.push({ facts, clip: readClipRect(element) });
+    }
+    if (facts.position === "fixed") currentEscape = "fixed";
+    else if (facts.position === "absolute" && currentEscape === "none") currentEscape = "absolute";
+  }
+  return ancestors;
+}
+
+/**
+ * Returns the part of a scroller's area that the user can see, or null when
+ * none is left. It is the scroller's `clip`, cut by every outer ancestor that
+ * cuts along an axis, and by the window unless an outer ancestor scrolls (the
+ * user then scrolls the scroller itself into view, and that ancestor gets its
+ * own turn in `computeLostShare`). `outer` holds the ancestors around the
+ * scroller, innermost first.
+ */
+function computeVisibleScrollerArea(
+  clip: ProbeRect,
+  outer: ReadonlyArray<ClippingAncestor>,
+): ProbeRect | null {
+  let visible: ProbeRect | null = clip;
+  let hasOuterScroller = false;
+  for (const { facts, clip: outerClip } of outer) {
+    if (facts.cutsX) visible = moveAndCutAlongAxis(visible, "x", 0, outerClip);
+    if (facts.cutsY) visible = moveAndCutAlongAxis(visible, "y", 0, outerClip);
+    if (facts.scrollsX || facts.scrollsY) hasOuterScroller = true;
+  }
+  return hasOuterScroller || visible === null ? visible : intersectRects(visible, readWindowRect());
+}
+
 /**
  * Returns the share of `box`, from 0 to 1, that is lost: cut off for good,
- * with no scrolling that reaches it.
+ * with no scrolling that reaches it. The rules, from the box outward:
  *
  * - An ancestor with overflow `hidden` or `clip` cuts the box along that axis.
- * - An ancestor that scrolls along an axis (`auto` or `scroll`) does not cut
- *   it: the user scrolls the box into view. The walk moves the box into the
- *   scroller's view and goes on from there, so the clipping ancestors around
- *   the scroller judge the box where scrolling puts it, not where it lies now.
+ * - An ancestor that scrolls along an axis (overflow `auto` or `scroll`) lets
+ *   the user scroll the box into view along that axis, but only into the
+ *   part of the scroller the user can see: its area cut by the outer
+ *   ancestors that cut and by the window. The walk moves the box into that
+ *   part and goes on from there, so the ancestors around the scroller judge
+ *   the box where scrolling puts it, not where it lies now. Along an axis
+ *   that does not scroll, the scroller cuts like overflow `hidden`.
+ * - A scroller whose visible part is empty (a panel placed outside the
+ *   window) loses everything inside it, because no scrolling brings the
+ *   content into view.
  * - The window cuts the box only when no ancestor scrolls.
  *
  * `from` and `escape` work as in `clipToAncestors`.
@@ -494,39 +590,30 @@ function computeLostShare(
   escape: Escape,
   readFacts: ReadFacts,
 ): number {
+  const ancestors = listClippingAncestors(from, escape, readFacts);
   // `reference` is the box as scrolling would put it. The lost share is
   // what `kept` lacks of it, so moving a box into view loses nothing.
   let reference: ProbeRect | null = box;
   let kept: ProbeRect | null = box;
   let hasScroller = false;
-  let currentEscape = escape;
-  for (let element = from; element !== null && kept !== null; element = element.parentElement) {
-    const facts = readFacts(element);
-    if (
-      (currentEscape === "absolute" && facts.containsAbsolute) ||
-      (currentEscape === "fixed" && facts.containsFixed)
-    ) {
-      currentEscape = "none";
+  for (let index = 0; index < ancestors.length && kept !== null; index++) {
+    const { facts, clip } = ancestors[index]!;
+    if (facts.cutsX) kept = moveAndCutAlongAxis(kept, "x", 0, clip);
+    if (facts.cutsY) kept = moveAndCutAlongAxis(kept, "y", 0, clip);
+    if (!facts.scrollsX && !facts.scrollsY) continue;
+    hasScroller = true;
+    const view = computeVisibleScrollerArea(clip, ancestors.slice(index + 1));
+    if (view === null) return 1;
+    if (facts.scrollsX && reference !== null) {
+      const delta = computeShiftIntoView(reference.left, reference.right, view.left, view.right);
+      reference = moveAndCutAlongAxis(reference, "x", delta, view);
+      kept = moveAndCutAlongAxis(kept, "x", delta, view);
     }
-    if (currentEscape === "none") {
-      const clip = readClipRect(element);
-      if (facts.cutsX) kept = moveAndCutAlongAxis(kept, "x", 0, clip);
-      if (facts.cutsY) kept = moveAndCutAlongAxis(kept, "y", 0, clip);
-      if (facts.scrollsX && reference !== null) {
-        hasScroller = true;
-        const delta = computeShiftIntoView(reference.left, reference.right, clip.left, clip.right);
-        reference = moveAndCutAlongAxis(reference, "x", delta, clip);
-        kept = moveAndCutAlongAxis(kept, "x", delta, clip);
-      }
-      if (facts.scrollsY && reference !== null) {
-        hasScroller = true;
-        const delta = computeShiftIntoView(reference.top, reference.bottom, clip.top, clip.bottom);
-        reference = moveAndCutAlongAxis(reference, "y", delta, clip);
-        kept = moveAndCutAlongAxis(kept, "y", delta, clip);
-      }
+    if (facts.scrollsY && reference !== null) {
+      const delta = computeShiftIntoView(reference.top, reference.bottom, view.top, view.bottom);
+      reference = moveAndCutAlongAxis(reference, "y", delta, view);
+      kept = moveAndCutAlongAxis(kept, "y", delta, view);
     }
-    if (facts.position === "fixed") currentEscape = "fixed";
-    else if (facts.position === "absolute" && currentEscape === "none") currentEscape = "absolute";
   }
   if (kept !== null && !hasScroller) kept = intersectRects(kept, readWindowRect());
   if (kept === null || reference === null) return 1;
@@ -690,19 +777,55 @@ function isDrawn(element: Element, readFacts: ReadFacts): boolean {
   return true;
 }
 
+/** Returns whether an element is replaced content, which the browser draws whole over what lies behind it. */
+function isReplacedElement(element: Element): boolean {
+  return (
+    element instanceof HTMLImageElement ||
+    element instanceof SVGSVGElement ||
+    element instanceof HTMLCanvasElement ||
+    element instanceof HTMLVideoElement ||
+    element instanceof HTMLIFrameElement
+  );
+}
+
+/**
+ * Returns whether an element paints something of its own inside its box, so
+ * that what lies behind the box is not seen through it: a background colour
+ * with alpha above 0, a background image, a backdrop filter, or replaced
+ * content. An element that draws only text, a border or nothing at all does
+ * not hide what is behind it.
+ */
+function paintsInsideBox(element: Element, readFacts: ReadFacts): boolean {
+  const { style } = readFacts(element);
+  return (
+    isReplacedElement(element) ||
+    style.backgroundImage !== "none" ||
+    style.backdropFilter !== "none" ||
+    resolveColour(style.backgroundColor)[3] > 0
+  );
+}
+
 /**
  * Returns whether another element paints over the fragment, so that nobody
  * sees it: a tray that slides over a list, a floating header over the
  * transcript. Five points are tried: the centre and the four corners of the
  * visible box, each moved 1px inward (less in a box thinner than 2px). The
- * fragment is covered when none of them hits its owner.
+ * fragment is covered when every point is covered.
  *
- * A point hits the owner when the topmost element that is drawn there is the
- * owner, inside it, or around it. An element that is not drawn (opacity 0 or
- * hidden) is skipped, because it shows nothing: the sidebar's hover buttons
- * sit over the row text at opacity 0. A fragment with no visible box, or whose
- * owner ignores the pointer (the browser leaves such an element out of hit
- * testing, so nothing can be said), is not covered.
+ * A point is covered when, walking down the elements at that point from the
+ * topmost, an element that paints inside its box (see `paintsInsideBox`)
+ * comes before the owner of the fragment. The walk skips elements that paint
+ * nothing there, because the text shows through them: a transparent overlay
+ * over the whole page, or a second block of text at the same place. It also
+ * skips elements that are not drawn (opacity 0 or hidden), such as the
+ * sidebar's hover buttons over the row text. The walk ends, and the point is
+ * not covered, at the owner, an element inside it, or an element around it.
+ * An element with `pointer-events: none` is not in the list the browser
+ * gives, so such an overlay never covers anything.
+ *
+ * A fragment with no visible box, or whose owner ignores the pointer (the
+ * browser leaves such an element out of the list, so nothing can be said), is
+ * not covered.
  */
 function isCoveredByOtherElement(
   readFacts: ReadFacts,
@@ -719,9 +842,12 @@ function isCoveredByOtherElement(
     [box.left + insetX, box.bottom - insetY],
     [box.right - insetX, box.bottom - insetY],
   ] as const;
-  return !points.some(([x, y]) => {
-    const top = document.elementsFromPoint(x, y).find((element) => isDrawn(element, readFacts));
-    return top !== undefined && (top === owner || owner.contains(top) || top.contains(owner));
+  return points.every(([x, y]) => {
+    for (const element of document.elementsFromPoint(x, y)) {
+      if (element === owner || owner.contains(element) || element.contains(owner)) return false;
+      if (isDrawn(element, readFacts) && paintsInsideBox(element, readFacts)) return true;
+    }
+    return false;
   });
 }
 
@@ -907,9 +1033,13 @@ function readElement(pass: TextPass, element: Element): void {
   if (pass.pseudoHosts.has(element)) readPseudoElement(pass, element, "::after");
 }
 
-/** Reads every visible piece of text on the page, in document order, with the paragraph of each prose fragment. */
-function readTextFragments(): CollectedFragment[] {
-  const readFacts = createFactsReader();
+/**
+ * Reads every piece of text on the page that is visible in principle, in
+ * document order, with the paragraph of each prose fragment. Text that
+ * another element paints over is still here; `readPaintedTextFragments`
+ * leaves it out.
+ */
+function readTextFragments(readFacts: ReadFacts): CollectedFragment[] {
   const existingGroups = Array.from(document.querySelectorAll(`[${GROUP_ATTRIBUTE}]`), (element) =>
     Number(element.getAttribute(GROUP_ATTRIBUTE)),
   );
@@ -922,7 +1052,15 @@ function readTextFragments(): CollectedFragment[] {
     nextGroupId: Math.max(-1, ...existingGroups) + 1,
   };
   readElement(pass, document.body);
-  return pass.fragments.filter((collected) => !isCoveredByOtherElement(pass.readFacts, collected));
+  return pass.fragments;
+}
+
+/** Reads the text of the page like `readTextFragments`, without the text that another element paints over: the text a user sees. */
+function readPaintedTextFragments(): CollectedFragment[] {
+  const readFacts = createFactsReader();
+  return readTextFragments(readFacts).filter(
+    (collected) => !isCoveredByOtherElement(readFacts, collected),
+  );
 }
 
 /**
@@ -938,7 +1076,7 @@ function readTextFragments(): CollectedFragment[] {
  * inside an element of opacity 0 is not drawn, so it is left out.
  */
 export function collectText(): TextFragment[] {
-  return readTextFragments().map((collected) => collected.fragment);
+  return readPaintedTextFragments().map((collected) => collected.fragment);
 }
 
 // ---------- Hiding text and see-through groups ----------
@@ -1124,11 +1262,11 @@ function visitStyleRules(visit: (authored: AuthoredRule) => void): void {
  * Returns the selector with its pseudo-elements removed, so it matches the
  * element a pseudo-element belongs to, or null when nothing is left (such as
  * `::selection`, which belongs to every element). `a:hover::before` becomes
- * `a:hover`.
+ * `a:hover`, and `*::before` becomes `*`, which matches every element.
  */
 function stripPseudoElements(selector: string): string | null {
   const stripped = selector.replace(/::?(?:before|after)\b|::[\w-]+(?:\([^)]*\))?/gi, "").trim();
-  return stripped === "" || stripped === "*" ? null : stripped;
+  return stripped === "" ? null : stripped;
 }
 
 /**
@@ -1238,7 +1376,7 @@ export function collectDiscipline(): DisciplineFacts {
 
   const fontSizes = new Set<number>();
   const fontWeights = new Set<number>();
-  for (const { fragment } of readTextFragments()) {
+  for (const { fragment } of readPaintedTextFragments()) {
     fontSizes.add(fragment.fontSize);
     fontWeights.add(fragment.fontWeight);
   }
@@ -1557,7 +1695,13 @@ export function removePerturbation(): void {
 
 /**
  * Returns how much text is lost or overlapping in the page as it is now,
- * from the fragments `collectText` reads.
+ * from the fragments `collectText` reads, plus the ones it leaves out because
+ * another element paints over them. Covered text still counts as lost
+ * characters: a layout that fits the text should not depend on a tray or a
+ * header happening to hide the clipped part. It does not count in the
+ * overlaps, because an overlap is two pieces of text that visibly collide,
+ * and text under a tray is not visible. Text with opacity 0 is not counted
+ * at all.
  *
  * - A fragment's lost characters are its length times its lost share,
  *   rounded to whole characters. An ancestor with overflow `hidden` or
@@ -1568,14 +1712,16 @@ export function removePerturbation(): void {
  * - Two fragments of different sources overlap when their visible boxes
  *   (cut by the window and every clipping ancestor, scrolling ones too)
  *   share more than 2 square pixels. A part that is cut away is not drawn,
- *   so it cannot overlap anything.
+ *   so it cannot overlap anything. A fragment that another element paints
+ *   over (see `isCoveredByOtherElement`) is left out of the pairs.
  * - The string of a pseudo-element is left out of the overlaps, because its
  *   box is its element's box, which holds other text.
  *
  * Text inside an element of opacity 0 is not in the fragments at all.
  */
 export function measureClipping(): ClippingFacts {
-  const collected = readTextFragments();
+  const readFacts = createFactsReader();
+  const collected = readTextFragments(readFacts);
   let clippedCharacters = 0;
   for (const { fragment, lostShare } of collected) {
     clippedCharacters += Math.round(fragment.length * lostShare);
@@ -1583,7 +1729,12 @@ export function measureClipping(): ClippingFacts {
 
   // Sweep from left to right: a fragment can overlap only the fragments that start before it ends.
   const drawn = collected
-    .filter(({ fragment, hasStandInBox }) => fragment.visibleBox !== null && !hasStandInBox)
+    .filter(
+      (each) =>
+        each.fragment.visibleBox !== null &&
+        !each.hasStandInBox &&
+        !isCoveredByOtherElement(readFacts, each),
+    )
     .map(({ fragment }) => ({ sourceId: fragment.sourceId, box: fragment.visibleBox! }))
     .sort((first, second) => first.box.left - second.box.left);
   let overlappingPairs = 0;
@@ -1610,7 +1761,7 @@ export function measureClipping(): ClippingFacts {
  */
 export function measureProse(): ProseFacts {
   const byParagraph = new Map<Element, TextFragment[]>();
-  for (const { fragment, paragraph } of readTextFragments()) {
+  for (const { fragment, paragraph } of readPaintedTextFragments()) {
     if (paragraph === null) continue;
     const group = byParagraph.get(paragraph);
     if (group === undefined) byParagraph.set(paragraph, [fragment]);
@@ -1648,33 +1799,86 @@ export function measureProse(): ProseFacts {
 }
 
 /**
- * Returns, for each pair of easily confused characters (I and l, I and 1, l
- * and 1, O and 0), how many pixels differ when the two are drawn alone, at the
- * same place, in the page's text font at 13px and weight 400, on a canvas at
- * a scale of 1. A pixel differs when its alpha differs by more than 32 of 255.
+ * Draws the glyph specimen over the top left of the page and returns where
+ * its glyphs are, so a screenshot of two boxes shows two easily confused
+ * characters as the UI draws them. It adds one fixed element with the
+ * characters "I", "l", "1", "O" and "0", one span per character, each in a
+ * 24 x 24 px inline-block cell. The glyphs are black on white and nothing is
+ * transformed, so the same shape lands on the same pixels in every cell.
+ * Returns the boxes of the two cells of each pair: "Il", "I1", "l1" and "O0".
+ * Both cells of a pair have the same size. A second call replaces the first
+ * specimen.
+ *
+ * The specimen copies its typography from `<body>`. The stylesheet
+ * base.css sets the UI font on `<html>` and `<body>` once, and the UI text of
+ * every screen inherits it, so `<body>` has the font family, the font
+ * features and axes (such as the alternate shapes of "1" and "0"), the
+ * kerning and the glyph smoothing that UI text has. The size (13px) and the
+ * weight (400) are the ones of body UI text, set here because a screen may
+ * give its body another size. A canvas would not do: it takes only the
+ * family, size and weight, so it draws other glyph shapes than the page.
+ *
+ * The page's fonts are already loaded when the page is ready, so the specimen
+ * draws with them at once. Call this only on a ready page.
+ *
+ * Remove the specimen with `hideGlyphSpecimen` before the next measure.
  */
-export function measureGlyphPairs(): GlyphPair[] {
-  const size = 24;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (context === null) throw new Error("The browser gave no 2D canvas context.");
-  context.font = `400 13px ${getComputedStyle(document.body).fontFamily}`;
-  context.fillStyle = "#000";
-  const drawAlpha = (character: string): Uint8ClampedArray => {
-    context.clearRect(0, 0, size, size);
-    context.fillText(character, 6, 17);
-    const { data } = context.getImageData(0, 0, size, size);
-    return data.filter((_value, index) => index % 4 === 3);
+export function showGlyphSpecimen(): GlyphSpecimen[] {
+  hideGlyphSpecimen();
+  const body = getComputedStyle(document.body);
+  const specimen = document.createElement("div");
+  specimen.setAttribute(GLYPH_SPECIMEN_ATTRIBUTE, "");
+  const set = (target: HTMLElement, property: string, value: string): void => {
+    target.style.setProperty(property, value, "important");
   };
-  return GLYPH_PAIRS.map((pair) => {
-    const first = drawAlpha(pair[0]!);
-    const second = drawAlpha(pair[1]!);
-    let differingPixels = 0;
-    first.forEach((alpha, index) => {
-      if (Math.abs(alpha - second[index]!) > GLYPH_ALPHA_THRESHOLD) differingPixels++;
-    });
-    return { pair, differingPixels };
-  });
+  const layout: ReadonlyArray<readonly [string, string]> = [
+    ["all", "initial"],
+    ["position", "fixed"],
+    ["top", "0"],
+    ["left", "0"],
+    ["z-index", "2147483647"],
+    ["display", "block"],
+    ["width", "max-content"],
+    ["padding", `${String(GLYPH_GAP_PX)}px`],
+    ["box-sizing", "border-box"],
+    ["background", "#fff"],
+    ["color", "#000"],
+    ["transform", "none"],
+    ["font-size", "13px"],
+    ["font-weight", "400"],
+    ["font-style", "normal"],
+    ["line-height", `${String(GLYPH_CELL_PX)}px`],
+    ["white-space", "pre"],
+  ];
+  for (const [property, value] of layout) set(specimen, property, value);
+  for (const property of GLYPH_TYPOGRAPHY_PROPERTIES) {
+    set(specimen, property, body.getPropertyValue(property));
+  }
+  const cells = new Map<string, HTMLElement>();
+  for (const character of GLYPH_CHARACTERS) {
+    const cell = document.createElement("span");
+    cell.textContent = character;
+    set(cell, "display", "inline-block");
+    set(cell, "box-sizing", "border-box");
+    set(cell, "vertical-align", "top");
+    set(cell, "margin-right", `${String(GLYPH_GAP_PX)}px`);
+    set(cell, "width", `${String(GLYPH_CELL_PX)}px`);
+    set(cell, "height", `${String(GLYPH_CELL_PX)}px`);
+    set(cell, "padding-left", `${String(GLYPH_INDENT_PX)}px`);
+    specimen.append(cell);
+    cells.set(character, cell);
+  }
+  document.body.append(specimen);
+  const readCell = (character: string | undefined): ProbeRect =>
+    toProbeRect(cells.get(character ?? "")!.getBoundingClientRect());
+  return GLYPH_PAIRS.map((pair) => ({
+    pair,
+    first: readCell(pair[0]),
+    second: readCell(pair[1]),
+  }));
+}
+
+/** Removes the glyph specimen `showGlyphSpecimen` added. It does nothing when there is none. */
+export function hideGlyphSpecimen(): void {
+  document.querySelector(`[${GLYPH_SPECIMEN_ATTRIBUTE}]`)?.remove();
 }

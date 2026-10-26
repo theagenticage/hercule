@@ -69,9 +69,9 @@ function mergeMeasurements(measurements: ReadonlyArray<PageMeasurement>): Record
 
 /** Returns the line that says where the time went, summed over all pages (the pages run in parallel, so the sums are larger than the run's time). */
 function describeTimings(measurements: ReadonlyArray<PageMeasurement>): string {
-  const sum = (kind: "contrast" | "focus" | "other"): string =>
+  const sum = (kind: keyof PageMeasurement["timings"]): string =>
     measurements.reduce((total, { timings }) => total + timings[kind], 0).toFixed(0);
-  return `Page time, summed over ${String(measurements.length)} pages: contrast ${sum("contrast")} s, focus ${sum("focus")} s, other ${sum("other")} s.`;
+  return `Page time, summed over ${String(measurements.length)} pages: contrast ${sum("contrast")} s, focus ${sum("focus")} s, resilience ${sum("resilience")} s, other ${sum("other")} s.`;
 }
 
 /** Reads the baseline file. Returns null when it does not exist. Fails when it exists and is not a valid baseline. */
