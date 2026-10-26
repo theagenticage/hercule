@@ -1,0 +1,102 @@
+/* PROTOTYPE - dark theme directions for Orient Express, compared live.
+
+   Never merged. The dark comparison sheet loads this file last, into a specimen page drawn in
+   data-theme="orient-express", and sets data-dark on that page's <html>:
+     (absent)  a: Orient Express as tokens.css has it. This file does nothing.
+     b         Orient Express retuned: lighter, warm grey, steps of 0.03, lines that show.
+     c         b with larger steps (0.05 to 0.06) and edges at L 0.44.
+     d         "Blue Train": T3 Code's Ocean values on our tokens, lacquer-green --accent kept.
+
+   Each block sets the tokens that define the look: the ground (--bg), the three layers above
+   and below it, the line, the three text levels, the tints that sit on a layer, the character
+   hat and the scrim. It leaves alone:
+     - the crew hues and --char-l, --char-c, --char-shade, --char-ink-l (a measured check of the
+       sky hue on d is in the report; no change was needed),
+     - --accent, --you, --fail, --ok, --brass and their inks (they already clear every ground),
+     - --room-* (the Office is out of scope) and the shadows.
+
+   Specificity: tokens.css and base.css both use [data-theme="orient-express"], one attribute
+   selector (0,1,0). Each selector here has html plus two attributes (0,2,1), so it wins whatever
+   the load order. The second selector of each block covers a page that nests the theme on a
+   child element instead of on <html>.
+
+   --bg is set as the exact sRGB hex of the OKLCH value in the comment beside it, because
+   base.css gives --bg as 8-bit sRGB per theme (so the page matches the native window). */
+
+/* ---------- b: warm grey, steps of 0.03, lines that show ----------
+   bg L 0.25 / chroma 0.006 (tokens.css: 0.195 / 0.012)
+   surface 0.28, raised 0.31, sunken 0.22
+   line 0.42, line-soft 0.35
+   ink 0.91, muted 0.78, faint 0.69 */
+html[data-dark="b"][data-theme="orient-express"],
+html[data-dark="b"] [data-theme="orient-express"] {
+  --bg: #24211f; /* oklch(0.25 0.006 55) */
+  --surface: oklch(0.28 0.007 55);
+  --raised: oklch(0.31 0.008 55);
+  --sunken: oklch(0.22 0.006 55);
+  --ink: oklch(0.91 0.01 85);
+  --muted: oklch(0.78 0.012 75);
+  --faint: oklch(0.69 0.012 70);
+  --line: oklch(0.42 0.01 55);
+  --line-soft: oklch(0.35 0.008 55);
+
+  --char-tint-l: 0.34;
+  --you-tint: oklch(0.34 0.05 75);
+  --fail-tint: oklch(0.33 0.055 28);
+  --ok-tint: oklch(0.33 0.045 150);
+  --hat: oklch(0.42 0.012 55);
+  --scrim: oklch(0.12 0.008 55 / 0.5);
+}
+
+/* ---------- c: b with Ocean's larger layer steps and edges ----------
+   bg L 0.25 / chroma 0.006
+   surface 0.30, raised 0.35, sunken 0.21 (steps 0.05, 0.05)
+   line 0.44, line-soft 0.37
+   ink 0.91, muted 0.78, faint 0.69 */
+html[data-dark="c"][data-theme="orient-express"],
+html[data-dark="c"] [data-theme="orient-express"] {
+  --bg: #24211f; /* oklch(0.25 0.006 55) */
+  --surface: oklch(0.3 0.008 55);
+  --raised: oklch(0.35 0.01 55);
+  --sunken: oklch(0.21 0.006 55);
+  --ink: oklch(0.91 0.01 85);
+  --muted: oklch(0.78 0.012 75);
+  --faint: oklch(0.69 0.012 70);
+  --line: oklch(0.44 0.012 55);
+  --line-soft: oklch(0.37 0.01 55);
+
+  --char-tint-l: 0.37;
+  --you-tint: oklch(0.37 0.05 75);
+  --fail-tint: oklch(0.36 0.055 28);
+  --ok-tint: oklch(0.36 0.045 150);
+  --hat: oklch(0.47 0.012 55);
+  --scrim: oklch(0.12 0.008 55 / 0.5);
+}
+
+/* ---------- d: Blue Train, T3 Code's Ocean on our tokens ----------
+   bg L 0.243 / chroma 0.024 / hue 251 (Ocean's canvas)
+   surface 0.29 (Ocean's sidebar), raised 0.348 (Ocean's raised surface), sunken 0.205
+   line 0.439 (Ocean's border), line-soft 0.37
+   ink 0.91, muted 0.78, faint 0.69 (Ocean's own text, 0.99, is above the ink ceiling of Lc 95)
+   --selected stays our neutral one: Ocean's blue selected row (0.414 0.052 244) is nearly the
+   tint of a sky colleague, and one colour keeps one meaning. --accent stays lacquer green: in
+   Hercule it means the one suggested answer, and Ocean's blue accent is not copied. */
+html[data-dark="d"][data-theme="orient-express"],
+html[data-dark="d"] [data-theme="orient-express"] {
+  --bg: #17212b; /* oklch(0.243 0.024 251) */
+  --surface: oklch(0.29 0.03 247);
+  --raised: oklch(0.348 0.022 254);
+  --sunken: oklch(0.205 0.022 251);
+  --ink: oklch(0.91 0.008 326);
+  --muted: oklch(0.78 0.014 250);
+  --faint: oklch(0.69 0.014 250);
+  --line: oklch(0.439 0.039 245);
+  --line-soft: oklch(0.37 0.03 248);
+
+  --char-tint-l: 0.37;
+  --you-tint: oklch(0.37 0.05 75);
+  --fail-tint: oklch(0.36 0.055 28);
+  --ok-tint: oklch(0.36 0.045 150);
+  --hat: oklch(0.45 0.02 250);
+  --scrim: oklch(0.12 0.02 251 / 0.55);
+}

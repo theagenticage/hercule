@@ -1,0 +1,170 @@
+/* PROTOTYPE - font comparison, never merged.
+
+   The sheet page loads this file into a specimen page and sets three attributes on that page's
+   <html>. This file reacts to those attributes and to nothing else; with none of them set, the
+   specimen looks like the app does today.
+
+   - data-ui-font:    inter | plex | geist     (absent: Bricolage Grotesque)
+   - data-title-font: bricolage                (absent: titles use the UI font)
+   - data-code-font:  recursive-casl0 | jetbrains | geist-mono   (absent: Recursive, CASL 0.5)
+
+   Limelight (--font-deco) is never touched: the wordmark and headline numerals stay as they are.
+   Font files: ./fonts/ (see SOURCES.md). The urls are relative to this file. */
+
+@font-face {
+  font-family: "Inter Compare";
+  src: url("fonts/inter-4.1-variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+}
+@font-face {
+  font-family: "IBM Plex Sans Compare";
+  src: url("fonts/ibm-plex-sans-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 700;
+  font-display: block;
+}
+@font-face {
+  font-family: "Geist Compare";
+  src: url("fonts/geist-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono Compare";
+  src: url("fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 800;
+  font-display: block;
+}
+@font-face {
+  font-family: "Geist Mono Compare";
+  src: url("fonts/geist-mono-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+}
+
+/* ---------- UI font ---------- */
+
+html[data-ui-font="inter"] {
+  --font-ui: "Inter Compare", ui-sans-serif, system-ui, sans-serif;
+  /* cv05 is the tailed l, cv08 the serifed I, zero the slashed 0. The app sets no
+     font-feature-settings of its own, so setting them here reaches all UI text. */
+  font-feature-settings: "cv05", "cv08", "zero";
+  /* The file has an opsz axis; the browser picks the optical size from the font size. */
+  font-optical-sizing: auto;
+}
+html[data-ui-font="plex"] {
+  --font-ui: "IBM Plex Sans Compare", ui-sans-serif, system-ui, sans-serif;
+  /* Plex has a smaller x-height than Bricolage, so the small sizes grow by 1px.
+     Titles (18px and up) stay. */
+  --t-11: 12px;
+  --t-12: 13px;
+  --t-13: 14px;
+  --t-14: 15px;
+  --t-16: 17px;
+}
+html[data-ui-font="geist"] {
+  --font-ui: "Geist Compare", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Inter's feature settings are inherited, so they would also reach code set in a mono font
+   (JetBrains Mono has its own cv05, cv08 and zero). These are every rule in the renderer that
+   sets font-family: var(--font-mono); code, .mono and .field > input.mono are the base ones. */
+html[data-ui-font="inter"] :is(
+  code,
+  .mono,
+  .field > input.mono,
+  .table-name code,
+  .column-name code,
+  .open-name code,
+  .table-path,
+  .post-system code,
+  .fr .cmd,
+  .b-words code,
+  .codeblock,
+  .skill-hover-path,
+  .skill-changes-row,
+  .skill-changes-head :is(.skill-plus, .skill-minus),
+  .skill-patch,
+  .skill-path,
+  .skill-rev-hash,
+  .code b,
+  .subagent-row-meta,
+  .work-output-text,
+  .node-facts dd.is-code,
+  .node-prompt.is-code,
+  .run-inputs:not(.run-facts) dd,
+  .run-facts dd.is-code,
+  .table-code,
+  .edge-label
+) {
+  font-feature-settings: normal;
+}
+/* Limelight never changes, and its zero would turn slashed under Inter's "zero". These are every
+   rule in the renderer that sets font-family: var(--font-deco). */
+html[data-ui-font="inter"] :is(.wordmark, .asks-zero-num, .office-room .wall-word) {
+  font-feature-settings: normal;
+}
+/* Text in the UI font that sits inside one of the mono blocks above gets Inter's features back. */
+html[data-ui-font="inter"] :is(.fr .cmd .btn, .skill-changes-row .chip, .skill-omitted, .edge-label--count) {
+  font-feature-settings: "cv05", "cv08", "zero";
+}
+
+/* Figures that must line up get tabular figures (Inter's tnum) in every candidate. Most of the
+   app's number rules already say tabular-nums (the sidebar's .side-end, .ask-age, .column-time,
+   .work-time and others); these are the numeric rules that do not. Prose keeps proportional
+   figures. */
+html[data-ui-font] :is(
+  .section-h .count,
+  .tr-label .count,
+  .office-menu .line .count,
+  .ev-stamp,
+  .error-note .time,
+  .notice .time,
+  .skill-import-foot > .time
+) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Page titles ---------- */
+
+/* Page titles of 18px and up keep Bricolage while the UI font changes. Nothing in the app marks
+   a title, so these are all the rules that set font-size: var(--t-18) or var(--t-20) on text in
+   the UI font:
+   - not-found, render-failure: the headline of an error screen
+   - newbie h1, hello-who h2: the new-thread and assistant greetings
+   - fr .st-h, fr .lead: the first-run step title and the welcome
+   - set-col .head h2: the Settings page title
+   - asks-zero-h: the inbox-zero headline
+   - ad-title: the title of a request in the intake detail
+   - open-name > h1: the workflow's name
+   Not listed: .code b (18px, but code in the mono font) and .asks-zero-num (Limelight). The
+   features are reset because they belong to Inter and these titles are not set in it. */
+html[data-title-font="bricolage"] :is(
+  .not-found-headline,
+  .render-failure-headline,
+  .newbie h1,
+  .hello-who h2,
+  .fr .st-h,
+  .fr .lead,
+  .set-col .head h2,
+  .asks-zero-h,
+  .ad-title,
+  .open-name > h1
+) {
+  font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: normal;
+}
+
+/* ---------- Code font ---------- */
+
+html[data-code-font="recursive-casl0"] {
+  --mono-axes: "MONO" 1, "CASL" 0, "CRSV" 0;
+}
+html[data-code-font="jetbrains"] {
+  --font-mono: "JetBrains Mono Compare", ui-monospace, "SF Mono", monospace;
+  --mono-axes: normal;
+}
+html[data-code-font="geist-mono"] {
+  --font-mono: "Geist Mono Compare", ui-monospace, "SF Mono", monospace;
+  --mono-axes: normal;
+}

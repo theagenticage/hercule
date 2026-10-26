@@ -1,0 +1,124 @@
+/*
+ * The frame around the comparison page (compare.html). It is deliberately
+ * plain grey with system fonts and uses none of the app's tokens, so it looks
+ * the same whichever font or dark variant is being judged.
+ *
+ * Nothing here scales, zooms or transforms: the screens in the frames are
+ * judged at real size.
+ */
+
+html,
+body {
+  margin: 0;
+  background: #c4c4c4;
+  color: #1c1c1c;
+  font:
+    12px/20px system-ui,
+    sans-serif;
+}
+
+/* Exactly 40px, two rows of 20px, and above the screens, never over them. */
+#bar {
+  box-sizing: border-box;
+  height: 40px;
+  overflow: hidden;
+  background: #e4e4e4;
+  border-bottom: 1px solid #a8a8a8;
+  padding: 0 8px;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 19px;
+  white-space: nowrap;
+}
+
+.bar-row + .bar-row {
+  height: 20px;
+}
+
+#bar label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#bar select,
+#bar button {
+  box-sizing: border-box;
+  height: 18px;
+  margin: 0;
+  padding: 0 4px;
+  font: inherit;
+  color: inherit;
+  background: #fafafa;
+  border: 1px solid #9a9a9a;
+  border-radius: 3px;
+}
+
+#bar button:hover {
+  background: #fff;
+}
+
+#bar button[aria-pressed="true"] {
+  background: #1c1c1c;
+  color: #fff;
+  border-color: #1c1c1c;
+}
+
+#bar select:disabled {
+  opacity: 0.5;
+}
+
+.bar-warning {
+  flex: none;
+  color: #a40000;
+  font-weight: 600;
+}
+
+.bar-values {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-info {
+  flex: none;
+  color: #444;
+}
+
+/* Gaps of 4px between the three excerpts of the side-by-side view. */
+#stage {
+  display: flex;
+  gap: 4px;
+  width: max-content;
+  padding: 1px;
+}
+
+/* One screen. In the side-by-side view the box clips the frame to a column. */
+.pane {
+  flex: none;
+  height: 900px;
+  overflow: hidden;
+  background: #c4c4c4;
+  box-shadow: 0 0 0 1px #8a8a8a;
+  position: relative;
+}
+
+/* Covers the frame while its fonts load, so a fallback font never shows. */
+.pane[data-loading]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #c4c4c4;
+}
+
+.pane iframe {
+  display: block;
+  width: 1440px;
+  height: 900px;
+  border: 0;
+}
