@@ -899,8 +899,10 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * to the root agent alone, so a subagent's async question is not opened and
    * the session gets a warning instead.
    *
-   * An item that completes in a turn the user stopped opens nothing, however
-   * late it arrives, but its id is remembered. When the session already keeps
+   * Codex completes the item inside its turn, so a legitimate item always
+   * belongs to the agent's running turn. An item of any other turn, or of a
+   * turn the user stopped, opens nothing however late it arrives, but its id
+   * is remembered. When the session already keeps
    * `MAX_OPEN_ASYNC_QUESTIONS` open, the oldest is closed as cancelled first
    * and the session gets a warning.
    */
@@ -919,7 +921,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     }
     if (held.seenAsyncQuestionItems.has(item.id)) return;
     held.seenAsyncQuestionItems.add(item.id);
-    if (held.threads.isStoppedTurn(thread, turnId)) return;
+    if (thread.turnId !== turnId || held.threads.isStopped(thread)) return;
     while (held.asyncQuestions.size >= MAX_OPEN_ASYNC_QUESTIONS) {
       const oldest = held.asyncQuestions.values().next().value!;
       closeAsyncQuestion(held, oldest, { decision: "cancel" });
@@ -962,8 +964,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   /**
    * Closes every open async question of the session's own agent as cancelled,
    * including one whose answer is being delivered. Stopping the asking agent
-   * turns its questions down, as it does for every question. The records are
-   * dropped and the item ids stay in the seen set.
+   * (an interrupt, or cancelling one of its approvals) turns its questions
+   * down, as it does for every question. The records are dropped and the item
+   * ids stay in the seen set.
    */
   const cancelAsyncQuestions = (held: Held): void => {
     for (const question of [...held.asyncQuestions.values()]) {
@@ -1623,7 +1626,11 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           return Effect.void;
         }
         const { held, thread, park } = found;
-        if (decision === "cancel") held.threads.cancelAskingTurn(thread);
+        if (decision === "cancel") {
+          held.threads.cancelAskingTurn(thread);
+          // A subagent's cancel ends that subagent's turn alone.
+          if (thread.state.subagentId === undefined) cancelAsyncQuestions(held);
+        }
         resolvePark(held, thread, park, park.asked.replies(decision, park.params), { decision });
         // Cancel ends the asking agent alone. The explicit Stop operation is
         // the operation that also stops descendants.

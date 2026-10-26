@@ -164,9 +164,9 @@ const ANSWER_ON_ITS_WAY =
  * while the controller waited. Nothing says whether the agent got the answer.
  */
 const ANSWER_NOT_CONFIRMED =
-  "that session's runner did not confirm the answer, so it is not known whether the agent got it; " +
-  "if the runner later finds it may not have arrived, it closes the question and says so in the thread, " +
-  "otherwise the question closes by itself when the answer arrives";
+  "that session's runner did not confirm the answer in time, so it is not known whether the agent got it; " +
+  "read the thread: the question closes when the answer arrives, stays open if the harness refused it, " +
+  "or is closed with a note if its delivery could not be confirmed";
 
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 

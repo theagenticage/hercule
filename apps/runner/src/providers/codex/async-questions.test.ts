@@ -57,6 +57,20 @@ const buildItemNote = (
   },
 });
 
+const APPROVAL_METHOD = "item/commandExecution/requestApproval";
+
+const buildApproval = (threadId: string, turnId: string) => ({
+  kind: "command",
+  threadId,
+  turnId,
+  itemId: "approval-item",
+  startedAtMs: 1,
+  environmentId: null,
+  command: "rm -rf build",
+  cwd: "/tmp",
+  commandActions: [],
+});
+
 type Run = Awaited<ReturnType<typeof startBusySession>>;
 
 /** Sends the item the way Codex does, started and then completed, and waits for the Request. */
@@ -492,6 +506,84 @@ describe("a Codex async question", () => {
     run.server.push(buildItemNote("item/completed", { ...ASYNC_ITEM, id: "call_late" }));
     await settle();
     expect(filterByTag(run.seen, "request.opened")).toHaveLength(1);
+  });
+
+  it("opens nothing for an unseen item of an ended turn after an idle stop and a new turn", async () => {
+    const NEXT = "0199e0e7-0000-7000-8000-0000000000f9";
+    let starts = 0;
+    const run = await startBusySession({
+      "turn/start": () => {
+        starts += 1;
+        return {
+          turn: {
+            id: starts === 1 ? TURN : NEXT,
+            items: [],
+            itemsView: "full",
+            status: "inProgress",
+          },
+        };
+      },
+    });
+    await completeTurn(run);
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "carry on" }));
+
+    run.server.push(buildItemNote("item/completed", { ...ASYNC_ITEM, id: "call_old" }));
+    await settle();
+
+    expect(filterByTag(run.seen, "request.opened")).toEqual([]);
+  });
+
+  it("closes the open questions when the agent's own approval is cancelled, and opens nothing from that turn afterwards", async () => {
+    const run = await startBusySession();
+    const requestId = await askAsyncQuestion(run);
+    run.server.push({ id: 7, method: APPROVAL_METHOD, params: buildApproval(THREAD, TURN) });
+    await waitUntil(
+      "opened the approval",
+      () => filterByTag(run.seen, "request.opened").length === 2,
+    );
+    const approval = filterByTag(run.seen, "request.opened")[1]!;
+
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, approval.request.requestId, "cancel"),
+    );
+
+    expect(filterByTag(run.seen, "request.resolved")).toContainEqual(
+      expect.objectContaining({ requestId, decision: "cancel" }),
+    );
+    run.server.push(buildItemNote("item/completed", { ...ASYNC_ITEM, id: "call_late" }));
+    await settle();
+    expect(filterByTag(run.seen, "request.opened")).toHaveLength(2);
+  });
+
+  it("leaves the open questions when a subagent's approval is cancelled", async () => {
+    const child = "0199e0e7-0000-7000-8000-0000000000b1";
+    const run = await startBusySession({
+      "thread/read": () => ({ thread: { id: child, parentThreadId: THREAD } }),
+    });
+    const requestId = await askAsyncQuestion(run);
+    run.server.push({
+      method: "turn/started",
+      params: {
+        threadId: child,
+        turn: { id: "child-turn", status: "inProgress", items: [], itemsView: "full" },
+      },
+    });
+    run.server.push({ id: 7, method: APPROVAL_METHOD, params: buildApproval(child, "child-turn") });
+    await waitUntil(
+      "opened the subagent's approval",
+      () => filterByTag(run.seen, "request.opened").length === 2,
+    );
+    const approval = filterByTag(run.seen, "request.opened")[1]!;
+
+    await Effect.runPromise(
+      run.adapter.respondToApprovalRequest(SESSION, approval.request.requestId, "cancel"),
+    );
+
+    expect(filterByTag(run.seen, "request.resolved").map((event) => event.requestId)).toEqual([
+      approval.request.requestId,
+    ]);
+    await answer(run, requestId, { Question: "Yes" });
   });
 
   it("emits no second text and opens no second Request when an item completes again after its turn ended", async () => {
