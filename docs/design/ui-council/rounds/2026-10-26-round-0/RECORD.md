@@ -26,7 +26,7 @@
 
 Repeat spread per category (largest difference between session A and B on the same image): typography 2, hierarchy 3, spacing-density 3, colour-contrast 2, eye-comfort 2, iconography 1, state-visibility 2, consistency-polish 1, clarity-copy 1, character 1, overall 2.
 
-This is the first of the two baseline rounds of BRIEF.md section 9.3. The baseline score of each calibration image is the mean of its scores once round 1 adds two more.
+**This round does not count toward the drift baseline.** BRIEF.md section 5 asks for all 1x images first and the 2x images in later turns. This trial interleaved the 2x reference screenshots with 1x images (session A's first turn holds both scales, and both sessions put 2x references before remaining 1x images). The spread above is kept as a first estimate only. The drift baseline of section 9.3 comes from the first two rounds that follow the prescribed order. The Hercule scores above are the trend baseline that later rounds are compared with.
 
 ## Fixes (session A)
 
