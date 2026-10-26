@@ -253,11 +253,18 @@ const mountHook = (subagentId?: string, onGone?: () => void) => {
     unmount,
     /** Returns the paragraph being written, or `null` while the message is not drawn. */
     findOpenParagraph: () => container.querySelector(".streaming"),
-    /** Returns the text of each block the message draws as markdown, in order. */
+    /**
+     * Returns the text of each block the message draws as markdown, in order.
+     * A code block's text is its code, without the header row's language and
+     * buttons.
+     */
     readFinishedBlocks: () =>
       [...(container.querySelector(".msg-body")?.children ?? [])]
         .filter((element) => !element.matches(".msg-meta, .streaming"))
-        .map((element) => element.textContent),
+        .map(
+          (element) =>
+            (element.matches(".code-block") ? element.querySelector("pre")! : element).textContent,
+        ),
   };
 };
 

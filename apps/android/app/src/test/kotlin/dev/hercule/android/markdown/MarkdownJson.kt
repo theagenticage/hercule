@@ -54,7 +54,7 @@ private fun encodeBlock(block: MarkdownBlock): JsonObject =
                 "items" to JsonArray(block.items.map { JsonObject(mapOf("children" to JsonArray(it.children.map(::encodeBlock)))) }),
             )
         is MarkdownBlock.Blockquote -> node("blockquote", "children" to JsonArray(block.children.map(::encodeBlock)))
-        is MarkdownBlock.Code -> node("code", "text" to JsonPrimitive(block.text))
+        is MarkdownBlock.Code -> node("code", "text" to JsonPrimitive(block.text), "language" to block.language?.let(::JsonPrimitive))
         is MarkdownBlock.Table ->
             node(
                 "table",

@@ -491,6 +491,27 @@ export const spyOnExecCommand = () => {
   return execCommand;
 };
 
+/**
+ * Replaces `document.execCommand` with the browser's copy command: it fires a
+ * `copy` event, so the listener of `copyText` supplies the text, and returns
+ * `copies`. It is removed again when the test ends. Returns the clipboard it
+ * fills, by type.
+ */
+export const stubCopyCommand = (copies: boolean): Map<string, string> => {
+  const clipboard = new Map<string, string>();
+  const execCommand = spyOnExecCommand();
+  execCommand.mockImplementation((command) => {
+    if (command !== "copy") return false;
+    const event = new Event("copy", { cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, "clipboardData", {
+      value: { setData: (type: string, text: string) => clipboard.set(type, text) },
+    });
+    document.dispatchEvent(event);
+    return copies;
+  });
+  return clipboard;
+};
+
 /** Returns the text of one line of a message field, a skill chip written as `$name`. */
 const readFieldLine = (line: Element): string =>
   [...line.childNodes]

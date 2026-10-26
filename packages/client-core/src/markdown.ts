@@ -566,7 +566,7 @@ const mapBlock = (token: Token, context: MappingContext): MarkdownBlock[] => {
     case "blockquote":
       return [{ type: "blockquote", children: mapBlocks(known.tokens, context) }];
     case "code":
-      return [{ type: "code", text: readCodeText(known) }];
+      return [buildCodeBlock(known)];
     case "html":
       // The HTML is shown as written. marked keeps the line break that ends an HTML block.
       return [
@@ -599,6 +599,24 @@ const mapBlock = (token: Token, context: MappingContext): MarkdownBlock[] => {
     default:
       return [{ type: "paragraph", children: [{ type: "text", text: token.raw }] }];
   }
+};
+
+/**
+ * Returns the code block for a code token. Its `language` is the first word of
+ * a fenced block's info string, and is left out when there is none: an
+ * indented block, a bare fence, or an info string of only white space. marked
+ * gives the whole info string with backslash escapes already removed but
+ * character references still encoded, so this decodes them first and only then
+ * trims and splits: `&#32;ts` is `ts`.
+ */
+const buildCodeBlock = (code: Tokens.Code): MarkdownBlock => {
+  const text = readCodeText(code);
+  const language = decodeCharacterReferences(code.lang ?? "")
+    .trim()
+    .split(/\s+/, 1)[0];
+  return language === undefined || language === ""
+    ? { type: "code", text }
+    : { type: "code", text, language };
 };
 
 /**

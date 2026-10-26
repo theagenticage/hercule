@@ -34,8 +34,15 @@ export type MarkdownBlock =
       readonly items: ReadonlyArray<MarkdownListItem>;
     }
   | { readonly type: "blockquote"; readonly children: ReadonlyArray<MarkdownBlock> }
-  /** A fenced or indented code block. Its text is exactly as written, with no trailing newline. */
-  | { readonly type: "code"; readonly text: string }
+  /**
+   * A fenced or indented code block. Its text is exactly as written, with no
+   * trailing newline. `language` is the first word of a fenced block's info
+   * string with character references decoded: `ts` for both "```ts" and
+   * "```ts title="a.ts"". It is left out when the block names no language: an
+   * indented block, a bare fence, an info string of only white space, or an
+   * HTML `<pre>`.
+   */
+  | { readonly type: "code"; readonly text: string; readonly language?: string }
   | {
       readonly type: "table";
       /**

@@ -127,7 +127,9 @@
 
 /* Not in the book. A word too long for the line, such as a URL, breaks at the
    edge rather than running past it. `break-word` leaves the min-content width
-   alone, so a table or a code block still scrolls sideways. */
+   alone, so a table still scrolls sideways. A code block sets
+   `overflow-wrap: anywhere` on its own text while it wraps, and scrolls
+   sideways only when the reader turns wrapping off. */
 .msg-body,
 .bubble {
   overflow-wrap: break-word;

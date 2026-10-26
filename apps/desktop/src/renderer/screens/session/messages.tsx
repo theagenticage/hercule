@@ -14,16 +14,7 @@
  * current day, so every message draws again when the day changes and "09:04"
  * becomes "4 Sep 09:04".
  */
-import {
-  memo,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type JSX,
-  type ReactNode,
-} from "react";
+import { memo, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import {
   formatMessageTime,
@@ -36,7 +27,7 @@ import { buildHueStyle, Face, type Look } from "../../faces";
 import { CheckIcon } from "../../icons/check";
 import { CopyIcon } from "../../icons/copy";
 import { SentImages } from "../attachments/sent-images";
-import { copyText } from "../clipboard";
+import { useCopyResult } from "../use-copy-result";
 import { Markdown } from "./markdown";
 import { buildSenderLook, SenderChip, SenderChipPlaceholder } from "./sender-chip";
 import { useSessionSkills } from "./use-session-skills";
@@ -122,6 +113,19 @@ function BubbleText({ children }: { readonly children: ReactNode }): JSX.Element
         className="bubble-text"
         data-collapsed={collapsed ? "" : undefined}
         style={collapsed ? { maxHeight: COLLAPSED_TEXT_HEIGHT } : undefined}
+        onFocus={(event) => {
+          // A link or a code block's button below the cut can still take the
+          // keyboard focus, and the browser then scrolls the clipped text to
+          // show it, which hides the start of the message while the bubble
+          // reads as collapsed. So focus that arrives by keyboard opens the
+          // bubble, as "Show full message" does, and the focused control is
+          // brought into view in the opened text. A click does not open it:
+          // the reader only clicked what the cut left visible.
+          if (!collapsed || !event.target.matches(":focus-visible")) return;
+          flushSync(() => setOpen(true));
+          event.currentTarget.scrollTop = 0;
+          event.target.scrollIntoView({ block: "nearest" });
+        }}
       >
         {children}
       </div>
@@ -139,23 +143,18 @@ function BubbleText({ children }: { readonly children: ReactNode }): JSX.Element
   );
 }
 
-/** How long the copy button shows its result, in milliseconds, before it reads "Copy message" again. */
-const COPY_RESULT_MS = 1500;
-
 /**
  * Renders the button under a message that copies `text`, the message as it
  * was written: its Markdown, its line breaks and its `$name` Skill References,
  * also the part a collapsed bubble hides. Pasted into the composer, the
  * references become chips again.
  *
- * For `COPY_RESULT_MS` after a click the button shows a check mark and reads
+ * For a moment after a click the button shows a check mark and reads
  * "Copied", or reads "Copy failed" when the browser refused, so the user
  * knows to select the text by hand.
  */
 function MessageCopyButton({ text }: { readonly text: string }): JSX.Element {
-  const [result, setResult] = useState<"copied" | "failed" | undefined>(undefined);
-  const resetTimer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(resetTimer.current), []);
+  const { result, copy } = useCopyResult();
   const label =
     result === "copied" ? "Copied" : result === "failed" ? "Copy failed" : "Copy message";
   return (
@@ -166,9 +165,7 @@ function MessageCopyButton({ text }: { readonly text: string }): JSX.Element {
       title={label}
       data-result={result}
       onClick={() => {
-        setResult(copyText(text) ? "copied" : "failed");
-        window.clearTimeout(resetTimer.current);
-        resetTimer.current = window.setTimeout(() => setResult(undefined), COPY_RESULT_MS);
+        copy(text);
       }}
     >
       {result === "copied" ? <CheckIcon size={14} /> : <CopyIcon size={14} />}

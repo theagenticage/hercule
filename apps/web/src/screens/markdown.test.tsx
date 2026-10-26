@@ -8,7 +8,7 @@
  * `@hercule/client-core`.
  */
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Markdown } from "./markdown";
 
 afterEach(cleanup);
@@ -175,15 +175,26 @@ it("puts no inline style on anything it renders", () => {
   expect(container.querySelector("[style]")).toBeNull();
 });
 
-// A fenced block holds unwrapped lines, such as a CLI's output table or a
-// long JSON value, and its card is only as wide as the column. Without
-// scrolling, a long line is clipped at the card's edge and the rest cannot be
-// read. So the block scrolls sideways, rather than wrapping the text or
-// widening the thread.
-it("lets a fenced block scroll sideways instead of clipping a long line", () => {
-  const { container } = render(<Markdown text={"```\n" + "x".repeat(400) + "\n```"} />);
+it("shows a fence's language in the block's header, and none for a bare fence", () => {
+  const { container } = render(
+    <Markdown text={"```ts title=a\nconst a = 1;\n```\n\n```\nbare\n```"} />,
+  );
 
-  expect(container.querySelector("pre")?.className).toContain("overflow-x-auto");
+  expect(screen.getByText("ts")).toBeDefined();
+  expect(container.querySelectorAll("pre")).toHaveLength(2);
+  expect(screen.getAllByRole("button", { name: "Copy code" })).toHaveLength(2);
+  expect(container.textContent).not.toContain("title=a");
+});
+
+it("keeps a block's wrap choice while its answer streams in", () => {
+  const { rerender } = render(<Markdown text={"```ts\nconst a"} />);
+  fireEvent.click(screen.getByRole("button", { name: "Wrap lines" }));
+
+  rerender(<Markdown text={"```ts\nconst a = 1;\n```\n\nDone."} />);
+
+  expect(screen.getByRole("button", { name: "Wrap lines" }).getAttribute("aria-pressed")).toBe(
+    "false",
+  );
 });
 
 it("draws a details block shut, with its summary and the blocks inside it", () => {
