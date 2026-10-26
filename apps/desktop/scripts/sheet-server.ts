@@ -136,6 +136,11 @@ export async function startSpecimenServer(): Promise<SpecimenServer> {
     // No file watching: nothing is edited while the sheets are captured,
     // and a change made elsewhere during the run must not reload a sheet.
     server: { port, watch: null },
+    // Scans every specimen page for dependencies before the server answers.
+    // Otherwise Vite finds a new dependency while a page loads, bundles it,
+    // and reloads every open page, which destroys a page a capture is
+    // reading. On a fresh machine, such as CI, that happened mid-run.
+    optimizeDeps: { entries: ["specimens/*.html"] },
     plugins: [serveDesigns()],
     logLevel: "warn",
   });

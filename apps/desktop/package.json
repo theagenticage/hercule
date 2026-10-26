@@ -23,6 +23,7 @@
     "capture:first-run": "node scripts/capture-first-run.ts",
     "capture:intake": "node scripts/capture-intake.ts",
     "capture:ui": "node scripts/capture-ui.ts",
+    "ui:metrics": "node scripts/ui-metrics.ts",
     "demo:subagents": "node scripts/subagents-demo.ts",
     "world:book": "node scripts/book-world.ts"
   },
