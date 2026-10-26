@@ -1,0 +1,654 @@
+{
+ "mode": "absolute",
+ "reviewer": {
+  "model": "gpt-6.1-sol",
+  "version": "unknown",
+  "effort": "high"
+ },
+ "inputs": [
+  {
+   "file_name": "claude-light-1x.png",
+   "sha256": "9ac904ded5edc2d5463db2456b05ea0ccb20a3a620b867e767d3b80cabf29378"
+  },
+  {
+   "file_name": "claude-light-2x.png",
+   "sha256": "6ad85220fe574bb4e1ce388519c56df24a9b6e6849e92ae9282f6a270ba9f49a"
+  },
+  {
+   "file_name": "codex-dark-1x.png",
+   "sha256": "b56e44647ec8b3603a58d87bb8a7b70129993b31b2e8f3751ed731aa77a3e20c"
+  },
+  {
+   "file_name": "codex-dark-2x.png",
+   "sha256": "be6178976492c74f94cee4c8f7d89bef90103fb67670ac1f5dc2e25b219c9615"
+  },
+  {
+   "file_name": "codex-light-1x.png",
+   "sha256": "b70e3f391f6cc2d6dfa5a6e170ac48ff542b95e8f6580a1cafeb201ffe698cb0"
+  },
+  {
+   "file_name": "codex-light-2x.png",
+   "sha256": "61b0310116717ab497e6a1f7570ea1b2f2fea895e679244095274baa486ee1d2"
+  },
+  {
+   "file_name": "t3-ocean-1x.png",
+   "sha256": "8ff5e074da17c04598326028230690e3a533f04e3e5c40275f20bf7a1e25d263"
+  },
+  {
+   "file_name": "t3-ocean-2x.png",
+   "sha256": "454a1c97a14c75b8062a42f0e8749cef035d248288791d091413e77f392e0343"
+  }
+ ],
+ "images": [
+  {
+   "file_name": "claude-light-1x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-light",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 9,
+     "unassessable_reason": null,
+     "evidence": "claude-light-1x.png: (397, 69, 634, 627) uses clear prose and code faces, even line spacing and distinct indentation. Paragraphs have a comfortable measure, and sidebar labels remain legible at 1x."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-light-1x.png: (393, 212, 638, 484) gives the explanation and SQL priority over navigation. Saturated syntax colors draw attention before the surrounding prose."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-light-1x.png: (393, 212, 638, 484) has regular paragraph, bullet and code spacing. The user bubble at (751, 761, 312, 47) meets the composer at (363, 807, 729, 50) without a clear separating gap."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "claude-light-1x.png: (397, 249, 634, 447) has clear body text, but orange and green code text is relatively light on white. Card outlines in (1126, 63, 307, 426) and the composer placeholder are faint."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "claude-light-1x.png: (329, 49, 1111, 851) is a large bright white sheet with very little tonal separation between conversation, code and environment cards."
+    },
+    {
+     "category": "iconography",
+     "score": 9,
+     "unassessable_reason": null,
+     "evidence": "claude-light-1x.png: (19, 62, 20, 204), (1147, 109, 20, 131) and (1231, 14, 161, 20) use a coherent outline family with consistent optical size and alignment."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-light-1x.png: (1379, 222, 34, 20) shows the toggle position; (1146, 290, 266, 175) combines chevrons, counts and signed changes. The small ring at (1058, 869, 17, 18) has no explicit state label."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-light-1x.png: (1126, 63, 307, 426) repeats aligned card edges and radii. The user bubble at (751, 761, 312, 52) loses its lower edge directly behind the composer."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-light-1x.png: (1146, 82, 267, 389) uses clear Environment, Remote Control and Commit changes labels. Auto at (381, 870, 35, 17) is vague, and several sidebar titles fade before informative endings."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-light-1x.png: (0, 0, 1440, 900) consistently uses quiet neutral surfaces, rounded cards, a pill-shaped composer and outline controls. The toolbar and broad white content area have few distinctive identity cues."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-light-1x.png: (393, 69, 638, 627) is readable and well organized. The large bright surface, weak panel edges and a few ambiguous compact controls reduce comfort and clarity."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "claude-light-2x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-light",
+   "scale": 2,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 9,
+     "unassessable_reason": null,
+     "evidence": "claude-light-2x.png: (794, 138, 1268, 1254) has clear prose and code faces, even line spacing and distinct indentation at 2x. Paragraph measures and metadata sizes are comfortable."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-light-2x.png: (786, 424, 1276, 968) gives the explanation and SQL clear priority. Saturated syntax colors attract attention before the surrounding prose."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-light-2x.png: (786, 424, 1276, 968) maintains regular paragraph, bullet and code spacing. The bubble at (1502, 1522, 624, 94) meets the composer at (726, 1614, 1458, 100) without a clear gap."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "claude-light-2x.png: (794, 498, 1268, 894) has clear body text, but orange and green code text is relatively light on white. Card boundaries at (2252, 126, 614, 852) and placeholder text are faint."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "claude-light-2x.png: (658, 98, 2222, 1702) presents a broad bright white sheet. Conversation, code and environment cards have little tonal separation."
+    },
+    {
+     "category": "iconography",
+     "score": 9,
+     "unassessable_reason": null,
+     "evidence": "claude-light-2x.png: (38, 124, 40, 408), (2294, 218, 40, 262) and (2462, 28, 322, 40) show consistent outline strokes, optical sizes and alignment at 2x."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-light-2x.png: (2758, 444, 68, 40) clearly shows the toggle position. Chevrons, counts and signed changes at (2292, 580, 532, 350) are explicit, but the ring at (2116, 1738, 34, 36) lacks a state label."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-light-2x.png: (2252, 126, 614, 852) repeats aligned card edges and radii. The bubble at (1502, 1522, 624, 104) has its lower edge hidden directly behind the composer."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-light-2x.png: (2292, 164, 534, 778) uses clear Environment, Remote Control and Commit changes labels. Auto at (762, 1740, 70, 34) is vague, and sidebar title endings repeatedly fade away."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-light-2x.png: (0, 0, 2880, 1800) consistently uses neutral surfaces, rounded cards, a pill-shaped composer and outline controls. The toolbar and broad white content area offer few distinctive identity cues."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-light-2x.png: (786, 138, 1276, 1254) is readable and organized at 2x. Bright expanses, weak card boundaries and ambiguous compact controls remain visible limitations."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "codex-dark-1x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-dark",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": null,
+     "unassessable_reason": "The brief excludes typography assessment for Codex's monospace new-chat capture.",
+     "evidence": "codex-dark-1x.png: (614, 428, 540, 28) shows the monospace empty-screen question; (68, 103, 239, 785) contains monospace navigation and thread labels."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png: (614, 347, 540, 109) makes the starting question dominant. The composer at (515, 782, 736, 99) is clearly separate, though the large heading draws attention away from where typing begins."
+    },
+    {
+     "category": "spacing-density",
+     "score": null,
+     "unassessable_reason": "The empty new-chat screen provides insufficient content to assess density, as required by the brief.",
+     "evidence": "codex-dark-1x.png: (330, 44, 1106, 852) contains an empty conversation area, a central question and an unused composer rather than populated working content."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png: (526, 795, 710, 73) has a faint placeholder and muted approval and effort labels. Several sidebar title endings at (91, 288, 216, 570) fade into the background."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png: (0, 0, 1440, 900) uses gentle steps between frame, sidebar, content and composer. The white voice button at (1214, 844, 29, 29) is a localized bright point."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png: (14, 59, 24, 294) uses consistent small navigation symbols, with a filled Home indicating selection. Bell, search and folder outlines at (68, 62, 241, 218) are recognizable but fine at 1x."
+    },
+    {
+     "category": "state-visibility",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png: (8, 52, 36, 36) and (60, 252, 250, 30) distinguish selected Home and project through backgrounds. Back and forward arrows at (94, 15, 50, 15) are faint; composer focus is shown mainly by its caret."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png: (60, 252, 250, 636) repeats aligned sidebar rows, and the composer has clean rounded boundaries. The model and High labels at (1028, 848, 138, 20) are cramped together."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png: (91, 288, 216, 110) shows four indistinguishable truncated Act as the review sub-age titles. Approve for me at (583, 848, 109, 20) does not explain the approval scope."
+    },
+    {
+     "category": "character",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png: (614, 347, 540, 109) combines a terminal-like emblem and monospace question into a recognizable coding identity. The neutral shell is coherent, though the navigation rail is comparatively generic."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-1x.png: (330, 44, 1106, 852) provides a calm, clear starting point. Faint composer text, repeated indistinguishable sidebar titles and unexplained approval wording create reading and interpretation friction."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "codex-dark-2x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-dark",
+   "scale": 2,
+   "scores": [
+    {
+     "category": "typography",
+     "score": null,
+     "unassessable_reason": "The brief excludes typography assessment for Codex's monospace new-chat capture.",
+     "evidence": "codex-dark-2x.png: (1228, 856, 1080, 56) shows the monospace empty-screen question; (136, 206, 478, 1570) contains monospace navigation and thread labels."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png: (1228, 694, 1080, 218) makes the starting question dominant. The composer at (1030, 1564, 1472, 198) is clearly separate, though the heading attracts attention away from the typing location."
+    },
+    {
+     "category": "spacing-density",
+     "score": null,
+     "unassessable_reason": "The empty new-chat screen provides insufficient content to assess density, as required by the brief.",
+     "evidence": "codex-dark-2x.png: (660, 88, 2212, 1704) shows an empty conversation area, a central question and an unused composer rather than populated working content."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png: (1052, 1590, 1420, 146) has a faint placeholder and muted approval and effort labels. Sidebar title endings at (182, 576, 432, 1140) repeatedly fade into the background."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png: (0, 0, 2880, 1800) uses soft dark layer steps across frame, sidebar, content and composer. The white voice button at (2428, 1688, 58, 58) is a localized bright point."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png: (28, 118, 48, 588) uses consistent navigation symbols, with a filled selected Home. Bell, search and folder outlines at (136, 124, 482, 436) are clean, with relatively fine strokes."
+    },
+    {
+     "category": "state-visibility",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png: (16, 104, 72, 72) and (120, 504, 500, 60) distinguish selected Home and project through backgrounds. Arrows at (188, 30, 100, 30) are faint; composer focus is shown mainly by its caret."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png: (120, 504, 500, 1272) repeats aligned rows and clean selection radii. The model and High labels at (2056, 1696, 276, 40) are cramped together."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png: (182, 576, 432, 220) shows four indistinguishable truncated Act as the review sub-age titles. Approve for me at (1166, 1696, 218, 40) leaves approval scope unexplained."
+    },
+    {
+     "category": "character",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png: (1228, 694, 1080, 218) combines a terminal-like emblem and monospace question into a recognizable coding identity. The neutral shell is coherent, while the navigation rail is comparatively generic."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-dark-2x.png: (660, 88, 2212, 1704) offers a calm, clear starting point. Faint composer text, indistinguishable truncated titles and unexplained approval wording remain visible limitations."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "codex-light-1x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-light",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": null,
+     "unassessable_reason": "The brief excludes typography assessment for Codex's monospace new-chat capture.",
+     "evidence": "codex-light-1x.png: (614, 428, 540, 28) shows the monospace empty-screen question; (68, 103, 239, 785) contains monospace navigation and thread labels."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-light-1x.png: (614, 347, 540, 109) makes the starting question dominant. The bottom composer is identifiable, but its pale treatment gives less emphasis to the typing location."
+    },
+    {
+     "category": "spacing-density",
+     "score": null,
+     "unassessable_reason": "The empty new-chat screen provides insufficient content to assess density, as required by the brief.",
+     "evidence": "codex-light-1x.png: (330, 44, 1106, 852) contains an empty conversation area, a central question and an unused composer rather than populated working content."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-light-1x.png: (526, 795, 710, 73) has a very pale placeholder, approval label and effort label. Sidebar headings and title endings in (68, 146, 239, 742) are repeatedly subdued."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-light-1x.png: (330, 44, 1106, 852) is a large white sheet, with little tonal separation around the composer. The sidebar and frame are also very light."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-light-1x.png: (14, 59, 24, 294) uses consistent navigation symbols and a filled selected Home. Small folder, bell and search outlines at (68, 62, 241, 218) are aligned but relatively fine."
+    },
+    {
+     "category": "state-visibility",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-light-1x.png: (8, 52, 36, 36) identifies selected Home, but the selected project fill at (60, 252, 250, 30) is subtle. Top arrows are very faint, and composer focus is shown mainly by a caret."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-light-1x.png: (60, 252, 250, 636) repeats aligned sidebar rows and clean selection radii. The model and High labels at (1028, 848, 138, 20) are cramped together."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-light-1x.png: (91, 288, 216, 110) shows four indistinguishable truncated Act as the review sub-age titles. Approve for me at (583, 848, 109, 20) does not describe approval scope."
+    },
+    {
+     "category": "character",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-light-1x.png: (614, 347, 540, 109) gives the screen a recognizable terminal-like emblem and monospace coding identity. Neutral surfaces and rounded controls are coherent, though the navigation rail is comparatively generic."
+    },
+    {
+     "category": "overall",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "codex-light-1x.png: (330, 44, 1106, 852) makes starting a conversation understandable. The bright white field, faint supporting controls and repeated indistinguishable titles create several rough edges."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "codex-light-2x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-light",
+   "scale": 2,
+   "scores": [
+    {
+     "category": "typography",
+     "score": null,
+     "unassessable_reason": "The brief excludes typography assessment for Codex's monospace new-chat capture.",
+     "evidence": "codex-light-2x.png: (1228, 856, 1080, 56) shows the monospace empty-screen question; (136, 206, 478, 1570) contains monospace navigation and thread labels."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-light-2x.png: (1228, 694, 1080, 218) makes the starting question dominant. The composer is identifiable, but its pale treatment weakens emphasis on where typing begins."
+    },
+    {
+     "category": "spacing-density",
+     "score": null,
+     "unassessable_reason": "The empty new-chat screen provides insufficient content to assess density, as required by the brief.",
+     "evidence": "codex-light-2x.png: (660, 88, 2212, 1704) shows an empty conversation area, a central question and an unused composer rather than populated working content."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-light-2x.png: (1052, 1590, 1420, 146) has a very pale placeholder, approval label and effort label. Sidebar headings and title endings at (136, 292, 478, 1484) are repeatedly subdued."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-light-2x.png: (660, 88, 2212, 1704) is a large white sheet with little tonal separation around the composer. The sidebar and frame are also very light."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-light-2x.png: (28, 118, 48, 588) uses consistent navigation symbols and a filled selected Home. Folder, bell and search outlines at (136, 124, 482, 436) align cleanly, with relatively fine strokes."
+    },
+    {
+     "category": "state-visibility",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-light-2x.png: (16, 104, 72, 72) identifies selected Home, while the project fill at (120, 504, 500, 60) is subtle. Top arrows are very faint, and composer focus is shown mainly by its caret."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "codex-light-2x.png: (120, 504, 500, 1272) repeats aligned sidebar rows and clean selection radii. The model and High labels at (2056, 1696, 276, 40) are cramped together."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "codex-light-2x.png: (182, 576, 432, 220) shows four indistinguishable truncated Act as the review sub-age titles. Approve for me at (1166, 1696, 218, 40) leaves approval scope unexplained."
+    },
+    {
+     "category": "character",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "codex-light-2x.png: (1228, 694, 1080, 218) combines a terminal-like emblem and monospace question into a recognizable coding identity. The neutral shell is coherent, while the navigation rail is comparatively generic."
+    },
+    {
+     "category": "overall",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "codex-light-2x.png: (660, 88, 2212, 1704) makes the starting task understandable. The broad white field, faint supporting controls and indistinguishable truncated sidebar titles remain visible rough edges."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "t3-ocean-1x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-ocean",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-1x.png: (388, 174, 724, 295) separates prose, code and inline code clearly. Sidebar metadata at (18, 113, 300, 473) is small and light, while code lines have a compact but regular rhythm."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-1x.png: (388, 174, 724, 295) makes the code response easy to locate, and (8, 434, 319, 78) identifies the selected thread. The lighter environment card at (1148, 64, 280, 231) competes somewhat with the response."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-1x.png: (388, 174, 724, 295) maintains clear gaps between prose and code blocks. Sidebar rows align consistently; the long return line at (419, 317, 684, 18) approaches the code block's right edge."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-1x.png: (403, 284, 484, 16) renders the code comment faintly. Sidebar branch labels and ages in (18, 113, 300, 473), plus the machine label at (1194, 82, 169, 17), are also subdued."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-1x.png: (336, 0, 1104, 900) uses soft navy layer steps and restrained blue borders. The gray environment card at (1148, 64, 280, 231) is a localized lighter patch."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-1x.png: (1166, 81, 245, 195) uses consistently sized outline controls. Code toolbar icons and language badges at (401, 210, 699, 20) remain recognizable but are small at 1x."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-1x.png: (8, 434, 319, 78) marks the selected thread with a blue fill and brighter title. The selected top view at (1335, 12, 28, 28) has a filled background; the thread selection has no additional mark."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 9,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-1x.png: (388, 202, 724, 266) repeats aligned code block edges, radii and toolbar placement. Sidebar row edges and the composer controls at (384, 766, 732, 114) are cleanly aligned."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-1x.png: (1170, 112, 239, 163) has clear Open in Cursor, Add project script and Changes labels. Medium at (600, 837, 69, 20) leaves its subject implicit, and Settled at (18, 827, 48, 17) is ambiguous."
+    },
+    {
+     "category": "character",
+     "score": 9,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-1x.png: (0, 0, 336, 100) gives Ocean a distinctive starry header and T3 Code wordmark. Navy surfaces, blue selections and restrained borders carry that identity coherently through the content and composer."
+    },
+    {
+     "category": "overall",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-1x.png: (384, 174, 732, 706) is coherent, comfortable and clearly organized around the response. Faint comments and metadata, small toolbar marks and a few implicit labels are the main weaknesses."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "t3-ocean-2x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-ocean",
+   "scale": 2,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-2x.png: (776, 348, 1448, 590) clearly separates prose, code and inline code at 2x. Sidebar metadata at (36, 226, 600, 946) is small and light; code lines have a compact, regular rhythm."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-2x.png: (776, 348, 1448, 590) gives the code response clear priority, and (16, 868, 638, 156) identifies the selected thread. The lighter environment card at (2296, 128, 560, 462) adds competing emphasis."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-2x.png: (776, 348, 1448, 590) maintains clear prose and code gaps with aligned block edges. The long return line at (838, 634, 1368, 36) approaches the code block's right boundary."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-2x.png: (806, 568, 968, 32) has a faint code comment. Sidebar branches and ages at (36, 226, 600, 946), plus the machine label at (2388, 164, 338, 34), are also subdued."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-2x.png: (672, 0, 2208, 1800) uses calm navy layer steps and soft blue borders. The gray environment card at (2296, 128, 560, 462) is a localized lighter patch."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-2x.png: (2332, 162, 490, 390) shows consistent outline controls. Code toolbar symbols and language badges at (802, 420, 1398, 40) are distinct at 2x but remain optically small."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-2x.png: (16, 868, 638, 156) marks the selected thread with blue fill and brighter text. The top selected view at (2670, 24, 56, 56) has a filled background; thread selection has no additional mark."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 9,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-2x.png: (776, 404, 1448, 532) repeats aligned code block edges, radii and toolbar placement. Sidebar row edges and composer controls at (768, 1532, 1464, 228) remain cleanly aligned at 2x."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-2x.png: (2340, 224, 478, 326) uses clear Open in Cursor, Add project script and Changes labels. Medium at (1200, 1674, 138, 40) leaves its subject implicit, and Settled at (36, 1654, 96, 34) is ambiguous."
+    },
+    {
+     "category": "character",
+     "score": 9,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-2x.png: (0, 0, 672, 200) has a distinctive starry header and T3 Code wordmark. Navy surfaces, blue selections and restrained borders maintain a coherent Ocean identity through the content and composer."
+    },
+    {
+     "category": "overall",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "t3-ocean-2x.png: (768, 348, 1464, 1412) is comfortable and clearly organized at 2x. Faint comments and metadata, small toolbar symbols and a few implicit labels remain visible weaknesses."
+    }
+   ],
+   "overall_note": null
+  }
+ ],
+ "fixes": [],
+ "summary": "The reference captures show coherent neutral and ocean identities, with recurring weaknesses in supporting-text contrast and compact control labels. Repeated title truncation hides meaning in the Codex sidebar; its empty monospace screen leaves typography and density unassessable."
+}

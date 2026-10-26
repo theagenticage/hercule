@@ -1,0 +1,86 @@
+{
+  "mode": "pairwise",
+  "reviewer": {
+    "model": "gpt-6.1-sol",
+    "version": "unknown",
+    "effort": "high"
+  },
+  "inputs": [
+    {
+      "label": "A",
+      "file_name": "A-thread-whitehaven-1x.png",
+      "sha256": "4d9f4b3cb406f74854625b45065023decd4b71e9a4cf499cc355eb09444cb2fd"
+    },
+    {
+      "label": "B",
+      "file_name": "B-thread-whitehaven-1x.png",
+      "sha256": "420be4ffa4a84022fdb38ae42e8e472e88eb69f751065f2cb5edf77be932c950"
+    }
+  ],
+  "comparisons": [
+    {
+      "image_a": "A-thread-whitehaven-1x.png",
+      "image_b": "B-thread-whitehaven-1x.png",
+      "screen": "thread",
+      "theme": "whitehaven",
+      "scale": 1,
+      "votes": [
+        {
+          "category": "typography",
+          "verdict": "tie",
+          "evidence": "No visible difference in typography."
+        },
+        {
+          "category": "hierarchy",
+          "verdict": "tie",
+          "evidence": "No visible difference in hierarchy."
+        },
+        {
+          "category": "spacing-density",
+          "verdict": "B",
+          "evidence": "B (x 16, y 180, w 240, h 120): both sidebar row gaps are 8px. In A they are 6px and 8px."
+        },
+        {
+          "category": "colour-contrast",
+          "verdict": "tie",
+          "evidence": "No visible difference in colour-contrast."
+        },
+        {
+          "category": "eye-comfort",
+          "verdict": "tie",
+          "evidence": "No visible difference in eye-comfort."
+        },
+        {
+          "category": "iconography",
+          "verdict": "unassessable",
+          "evidence": "Neither image shows an icon that differs."
+        },
+        {
+          "category": "state-visibility",
+          "verdict": "tie",
+          "evidence": "No visible difference in state-visibility."
+        },
+        {
+          "category": "consistency-polish",
+          "verdict": "tie",
+          "evidence": "No visible difference in consistency-polish."
+        },
+        {
+          "category": "clarity-copy",
+          "verdict": "tie",
+          "evidence": "No visible difference in clarity-copy."
+        },
+        {
+          "category": "character",
+          "verdict": "tie",
+          "evidence": "No visible difference in character."
+        },
+        {
+          "category": "overall",
+          "verdict": "tie",
+          "evidence": "No visible difference in overall."
+        }
+      ]
+    }
+  ]
+}

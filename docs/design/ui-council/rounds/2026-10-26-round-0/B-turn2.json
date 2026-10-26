@@ -1,0 +1,814 @@
+{
+ "mode": "absolute",
+ "reviewer": {
+  "model": "gpt-6.1-sol",
+  "version": "unknown",
+  "effort": "high"
+ },
+ "inputs": [
+  {
+   "file_name": "cal-11.png",
+   "sha256": "2d2c856ca63d1a11c8fd6d7a8e8e3be2ac52acb487a41a753ac5a2d562b10e72"
+  },
+  {
+   "file_name": "cal-12.png",
+   "sha256": "a3ee43cda4112f4e9eb477ea0e26b177470b7357f49871101d80582615ae0aff"
+  },
+  {
+   "file_name": "cal-13.png",
+   "sha256": "d09b17cc11f57bbef20d49f24f99e0bffc7769cdaa064e015d76bf9b73deb9fe"
+  },
+  {
+   "file_name": "cal-14.png",
+   "sha256": "65314dff943ce16f7683de58bb07a335129c23285e6d9b40fd8e33e2de5ed506"
+  },
+  {
+   "file_name": "cal-15.png",
+   "sha256": "5f5891628f2be0b788714d1362521caafc19d889174f4f2b1607ff19afba33cb"
+  },
+  {
+   "file_name": "cal-16.png",
+   "sha256": "6c0f98913d6cff280333557063fa657077c91dd395d8ad730d12ead52af0b358"
+  },
+  {
+   "file_name": "cal-17.png",
+   "sha256": "a389447fc8cbf2cfd881ec4db55c841559ba6a969c872ad82420520c477ddb43"
+  },
+  {
+   "file_name": "cal-18.png",
+   "sha256": "fc0b3a8dbd61434c87af718bf29cc39f9d796fc44710c7d0dc8d63b2ea4768c2"
+  },
+  {
+   "file_name": "claude-dark-1x.png",
+   "sha256": "3815c0ebc883eee030f2973b22a03fa4f48912312c839e4761d4234efb9eeaaa"
+  },
+  {
+   "file_name": "claude-dark-2x.png",
+   "sha256": "43ef0cb0c9d98034a9f1f3e4d79589d8c09885a66d147d4e73cbe0cd9e29e2fe"
+  }
+ ],
+ "images": [
+  {
+   "file_name": "cal-11.png",
+   "set": "calibration",
+   "screen": "sidebar",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-11.png: (22, 271, 230, 417) has readable titles and metadata with even line spacing. Several titles truncate early where trailing statuses narrow the available measure."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-11.png: (12, 130, 248, 94) places waiting requests first. Project groups and selected fills organize the remaining threads, although the outlined tab at (12, 48, 248, 30) attracts extra attention."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-11.png: (12, 239, 248, 449) maintains consistent thread spacing, aligned metadata and distinct project gaps. The approval title at (22, 267, 230, 17) fits tightly beside its status."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-11.png: (22, 271, 230, 417) keeps titles and workspace labels legible. Working labels are relatively light, while the black divider at (271, 0, 1, 900) is stronger than nearby surface boundaries."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-11.png: (272, 0, 1168, 900) is a broad bright field. The warm sidebar is soft, but black rules at (271, 0, 1, 900) and (0, 833, 272, 1) introduce hard edges."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-11.png: (22, 94, 230, 15) uses crisp, aligned outline controls. Provider marks in (21, 289, 14, 399) remain distinct, with slightly different optical weights."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-11.png: (12, 48, 248, 30) clearly outlines the active tab. Selected rows have visible fills, and Approval, Question, Working and needs you are explicit; working titles are still dimmed."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-11.png: (12, 239, 248, 449) repeats coherent row alignment and selection radii. Nested outlines around the active tab at (12, 48, 123, 30) create a doubled contour."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-11.png: (22, 267, 174, 17), (22, 323, 174, 17) and (22, 460, 174, 17) truncate informative title endings. The pending questions themselves remain plain."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-11.png: (20, 152, 232, 70) retains expressive peach and mint faces. Warm sidebar surfaces, marigold requests and low-chroma project inlays preserve identity, with little visible Deco detail."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-11.png: (12, 130, 248, 558) is orderly and clear about pending requests. Repeated title truncation, dimmed working titles and hard structural rules remain visible weaknesses."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-12.png",
+   "set": "calibration",
+   "screen": "thread",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-12.png: (521, 182, 715, 313) clearly separates author labels, prose, code and summaries. Prose lines are long, and the initial message at (657, 49, 566, 36) is difficult to read."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-12.png: (476, 594, 760, 166) gives the command request and filled Allow button clear priority. Bright white composer space at (476, 760, 760, 98) adds a competing emphasis."
+    },
+    {
+     "category": "spacing-density",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-12.png: (521, 182, 715, 356) separates prose, code, work summaries and waiting status cleanly. The queue, permission card and composer at (476, 554, 760, 304) form a tight but readable stack."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-12.png: (521, 182, 715, 356) has clear main prose and code. The initial message at (657, 49, 566, 36) is nearly invisible, while black panel outlines are conspicuously strong."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-12.png: (274, 46, 1166, 508) is a large bright field crossed by hard black rules. The amber permission card is soft, but the white composer and its dark border add visual weight."
+    },
+    {
+     "category": "iconography",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-12.png: (1258, 10, 168, 36) uses coherent outline controls. Composer icons at (494, 818, 734, 32) align cleanly; small sidebar provider marks vary slightly in optical weight."
+    },
+    {
+     "category": "state-visibility",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-12.png: (523, 525, 216, 13) explicitly labels waiting, and (490, 554, 732, 40) labels the queued message and its position. Working titles in the sidebar are visibly dimmed."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-12.png: (494, 648, 156, 62) repeats action widths and aligned labels. The permission card and composer at (476, 594, 760, 264) meet in a busy stack of rounded boundaries."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "cal-12.png: (494, 611, 718, 129) shows the command and explains each permission outcome. Queued until the turn finishes at (491, 778, 231, 16) leaves its relationship to pending approval unclear."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-12.png: (480, 183, 24, 305) contains expressive peach faces, including the raised-hand face at (494, 607, 28, 28). Warm surfaces and marigold requests preserve identity without much visible Deco detail."
+    },
+    {
+     "category": "overall",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-12.png: (476, 182, 760, 676) presents messages and permission actions coherently. A faint initial message, wide prose and hard panel outlines remain noticeable defects."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-13.png",
+   "set": "calibration",
+   "screen": "intake",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-13.png: (742, 106, 662, 192) retains readable title and prose shapes, but individual text boxes tightly enclose lines. Small metadata at (324, 164, 333, 19) is light and visually interrupted."
+    },
+    {
+     "category": "hierarchy",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-13.png: (12, 48, 1392, 514) gives tabs, labels, metadata, rows and actions competing outlines and saturated fills. The signal and suggested action must compete with almost every surrounding element."
+    },
+    {
+     "category": "spacing-density",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-13.png: (742, 343, 662, 219) repeatedly nests label, button and row borders with very little separation. Text at (324, 145, 333, 38) nearly touches its individual rectangles."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-13.png: (0, 0, 1440, 900) uses large red and green surfaces, purple strips and blue controls without a clear semantic division. Supporting text at (291, 529, 397, 30) and (918, 353, 439, 18) is weak."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-13.png: (0, 0, 1440, 900) combines saturated red, green, purple and blue with dense pale outlines. The entire window is visually agitated rather than softly layered."
+    },
+    {
+     "category": "iconography",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-13.png: (293, 155, 20, 330) encloses source icons in additional rectangles, obscuring their silhouettes. Navigation icons at (22, 266, 17, 233) are similarly crowded by nested boxes."
+    },
+    {
+     "category": "state-visibility",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-13.png: (282, 64, 412, 30) identifies the active tab with a blue fill, and waiting and failed checks retain words. The selected signal at (282, 287, 412, 53) barely separates from other heavily outlined rows."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-13.png: (12, 48, 1392, 514) outlines individual labels, icons, buttons and containers, producing coincident and doubled edges throughout. These look like diagnostic overlays; their origin is not established by the image."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-13.png: (789, 353, 586, 206) still explains action outcomes in plain words. The waiting title at (50, 152, 202, 18) is truncated, and the heavily boxed labels take extra effort to scan."
+    },
+    {
+     "category": "character",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-13.png: (0, 0, 1440, 900) replaces restrained warm layers with red, green, purple and blue blocks. Faces remain at (20, 153, 23, 69), but their fluorescent treatment and pervasive outlines overwhelm the intended character."
+    },
+    {
+     "category": "overall",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-13.png: (0, 0, 1440, 900) is dominated by saturated surfaces and diagnostic-looking rectangles. The words remain partly usable, but hierarchy, comfort and finish are severely obstructed."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-14.png",
+   "set": "calibration",
+   "screen": "sidebar",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-14.png: (22, 267, 230, 423) retains readable titles, but metadata is small and faint. Boxes tightly enclose individual text runs and repeatedly interrupt the title and metadata rhythm."
+    },
+    {
+     "category": "hierarchy",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-14.png: (12, 125, 248, 573) still places waiting requests above project groups, but every row, label and icon has a competing outline. Selected thread content no longer wins clearly."
+    },
+    {
+     "category": "spacing-density",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-14.png: (12, 259, 248, 439) nests row and text rectangles almost against one another. At (22, 266, 230, 39), title, status and supporting text are tightly boxed."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-14.png: (0, 0, 272, 900) places faint metadata and working labels over saturated red. Blue and purple tab fills at (12, 48, 248, 30) add unrelated strong colors."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-14.png: (0, 0, 1440, 900) is split into large saturated red and green slabs. Dense pale sidebar outlines and a blue active tab make the window harsh to view."
+    },
+    {
+     "category": "iconography",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-14.png: (22, 289, 13, 400) crowds tiny provider marks inside extra boxes. Header controls at (13, 86, 247, 30) also have nested outlines that obscure their simple silhouettes."
+    },
+    {
+     "category": "state-visibility",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-14.png: (157, 236, 95, 433) retains needs you, Approval, Question and Working labels. Selected and ordinary thread rows in (12, 259, 248, 159) share nearly identical red surfaces and dense outlines."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-14.png: (12, 86, 248, 612) shows diagnostic-looking rectangles around almost every text run, icon and container. Coincident borders make repeated thread rows appear broken."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-14.png: (22, 267, 174, 17), (22, 321, 174, 17) and (22, 459, 174, 17) truncate informative title endings. Pending request wording remains specific."
+    },
+    {
+     "category": "character",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-14.png: (0, 0, 272, 900) uses saturated red instead of a restrained warm sidebar. Faces survive at (20, 153, 23, 69), but fluorescent colors and pervasive rectangles dominate the identity."
+    },
+    {
+     "category": "overall",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-14.png: (0, 0, 1440, 900) remains partially navigable through its words, but saturated surfaces, weak metadata and excessive outlines obstruct comfortable work."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-15.png",
+   "set": "calibration",
+   "screen": "thread",
+   "theme": "orient-express",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-15.png: (521, 182, 714, 318) retains readable prose and code, but boxed author labels and summaries interrupt the rhythm. The initial message at (657, 49, 565, 38) is almost invisible."
+    },
+    {
+     "category": "hierarchy",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-15.png: (476, 179, 760, 679) gives message containers, summaries, code, permission actions and composer competing outlines and fills. The blue composer and purple code block overpower the suggested action."
+    },
+    {
+     "category": "spacing-density",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-15.png: (490, 605, 734, 144) tightly nests labels, action rows and borders. The composer at (476, 760, 760, 98) adds another layer of closely packed rectangles around text and controls."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-15.png: (476, 594, 760, 264) mixes amber, blue and green, with low-contrast explanatory text and placeholder text. Blue fills appear on the composer, a command and Allow always without a consistent meaning."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-15.png: (0, 0, 1440, 900) combines large red and green fields with purple code, a blue composer and dense pale outlines. Saturated regions compete continuously."
+    },
+    {
+     "category": "iconography",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-15.png: (1258, 10, 168, 36) and (484, 818, 744, 32) surround small controls with multiple nested boxes. Sidebar provider marks at (22, 289, 13, 344) lose clear silhouettes."
+    },
+    {
+     "category": "state-visibility",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-15.png: (522, 522, 704, 18) explicitly labels waiting, and the queue at (490, 554, 732, 40) names its position. Selected rows and working rows in (12, 236, 248, 407) are weakly distinguished."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-15.png: (476, 101, 760, 781) contains diagnostic-looking outlines around message regions, text runs and controls. Repeated coincident borders make the thread appear structurally broken."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-15.png: (529, 609, 648, 132) shows the exact command and explains Allow, Allow always and Deny. Queued until the turn finishes at (492, 773, 728, 22) remains ambiguous beside pending permission."
+    },
+    {
+     "category": "character",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-15.png: (0, 0, 1440, 900) is dominated by saturated red, green, purple and blue. Faces remain at (480, 183, 27, 305), but fluorescent hues and pervasive outlines overwhelm warmth and colleague identity."
+    },
+    {
+     "category": "overall",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-15.png: (476, 179, 760, 679) retains interpretable messages and permission wording, but saturated fills and extensive diagnostic-looking borders obstruct hierarchy and sustained reading."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-16.png",
+   "set": "calibration",
+   "screen": "intake",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-16.png: (742, 106, 662, 192) retains recognizable text roles, but tight rectangles surround each title, metadata and prose line. Small gray metadata at (324, 164, 333, 19) is difficult to read."
+    },
+    {
+     "category": "hierarchy",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-16.png: (12, 48, 1392, 514) gives tabs, rows, individual labels and action explanations competing boxes. Neon green surfaces and pink strips dominate before the signal content."
+    },
+    {
+     "category": "spacing-density",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-16.png: (742, 343, 662, 219) nests label, button and row borders with little separation. In (324, 145, 333, 38), text sits almost against its individual rectangles."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-16.png: (274, 0, 1166, 900) places gray secondary text on intense green. Cyan fills appear on tabs and secondary actions, while pink marks unrelated strips; color no longer has a clear meaning."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-16.png: (274, 0, 1166, 900) is almost entirely neon green, paired with a salmon sidebar and pink and cyan controls. Large saturated fields glare across the window."
+    },
+    {
+     "category": "iconography",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-16.png: (293, 155, 20, 330) encloses source icons in additional rectangles. Navigation icons at (22, 266, 17, 233) are crowded by nested boxes and weakened by surrounding saturated colors."
+    },
+    {
+     "category": "state-visibility",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-16.png: (282, 64, 412, 30) uses cyan to identify the active tab, and status words remain. The selected signal at (282, 287, 412, 53) barely separates from ordinary green rows."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-16.png: (12, 48, 1392, 514) has diagnostic-looking rectangles around individual text runs, icons and containers. Coincident and doubled edges occur throughout the visible interface."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-16.png: (789, 353, 586, 206) still explains the action outcomes plainly. The waiting title at (50, 152, 202, 18) is truncated, and boxed labels slow scanning."
+    },
+    {
+     "category": "character",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-16.png: (0, 0, 1440, 900) replaces restrained warmth with neon green, salmon, pink and cyan. Faces remain at (20, 153, 23, 69), but their hues and the screen's visual identity are overwhelmed."
+    },
+    {
+     "category": "overall",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-16.png: (0, 0, 1440, 900) contains readable primary words, but glaring full-surface color and pervasive diagnostic-looking boxes make sustained work highly uncomfortable."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-17.png",
+   "set": "calibration",
+   "screen": "sidebar",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png: (22, 267, 230, 423) retains recognizable titles, but small metadata is faint. Individual text rectangles tightly enclose lines and interrupt the repeated title and metadata rhythm."
+    },
+    {
+     "category": "hierarchy",
+     "score": 3,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png: (12, 125, 248, 573) places waiting requests first, but every row, label and icon has a competing outline. Cyan and pink tabs at (12, 48, 248, 30) pull attention above the content."
+    },
+    {
+     "category": "spacing-density",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png: (12, 259, 248, 439) repeatedly nests row and text borders almost against one another. The title, status and supporting text at (22, 266, 230, 39) are tightly boxed."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png: (0, 125, 272, 573) uses gray metadata and status text against salmon. Intense green across (274, 0, 1166, 900) and cyan and pink tabs add strong color without a clear informational role."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png: (274, 0, 1166, 900) is a nearly full-height neon green field. The salmon sidebar, cyan tab and pink strip create harsh saturated areas across almost the entire window."
+    },
+    {
+     "category": "iconography",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png: (22, 289, 13, 400) crowds tiny provider marks inside extra rectangles. Header controls at (13, 86, 247, 30) have nested outlines that obscure their simple shapes."
+    },
+    {
+     "category": "state-visibility",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png: (157, 236, 95, 433) retains explicit needs you, Approval, Question and Working labels. Selected and ordinary thread rows at (12, 259, 248, 159) share nearly identical salmon surfaces."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png: (12, 86, 248, 612) shows diagnostic-looking rectangles around almost every label, icon and container. Repeated coincident borders make the thread list appear broken."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png: (22, 267, 174, 17), (22, 321, 174, 17) and (22, 459, 174, 17) truncate informative title endings. Pending request wording remains specific."
+    },
+    {
+     "category": "character",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png: (0, 0, 1440, 900) is dominated by neon green, salmon, cyan and pink. Small faces at (20, 153, 23, 69) survive, but restrained warmth and colleague hues are overwhelmed."
+    },
+    {
+     "category": "overall",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-17.png: (0, 0, 1440, 900) remains partly navigable through its labels, but glaring color, faint metadata and pervasive outlines obstruct comfortable use."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "cal-18.png",
+   "set": "calibration",
+   "screen": "thread",
+   "theme": "whitehaven",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png: (521, 182, 714, 318) retains readable prose and code, but small boxed author labels and summaries interrupt the rhythm. The initial message at (657, 49, 565, 38) is almost invisible."
+    },
+    {
+     "category": "hierarchy",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png: (476, 179, 760, 679) gives messages, summaries, code, permission actions and composer competing outlines and fills. Pink code and a cyan composer compete with the suggested action."
+    },
+    {
+     "category": "spacing-density",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png: (490, 605, 734, 144) tightly nests labels, action rows and borders. The composer at (476, 760, 760, 98) adds closely packed rectangles around its text and every control."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png: (521, 139, 714, 400) places gray author labels and summaries against intense green. Cyan fills appear on the composer, command and Allow always without a consistent meaning."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png: (0, 0, 1440, 900) combines near-full-window neon green with salmon, pink code and a cyan composer. Saturated fields and dense outlines make sustained viewing harsh."
+    },
+    {
+     "category": "iconography",
+     "score": 4,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png: (1258, 10, 168, 36) and (484, 818, 744, 32) surround small controls with nested boxes. Sidebar provider marks at (22, 289, 13, 344) lose clear silhouettes."
+    },
+    {
+     "category": "state-visibility",
+     "score": 5,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png: (522, 522, 704, 18) explicitly labels waiting, and the queue at (490, 554, 732, 40) names its position. Selected and working rows in (12, 236, 248, 407) remain weakly distinguished."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png: (476, 101, 760, 781) has diagnostic-looking outlines around message regions, individual text runs and controls. Coincident borders create a systematically broken appearance."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png: (529, 609, 648, 132) shows the exact command and explains permission outcomes. Queued until the turn finishes at (492, 773, 728, 22) remains ambiguous beside pending approval."
+    },
+    {
+     "category": "character",
+     "score": 1,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png: (0, 0, 1440, 900) is dominated by neon green, salmon, pink and cyan. Faces remain at (480, 183, 27, 305), but fluorescent hues and pervasive outlines overwhelm warmth and colleague identity."
+    },
+    {
+     "category": "overall",
+     "score": 2,
+     "unassessable_reason": null,
+     "evidence": "cal-18.png: (476, 179, 760, 679) retains interpretable messages and permission wording. Glaring saturated fields, weak metadata and extensive diagnostic-looking borders obstruct comfortable reading."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "claude-dark-1x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-dark",
+   "scale": 1,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 9,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png: (397, 69, 634, 627) uses clear prose and code faces with even line spacing. Paragraphs have a comfortable measure, code indentation is distinct, and sidebar labels remain legible at 1x."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png: (393, 212, 638, 484) gives the explanation and SQL clear priority over navigation. Bright syntax colors in the large code block pull attention away from the surrounding prose."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png: (393, 212, 638, 484) has regular paragraph, bullet and code spacing. The user bubble at (751, 761, 312, 47) meets the composer at (364, 808, 727, 48) without a visible separating gap."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png: (397, 249, 634, 447) has clear body and code text. Several right-panel boundaries in (1127, 64, 305, 424) are faint, and placeholder text at (410, 825, 165, 20) is subdued."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png: (0, 0, 1440, 900) uses soft dark grays without bright sheets or strong white outlines. Right-side cards at (1127, 64, 305, 424) separate only weakly from the main surface."
+    },
+    {
+     "category": "iconography",
+     "score": 9,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png: (19, 62, 20, 204), (1147, 109, 20, 131) and (1231, 14, 161, 20) use a coherent outline family with consistent optical size and alignment."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png: (1379, 222, 34, 20) shows the toggle position, and (1146, 290, 266, 175) combines chevrons, counts and signed change totals. The small ring at (1058, 869, 17, 18) has no explicit state label."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png: (1127, 64, 305, 424) repeats aligned card edges and radii cleanly. At (751, 761, 312, 52), the user bubble's lower edge disappears directly behind the composer."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png: (1146, 82, 267, 389) uses clear Environment, Remote Control and Commit changes labels. Auto at (381, 870, 35, 17) is vague, and several sidebar titles fade before their endings."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png: (0, 0, 1440, 900) has a coherent quiet identity through warm grays, rounded cards, a pill-shaped composer and consistent outline controls. The top toolbar is comparatively generic."
+    },
+    {
+     "category": "overall",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-1x.png: (393, 69, 638, 627) is comfortable to read and visually organized. Faint panel boundaries, ambiguous small status controls and the bubble-composer join are localized weaknesses."
+    }
+   ],
+   "overall_note": null
+  },
+  {
+   "file_name": "claude-dark-2x.png",
+   "set": "other-app",
+   "screen": "reference-app",
+   "theme": "reference-dark",
+   "scale": 2,
+   "scores": [
+    {
+     "category": "typography",
+     "score": 9,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png: (794, 138, 1268, 1254) has clear prose and code faces, even line spacing and distinct code indentation at 2x. Metadata remains legible and paragraphs have a comfortable measure."
+    },
+    {
+     "category": "hierarchy",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png: (786, 424, 1276, 968) gives the explanation and SQL clear priority over navigation. Bright code syntax colors attract attention before the surrounding prose."
+    },
+    {
+     "category": "spacing-density",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png: (786, 424, 1276, 968) maintains regular paragraph, bullet and code spacing. The user bubble at (1502, 1522, 624, 94) meets the composer at (728, 1616, 1454, 96) without a visible gap."
+    },
+    {
+     "category": "colour-contrast",
+     "score": 6,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png: (794, 498, 1268, 894) has clear body and code text. Card boundaries in (2254, 128, 610, 848) are faint, and composer placeholder text at (820, 1650, 330, 40) is subdued."
+    },
+    {
+     "category": "eye-comfort",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png: (0, 0, 2880, 1800) uses calm dark grays without glaring white areas or hard outlines. Right-side cards at (2254, 128, 610, 848) have only weak surface separation."
+    },
+    {
+     "category": "iconography",
+     "score": 9,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png: (38, 124, 40, 408), (2294, 218, 40, 262) and (2462, 28, 322, 40) show consistent outline strokes, optical sizes and alignment at 2x."
+    },
+    {
+     "category": "state-visibility",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png: (2758, 444, 68, 40) clearly shows the toggle position. Chevrons, counts and signed changes at (2292, 580, 532, 350) are explicit, but the ring at (2116, 1738, 34, 36) has no state label."
+    },
+    {
+     "category": "consistency-polish",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png: (2254, 128, 610, 848) repeats aligned card edges and radii cleanly. The user bubble at (1502, 1522, 624, 104) has its lower edge hidden directly behind the composer."
+    },
+    {
+     "category": "clarity-copy",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png: (2292, 164, 534, 778) uses clear Environment, Remote Control and Commit changes labels. Auto at (762, 1740, 70, 34) is vague, and several sidebar titles fade before informative endings."
+    },
+    {
+     "category": "character",
+     "score": 7,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png: (0, 0, 2880, 1800) maintains a coherent quiet identity through warm grays, rounded cards, a pill-shaped composer and consistent outline controls. The top toolbar has few distinctive identity cues."
+    },
+    {
+     "category": "overall",
+     "score": 8,
+     "unassessable_reason": null,
+     "evidence": "claude-dark-2x.png: (786, 138, 1276, 1254) is readable and well organized at 2x. Weak panel boundaries, ambiguous small status controls and the bubble-composer join remain localized defects."
+    }
+   ],
+   "overall_note": null
+  }
+ ],
+ "fixes": [],
+ "summary": "Several calibration captures contain diagnostic-looking outlines and saturated surfaces; their origin cannot be established from the images. The Claude captures have readable prose and code, with faint panel boundaries and some ambiguous small labels. No supplied image is eligible for a fix."
+}
