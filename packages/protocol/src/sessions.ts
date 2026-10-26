@@ -408,10 +408,10 @@ const ToolApproval = defineApprovalRequest("tool_approval", { toolName: Fact });
 /**
  * One question in a `question` request: the chip it is labelled with, the
  * prose the agent wrote, and the options it offers. An option's description
- * is absent when the agent wrote none, and nothing is made up in its place. An approval and a
- * question are different things sharing one request slot, so the question
- * keeps its own structure rather than being flattened to text: a surface that
- * reads only the text cannot show what the answers were.
+ * is absent when the agent wrote none, and nothing is made up in its place.
+ * An approval and a question are different things sharing one request slot,
+ * so the question keeps its own structure rather than being flattened to
+ * text: a surface that reads only the text cannot show what the answers were.
  *
  * The struct is closed, like every detail here: a vendor's extra field (the
  * Claude SDK's `preview`) would make what the user sees depend on which

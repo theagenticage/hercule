@@ -192,7 +192,9 @@ export const isRequestEvent = (event: ProviderEvent): event is RequestEvent =>
  * - `request.resolved` removes the Request it names, and leaves the others;
  * - `turn.completed` removes the Requests of the agent whose turn ended, and
  *   only those: the session's own agent ending its turn leaves its subagents'
- *   Requests open;
+ *   Requests open. An async question is the exception: its agent does not
+ *   wait on it, so it stays open, and only an answer, an interrupt or the
+ *   session's exit closes it;
  * - `session.exited` removes every Request.
  *
  * Returns `open` itself when nothing changed, so a caller can tell a change by
@@ -216,7 +218,11 @@ export const computeOpenRequestsAfter = (
     case "request.resolved":
       return keep((request) => request.requestId !== event.requestId);
     case "turn.completed":
-      return keep((request) => request.subagentId !== event.subagentId);
+      return keep(
+        (request) =>
+          request.subagentId !== event.subagentId ||
+          (request.kind === "question" && request.async === true),
+      );
     case "session.exited":
       return open.length === 0 ? open : [];
   }

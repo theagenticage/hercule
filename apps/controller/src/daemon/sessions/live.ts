@@ -155,6 +155,25 @@ const STEP_PROMPT_NOT_CONFIRMED =
   "that session's runner did not confirm it took the step's prompt; the prompt is not sent again, " +
   "and the runner's report of the step's turn settles the step";
 
+const ANSWER_ON_ITS_WAY =
+  "an answer to this question is already on its way; wait until it is confirmed or fails, " +
+  "then read the session again to see whether the question is still open";
+
+/**
+ * The runner refused an answer without saying why. A refusal that comes with
+ * a reason from the runner uses that reason instead.
+ */
+const ANSWER_REFUSED =
+  "the agent's harness did not accept the answer; the question is still open, so answer it again";
+
+/**
+ * The runner did not confirm an answer in time, or its connection dropped
+ * while the controller waited. The answer may have reached the agent.
+ */
+const ANSWER_NOT_CONFIRMED =
+  "that session's runner did not confirm the answer, so it is not known whether the agent got it; " +
+  "if it did, the question closes by itself, and if it did not, the question stays open and can be answered again";
+
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError;
 
 type InputError = ReadError | NotFound | InvalidState | SettingError | Schema.SchemaError;
@@ -174,6 +193,11 @@ const make = Effect.gen(function* () {
   const agents = yield* agentRepository;
   const forkAfterCommit = yield* makeForkAfterCommit;
   const promotion = yield* PromotionState;
+  // The answers to a question that are waiting for the runner's result, as
+  // `<session id>/<request id>`. It describes a wait in progress on this
+  // controller, not domain state, so it is not stored: a restart ends the
+  // wait with it.
+  const answersOnTheirWay = new Set<string>();
 
   /**
    * Returns the model selection to use: the given model, or the session's
@@ -587,9 +611,7 @@ const make = Effect.gen(function* () {
    * - a lost decision on an approval leaves the harness waiting on its
    *   request, and a second decision is refused because the approval
    *   notification is already decided. The user interrupts or stops the
-   *   session to end the wait;
-   * - a question raises no notification, so lost answers to a question can
-   *   simply be sent again.
+   *   session to end the wait.
    *
    * The runner's report of what the frame did is applied in a later
    * transaction, after this one commits, so that report always finds these
@@ -1249,22 +1271,33 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Answers the question the session's harness is waiting on. Returns the
-     * session.
+     * Answers a question one of the session's agents has asked. Returns the
+     * session once the runner confirms the agent's harness accepted the
+     * answer. The question closes when the runner then reports
+     * `request.resolved`, not here.
      *
      * Every check runs before anything is sent to the runner. It fails when:
      *
      * - the session has exited;
      * - the session waits on no Request, or not on this one;
      * - the request is an approval, or the answers do not fit its questions
-     *   (see `validateAnswers`).
+     *   (see `validateAnswers`);
+     * - an earlier answer to the same question is still waiting for the
+     *   runner's result, so two answers never race;
+     * - the runner is not connected.
+     *
+     * After the send it fails with `InvalidState` when the harness refused the
+     * answer (the question stays open), or when no result came before the
+     * deadline or the runner's connection dropped (it is then not known
+     * whether the agent got the answer). The deadline is the one inputs get:
+     * it is the time a harness has to accept a message.
      *
      * A question takes no decision. To turn it down, the user stops the turn
      * with `interrupt`, and the adapter resolves the question as cancelled.
      *
-     * A question raises no notification, so a second answer is not refused
-     * here: it is sent on, and the adapter ignores it because the harness's
-     * wait has ended. The runner is told once the transaction commits.
+     * The audit entry is written in a transaction of its own that commits
+     * before the send, so the wait for the runner never holds a transaction
+     * open.
      */
     respondToQuestion: (input: RespondToQuestionInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
@@ -1276,22 +1309,52 @@ const make = Effect.gen(function* () {
         const { session, open } = yield* readOpenRequest(id, requestId);
         yield* validateAnswers(open, answers);
         const actor = yield* currentStamp;
-        yield* writeThenTellRunner(
-          session.runnerId,
-          sessions.respondingToQuestion(id, requestId, answers),
-          Effect.gen(function* () {
-            yield* audit.append({
-              kind: "session.answered",
-              actor,
-              // The answers stay out of the audit log: `event.read` reaches it
-              // without `session.read`, and an answer can be one the agent
-              // asked to keep secret. The transcript holds them.
-              payload: { sessionId: id, runnerId: session.runnerId, requestId },
-              at: yield* nowIso,
-            });
+        const deadline = yield* SessionInputDeadline;
+        const key = `${id}/${requestId}`;
+        yield* Effect.acquireUseRelease(
+          Effect.suspend(() => {
+            if (answersOnTheirWay.has(key))
+              return Effect.fail(createInvalidStateError(ANSWER_ON_ITS_WAY));
+            answersOnTheirWay.add(key);
+            return Effect.void;
           }),
+          () =>
+            Effect.gen(function* () {
+              yield* withTransaction(
+                sql,
+                Effect.gen(function* () {
+                  if (!(yield* connections.holdsConnection(session.runnerId))) {
+                    return yield* Effect.fail(createInvalidStateError(GONE));
+                  }
+                  yield* audit.append({
+                    kind: "session.answered",
+                    actor,
+                    // The answers stay out of the audit log: `event.read` reaches it
+                    // without `session.read`, and an answer can be one the agent
+                    // asked to keep secret. The transcript holds them.
+                    payload: { sessionId: id, runnerId: session.runnerId, requestId },
+                    at: yield* nowIso,
+                  });
+                }),
+              );
+              const sent = yield* connections.sendAnswerToQuestion(
+                session.runnerId,
+                sessions.respondingToQuestion(id, requestId, answers),
+                deadline,
+              );
+              if (sent._tag === "notSent") return yield* Effect.fail(createInvalidStateError(GONE));
+              if (Option.isNone(sent.answer)) {
+                return yield* Effect.fail(createInvalidStateError(ANSWER_NOT_CONFIRMED));
+              }
+              if (!sent.answer.value.ok) {
+                return yield* Effect.fail(
+                  createInvalidStateError(sent.answer.value.message ?? ANSWER_REFUSED),
+                );
+              }
+            }),
+          () => Effect.sync(() => answersOnTheirWay.delete(key)),
         );
-        return (yield* recordComposer)(session);
+        return (yield* recordComposer)(yield* readSession(id));
       }),
 
     /**

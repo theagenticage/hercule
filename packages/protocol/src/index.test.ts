@@ -382,8 +382,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 7, the version that reports file reads and file searches", () => {
-    expect(PROTOCOL_VERSION).toBe(7);
+  it("is 8, the version that added async questions and the answer result", () => {
+    expect(PROTOCOL_VERSION).toBe(8);
   });
 });
 

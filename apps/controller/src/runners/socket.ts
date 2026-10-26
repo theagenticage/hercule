@@ -332,12 +332,9 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             if (!greeted) return;
             return yield* connections.reportedLoginEnded(runnerId, mine, message);
           case "sessionRespondToQuestionResult":
-            // The controller does not wait for this reply yet, so there is
-            // nobody to hand it to. It is logged rather than dropped silently.
+            // Only an answer to the caller that sent the question's answers.
             if (!greeted) return;
-            return yield* Effect.logWarning(
-              `runner ${runnerId} sent a result for answer ${message.answerId}, which nothing is waiting for`,
-            );
+            return yield* connections.reportedQuestionAnswer(runnerId, mine, message);
           case "goodbye":
             departure = "offline";
             return;
