@@ -482,18 +482,18 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 6 cannot decode the file read and file search item kinds.
-  it("refuses a runner on protocol version 6 and says to upgrade it", async () => {
+  // Version 7 cannot decode an async question or the answer result frame.
+  it("refuses a runner on protocol version 7 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dialRunnerSocket(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 6 }));
+      wire.send(buildHello({ protocolVersion: 7 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(7);
+      expect(PROTOCOL_VERSION).toBe(8);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 7 and the runner does not; " +
-          "upgrade the runner to a build that uses version 7",
+        "this controller uses runner protocol version 8 and the runner does not; " +
+          "upgrade the runner to a build that uses version 8",
       );
       expect(wire.frames).toEqual([]);
     });

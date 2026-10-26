@@ -73,6 +73,8 @@ import {
   type FilesEdited,
   type SessionEvent,
   type SessionInputResult,
+  type SessionRespondToQuestion,
+  type SessionRespondToQuestionResult,
   type SessionsReport,
   type CredentialRequest,
   type WorkspaceReport,
@@ -105,9 +107,10 @@ export const RunnerFactsDeadline = Context.Reference<Duration.Duration>(
 );
 
 /**
- * A frame the runner answers under its `requestId`, other than a frame that
- * carries an input. Those go through `sendFrameCarryingInput`, whose answer
- * is always a `SessionInputResult`.
+ * A frame the runner answers under its `requestId`, or under its `answerId`
+ * for `SessionRespondToQuestion`, other than a frame that carries an input.
+ * Those go through `sendFrameCarryingInput`, whose answer is always a
+ * `SessionInputResult`.
  */
 export type Request =
   | ProbeRequest
@@ -117,7 +120,8 @@ export type Request =
   | WorkspaceInspect
   | RepositorySkillsInspect
   | RepositorySkillsPreview
-  | TextGenerationRequest;
+  | TextGenerationRequest
+  | SessionRespondToQuestion;
 
 /**
  * What came of sending a frame the runner answers:
@@ -208,7 +212,7 @@ export type FleetTraffic =
     }
   | { readonly _tag: "placementsChanged"; readonly runnerId: string };
 
-/** A runner's answer to a `Request`, matched to it by the request's id. */
+/** A runner's answer to a `Request`, matched to it by the id `readAnswerKey` reads. */
 export type Answer =
   | ProbeReport
   | InstallResult
@@ -218,7 +222,17 @@ export type Answer =
   | SessionInputResult
   | WorkspaceInspection
   | RepositorySkillsInspection
-  | TextGenerationReport;
+  | TextGenerationReport
+  | SessionRespondToQuestionResult;
+
+/**
+ * Returns the id a request and its answer are matched by. A question's answers
+ * use their own `answerId`, new for every attempt, because the `requestId` of
+ * the question is the same for a retry, and a late result for an earlier
+ * attempt must wake nobody. Every other frame uses its `requestId`.
+ */
+const readAnswerKey = (frame: Request | Answer): string =>
+  "answerId" in frame ? frame.answerId : frame.requestId;
 
 /**
  * The key callers of `refreshedFacts` wait under. The facts report has no
@@ -482,7 +496,7 @@ const make = Effect.gen(function* () {
     Effect.map(
       sendAndAwaitReport(
         id,
-        request.requestId,
+        readAnswerKey(request),
         (held) => held.ask(request),
         deadline,
         readRequiredCapability(request),
@@ -667,7 +681,7 @@ const make = Effect.gen(function* () {
       Effect.sync(() => {
         const held = reachable.get(id);
         if (held?.connection !== connection) return;
-        wakeWaiters(held, answer.requestId, answer);
+        wakeWaiters(held, readAnswerKey(answer), answer);
       }),
 
     /**

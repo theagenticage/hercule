@@ -533,6 +533,42 @@ describe("the dock for a question", () => {
     expect(readBodies(calls)).toEqual([{ requestId: "req-2", answers: { Storage: "IndexedDB" } }]);
   });
 
+  it("shows the controller's error as it is and keeps every answer when sending fails", async () => {
+    const user = userEvent.setup();
+    const replies: Answer[] = [
+      {
+        status: 409,
+        body: buildErrorBody("invalid_state", "The harness did not take the answer."),
+      },
+      ACCEPTED,
+    ];
+    const { calls } = await renderDock(QUESTIONS, () => replies.shift()!);
+
+    await user.click(findChoice("radio", "IndexedDB"));
+    await user.click(within(readQuestionDock()).getByRole("button", { name: "Next" }));
+    await user.click(findChoice("checkbox", "Sync"));
+    await user.type(readOwnAnswer(), "Offline mode");
+    await user.click(readSend());
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "The harness did not take the answer.",
+    );
+    expect(isLocked(readSend())).toBe(false);
+    expect(isLocked(readOwnAnswer())).toBe(false);
+    expect((findChoice("checkbox", "Sync") as HTMLInputElement).checked).toBe(true);
+    expect((readOwnAnswer() as HTMLInputElement).value).toBe("Offline mode");
+
+    // The first question's pick is kept too: sending again sends all of it.
+    await user.click(readSend());
+    await waitFor(() => {
+      expect(readBodies(calls)).toHaveLength(2);
+    });
+    expect(readBodies(calls)[1]).toEqual({
+      requestId: "req-2",
+      answers: { Storage: "IndexedDB", Features: ["Sync", "Offline mode"] },
+    });
+  });
+
   it("offers no decision, since the user turns a question down by stopping the turn", async () => {
     await renderDock(QUESTIONS);
 

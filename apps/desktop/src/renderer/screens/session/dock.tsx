@@ -384,7 +384,16 @@ export function RequestDock({
                 column, so options and answers line up. The whole row is the
                 click target. */}
             {question.options.length === 0 ? null : (
-              <div className="dock-options">
+              <div
+                className={
+                  // Decided here, not by a `:has()` selector in the CSS:
+                  // `:has()` makes style invalidation depend on descendants,
+                  // which costs while the transcript streams.
+                  question.options.some((option) => option.description !== undefined)
+                    ? "dock-options"
+                    : "dock-options dock-options--plain"
+                }
+              >
                 {question.options.map((option, index) => (
                   // Keyed by place, so a focused choice keeps the focus when
                   // the next question has a choice in the same place.
@@ -404,7 +413,9 @@ export function RequestDock({
                       </span>
                       {option.label}
                     </span>
-                    <span className="ans-desc">{option.description}</span>
+                    {option.description === undefined ? null : (
+                      <span className="ans-desc">{option.description}</span>
+                    )}
                   </label>
                 ))}
               </div>

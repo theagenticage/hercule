@@ -68,7 +68,11 @@ import { runProcess, spawnAppServer } from "../process";
 import type { AppServerChild, AppServerSpawn } from "./rpc";
 import type { SkillsListParams } from "./generated/v2/SkillsListParams";
 import type { SkillsListResponse } from "./generated/v2/SkillsListResponse";
-import { startMockModel } from "./mock-model.testing";
+import {
+  ASYNC_QUESTION_CATALOG,
+  startAsyncQuestionModel,
+  startMockModel,
+} from "./mock-model.testing";
 import type { ProviderRunnerContext } from "../index";
 import { createLines, NO_CONTROLLER_UPLOADER, NO_USER_MATERIAL_PATHS } from "../testing";
 import { buildScriptedSeam, listSentParams, SESSION, SPEC } from "./testing";
@@ -1202,6 +1206,115 @@ describe.skipIf(binary === undefined)("Stop against real Codex subagents", () =>
     },
     45_000,
   );
+});
+
+/**
+ * Checks an async question against a real Codex app-server: the tool, the
+ * item it completes, the Request Hercule opens for it, and the answer Codex
+ * hands to the model. The model is a local fixture, so no login is needed.
+ */
+describe.skipIf(binary === undefined)("a real Codex async question", () => {
+  it("opens a Request, outlives its turn, and reaches the model as the user's answer", async () => {
+    const title = "Which fixture should run next?";
+    const model = startAsyncQuestionModel(title, ["Alpha", "Beta"]);
+    const home = createScratchDir("async-question");
+    mkdirSync(join(home, "codex"));
+    const catalog = join(home, "codex", "model-catalog.json");
+    writeFileSync(catalog, JSON.stringify(ASYNC_QUESTION_CATALOG));
+    writeFileSync(
+      join(home, "codex", "config.toml"),
+      `model_catalog_json = ${JSON.stringify(catalog)}\n${model.config}`,
+    );
+    const adapter = makeCodexAdapter({ appServer: spawnAppServer, run: runProcess });
+    const seen: Array<ProviderEvent> = [];
+    const subscriber = Effect.runFork(
+      Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
+    );
+    const sessionId = "0199e0e7-0000-7000-8000-00000000ff11";
+    const completedTurns = () => seen.filter((event) => event._tag === "turn.completed").length;
+    try {
+      await Effect.runPromise(
+        adapter.startSession(
+          sessionId,
+          { ...SESSION_SPEC, modelSelection: { model: "gpt-5.4", options: {} } },
+          {
+            ...buildContext(home),
+            env: { PATH: process.env["PATH"] ?? "", HERCULE_CODEX_FIXTURE_KEY: "dummy-local-key" },
+          },
+        ),
+      );
+      await Effect.runPromise(adapter.sendInput(sessionId, { text: "Ask me something." }));
+      await waitForFixture(seen, "the asking turn", () => completedTurns() === 1);
+
+      const opened = seen.filter((event) => event._tag === "request.opened");
+      expect(opened).toHaveLength(1);
+      const request = opened[0]!.request;
+      expect(request).toMatchObject({
+        kind: "question",
+        async: true,
+        itemId: "call-async-question",
+        detail: {
+          questions: [
+            {
+              question: title,
+              header: "Question",
+              options: [{ label: "Alpha" }, { label: "Beta" }],
+              multiSelect: false,
+            },
+          ],
+        },
+      });
+      // The question's text reaches the stream once, although Codex streams no delta for it.
+      expect(
+        seen.flatMap((event) =>
+          event._tag === "content.delta" && event.itemId === "call-async-question"
+            ? [event.delta]
+            : [],
+        ),
+      ).toEqual([`${title}\n- Alpha\n- Beta`]);
+      // The asking turn is over, and the question is still open.
+      expect(seen.filter((event) => event._tag === "request.resolved")).toEqual([]);
+
+      await Effect.runPromise(
+        adapter.respondToQuestion(
+          sessionId,
+          request.requestId,
+          { Question: "Beta" },
+          { model: "gpt-5.4", options: {} },
+        ),
+      );
+      await waitForFixture(seen, "the answering turn", () => completedTurns() === 2);
+
+      expect(seen.filter((event) => event._tag === "request.resolved")).toMatchObject([
+        { requestId: request.requestId, answers: { Question: "Beta" } },
+      ]);
+      const shown = seen
+        .filter((event) => event._tag === "item.completed" && event.kind === "user_message")
+        .at(-1);
+      expect(shown).toMatchObject({ detail: { text: `> ${title}\n\nBeta` } });
+      // The model was shown the answer as a user message holding the reply envelope.
+      const texts = model.bodies
+        .at(-1)!
+        .input.flatMap((item) =>
+          item["role"] === "user"
+            ? (item["content"] as Array<{ text?: string }>).map((part) => part.text ?? "")
+            : [],
+        );
+      expect(texts.at(-1)).toBe(
+        `<send_user_message_question_reply>\n${JSON.stringify([
+          {
+            answer: "Beta",
+            question: title,
+            questionItemId: JSON.stringify(["request_user_input_async", "call-async-question", 0]),
+          },
+        ])}\n</send_user_message_question_reply>`,
+      );
+    } finally {
+      await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+      await Effect.runPromise(Fiber.interrupt(subscriber));
+      await model.stop();
+    }
+  }, 45_000);
 });
 
 const NO_USAGE = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };

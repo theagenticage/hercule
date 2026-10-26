@@ -263,7 +263,7 @@ private fun QuestionAnswersForm(request: QuestionRequest, answered: Boolean, onA
                     AnswerRow(
                         icon = if (option.label in answer.picks) BureauIcons.Check else null,
                         title = option.label,
-                        description = option.description.ifBlank { null },
+                        description = option.description?.ifBlank { null },
                         look = if (option.label in answer.picks) AnswerLook.Picked else AnswerLook.Raised,
                         choice = if (question.multiSelect) AnswerChoice.AnyOf else AnswerChoice.OneOf,
                         enabled = !answered,

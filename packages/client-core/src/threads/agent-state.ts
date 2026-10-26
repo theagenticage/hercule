@@ -24,7 +24,11 @@ export interface AgentState {
    * decide, because the records may be older than they are.
    */
   readonly mayBeRunningTurn: boolean;
-  /** The Requests this agent is parked on, oldest first. Another agent's are not here. */
+  /**
+   * The Requests this agent asked that are open, oldest first. Another
+   * agent's are not here. The agent is parked on each, except on an async
+   * question, which it does not wait on.
+   */
   readonly openRequests: readonly SessionRequest[];
   /** The model shown for a turn whose rows do not name one. */
   readonly model: string;

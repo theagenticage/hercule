@@ -10,6 +10,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
+import { AnswerNotDelivered } from "../answer-not-delivered";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
 import {
@@ -520,6 +521,25 @@ const pushAgentEnd = (child: Spawn, message: Record<string, unknown>): void => {
   child.push({ type: "agent_end", messages: [{ role: "assistant", ...message }] });
   child.push({ type: "agent_settled" });
 };
+
+describe("answering a question to pi", () => {
+  it("fails to deliver the answer, because pi asks no questions", async () => {
+    const run = await startTestSession();
+
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.respondToQuestion(
+          SESSION,
+          "r-1",
+          { Storage: "localStorage" },
+          { model: "glm-5.3-flash", options: {} },
+        ),
+      ),
+    );
+
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
+  });
+});
 
 describe("how a turn ends after the user stops it", () => {
   it("ends as interrupted, whatever pi reports about the message in flight", async () => {

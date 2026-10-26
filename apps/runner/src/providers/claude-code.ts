@@ -69,6 +69,7 @@ import {
   type RequestOpened,
 } from "./claude-code-subagents";
 import type { AttachmentUploader } from "../attachments";
+import { AnswerNotDelivered } from "./answer-not-delivered";
 import type { ResolvedSkillReference } from "../skills";
 import { buildSkillSteerRefusedMessage, SteerRefused } from "./steer-refused";
 import { readAttachmentBase64 } from "./attachments";
@@ -410,9 +411,10 @@ const createPushable = <A>(): Pushable<A> => {
 /**
  * The SDK permission mode for each access mode (spec 06 section 8.1).
  * `approval-required` maps to the SDK's default mode, which asks for approval
- * through `canUseTool`. The callback is passed in every mode except
- * `full-access`: the harness decides which actions a mode asks about, and a
- * mode that asks about nothing never calls it.
+ * through `canUseTool`. The callback is passed in every mode, `full-access`
+ * included: without it the harness leaves out `AskUserQuestion` altogether.
+ * In `full-access` the harness still calls it for a question and for a tool
+ * call that always needs the user's approval (`FULL_ACCESS_NOT_ASKED`).
  */
 const PERMISSION_MODES: Readonly<Record<AccessMode, PermissionMode>> = {
   "approval-required": "default",
@@ -436,6 +438,18 @@ const readInputPaths = (input: Record<string, unknown>): ReadonlyArray<string> =
 
 /** The SDK's tool for asking the user questions; it gets a `question` request. */
 const ASK_USER_QUESTION = "AskUserQuestion";
+
+/**
+ * The message the model reads when a tool call is refused in `full-access`.
+ * In `full-access` the harness asks the callback only about a question and
+ * about a call that needs the user's approval whatever the mode: a tool the
+ * user's or project's settings have an `ask` rule for, a critical-path `rm`
+ * or `rmdir`, or an MCP tool that requires user interaction. Full access
+ * shows the user no approvals, so nobody can be asked. The harness gives the
+ * same refusal when it has no callback at all.
+ */
+const FULL_ACCESS_NOT_ASKED =
+  "Not run: this tool call needs the user's approval, and a session in full access cannot ask the user for it.";
 
 /**
  * Builds the approval the user answers for one tool call other than a
@@ -974,9 +988,9 @@ const buildSessionOptions = (
       ...(spec.workspaceId === null ? [] : (["project"] as const)),
     ],
     settings,
-    // A hook, unlike `canUseTool`, runs in every access mode, `full-access`
-    // included, so no session can message another Claude session, and every
-    // tool that can write files is marked.
+    // A hook, unlike `canUseTool`, runs for every tool call in every access
+    // mode, `full-access` included. So no session can message another Claude
+    // session, and every tool that can write files is marked.
     hooks: {
       PreToolUse: [
         { matcher: "SendMessage", hooks: [refuseMessageToOtherSession] },
@@ -996,11 +1010,13 @@ const buildSessionOptions = (
     model: spec.modelSelection.model,
     ...(effort === undefined ? {} : { effort }),
     permissionMode: PERMISSION_MODES[spec.accessMode],
-    // Pass the callback in every mode except `full-access`. When permissions
-    // are skipped, the SDK ignores the callback and logs a warning about it.
-    ...(spec.accessMode === "full-access"
-      ? { allowDangerouslySkipPermissions: true }
-      : { canUseTool }),
+    // The callback is passed in every mode. The harness leaves out the
+    // `AskUserQuestion` tool when it has no callback. In `bypassPermissions`
+    // it still calls the callback for a question and for a call that always
+    // needs the user's approval. The SDK warns that the callback "will not be
+    // invoked" in that mode; the warning does not hold for those calls.
+    canUseTool,
+    ...(spec.accessMode === "full-access" ? { allowDangerouslySkipPermissions: true } : {}),
     env: {
       ...buildEnv(ctx),
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
@@ -1139,8 +1155,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
 
   /**
    * Builds the `canUseTool` callback the harness calls to ask for approval
-   * (spec 06 section 8.2). The promise the callback returns is the park. It
-   * stays open until one of these happens:
+   * or to ask a question (spec 06 section 8.2). In `full-access` it opens no
+   * approval: it refuses every call but a question at once. The promise the
+   * callback returns is the park. It stays open until one of these happens:
    *
    * - the user answers;
    * - the harness withdraws the request by aborting the signal;
@@ -1156,8 +1173,11 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
    * (spec 06 section 13.3).
    */
   const buildCanUseTool =
-    (sessionId: string): CanUseTool =>
+    (sessionId: string, accessMode: AccessMode): CanUseTool =>
     (toolName, input, options) => {
+      if (accessMode === "full-access" && toolName !== ASK_USER_QUESTION) {
+        return Promise.resolve({ behavior: "deny", message: FULL_ACCESS_NOT_ASKED });
+      }
       const held = live.get(sessionId);
       // Deny by default, using the same check that rejects input: when the
       // session is gone or stopping, nobody is left to answer, and the park
@@ -1483,7 +1503,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
                       spec,
                       binary,
                       native.options,
-                      buildCanUseTool(sessionId),
+                      buildCanUseTool(sessionId, spec.accessMode),
                       buildRefuseMessageToOtherSession(sessionId),
                       settings,
                     ),
@@ -1659,11 +1679,19 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       sessionId: string,
       requestId: string,
       answers: QuestionAnswers,
-    ): Effect.Effect<void> =>
-      Effect.sync(() => {
+    ): Effect.Effect<void, AnswerNotDelivered> =>
+      Effect.suspend(() => {
         const park = live.get(sessionId)?.parks.get(requestId);
-        if (park?.kind !== "question") return;
+        if (park?.kind !== "question") {
+          return Effect.fail(
+            new AnswerNotDelivered({
+              message:
+                "The question is no longer open: it was already answered, or the agent that asked it stopped.",
+            }),
+          );
+        }
         park.answer(answers);
+        return Effect.void;
       }),
 
     listSessions: Effect.sync(() => [...live.values()].map((held) => held.binding)),

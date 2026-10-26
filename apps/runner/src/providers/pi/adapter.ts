@@ -43,6 +43,7 @@ import type {
   TextGenerationContext,
   UserMaterial,
 } from "../index";
+import { AnswerNotDelivered } from "../answer-not-delivered";
 import { readAttachmentBase64 } from "../attachments";
 import { buildUserMessage } from "../events";
 import { joinInstructions } from "../prompt";
@@ -1844,10 +1845,15 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         return decision === "cancel" ? abortTurn(park.agent, "interrupt") : Effect.void;
       }),
 
-    // pi parks only on a confirm dialog, never on a question, so there is
-    // never a question here to answer. The `subagent` tool's input dialog is
-    // answered by the runner itself and never reaches the user.
-    respondToQuestion: (): Effect.Effect<void> => Effect.void,
+    // pi parks only on a confirm dialog, never on a question (issue #316), so
+    // there is never a question here to answer. The `subagent` tool's input
+    // dialog is answered by the runner itself and never reaches the user.
+    respondToQuestion: (): Effect.Effect<void, AnswerNotDelivered> =>
+      Effect.fail(
+        new AnswerNotDelivered({
+          message: "pi asks no questions, so there is no question to answer.",
+        }),
+      ),
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
       Effect.gen(function* () {

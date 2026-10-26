@@ -1109,7 +1109,7 @@ describe("what an input does to a Codex session", () => {
     const NEXT = "0199e0e7-0000-7000-8000-0000000000f9";
     let turns = 0;
     const run = await startBusySession({
-      "turn/steer": () => buildRefusal(`expected turn ${TURN} is not the active turn`),
+      "turn/steer": () => buildRefusal(`expected active turn id \`${TURN}\` but found \`other\``),
       "turn/start": () => {
         turns += 1;
         const id = turns === 1 ? TURN : NEXT;
@@ -1125,11 +1125,47 @@ describe("what an input does to a Codex session", () => {
     expect(listSentParams(run.requests, "turn/start")).toHaveLength(2);
   });
 
+  it("starts a new turn instead when Codex says the turn it meant to steer ended", async () => {
+    const run = await startBusySession({
+      "turn/steer": () => buildRefusal("no active turn to steer"),
+    });
+
+    const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "carry on" }));
+
+    expect(sent.delivery).toBe("opened");
+    expect(listSentParams(run.requests, "turn/start")).toHaveLength(2);
+  });
+
+  it("starts a new turn instead for any steer refusal that carries an error code", async () => {
+    const run = await startBusySession({
+      "turn/steer": () => buildRefusal("failed to steer turn: something new", -32603),
+    });
+
+    const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "carry on" }));
+
+    expect(sent.delivery).toBe("opened");
+    expect(listSentParams(run.requests, "turn/start")).toHaveLength(2);
+  });
+
+  it("fails and starts no turn when the steer fails with no error code", async () => {
+    const run = await startBusySession({
+      "turn/steer": () => ({ error: { message: "failed to steer turn: the thread is gone" } }),
+    });
+
+    const failure = await Effect.runPromise(
+      Effect.flip(run.adapter.sendInput(SESSION, { text: "carry on" })),
+    );
+
+    // A new turn here could deliver the input a second time.
+    expect(failure).toBe("failed to steer turn: the thread is gone");
+    expect(listSentParams(run.requests, "turn/start")).toHaveLength(1);
+  });
+
   it("starts a new turn instead when the running turn cannot be steered", async () => {
     const NEXT = "0199e0e7-0000-7000-8000-0000000000f8";
     let turns = 0;
     const run = await startBusySession({
-      "turn/steer": () => buildRefusal("activeTurnNotSteerable: the active turn is a review"),
+      "turn/steer": () => buildRefusal("cannot steer a review turn"),
       "turn/start": () => {
         turns += 1;
         const id = turns === 1 ? TURN : NEXT;

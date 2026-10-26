@@ -254,6 +254,71 @@ const buildItemCompleted = (item: Record<string, unknown>): Note =>
     completedAtMs: 1789373123124,
   });
 
+describe("the text of an assistant message", () => {
+  const ASYNC_MESSAGE = {
+    type: "agentMessage",
+    id: "call_7c2a59c7b036446aaf0aaa6df4e3200f",
+    text: "Tool test: Did this structured question reach you?\n- Yes\n- No",
+    phase: "final_answer",
+    delivery: "async",
+    questions: [
+      { title: "Tool test: Did this structured question reach you?", options: ["Yes", "No"] },
+    ],
+  };
+
+  it("reaches the stream as one delta when Codex sends a message with no deltas", () => {
+    // The frames captured from codex 0.163.0 for request_user_input_async.
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildNote("item/started", { item: ASYNC_MESSAGE, threadId: THREAD, turnId: TURN }),
+      buildItemCompleted(ASYNC_MESSAGE),
+    ]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "content.delta",
+      "item.completed",
+    ]);
+    expect(filterByTag(events, "content.delta")[0]).toMatchObject({
+      itemId: ASYNC_MESSAGE.id,
+      streamKind: "assistant_text",
+      delta: ASYNC_MESSAGE.text,
+    });
+  });
+
+  it("is not repeated when the same item completes again", () => {
+    const state = buildTestState();
+
+    const events = normalizeNotes(state, [
+      buildItemCompleted(ASYNC_MESSAGE),
+      buildItemCompleted(ASYNC_MESSAGE),
+    ]);
+
+    expect(filterByTag(events, "content.delta")).toHaveLength(1);
+    expect(filterByTag(events, "item.completed")).toHaveLength(2);
+  });
+
+  it("is not repeated for a message that streamed", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      ITEM_STARTED,
+      buildDeltaNote("item/agentMessage/delta", { delta: "Hel" }),
+      buildDeltaNote("item/agentMessage/delta", { delta: "lo" }),
+      ITEM_COMPLETED,
+      ITEM_COMPLETED,
+    ]);
+
+    expect(filterByTag(events, "content.delta").map((event) => event.delta)).toEqual(["Hel", "lo"]);
+  });
+
+  it("adds nothing for a message with no text", () => {
+    const events = normalizeFromStart([buildItemCompleted({ ...MESSAGE, text: "" })]);
+
+    expect(filterByTag(events, "content.delta")).toEqual([]);
+  });
+});
+
 describe("the kind each Codex item is reported as", () => {
   it("maps every item type in this release, and reports any other type as unknown", () => {
     for (const [item, kind] of ITEMS) {

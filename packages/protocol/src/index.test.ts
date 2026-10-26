@@ -174,6 +174,17 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   },
   { _tag: "sessionInputResult", requestId: REQUEST_ID, ok: true, delivery: "steered" },
   {
+    _tag: "sessionRespondToQuestionResult",
+    answerId: "0199e0e7-0000-7000-8000-000000000010",
+    ok: true,
+  },
+  {
+    _tag: "sessionRespondToQuestionResult",
+    answerId: "0199e0e7-0000-7000-8000-000000000010",
+    ok: false,
+    message: "Codex has stopped, so the answer did not reach it.",
+  },
+  {
     _tag: "sessionsReport",
     sessions: [{ sessionId: SESSION_ID, nativeSessionId: "native-1", instanceId: INSTANCE_ID }],
   },
@@ -291,6 +302,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     _tag: "sessionRespondToQuestion",
     sessionId: SESSION_ID,
     requestId: "0199e0e7-0000-7000-8000-00000000000f",
+    answerId: "0199e0e7-0000-7000-8000-000000000010",
+    modelSelection: { model: "gpt-5.5", options: {} },
     answers: { Storage: "localStorage", Features: ["Sync", "Search"] },
   },
   {
@@ -375,8 +388,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 7, the version that reports file reads and file searches", () => {
-    expect(PROTOCOL_VERSION).toBe(7);
+  it("is 8, the version that added async questions and the answer result", () => {
+    expect(PROTOCOL_VERSION).toBe(8);
   });
 });
 

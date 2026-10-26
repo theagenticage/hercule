@@ -56,7 +56,7 @@ import {
   type ServerHarness,
 } from "../http/testing";
 import { Live } from "../daemon";
-import { withTransaction } from "../db";
+import { UUID_PATTERN, withTransaction } from "../db";
 import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
 import { importTestSkill } from "../skills/testing";
 import { sessionRepository } from "./repository";
@@ -4950,9 +4950,13 @@ const ANSWERS = { Storage: "localStorage", Features: ["Sync", "Search"] } as con
 
 /**
  * Starts a session in a running turn, waiting on one open `question` request
- * that asks `QUESTIONS`. Returns the session once it shows the request.
+ * that asks `QUESTIONS`, an async question when `asyncQuestion` is set.
+ * Returns the session once it shows the request.
  */
-const startQuestionSession = async (arranged: Arranged): Promise<Session> => {
+const startQuestionSession = async (
+  arranged: Arranged,
+  asyncQuestion: boolean = false,
+): Promise<Session> => {
   const session = await startSession(arranged, "hello");
   reportEvent(arranged.wire, 2, {
     eventId: crypto.randomUUID(),
@@ -4971,6 +4975,7 @@ const startQuestionSession = async (arranged: Arranged): Promise<Session> => {
       itemId: "i1",
       kind: "question",
       detail: { questions: [...QUESTIONS] },
+      ...(asyncQuestion ? { async: true as const } : {}),
     },
   });
   return await waitForSession(arranged, session.id, (one) =>
@@ -4989,19 +4994,27 @@ describe("session.respondToQuestion", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(200);
-      expect(((await response.json()) as Session).id).toBe(session.id);
+      const answered = (await response.json()) as Session;
+      expect(answered.id).toBe(session.id);
+      // The runner's `request.resolved` closes the question, not the reply.
+      expect(answered.openRequests).toMatchObject([{ requestId: REQUEST_ID }]);
 
       const sent = await waitForFrames<SessionRespondToQuestion>(
         arranged.wire,
         "sessionRespondToQuestion",
         1,
       );
+      // The answer id is new for every attempt, so it is checked apart.
+      expect(sent[0]?.answerId).toMatch(UUID_PATTERN);
       expect(sent).toStrictEqual([
         {
           _tag: "sessionRespondToQuestion",
           sessionId: session.id,
           requestId: REQUEST_ID,
+          answerId: sent[0]?.answerId,
           answers: ANSWERS,
+          // The session's current model, which the harness applies if the answer starts a turn.
+          modelSelection: { model: "clever", options: {} },
         },
       ]);
 
@@ -5059,6 +5072,173 @@ describe("session.respondToQuestion", () => {
       // Whether the runner gets the one answer as a string or as a list of
       // one, it is the answer the user chose.
       expect([sent[0]!.answers["Storage"]].flat()).toEqual(["localStorage"]);
+    });
+  });
+
+  it("refuses with the runner's message when the harness does not accept the answer, and leaves the question open", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged);
+      arranged.wire.answeringQuestions(() => ({
+        ok: false,
+        message: "the agent is not waiting on that question any more",
+      }));
+
+      const response = await respondToQuestion(arranged, session.id, {
+        requestId: REQUEST_ID,
+        answers: ANSWERS,
+      });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.clone().text()).toContain(
+        "the agent is not waiting on that question any more",
+      );
+      expect((await parseRefusal(response)).code).toBe("invalid_state");
+      expect((await readSession(arranged, session.id)).openRequests).toEqual(session.openRequests);
+    });
+  });
+
+  it("says it is not known whether the agent got the answer when the runner reports nothing in time", async () => {
+    await withFleet(
+      async (arranged) => {
+        const session = await startQuestionSession(arranged);
+        arranged.wire.answeringQuestions(() => undefined);
+
+        const response = await respondToQuestion(arranged, session.id, {
+          requestId: REQUEST_ID,
+          answers: ANSWERS,
+        });
+
+        expect(response.status, await response.clone().text()).toBe(409);
+        expect(await response.clone().text()).toContain("not known whether the agent got it");
+        expect((await parseRefusal(response)).code).toBe("invalid_state");
+        expect((await readSession(arranged, session.id)).openRequests).toEqual(
+          session.openRequests,
+        );
+      },
+      { inputDeadline: EXPIRING_INPUT_DEADLINE },
+    );
+  });
+
+  it("refuses a second answer to a question while the first is on its way, and takes a new one once the first has settled", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged);
+      arranged.wire.answeringQuestions(() => undefined);
+      const body = { requestId: REQUEST_ID, answers: ANSWERS };
+
+      const first = respondToQuestion(arranged, session.id, body);
+      const [firstFrame] = await waitForFrames<SessionRespondToQuestion>(
+        arranged.wire,
+        "sessionRespondToQuestion",
+        1,
+      );
+      const second = await respondToQuestion(arranged, session.id, body);
+
+      expect(second.status, await second.clone().text()).toBe(409);
+      expect(await second.clone().text()).toContain("already on its way");
+      expect((await parseRefusal(second)).code).toBe("invalid_state");
+      expect(listFrames(arranged.wire, "sessionRespondToQuestion")).toHaveLength(1);
+      expect(await arranged.harness.audit("session.answered")).toHaveLength(1);
+
+      arranged.wire.send({
+        _tag: "sessionRespondToQuestionResult",
+        answerId: firstFrame!.answerId,
+        ok: true,
+      });
+      expect((await first).status).toBe(200);
+
+      arranged.wire.answeringQuestions(() => ({ ok: true }));
+      const third = await respondToQuestion(arranged, session.id, body);
+      expect(third.status, await third.clone().text()).toBe(200);
+      const frames = listFrames<SessionRespondToQuestion>(
+        arranged.wire,
+        "sessionRespondToQuestion",
+      );
+      expect(frames).toHaveLength(2);
+      expect(frames[1]?.answerId).not.toBe(firstFrame!.answerId);
+    });
+  });
+
+  it("does not settle a new answer with the late result of an earlier attempt", async () => {
+    await withFleet(
+      async (arranged) => {
+        const session = await startQuestionSession(arranged);
+        arranged.wire.answeringQuestions(() => undefined);
+        const body = { requestId: REQUEST_ID, answers: ANSWERS };
+
+        // The first attempt gets no result, so it fails at the deadline.
+        const expired = await respondToQuestion(arranged, session.id, body);
+        expect(expired.status).toBe(409);
+        const [earlier] = await waitForFrames<SessionRespondToQuestion>(
+          arranged.wire,
+          "sessionRespondToQuestion",
+          1,
+        );
+
+        const retry = respondToQuestion(arranged, session.id, body);
+        const [, later] = await waitForFrames<SessionRespondToQuestion>(
+          arranged.wire,
+          "sessionRespondToQuestion",
+          2,
+        );
+        arranged.wire.send({
+          _tag: "sessionRespondToQuestionResult",
+          answerId: earlier!.answerId,
+          ok: true,
+        });
+        const settled = await Promise.race([retry, delay(100).then(() => "pending" as const)]);
+        expect(settled).toBe("pending");
+
+        arranged.wire.send({
+          _tag: "sessionRespondToQuestionResult",
+          answerId: later!.answerId,
+          ok: true,
+        });
+        expect((await retry).status).toBe(200);
+      },
+      { inputDeadline: Duration.millis(800) },
+    );
+  });
+
+  it("keeps an async question open when its agent's turn ends, until a request.resolved closes it", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged, true);
+
+      reportEvent(arranged.wire, 4, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "turn.completed",
+        turnId: "t1",
+        state: "completed",
+      });
+      const idle = await waitForSession(arranged, session.id, (one) => one.status === "idle");
+      expect(idle.openRequests).toMatchObject([{ requestId: REQUEST_ID, async: true }]);
+
+      reportEvent(arranged.wire, 5, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "request.resolved",
+        requestId: REQUEST_ID,
+        answers: ANSWERS,
+      });
+      await waitForSession(arranged, session.id, (one) => one.openRequests.length === 0);
+    });
+  });
+
+  it("closes a blocking question when its agent's turn ends", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged);
+
+      reportEvent(arranged.wire, 4, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "turn.completed",
+        turnId: "t1",
+        state: "interrupted",
+      });
+      await waitForSession(arranged, session.id, (one) => one.openRequests.length === 0);
     });
   });
 

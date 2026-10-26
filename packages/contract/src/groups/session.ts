@@ -15,6 +15,7 @@ import {
   Fact,
   ModelSelection,
   OpenRequest,
+  isAsyncQuestion,
   OutputSchema,
   QuestionAnswers,
   SESSION_INPUT_DEADLINE,
@@ -48,15 +49,24 @@ import { atMost, bounded, nonBlankLine } from "../strings";
  * The request, subagent and usage vocabulary comes from the runner protocol;
  * the API returns it unchanged.
  */
-export { ApprovalDecision, OpenRequest, QuestionAnswers, SubagentId, Usage, UsageReport };
+export {
+  ApprovalDecision,
+  OpenRequest,
+  QuestionAnswers,
+  SubagentId,
+  Usage,
+  UsageReport,
+  isAsyncQuestion,
+};
 export type { ApprovalRequest };
 
 /** Checks whether `value` is a subagent's id, such as one read back from storage. */
 export const isSubagentId = Schema.is(SubagentId);
 
 /**
- * A Request one agent of a session is parked on: the request exactly as the
- * harness opened it, and the subagent that asked.
+ * A Request one agent of a session has open: the request exactly as the
+ * harness opened it, and the subagent that asked. The agent is parked on it,
+ * except on an async question, which the agent does not wait on.
  *
  * - `subagentId` is absent when the session's own agent asked (spec 06
  *   section 13.3).
@@ -291,12 +301,13 @@ export const Session = Schema.Struct({
   /** Set where this session was forked off another one; null otherwise. */
   parentSessionId: Schema.NullOr(Id),
   /**
-   * The Requests the session's agents are parked on, oldest first; empty when
+   * The Requests the session's agents have open, oldest first; empty when
    * nothing waits on the user. Several can be open at once, from the
    * session's own agent and from its subagents, and each is answered on its
-   * own, in any order. A Request closes when it is answered, when the turn of
-   * the agent that asked ends, when that agent is stopped, or when the
-   * session exits.
+   * own, in any order. A Request closes when it is answered, when that agent
+   * is stopped, or when the session exits. It also closes when the turn of
+   * the agent that asked ends, except an async question, which stays open
+   * after the turn.
    */
   openRequests: Schema.Array(SessionRequest),
   /**
@@ -698,7 +709,7 @@ export type SessionRespondToApprovalRequestCall = Schema.Schema.Type<
 >;
 
 /**
- * The answers to the questions one of a session's agents is parked on, keyed
+ * The answers to the questions one of a session's agents has open, keyed
  * by each question's header. `requestId` is that Request's own id, for the
  * same reason as a decision's.
  */

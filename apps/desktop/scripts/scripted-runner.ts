@@ -1219,10 +1219,24 @@ export async function enlistScriptedRunner(
         if (session === undefined) return;
         return resolveRequest(session, frame.requestId, { decision: frame.decision });
       }
+      // The controller waits for this result before it answers the user, so a
+      // question that is not open is refused rather than left unanswered.
       case "sessionRespondToQuestion": {
         const session = sessions.get(frame.sessionId);
-        if (session === undefined) return;
-        return resolveRequest(session, frame.requestId, { answers: frame.answers });
+        if (session === undefined || !session.requests.has(frame.requestId)) {
+          return send({
+            _tag: "sessionRespondToQuestionResult",
+            answerId: frame.answerId,
+            ok: false,
+            message: `runner ${runnerId} is not waiting on question ${frame.requestId}`,
+          });
+        }
+        resolveRequest(session, frame.requestId, { answers: frame.answers });
+        return send({
+          _tag: "sessionRespondToQuestionResult",
+          answerId: frame.answerId,
+          ok: true,
+        });
       }
       // Without a subagent id, an interrupt stops all work in the session, even
       // while its own agent is idle and only subagents run. With one, it stops
@@ -1268,7 +1282,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 7 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 8 satisfies typeof PROTOCOL_VERSION,
             capabilities: [
               "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,

@@ -295,6 +295,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           case "loginFailed":
           case "loginResult":
           case "textGenerationReport":
+          case "sessionRespondToQuestionResult":
             if (!greeted) return;
             return yield* connections.reportedAnswer(runnerId, mine, message);
           case "sessionInputResult":

@@ -187,6 +187,7 @@ function QuestionForm({
   const answer = draft[question.header]!;
   const isLast = shownQuestionIndex === questions.length - 1;
   const questionAnswered = isQuestionAnswered(draft, question);
+  const hasDescriptions = question.options.some((option) => option.description !== undefined);
 
   return (
     <form
@@ -217,7 +218,12 @@ function QuestionForm({
           </span>
         )}
       </div>
-      <span className="mt-0.5 text-meta text-ink">{question.question}</span>
+      {/* An async question's text is the agent's whole title, which can run
+          to several paragraphs: it keeps its line breaks and scrolls past
+          about eight lines rather than push the transcript out of view. */}
+      <span className="mt-0.5 max-h-[8lh] overflow-y-auto text-meta whitespace-pre-line text-ink wrap-anywhere">
+        {question.question}
+      </span>
       {/* The same two columns as the answer ledger, so options and answers
           line up: the choice and its label on the shared left edge, its
           meaning beside it. The whole row is the click target. The list, not
@@ -232,7 +238,10 @@ function QuestionForm({
             <label
               key={index}
               className={cn(
-                "grid grid-cols-[140px_minmax(0,1fr)] items-baseline gap-3 rounded-control px-2 py-[3px]",
+                "grid items-baseline gap-3 rounded-control px-2 py-[3px]",
+                // With no description to line up, the label takes the whole
+                // row instead of wrapping in the first column.
+                hasDescriptions ? "grid-cols-[140px_minmax(0,1fr)]" : "grid-cols-1",
                 locked ? "cursor-not-allowed" : "cursor-pointer hover:bg-line-soft",
               )}
             >
@@ -252,7 +261,9 @@ function QuestionForm({
                 />
                 <span className="text-meta font-emph text-ink wrap-anywhere">{option.label}</span>
               </span>
-              <span className="text-fine text-muted wrap-anywhere">{option.description}</span>
+              {option.description === undefined ? null : (
+                <span className="text-fine text-muted wrap-anywhere">{option.description}</span>
+              )}
             </label>
           ))}
         </div>

@@ -407,10 +407,11 @@ const ToolApproval = defineApprovalRequest("tool_approval", { toolName: Fact });
 
 /**
  * One question in a `question` request: the chip it is labelled with, the
- * prose the agent wrote, and the options it offers. An approval and a
- * question are different things sharing one request slot, so the question
- * keeps its own structure rather than being flattened to text: a surface that
- * reads only the text cannot show what the answers were.
+ * prose the agent wrote, and the options it offers. An option's description
+ * is absent when the agent wrote none, and nothing is made up in its place.
+ * An approval and a question are different things sharing one request slot,
+ * so the question keeps its own structure rather than being flattened to
+ * text: a surface that reads only the text cannot show what the answers were.
  *
  * The struct is closed, like every detail here: a vendor's extra field (the
  * Claude SDK's `preview`) would make what the user sees depend on which
@@ -419,7 +420,7 @@ const ToolApproval = defineApprovalRequest("tool_approval", { toolName: Fact });
 const Question = Schema.Struct({
   question: Message,
   header: Fact,
-  options: Schema.Array(Schema.Struct({ label: Fact, description: Message })),
+  options: Schema.Array(Schema.Struct({ label: Fact, description: Schema.optionalKey(Message) })),
   /** Whether more than one option may be chosen. */
   multiSelect: Schema.Boolean,
   /**
@@ -432,14 +433,22 @@ const Question = Schema.Struct({
 });
 
 /**
- * Questions one agent of a session is parked on. A harness asks one to four
- * questions at a time, so the request holds a list. It accepts answers only,
- * never a decision. To turn the questions down, the user stops the turn, and
+ * Questions one agent of a session asks the user: it is parked on them, unless
+ * the request is async (below). A harness asks one to four questions at a
+ * time, so the request holds a list. It accepts answers only, never a
+ * decision. To turn the questions down, the user stops the asking agent, and
  * the request resolves as `cancel`.
+ *
+ * `async` is present, and true, on an async question: one the asking agent
+ * does not wait on. The agent keeps working, and the request stays open after
+ * the agent's turn ends, until the question is answered, the asking agent is
+ * stopped, or the session exits. It is left out when the agent waits (parks)
+ * for the answer.
  */
-const QuestionRequest = Schema.Struct(
-  defineOpenRequestFields("question", { questions: Schema.NonEmptyArray(Question) }),
-);
+const QuestionRequest = Schema.Struct({
+  ...defineOpenRequestFields("question", { questions: Schema.NonEmptyArray(Question) }),
+  async: Schema.optionalKey(Schema.Literal(true)),
+});
 
 /**
  * One answer to a question: an option's label or text the user typed. Text
@@ -513,6 +522,14 @@ export const OpenRequest = Schema.Union([
 ]);
 
 export type OpenRequest = Schema.Schema.Type<typeof OpenRequest>;
+
+/**
+ * Checks whether a request is an async question: one the asking agent does not
+ * wait on. Such a request stays open after its agent's turn ends, and it does
+ * not stop the session's inactivity watch.
+ */
+export const isAsyncQuestion = (request: OpenRequest): boolean =>
+  request.kind === "question" && request.async === true;
 
 /** An open request that is an approval: any kind but `question`. It takes a decision. */
 export type ApprovalRequest = Exclude<OpenRequest, { readonly kind: "question" }>;
@@ -1002,19 +1019,58 @@ export type SessionRespondToApprovalRequest = Schema.Schema.Type<
 >;
 
 /**
- * Answers the questions one agent of the session is parked on. Like
- * `SessionRespondToApprovalRequest`, there is no reply frame: the result
- * arrives in the session's own stream as `request.resolved`, with the
+ * Answers the questions of one open question request. The runner replies with
+ * a `SessionRespondToQuestionResult` under `answerId`, which tells the
+ * controller whether the answer reached the agent. When it did, the request
+ * resolves in the session's own stream as `request.resolved`, with the
  * answers.
+ *
+ * `answerId` is new for every attempt to answer, so the result of one attempt
+ * is never taken for the result of another, such as a retry of the same
+ * request.
  */
 export const SessionRespondToQuestion = Schema.Struct({
   _tag: Schema.Literal("sessionRespondToQuestion"),
   sessionId: SessionId,
   requestId: Fact,
+  answerId: Fact,
   answers: QuestionAnswers,
+  /**
+   * The session's current model, sent on every input frame too. A harness
+   * takes a model change only on the input that starts a turn, and an answer
+   * can start one, so the adapter applies this there and ignores it the rest
+   * of the time.
+   */
+  modelSelection: ModelSelection,
 });
 
 export type SessionRespondToQuestion = Schema.Schema.Type<typeof SessionRespondToQuestion>;
+
+/**
+ * What happened to one attempt to answer a question, with the `answerId` it
+ * was sent with. Sent by the runner for every `SessionRespondToQuestion`.
+ */
+export const SessionRespondToQuestionResult = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal("sessionRespondToQuestionResult"),
+    answerId: Fact,
+    ok: Schema.Literal(true),
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("sessionRespondToQuestionResult"),
+    answerId: Fact,
+    ok: Schema.Literal(false),
+    /**
+     * Written for the user: says why the answer did not reach the agent, or
+     * that it is not known whether it did.
+     */
+    message: Message,
+  }),
+]);
+
+export type SessionRespondToQuestionResult = Schema.Schema.Type<
+  typeof SessionRespondToQuestionResult
+>;
 
 /**
  * What happened to one input, with the row id it was sent with. It has no turn

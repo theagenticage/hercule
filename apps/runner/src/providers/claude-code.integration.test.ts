@@ -1034,6 +1034,159 @@ describe.skipIf(binary === undefined)("the workspace root in a real Claude Code 
   );
 });
 
+/** One request the CLI sent to the mock Messages API in a turn that has tools. */
+interface MockRequest {
+  readonly model: string;
+  /** The names of the tools the request offers the model. */
+  readonly tools: ReadonlyArray<string>;
+  readonly messages: unknown;
+}
+
+/** What the mock model answers: one tool call, or a text that ends the turn. */
+type MockReply =
+  | { readonly toolUse: { readonly name: string; readonly input: unknown } }
+  | { readonly text: string };
+
+/**
+ * Starts a mock of the Anthropic Messages API. `decide` picks the reply to
+ * each request that offers tools; a request without tools (the CLI makes some
+ * on the side, for example to name the session) always gets the text "done".
+ * Returns the base URL, the requests with tools in the order they arrived, and
+ * a function that stops the server.
+ */
+const startMockApi = (
+  decide: (request: MockRequest) => MockReply,
+): {
+  readonly url: string;
+  readonly requests: ReadonlyArray<MockRequest>;
+  readonly stop: () => void;
+} => {
+  const requests: Array<MockRequest> = [];
+  let toolUses = 0;
+  const stream = (events: ReadonlyArray<readonly [string, unknown]>): Response =>
+    new Response(
+      events.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join(""),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      if (!new URL(request.url).pathname.endsWith("/v1/messages")) {
+        return new Response("{}", { headers: { "content-type": "application/json" } });
+      }
+      const body = (await request.json()) as {
+        readonly model: string;
+        readonly tools?: ReadonlyArray<{ readonly name: string }>;
+        readonly messages: unknown;
+      };
+      const message = {
+        id: "msg_1",
+        type: "message",
+        role: "assistant",
+        model: body.model,
+        content: [],
+        stop_reason: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      };
+      const offersTools = (body.tools?.length ?? 0) > 0;
+      const seen: MockRequest = {
+        model: body.model,
+        tools: (body.tools ?? []).map((tool) => tool.name),
+        messages: body.messages,
+      };
+      if (offersTools) requests.push(seen);
+      const reply: MockReply = offersTools ? decide(seen) : { text: "done" };
+      const block =
+        "toolUse" in reply
+          ? [
+              {
+                type: "content_block_start",
+                index: 0,
+                content_block: {
+                  type: "tool_use",
+                  id: `toolu_${++toolUses}`,
+                  name: reply.toolUse.name,
+                  input: {},
+                },
+              },
+              {
+                type: "content_block_delta",
+                index: 0,
+                delta: {
+                  type: "input_json_delta",
+                  partial_json: JSON.stringify(reply.toolUse.input),
+                },
+              },
+            ]
+          : [
+              {
+                type: "content_block_start",
+                index: 0,
+                content_block: { type: "text", text: "" },
+              },
+              {
+                type: "content_block_delta",
+                index: 0,
+                delta: { type: "text_delta", text: reply.text },
+              },
+            ];
+      return stream([
+        ["message_start", { type: "message_start", message }],
+        ...block.map((event) => [event.type, event] as const),
+        ["content_block_stop", { type: "content_block_stop", index: 0 }],
+        [
+          "message_delta",
+          {
+            type: "message_delta",
+            delta: { stop_reason: "toolUse" in reply ? "tool_use" : "end_turn" },
+            usage: { output_tokens: 5 },
+          },
+        ],
+        ["message_stop", { type: "message_stop" }],
+      ]);
+    },
+  });
+  return { url: `http://localhost:${server.port}`, requests, stop: () => void server.stop(true) };
+};
+
+/** Counts the tool results the model has been given in `request`'s conversation. */
+const countToolResults = (request: MockRequest): number =>
+  JSON.stringify(request.messages).split('"type":"tool_result"').length - 1;
+
+/**
+ * Makes an adapter that drives the real SDK, and collects the events it
+ * publishes. `running()` returns the SDK query of the latest session.
+ */
+const createRealAdapter = (): {
+  readonly adapter: ReturnType<typeof makeClaudeCodeAdapter>;
+  readonly seen: ReadonlyArray<ProviderEvent>;
+  readonly running: () => Query | undefined;
+} => {
+  let running: Query | undefined;
+  const adapter = makeClaudeCodeAdapter({
+    stream: ({ options, input }) => {
+      const started = sdkQuery({ prompt: input, options });
+      running = started;
+      return {
+        [Symbol.asyncIterator]: () => started[Symbol.asyncIterator](),
+        interrupt: () => started.interrupt().then(() => undefined),
+        setModel: (model) => started.setModel(model),
+        stopTask: (taskId) => started.stopTask(taskId),
+        close: () => void started.return(undefined).catch(() => undefined),
+      };
+    },
+    query: () => {
+      throw new Error("these tests start sessions, not probes");
+    },
+    run: runProcess,
+  });
+  const seen: Array<ProviderEvent> = [];
+  Effect.runFork(
+    Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
+  );
+  return { adapter, seen, running: () => running };
+};
+
 /**
  * Checks the skills Claude Code loads from a checkout while a session works in
  * it. Besides the working directory, Claude looks at every directory between a
@@ -1052,91 +1205,6 @@ describe.skipIf(binary === undefined)("the workspace root in a real Claude Code 
 describe.skipIf(binary === undefined)(
   "native skills of a checkout in a real Claude Code session",
   () => {
-    /**
-     * Starts a mock of the Anthropic Messages API. The first request of a turn
-     * that has tools answers with a `Read` of `readPath`; every other request
-     * answers with the text "done". Returns the base URL and a function that
-     * stops the server.
-     */
-    const startMockApi = (
-      readPath: string,
-    ): { readonly url: string; readonly stop: () => void } => {
-      const stream = (events: ReadonlyArray<readonly [string, unknown]>): Response =>
-        new Response(
-          events
-            .map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`)
-            .join(""),
-          { headers: { "content-type": "text/event-stream" } },
-        );
-      const server = Bun.serve({
-        port: 0,
-        async fetch(request) {
-          if (!new URL(request.url).pathname.endsWith("/v1/messages")) {
-            return new Response("{}", { headers: { "content-type": "application/json" } });
-          }
-          const body = (await request.json()) as {
-            readonly model: string;
-            readonly tools?: ReadonlyArray<unknown>;
-            readonly messages: unknown;
-          };
-          const message = {
-            id: "msg_1",
-            type: "message",
-            role: "assistant",
-            model: body.model,
-            content: [],
-            stop_reason: null,
-            usage: { input_tokens: 1, output_tokens: 1 },
-          };
-          const asksForRead =
-            (body.tools?.length ?? 0) > 0 && !JSON.stringify(body.messages).includes("tool_result");
-          const block = asksForRead
-            ? [
-                {
-                  type: "content_block_start",
-                  index: 0,
-                  content_block: { type: "tool_use", id: "toolu_1", name: "Read", input: {} },
-                },
-                {
-                  type: "content_block_delta",
-                  index: 0,
-                  delta: {
-                    type: "input_json_delta",
-                    partial_json: JSON.stringify({ file_path: readPath }),
-                  },
-                },
-              ]
-            : [
-                {
-                  type: "content_block_start",
-                  index: 0,
-                  content_block: { type: "text", text: "" },
-                },
-                {
-                  type: "content_block_delta",
-                  index: 0,
-                  delta: { type: "text_delta", text: "done" },
-                },
-              ];
-          return stream([
-            ["message_start", { type: "message_start", message }],
-            ...block.map((event) => [event.type, event] as const),
-            ["content_block_stop", { type: "content_block_stop", index: 0 }],
-            [
-              "message_delta",
-              {
-                type: "message_delta",
-                delta: { stop_reason: asksForRead ? "tool_use" : "end_turn" },
-                usage: { output_tokens: 5 },
-              },
-            ],
-            ["message_stop", { type: "message_stop" }],
-          ]);
-        },
-      });
-      return { url: `http://localhost:${server.port}`, stop: () => void server.stop(true) };
-    };
-
     /** Writes a skill named `name` into the skills folder `skillsDir`. */
     const writeSkill = (skillsDir: string, name: string): void => {
       mkdirSync(join(skillsDir, name), { recursive: true });
@@ -1185,29 +1253,14 @@ describe.skipIf(binary === undefined)(
       const home = join(root, "instance");
       mkdirSync(home);
 
-      const mock = startMockApi(join(web, "src", "a.ts"));
-      let running: Query | undefined;
-      const adapter = makeClaudeCodeAdapter({
-        stream: ({ options, input }) => {
-          const started = sdkQuery({ prompt: input, options });
-          running = started;
-          return {
-            [Symbol.asyncIterator]: () => started[Symbol.asyncIterator](),
-            interrupt: () => started.interrupt().then(() => undefined),
-            setModel: (model) => started.setModel(model),
-            stopTask: (taskId) => started.stopTask(taskId),
-            close: () => void started.return(undefined).catch(() => undefined),
-          };
-        },
-        query: () => {
-          throw new Error("these tests start sessions, not probes");
-        },
-        run: runProcess,
-      });
-      const seen: Array<ProviderEvent> = [];
-      Effect.runFork(
-        Stream.runForEach(adapter.events, (event) => Effect.sync(() => void seen.push(event))),
+      // The first request that offers tools asks for one `Read`; the next
+      // replies with text.
+      const mock = startMockApi((request) =>
+        countToolResults(request) === 0
+          ? { toolUse: { name: "Read", input: { file_path: join(web, "src", "a.ts") } } }
+          : { text: "done" },
       );
+      const { adapter, seen, running } = createRealAdapter();
       const context: ProviderRunnerContext = {
         cwd: workspaceRoot,
         attachmentsDir: null,
@@ -1249,7 +1302,7 @@ describe.skipIf(binary === undefined)(
         await waitForTurns(1);
         await Effect.runPromise(adapter.sendInput(sessionId, { text: "Thanks." }));
         await waitForTurns(2);
-        const usage = await running!.getContextUsage({ detail: "summary" });
+        const usage = await running()!.getContextUsage({ detail: "summary" });
         return (usage.skills?.skillFrontmatter ?? [])
           .filter((skill) => skill.source === "projectSettings")
           .map((skill) => skill.name)
@@ -1320,6 +1373,169 @@ describe.skipIf(binary === undefined)(
     );
   },
 );
+
+/**
+ * Checks that a session in `full-access` still gets Claude's `AskUserQuestion`
+ * tool, and still runs every other tool without asking (#770). The CLI leaves
+ * the question tool out of a headless session that has no `canUseTool`
+ * callback, so only a real CLI can show the adapter passes one.
+ *
+ * Like the skills tests above, these talk to a mock of the Anthropic API with a
+ * placeholder key, a temporary `HOME`, and nothing of the developer's own
+ * installation.
+ */
+describe.skipIf(binary === undefined)("full-access in a real Claude Code session", () => {
+  const SESSION_IDS = [
+    "0199e0e7-0000-7000-8000-00000000ff50",
+    "0199e0e7-0000-7000-8000-00000000ff51",
+  ] as const;
+
+  const STORAGE_QUESTION = {
+    question: "Which storage should drafts use?",
+    header: "Storage",
+    options: [
+      { label: "localStorage", description: "simple, synchronous" },
+      { label: "IndexedDB", description: "larger, asynchronous" },
+    ],
+    multiSelect: false,
+  };
+
+  /**
+   * Starts a `full-access` session in a new workspace, against a mock model
+   * that follows `decide`. `projectSettings` is written to the workspace's
+   * `.claude/settings.json`. Returns what the test needs and a function that
+   * stops the session and the mock.
+   */
+  const startFullAccessSession = async (
+    sessionId: string,
+    decide: Parameters<typeof startMockApi>[0],
+    projectSettings?: object,
+  ) => {
+    const root = realpathSync(createTemporaryHome());
+    const userHome = join(root, "user");
+    const workspace = join(root, "workspace");
+    mkdirSync(userHome);
+    mkdirSync(join(workspace, ".claude"), { recursive: true });
+    if (projectSettings !== undefined) {
+      writeFileSync(join(workspace, ".claude", "settings.json"), JSON.stringify(projectSettings));
+    }
+    const mock = startMockApi(decide);
+    const { adapter, seen } = createRealAdapter();
+    const context: ProviderRunnerContext = {
+      cwd: workspace,
+      attachmentsDir: null,
+      editMarks: null,
+      attachmentUploader: NO_CONTROLLER_UPLOADER,
+      home: join(root, "instance"),
+      binary: binary!,
+      env: {
+        PATH: process.env["PATH"] ?? "",
+        HOME: userHome,
+        ANTHROPIC_API_KEY: "sk-ant-placeholder",
+        ANTHROPIC_BASE_URL: mock.url,
+      },
+      secrets: {},
+      herculeTool: prepareTool(),
+    };
+    mkdirSync(context.home);
+    // A workspace id makes the adapter load the project's settings.
+    const spec: SessionSpec = {
+      ...SPEC,
+      accessMode: "full-access",
+      workspaceId: "0199e0e7-0000-7000-8000-00000000000b",
+    };
+    await Effect.runPromise(adapter.startSession(sessionId, spec, context));
+    await Effect.runPromise(adapter.sendInput(sessionId, { text: "Go." }));
+    return {
+      adapter,
+      seen,
+      mock,
+      workspace,
+      stop: async () => {
+        await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
+        mock.stop();
+      },
+    };
+  };
+
+  const listOpenedRequests = (seen: ReadonlyArray<ProviderEvent>) =>
+    seen.flatMap((event) => (event._tag === "request.opened" ? [event.request] : []));
+
+  it(
+    "offers the question tool, asks the user, passes the answer on, and runs other tools unasked",
+    async () => {
+      let touched = "";
+      const session = await startFullAccessSession(SESSION_IDS[0], (request) => {
+        const answered = countToolResults(request);
+        if (answered === 0) {
+          return {
+            toolUse: { name: "AskUserQuestion", input: { questions: [STORAGE_QUESTION] } },
+          };
+        }
+        if (answered === 1) {
+          return { toolUse: { name: "Bash", input: { command: `touch ${touched}` } } };
+        }
+        return { text: "done" };
+      });
+      touched = join(session.workspace, "touched");
+      try {
+        await waitForEvent(session.seen, "request.opened");
+
+        // Proved by the request the CLI sent, not by the adapter's options.
+        expect(session.mock.requests[0]?.tools).toContain("AskUserQuestion");
+        const [question, ...others] = listOpenedRequests(session.seen);
+        expect(question?.kind).toBe("question");
+        expect(others).toEqual([]);
+
+        await Effect.runPromise(
+          session.adapter.respondToQuestion(
+            SESSION_IDS[0],
+            question!.requestId,
+            { Storage: "IndexedDB" },
+            SPEC.modelSelection,
+          ),
+        );
+        await waitForEvent(session.seen, "turn.completed");
+
+        // The model's next request carries the user's answer.
+        expect(JSON.stringify(session.mock.requests[1]?.messages)).toContain(
+          `\\"${STORAGE_QUESTION.question}\\"=\\"IndexedDB\\"`,
+        );
+        // `Bash` ran with no approval, and the question was the only request.
+        expect(existsSync(touched)).toBe(true);
+        expect(listOpenedRequests(session.seen)).toHaveLength(1);
+      } finally {
+        await session.stop();
+      }
+    },
+    Duration.toMillis(TURN_DEADLINE) * 2,
+  );
+
+  it(
+    "refuses a tool call that a setting of the project asks about, without opening a request",
+    async () => {
+      const session = await startFullAccessSession(
+        SESSION_IDS[1],
+        (request) =>
+          countToolResults(request) === 0
+            ? { toolUse: { name: "Bash", input: { command: "echo hi" } } }
+            : { text: "done" },
+        { permissions: { ask: ["Bash(echo:*)"] } },
+      );
+      try {
+        await waitForEvent(session.seen, "turn.completed");
+
+        expect(listOpenedRequests(session.seen)).toEqual([]);
+        expect(JSON.stringify(session.mock.requests[1]?.messages)).toContain(
+          "a session in full access cannot ask the user for it",
+        );
+      } finally {
+        await session.stop();
+      }
+    },
+    Duration.toMillis(TURN_DEADLINE) * 2,
+  );
+});
 
 /**
  * Replays a recorded live run with two subagents through the adapter, and

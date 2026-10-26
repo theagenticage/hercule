@@ -32,6 +32,7 @@ import {
   SessionInterrupt,
   SessionRespondToApprovalRequest,
   SessionRespondToQuestion,
+  SessionRespondToQuestionResult,
   SessionsReport,
   SessionStart,
   SessionStop,
@@ -100,8 +101,13 @@ export {
  * - Version 7 added the `file_read` and `file_search` item kinds. An older
  *   controller could not decode an item of either kind, for the same reason
  *   as version 5.
+ * - Version 8 added async questions (`async` on a `question` request) and the
+ *   `SessionRespondToQuestionResult` frame. An older controller could not
+ *   decode an async question or the result frame, and an older runner never
+ *   sends the result that a newer controller waits for, so the two refuse each
+ *   other at hello.
  */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /**
  * The close code and reason the controller uses to end the connection of a
@@ -624,6 +630,7 @@ export const RunnerToController = Schema.Union([
   SessionEvent,
   FilesEdited,
   SessionInputResult,
+  SessionRespondToQuestionResult,
   SessionsReport,
   WorkspaceReport,
   WorkspaceInspection,

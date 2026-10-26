@@ -11,7 +11,7 @@
  * So each message is placed by its `item.started` row, and its text is
  * gathered from its rows wherever they sit.
  */
-import type { Input, TranscriptRow } from "@hercule/contract";
+import { isAsyncQuestion, type Input, type TranscriptRow } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
 import type { AgentState } from "./agent-state";
 import { findOpenItem } from "./open-item";
@@ -315,13 +315,17 @@ const readWorkItemTarget = (
  *   its session started again, another turn started, or the agent's records
  *   say it can no longer be running a turn (`mayBeRunningTurn`).
  * - A `waiting` block where one of the agent's open Requests opened, once its
- *   `request.opened` row has landed.
+ *   `request.opened` row has landed. An async question gets none: the agent
+ *   does not wait on it, and the question's text is already in the
+ *   transcript as the agent's own message. The dock above the composer is
+ *   where it waits on the user.
  * - A `warning` block per `runtime.warning` row, where the row sits. It does
  *   not end the work stretch it falls in: the stretch's divider stays one,
  *   above the warning, and items that start after the warning still join it.
  * - An `error` block per `runtime.error` row, where the row sits. Like a
  *   warning, it does not end the work stretch it falls in.
- * - A `pending` block at the end while the agent has no open Request, no
+ * - A `pending` block at the end while the agent has no open Request (an
+ *   async question does not count, because the agent keeps working), no
  *   agent message holds the working face, the last block other than a
  *   warning or an error is not the running turn's running `work` block, and either the
  *   last turn has not finished or, before any turn, the agent is working.
@@ -340,8 +344,12 @@ export const buildThreadBlocks = (
   rows: readonly TranscriptRow[],
   agent: AgentState,
 ): readonly ThreadBlock[] => {
-  const openRequestIds = new Set(agent.openRequests.map((request) => request.requestId));
-  const awaitingItemIds = new Set(agent.openRequests.map((request) => request.itemId));
+  // The Requests the agent is parked on. An async question is not one: the
+  // agent keeps working, so it must not freeze a stretch, hide the working
+  // face or mark an item as awaiting.
+  const parkedRequests = agent.openRequests.filter((request) => !isAsyncQuestion(request));
+  const openRequestIds = new Set(parkedRequests.map((request) => request.requestId));
+  const awaitingItemIds = new Set(parkedRequests.map((request) => request.itemId));
   const slots: Slot[] = [];
   const turns = new Map<string, BuildingTurn>();
   const agents = new Map<string, BuildingAgent>();
@@ -567,7 +575,7 @@ export const buildThreadBlocks = (
   }
   const running = last !== null && !last.finished ? last : null;
   const hasFace =
-    agent.openRequests.length === 0 && (running !== null || (last === null && agent.working));
+    parkedRequests.length === 0 && (running !== null || (last === null && agent.working));
   const openItemId = findOpenItem(rows);
   const faceAgent =
     hasFace && running !== null ? findFaceAgent(running, agents, openItemId) : undefined;

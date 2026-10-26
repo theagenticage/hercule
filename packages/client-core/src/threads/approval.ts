@@ -41,8 +41,8 @@ export interface ApprovalRow {
 export interface ApprovalOption {
   /** The short label the harness put on the option. */
   readonly label: string;
-  /** What choosing the option would mean, or empty when the harness gave no description. */
-  readonly description: string;
+  /** What choosing the option would mean. Absent when the agent wrote no description. */
+  readonly description?: string;
 }
 
 /**

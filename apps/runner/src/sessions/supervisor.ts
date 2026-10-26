@@ -27,6 +27,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import {
   MAX_MESSAGE_LENGTH,
+  isAsyncQuestion,
   lintOutputSchema,
   type ExitReason,
   type ProviderEvent,
@@ -178,7 +179,8 @@ interface Live {
    * with the subagent that asked it, or `undefined` when the session's own
    * agent did. A session waiting for its user is not stuck, however long it
    * waits, so it is not watched while any Request is open. Several agents can
-   * each wait at once (spec 06 section 13.3).
+   * each wait at once (spec 06 section 13.3). An async question is not in this
+   * map: its agent does not wait on it.
    *
    * A Request leaves this map on exactly the events that close it at the
    * controller: its `request.resolved`, the end of its own agent's turn, and
@@ -826,6 +828,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             break;
           }
           case "request.opened":
+            // An async question is not tracked: its agent does not wait on it,
+            // and a session sitting on an unanswered one must still unload when
+            // idle (its exit then closes the question). See `isAsyncQuestion`.
+            if (isAsyncQuestion(event.request)) break;
             held.parkedRequests.set(event.request.requestId, event.subagentId);
             // A session waiting on its user is in use, however long the
             // user takes to answer.
@@ -1794,17 +1800,65 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         }),
 
       /**
-       * Passes the user's answers to an open question to the adapter, with the
-       * same idempotence and the same report as `respondToApprovalRequest`.
+       * Passes the user's answers to an open question to the adapter, and
+       * always replies with a `sessionRespondToQuestionResult` under the
+       * frame's `answerId`: the controller waits for it. The reply is a
+       * refusal when the session is not running here or when the adapter
+       * does not deliver the answer. It never claims success otherwise.
+       *
+       * An answer can start a turn, like an input, so the idle wait is
+       * cancelled before the answer reaches the adapter. Otherwise the wait
+       * could end the session between the answer and the turn's
+       * `turn.started`. A refused answer starts no turn, so a session that was
+       * idle gets its wait back. The caller's block is uninterruptible for the
+       * same reason as in `input`: an interrupt between the cancel and the
+       * reply would leave the session with no idle wait.
        */
       respondToQuestion: (frame: SessionRespondToQuestion): Effect.Effect<void> =>
-        Effect.suspend(
-          () =>
-            live
-              .get(frame.sessionId)
-              ?.adapter.respondToQuestion(frame.sessionId, frame.requestId, frame.answers) ??
-            Effect.void,
-        ),
+        Effect.suspend(() => {
+          const sendRefusal = (message: string) =>
+            reply({
+              _tag: "sessionRespondToQuestionResult",
+              answerId: frame.answerId,
+              ok: false,
+              message: message.slice(0, MAX_MESSAGE_LENGTH),
+            });
+          const held = live.get(frame.sessionId);
+          if (held === undefined) {
+            return sendRefusal(
+              "The session is no longer running on its runner, so your answer was not delivered.",
+            );
+          }
+          return Effect.uninterruptible(
+            Effect.andThen(
+              cancelIdleUnload(held),
+              held.adapter
+                .respondToQuestion(
+                  frame.sessionId,
+                  frame.requestId,
+                  frame.answers,
+                  frame.modelSelection,
+                )
+                .pipe(
+                  Effect.matchEffect({
+                    onFailure: (error) =>
+                      Effect.andThen(
+                        sendRefusal(error.message),
+                        Effect.suspend(() =>
+                          isIdle(held) ? armIdleUnload(held, frame.sessionId) : Effect.void,
+                        ),
+                      ),
+                    onSuccess: () =>
+                      reply({
+                        _tag: "sessionRespondToQuestionResult",
+                        answerId: frame.answerId,
+                        ok: true,
+                      }),
+                  }),
+                ),
+            ),
+          );
+        }),
 
       stop: (frame: SessionStop): Effect.Effect<void> => {
         for (const arrived of arrivedStarts) {

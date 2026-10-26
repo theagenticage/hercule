@@ -242,6 +242,22 @@ describe("the open Requests", () => {
     expect(computeOpenRequestsAfter({ ...turnCompleted, subagentId: "a9" }, open)).toBe(open);
   });
 
+  it("keep an async question when its agent's turn ends, but not a blocking one", () => {
+    const question = {
+      requestId: "q1",
+      itemId: "i2",
+      kind: "question",
+      detail: {
+        questions: [{ question: "Ship it?", header: "Ship", options: [], multiSelect: false }],
+      },
+    } as const;
+    const async: SessionRequest = { ...question, async: true };
+    const blocking: SessionRequest = { ...question, requestId: "q2" };
+    expect(computeOpenRequestsAfter(turnCompleted, [main, async, blocking])).toEqual([async]);
+    expect(computeOpenRequestsAfter(exited, [async])).toEqual([]);
+    expect(computeOpenRequestsAfter({ ...resolved, requestId: "q1" }, [async])).toEqual([]);
+  });
+
   it("are all closed when the harness exits", () => {
     expect(computeOpenRequestsAfter(exited, [main, fromSubagent])).toEqual([]);
   });

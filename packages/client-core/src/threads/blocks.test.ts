@@ -958,6 +958,64 @@ describe("buildThreadBlocks", () => {
     ]);
   });
 
+  it("treats an async question as no wait: no waiting block, no frozen stretch, the working face stays", () => {
+    // The agent asks in its own message, then goes on with a command. The
+    // question is the message's text, so the transcript shows it once.
+    const asked: OpenRequest = {
+      requestId: "q1",
+      itemId: "a1",
+      kind: "question",
+      async: true,
+      detail: {
+        questions: [
+          {
+            question: "Which storage should drafts use?",
+            header: "Question",
+            options: [{ label: "localStorage" }],
+            multiSelect: false,
+          },
+        ],
+      },
+    };
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Pick"),
+      ...buildAgentMessage("t1", "a1", 1, "Which storage should drafts use?"),
+      buildRequestOpened(2, asked),
+      buildItemStarted("t1", "c1", "command_execution", 3),
+    ];
+
+    const blocks = buildThreadBlocks(
+      rows,
+      buildSessionAgentState({ ...BUSY, openRequests: [asked] }),
+    );
+
+    expect(listKeys(blocks)).toEqual(["user:u1", "agent:a1", "work:c1"]);
+    const work = findBlock(blocks, "work", "work:c1");
+    expect(work.endedAt).toBeNull();
+    expect(work.items[0]!.result).toBe("running");
+  });
+
+  it("keeps the pending status line while an async question is open and the agent has drawn nothing", () => {
+    const asked: OpenRequest = {
+      requestId: "q1",
+      itemId: "a1",
+      kind: "question",
+      async: true,
+      detail: {
+        questions: [{ question: "Ready?", header: "Question", options: [], multiSelect: false }],
+      },
+    };
+    const rows = [buildTurnStarted("t1", 0), ...buildUserMessage("t1", "u1", 0, "Go")];
+
+    const blocks = buildThreadBlocks(
+      rows,
+      buildSessionAgentState({ ...BUSY, openRequests: [asked] }),
+    );
+
+    expect(listKeys(blocks)).toEqual(["user:u1", "pending"]);
+  });
+
   it("shows the working face of a running subagent before its first turn", () => {
     const subagent: Subagent = {
       id: "agent-1",

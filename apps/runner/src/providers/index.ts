@@ -10,6 +10,7 @@ import type {
   ProbeResult,
   TextGenerationOutcome,
   TextGenerationSpec,
+  ModelSelection,
   ProviderEvent,
   QuestionAnswers,
   SendResult,
@@ -26,6 +27,7 @@ import { CODEX, codex } from "./codex";
 import { PI, pi } from "./pi";
 import { makeLogins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
+import type { AnswerNotDelivered } from "./answer-not-delivered";
 import type { SteerRefused } from "./steer-refused";
 
 export interface ProviderRunnerContext {
@@ -342,15 +344,24 @@ export interface ProviderAdapter {
   /**
    * Answers the questions one agent of the session is parked on, by the id the
    * adapter gave the request. That agent resumes, and `request.resolved` follows on
-   * `events`, with the answers, as the only report. Does nothing when the
-   * adapter is not holding that question: it was never opened here, it was
-   * already answered, or it is an approval.
+   * `events`, with the answers, as the only report.
+   *
+   * Fails with `AnswerNotDelivered` when the adapter is not holding that
+   * question (it was never opened here, it was already answered, it is an
+   * approval, or its agent stopped), when the answer did not reach the agent,
+   * or when the adapter cannot confirm that it did.
+   *
+   * `modelSelection` is the session's current model. A harness takes a model
+   * change only on the input that starts a turn, and an answer can start one,
+   * so an adapter that starts a turn for the answer applies it there and
+   * ignores it otherwise.
    */
   readonly respondToQuestion: (
     sessionId: string,
     requestId: string,
     answers: QuestionAnswers,
-  ) => Effect.Effect<void>;
+    modelSelection: ModelSelection,
+  ) => Effect.Effect<void, AnswerNotDelivered>;
 
   /**
    * Stops the harness cleanly. `session.exited { reason }` follows on
@@ -385,6 +396,7 @@ export const findAdapter = (providerId: string): ProviderAdapter | undefined =>
 export const providerLogins = makeLogins(spawnLogin);
 
 export { PROBE_DEADLINE, buildFailedProbe } from "./probe";
+export type { AnswerNotDelivered } from "./answer-not-delivered";
 export type { SteerRefused } from "./steer-refused";
 
 export { CLAUDE_CODE, CODEX, PI };

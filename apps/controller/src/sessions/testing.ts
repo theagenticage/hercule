@@ -36,6 +36,8 @@ import {
   type RepositorySkillsInspect,
   type RepositorySkillsInspection,
   type RepositorySkillsPreview,
+  type SessionRespondToQuestion,
+  type SessionRespondToQuestionResult,
   type SessionStart,
   type TextGenerationOutcome,
   type TextGenerationRequest,
@@ -112,6 +114,17 @@ type Answer = Delivery | { readonly message: string };
 
 type Answered = Answer | undefined;
 
+/**
+ * A runner's result for an attempt to answer a question, without the tag and
+ * the answer id the fake adds. `Omit` is applied to each member of the union,
+ * so the message stays tied to `ok: false`.
+ */
+type QuestionResult = SessionRespondToQuestionResult extends infer Result
+  ? Result extends unknown
+    ? Omit<Result, "_tag" | "answerId">
+    : never
+  : never;
+
 /** Checks whether a frame sent to a runner carries an input the runner answers. */
 export const carriesInput = (frame: ControllerMessage): frame is FrameCarryingInput =>
   frame._tag === "sessionInput" || frame._tag === "sessionStart";
@@ -127,6 +140,14 @@ export interface Wire {
    * leave the frame unanswered, like a runner that has stopped responding.
    */
   readonly answering: (delivery: (frame: FrameCarryingInput) => Answered) => void;
+  /**
+   * Sets how this runner answers the answers to a question: with a result,
+   * or with `undefined` to leave the frame unanswered, so a test can send the
+   * result itself with `send`. Until it is set, every answer is accepted.
+   */
+  readonly answeringQuestions: (
+    decide: (frame: SessionRespondToQuestion) => QuestionResult | undefined,
+  ) => void;
   /**
    * Answers every input this runner has left unanswered so far, with a
    * delivery or with a refusal.
@@ -203,6 +224,11 @@ const dial = (
     });
     const frames: Array<ControllerMessage> = [];
     let decideDelivery: (frame: FrameCarryingInput) => Answered = () => "opened";
+    let decideQuestionResult: (
+      frame: SessionRespondToQuestion,
+    ) => QuestionResult | undefined = () => ({
+      ok: true,
+    });
     let decideTextGeneration: (
       request: TextGenerationRequest,
     ) => TextGenerationOutcome | undefined = () => undefined;
@@ -228,6 +254,16 @@ const dial = (
         const answer = decideDelivery(frame);
         if (answer === undefined) withheld.push(frame);
         else writeAnswer(frame, answer);
+      }
+      if (frame._tag === "sessionRespondToQuestion") {
+        const result = decideQuestionResult(frame);
+        if (result !== undefined) {
+          writeMessage({
+            _tag: "sessionRespondToQuestionResult",
+            answerId: frame.answerId,
+            ...result,
+          });
+        }
       }
       if (frame._tag === "textGenerationRequest") {
         const outcome = decideTextGeneration(frame);
@@ -281,6 +317,9 @@ const dial = (
         close: () => socket.close(),
         answering: (next) => {
           decideDelivery = next;
+        },
+        answeringQuestions: (next) => {
+          decideQuestionResult = next;
         },
         release: (answer) => {
           for (const held of withheld.splice(0)) writeAnswer(held, answer);

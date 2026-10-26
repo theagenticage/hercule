@@ -3487,6 +3487,47 @@ describe("Thread: answering the agent's questions", () => {
     ]);
   });
 
+  it("shows the controller's error as it is and keeps every answer when sending fails", async () => {
+    const user = userEvent.setup();
+    const replies = [
+      {
+        status: 409,
+        body: buildErrorBody("invalid_state", "The harness did not take the answer."),
+      },
+      { body: buildSession({ status: "busy", openRequests: [QUESTIONS] }) },
+    ];
+    const session = buildSession({ status: "busy", openRequests: [QUESTIONS] });
+    const { api } = await openApp(session, [], {
+      [RESPOND_TO_QUESTION]: () => replies.shift()!,
+    });
+
+    await user.click(
+      await screen.findByRole("radio", { name: (name) => name.startsWith("IndexedDB") }),
+    );
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(findChoice("checkbox", "Sync"));
+    await user.type(readOwnAnswer(), "Offline mode");
+    await user.click(readSend());
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "The harness did not take the answer.",
+    );
+    expect(isLocked(readSend())).toBe(false);
+    expect(isLocked(readOwnAnswer())).toBe(false);
+    expect((findChoice("checkbox", "Sync") as HTMLInputElement).checked).toBe(true);
+    expect((readOwnAnswer() as HTMLInputElement).value).toBe("Offline mode");
+
+    // The first question's pick is kept too: sending again sends all of it.
+    await user.click(readSend());
+    await waitFor(() => {
+      expect(readBodies(api.calls)).toHaveLength(2);
+    });
+    expect(readBodies(api.calls)[1]).toEqual({
+      requestId: "req-2",
+      answers: { Storage: "IndexedDB", Features: ["Sync", "Offline mode"] },
+    });
+  });
+
   it("goes to the next question on ↩ in the own-answer field", async () => {
     const user = userEvent.setup();
     const { api } = await openParked(QUESTIONS);

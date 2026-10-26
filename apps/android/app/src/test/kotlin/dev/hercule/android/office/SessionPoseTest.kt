@@ -1,6 +1,7 @@
 package dev.hercule.android.office
 
 import dev.hercule.android.faces.Pose
+import dev.hercule.android.wire.QuestionRequest
 import dev.hercule.android.wire.RunnerConnectivity
 import dev.hercule.android.wire.SessionStatus
 import kotlin.test.assertEquals
@@ -21,6 +22,12 @@ class SessionPoseTest {
     @Test
     fun `shows a thread with an open request as waiting`() {
         assertEquals(Pose.Waiting, decideThreadPose(buildSession("s-1", status = SessionStatus.Busy, openRequests = listOf(request)), online))
+    }
+
+    @Test
+    fun `shows a busy thread with an async question as waiting on the user, though its agent keeps working`() {
+        val asked = QuestionRequest("req-1", "item-1", QuestionRequest.Detail(emptyList()), async = true)
+        assertEquals(Pose.Waiting, decideThreadPose(buildSession("s-1", status = SessionStatus.Busy, openRequests = listOf(asked)), online))
     }
 
     @Test

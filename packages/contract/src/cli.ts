@@ -3546,7 +3546,7 @@ export const CLI = {
   },
   "session.read": {
     command: "session read",
-    help: "Reads one session: its status, what it runs under, and whether it can be resumed. The Requests its agents are parked on come with it, oldest first, each naming the subagent that asked when it was not the session's own agent; decide an approval with `hercule session respond-to-approval-request`, and answer a question with `hercule session respond-to-question`. The Token Usage of the whole session comes with it too, once the harness has reported any, and `toolCalls`, how many tool calls its own agent and its subagents have made.",
+    help: "Reads one session: its status, what it runs under, and whether it can be resumed. The Requests its agents have open come with it, oldest first, each naming the subagent that asked when it was not the session's own agent; decide an approval with `hercule session respond-to-approval-request`, and answer a question with `hercule session respond-to-question`. The Token Usage of the whole session comes with it too, once the harness has reported any, and `toolCalls`, how many tool calls its own agent and its subagents have made.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -3841,7 +3841,7 @@ export const CLI = {
   },
   "session.respondToQuestion": {
     command: "session respond-to-question",
-    help: "Answers the questions one of a session's agents is parked on, all of them at once. Read the open Requests first with `hercule session read`. A question cannot be declined: to turn it down, stop the turn with `hercule session interrupt`, or answer in your own words.",
+    help: "Answers the questions one of a session's agents asked, all at once. It returns once the agent has the answer. Read the open Requests first with `hercule session read`. A question cannot be declined: to turn it down, stop the turn with `hercule session interrupt`, or answer in your own words.",
     examples: [
       {
         args: [
@@ -3870,7 +3870,7 @@ export const CLI = {
     },
     errors: {
       invalid_state:
-        "the session has exited, its runner is no longer connected, or it is not waiting on a question; or the harness has moved on and this is not one of the Requests the session is waiting on (read them again with `hercule session read`)",
+        "the session has exited, its runner is no longer connected, or it has no such open question; or the harness has moved on and this is not one of the Requests the session is waiting on (read them again with `hercule session read`); or the harness refused the answer, in which case the question stays open and you can answer again; or another answer to the same question is already on its way; or the runner did not confirm the answer in time, so it is not known whether the agent got it (if the runner later finds it may not have, it closes the question and says so in the thread)",
       validation:
         "the answers do not fit the questions: they name an unknown header, leave a question out, give several to a question that takes one, hold an empty answer, or are too long together; or the request is an approval, which is decided with `hercule session respond-to-approval-request`",
     },

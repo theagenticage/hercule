@@ -101,6 +101,10 @@ data class ToolApproval(
 /**
  * The agent asks one to four questions, answered through `session.respondToQuestion`. A
  * question has no decline: to turn it down, the user interrupts the asking agent's turn.
+ *
+ * [async] is true when the asking agent does not wait for the answer: it keeps working, and
+ * the request stays open after its turn ends, until it is answered, the agent is stopped, or
+ * the session exits. Absent when the agent waits.
  */
 @Serializable
 data class QuestionRequest(
@@ -109,6 +113,7 @@ data class QuestionRequest(
     val detail: Detail,
     override val subagentId: String? = null,
     override val subagentName: String? = null,
+    val async: Boolean? = null,
 ) : SessionRequest {
     @Serializable
     data class Detail(val questions: List<Question>)
@@ -142,11 +147,14 @@ data class Question(
     val secret: Boolean? = null,
 )
 
-/** One option a [Question] offers. Its [label] is the answer text sent when it is picked. */
+/**
+ * One option a [Question] offers. Its [label] is the answer text sent when it is picked.
+ * [description] is null when the agent wrote none.
+ */
 @Serializable
 data class QuestionOption(
     val label: String,
-    val description: String,
+    val description: String? = null,
 )
 
 /** The decision an approval is answered with. Unknown values decode outside the constants. */

@@ -138,7 +138,10 @@ sealed interface ProviderEvent {
         val message: String? = null,
     ) : ProviderEvent
 
-    /** An agent started waiting on [request]. */
+    /**
+     * An agent asked [request]. It waits for the answer, except for an async question, which the
+     * agent keeps working past.
+     */
     @Serializable
     data class RequestOpened(
         val subagentId: String? = null,

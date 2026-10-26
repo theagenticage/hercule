@@ -42,6 +42,7 @@ import { buildClaudePromptParts, makeClaudeCodeAdapter, type ClaudeSeam } from "
 import { PROBE_DEADLINE } from "./probe";
 import { resolveSkillReferences, type LoadedSkills } from "../skills";
 import type { AdapterTurnInput, EditMarks, ProviderAdapter, ProviderRunnerContext } from "./index";
+import { AnswerNotDelivered } from "./answer-not-delivered";
 import { SteerRefused } from "./steer-refused";
 import * as testing from "./testing";
 import {
@@ -1022,13 +1023,9 @@ describe("a Claude Code session", () => {
 
       expect(run.options[0]?.permissionMode).toBe(permissionMode);
       expect(run.options[0]?.allowDangerouslySkipPermissions).toBe(dangerous);
-      // The callback is passed in every mode except full-access, not only in
-      // `approval-required`: the harness decides whether to ask, and a mode
-      // that asks about nothing never calls it. When permissions are skipped
-      // the SDK ignores the callback and logs a warning, so it is left out.
-      expect(typeof run.options[0]?.canUseTool).toBe(
-        accessMode === "full-access" ? "undefined" : "function",
-      );
+      // The callback is passed in every mode, full-access included: without
+      // it the harness leaves out `AskUserQuestion`.
+      expect(typeof run.options[0]?.canUseTool).toBe("function");
     });
   }
 
@@ -1786,17 +1783,18 @@ const readDenial = (
     : { message: "", interrupt: true };
 
 /**
- * Starts a session in `approval-required` with a turn open, ready for a tool
- * call to be asked about.
+ * Starts a session in `accessMode` with a turn open, ready for a tool call to
+ * be asked about.
  */
-const startApprovalSession = async (): Promise<Driving> => {
+const startSessionWithTurn = async (accessMode: SessionSpec["accessMode"]): Promise<Driving> => {
   const run = createDriving();
-  await Effect.runPromise(
-    run.adapter.startSession(SESSION, { ...SPEC, accessMode: "approval-required" }, WORKING),
-  );
+  await Effect.runPromise(run.adapter.startSession(SESSION, { ...SPEC, accessMode }, WORKING));
   await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "list the files" }));
   return run;
 };
+
+/** Starts a session in `approval-required` with a turn open. */
+const startApprovalSession = (): Promise<Driving> => startSessionWithTurn("approval-required");
 
 /** Parks on one tool call and returns the park and the request the adapter emitted. */
 const parkAndAwaitRequest = async (
@@ -2528,7 +2526,20 @@ const respondWithAnswers = (
   run: Driving,
   requestId: string,
   answers: QuestionAnswers,
-): Promise<void> => Effect.runPromise(run.adapter.respondToQuestion(SESSION, requestId, answers));
+): Promise<void> =>
+  Effect.runPromise(
+    run.adapter.respondToQuestion(SESSION, requestId, answers, SPEC.modelSelection),
+  );
+
+/** Sends answers the adapter must refuse, and returns its failure. Rejects when the adapter accepts them. */
+const refuseAnswers = (
+  run: Driving,
+  requestId: string,
+  answers: QuestionAnswers,
+): Promise<AnswerNotDelivered> =>
+  Effect.runPromise(
+    Effect.flip(run.adapter.respondToQuestion(SESSION, requestId, answers, SPEC.modelSelection)),
+  );
 
 /** Returns the input an allow handed back to the harness, or `undefined` for any other result. */
 const readUpdatedInput = (settled: PermissionResult | null | undefined): unknown =>
@@ -2582,26 +2593,42 @@ describe("answering a question the harness asks", () => {
     });
   });
 
-  it("ignores answers to an approval request", async () => {
+  it("fails to deliver answers to an approval request, and leaves the approval parked", async () => {
     const run = await startApprovalSession();
     const { park, request } = await parkAndAwaitRequest(run, "Bash", { command: "ls -la" });
 
-    await respondWithAnswers(run, request.requestId, { Storage: "localStorage" });
+    const failure = await refuseAnswers(run, request.requestId, { Storage: "localStorage" });
 
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
     expect(park.settled()).toBeUndefined();
     expect(listResolutions(run.seen)).toEqual([]);
   });
 
-  it("ignores answers to a request id that is not the open one", async () => {
+  it("fails to deliver answers to a request id that is not the open one", async () => {
     const run = await startApprovalSession();
     const { park } = await parkAndAwaitRequest(run, "AskUserQuestion", {
       questions: [STORAGE_QUESTION],
     });
 
-    await respondWithAnswers(run, "r-nobody-asked", { Storage: "localStorage" });
+    const failure = await refuseAnswers(run, "r-nobody-asked", { Storage: "localStorage" });
 
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
     expect(park.settled()).toBeUndefined();
     expect(listResolutions(run.seen)).toEqual([]);
+  });
+
+  it("fails to deliver a second answer to a question that was already answered", async () => {
+    const run = await startApprovalSession();
+    const { park, request } = await parkAndAwaitRequest(run, "AskUserQuestion", {
+      questions: [STORAGE_QUESTION],
+    });
+    await respondWithAnswers(run, request.requestId, { Storage: "localStorage" });
+    await waitUntil("resolved the park", () => park.settled() !== undefined);
+
+    const failure = await refuseAnswers(run, request.requestId, { Storage: "IndexedDB" });
+
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
+    expect(failure.message).toContain("no longer open");
   });
 
   for (const decision of ["deny", "cancel"] as const) {
@@ -2679,6 +2706,41 @@ describe("answering a question the harness asks", () => {
         "Which storage should drafts use?": "IndexedDB",
         "Which features should ship first?": "Export",
       },
+    });
+  });
+});
+
+/**
+ * In `full-access` the harness still calls `canUseTool` for a question, and
+ * for a tool call that always needs the user's approval (for example one an
+ * `ask` rule of the settings covers). The question is asked like in any mode;
+ * the tool call must not become an approval.
+ */
+describe("the harness asking in full-access", () => {
+  it("refuses a tool call at once, without opening a request", async () => {
+    const run = await startSessionWithTurn("full-access");
+
+    const park = parkToolCall(run, "Bash", { command: "echo hi" });
+
+    await waitUntil("refused the call", () => park.settled() !== undefined);
+    const denial = readDenial(park.settled());
+    expect(denial.message).toContain("full access");
+    expect(denial.interrupt).toBe(false);
+    expect(listOpenedRequests(run.seen)).toEqual([]);
+  });
+
+  it("opens a question request for a question and passes the answer on", async () => {
+    const run = await startSessionWithTurn("full-access");
+    const input = { questions: [STORAGE_QUESTION] };
+
+    const { park, request } = await parkAndAwaitRequest(run, "AskUserQuestion", input);
+    expect(request.kind).toBe("question");
+    await respondWithAnswers(run, request.requestId, { Storage: "IndexedDB" });
+
+    await waitUntil("resolved the park", () => park.settled() !== undefined);
+    expect(readUpdatedInput(park.settled())).toEqual({
+      ...input,
+      answers: { "Which storage should drafts use?": "IndexedDB" },
     });
   });
 });

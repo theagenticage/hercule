@@ -175,14 +175,19 @@ fun buildBookOfficeState(): OfficeUiState = OfficeUiState(
     waitingCount = BOOK_LISTS.countWaitingThreads(),
 )
 
-/** Returns the Fix thread of session-active.html, waiting on the user to allow `git push`. */
-fun buildBookThreadState(): ThreadUiState {
+/**
+ * Returns the Fix thread of session-active.html, waiting on the user to allow `git push`. Another
+ * [request] takes the place of the push Request: the transcript's last row opens it, and the
+ * thread docks it.
+ */
+fun buildBookThreadState(request: SessionRequest = PUSH_REQUEST): ThreadUiState {
+    val transcript = FIX_TRANSCRIPT.dropLast(1) + FIX_TRANSCRIPT.last().copy(event = ProviderEvent.RequestOpened(request = request))
     return ThreadUiState(
         title = "Fix 3‑D Secure checkout for EU cards",
         face = OfficeFace(FIX_ID, Pose.Waiting, isAssistant = false),
         projectName = WEBSHOP.name,
-        blocks = buildThreadBlocks(FIX_TRANSCRIPT, listOf(PUSH_REQUEST)),
-        openRequest = PUSH_REQUEST,
+        blocks = buildThreadBlocks(transcript, listOf(request)),
+        openRequest = request,
         openRequestAnswered = false,
         waitingCount = BOOK_LISTS.countWaitingThreads(),
         resumeBlockedReason = null,
