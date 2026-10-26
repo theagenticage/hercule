@@ -1388,6 +1388,23 @@ const make = Effect.gen(function* () {
       `),
 
     /**
+     * Returns the ids of the GitHub Connections that this runner's queued
+     * sessions use, each once. It reads nothing else of the sessions, so it
+     * is cheap to call before every claim.
+     */
+    listQueuedGithubConnectionIds: (
+      runnerId: string,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly github_connection_id: Uint8Array }>`
+          SELECT DISTINCT github_connection_id FROM sessions
+          WHERE runner_id = ${uuidFromString(runnerId)} AND status = 'queued'
+            AND github_connection_id IS NOT NULL
+        `,
+        (rows) => rows.map((row) => uuidToString(row.github_connection_id)),
+      ),
+
+    /**
      * Returns up to `limit` of this runner's oldest queued sessions, with what
      * the start frame needs: the exact spec each was queued with, and its
      * provider. The provider is joined rather than read per row, so dispatch

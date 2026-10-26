@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import {
   EditedFile,
+  GithubTokenAnswer,
+  GithubTokenRequest,
   MAX_ANSWERS_LENGTH,
   MAX_MESSAGE_LENGTH,
   ProviderEvent,
@@ -589,6 +591,21 @@ describe("what the controller sends for a session", () => {
     expect(decode(SessionStart, { ...start, token: "" })._tag).toBe("Failure");
   });
 
+  it("carries the GitHub token's Connection and expiry, and refuses an expiry that is not an instant", () => {
+    const withToken = {
+      ...start,
+      ghToken: "ghu_a-token",
+      githubConnectionId: "0199e0e7-0000-7000-8000-000000000020",
+      ghTokenExpiresAt: "2026-10-26T18:00:00.000Z",
+    };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(SessionStart)(withToken))).toEqual(withToken);
+    // A token without an expiry is a personal access token.
+    expect(decode(SessionStart, omitKey(withToken, "ghTokenExpiresAt"))._tag).toBe("Success");
+    expect(decode(SessionStart, { ...withToken, ghTokenExpiresAt: "tomorrow" })._tag).toBe(
+      "Failure",
+    );
+  });
+
   it("accepts the `userMaterial` flag only as true, and a start without it", () => {
     // Only `true` is allowed, so a session that runs isolated has one
     // spelling: no key at all.
@@ -609,6 +626,36 @@ describe("what the controller sends for a session", () => {
         instanceId: "../../etc",
       })._tag,
     ).toBe("Failure");
+  });
+});
+
+describe("the frames that ask for a session's GitHub token", () => {
+  const request = { _tag: "githubTokenRequest", requestId: "r-1", sessionToken: "a-session-token" };
+  const granted = { _tag: "githubTokenAnswer", requestId: "r-1", token: "ghu_a-token" };
+  const refused = { _tag: "githubTokenAnswer", requestId: "r-1", reason: "needs reconnecting" };
+  const decodeAnswer = (input: unknown) =>
+    Effect.runSyncExit(Schema.decodeUnknownEffect(GithubTokenAnswer)(input))._tag;
+
+  it("needs a non-empty session token to identify who asks", () => {
+    const decodeRequest = (input: unknown) =>
+      Effect.runSyncExit(Schema.decodeUnknownEffect(GithubTokenRequest)(input))._tag;
+    expect(decodeRequest(request)).toBe("Success");
+    expect(decodeRequest({ ...request, sessionToken: "" })).toBe("Failure");
+    expect(decodeRequest(omitKey(request, "sessionToken"))).toBe("Failure");
+  });
+
+  it("answers with a token, with or without an expiry, or with a reason", () => {
+    const expiring = { ...granted, expiresAt: "2026-10-26T18:00:00.000Z" };
+    for (const answer of [granted, expiring, refused]) {
+      expect(Effect.runSync(Schema.decodeUnknownEffect(GithubTokenAnswer)(answer))).toEqual(answer);
+    }
+  });
+
+  it("rejects an answer that has both a token and a reason, or neither", () => {
+    expect(decodeAnswer({ ...granted, reason: "needs reconnecting" })).toBe("Failure");
+    expect(decodeAnswer({ ...refused, token: "ghu_a-token" })).toBe("Failure");
+    expect(decodeAnswer({ ...refused, expiresAt: "2026-10-26T18:00:00.000Z" })).toBe("Failure");
+    expect(decodeAnswer({ _tag: "githubTokenAnswer", requestId: "r-1" })).toBe("Failure");
   });
 });
 

@@ -75,6 +75,7 @@ import {
   type SessionInputResult,
   type SessionsReport,
   type CredentialRequest,
+  type GithubTokenRequest,
   type WorkspaceReport,
   type WorkspaceStepResult,
   type WorkspaceStepsReport,
@@ -190,6 +191,11 @@ export type FleetTraffic =
       readonly _tag: "credentialRequested";
       readonly runnerId: string;
       readonly request: CredentialRequest;
+    }
+  | {
+      readonly _tag: "githubTokenRequested";
+      readonly runnerId: string;
+      readonly request: GithubTokenRequest;
     }
   | {
       readonly _tag: "workspaceStepReported";
@@ -769,6 +775,18 @@ const make = Effect.gen(function* () {
       request: CredentialRequest,
     ): Effect.Effect<void> =>
       publish(id, connection, { _tag: "credentialRequested", runnerId: id, request }),
+
+    /**
+     * Publishes a runner's request for a session's GitHub token. Like a
+     * credential request, the answer is a frame the controller daemon sends,
+     * so the request is published rather than answered here.
+     */
+    requestedGithubToken: (
+      id: string,
+      connection: Connection,
+      request: GithubTokenRequest,
+    ): Effect.Effect<void> =>
+      publish(id, connection, { _tag: "githubTokenRequested", runnerId: id, request }),
 
     /**
      * Publishes how one of a runner's workspace steps ended. The runs domain

@@ -13,7 +13,8 @@ import { RUNNER_SOCKET_VARIABLE } from "./helper";
 /** Matches a word that the shell would not read as one plain word, so it needs quoting. */
 const QUOTABLE = /[^A-Za-z0-9_@%+=:,./-]/;
 
-const quoteShellWord = (word: string): string => `'${word.replaceAll("'", `'\\''`)}'`;
+/** Returns `word` as one single-quoted shell word, whatever characters it holds. */
+export const quoteShellWord = (word: string): string => `'${word.replaceAll("'", `'\\''`)}'`;
 
 /**
  * Returns the command line git runs as the credential helper. It starts with

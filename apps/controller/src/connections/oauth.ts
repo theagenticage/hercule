@@ -257,6 +257,10 @@ export const serializeTokens = (tokens: TokenSet): string => JSON.stringify(toke
 export const isStale = (tokens: TokenSet, nowMillis: number): boolean =>
   tokens.expiresAt !== undefined && Date.parse(tokens.expiresAt) - nowMillis <= REFRESH_MARGIN_MS;
 
+/** Checks whether the access token has expired, so that GitHub would refuse it. */
+export const isExpired = (tokens: TokenSet, nowMillis: number): boolean =>
+  tokens.expiresAt !== undefined && Date.parse(tokens.expiresAt) <= nowMillis;
+
 /**
  * Returns a function that finds the client a type's redirect flow runs as,
  * for both the code exchange and the refresh:
@@ -365,8 +369,8 @@ const postForm = (
  * Fails as `postForm` does, and with `ProviderUnreachable` when the response is
  * neither tokens nor an error. `expires_in` is converted to a timestamp here,
  * because it counts from the moment of the response. A token without
- * `expires_in`, such as a GitHub OAuth App token, never expires, and is stored
- * without `expiresAt`.
+ * `expires_in` never expires, and is stored without `expiresAt`. A provider
+ * whose tokens do not expire sends none.
  */
 const requestTokens = (
   tokenUrl: string,

@@ -1,8 +1,9 @@
 /**
  * Sessions on the fleet: placing a session, starting queued sessions on a
  * runner with room, the operations that reach a live session's harness, the
- * sessions of agent steps, the skills a session has, the sweep that ends the sessions of lost runners,
- * and the observer that tells other domains what sessions do.
+ * sessions of agent steps, the skills a session has, the answer to a runner's
+ * request for a session's GitHub token, the sweep that ends the sessions of
+ * lost runners, and the observer that tells other domains what sessions do.
  *
  * `resuming.ts` holds the check that resuming a session in place and forking
  * from it share. It reads across domains, so it lives here and not in the
@@ -11,6 +12,7 @@
 export { makeForkAfterCommit } from "./after-commit";
 export { AssistantSessionsLayer } from "./assistant-sessions";
 export { Dispatch, DispatchLayer } from "./dispatch";
+export { makeGithubTokenAnswers } from "./github-token-answers";
 export { Live, LiveLayer, SessionInputDeadline } from "./live";
 export { LostRunnerSweepInterval, sweepSessionsOnLostRunners } from "./lost-runners";
 export {

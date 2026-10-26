@@ -47,6 +47,7 @@ import {
   oauthClients,
   parseTokens,
   refreshAccess,
+  type ProviderUnreachable,
   serializeTokens,
   type OAuthClient,
   type TokenSet,
@@ -283,15 +284,17 @@ const make = Effect.gen(function* () {
    *   connection `needs-reauth` and fails.
    * - When the token endpoint rejects the refresh, it marks the connection
    *   `needs-reauth` and fails.
-   * - When the token endpoint cannot be reached, it fails and leaves the
-   *   status unchanged.
+   * - When the token endpoint cannot be reached, it fails with
+   *   `ProviderUnreachable` and leaves the status unchanged. The error is not
+   *   converted here, so a caller can tell this apart from a connection that
+   *   needs reconnecting.
    * - When the user reconnected meanwhile, it fails and changes nothing, as
    *   `writeWhileTokensHeld` explains.
    */
   const refreshTokens = (
     row: StoredConnection,
     type: ConnectionType,
-  ): Effect.Effect<TokenSet, ConnectionUnavailable> =>
+  ): Effect.Effect<TokenSet, ConnectionUnavailable | ProviderUnreachable> =>
     Effect.gen(function* () {
       const stored = yield* Effect.orDie(
         secrets.get({ kind: "connection", id: row.id }, OAUTH_TOKENS),
@@ -324,9 +327,6 @@ const make = Effect.gen(function* () {
             Effect.catchTag("ProviderRefused", (error) =>
               markTokensNeedReauth(row.id, held, error.message),
             ),
-            Effect.catchTag("ProviderUnreachable", (error) =>
-              Effect.fail(new ConnectionUnavailable({ message: error.message })),
-            ),
           );
           // When the response has no refresh token, the old one is still valid.
           const next: TokenSet = { ...answer, refreshToken: answer.refreshToken ?? refreshToken };
@@ -347,14 +347,19 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns the access token of a token connection, refreshing it first when
-   * it has expired or is about to. The core does the refresh, so a caller that
-   * asks for credentials gets a working token or a `ConnectionUnavailable`.
+   * Returns the token set of a token connection, refreshing it first when its
+   * access token has expired or is about to. The core does the refresh, so a
+   * caller that asks gets a working token or a failure. The expiry in the
+   * returned set belongs to its access token: both come from the one set that
+   * was read, or the one the refresh returned.
    *
    * A token from a redirect flow or a device flow is refreshed when it has an
-   * expiry and a refresh token. A token with no expiry, such as GitHub's,
-   * never needs a refresh. A type that declares neither flow cannot refresh,
-   * so its connection needs reauth once the token lapses.
+   * expiry and a refresh token. A token with no expiry never needs a refresh.
+   * A type that declares neither flow cannot refresh, so its connection needs
+   * reauth once the token lapses.
+   *
+   * Fails with `ConnectionUnavailable` when the token cannot be used, and with
+   * `ProviderUnreachable` when a refresh could not reach the provider.
    *
    * A refresh passes the promotion gate as one unit, before the provider is
    * called: it waits while a promotion freezes the controller, and never
@@ -370,15 +375,15 @@ const make = Effect.gen(function* () {
    * invalidated the old tokens by the time it answers. So a cancelled caller
    * can wait up to the timeout before it stops.
    */
-  const readFreshAccessToken = (
+  const readFreshTokenSet = (
     row: StoredConnection,
     stored: Redacted.Redacted<string>,
-  ): Effect.Effect<Record<string, string>, ConnectionUnavailable> =>
+  ): Effect.Effect<TokenSet, ConnectionUnavailable | ProviderUnreachable> =>
     Effect.gen(function* () {
       const held = Redacted.value(stored);
       const tokens = yield* parseStoredTokens(row.id, held);
       const millis = yield* Clock.currentTimeMillis;
-      if (!isStale(tokens, millis)) return { accessToken: tokens.accessToken };
+      if (!isStale(tokens, millis)) return tokens;
       const type = (yield* findRegisteredType(row))?.contribution;
       if (type?.oauth === undefined && type?.device === undefined) {
         return yield* markTokensNeedReauth(
@@ -389,10 +394,9 @@ const make = Effect.gen(function* () {
       }
       // The gate is passed before the permit is taken, so no caller holds
       // the permit while it waits for a freeze to end.
-      const fresh = yield* promotion.whenServing(
+      return yield* promotion.whenServing(
         readOrCreateRefreshPermit(row.id).withPermits(1)(refreshTokens(row, type)),
       );
-      return { accessToken: fresh.accessToken };
     });
 
   /**
@@ -405,7 +409,7 @@ const make = Effect.gen(function* () {
    * - any other connection returns the fields the user pasted, keyed by name.
    *
    * Fails with `ConnectionUnavailable` when the connection holds no secrets,
-   * or when its token cannot be used, as `readFreshAccessToken` explains. A
+   * or when its token cannot be used, as `readFreshTokenSet` explains. A
    * connection with no secrets whose type signs in through a redirect flow or
    * a device flow is also marked `needs-reauth`: signing in again is how the
    * user gives it a token.
@@ -416,7 +420,14 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const stored = yield* Effect.orDie(secrets.values({ kind: "connection", id: row.id }));
       const tokens = stored.find((one) => one.name === OAUTH_TOKENS);
-      if (tokens !== undefined) return yield* readFreshAccessToken(row, tokens.value);
+      if (tokens !== undefined) {
+        return yield* readFreshTokenSet(row, tokens.value).pipe(
+          Effect.map((fresh) => ({ accessToken: fresh.accessToken })),
+          Effect.catchTag("ProviderUnreachable", (error) =>
+            Effect.fail(new ConnectionUnavailable({ message: error.message })),
+          ),
+        );
+      }
       if (stored.length === 0) {
         const message = `the connection ${row.id} holds no credentials`;
         const type = (yield* findRegisteredType(row))?.contribution;
@@ -482,6 +493,24 @@ const make = Effect.gen(function* () {
       Effect.map(Ref.get(declared), (all) => [...all.values()]),
 
     runtimeFor,
+
+    /**
+     * Returns the token set a Connection holds, refreshing it first when its
+     * access token has expired or is inside the refresh margin. `stored` is
+     * the Connection's secret under `OAUTH_TOKENS`, which the caller has
+     * already read. Core code that hands a token to a session uses this, so
+     * it gets a working token or a failure, whatever the Connection's type.
+     *
+     * Fails with `ConnectionUnavailable` when the token cannot be used (the
+     * refresh was refused, which also marks the Connection `needs-reauth`),
+     * and with `ProviderUnreachable` when the refresh could not reach the
+     * provider. The two stay apart so a caller can tell a person to reconnect
+     * from telling them to try again later.
+     *
+     * This may call the provider and write the Connection's status, so it must
+     * run outside any transaction: never call it inside `withTransaction`.
+     */
+    readFreshTokenSet,
 
     /**
      * Returns a string that changes whenever the connection's credentials

@@ -34,6 +34,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Option, Stream } from "effect";
 import {
   FILES_EDITED_CAPABILITY,
+  GITHUB_TOKEN_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   MAX_FRAME_BYTES,
   PROTOCOL_VERSION,
@@ -2271,6 +2272,18 @@ describe("logging a runner's provider instance in", () => {
       const { wire, answer } = await greet(harness.base, joined.credential);
       try {
         expect(answer.capabilities).toContain(FILES_EDITED_CAPABILITY);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("offers the GitHub token frames at hello", async () => {
+    await withRegistry(async (harness) => {
+      const joined = await enlist(harness);
+      const { wire, answer } = await greet(harness.base, joined.credential);
+      try {
+        expect(answer.capabilities).toContain(GITHUB_TOKEN_CAPABILITY);
       } finally {
         wire.close();
       }

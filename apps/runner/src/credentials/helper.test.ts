@@ -43,6 +43,8 @@ const startCredentialSocket = async (
       asked.push(request);
       return answer();
     },
+    // This file tests git's question only.
+    readGithubToken: () => Promise.resolve({ reason: "not asked in this file" }),
   });
   return { path, close: () => server.close() };
 };

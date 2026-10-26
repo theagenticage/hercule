@@ -1,3 +1,4 @@
+import { makeGithubTokenCopies } from "../credentials";
 import { makeTestWorkspaces } from "../workspaces/testing";
 /**
  * Tests the supervisor the way a connection uses it: the controller's frames go
@@ -345,8 +346,18 @@ const buildConnection = (
   // socket that started them, and so does the shutdown that stops them all.
   const runner = makeSupervising([fake.adapter]);
   watchers.set(fake, { runner, scope, watching: false });
-  const supervisor = runner.forConnection({ scope, machine, send, workspaceSteps: steps });
-  return { supervisor, runner, sent, machine, under, steps, scope };
+  // The controller never answers: a test sees only the token the start gave.
+  const githubTokenCopies = makeGithubTokenCopies({
+    ask: () => Promise.reject(new Error("no controller in this test")),
+  });
+  const supervisor = runner.forConnection({
+    scope,
+    machine,
+    githubTokenCopies,
+    send,
+    workspaceSteps: steps,
+  });
+  return { supervisor, runner, sent, machine, githubTokenCopies, under, steps, scope };
 };
 
 /**
@@ -1124,6 +1135,92 @@ describe("a session that ended while the socket was down", () => {
 
     expect(fake.contexts).toHaveLength(2);
     expect(listInputResults(sent).map((result) => result.ok)).toEqual([true, true]);
+  });
+});
+
+describe("the GitHub token a start carries", () => {
+  const WITH_TOKEN: SessionStart = {
+    ...START,
+    ghToken: "ghs_start-token",
+    githubConnectionId: "the-connection",
+  };
+  const NOT_BOUND = { reason: "this runner holds no GitHub token for this session" };
+
+  it("is held for the session from its start until its exit", async () => {
+    const fake = createFake();
+    const { supervisor, sent, githubTokenCopies } = buildConnection(fake);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(WITH_TOKEN);
+        // Read from the copy the start seeded: the fake controller never answers.
+        expect(yield* Effect.promise(() => githubTokenCopies.read(START.token))).toEqual({
+          token: "ghs_start-token",
+        });
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* waitUntil("sent the exit", () =>
+          listSessionEvents(sent).some((frame) => frame.event._tag === "session.exited"),
+        );
+      }),
+    );
+
+    expect(await githubTokenCopies.read(START.token)).toEqual(NOT_BOUND);
+  });
+
+  it("is released when the adapter fails to start the session", async () => {
+    const fake = createFake();
+    fake.fails = "no fake-harness on this machine";
+    const { supervisor, githubTokenCopies } = buildConnection(fake);
+
+    await runConnected(fake, supervisor, supervisor.start(WITH_TOKEN));
+
+    expect(await githubTokenCopies.read(START.token)).toEqual(NOT_BOUND);
+  });
+
+  it("is not held when the start names no Connection, as from an older controller", async () => {
+    const fake = createFake();
+    const { supervisor, githubTokenCopies } = buildConnection(fake);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...START, ghToken: "ghs_start-token" });
+        expect(yield* Effect.promise(() => githubTokenCopies.read(START.token))).toEqual(NOT_BOUND);
+      }),
+    );
+  });
+
+  it("keeps the Connection's copy while another session of it runs", async () => {
+    const fake = createFake();
+    const { supervisor, sent, githubTokenCopies } = buildConnection(fake);
+    const OTHER = "0199e0e7-0000-7000-8000-0000000000c2";
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(WITH_TOKEN);
+        yield* supervisor.start({
+          ...WITH_TOKEN,
+          sessionId: OTHER,
+          requestId: "0199e0e7-0000-7000-8000-0000000000c3",
+          token: "another-session-token",
+        });
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* waitUntil("sent the exit", () =>
+          listSessionEvents(sent).some((frame) => frame.event._tag === "session.exited"),
+        );
+        expect(yield* Effect.promise(() => githubTokenCopies.read(START.token))).toEqual(NOT_BOUND);
+        expect(
+          yield* Effect.promise(() => githubTokenCopies.read("another-session-token")),
+        ).toEqual({
+          token: "ghs_start-token",
+        });
+      }),
+    );
   });
 });
 
@@ -2486,7 +2583,7 @@ describe("a stop that arrives while a session is still starting", () => {
 
   it("spawns no harness when it arrives while the start switches the workspace's branch", async () => {
     const fake = createFake();
-    const { runner, machine, steps, scope } = buildConnection(fake);
+    const { runner, machine, githubTokenCopies, steps, scope } = buildConnection(fake);
     const remote = makeRemote();
     addBranch(remote, "release");
     const workspaceId = createId();
@@ -2508,6 +2605,7 @@ describe("a stop that arrives while a session is still starting", () => {
     const sent: Array<RunnerToController> = [];
     const supervisor = runner.forConnection({
       scope,
+      githubTokenCopies,
       machine: {
         ...machine,
         workspaces: {
@@ -2612,7 +2710,7 @@ describe("a start that follows a stop of the same id", () => {
 
   it("keeps its entry when the old exit is handled after the adapter dropped the old session", async () => {
     const fake = createFake();
-    const { runner, machine, steps, scope } = buildConnection(fake);
+    const { runner, machine, githubTokenCopies, steps, scope } = buildConnection(fake);
     // The watch holds this event until the test lets it go, so the old exit,
     // published after it, is handled only then.
     const HOLD: ProviderEvent = { ...MARKER, eventId: "e-hold" };
@@ -2624,6 +2722,7 @@ describe("a start that follows a stop of the same id", () => {
     const supervisor = runner.forConnection({
       scope,
       machine,
+      githubTokenCopies,
       workspaceSteps: steps,
       send: (frame) =>
         Effect.andThen(
@@ -4023,7 +4122,8 @@ describe("the files an edit changed", () => {
 
     it("sends the live sessions' files again on a new connection, and not those of the session that exited", async () => {
       const fake = createFake();
-      const { supervisor, runner, sent, machine, steps, scope } = buildConnection(fake);
+      const { supervisor, runner, sent, machine, githubTokenCopies, steps, scope } =
+        buildConnection(fake);
       const exiting = await provisionRepository(machine, "ephemeral");
       const staying = await provisionRepository(machine, "ephemeral");
       await runConnected(
@@ -4056,6 +4156,7 @@ describe("the files an edit changed", () => {
       const next = runner.forConnection({
         scope: nextScope,
         machine,
+        githubTokenCopies,
         workspaceSteps: steps,
         send: (frame) => Effect.sync(() => void nextSent.push(frame)),
       });

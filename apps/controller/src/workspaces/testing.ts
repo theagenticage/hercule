@@ -139,6 +139,25 @@ export const createGithubConnection = async (
   return ((await response.json()) as { id: string }).id;
 };
 
+/**
+ * Disables a Connection. No operation does that yet: the status exists for
+ * the Connections screen, so the test writes it directly.
+ */
+export const disableConnection = async (
+  arranged: Arranged,
+  connectionId: string,
+): Promise<void> => {
+  const { sql } = arranged.harness;
+  await Effect.runPromise(
+    Effect.orDie(
+      withTransaction(
+        sql,
+        sql`UPDATE connections SET status = 'disabled' WHERE id = unhex(replace(${connectionId}, '-', ''))`,
+      ),
+    ),
+  );
+};
+
 /** A frame on the wire, read as the object it is rather than as a member of a union. */
 export type Frame = { readonly _tag: string } & Record<string, unknown>;
 

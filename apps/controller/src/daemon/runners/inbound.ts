@@ -3,7 +3,7 @@
  *
  * - the sessions a runner holds, and what happens in them;
  * - the result of provisioning a workspace, and of each workspace step;
- * - the git credentials a runner asks for;
+ * - the git credentials and the GitHub tokens a runner asks for;
  * - the end of a device login, which calls for a fresh probe;
  * - every change that may have given a runner room for more work.
  *
@@ -22,15 +22,18 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 import { withTransaction } from "../../db";
+import { ConnectionTypes } from "../../connections";
+import { SessionTokens } from "../../permissions";
 import { PromotionState } from "../../promotion";
 import { ProviderProbes } from "../../providers";
 import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
+import { Secrets } from "../../secrets";
 import { SessionService } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
 import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
 import { DiscussionInputs } from "../discussions";
-import { Dispatch, Live } from "../sessions";
+import { Dispatch, Live, makeGithubTokenAnswers } from "../sessions";
 import { TextGenerationTargetChanges } from "../text-generation";
 
 const make = Effect.gen(function* () {
@@ -46,6 +49,7 @@ const make = Effect.gen(function* () {
   const { dispatch } = yield* Dispatch;
   const { sendClaimed, deliverQueuedInput } = yield* Live;
   const { tellSession } = yield* DiscussionInputs;
+  const { answerGithubTokenRequest } = yield* makeGithubTokenAnswers;
 
   const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
     switch (traffic._tag) {
@@ -94,9 +98,22 @@ const make = Effect.gen(function* () {
       case "credentialRequested":
         // The credential is valid for this one request only, so it is sent
         // straight back on the connection that asked, and never stored.
-        return Effect.flatMap(
-          workspaces.credentialAnswer(traffic.runnerId, traffic.request),
-          (answer) => Effect.asVoid(connections.tell(traffic.runnerId, answer)),
+        // Forked, because a token inside its refresh margin is refreshed by
+        // calling GitHub, which can take a while, and the rest of the fleet's
+        // traffic is read in this one queue.
+        return forkAndAbsorbFailures(
+          "Answering a runner's git credential request failed",
+          Effect.flatMap(workspaces.credentialAnswer(traffic.runnerId, traffic.request), (answer) =>
+            Effect.asVoid(connections.tell(traffic.runnerId, answer)),
+          ),
+        );
+      case "githubTokenRequested":
+        // Forked, because a stale token is refreshed by calling GitHub, which
+        // can take a while, and the rest of the fleet's traffic is read in
+        // this one queue.
+        return forkAndAbsorbFailures(
+          "Answering a runner's GitHub token request failed",
+          answerGithubTokenRequest(traffic.runnerId, traffic.request),
         );
       case "workspaceStepReported":
         return Effect.gen(function* () {
@@ -280,6 +297,9 @@ export const InboundLayer: Layer.Layer<
   | PromotionState
   | Dispatch
   | Live
+  | SessionTokens
+  | ConnectionTypes
+  | Secrets
   | TextGenerationTargetChanges
   | DiscussionInputs
 > = Layer.effect(Inbound)(make);

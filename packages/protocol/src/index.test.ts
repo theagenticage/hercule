@@ -172,6 +172,7 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
     sessionId: SESSION_ID,
     editedFiles: [{ resourceId: "repo-1", path: "src/main.ts" }],
   },
+  { _tag: "githubTokenRequest", requestId: REQUEST_ID, sessionToken: "a-session-token" },
   { _tag: "sessionInputResult", requestId: REQUEST_ID, ok: true, delivery: "steered" },
   {
     _tag: "sessionsReport",
@@ -330,6 +331,17 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   // The git identity is sent once on `sessionStart`, not with every credential.
   { _tag: "credentialAnswer", requestId: REQUEST_ID, token: "ghp_a-token", username: "octocat" },
   { _tag: "credentialAnswer", requestId: REQUEST_ID, error: "no_connection" },
+  {
+    _tag: "githubTokenAnswer",
+    requestId: REQUEST_ID,
+    token: "ghu_a-token",
+    expiresAt: "2026-10-26T18:00:00.000Z",
+  },
+  {
+    _tag: "githubTokenAnswer",
+    requestId: REQUEST_ID,
+    reason: "the Connection 'octocat' needs reconnecting in Settings → Connections",
+  },
   {
     _tag: "workspaceStepStart",
     kind: "action",

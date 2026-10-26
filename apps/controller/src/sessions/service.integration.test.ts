@@ -789,6 +789,45 @@ describe("SessionService.claimStarts", () => {
   });
 });
 
+describe("SessionService.listQueuedGithubConnectionIds", () => {
+  it("lists each Connection once, from every queued session of the runner and no other", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const instanceId = yield* insertInstance("an-adapter", {});
+        const runnerId = mintId();
+        const connectionId = yield* aGithubConnection;
+        const spec = buildSpec(instanceId, "clever");
+        yield* insertQueuedSession(runnerId, { instanceId, spec });
+        yield* insertQueuedSession(runnerId, {
+          instanceId,
+          spec,
+          githubConnectionId: connectionId,
+        });
+        yield* insertQueuedSession(runnerId, {
+          instanceId,
+          spec,
+          githubConnectionId: connectionId,
+        });
+        // Another runner's queue is not this runner's to claim.
+        yield* insertQueuedSession(mintId(), {
+          instanceId,
+          spec,
+          githubConnectionId: connectionId,
+        });
+        return {
+          connectionId,
+          own: yield* sessions.listQueuedGithubConnectionIds(runnerId),
+          other: yield* sessions.listQueuedGithubConnectionIds(mintId()),
+        };
+      }),
+    );
+
+    expect(result.own).toEqual([result.connectionId]);
+    expect(result.other).toEqual([]);
+  });
+});
+
 describe("SessionService.inputFrame", () => {
   it("fails with a defect on a step prompt whose session no step started", async () => {
     const row: StoredInput = {

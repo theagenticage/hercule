@@ -1,10 +1,10 @@
 /**
  * Tests what the runner prepares on the machine at start, so that every session
- * it hosts can reach Hercule: the `hercule` binary in a directory it puts at the
- * front of PATH (spec 15 section 2), and the Claude plugin directory that holds
- * the skill (spec 06 section 9.3).
+ * it hosts can reach Hercule: the `hercule` binary and the `gh` shim in a
+ * directory it puts at the front of PATH (spec 15 section 2), and the Claude
+ * plugin directory that holds the skill (spec 06 section 9.3).
  *
- * Both are rewritten at every start, because an upgraded binary must replace an
+ * All of them are rewritten at every start, because an upgraded binary must replace an
  * older build's symlink and an older build's skill text.
  */
 import {
@@ -14,6 +14,7 @@ import {
   mkdtempSync,
   readFileSync,
   readlinkSync,
+  statSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -21,6 +22,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { buildGhShim } from "./gh-shim";
 import { SKILL_DESCRIPTION } from "./skill";
 import { prepareTooling } from "./tooling";
 
@@ -86,6 +88,25 @@ describe("the hercule binary a session calls", () => {
     // The link is rewritten at every runner start, so after an upgrade the
     // sessions call the new build, not the one it replaced.
     expect(readlinkSync(join(binDir, "hercule"))).toBe(execPath);
+  });
+});
+
+describe("the gh a session calls", () => {
+  it("is an executable script beside the hercule symlink, rewritten at every start", () => {
+    const { home, storageDir, execPath } = createMachine();
+    const binDir = join(home, "runner", "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(join(binDir, "gh"), "what an older build wrote");
+
+    prepareTooling({ home, storageDir, execPath, orientation: ORIENTATION, skill: SKILL });
+
+    const shim = join(binDir, "gh");
+    expect(readFileSync(shim, "utf8")).toBe(buildGhShim(binDir));
+    expect(statSync(shim).mode & 0o111).not.toBe(0);
+    // Starting again leaves the shim in place and executable.
+    prepareTooling({ home, storageDir, execPath, orientation: ORIENTATION, skill: SKILL });
+    expect(readFileSync(shim, "utf8")).toBe(buildGhShim(binDir));
+    expect(statSync(shim).mode & 0o111).not.toBe(0);
   });
 });
 

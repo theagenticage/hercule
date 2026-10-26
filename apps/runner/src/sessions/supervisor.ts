@@ -56,6 +56,7 @@ import {
   type LoadedSkills,
   type RepositorySkillListing,
 } from "../skills";
+import type { GithubTokenCopies } from "../credentials";
 import type { WorkspaceSteps } from "../workspace-steps";
 import {
   removeSessionDirectory,
@@ -233,6 +234,13 @@ interface Live {
   readonly gone: Deferred.Deferred<void>;
   /** Whether the session runs under an output schema, so an agent step's turn must return a structured result. */
   readonly hasOutputSchema: boolean;
+  /**
+   * Releases the session's hold on its GitHub Connection's token, which drops
+   * the runner's copy once the Connection's last session is gone. A no-op when
+   * the start held nothing. `tearDownSession` calls it, and every removal of
+   * the entry goes through that, so the hold ends exactly once.
+   */
+  readonly releaseGithubToken: () => void;
   /** The agent step whose turn runs in this session now, if any. */
   step: RunningStep | undefined;
 }
@@ -312,6 +320,11 @@ const isWatched = (held: Live): boolean =>
 export interface Connection {
   readonly scope: Scope.Scope;
   readonly machine: Machine;
+  /**
+   * The GitHub tokens this runner holds for its sessions. A session holds its
+   * Connection's token from its start until its entry is removed.
+   */
+  readonly githubTokenCopies: GithubTokenCopies;
   /**
    * The workspace steps of this process. The supervisor tells them when an
    * agent step's turn begins, and the step keeps them to say how it ended.
@@ -599,8 +612,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   /**
    * Takes a removed session entry out of its edit watch, interrupts every
    * timer fiber of the entry, removes its scratch, image and marks
-   * directories, and completes its `gone`. Call it after the entry has left
-   * `live`.
+   * directories, releases its hold on its GitHub token, and completes its
+   * `gone`. Call it after the entry has left `live`.
    */
   const tearDownSession = (sessionId: string, held: Live): Effect.Effect<void> =>
     Effect.gen(function* () {
@@ -610,6 +623,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       yield* cancelIdleUnload(held);
       yield* removeSessionDirectories(held);
       yield* removeSessionSkillsFolder(held.sessionSkillsFolder);
+      held.releaseGithubToken();
       yield* Deferred.succeed(held.gone, undefined);
     });
 
@@ -1432,6 +1446,20 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           pendingStop: arrived.pendingStop,
           gone: Deferred.makeUnsafe<void>(),
           hasOutputSchema: frame.spec.outputSchema !== undefined,
+          // Held with the entry, so every way the entry ends releases it. An
+          // older controller sends `ghToken` without a Connection id: nothing
+          // is held then, and the session keeps its start token in `GH_TOKEN`.
+          releaseGithubToken:
+            frame.ghToken === undefined || frame.githubConnectionId === undefined
+              ? () => undefined
+              : connection.githubTokenCopies.hold({
+                  sessionToken: frame.token,
+                  connectionId: frame.githubConnectionId,
+                  githubToken: frame.ghToken,
+                  ...(frame.ghTokenExpiresAt === undefined
+                    ? {}
+                    : { expiresAt: frame.ghTokenExpiresAt }),
+                }),
           step: undefined,
         };
         // In the same step, with no yield between, so a stop finds either the

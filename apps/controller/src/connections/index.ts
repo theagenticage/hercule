@@ -3,7 +3,7 @@
  * connection record and its credentials; each connection type comes from a
  * plugin.
  */
-export { githubTokens, type GithubToken } from "./github";
+export { githubTokens, GithubTokenUnavailable, type GithubToken } from "./github";
 export { CALLBACK_PATH, OAUTH_TOKENS } from "./oauth";
 export { ActivePlugins } from "./active-plugins";
 export { ConnectionObserver } from "./observer";

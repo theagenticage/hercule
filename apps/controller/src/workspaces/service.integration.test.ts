@@ -9,8 +9,11 @@ import { join } from "node:path";
 import { buildHomePaths, HerculeHome } from "../config";
 import { uuidFromString } from "../db/id";
 import { inTransaction, TestDatabase } from "../db/testing";
+import { ConnectionTypesLayer } from "../connections";
 import { AuditLogLayer } from "../events";
 import { SessionTokensLayer } from "../permissions";
+import { PluginConfigsLayer } from "../plugins";
+import { ServingPromotionStateLayer } from "../promotion/testing";
 import { RunWorkspaceStepActivityLayer } from "../runs";
 import { masterKeyLayer } from "../secrets/masterKey";
 import { secretsLayer } from "../secrets/repository";
@@ -27,6 +30,9 @@ const RUNNER_ID = "0199e0e7-0000-7000-8000-0000000000a1";
 const serviceLayer = WorkspaceServiceLayer.pipe(
   Layer.provideMerge(SessionTokensLayer),
   Layer.provideMerge(RunWorkspaceStepActivityLayer),
+  Layer.provideMerge(ConnectionTypesLayer),
+  Layer.provideMerge(PluginConfigsLayer),
+  Layer.provideMerge(ServingPromotionStateLayer),
   Layer.provideMerge(SettingsLayer),
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),

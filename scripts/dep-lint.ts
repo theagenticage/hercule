@@ -45,6 +45,11 @@
  * Inside it, the same two rules hold one level down: its folders form a DAG,
  * and one folder reaches another only through that folder's `index.ts`.
  *
+ * One rule keeps `hercule github-token`, which runs on every `gh` call, fast to
+ * start: its client links Node built-ins and two small sibling modules, and
+ * nothing else, so a careless import such as `effect` fails here instead of
+ * slowing every `gh` call.
+ *
  * One rule is a fence inside the runner: only `sessions/context.ts`, which
  * resolves a session from its start frame, imports `user-material/`. That
  * module finds the user's own skills and instructions in each harness's
@@ -169,6 +174,25 @@ const ENTRYPOINT_RULES: ReadonlyArray<EntrypointRule> = [
         what: "the web bundle",
         pattern:
           /^apps\/web\/|^packages\/ui\/|@hercule[/+]ui|(^|\/)react(-dom)?([/@]|$)|\.(html|css)$/,
+      },
+    ],
+  },
+  {
+    layer: "github-token client",
+    entrypoint: "apps/runner/src/credentials/github-token-client.ts",
+    target: "node",
+    bundler: "bun",
+    reason:
+      "`hercule github-token` runs on every `gh` call, so it must start fast. Its client may link\n" +
+      "Node built-ins and the modules ./helper and ./socket, which import nothing else at runtime.\n" +
+      "Types are free when they are imported with `import type`.",
+    forbidden: [
+      {
+        what: "anything but Node built-ins, ./helper and ./socket",
+        pattern: new RegExp(
+          `^(?!(${RUNTIME_BUILT_IN.source.slice(1, -1)}|` +
+            "apps/runner/src/credentials/(github-token-client|helper|socket)\\.ts)$)",
+        ),
       },
     ],
   },
