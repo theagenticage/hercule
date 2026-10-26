@@ -78,7 +78,7 @@ const FIX_WORKSPACE: Workspace = buildWorkspace({
 });
 
 /** The Fix thread, working and waiting on `PUSH_REQUEST`, which opened ten minutes ago. */
-const FIX_SESSION = buildSpecimenSession({
+export const FIX_SESSION = buildSpecimenSession({
   id: FIX_THREAD_ID,
   title: "Fix 3-D Secure checkout for EU cards",
   role: "fix",
@@ -97,7 +97,7 @@ const FIX_SESSION = buildSpecimenSession({
 });
 
 /** The moment the Fix thread's turn started: 2026-09-29 09:02 UTC. */
-const TURN_START = Date.UTC(2026, 8, 29, 9, 2, 0);
+export const TURN_START = Date.UTC(2026, 8, 29, 9, 2, 0);
 
 /** The one turn of the Fix thread. */
 const TURN_ID = "turn-1";
@@ -112,13 +112,13 @@ type ItemKind = ItemStartedBody["kind"];
 type ItemDetail = NonNullable<ItemStartedBody["detail"]>;
 
 /** One event of the transcript, and how many seconds after `TURN_START` it happened. */
-type TranscriptStep = readonly [seconds: number, event: EventBody];
+export type TranscriptStep = readonly [seconds: number, event: EventBody];
 
 /**
  * Returns the steps of one item that runs from `from` to `to` seconds: its
  * start, the text it wrote when `text` is given, and its completion.
  */
-const runItem = (
+export const runItem = (
   [from, to]: readonly [number, number],
   itemId: string,
   kind: ItemKind,
@@ -151,7 +151,7 @@ const runItem = (
  * input, as the adapter passes them on. A file read also carries its fixed
  * field `path`, as the adapter sets it from the input's `file_path`.
  */
-const runTool = (
+export const runTool = (
   seconds: readonly [number, number],
   itemId: string,
   kind: ItemKind,
@@ -236,7 +236,7 @@ const FIX_STEPS: ReadonlyArray<TranscriptStep> = [
 ];
 
 /** Returns the transcript rows of `steps` for the Fix thread, with positions from 1. */
-const buildTranscript = (steps: ReadonlyArray<TranscriptStep>): TranscriptRow[] =>
+export const buildTranscript = (steps: ReadonlyArray<TranscriptStep>): TranscriptRow[] =>
   steps.map(([seconds, body], index) => {
     const at = new Date(TURN_START + seconds * 1000).toISOString();
     return {

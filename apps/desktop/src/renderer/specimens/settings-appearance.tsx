@@ -5,14 +5,20 @@
  * pixel with the Bureau book's desktop/settings-appearance.html, edited by
  * settings-appearance-reference.ts to show the same rows.
  *
- * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`.
- * With Follow the system on, the app presses the card of the theme macOS's
+ * The page takes its theme from `?theme=` (any of the five) and its Glass
+ * level from `?glass=`, 40 when the URL names none. The Appearance it reads
+ * holds that theme as the one Follow the system uses, and that glass. With
+ * Follow the system on, the app presses the card of the theme macOS's
  * appearance puts in use, so the capture window reports the appearance that
- * matches the theme (see scripts/sheet-window.ts).
+ * matches the theme (see scripts/sheet-window.ts): a dark theme needs a dark
+ * appearance. The Glass slider reads the page's glass.
  *
  * The working face's paws tap. The page removes every animation, as the
  * book's page is held still, so the paws rest where they start.
  */
+// The fixed clock comes first: the app's age clock reads the time as soon as
+// its module loads, and the sidebar shows ages.
+import "./fixed-clock";
 import {
   SETTINGS_ASSISTANTS_RECORDS,
   SETTINGS_ASSISTANTS_SCREEN,

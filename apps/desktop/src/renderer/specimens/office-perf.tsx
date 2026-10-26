@@ -46,7 +46,7 @@ import {
 import type { Object3D } from "three";
 import { mountOfficeScene } from "../office/office-scene";
 import { buildWorld } from "../office/world/build-world";
-import { applySheetTheme, markSheetReady } from "./sheet-page";
+import { applySheetAppearance, markSheetReady } from "./sheet-page";
 
 Object.defineProperty(document, "hidden", { get: () => false });
 Object.defineProperty(document, "visibilityState", { get: () => "visible" });
@@ -252,7 +252,7 @@ const buildFixtureWorld = () =>
     localRunnerId: MOSS.id,
   });
 
-applySheetTheme();
+applySheetAppearance();
 const root = document.getElementById("root")!;
 root.style.cssText = "position:fixed;inset:0";
 const stage = document.createElement("div");
