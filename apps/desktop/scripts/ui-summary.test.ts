@@ -29,6 +29,7 @@ function buildMeasured(
     supported?: boolean;
     sourceId?: number;
     dimmed?: boolean;
+    partlyCovered?: boolean;
   } = {},
 ): MeasuredFragment {
   const fragment: TextFragment = {
@@ -42,6 +43,7 @@ function buildMeasured(
     role,
     opacityGroups: options.dimmed === true ? [{ id: 1, opacity: 0.5 }] : [],
     isProse: false,
+    partlyCovered: options.partlyCovered ?? false,
   };
   return {
     fragment,
@@ -102,6 +104,17 @@ describe("summarizeContrast", () => {
   it("counts a line that cannot be measured as failing, and leaves it out of the lowest Lc", () => {
     const values = summarizeContrast(
       [buildMeasured("muted", 70), buildMeasured("muted", 10, { supported: false })],
+      false,
+    );
+    expect(values["contrast.unsupported"]).toBe(1);
+    expect(values["contrast.muted.minLc"]).toBe(70);
+    expect(values["contrast.muted.belowTarget"]).toBe(1);
+    expect(values["contrast.wcag.failing"]).toBe(1);
+  });
+
+  it("treats a line under a translucent layer like a line that cannot be measured", () => {
+    const values = summarizeContrast(
+      [buildMeasured("muted", 70), buildMeasured("muted", 10, { partlyCovered: true })],
       false,
     );
     expect(values["contrast.unsupported"]).toBe(1);

@@ -768,13 +768,18 @@ function takeSourceId(pass: TextPass): number {
   return pass.nextSourceId++;
 }
 
-/** Returns whether the element and all its ancestors are drawn: no opacity 0 and no `visibility` other than visible on the element. */
-function isDrawn(element: Element, readFacts: ReadFacts): boolean {
-  if (readFacts(element).style.visibility !== "visible") return false;
+/** Returns whether the element itself is drawn: its `visibility` is visible. */
+function isVisible(element: Element, readFacts: ReadFacts): boolean {
+  return readFacts(element).style.visibility === "visible";
+}
+
+/** Returns the opacity an element is drawn with: its own opacity times that of every ancestor. */
+function readEffectiveOpacity(element: Element, readFacts: ReadFacts): number {
+  let opacity = 1;
   for (let each: Element | null = element; each !== null; each = each.parentElement) {
-    if (readFacts(each).opacity === 0) return false;
+    opacity *= readFacts(each).opacity;
   }
-  return true;
+  return opacity;
 }
 
 /** Returns whether an element is replaced content, which the browser draws whole over what lies behind it. */
@@ -789,13 +794,19 @@ function isReplacedElement(element: Element): boolean {
 }
 
 /**
- * The least alpha of a background colour that hides what lies behind it. The
- * text under a layer this opaque cannot be read, while the text under a faint
- * wash (a hover tint at 1 % or 8 %) still can, and the glass of the UI is
- * about 0.9. Half is the point where the layer, and not what is behind it,
- * decides the colour a reader sees.
+ * The effective opacity and background alpha from which an element hides what
+ * is behind it. Only text that is confidently out of sight is left out of the
+ * metrics, so the bar is high: a layer that is 90 % opaque still lets the
+ * text show through.
  */
-const OPAQUE_BACKGROUND_ALPHA = 0.5;
+const HIDING_ALPHA = 0.95;
+
+/**
+ * The paint alpha above which an element that does not hide a point still
+ * covers it partly. Below it the layer is too faint to change what the reader
+ * sees (a 1 % hover tint), and it is ignored.
+ */
+const PARTLY_COVERING_ALPHA = 0.05;
 
 /** Returns whether a computed `backdrop-filter` value blurs: it holds a `blur()` with a radius above 0. */
 function blursBackdrop(backdropFilter: string): boolean {
@@ -804,57 +815,74 @@ function blursBackdrop(backdropFilter: string): boolean {
   );
 }
 
+/** How an element sitting above a point of text affects that point. */
+type Coverage = "hidden" | "partly" | "clear";
+
 /**
- * Returns whether an element hides what lies behind its box, so that text
- * behind it cannot be read. It does when it has any of these:
+ * Returns how an element that lies over a point affects the text at that
+ * point, from what the element paints and the opacity it is drawn with (its
+ * own times that of every ancestor).
  *
- * - a background colour with alpha of 0.5 or more (see `OPAQUE_BACKGROUND_ALPHA`);
- * - a background image of any kind;
- * - replaced content (an image, svg, canvas, video or iframe);
- * - a backdrop filter with a blur radius above 0, which smears what is behind.
+ * An element paints in one of four ways: a background colour, a background
+ * image, replaced content (an image, svg, canvas, video or iframe), or a
+ * backdrop filter that blurs. The first has the alpha of the colour; the
+ * others count as alpha 1. The paint alpha is that alpha times the effective
+ * opacity.
  *
- * A fainter background colour, a backdrop filter without a blur (`blur(0px)`,
- * `saturate(1.2)`) and an element that draws only text, a border or nothing
- * leave the text behind readable, so they do not hide it.
+ * - "hidden": the effective opacity is at least 0.95 and the element has a
+ *   background colour with alpha of at least 0.95, or one of the other three
+ *   kinds of paint. A frosted layer (a blurring backdrop filter) counts,
+ *   because it blurs what is behind it past reading.
+ * - "partly": the element does not hide the point, but its paint alpha is
+ *   above 0.05. A wash of 50 % is an example.
+ * - "clear": anything else, including an element that paints nothing, such
+ *   as one with only text or a border.
  */
-function hidesContentBehind(element: Element, readFacts: ReadFacts): boolean {
+function readCoverageOfPoint(element: Element, readFacts: ReadFacts): Coverage {
   const { style } = readFacts(element);
-  return (
+  const backgroundAlpha = resolveColour(style.backgroundColor)[3];
+  const paintsOtherwise =
     isReplacedElement(element) ||
     style.backgroundImage !== "none" ||
-    blursBackdrop(style.backdropFilter) ||
-    resolveColour(style.backgroundColor)[3] >= OPAQUE_BACKGROUND_ALPHA
-  );
+    blursBackdrop(style.backdropFilter);
+  const opacity = readEffectiveOpacity(element, readFacts);
+  if (opacity >= HIDING_ALPHA && (paintsOtherwise || backgroundAlpha >= HIDING_ALPHA)) {
+    return "hidden";
+  }
+  const paintAlpha = (paintsOtherwise ? 1 : backgroundAlpha) * opacity;
+  return paintAlpha > PARTLY_COVERING_ALPHA ? "partly" : "clear";
 }
 
 /**
- * Returns whether another element paints over the fragment, so that nobody
- * sees it: a tray that slides over a list, a floating header over the
- * transcript. Five points are tried: the centre and the four corners of the
- * visible box, each moved 1px inward (less in a box thinner than 2px). The
- * fragment is covered when every point is covered.
+ * Returns how other elements cover a fragment: "hidden" when nobody sees it
+ * (a tray that slides over a list, a floating header over the transcript),
+ * "partly" when something translucent lies over some of it, and "clear"
+ * otherwise. Five points are tried: the centre and the four corners of the
+ * visible box, each moved 1px inward (less in a box thinner than 2px).
  *
- * A point is covered when, walking down the elements at that point from the
- * topmost, an element that hides what is behind it (see `hidesContentBehind`)
- * comes before the owner of the fragment. The walk skips elements that do
- * not, because the text shows through them: a transparent or faintly tinted
- * overlay over the whole page, or a second block of text at the same place. It also
- * skips elements that are not drawn (opacity 0 or hidden), such as the
- * sidebar's hover buttons over the row text. The walk ends, and the point is
- * not covered, at the owner, an element inside it, or an element around it.
- * An element with `pointer-events: none` is not in the list the browser
- * gives, so such an overlay never covers anything.
+ * At each point the walk goes down the elements at that point from the
+ * topmost, as `readCoverageOfPoint` judges them:
  *
- * A fragment with no visible box, or whose owner ignores the pointer (the
- * browser leaves such an element out of the list, so nothing can be said), is
- * not covered.
+ * - An element that hides the point ends the walk: the point is hidden.
+ * - An element that covers the point partly marks it, and the walk goes on.
+ * - The walk skips elements that are not drawn (`visibility` hidden, or too
+ *   faint to count), such as the sidebar's hover buttons over the row text,
+ *   and elements that paint nothing, such as a second block of text at the
+ *   same place.
+ * - The walk ends, with what was found so far, at the owner, an element
+ *   inside it, or an element around it.
+ * - An element with `pointer-events: none` is not in the list the browser
+ *   gives, so such an overlay never covers anything.
+ *
+ * The fragment is "hidden" when all five points are hidden, "partly" when
+ * it is not hidden and some point is covered partly, else "clear". A
+ * fragment with no visible box, or whose owner ignores the pointer (the
+ * browser leaves such an element out of the list, so nothing can be said),
+ * is "clear".
  */
-function isCoveredByOtherElement(
-  readFacts: ReadFacts,
-  { fragment, owner }: CollectedFragment,
-): boolean {
+function readCoverage(readFacts: ReadFacts, { fragment, owner }: CollectedFragment): Coverage {
   const box = fragment.visibleBox;
-  if (box === null || readFacts(owner).style.pointerEvents === "none") return false;
+  if (box === null || readFacts(owner).style.pointerEvents === "none") return "clear";
   const insetX = Math.min(1, (box.right - box.left) / 2);
   const insetY = Math.min(1, (box.bottom - box.top) / 2);
   const points = [
@@ -864,13 +892,26 @@ function isCoveredByOtherElement(
     [box.left + insetX, box.bottom - insetY],
     [box.right - insetX, box.bottom - insetY],
   ] as const;
-  return points.every(([x, y]) => {
+  let hiddenPoints = 0;
+  let hasPartlyCoveredPoint = false;
+  for (const [x, y] of points) {
+    let partly = false;
+    let hidden = false;
     for (const element of document.elementsFromPoint(x, y)) {
-      if (element === owner || owner.contains(element) || element.contains(owner)) return false;
-      if (isDrawn(element, readFacts) && hidesContentBehind(element, readFacts)) return true;
+      if (element === owner || owner.contains(element) || element.contains(owner)) break;
+      if (!isVisible(element, readFacts)) continue;
+      const coverage = readCoverageOfPoint(element, readFacts);
+      if (coverage === "hidden") {
+        hidden = true;
+        break;
+      }
+      if (coverage === "partly") partly = true;
     }
-    return false;
-  });
+    if (hidden) hiddenPoints += 1;
+    else if (partly) hasPartlyCoveredPoint = true;
+  }
+  if (hiddenPoints === points.length) return "hidden";
+  return hasPartlyCoveredPoint ? "partly" : "clear";
 }
 
 /** Reads the line fragments of one text node and adds them to the pass. */
@@ -914,6 +955,7 @@ function readTextNode(pass: TextPass, node: Text, parent: Element): void {
         role,
         opacityGroups,
         isProse: paragraph !== null,
+        partlyCovered: false,
       },
     });
   });
@@ -974,6 +1016,7 @@ function readField(
       role: isPlaceholder ? "placeholder" : decideRole(pass, field, colour),
       opacityGroups,
       isProse: false,
+      partlyCovered: false,
     },
   });
 }
@@ -1031,6 +1074,7 @@ function readPseudoElement(pass: TextPass, host: Element, pseudo: "::before" | "
       role: isPlaceholder ? "placeholder" : decideRole(pass, host, colour),
       opacityGroups,
       isProse: false,
+      partlyCovered: false,
     },
   });
 }
@@ -1077,12 +1121,24 @@ function readTextFragments(readFacts: ReadFacts): CollectedFragment[] {
   return pass.fragments;
 }
 
-/** Reads the text of the page like `readTextFragments`, without the text that another element paints over: the text a user sees. */
+/**
+ * Reads the text of the page like `readTextFragments`, without the text that
+ * another element hides: the text a user sees. A fragment that something
+ * translucent lies over has `partlyCovered` set.
+ */
 function readPaintedTextFragments(): CollectedFragment[] {
   const readFacts = createFactsReader();
-  return readTextFragments(readFacts).filter(
-    (collected) => !isCoveredByOtherElement(readFacts, collected),
-  );
+  const painted: CollectedFragment[] = [];
+  for (const collected of readTextFragments(readFacts)) {
+    const coverage = readCoverage(readFacts, collected);
+    if (coverage === "hidden") continue;
+    painted.push(
+      coverage === "partly"
+        ? { ...collected, fragment: { ...collected.fragment, partlyCovered: true } }
+        : collected,
+    );
+  }
+  return painted;
 }
 
 /**
@@ -1090,8 +1146,8 @@ function readPaintedTextFragments(): CollectedFragment[] {
  * each text node, input value, placeholder and drawn `::before` or `::after`
  * string, in document order. See `TextFragment` for what a fragment holds.
  *
- * Text that another element paints over is left out: see
- * `isCoveredByOtherElement`.
+ * Text that another element hides is left out, and text that something
+ * translucent lies over is marked `partlyCovered`: see `readCoverage`.
  *
  * An element with an opacity above 0 and below 1 around the text gets a
  * `data-ui-probe-group` attribute that names it in `opacityGroups`. Text
@@ -1754,8 +1810,8 @@ export function removePerturbation(): void {
  * - Two fragments of different sources overlap when their visible boxes
  *   (cut by the window and every clipping ancestor, scrolling ones too)
  *   share more than 2 square pixels. A part that is cut away is not drawn,
- *   so it cannot overlap anything. A fragment that another element paints
- *   over (see `isCoveredByOtherElement`) is left out of the pairs.
+ *   so it cannot overlap anything. A fragment that another element
+ *   hides (see `readCoverage`) is left out of the pairs.
  * - The string of a pseudo-element is left out of the overlaps, because its
  *   box is its element's box, which holds other text.
  *
@@ -1775,7 +1831,7 @@ export function measureClipping(): ClippingFacts {
       (each) =>
         each.fragment.visibleBox !== null &&
         !each.hasStandInBox &&
-        !isCoveredByOtherElement(readFacts, each),
+        readCoverage(readFacts, each) !== "hidden",
     )
     .map(({ fragment }) => ({ sourceId: fragment.sourceId, box: fragment.visibleBox! }))
     .sort((first, second) => first.box.left - second.box.left);

@@ -76,6 +76,7 @@ function buildFragment(overrides: Partial<TextFragment>): TextFragment {
     role: "ink",
     opacityGroups: [],
     isProse: false,
+    partlyCovered: false,
     ...overrides,
   };
 }

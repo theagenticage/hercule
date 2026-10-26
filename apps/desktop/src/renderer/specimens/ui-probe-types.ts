@@ -46,6 +46,27 @@ export interface TextFragment {
   readonly opacityGroups: ReadonlyArray<{ readonly id: number; readonly opacity: number }>;
   /** Whether the text is prose of a transcript message, which the prose measure reads. */
   readonly isProse: boolean;
+  /**
+   * Whether another element lies over the fragment without hiding it. For one
+   * of the five sample points of the fragment, an element above the fragment
+   * is judged by its effective opacity (its own times that of every
+   * ancestor):
+   *
+   * - It hides the point when the effective opacity is at least 0.95 and the
+   *   element has a background colour with alpha of at least 0.95, a
+   *   background image, replaced content, or a backdrop filter that blurs
+   *   (radius above 0). A fragment whose five points are all hidden is not
+   *   collected.
+   * - It covers the point partly when it paints with any of those four but
+   *   does not hide the point, and its paint alpha (the background alpha, or
+   *   1 for the other three, times the effective opacity) is above 0.05.
+   * - Anything fainter is ignored.
+   *
+   * True when some point is covered partly. The pixels under the text are then
+   * a mix of the text's own background and the layer, so the contrast read
+   * from them is only an estimate.
+   */
+  readonly partlyCovered: boolean;
 }
 
 /** The theme tokens a metric compares with, resolved to sRGB in the page's top-level theme. */

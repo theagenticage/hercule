@@ -65,6 +65,16 @@ const TARGET_SIZE_LIMITS = { under24: 24, under28: 28 } as const;
 const SIZE_TOLERANCE_PX = 0.01;
 
 /**
+ * Returns whether the contrast of a measured line is a real measure. It is not
+ * when the pixels behind the text are an estimate: the text sits in nested
+ * opacity groups (`contrast.supported` is false), or a translucent layer lies
+ * over part of it (`partlyCovered`).
+ */
+function hasSupportedContrast({ fragment, contrast }: MeasuredFragment): boolean {
+  return contrast.supported && !fragment.partlyCovered;
+}
+
+/**
  * Summarizes the contrast of the measured text lines of one page at one glass
  * level, for a theme that is dark or light.
  *
@@ -78,9 +88,10 @@ const SIZE_TOLERANCE_PX = 0.01;
  * It also returns the lines of ink above the ceiling (always 0 in a light
  * theme), the lines that fail WCAG (the roles placeholder and disabled are
  * exempt from WCAG, so they are skipped), and the lines whose contrast could
- * not be measured. A line that could not be measured counts as below its
- * target and as failing WCAG, and is left out of the lowest Lc, because its
- * numbers are only an estimate.
+ * not be measured: text in nested opacity groups, and text that a translucent
+ * layer lies over in part (`partlyCovered`). A line that could not be measured
+ * counts as below its target and as failing WCAG, and is left out of the
+ * lowest Lc, because its numbers are only an estimate.
  */
 export function summarizeContrast(
   measured: ReadonlyArray<MeasuredFragment>,
@@ -91,14 +102,14 @@ export function summarizeContrast(
     const ofRole = measured.filter(({ fragment }) => fragment.role === role);
     if (ofRole.length === 0) continue;
     const target = METRICS[`contrast.${role}.minLc`]!.target;
-    const supported = ofRole.filter(({ contrast }) => contrast.supported);
+    const supported = ofRole.filter(hasSupportedContrast);
     if (supported.length > 0) {
       values[`contrast.${role}.minLc`] = Math.min(
         ...supported.map(({ contrast }) => Math.abs(contrast.apcaLc)),
       );
     }
     values[`contrast.${role}.belowTarget`] = ofRole.filter(
-      ({ contrast }) => !contrast.supported || !target(Math.abs(contrast.apcaLc), { dark }),
+      (each) => !hasSupportedContrast(each) || !target(Math.abs(each.contrast.apcaLc), { dark }),
     ).length;
   }
   values["contrast.ink.aboveCeiling"] = dark
@@ -107,12 +118,13 @@ export function summarizeContrast(
           fragment.role === "ink" && Math.abs(contrast.apcaLc) > INK_CEILING_LC,
       ).length
     : 0;
-  values["contrast.wcag.failing"] = measured.filter(({ fragment, contrast }) => {
+  values["contrast.wcag.failing"] = measured.filter((each) => {
+    const { fragment, contrast } = each;
     if (fragment.role === "placeholder" || fragment.role === "disabled") return false;
     const needed = fragment.fontSize < LARGE_TEXT_PX ? SMALL_TEXT_RATIO : LARGE_TEXT_RATIO;
-    return !contrast.supported || contrast.wcagRatio < needed;
+    return !hasSupportedContrast(each) || contrast.wcagRatio < needed;
   }).length;
-  values["contrast.unsupported"] = measured.filter(({ contrast }) => !contrast.supported).length;
+  values["contrast.unsupported"] = measured.filter((each) => !hasSupportedContrast(each)).length;
   return values;
 }
 
