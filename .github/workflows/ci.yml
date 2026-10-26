@@ -207,10 +207,13 @@ jobs:
     strategy:
       # A failure in one shard must not hide the numbers of the other.
       fail-fast: false
+      # Two themes and three. The first shard also measures the run-wide
+      # metrics, and on 2026-10-26 a split of three and two took 99 s and
+      # 50 s to measure.
       matrix:
         themes:
-          - whitehaven,styles,orient-express
-          - nile,end-house
+          - whitehaven,styles
+          - orient-express,nile,end-house
     steps:
       - uses: actions/checkout@v7
         with:
