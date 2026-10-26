@@ -170,6 +170,8 @@ describe("independent Codex subagent conversations", () => {
       [undefined, "root reasoning"],
       [CHILD_A, "A reasoning"],
       [CHILD_B, "B reasoning"],
+      // Codex sent this message in one piece, with no deltas.
+      [CHILD_B, "Plain prose from the child."],
     ]);
     for (const event of filterByTag(run.seen, "turn.completed")) {
       expect(event.subagentId).toBeDefined();

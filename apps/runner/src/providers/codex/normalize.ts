@@ -70,6 +70,13 @@ export interface Normalizing {
    */
   model: string | undefined;
   readonly reasoning: Map<string, Channel>;
+  /**
+   * The assistant messages of the running turn whose text has reached the
+   * stream, whether as deltas or as the one delta `buildMissingMessageText`
+   * adds. A repeated `item/completed` for such a message adds nothing. The set
+   * is emptied when the turn ends.
+   */
+  readonly streamedMessages: Set<string>;
   /** The root's output schema, absent for a subagent whose answer belongs to its parent. */
   readonly outputSchema: OutputSchema | undefined;
   /**
@@ -108,6 +115,7 @@ export const buildNormalizingState = (
   subagentId: subagent?.subagentId,
   model: undefined,
   reasoning: new Map(),
+  streamedMessages: new Set(),
   outputSchema: subagent === undefined ? outputSchema : undefined,
   lastCompletedItem: undefined,
   turnStarted: false,
@@ -293,6 +301,29 @@ const buildContentDelta = (
     delta: params.delta,
   },
 ];
+
+/**
+ * Returns the whole text of a completed assistant message as one delta when
+ * no delta carried it, or nothing when the text already streamed or is empty.
+ * Codex streams the text of an ordinary message as deltas, but a message
+ * written in one piece, such as an async question, arrives only inside its
+ * `item/completed` frame, and a client builds a message's text from deltas.
+ */
+const buildMissingMessageText = (
+  state: Normalizing,
+  params: ItemCompletedNotification,
+): ReadonlyArray<ProviderEvent> => {
+  const { item } = params;
+  if (item.type !== "agentMessage" || item.text === "" || state.streamedMessages.has(item.id)) {
+    return [];
+  }
+  state.streamedMessages.add(item.id);
+  return buildContentDelta(
+    state,
+    { threadId: params.threadId, turnId: params.turnId, itemId: item.id, delta: item.text },
+    "assistant_text",
+  );
+};
 
 /**
  * Builds a reasoning delta, or nothing if the delta is on the channel not
@@ -616,7 +647,11 @@ export const normalize = (
     ? DELTA_STREAMS[frame.method]
     : undefined;
   if (streamKind !== undefined) {
-    return buildContentDelta(state, frame.params as AgentMessageDeltaNotification, streamKind);
+    const params = frame.params as AgentMessageDeltaNotification;
+    if (streamKind === "assistant_text" && params.delta !== "") {
+      state.streamedMessages.add(params.itemId);
+    }
+    return buildContentDelta(state, params, streamKind);
   }
   switch (frame.method) {
     case "turn/started": {
@@ -644,8 +679,9 @@ export const normalize = (
       if (ended === undefined) return [];
       const structuredResult = judgeTurn(state, params.turn, ended);
       // The items of an ended turn cannot stream any more, so their reasoning
-      // channels are no longer needed.
+      // channels and message records are no longer needed.
       state.reasoning.clear();
+      state.streamedMessages.clear();
       state.lastCompletedItem = undefined;
       return [
         {
@@ -682,6 +718,7 @@ export const normalize = (
       const kind = classifyItem(state, params.item);
       if (kind === null) return [];
       return [
+        ...buildMissingMessageText(state, params),
         {
           _tag: "item.completed",
           ...buildCodexThreadEnvelope(state),

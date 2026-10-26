@@ -20,6 +20,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import type { ApprovalDecision, ProviderEvent, QuestionAnswers } from "@hercule/protocol";
+import { AnswerNotDelivered } from "../answer-not-delivered";
 import {
   type Answered,
   startBusySession,
@@ -472,37 +473,58 @@ describe("answering a question the agent asks", () => {
     expect(filterByTag(run.seen, "request.opened")[1]?.request.kind).toBe("command_approval");
   });
 
-  it("ignores answers to an approval request", async () => {
+  it("refuses answers to an approval request", async () => {
     const run = await pushServerRequest(COMMAND, COMMAND_PARAMS);
     const opened = await awaitOpenedRequest(run);
 
-    await Effect.runPromise(
-      run.adapter.respondToQuestion(SESSION, opened.request.requestId, {
-        "Deploy target": "staging",
-      }),
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.respondToQuestion(SESSION, opened.request.requestId, {
+          "Deploy target": "staging",
+        }),
+      ),
     );
 
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
     await settle();
     expect(run.answered).toEqual([]);
     expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
   });
 
-  it("ignores answers to a question shown as a tool approval", async () => {
+  it("refuses answers to a question shown as a tool approval", async () => {
     const run = await pushServerRequest(USER_INPUT, {
       ...USER_INPUT_PARAMS,
       questions: [{ ...USER_INPUT_PARAMS.questions[0], header: "" }],
     });
     const opened = await awaitOpenedRequest(run);
 
-    await Effect.runPromise(
-      run.adapter.respondToQuestion(SESSION, opened.request.requestId, {
-        "Deploy target": "staging",
-      }),
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.respondToQuestion(SESSION, opened.request.requestId, {
+          "Deploy target": "staging",
+        }),
+      ),
     );
 
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
     await settle();
     expect(run.answered).toEqual([]);
     expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
+  });
+
+  it("refuses an answer to a question that was already answered", async () => {
+    const run = await pushServerRequest(USER_INPUT, USER_INPUT_PARAMS);
+    const opened = await awaitOpenedRequest(run);
+    const answer = { "Deploy target": "staging" };
+    await Effect.runPromise(
+      run.adapter.respondToQuestion(SESSION, opened.request.requestId, answer),
+    );
+
+    const failure = await Effect.runPromise(
+      Effect.flip(run.adapter.respondToQuestion(SESSION, opened.request.requestId, answer)),
+    );
+
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
   });
 });
 

@@ -217,3 +217,91 @@ export const startMockModel = (version: "v1" | "v2", stopScenario = false) => {
     stop: () => server.stop(true),
   };
 };
+
+/** The model catalog entry that lets a fixture model call `request_user_input_async`. */
+export const ASYNC_QUESTION_CATALOG = {
+  models: [
+    {
+      slug: "gpt-5.4",
+      display_name: "Local fixture",
+      description: "Local model fixture",
+      supported_reasoning_levels: [],
+      shell_type: "unified_exec",
+      visibility: "list",
+      supported_in_api: true,
+      priority: 0,
+      support_verbosity: false,
+      truncation_policy: { mode: "tokens", limit: 10000 },
+      experimental_supported_tools: ["request_user_input_async"],
+      base_instructions: "Complete the isolated fixture task.",
+    },
+  ],
+};
+
+/**
+ * Runs a local Responses API fixture whose model asks one async question on
+ * its first call, says it is done on its second (after the tool's reply), and
+ * thanks the user on every call after that. `bodies` holds the JSON body of
+ * every request Codex made, so a test can read what the model was shown.
+ * `config` is the `config.toml` text that points Codex at the fixture.
+ */
+export const startAsyncQuestionModel = (title: string, options: ReadonlyArray<string>) => {
+  const bodies: Array<{ readonly input: ReadonlyArray<Record<string, unknown>> }> = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      if (request.method !== "POST") return Response.json({ data: [] });
+      bodies.push((await request.json()) as (typeof bodies)[number]);
+      const call = bodies.length;
+      const item =
+        call === 1
+          ? {
+              type: "function_call",
+              name: "request_user_input_async",
+              call_id: "call-async-question",
+              arguments: JSON.stringify({ questions: [{ title, options }] }),
+            }
+          : {
+              type: "message",
+              role: "assistant",
+              id: `message-${call}`,
+              content: [{ type: "output_text", text: call === 2 ? "Asked." : "Thanks." }],
+            };
+      const events = [
+        { type: "response.created", response: { id: `response-${call}` } },
+        { type: "response.output_item.done", item },
+        {
+          type: "response.completed",
+          response: {
+            id: `response-${call}`,
+            usage: {
+              input_tokens: 100,
+              input_tokens_details: { cached_tokens: 0 },
+              output_tokens: 10,
+              output_tokens_details: null,
+              total_tokens: 110,
+            },
+          },
+        },
+      ];
+      return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+  return {
+    bodies,
+    config: [
+      'model_provider = "fixture"',
+      'model = "gpt-5.4"',
+      "[model_providers.fixture]",
+      'name = "Isolated fixture"',
+      `base_url = "${server.url.toString()}v1"`,
+      'env_key = "HERCULE_CODEX_FIXTURE_KEY"',
+      'wire_api = "responses"',
+      "supports_websockets = false",
+    ].join("\n"),
+    stop: () => server.stop(true),
+  };
+};

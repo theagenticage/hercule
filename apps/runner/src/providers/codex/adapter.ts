@@ -42,6 +42,7 @@ import type {
   UserMaterial,
 } from "../index";
 import type { ResolvedSkillReference } from "../../skills";
+import { AnswerNotDelivered } from "../answer-not-delivered";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
@@ -51,6 +52,13 @@ import { truncateMessage } from "../text";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { now } from "../../report";
 import { ASKED } from "./approvals";
+import {
+  buildAnswerEnvelope,
+  buildAnswerMessage,
+  buildAsyncQuestion,
+  readAnswerTexts,
+  type AsyncQuestion,
+} from "./async-questions";
 import { normalize, readApprovalPaths } from "./normalize";
 import {
   makeCodexThreads,
@@ -94,6 +102,7 @@ import type {
   SandboxMode,
   SkillsExtraRootsSetParams,
   ThreadForkParams,
+  ThreadItem,
   ThreadResumeParams,
   ThreadStartParams,
   ThreadStartResponse,
@@ -137,6 +146,20 @@ interface Held {
   readonly threads: CodexThreads;
   /** How the session reports its commands to the edit watch, or null when its edits are not observed. */
   readonly editMarks: EditMarks | null;
+  /**
+   * The model selection the next turn starts with when its input carries
+   * none: the last one an input carried, or the session's own at the start.
+   * An answer to an async question starts a turn without an input of its own.
+   */
+  modelSelection: ModelSelection | undefined;
+  /** The async questions of the root agent that can still be answered, by Request id. */
+  readonly asyncQuestions: Map<string, AsyncQuestion>;
+  /**
+   * The native id of every async question this session has opened, answered
+   * or not. Codex may send an item again, and a question that is already
+   * answered must not open a second time.
+   */
+  readonly seenAsyncQuestionItems: Set<string>;
 }
 
 /**
@@ -195,6 +218,48 @@ const METHOD_NOT_FOUND = -32601;
  * requests it cannot parse.
  */
 const INVALID_REQUEST = -32600;
+
+/** Why an input did not reach Codex, and whether Codex may have taken it anyway. */
+interface InputFailure {
+  readonly message: string;
+  readonly maybeDelivered: boolean;
+}
+
+/** Wraps a failure that happened before the input was sent, so Codex has not seen it. */
+const buildNotSent = (message: string): InputFailure => ({ message, maybeDelivered: false });
+
+/**
+ * Converts the failure of a request that carried an input. An error Codex
+ * replied with proves it did not take the input. A failure with no `code`
+ * happened on this side of the connection (a timeout, a lost connection or a
+ * failed write), and the input may have arrived before it.
+ */
+const describeRequestFailure = (error: RpcError): InputFailure => ({
+  message: error.message,
+  maybeDelivered: error.code === undefined,
+});
+
+/**
+ * The start of each message with which Codex refuses a `turn/steer` because
+ * no turn can take the input. They are the same at 0.154 and 0.163. The reply
+ * carries no machine-readable reason, so the text is the only thing to match.
+ */
+const STEER_NOT_TAKEN_MESSAGES: ReadonlyArray<string> = [
+  "no active turn to steer",
+  "expected active turn id",
+  "cannot steer a ",
+  "active turn uses a different output schema",
+];
+
+/**
+ * Checks whether Codex answered a `turn/steer` by saying it did not take the
+ * input because the turn cannot be steered: it ended, it is another turn, or
+ * it is a review or compaction. Starting a new turn with that input is then
+ * safe. Any other failure leaves it unknown whether Codex took the input.
+ */
+const isSteerNotTaken = (error: RpcError): boolean =>
+  error.code === INVALID_REQUEST &&
+  STEER_NOT_TAKEN_MESSAGES.some((message) => error.message.startsWith(message));
 
 const RETRIES = 3;
 
@@ -804,6 +869,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           if (frame.method === "item/completed") thread.fileChanges.delete(item.id);
           else thread.fileChanges.set(item.id, readApprovalPaths(item));
         }
+        if (frame.method === "item/completed" && item.type === "agentMessage") {
+          openAsyncQuestion(held, thread, item);
+        }
       }
     } catch {
       if (frame.method === "thread/tokenUsage/updated") {
@@ -822,6 +890,60 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           message: `Hercule could not read this ${frame.method} request`,
         });
       warn(held.host, `the app-server sent a ${frame.method} that this build could not read`);
+    }
+  };
+
+  /**
+   * Opens the Request for a completed `agentMessage` item that holds async
+   * questions, and keeps what the answer needs. Does nothing for any other
+   * item, and for an item whose native id was seen before: a repeated item
+   * must not reopen a question that was answered. Codex offers the async tool
+   * to the root agent alone, so a subagent's async question is not opened and
+   * the session gets a warning instead.
+   */
+  const openAsyncQuestion = (
+    held: Held,
+    thread: CodexThreadState,
+    item: Extract<ThreadItem, { type: "agentMessage" }>,
+  ): void => {
+    if (item.delivery !== "async" || item.questions == null || item.questions.length === 0) return;
+    if (thread.state.subagentId !== undefined) {
+      warn(
+        held.host,
+        `subagent ${thread.state.subagentId} asked an async question, which Hercule shows only for the session's own agent`,
+      );
+      return;
+    }
+    if (held.seenAsyncQuestionItems.has(item.id)) return;
+    held.seenAsyncQuestionItems.add(item.id);
+    const { request, question } = buildAsyncQuestion(item.id, item.questions);
+    held.asyncQuestions.set(question.requestId, question);
+    emit({
+      _tag: "request.opened",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      request,
+    });
+  };
+
+  /**
+   * Closes every open async question of the session's own agent as cancelled,
+   * including one whose answer is being delivered or is unconfirmed. Stopping
+   * the asking agent turns its questions down, as it does for every question.
+   * The records are dropped and the item ids stay in the seen set.
+   */
+  const cancelAsyncQuestions = (held: Held): void => {
+    for (const question of [...held.asyncQuestions.values()]) {
+      held.asyncQuestions.delete(question.requestId);
+      emit({
+        _tag: "request.resolved",
+        eventId: crypto.randomUUID(),
+        sessionId: held.binding.sessionId,
+        at: now(),
+        requestId: question.requestId,
+        decision: "cancel",
+      });
     }
   };
 
@@ -1001,8 +1123,8 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     });
 
   /**
-   * Starts a turn with the session's current model selection. Returns the new
-   * turn id, or fails with the server's error message. Codex takes the model,
+   * Starts a turn with the input's model selection. Returns the new turn id,
+   * or fails with the server's error message. Codex takes the model,
    * reasoning effort and service tier per turn, and every `TurnInput` carries
    * the session's selection, so the selection is sent on every turn rather
    * than tracked here.
@@ -1011,7 +1133,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     held: Held,
     input: AdapterTurnInput,
     skillItems: ReadonlyArray<UserInput>,
-  ): Effect.Effect<SendResult, string> =>
+  ): Effect.Effect<SendResult, InputFailure> =>
     Effect.gen(function* () {
       // Codex takes the schema per turn, not per thread, so every turn of the
       // session sends it. If it were sent only once, the second turn of an
@@ -1038,25 +1160,28 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           // No turn started, so restore the previous model for the next turn
           // to report.
           held.threads.root.state.model = before;
-          return error.message;
+          return describeRequestFailure(error);
         },
       );
       return { turnId: (answer as TurnStartResponse).turn.id, delivery: "opened" };
     });
 
   /**
-   * Steers the turn the adapter believes is running. Returns `undefined` if
-   * the steer failed: the expected turn id did not match, the turn cannot be
-   * steered, or the turn ended before the call. The caller then starts a new
-   * turn instead, because input is never rejected.
+   * Steers the turn the adapter believes is running. Returns `undefined` when
+   * Codex says it did not take the input because that turn cannot be steered:
+   * it ended, it is another turn than expected, or it is a review or a
+   * compaction (see `isSteerNotTaken`). The caller then starts a new turn
+   * instead, because input is never rejected. Any other failure is returned as
+   * a failure and starts nothing, because the input may have reached the turn
+   * and a new turn would deliver it twice.
    */
   const steerTurn = (
     held: Held,
     input: AdapterTurnInput,
     skillItems: ReadonlyArray<UserInput>,
     expectedTurnId: string,
-  ): Effect.Effect<SendResult | undefined> =>
-    Effect.match(
+  ): Effect.Effect<SendResult | undefined, InputFailure> =>
+    Effect.matchEffect(
       retryWhileOverloaded(
         held.host.rpc.request("turn/steer", {
           threadId: held.binding.nativeSessionId,
@@ -1065,13 +1190,151 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         } satisfies TurnSteerParams),
       ),
       {
-        onFailure: () => undefined,
-        onSuccess: (answer): SendResult => ({
-          turnId: (answer as TurnSteerResponse).turnId,
-          delivery: "steered",
-        }),
+        onFailure: (error) =>
+          isSteerNotTaken(error)
+            ? Effect.succeed(undefined)
+            : Effect.fail(describeRequestFailure(error)),
+        onSuccess: (answer) =>
+          Effect.succeed<SendResult>({
+            turnId: (answer as TurnSteerResponse).turnId,
+            delivery: "steered",
+          }),
       },
     );
+
+  /**
+   * Delivers one input to the session's root agent and returns how it was
+   * delivered. A running turn is steered, and an idle session starts a turn.
+   * Both an ordinary input and the answer to an async question go through
+   * here, so both are fenced the same way: an input that arrives after the
+   * agent was stopped is refused instead of reopening the turn.
+   *
+   * Fails with an `InputFailure`, which says whether Codex may have taken the
+   * input, or with `SteerRefused` when the input has a skill and a turn is
+   * running.
+   */
+  const deliverInput = (
+    held: Held,
+    input: AdapterTurnInput,
+    skills: SkillInputs,
+  ): Effect.Effect<SendResult, InputFailure | SteerRefused> =>
+    Effect.gen(function* () {
+      const ticket = held.threads.beginInput();
+      const sent = yield* Effect.onExit(
+        Effect.gen(function* () {
+          yield* Effect.mapError(held.threads.prepareUsage, buildNotSent);
+          const running = held.threads.root.turnId;
+          // Codex's app server accepts a `skill` item on `turn/steer` but
+          // does not load the skill, so the chip would show a skill that
+          // never ran. Refuse before the input is submitted, so it stays
+          // queued and runs normally when this turn ends.
+          if (running !== undefined && skills.translated.length > 0)
+            return yield* Effect.fail(
+              new SteerRefused({ message: buildSkillSteerRefusedMessage("Codex") }),
+            );
+          yield* Effect.mapError(held.threads.submitInput(ticket, running), buildNotSent);
+          const steered =
+            running === undefined
+              ? undefined
+              : yield* steerTurn(held, input, skills.items, running);
+          if (steered !== undefined) return steered;
+          yield* Effect.mapError(held.threads.submitInput(ticket), buildNotSent);
+          return yield* startTurn(held, input, skills.items);
+        }),
+        () => Effect.sync(() => held.threads.finishInput(ticket)),
+      );
+      // The turn counts as running from the reply, not from the
+      // `turn/started` notification after it: an input arriving in between
+      // would otherwise start a second turn.
+      held.threads.acceptInput(ticket, sent.turnId);
+      if (input.modelSelection !== undefined) held.modelSelection = input.modelSelection;
+      return sent;
+    });
+
+  /**
+   * Delivers the user's answers to an async question as one user input and
+   * closes the question once Codex has taken it. Fails with
+   * `AnswerNotDelivered`:
+   *
+   * - while an earlier answer is still being delivered;
+   * - after an earlier answer whose outcome is unknown, because sending it
+   *   again could deliver it twice;
+   * - when an answer is missing for one of the questions;
+   * - when Codex refuses the input (the question stays open, so the user can
+   *   answer again);
+   * - when it cannot be known whether Codex took the input (the question
+   *   stays unconfirmed).
+   *
+   * The question can be cancelled while the answer is on its way, by stopping
+   * the agent. Then the input still counts as delivered, the transcript shows
+   * it, and `request.resolved` is not reported a second time.
+   */
+  const answerAsyncQuestion = (
+    held: Held,
+    question: AsyncQuestion,
+    answers: QuestionAnswers,
+  ): Effect.Effect<void, AnswerNotDelivered> =>
+    Effect.gen(function* () {
+      if (question.state === "delivering") {
+        return yield* new AnswerNotDelivered({
+          message: "An answer to this question is already on its way to the agent.",
+        });
+      }
+      if (question.state === "unconfirmed") {
+        return yield* new AnswerNotDelivered({
+          message:
+            "An earlier answer to this question may have reached the agent. Hercule cannot tell, and sending it again could deliver it twice. Check the thread for the agent's reaction.",
+        });
+      }
+      const texts = readAnswerTexts(question, answers);
+      if (texts === undefined) {
+        return yield* new AnswerNotDelivered({
+          message: "The answers leave out a question. Answer every question.",
+        });
+      }
+      question.state = "delivering";
+      const input: AdapterTurnInput = {
+        text: buildAnswerEnvelope(question, texts),
+        ...(held.modelSelection === undefined ? {} : { modelSelection: held.modelSelection }),
+      };
+      const sent = yield* deliverInput(held, input, { items: [], translated: [] }).pipe(
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            question.state = "unconfirmed";
+          }),
+        ),
+        Effect.catch((failure) => {
+          const maybeDelivered = "maybeDelivered" in failure && failure.maybeDelivered;
+          question.state = maybeDelivered ? "unconfirmed" : "open";
+          return new AnswerNotDelivered({
+            message: maybeDelivered
+              ? `Codex did not confirm the answer (${failure.message}). It may have reached the agent, so Hercule will not send it again. Check the thread for the agent's reaction.`
+              : `The agent did not take the answer: ${failure.message}. Answer again to retry.`,
+          });
+        }),
+      );
+      const sessionId = held.binding.sessionId;
+      if (sessions.get(sessionId) !== held) return;
+      for (const event of buildUserMessage({
+        sessionId,
+        turnId: sent.turnId,
+        text: buildAnswerMessage(question, texts),
+        steered: sent.delivery === "steered",
+        providerRefs: { threadId: held.binding.nativeSessionId },
+      })) {
+        emit(event);
+      }
+      if (held.asyncQuestions.get(question.requestId) !== question) return;
+      held.asyncQuestions.delete(question.requestId);
+      emit({
+        _tag: "request.resolved",
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at: now(),
+        requestId: question.requestId,
+        answers,
+      });
+    });
 
   /**
    * Returns the service tier to send to Codex, or `undefined` for none.
@@ -1234,6 +1497,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           binding,
           host,
           editMarks: ctx.editMarks,
+          modelSelection: spec.modelSelection,
+          asyncQuestions: new Map(),
+          seenAsyncQuestionItems: new Set(),
           threads: makeCodexThreads({
             sessionId,
             rootThreadId: opened,
@@ -1281,34 +1547,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           yield* Effect.logWarning(
             `Gave Codex no skill item for ${[...skipped].join(", ")}: its SKILL.md is missing or resolves outside the skill folder.`,
           );
-        const ticket = held.threads.beginInput();
-        const sent = yield* Effect.onExit(
-          Effect.gen(function* () {
-            yield* held.threads.prepareUsage;
-            const running = held.threads.root.turnId;
-            // Codex's app server accepts a `skill` item on `turn/steer` but
-            // does not load the skill, so the chip would show a skill that
-            // never ran. Refuse before the input is submitted, so it stays
-            // queued and runs normally when this turn ends.
-            if (running !== undefined && skills.translated.length > 0)
-              return yield* Effect.fail(
-                new SteerRefused({ message: buildSkillSteerRefusedMessage("Codex") }),
-              );
-            yield* held.threads.submitInput(ticket, running);
-            const steered =
-              running === undefined
-                ? undefined
-                : yield* steerTurn(held, input, skills.items, running);
-            if (steered !== undefined) return steered;
-            yield* held.threads.submitInput(ticket);
-            return yield* startTurn(held, input, skills.items);
-          }),
-          () => Effect.sync(() => held.threads.finishInput(ticket)),
+        const sent = yield* Effect.mapError(deliverInput(held, input, skills), (failure) =>
+          failure instanceof SteerRefused ? failure : failure.message,
         );
-        // The turn counts as running from the reply, not from the
-        // `turn/started` notification after it: an input arriving in between
-        // would otherwise start a second turn.
-        held.threads.acceptInput(ticket, sent.turnId);
         for (const event of sessions.get(sessionId) !== held
           ? []
           : buildUserMessage({
@@ -1329,7 +1570,11 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     interrupt: (sessionId: string, subagentId?: SubagentId): Effect.Effect<void> =>
       Effect.suspend(() => {
         const held = sessions.get(sessionId);
-        return held === undefined ? Effect.void : stopCodexThreads(held, subagentId);
+        if (held === undefined) return Effect.void;
+        // Async questions belong to the session's own agent, and stopping a
+        // subagent leaves it running.
+        if (subagentId === undefined) cancelAsyncQuestions(held);
+        return stopCodexThreads(held, subagentId);
       }),
 
     respondToApprovalRequest: (
@@ -1361,15 +1606,27 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       sessionId: string,
       requestId: string,
       answers: QuestionAnswers,
-    ): Effect.Effect<void> =>
-      Effect.sync(() => {
+    ): Effect.Effect<void, AnswerNotDelivered> =>
+      Effect.suspend(() => {
+        const asyncQuestion = sessions.get(sessionId)?.asyncQuestions.get(requestId);
+        if (asyncQuestion !== undefined) {
+          return answerAsyncQuestion(sessions.get(sessionId)!, asyncQuestion, answers);
+        }
         const found = findOpenPark(sessionId, requestId);
         const reply =
           found?.park.request.kind === "question"
             ? found.park.asked.answers?.(answers, found.park.params)
             : undefined;
-        if (found === undefined || reply === undefined) return;
+        if (found === undefined || reply === undefined) {
+          return Effect.fail(
+            new AnswerNotDelivered({
+              message:
+                "The agent is not waiting on this question any more. It was answered, or its agent was stopped.",
+            }),
+          );
+        }
         resolvePark(found.held, found.thread, found.park, reply, { answers });
+        return Effect.void;
       }),
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
