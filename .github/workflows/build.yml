@@ -33,7 +33,7 @@ jobs:
           bun run scripts/gen-web-bundle.ts
           for target in bun-darwin-arm64 bun-linux-x64 bun-linux-arm64; do
             bun build packages/hercule/src/main.ts \
-              --compile --target="$target" \
+              --compile --splitting --target="$target" \
               --outfile "dist-binary/hercule-${target#bun-}"
           done
           ls -l dist-binary
