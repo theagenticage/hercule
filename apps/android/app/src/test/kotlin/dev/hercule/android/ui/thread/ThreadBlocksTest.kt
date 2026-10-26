@@ -5,6 +5,9 @@ import dev.hercule.android.wire.ExitReason
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
 import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.Question
+import dev.hercule.android.wire.QuestionOption
+import dev.hercule.android.wire.QuestionRequest
 import dev.hercule.android.wire.StreamKind
 import dev.hercule.android.wire.TranscriptRow
 import dev.hercule.android.wire.TurnState
@@ -260,6 +263,32 @@ class ThreadBlocksTest {
         val tails = mapOf("m" to "Streamed before the command")
 
         assertEquals(buildThreadBlocks(toRows(events), emptyList(), tails), ThreadBlockBuilder().build(toRows(events), emptyList(), tails))
+    }
+
+    @Test
+    fun `an async question adds no waiting note and does not end the work stretch, a blocking one does`() {
+        fun buildBlocks(async: Boolean?): List<ThreadBlock> {
+            val request = QuestionRequest(
+                "rq",
+                "it-question",
+                QuestionRequest.Detail(listOf(Question("Which storage?", "Question", listOf(QuestionOption("Local")), multiSelect = false))),
+                async = async,
+            )
+            val events = listOf(
+                ProviderEvent.TurnStarted(turnId = "t", model = null),
+                ProviderEvent.ItemStarted(turnId = "t", itemId = "a", kind = ItemKind.CommandExecution),
+                ProviderEvent.RequestOpened(request = request),
+                ProviderEvent.ItemStarted(turnId = "t", itemId = "b", kind = ItemKind.FileRead),
+            )
+            return buildThreadBlocks(toRows(events), listOf(request))
+        }
+
+        val async = buildBlocks(async = true)
+        assertEquals(listOf(listOf("a", "b")), async.map { block -> (block as WorkBlock).items.map { it.itemId } })
+        assertEquals(null, (async.single() as WorkBlock).endedAt)
+
+        val blocking = buildBlocks(async = null)
+        assertEquals(listOf("WorkBlock", "WaitingBlock", "WorkBlock"), blocking.map { it::class.simpleName })
     }
 
     /** Returns whether each agent message the transcript of [events] holds is open. */

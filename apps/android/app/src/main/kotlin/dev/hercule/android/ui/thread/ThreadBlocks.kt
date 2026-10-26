@@ -5,6 +5,7 @@ import dev.hercule.android.ui.assistant.findOpenItem
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
 import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.QuestionRequest
 import dev.hercule.android.wire.SessionRequest
 import dev.hercule.android.wire.StreamKind
 import dev.hercule.android.wire.TranscriptRow
@@ -40,7 +41,7 @@ data class UserBlock(override val key: String, val text: String, val at: Instant
 /**
  * The items of one turn between two messages. [startedAt] is the turn's start or the end of the
  * message before; [endedAt] is the start of the message after, the end of the turn, or the
- * moment a Request opened, and null while the stretch still runs.
+ * moment a Request the agent waits on opened, and null while the stretch still runs.
  */
 @Immutable
 data class WorkBlock(
@@ -99,7 +100,9 @@ data class EndingBlock(override val key: String, val state: TurnState, val durat
  *   restart;
  * - a [WorkBlock] per stretch of items between two messages of a turn, once it holds an item
  *   other than reasoning;
- * - a [WaitingBlock] where a Request in [openRequests] opened;
+ * - a [WaitingBlock] where a Request in [openRequests] opened that the agent waits on. An async
+ *   question gets none: the agent keeps working, so the note would be false, and the question's
+ *   text is already the agent's message above. It does not end the work stretch either;
  * - a [WarningBlock] per `runtime.warning` row;
  * - an [EndingBlock] after a turn that was stopped or failed.
  *
@@ -198,7 +201,7 @@ fun buildThreadBlocks(
             is ProviderEvent.RuntimeWarning -> if (event.subagentId == null) {
                 blocks += WarningBlock("warning-${row.position}", event.message, at)
             }
-            is ProviderEvent.RequestOpened -> if (event.subagentId == null && event.request.requestId in openIds) {
+            is ProviderEvent.RequestOpened -> if (event.subagentId == null && event.request.requestId in openIds && !isAsyncQuestion(event.request)) {
                 closeStretch(at)
                 blocks += WaitingBlock("waiting-${event.request.requestId}", event.request.requestId, at)
             }
@@ -211,6 +214,9 @@ fun buildThreadBlocks(
     }
     return blocks
 }
+
+/** Checks whether [request] is a question the asking agent does not wait on. */
+private fun isAsyncQuestion(request: SessionRequest): Boolean = (request as? QuestionRequest)?.async == true
 
 /**
  * Builds a thread's blocks as [buildThreadBlocks] does, for one screen whose transcript changes a
