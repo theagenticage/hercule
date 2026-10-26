@@ -86,10 +86,6 @@ const NOT_PROSE_SELECTOR = "pre, table";
 /** The theme tokens `resolveThemeTokens` reads, in the order of `ThemeTokens`. */
 const THEME_TOKEN_NAMES = ["bg", "surface", "raised", "line", "ink", "muted", "faint"] as const;
 
-/** The type scale tokens that the largest Text size step raises, and by how much. */
-const TEXT_SIZE_TOKENS = ["--t-11", "--t-12", "--t-13", "--t-14", "--t-16"] as const;
-const LARGEST_TEXT_SIZE_STEP_PX = 2;
-
 /** Two fragments overlap only when their boxes share more than this many square pixels. */
 const OVERLAP_THRESHOLD_PX2 = 2;
 
@@ -1737,12 +1733,13 @@ function forceLayout(): void {
  *
  * - "text-spacing": the text spacing of WCAG 1.4.12 (line height 1.5, letter
  *   spacing 0.12em, word spacing 0.16em, and 2em after each paragraph).
- * - "largest-text-size": the type tokens `--t-11` to `--t-16` two pixels
- *   larger, which is the largest Text size step of Settings > Appearance
- *   (four steps of 1px from the default, which is the second).
+ * - "largest-text-size": the largest Text size step of Settings > Appearance,
+ *   set the way `public/theme-init.js` sets it: `data-text-size="4"` on the
+ *   root element, which base.css turns into type tokens two pixels larger.
+ *   Removing the perturbation puts back exactly what the attribute was, a
+ *   step a page may have set from its URL or no attribute at all.
  *
- * Fails when a perturbation is already applied, or when a type token is not a
- * length in pixels.
+ * Fails when a perturbation is already applied.
  */
 export function applyPerturbation(perturbation: Perturbation): void {
   if (undoPerturbation !== undefined) {
@@ -1761,22 +1758,11 @@ export function applyPerturbation(perturbation: Perturbation): void {
     undoPerturbation = () => removeStyle("perturbation");
   } else {
     const root = document.documentElement;
-    const computed = getComputedStyle(root);
-    const before = TEXT_SIZE_TOKENS.map((token) => {
-      const size = computed.getPropertyValue(token).trim();
-      if (!/^\d+(?:\.\d+)?px$/.test(size)) {
-        throw new Error(`The type token ${token} is "${size}", but a length in px is needed.`);
-      }
-      return { token, size, inline: root.style.getPropertyValue(token) };
-    });
-    for (const { token, size } of before) {
-      root.style.setProperty(token, `${Number.parseFloat(size) + LARGEST_TEXT_SIZE_STEP_PX}px`);
-    }
+    const before = root.getAttribute("data-text-size");
+    root.setAttribute("data-text-size", "4");
     undoPerturbation = () => {
-      for (const { token, inline } of before) {
-        if (inline === "") root.style.removeProperty(token);
-        else root.style.setProperty(token, inline);
-      }
+      if (before === null) root.removeAttribute("data-text-size");
+      else root.setAttribute("data-text-size", before);
     };
   }
   forceLayout();

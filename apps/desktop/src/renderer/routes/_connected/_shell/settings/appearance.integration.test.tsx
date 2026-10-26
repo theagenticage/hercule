@@ -1,6 +1,6 @@
 /**
  * Tests Settings > Appearance: the theme cards, Follow the system with its
- * day and night themes, the Glass slider, and Reduce transparency, alone
+ * day and night themes, the Text size, the Glass slider, and Reduce transparency, alone
  * and under macOS's own setting. Each change must be saved through the
  * bridge, except the steps of a Glass drag, which are only shown. A save
  * that fails shows its error under its own row.
@@ -93,6 +93,12 @@ const listPressedCards = (): string[] =>
     .filter((card) => card.getAttribute("aria-pressed") === "true")
     .map((card) => card.textContent ?? "");
 
+/** Returns the Text size steps, smallest first, with their names and whether each is checked. */
+const listTextSizeSteps = (): Array<{ name: string; checked: boolean }> =>
+  screen
+    .getAllByRole<HTMLInputElement>("radio", { name: /^Text size: / })
+    .map((step) => ({ name: step.getAttribute("aria-label") ?? "", checked: step.checked }));
+
 describe("Settings > Appearance", () => {
   it("says it saves on this Mac, and draws a card for each of the five themes", async () => {
     await openAppearance();
@@ -170,6 +176,71 @@ describe("Settings > Appearance", () => {
     expect(
       screen.getByText("Switches with macOS: Styles by day, End House by night."),
     ).toBeTruthy();
+  });
+
+  it("draws the four Text size steps as radio buttons with their own names, the default checked", async () => {
+    await openAppearance();
+
+    const steps = listTextSizeSteps();
+    expect(steps.map((step) => step.name)).toEqual([
+      "Text size: smallest",
+      "Text size: default",
+      "Text size: larger",
+      "Text size: largest",
+    ]);
+    expect(steps.map((step) => step.checked)).toEqual([false, true, false, false]);
+    expect(screen.getByRole("radiogroup", { name: "Text size" })).toBeTruthy();
+  });
+
+  it("checks the step that main keeps", async () => {
+    await openAppearance({ ...DEFAULT_APPEARANCE, textSize: 4 });
+    expect(listTextSizeSteps().map((step) => step.checked)).toEqual([false, false, false, true]);
+  });
+
+  it("saves a chosen Text size step, and applies it to the window at once", async () => {
+    const { fake } = await openAppearance();
+    const applied: Appearance[] = [];
+    const record = (event: Event): void => {
+      applied.push((event as CustomEvent<Appearance>).detail);
+    };
+    document.addEventListener("appearancechange", record);
+    onTestFinished(() => {
+      document.removeEventListener("appearancechange", record);
+    });
+
+    await userEvent.click(screen.getByRole("radio", { name: "Text size: largest" }));
+
+    expect(applied.map((appearance) => appearance.textSize)).toContain(4);
+    expect(fake.appearanceWrites).toEqual([{ ...DEFAULT_APPEARANCE, textSize: 4 }]);
+    expect(listTextSizeSteps().map((step) => step.checked)).toEqual([false, false, false, true]);
+  });
+
+  it("moves between the Text size steps with the arrow keys, saving each", async () => {
+    const { fake } = await openAppearance();
+
+    screen.getByRole("radio", { name: "Text size: default" }).focus();
+    await userEvent.keyboard("{ArrowRight}{ArrowRight}{ArrowLeft}");
+
+    expect(fake.appearanceWrites.map((written) => written.textSize)).toEqual([3, 4, 3]);
+    expect(listTextSizeSteps().map((step) => step.checked)).toEqual([false, false, true, false]);
+  });
+
+  it("does not save when the step in use is chosen again", async () => {
+    const { fake } = await openAppearance();
+
+    await userEvent.click(screen.getByRole("radio", { name: "Text size: default" }));
+
+    expect(fake.appearanceWrites).toEqual([]);
+  });
+
+  it("shows a failed Text size save under its row, and checks the saved step again", async () => {
+    await openAppearance(DEFAULT_APPEARANCE, failNextSave());
+    const larger = screen.getByRole("radio", { name: "Text size: larger" });
+
+    await userEvent.click(larger);
+
+    expectErrorUnder(await screen.findByText(SAVE_ERROR), larger);
+    expect(listTextSizeSteps().map((step) => step.checked)).toEqual([false, true, false, false]);
   });
 
   it("shows each step of a Glass drag without saving it, and saves where the drag ends", async () => {

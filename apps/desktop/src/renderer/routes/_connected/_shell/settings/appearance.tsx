@@ -10,6 +10,7 @@ import {
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
 import { FollowSystemRow } from "../../../../screens/settings/appearance/follow-system-row";
 import { GlassSection } from "../../../../screens/settings/appearance/glass-section";
+import { TextSizeRow } from "../../../../screens/settings/appearance/text-size-row";
 import { ThemeSection } from "../../../../screens/settings/appearance/theme-section";
 import { SettingsHeaderActions } from "../../../../screens/settings/settings-frame";
 import { useSavedAppearance } from "./-saved-appearance";
@@ -17,7 +18,8 @@ import { useSavedAppearance } from "./-saved-appearance";
 /**
  * Settings > Appearance: how the app looks on this Mac (spec 17 §Settings,
  * Appearance). This part draws the theme cards, Follow the system with its
- * day and night themes, the Glass level and Reduce transparency.
+ * day and night themes, the Text size, the Glass level and Reduce
+ * transparency.
  *
  * Every change shows in the window at once and is saved on this Mac, in
  * main's settings file, with one exception: while the Glass slider is
@@ -42,6 +44,7 @@ function Appearance(): JSX.Element {
   const themeInUse = decideThemeInUse(appearance, darkAppearance);
   const theme = useSavedAppearance(store);
   const followSystem = useSavedAppearance(store);
+  const textSize = useSavedAppearance(store);
   const glass = useSavedAppearance(store);
   const reduceTransparency = useSavedAppearance(store);
   return (
@@ -77,6 +80,13 @@ function Appearance(): JSX.Element {
             followSystem.save({ nightTheme });
           }}
           error={followSystem.error}
+        />
+        <TextSizeRow
+          textSize={appearance.textSize}
+          onChange={(step) => {
+            textSize.save({ textSize: step });
+          }}
+          error={textSize.error}
         />
       </section>
       <GlassSection

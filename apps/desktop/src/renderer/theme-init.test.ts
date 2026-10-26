@@ -4,10 +4,12 @@ import {
   DEFAULT_APPEARANCE,
   decideThemeInUse,
   NIGHT_THEMES,
+  TEXT_SIZE_STEPS,
   THEMES,
 } from "../ipc/appearance";
 import type { Appearance } from "../ipc/contract";
 import script from "./public/theme-init.js?raw";
+import base from "./styles/base.css?raw";
 import tokens from "./styles/tokens.css?raw";
 
 /**
@@ -112,7 +114,13 @@ const recordStyleReads = (): ThemeAttributes[] => {
 const recordAttributeChanges = (): (() => Array<[string | null, string | null]>) => {
   const observer = new MutationObserver(() => {});
   observer.observe(document.documentElement, {
-    attributeFilter: ["data-theme", "data-theme-changing", "data-solid-glass", "style"],
+    attributeFilter: [
+      "data-theme",
+      "data-theme-changing",
+      "data-solid-glass",
+      "data-text-size",
+      "style",
+    ],
     attributeOldValue: true,
   });
   return () => {
@@ -128,6 +136,7 @@ afterEach(() => {
   const root = document.documentElement;
   delete root.dataset.theme;
   delete root.dataset.themeChanging;
+  delete root.dataset.textSize;
   root.removeAttribute("data-solid-glass");
   root.removeAttribute("style");
   for (const [type, listener] of documentListeners.splice(0)) {
@@ -139,6 +148,9 @@ afterEach(() => {
 
 /** Returns the theme <html> is drawn in. */
 const readTheme = (): string | undefined => document.documentElement.dataset.theme;
+
+/** Returns the step of the Text size <html> is drawn at. */
+const readTextSize = (): string | undefined => document.documentElement.dataset.textSize;
 
 /** Returns whether every glass surface on the page is solid. */
 const isGlassSolid = (): boolean => document.documentElement.hasAttribute("data-solid-glass");
@@ -215,6 +227,45 @@ describe("the theme script", () => {
   it("leaves the glass see-through when the Glass level is above 0 and Reduce transparency is off", () => {
     runThemeScript(new FakeAppearance(false), { ...DEFAULT_APPEARANCE, glassPercent: 1 });
     expect(isGlassSolid()).toBe(false);
+  });
+
+  it("sets the step of the Text size before the first paint, for every step", () => {
+    for (const textSize of TEXT_SIZE_STEPS) {
+      delete document.documentElement.dataset.textSize;
+      runThemeScript(new FakeAppearance(false), { ...DEFAULT_APPEARANCE, textSize });
+      expect(readTextSize()).toBe(String(textSize));
+    }
+  });
+
+  it("sets the step of the Text size again on every appearancechange event", () => {
+    runThemeScript(new FakeAppearance(false));
+    expect(readTextSize()).toBe("2");
+
+    for (const textSize of [4, 1, 3, 2] as const) {
+      changeAppearance({ ...DEFAULT_APPEARANCE, textSize });
+      expect(readTextSize()).toBe(String(textSize));
+    }
+  });
+
+  it("changes only the Text size, with no snap and no style read, when only the step changes", () => {
+    runThemeScript(new FakeAppearance(false));
+    const styleReads = recordStyleReads();
+    const stopRecording = recordAttributeChanges();
+
+    changeAppearance({ ...DEFAULT_APPEARANCE, textSize: 4 });
+
+    expect(stopRecording()).toEqual([["data-text-size", "2"]]);
+    expect(styleReads).toEqual([]);
+  });
+
+  it("leaves the Text size alone when only the glass changes", () => {
+    runThemeScript(new FakeAppearance(false), { ...DEFAULT_APPEARANCE, textSize: 3 });
+    const stopRecording = recordAttributeChanges();
+
+    changeAppearance({ ...DEFAULT_APPEARANCE, textSize: 3, glassPercent: 55 });
+
+    expect(stopRecording()).toEqual([["style", "--glass-percent: 40;"]]);
+    expect(readTextSize()).toBe("3");
   });
 
   it("applies the Appearance of an appearancechange event", () => {
@@ -300,8 +351,17 @@ describe("the theme script", () => {
     expect(stopRecording()).toEqual([
       ["data-theme", null],
       ["style", null],
+      ["data-text-size", null],
     ]);
     expect(styleReads).toEqual([]);
+  });
+
+  it("sets steps that base.css maps to the text tokens, and leaves the default step unmapped", () => {
+    // The default step needs no rule: tokens.css declares it on :root.
+    for (const step of TEXT_SIZE_STEPS.filter((each) => each !== 2)) {
+      expect(base).toContain(`:root[data-text-size="${step}"]`);
+    }
+    expect(base).not.toContain(`:root[data-text-size="2"]`);
   });
 
   it("uses theme names the design tokens define", () => {
