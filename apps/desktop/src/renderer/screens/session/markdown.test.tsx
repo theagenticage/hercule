@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import intakeStyles from "../intake/intake.css?raw";
 import { Markdown } from "./markdown";
 
@@ -24,13 +24,35 @@ describe("Markdown", () => {
     ]);
   });
 
-  it("renders a fence as the book's code block, with its text and no colours", () => {
+  it("renders a fence as a code block with its language, its text and no colours", () => {
     const body = renderMarkdown("Run this:\n\n```ts\nconst a = 1;\n```");
     const block = body.querySelector("pre");
-    expect(block?.className).toBe("codeblock");
+    expect(screen.getByText("ts")).toBeTruthy();
     expect(block?.textContent).toBe("const a = 1;");
     // No highlighter splits the code into coloured spans.
     expect(block?.querySelectorAll("span")).toHaveLength(0);
+  });
+
+  it("keeps a code block's wrap choice when the message around it changes", () => {
+    const fence = "```ts\nconst a = 1;\n```";
+    const { rerender } = render(
+      <div className="msg-body">
+        <Markdown text={fence} />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Wrap lines" }));
+
+    // The message goes on after the fence, as a streaming one does once its
+    // text is parsed again.
+    rerender(
+      <div className="msg-body">
+        <Markdown text={`${fence}\n\nAnd then more.`} />
+      </div>,
+    );
+
+    expect(screen.getByRole("button", { name: "Wrap lines" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
   });
 
   it("draws no script, form or event handler from embedded HTML", () => {

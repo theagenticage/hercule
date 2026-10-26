@@ -1,0 +1,97 @@
+/* A fenced code block of a message (code-block.tsx): a card that holds a slim
+   header row, then the code. The card has the look of the book's `.codeblock`,
+   with no syntax colours, because the book's colours are sample highlighting
+   and no highlighter is loaded. `.codeblock` itself is still the look of a
+   code block that is a `pre` alone, such as a workflow's source. The header is
+   not inside the `pre`, so the code alone scrolls sideways and the buttons
+   stay in place. */
+.code-block {
+  --code-block-radius: var(--r-md);
+  margin: 10px 0;
+  border-radius: var(--code-block-radius);
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+/* Not in the book. The header is chrome, so a selection that crosses the block
+   copies the code and not the language. Both buttons are always drawn: a code
+   block is not a bubble, so no pointer position decides whether they show. */
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 4px 6px 0 14px;
+  user-select: none;
+}
+/* The block's language, as the parser returns it. A long one ends in an ellipsis. */
+.code-block-language {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-right: 8px;
+  overflow: hidden;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: var(--t-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* `--faint` like the time under a bubble, and the ink while hovered or while
+   the toggle is on, which `.is-on` also tints as a selected row. The focus ring
+   is drawn inside the square, as the bubble's copy button draws it. */
+.code-block-header .icon-btn {
+  color: var(--faint);
+}
+.code-block-header .icon-btn:is(:hover, .is-on) {
+  color: var(--ink);
+}
+.code-block-header .icon-btn:focus-visible {
+  outline-offset: -2px;
+}
+/* A refused copy tints the glyph, so that "Copy failed" shows to the eye too,
+   also while the pointer is still on the button. */
+.code-block-header .icon-btn[data-result="failed"] {
+  color: var(--fail-ink);
+}
+/* The words only a screen reader gets: the result of a copy. */
+.code-block-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* Wrapped, a line breaks at the edge, and `overflow-wrap: anywhere` also
+   lowers the minimum width of a token with no break in it, such as a long
+   URL, which `break-word` would not. Unwrapped, the `pre` scrolls sideways.
+   The bottom corners follow the card's, also when the global focus ring takes
+   the `pre`'s radius, because the scrollbar of a `pre` that scrolls would
+   otherwise stick out of the corner. */
+.code-block .code-block-text {
+  margin: 0;
+  padding: 4px 14px 12px;
+  border-radius: 0 0 var(--code-block-radius) var(--code-block-radius);
+  font-family: var(--font-mono);
+  font-variation-settings: var(--mono-axes);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+}
+.code-block .code-block-text:focus-visible {
+  outline-offset: -2px;
+  border-radius: 0 0 var(--code-block-radius) var(--code-block-radius);
+}
+.code-block .code-block-text[data-wrapped] {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+/* The code element takes the block's type and none of inline code's chip. */
+.code-block .code-block-text code {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font-size: inherit;
+}

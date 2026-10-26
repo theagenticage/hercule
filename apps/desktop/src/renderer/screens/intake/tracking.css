@@ -453,18 +453,40 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
-.tr-pane .tr-orig-q :is(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, pre, table) {
+.tr-pane .tr-orig-q :is(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, table) {
   margin: 0;
   padding: 0;
   font-size: inherit;
   font-weight: inherit;
   line-height: inherit;
 }
+/* A fenced code block keeps the look it had before it had a header row: the
+   sunken fill and rim, with the text flush against them, not wrapped, and run
+   on like the rest. Its header row is left out: the quote is a clamped
+   preview, and buttons in it would be cut off and still reachable from the
+   keyboard. */
+.tr-pane .tr-orig-q .code-block {
+  margin: 0;
+}
+.tr-pane .tr-orig-q .code-block-header {
+  display: none;
+}
+.tr-pane .tr-orig-q .code-block .code-block-text {
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+  overflow: auto;
+  overflow-wrap: normal;
+  white-space: pre;
+}
 .tr-pane .tr-orig-q img {
   display: none;
 }
-.tr-pane .tr-orig-q code,
-.tr-pane .tr-did :not(.codeblock) > code {
+/* The quote's code is a chip, also the code inside a code block, as it was
+   before the block had a card: the `:is()` raises the rule's specificity
+   above the code block's own reset of the chip. */
+.tr-pane .tr-orig-q :is(code, .code-block-text code),
+.tr-pane .tr-did :not(.codeblock, .code-block-text) > code {
   padding: 0 4px;
   border-radius: 5px;
   background: color-mix(in oklab, var(--ink) 6%, transparent);

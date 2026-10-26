@@ -8,14 +8,15 @@
  * - the book's History says "Yesterday" beside revision 6, and the app says
  *   the weekday, "Tue", as it does for every day within the last six that is
  *   not today. The book's list says "Tue" for the same day;
- * - the code block's syntax colours are sample highlighting, and the app loads
- *   no highlighter, so its code blocks are plain.
+ * - the app draws the code block with a header row (the language and the wrap
+ *   and copy buttons) and without the book's syntax colours, which are sample
+ *   highlighting that the app, with no highlighter loaded, does not draw.
  */
-import { removeCodeHighlighting } from "./book-page";
+import { drawCodeBlocksWithHeader } from "./book-page";
 import { markSheetReady, stillBookPage } from "./sheet-page";
 
 stillBookPage();
-removeCodeHighlighting();
+drawCodeBlocksWithHeader("ts");
 for (const when of document.querySelectorAll(".rev-when")) {
   if (when.textContent === "Yesterday") when.textContent = "Tue";
 }

@@ -9,11 +9,12 @@
  * agent never runs, and an address that is not safe to open is not in the
  * tree.
  *
- * The elements carry no classes, with three exceptions, all styled in
- * `markdown.css`: `codeblock` on a fence, `table-scroll` on the box around a
- * table, and `markdown-failed` on the raw text shown when the markdown cannot
- * be drawn. The rest of that file styles the elements through their
- * container, `.msg-body` or `.bubble`, as the Bureau book does.
+ * The elements carry no classes, with three exceptions: `table-scroll` on the
+ * box around a table and `markdown-failed` on the raw text shown when the
+ * markdown cannot be drawn, both styled in `markdown.css`, and a fence, which
+ * is a `CodeBlock` with its own classes in `code-block.css`. The rest of
+ * `markdown.css` styles the elements through their container, `.msg-body` or
+ * `.bubble`, as the Bureau book does.
  *
  * Raw HTML is read only for an allowlist of tags (see `parseMarkdown`), and
  * only into the nodes this file already draws. A `<script>` is dropped, and
@@ -29,6 +30,7 @@ import {
   type MarkdownTableCell,
 } from "@hercule/client-core";
 import type { SessionSkill } from "@hercule/contract";
+import { CodeBlock } from "./code-block";
 import { HoverableSkillChip } from "./skill-chip";
 
 /** What drawing a message needs besides the tree. */
@@ -224,8 +226,9 @@ function drawCell(
  * tight list does for its items. It reaches the paragraphs of this block
  * only, not those of a block inside it.
  *
- * A fence is the book's `.codeblock`, with no syntax colours: the book's
- * colours are sample highlighting, and no highlighter is loaded.
+ * A fence is a `CodeBlock`, keyed like every block by its place among its
+ * siblings. It holds state of its own, the wrap toggle, so a key made from its
+ * text would reset that state when a streaming message settles.
  */
 function drawBlock(
   block: MarkdownBlock,
@@ -260,11 +263,7 @@ function drawBlock(
     case "blockquote":
       return <blockquote key={key}>{drawBlocks(block.children, context, false)}</blockquote>;
     case "code":
-      return (
-        <pre key={key} className="codeblock">
-          <code>{block.text}</code>
-        </pre>
-      );
+      return <CodeBlock key={key} text={block.text} language={block.language} />;
     case "table":
       // A wide table scrolls on its own rather than widening the column.
       return (

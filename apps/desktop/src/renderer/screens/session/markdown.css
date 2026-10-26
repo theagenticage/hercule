@@ -152,8 +152,9 @@ table :is(th, td)[data-align="right"] {
   white-space: pre;
   overflow: auto;
 }
-/* Markdown puts a fence's text in a `code` element inside the block, which
-   takes the block's type and none of inline code's chip. */
+/* The text of a `pre` is in a `code` element inside it, which takes the
+   block's type and none of inline code's chip. A fence in a message is drawn
+   by code-block.tsx instead, with its own rules. */
 .codeblock code {
   padding: 0;
   border-radius: 0;

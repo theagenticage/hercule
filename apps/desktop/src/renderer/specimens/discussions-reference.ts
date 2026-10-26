@@ -6,12 +6,13 @@
  *
  * Its times ("Mon", "Tue", "Sun") are the weekdays of the specimen's clock,
  * Wednesday 14 October (list-week-clock.ts), so they need no edit. The one
- * edit is the code block's syntax colours: they are sample highlighting, and
- * the app loads no highlighter, so its code blocks are plain.
+ * edit is the code block: the app draws it with a header row (the language and
+ * the wrap and copy buttons) and without the book's syntax colours, which are
+ * sample highlighting that the app, with no highlighter loaded, does not draw.
  */
-import { removeCodeHighlighting } from "./book-page";
+import { drawCodeBlocksWithHeader } from "./book-page";
 import { markSheetReady, stillBookPage } from "./sheet-page";
 
 stillBookPage();
-removeCodeHighlighting();
+drawCodeBlocksWithHeader("ts");
 await markSheetReady();

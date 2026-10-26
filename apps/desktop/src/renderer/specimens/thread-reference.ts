@@ -37,8 +37,10 @@
  * 10. sets the model pill's text to the model's name, "Opus 5.5": the pill
  *     shows the name the provider's catalog gives the model, and shows the
  *     provider by its logo, as the web app's composer does;
- * 11. removes the syntax colours from the code block: the book's colours are
- *     sample highlighting, and the app loads no highlighter;
+ * 11. draws the code block as the app does: without the syntax colours,
+ *     which are sample highlighting that the app, with no highlighter loaded,
+ *     does not draw, and with a header row that holds the fence's language
+ *     and the wrap and copy buttons, which the book's block does not have;
  * 12. replaces Send with Stop: the fixture's turn is running, and while a
  *     turn runs the app draws Stop where Send stands, as the book's
  *     assistant.html draws it. The app's Stop keeps Send's 4px left margin,
@@ -91,6 +93,7 @@ import {
   buildSidePaneTogglePill,
   buildWorkName,
   buildWorkNameSeparator,
+  drawCodeBlocksWithHeader,
   findElement,
   findElementByText,
   findElements,
@@ -199,10 +202,8 @@ findElementByText(composer, ".lip > span", "Own worktree").remove();
 // 10. The model pill.
 replaceTextAfterIcon(findElement(composer, ".pick--pill"), CLAUDE_OPUS.name);
 
-// 11. The code block's syntax colours.
-for (const span of findElement(transcript, ".codeblock").querySelectorAll("span")) {
-  span.replaceWith(span.textContent);
-}
+// 11. The code block's syntax colours and its header row.
+drawCodeBlocksWithHeader("ts");
 
 // 12. Send, as assistant.html's Stop. crew.js draws the stop icon in place of its placeholder.
 const stop = buildElement("button", "stop", "");

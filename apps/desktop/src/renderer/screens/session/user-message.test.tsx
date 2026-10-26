@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { stubResizeObserver, THREAD_FIXTURES } from "../../app/testing";
+import { stubCopyCommand, stubResizeObserver, THREAD_FIXTURES } from "../../app/testing";
 import { renderThreadPart } from "../thread/testing";
 import { UserMessage } from "./messages";
 
@@ -66,6 +66,64 @@ describe("a long message", () => {
     fireEvent.click(button);
     expect(button.textContent).toBe("Show full message");
     expect(text().style.maxHeight).toBe("162px");
+  });
+
+  /**
+   * Renders a collapsed message that holds a code block, whose controls are
+   * in the cut text, and returns its toggle and the code block's wrap button.
+   * `focusIsVisible` is what the browser would report for `:focus-visible`:
+   * true for the focus a key press moves, false for the focus a click moves.
+   * jsdom never matches that selector, so the answer is stubbed.
+   */
+  const renderCollapsedMessageWithCode = (focusIsVisible: boolean) => {
+    const resize = stubResizeObserver();
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(400);
+    // jsdom lays nothing out, so it cannot scroll an element to a control.
+    Element.prototype.scrollIntoView = vi.fn();
+    // oxlint-disable-next-line typescript/unbound-method -- called with `this` below
+    const matches = Element.prototype.matches;
+    vi.spyOn(Element.prototype, "matches").mockImplementation(function (this: Element, selector) {
+      return selector === ":focus-visible"
+        ? focusIsVisible && this === document.activeElement
+        : matches.call(this, selector);
+    });
+    render(
+      <UserMessage
+        text={"Run this:\n\n```sh\nls\n```"}
+        attachments={[]}
+        at="2026-09-29T09:14:00.000Z"
+        timezone="UTC"
+        today={Date.UTC(2026, 8, 29)}
+      />,
+    );
+    act(() => {
+      resize();
+    });
+    return {
+      toggle: screen.getByRole("button", { name: "Show full message" }),
+      wrap: screen.getByRole("button", { name: "Wrap lines" }),
+    };
+  };
+
+  it("opens when the keyboard focus enters a control in the cut text, and keeps the focus there", () => {
+    const { toggle, wrap } = renderCollapsedMessageWithCode(true);
+    text().scrollTop = 212;
+
+    wrap.focus();
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(text().hasAttribute("data-collapsed")).toBe(false);
+    expect(text().scrollTop).toBe(0);
+    expect(document.activeElement).toBe(wrap);
+  });
+
+  it("stays collapsed when a click puts the focus on a control the cut leaves visible", () => {
+    const { toggle, wrap } = renderCollapsedMessageWithCode(false);
+
+    wrap.focus();
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(text().hasAttribute("data-collapsed")).toBe(true);
   });
 });
 
@@ -172,22 +230,6 @@ describe("the button that copies a message", () => {
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
-
-  /** Stands in for the browser's copy command: it fires a `copy` event and returns `copies`. */
-  const stubCopyCommand = (copies: boolean) => {
-    const clipboard = new Map<string, string>();
-    const execCommand = vi.fn((command: string) => {
-      if (command !== "copy") return false;
-      const event = new Event("copy", { cancelable: true }) as ClipboardEvent;
-      Object.defineProperty(event, "clipboardData", {
-        value: { setData: (type: string, text: string) => clipboard.set(type, text) },
-      });
-      document.dispatchEvent(event);
-      return copies;
-    });
-    Object.defineProperty(document, "execCommand", { value: execCommand, configurable: true });
-    return clipboard;
-  };
 
   const renderPlain = (text: string) =>
     render(

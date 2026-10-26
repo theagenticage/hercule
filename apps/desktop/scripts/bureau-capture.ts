@@ -30,7 +30,12 @@
  *   open (`?state=menu`), over the top 400 px;
  * - the thread (x 272-1440, the main pane) of session-active.html: the
  *   book's page edited by specimens/thread-reference.ts, and the thread
- *   specimen (thread.html);
+ *   specimen (thread.html). The reference module gives the book's code block
+ *   the header row that the app draws: the fence's language, and the wrap and
+ *   copy buttons, with those two icons drawn from the app's shapes. The
+ *   header's look is a style written out in the reference module, from the
+ *   book's tokens, and not read from the app's `code-block.css`, so that a
+ *   change to the app's styles shows in the comparison;
  * - the scrolled thread: the same main pane with the transcript scrolled
  *   away from its bottom and the composer shrunk. Both pages are opened with
  *   `?state=scrolled`;
@@ -106,11 +111,11 @@
  *   specimen (discussions.html), in its table view, with the list as a column
  *   beside the open Discussion (`?view=split`), and with the open Discussion
  *   across the whole pane (`?view=full`). Only the items inside the window
- *   count. The reference module strips the code block's syntax colours, which
- *   the app does not draw;
+ *   count. The reference module draws the code block as the app does: with a
+ *   header row, and without the syntax colours, which the app does not draw;
  * - the Wiki page of wiki.html, in the same three views, and with an older
  *   revision open beside the list (`?view=split&rev=4`). Its reference module
- *   strips the code block's colours too, and writes "Tue" where the book's History says
+ *   draws the code block with a header row too, and writes "Tue" where the book's History says
  *   "Yesterday", as the app does for any day of the last week.
  *
  * Each reference module edits the book's page to show its fixture's data.
@@ -393,7 +398,11 @@ const THREAD_PARTS = [
   ".msg-body",
   ".msg-body > p",
   ".msg-body p > code",
-  ".codeblock",
+  ".code-block",
+  ".code-block-header",
+  ".code-block-language",
+  ".code-block-header .icon-btn",
+  ".code-block-text",
   ".waiting-note",
   ".waiting-note > .mark",
   ".composer-wrap",
@@ -1139,7 +1148,11 @@ const OPEN_DISCUSSION_PARTS = [
   ".msg-name > small",
   ".msg-body > p",
   ".msg-body p code",
-  ".codeblock",
+  ".code-block",
+  ".code-block-header",
+  ".code-block-language",
+  ".code-block-header .icon-btn",
+  ".code-block-text",
 ];
 
 // Every part of the Wiki table, as a selector inside `main.main`: the header,
@@ -1186,7 +1199,11 @@ const OPEN_WIKI_PARTS = [
   ".msg-body li",
   ".msg-body > ul",
   ".msg-body :is(p, li) code",
-  ".codeblock",
+  ".code-block",
+  ".code-block-header",
+  ".code-block-language",
+  ".code-block-header .icon-btn",
+  ".code-block-text",
   ".history",
   ".history .sec-h",
   ".history .sec-h > span",

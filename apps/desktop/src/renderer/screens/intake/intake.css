@@ -1081,11 +1081,15 @@
   font-family: var(--font-mono);
   font-size: 0.9em;
 }
-.b-words pre {
-  overflow-x: auto;
-  padding: 9px 12px;
-  border-radius: var(--r-sm);
-  background: var(--sunken);
+/* A fenced code block (code-block.tsx) in Intake's smaller type and corners. */
+.b-words .code-block {
+  --code-block-radius: var(--r-sm);
+}
+.b-words .code-block-header {
+  padding-left: 12px;
+}
+.b-words .code-block .code-block-text {
+  padding: 4px 12px 9px;
   font-size: var(--t-12);
 }
 /* Not in the drawing: an https image in the text, inline. It never grows
