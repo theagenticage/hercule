@@ -86,7 +86,7 @@ import {
 } from "../icons";
 import { Mark } from "../marks";
 import { SHEET, type IconName, type Piece } from "./cells";
-import { applySheetTheme, markSheetReady } from "./sheet-page";
+import { applySheetAppearance, markSheetReady } from "./sheet-page";
 
 // The screens import each icon by its own name, so a screen ships only the
 // icons it uses. The sheet draws every icon, so it may look them up by name.
@@ -178,7 +178,7 @@ function Specimen({ piece }: { readonly piece: Piece }): JSX.Element {
   }
 }
 
-applySheetTheme();
+applySheetAppearance();
 const sheet = document.getElementById("sheet");
 if (sheet === null) {
   throw new Error("specimens/index.html is missing #sheet");

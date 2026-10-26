@@ -1,23 +1,88 @@
 /**
- * What every captured sheet does the same way: take its theme from the URL,
+ * What every captured sheet does the same way: take its theme and glass from the URL,
  * hold a Bureau book page still, read the book's crew.js, and tell the
  * capture when it is ready.
  */
+import {
+  DAY_THEMES,
+  DEFAULT_APPEARANCE,
+  NIGHT_THEMES,
+  THEMES,
+  type Theme,
+} from "../../ipc/appearance";
+import type { Appearance } from "../../ipc/contract";
 import { waitForPresentedFrame } from "../app/presented-frame";
 import type { Look } from "../faces/look";
 import { ALL_THEMES } from "./sheet-themes";
 
 /**
- * Sets the theme named by the page's `?theme=` on `<html>`, Whitehaven when
- * the URL names none. Fails on a name that is not one of the five themes,
- * because the page would otherwise be drawn in no theme at all.
+ * Returns the theme the page's `?theme=` names, Whitehaven when the URL
+ * names none. Fails on a name that is not one of the five themes, because the
+ * page would otherwise be drawn in no theme at all.
  */
-export function applySheetTheme(): void {
-  const theme = new URLSearchParams(location.search).get("theme") ?? "whitehaven";
-  if (!ALL_THEMES.includes(theme)) {
-    throw new Error(`Unknown theme "${theme}" in the URL. Use one of: ${ALL_THEMES.join(", ")}.`);
+function readSheetTheme(): Theme {
+  const name = new URLSearchParams(location.search).get("theme") ?? "whitehaven";
+  const theme = THEMES.find((each) => each === name);
+  if (theme === undefined) {
+    throw new Error(`Unknown theme "${name}" in the URL. Use one of: ${ALL_THEMES.join(", ")}.`);
   }
-  document.documentElement.dataset.theme = theme;
+  return theme;
+}
+
+/**
+ * Returns the Glass level the page's `?glass=` names, or `undefined` when the
+ * URL names none. Fails on anything but a whole number from 0 to 100.
+ */
+function readSheetGlass(): number | undefined {
+  const value = new URLSearchParams(location.search).get("glass");
+  if (value === null) return undefined;
+  const glassPercent = /^\d{1,3}$/.test(value) ? Number(value) : NaN;
+  if (!(glassPercent <= 100)) {
+    throw new Error(`Unknown glass "${value}" in the URL. Use a whole number from 0 to 100.`);
+  }
+  return glassPercent;
+}
+
+/**
+ * Draws the page in the look its URL names: the theme of `?theme=`
+ * (Whitehaven when the URL names none) and the Glass level of `?glass=`, a
+ * whole number from 0 to 100 (the 40 of base.css when the URL names none).
+ * Fails on a theme that is not one of the five, or a glass that is not a
+ * whole number from 0 to 100.
+ *
+ * Glass is set the way `public/theme-init.js` sets it in the app, and both
+ * parts are needed: `--glass-percent` sets the glass level of every surface,
+ * and `data-solid-glass` turns the backdrop filter off, which a level of 0
+ * alone would still draw.
+ */
+export function applySheetAppearance(): void {
+  const root = document.documentElement;
+  root.dataset.theme = readSheetTheme();
+  const glassPercent = readSheetGlass();
+  if (glassPercent === undefined) return;
+  root.style.setProperty("--glass-percent", String(glassPercent));
+  root.toggleAttribute("data-solid-glass", glassPercent === 0);
+}
+
+/**
+ * Returns the Appearance a Mac would hold for the page the URL describes, so
+ * that Settings > Appearance draws the page's own theme and glass. It is the
+ * default Appearance with the Glass level of `?glass=`, and the page's theme
+ * set as the theme Follow the system would use: the day theme for a light
+ * theme, the night theme for a dark one. Fails like `applySheetAppearance`.
+ */
+export function readSheetAppearance(): Appearance {
+  const theme = readSheetTheme();
+  const glassPercent = readSheetGlass() ?? DEFAULT_APPEARANCE.glassPercent;
+  const dayTheme = DAY_THEMES.find((each) => each === theme);
+  const nightTheme = NIGHT_THEMES.find((each) => each === theme);
+  return {
+    ...DEFAULT_APPEARANCE,
+    theme,
+    glassPercent,
+    dayTheme: dayTheme ?? DEFAULT_APPEARANCE.dayTheme,
+    nightTheme: nightTheme ?? DEFAULT_APPEARANCE.nightTheme,
+  };
 }
 
 /**

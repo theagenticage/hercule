@@ -11,7 +11,7 @@
  */
 import "./sheet.css";
 import { SHEET, type IconName, type Piece } from "./cells";
-import { applySheetTheme, buildBookLook, markSheetReady, readCrew } from "./sheet-page";
+import { applySheetAppearance, buildBookLook, markSheetReady, readCrew } from "./sheet-page";
 
 const crew = readCrew();
 
@@ -43,7 +43,7 @@ function drawPiece(piece: Piece): string {
   }
 }
 
-applySheetTheme();
+applySheetAppearance();
 const sheet = document.getElementById("sheet");
 if (sheet === null) {
   throw new Error("specimens/reference.html is missing #sheet");
