@@ -4255,13 +4255,13 @@ Requests, for the events that read a Done page (a Done page is one `signal.query
 - **A row's memo comparison walks every session of its group** (the row, card and urgency lists). That costs about 0.6 ms for an extreme group of 500 sessions in a Node benchmark. Real groups hold 1 to 3 sessions. It has not been measured on the Mac with a single very large group.
 - **Not measured:** per-token cost (nothing in the sidebar runs per streamed token).
 
-**Async questions,** measured 2026-10-26 on Linux with `pnpm --filter @hercule/desktop build` and its bundle budget check, for [#770](https://github.com/theagenticage/hercule/issues/770). The change adds 13 lines of CSS to the question card in the dock (a bare option takes the whole row, and a long question text keeps its line breaks and scrolls past eight lines). It adds no JavaScript, process, timer, read or subscription.
+**Async questions,** measured 2026-10-26 on Linux with `pnpm --filter @hercule/desktop build` and its bundle budget check, for [#770](https://github.com/theagenticage/hercule/issues/770). The change adds 13 lines of CSS to the question card in the dock (a bare option takes the whole row, and a long question text keeps its line breaks and scrolls past eight lines), and the card marks a question whose options have no description with a class (`dock-options--plain`) in the component, because a `:has()` selector would make style invalidation depend on descendants while the transcript streams. The component adds one `some()` over a question's options per render of the card, and no process, timer, read or subscription.
 
 | Measure | Budget | After |
 |---|---|---|
 | Processes | none added | none added |
 | Memory | none added | none added |
-| Work while idle, and per streamed token | none added | none: no JavaScript changed |
+| Work while idle, and per streamed token | none added | one pass over a question's few options per card render |
 | The `transcript` route's CSS chunk | - | 4,109 to 4,258 bytes: 149 bytes more, 34 gzipped (1,319 to 1,353) |
 | The first screen's JavaScript, gzipped | a guide of 250 kB | 460.4 kB, unchanged |
 | Main's startup file, minified | 160 kB | 155.8 kB of 160 kB, unchanged |

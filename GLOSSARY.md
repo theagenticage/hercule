@@ -92,7 +92,7 @@ A provider-held question that one agent of a session - its own agent or one of i
 _Avoid_: user input (the old name for the `question` kind), permission request (reserved for grant escalation), approval prompt, tool prompt
 
 **Async question**:
-A question Request (`async: true`) that the asking agent does not wait on. The agent keeps working while the question is shown, and the Request stays open after the agent's turn ends. It closes when the harness accepts an answer, when the asking agent is stopped, or when the session exits. Only Codex asks them today.
+A question Request (`async: true`) that the asking agent does not wait on. The agent keeps working while the question is shown, and the Request stays open after the agent's turn ends. It closes when the harness accepts an answer, when the asking agent is stopped, when the session exits (an idle session unloads like any other, so an unanswered one does not keep it loaded), or when it is the oldest of more than eight open ones. Only Codex asks them today.
 _Avoid_: non-blocking question, background question (a question in a background session or subagent is an ordinary question)
 
 **Steering**:
