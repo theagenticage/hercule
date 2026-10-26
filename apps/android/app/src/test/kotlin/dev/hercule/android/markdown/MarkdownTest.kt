@@ -148,9 +148,26 @@ class MarkdownTest {
     @Test
     fun `keeps the text of a fenced code block as written, with no decoding`() {
         assertEquals(
-            document(code("const a = 1 &amp; 2;\n\nb();")),
+            document(code("const a = 1 &amp; 2;\n\nb();", "ts")),
             parseMarkdown("```ts\nconst a = 1 &amp; 2;\n\nb();\n```"),
         )
+    }
+
+    @Test
+    fun `takes the language of a fenced code block from the first word of its info string`() {
+        assertEquals(document(code("a", "ts")), parseMarkdown("```ts\na\n```"))
+        assertEquals(document(code("a", "ts")), parseMarkdown("~~~ ts  title=\"a.ts\"\na\n~~~"))
+        assertEquals(document(code("a", "c++")), parseMarkdown("```c&#43;&#43; x\na\n```"))
+        assertEquals(document(code("a", "&x")), parseMarkdown("```\\&amp;x\na\n```"))
+        assertEquals(document(code("a", "ts")), parseMarkdown("```&nbsp;ts\na\n```"))
+        assertEquals(document(code("a", "ts")), parseMarkdown("```ts&#9;extra\na\n```"))
+    }
+
+    @Test
+    fun `leaves the language out of a code block that names none`() {
+        for (markdown in listOf("```\na\n```", "```  \na\n```", "```&#32;\na\n```", "    a", "<pre>a</pre>")) {
+            assertEquals(document(code("a")), parseMarkdown(markdown), markdown)
+        }
     }
 
     @Test

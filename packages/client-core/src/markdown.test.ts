@@ -210,8 +210,32 @@ describe("parseMarkdown blocks", () => {
 
   it("keeps the text of a fenced code block as written, with no decoding", () => {
     expect(parseMarkdown("```ts\nconst a = 1 &amp; 2;\n\nb();\n```")).toEqual(
-      blocks({ type: "code", text: "const a = 1 &amp; 2;\n\nb();" }),
+      blocks({ type: "code", text: "const a = 1 &amp; 2;\n\nb();", language: "ts" }),
     );
+  });
+
+  it("takes the language of a fenced code block from the first word of its info string", () => {
+    expect(parseMarkdown("```ts\na\n```")).toEqual(
+      blocks({ type: "code", text: "a", language: "ts" }),
+    );
+    expect(parseMarkdown('~~~ ts  title="a.ts"\na\n~~~')).toEqual(
+      blocks({ type: "code", text: "a", language: "ts" }),
+    );
+    expect(parseMarkdown("```c&#43;&#43; x\na\n```")).toEqual(
+      blocks({ type: "code", text: "a", language: "c++" }),
+    );
+    // Character references are decoded before the info string is trimmed and split.
+    for (const info of ["ts&#32;extra", "&#32;ts", "&#9;ts", "&nbsp;ts"]) {
+      expect(parseMarkdown(`\`\`\`${info}\na\n\`\`\``)).toEqual(
+        blocks({ type: "code", text: "a", language: "ts" }),
+      );
+    }
+  });
+
+  it("leaves the language key out of a code block that names none", () => {
+    for (const markdown of ["```\na\n```", "```  \na\n```", "    a", "<pre>a</pre>"]) {
+      expect(parseMarkdown(markdown)).toStrictEqual(blocks({ type: "code", text: "a" }));
+    }
   });
 
   it("keeps the text of an indented code block as written, with no decoding", () => {

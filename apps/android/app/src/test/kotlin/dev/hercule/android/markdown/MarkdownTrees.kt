@@ -33,7 +33,7 @@ fun item(vararg children: MarkdownBlock): MarkdownListItem = MarkdownListItem(ch
 
 fun blockquote(vararg children: MarkdownBlock): MarkdownBlock = MarkdownBlock.Blockquote(children.toList())
 
-fun code(value: String): MarkdownBlock = MarkdownBlock.Code(value)
+fun code(value: String, language: String? = null): MarkdownBlock = MarkdownBlock.Code(value, language)
 
 fun table(header: List<MarkdownTableCell>, rows: List<List<MarkdownTableCell>>): MarkdownBlock = MarkdownBlock.Table(header, rows)
 

@@ -47,9 +47,15 @@ sealed interface MarkdownBlock {
     @Immutable
     data class Blockquote(val children: kotlin.collections.List<MarkdownBlock>) : MarkdownBlock
 
-    /** A fenced or indented code block. Its text is exactly as written, with no trailing newline. */
+    /**
+     * A fenced or indented code block. Its text is exactly as written, with no trailing newline.
+     * [language] is the first word of a fenced block's info string, with backslash escapes
+     * removed and character references decoded: `ts` for both "```ts" and "```ts title="a.ts"".
+     * It is null when the block names no language: an indented block, a bare fence, an info
+     * string of only white space, or an HTML `<pre>`.
+     */
     @Immutable
-    data class Code(val text: String) : MarkdownBlock
+    data class Code(val text: String, val language: String? = null) : MarkdownBlock
 
     /**
      * A table. [header] holds the header row's cells, and [rows] the body rows' cells. The header

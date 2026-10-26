@@ -360,6 +360,32 @@ private fun trimListEnd(block: Node, text: String): String {
     return text.substring(0, findTrimmedRange(text).let { if (it.isEmpty()) 0 else it.last + 1 })
 }
 
+/**
+ * Returns the language of a fenced code block: the first word of its info string, or null when
+ * there is none (a bare fence, or an info string of only white space).
+ *
+ * The info string is read from the source line of the opening fence, and not taken from
+ * commonmark-java's [FencedCodeBlock.getInfo], to give the language that marked and client-core
+ * give. commonmark-java removes backslash escapes and decodes character references in one pass,
+ * so it keeps `&amp;` as text for `\&amp;`. marked removes the backslash escapes first, and
+ * client-core then decodes the character references of the result, which gives `&`. So the
+ * order here is: remove backslash escapes, decode character references, trim, then take the
+ * first word. Trimming and splitting last means a reference that decodes to white space counts
+ * as white space: `&#32;ts` and `&nbsp;ts` have the language `ts`, and so does `ts&#32;extra`.
+ */
+private fun readFenceLanguage(block: FencedCodeBlock, input: String): String? {
+    val span = block.sourceSpans.firstOrNull() ?: return null
+    val line = input.substring(span.inputIndex, span.inputIndex + span.length)
+    // A list item or quote marker can come before the fence, but it never holds a fence character.
+    val fenceStart = line.indexOfFirst { it == '`' || it == '~' }
+    if (fenceStart == -1) return null
+    var infoStart = fenceStart
+    while (infoStart < line.length && line[infoStart] == line[fenceStart]) infoStart++
+    val info = trimJavaScriptWhitespace(decodeCharacterReferences(unescapePunctuation(trimJavaScriptWhitespace(line.substring(infoStart)))))
+    val wordEnd = info.indexOfFirst(::isJavaScriptWhitespace).let { if (it == -1) info.length else it }
+    return info.substring(0, wordEnd).ifEmpty { null }
+}
+
 /** Checks whether [node] is text that the text between elements covers: text and soft or hard line breaks. */
 private fun isTextLike(node: Node): Boolean = node is Text || node is SoftLineBreak || node is HardLineBreak
 
@@ -709,7 +735,8 @@ private class MessageMapper(private val breaks: Boolean, private val embeddedHtm
                     }
                 is ThematicBreak -> listOf(MarkdownBlock.Rule)
                 is BlockQuote -> listOf(MarkdownBlock.Blockquote(mapBlocks(childrenOf(node) + listOfNotNull(lazyParagraphs[node]), context, document)))
-                is FencedCodeBlock -> listOf(MarkdownBlock.Code(trimListEnd(node, node.literal.removeSuffix("\n"))))
+                is FencedCodeBlock ->
+                    listOf(MarkdownBlock.Code(trimListEnd(node, node.literal.removeSuffix("\n")), readFenceLanguage(node, document.text)))
                 is IndentedCodeBlock -> listOf(MarkdownBlock.Code(trimListEnd(node, readIndentedCode(node, document.text))))
                 is HtmlBlock if isParagraphToMarked(node) -> mapHtmlBlockAsText(node, context, document)
                 // The HTML is shown as written.
