@@ -6,6 +6,8 @@ Date: 2026-09-29
 
 Accepted. Decided by [Desktop app: threads in Crew Bureau (#275)](https://github.com/theagenticage/hercule/issues/275). Amends [ADR 0017](./0017-the-web-app-is-a-static-pure-client-of-the-public-api.md): the desktop app no longer reuses `@hercule/ui`. Keeps the rest of ADR 0017: the desktop app is an ordinary client of the public API, and it is not a wrapped webview of the web app.
 
+**Amended 2026-10-26 ([#855](https://github.com/theagenticage/hercule/issues/855), [ADR 0047](./0047-the-desktop-app-is-its-own-pixel-reference.md)):** `tokens.css` and the fonts started as copies of the Bureau book's, but they are no longer kept equal to them. The app's goldens and its own `tokens.css` decide a measurement now. Everything else in this ADR stands.
+
 **Amended 2026-09-29 ([#275](https://github.com/theagenticage/hercule/issues/275)):** performance no longer comes first during the desktop app's first milestone. Slices 1 to 4 were each held to the budgets before they merged. From slice 5 on, the budgets are guides: the milestone's functionality lands first, and performance passes after it bring the app within the budgets. The rules of spec 17 §Performance still apply to every slice, because they cost little when followed from the start and much when added later. The budgets themselves stand, and spec 17 §Performance says how they are checked while they are guides. Everything else here stands.
 
 **Amended 2026-10-02 ([#313](https://github.com/theagenticage/hercule/issues/313)):** two facts below have moved on, and the decision stands.
