@@ -2620,9 +2620,12 @@ describe("Workflows > the triggers panel", { timeout: EDITOR_TEST_TIMEOUT_MS }, 
   });
 
   it("reads the triggers again when a live push names the workflow", async () => {
-    const { api, live } = await openTriggers([ON_LABEL]);
+    const { api, live, queryClient } = await openTriggers([ON_LABEL]);
     await findTriggersPanel();
     await waitForWorkflowSubscription(live);
+    // A read the page started while it opened can still be answering here, and
+    // counting it would look like a second read caused by the push.
+    await waitForIdleRequests(queryClient);
     const readsBefore = api.calls.filter((call) => call.path === "/api/v1/triggers").length;
 
     pushWorkflowChange(live, TRIAGE.id, "updated");
