@@ -26,9 +26,10 @@
      pills, menus and popovers, the queued inputs (through --glass-rim and --btn-rim). The light
      themes set it equal to --line; the dark themes set it apart, quiet.
    - The composer is the main input, so it has the clearest edge on the page: --composer-line,
-     and its fill is --composer-fill. The light themes set them equal to --line and
-     --raised; the dark themes make the edge lighter than --line and the fill one step lighter
-     than --raised, so the edge reaches 3:1 (WCAG 1.4.11). Each theme sets both, so a theme nested
+     and its fill is --composer-fill. Every theme sets the edge apart from --line, so it
+     reaches 3:1 (WCAG 1.4.11): darker than --line in the light themes, lighter in the dark ones.
+     The dark themes also make the fill one step lighter than --raised; the light themes keep
+     --raised, which is already the lightest fill. Each theme sets both, so a theme nested
      in another never inherits the outer theme's values.
 
    Themes take their names from Poirot's world:
@@ -216,7 +217,7 @@
   --divider: oklch(0.91 0.006 110);
   --rim: oklch(0.87 0.007 120);
   --composer-fill: var(--raised);
-  --composer-line: var(--line);
+  --composer-line: oklch(0.585 0.007 120);
 
   /* Characters: fill lightness/chroma, the rim shade, text-safe ink and a quiet tint. */
   --char-l: 0.78;
@@ -289,7 +290,7 @@
   --divider: oklch(0.895 0.018 76);
   --rim: oklch(0.855 0.022 72);
   --composer-fill: var(--raised);
-  --composer-line: var(--line);
+  --composer-line: oklch(0.57 0.022 72);
 
   --char-l: 0.765;
   --char-c: 0.13;
