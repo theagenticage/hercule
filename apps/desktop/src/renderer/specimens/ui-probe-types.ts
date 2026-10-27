@@ -83,9 +83,9 @@ export interface ThemeTokens {
 
 /** The type, shape and spacing values the page uses, for the discipline metrics. */
 export interface DisciplineFacts {
-  /** Every computed font size of visible text, in px, without repeats, sorted. */
+  /** Every computed font size of visible text, in px, without repeats, sorted. Leaves out the fixed size samples and the text of drawn pieces. */
   readonly fontSizes: ReadonlyArray<number>;
-  /** Every computed font weight of visible text, without repeats, sorted. */
+  /** Every computed font weight of visible text, without repeats, sorted. Leaves out the text of drawn pieces. */
   readonly fontWeights: ReadonlyArray<number>;
   /** Every computed non-zero corner radius of a visible element, as CSS text, without repeats, sorted. */
   readonly radii: ReadonlyArray<string>;
@@ -95,6 +95,21 @@ export interface DisciplineFacts {
   readonly offTokenRadii: ReadonlyArray<string>;
   /** Every non-zero computed padding, margin and gap value of a visible element, in px, repeats kept. */
   readonly spacingValues: ReadonlyArray<number>;
+  /**
+   * How many text samples the page draws in a fixed size on purpose, whose
+   * font sizes are left out of `fontSizes` and `offScaleFontSizes`: the four
+   * "Aa" of the Text size control, or none. The probe fails when the selector
+   * of these samples matches anything else.
+   */
+  readonly fixedSizeSamples: number;
+  /**
+   * How many lines of text the page draws inside the SVG roots of drawn pieces
+   * (a face's z's, the user's avatar letter, a plugin mark's initial), whose
+   * font sizes and weights are left out of `fontSizes` and `fontWeights`. The
+   * probe fails when the selector of these roots matches something that is
+   * not a piece.
+   */
+  readonly pieceTextFragments: number;
 }
 
 /** An element a user can click or focus. */

@@ -135,7 +135,7 @@ table :is(th, td)[data-align="right"] {
   padding: 1px 5px;
   border-radius: 5px;
   background: color-mix(in oklab, var(--ink) 6%, transparent);
-  font-size: 12.5px;
+  font-size: var(--t-13);
 }
 /* The book has no syntax colours: its `.k`, `.s` and `.f` spans are sample
    highlighting, and the app loads no highlighter. */
@@ -148,7 +148,7 @@ table :is(th, td)[data-align="right"] {
   font-family: var(--font-mono);
   font-feature-settings: normal;
   font-variant-ligatures: none;
-  font-size: 12.5px;
+  font-size: var(--t-13);
   line-height: 1.6;
   white-space: pre;
   overflow: auto;

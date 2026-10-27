@@ -32,7 +32,7 @@
   justify-content: center;
   gap: 12px;
   margin: 0 0 24px;
-  font-size: 32px;
+  font-size: var(--t-wordmark);
   line-height: 1;
 }
 .centered-form {

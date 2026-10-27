@@ -40,6 +40,21 @@
  * and every golden. A shard cannot write the baseline or the goldens:
  * `--write-baseline` and `--write-goldens` need a full run.
  *
+ * One exception to the type scale is measured, not hidden: the four "Aa" of
+ * Settings > Appearance's Text size control are drawn at 12, 13, 14 and 15 px
+ * on purpose, so their font sizes are left out of `type.sizes` and
+ * `type.offScale`. Their contrast, targets and clipping count like any other
+ * text. Each screen's `coverage.fixedSizeSamples` shows how many samples the
+ * run exempted (4 on that screen, 0 on every other), and the run fails when
+ * a page has another number (scripts/ui-measure.ts).
+ *
+ * A second exception covers the letters inside drawn pieces (faces, the user's
+ * avatar, marks), which the Bureau book governs through `compare:bureau`:
+ * their font sizes and weights are left out of `type.sizes`, `type.weights`
+ * and `type.offScale`, and `coverage.pieceTextFragments` counts them per
+ * screen. The probe fails when the selector of the piece roots matches an
+ * element that is not an SVG piece (src/renderer/specimens/ui-probe.ts).
+ *
  * Setup and the library path on a Linux machine without sudo are the same as
  * for `capture:ui` (scripts/capture-ui.ts).
  */

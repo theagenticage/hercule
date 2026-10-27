@@ -490,7 +490,15 @@ export async function measurePage(
   await waitForPageToSettle(page);
   lap("contrast");
 
-  add(summarizeDiscipline(await probe.collectDiscipline()));
+  const discipline = await probe.collectDiscipline();
+  const expectedSamples = variant.screen.fixedSizeSamples ?? 0;
+  if (discipline.fixedSizeSamples !== expectedSamples) {
+    throw new Error(
+      `The screen ${variant.screen.name} has ${String(discipline.fixedSizeSamples)} text samples exempt from the type scale, and expects ${String(expectedSamples)}. ` +
+        "Fix fixedSizeSamples in scripts/ui-screens.ts, or the exemption in the probe (src/renderer/specimens/ui-probe.ts).",
+    );
+  }
+  add(summarizeDiscipline(discipline));
   lap("other");
 
   add({ "nonText.failing": await countFailingNonTextParts(probe, golden, variant) });
