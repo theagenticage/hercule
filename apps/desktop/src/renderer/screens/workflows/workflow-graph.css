@@ -1,6 +1,6 @@
 /* The workflow graph: steps and triggers as cards with hairline edges between
    them, as the Bureau book's "Workflow graph" draws it. On a run's page it
-   draws the run on top: a mark on each card, rings, half opacity for the
+   draws the run on top: a mark on each card, rings, quieter ink on the
    cards the run passed by, and a tone on each edge. */
 
 /* The frame reaches 12px past the text on each side, the pane's padding, so
@@ -156,14 +156,16 @@
   padding: 0 10px 0 8px;
   border-radius: var(--r-lg);
   background: var(--node-fill);
+  --node-title-ink: var(--ink);
+  --node-lead-ink: var(--muted);
   box-shadow:
     inset 0 0 0 1px var(--node-rim),
     var(--node-lift);
   text-align: left;
-  transition:
-    background var(--dur-1),
-    box-shadow var(--dur-1);
 }
+/* A card's fill and rim change in one frame, on hover and open as well as
+   when the run's state changes: CSS cannot tell what caused a change, and a
+   state change must never be seen halfway. */
 .node--step {
   --node-fill: var(--raised);
   --node-rim: var(--line-soft);
@@ -191,7 +193,7 @@
   height: 28px;
   border-radius: var(--r-sm);
   background: var(--sunken);
-  color: var(--muted);
+  color: var(--node-lead-ink);
 }
 .node--trigger .node-lead {
   background: var(--raised);
@@ -212,6 +214,7 @@
 }
 .node-title b {
   overflow: hidden;
+  color: var(--node-title-ink);
   font-size: var(--t-13);
   font-weight: var(--w-bold);
   text-overflow: ellipsis;
@@ -265,10 +268,32 @@
   line-height: 15px;
 }
 /* Cards the run did not reach, skipped or cancelled, and triggers that did
-   not start it, stand back at half opacity. The book leaves a step that
-   waits to start at full opacity. */
-.node:is(.is-unreached, .is-quiet, .is-cancelled, .is-skipped) {
-  opacity: 0.5;
+   not start it, stand back through colour and line, not opacity, which would
+   lower the text's contrast in a way no token shows: the title in the muted
+   ink, the lead's icon in the faint ink, and the card flat on the page inside
+   a dashed rim, as an edge the run did not take is dashed. They have no
+   mark, as a step that waits to start has none, and that step keeps its
+   raised card and the full ink. The book draws these at half opacity.
+   `:where` keeps the specificity low, so an open card (`.is-open`) and a
+   hovered one still change the rim, the lift and the fill as any card does. */
+.node:where(.is-unreached, .is-quiet, .is-cancelled, .is-skipped) {
+  --node-fill: transparent;
+  --node-rim: transparent;
+  --node-lift: 0 0 #0000;
+  --node-title-ink: var(--muted);
+  --node-lead-ink: var(--faint);
+}
+.node:where(.is-unreached, .is-quiet, .is-cancelled, .is-skipped)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px dashed var(--line);
+  border-radius: inherit;
+  pointer-events: none;
+}
+/* An open card shows its solid rim in place of the dashed one. */
+.node.is-open::before {
+  display: none;
 }
 .node.is-waiting {
   --node-ring: var(--you);
@@ -302,14 +327,6 @@
    and transform, so the compositor alone draws it. Edges are SVG, which
    Chromium animates on the main thread, so they change in one frame. */
 @media (prefers-reduced-motion: no-preference) {
-  /* A card the run reaches brightens from half opacity; one it passes by
-     dims to half. */
-  .node.is-brightening {
-    animation: node-brighten var(--dur-3) var(--ease-out);
-  }
-  .node.is-dimming {
-    animation: node-dim var(--dur-3) var(--ease-out);
-  }
   /* A ring fades in with its mark, and the mark pops in. */
   .node-ring.is-new {
     animation: node-ring-in var(--dur-3) var(--ease-out);
@@ -327,16 +344,6 @@
     box-shadow: 0 0 0 1.5px var(--node-ring);
     opacity: 0;
     animation: node-ring-ping var(--dur-3) var(--ease-out);
-  }
-}
-@keyframes node-brighten {
-  from {
-    opacity: 0.5;
-  }
-}
-@keyframes node-dim {
-  from {
-    opacity: 1;
   }
 }
 @keyframes node-ring-in {

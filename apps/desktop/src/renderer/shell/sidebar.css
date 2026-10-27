@@ -192,10 +192,13 @@
    book's three lines: two, 52px tall. 6px above the title, 18px for the
    title, 6px, 16px for the second line and 6px under it. The wrapper holds
    the link and the Done or Reopen button, which cannot sit inside the link,
-   and is what recedes. Only opacity moves, so nothing is laid out again. */
+   and holds the title that recedes. Only a colour moves, so nothing is laid
+   out again. */
 .side-thread {
   position: relative;
-  transition: opacity var(--dur-1);
+}
+.side-thread .side-name {
+  transition: color var(--dur-1);
 }
 .side-thread > .side-row {
   height: 100%;
@@ -229,17 +232,18 @@
   min-width: 58px;
 }
 /* A working thread steps back so the threads that need the user stand out,
-   unless it is the open thread (`receded` in sidebar-items.ts). It comes
-   back while the pointer is on it or focus is in it. */
-.side-thread.is-receded {
-  opacity: 0.72;
+   unless it is the open thread (`receded` in sidebar-items.ts), and so does
+   a Done thread. Only the title steps back, from the ink to the muted ink.
+   The second line is already faint, and the status word keeps its own
+   colour. The title comes back while the pointer is on the row or focus is
+   in it. */
+.side-thread.is-receded .side-name,
+.side-thread.is-done .side-name {
+  color: var(--muted);
 }
-.side-thread.is-done {
-  opacity: 0.6;
-}
-.side-thread:hover,
-.side-thread:focus-within {
-  opacity: 1;
+.side-thread:hover .side-name,
+.side-thread:focus-within .side-name {
+  color: var(--ink);
 }
 /* A row's second line: the provider's mark, then where the thread works.
    The first part ellipsizes; the part kept after it, the end of a branch
