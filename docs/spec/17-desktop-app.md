@@ -4343,6 +4343,17 @@ The sidebar was drawn from a specimen with 3,000 and with 200 threads, every sec
 - The latin-ext file is larger than Bricolage's because Inter covers more of the range; it is not preloaded, so a page in Latin script never fetches it.
 - A cold packaged launch and `firstScreen.report` need a Mac and are still to measure.
 
+**JetBrains Mono as the code font,** measured 2026-10-27 on Linux with `pnpm --filter @hercule/desktop build`, for [#860](https://github.com/theagenticage/hercule/issues/860). JetBrains Mono 5.3.0 replaces Recursive, as Fontsource's latin and latin-ext variable files, which load the first time code shows, as Recursive did.
+
+| Measure | Budget | Before, Recursive | After, JetBrains Mono |
+|---|---|---|---|
+| Processes | none added | - | none added |
+| Memory, work while idle, and per streamed token | none added | - | none added |
+| The code font files | - | 304,988 bytes | 55,600 bytes (40,404 + 15,196) |
+| All woff2 files in `out/renderer` | - | 531,144 bytes | 281,756 bytes |
+| All CSS in `out/renderer` | - | 199,783 bytes | 199,967 bytes |
+| The preload | - | the Inter latin file only | unchanged |
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
