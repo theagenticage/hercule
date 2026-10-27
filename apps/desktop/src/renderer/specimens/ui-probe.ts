@@ -1457,8 +1457,9 @@ const FIXED_SIZE_SAMPLES = {
 /**
  * Returns the glyph elements of `FIXED_SIZE_SAMPLES`: none on a page without
  * the Text size control, else its four "Aa" spans. Fails unless the selector
- * matches exactly those four glyphs, each holding only "Aa" and drawn at the
- * size its step shows, so that the exception cannot spread to other text, and
+ * matches exactly those four glyphs, each holding only the text "Aa" with no
+ * element inside it, and drawn at the size its step shows, so that the
+ * exception cannot spread to other text, and
  * a rule that changes a glyph's size (on the glyph or on its label) cannot
  * hide behind it.
  */
@@ -1468,7 +1469,9 @@ function findFixedSizeSamples(): Element[] {
   const sizes = samples.map((sample) => Number.parseFloat(getComputedStyle(sample).fontSize));
   const isExpected =
     sizes.join(",") === FIXED_SIZE_SAMPLES.fontSizes.join(",") &&
-    samples.every((sample) => sample.textContent === FIXED_SIZE_SAMPLES.text);
+    samples.every(
+      (sample) => sample.children.length === 0 && sample.textContent === FIXED_SIZE_SAMPLES.text,
+    );
   if (!isExpected) {
     throw new Error(
       `The selector "${FIXED_SIZE_SAMPLES.selector}" exempts text from the type scale, and must match ` +
@@ -1528,8 +1531,10 @@ export function collectDiscipline(): DisciplineFacts {
   const samples = findFixedSizeSamples();
   const pieces = findPieceRoots();
   const isPiece = (element: Element): boolean => pieces.some((piece) => piece.contains(element));
-  const isSample = (element: Element): boolean =>
-    samples.some((sample) => sample.contains(element));
+  // Only the validated glyph elements themselves, never anything inside them:
+  // a glyph holds no element, so an element found inside one is a change the
+  // check above did not see, and it must be measured.
+  const isSample = (element: Element): boolean => samples.includes(element);
   const isSampleOrItsLabel = (element: Element): boolean =>
     isSample(element) || samples.some((sample) => sample.parentElement === element);
   const isExemptFromSizes = (element: Element): boolean =>
