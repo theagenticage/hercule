@@ -4327,6 +4327,21 @@ The sidebar was drawn from a specimen with 3,000 and with 200 threads, every sec
 - **The development build reads far higher** (53 ms and 37 ms of script at 3,000 threads in one run), because React's development build does the same renders much slower. The figures above are the production build's.
 - **Not measured:** the Performance panel's recording of a change in the packaged app on a Mac, which the [budget](#budgets) names for a change of the Text size. It is still to be recorded once on a Mac, with a Performance-panel recording of one change in the packaged app. Memory was not measured as a difference: the heap reading after a forced collection was the same, 76.6 MB, with and without the change, at the tool's resolution. The Office's tags and labels are measured again once per change.
 
+**Inter as the UI font,** measured 2026-10-27 on Linux with `pnpm --filter @hercule/desktop build`, for [#859](https://github.com/theagenticage/hercule/issues/859). Inter 4.1 replaces Bricolage Grotesque. It ships as two subsets of the official file, a latin one that is preloaded and a latin-ext one that loads only when a character in its range shows.
+
+| Measure | Budget | Before, Bricolage | After, Inter |
+|---|---|---|---|
+| Processes | none added | - | none added |
+| Memory, work while idle, and per streamed token | none added | - | none added |
+| The preloaded UI font file | - | 131,548 bytes | 73,268 bytes |
+| Both UI font files | - | 185,136 bytes (131,548 + 53,588) | 203,076 bytes (73,268 + 129,808) |
+| All woff2 files in `out/renderer` | - | 513,204 bytes | 531,144 bytes |
+| All CSS in `out/renderer` | - | 196,949 bytes | 197,913 bytes |
+| The first screen's CSS | - | 66,860 bytes | 66,968 bytes |
+
+- The latin-ext file is larger than Bricolage's because Inter covers more of the range; it is not preloaded, so a page in Latin script never fetches it.
+- A cold packaged launch and `firstScreen.report` need a Mac and are still to measure.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
