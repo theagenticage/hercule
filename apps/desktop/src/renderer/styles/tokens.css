@@ -331,10 +331,10 @@
   --raised: oklch(0.262 0.014 52);
   --sunken: oklch(0.172 0.011 50);
   --ink: oklch(0.94 0.012 85);
-  --muted: oklch(0.77 0.016 75);
-  --faint: oklch(0.66 0.016 70);
-  --line: oklch(0.32 0.014 52);
-  --line-soft: oklch(0.275 0.012 50);
+  --muted: oklch(0.79 0.016 75);
+  --faint: oklch(0.72 0.016 70);
+  --line: oklch(0.466 0.014 52);
+  --line-soft: oklch(0.395 0.012 50);
 
   --char-l: 0.76;
   --char-c: 0.12;
