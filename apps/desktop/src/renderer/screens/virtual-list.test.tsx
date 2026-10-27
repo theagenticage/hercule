@@ -82,4 +82,44 @@ describe("VirtualList", () => {
     expect(nav.scrollTop).toBe(810);
     expect(screen.getByText("item-20")).not.toBeNull();
   });
+
+  it("keeps the top item through a second change of the heights before the scroll event of the first arrives, and through a change back", () => {
+    stubElementSize(300, 200);
+    const scrollRef = createRef<HTMLElement>();
+    const draw = (height: number) => (
+      <VirtualList
+        aria-label="Items"
+        items={ITEMS}
+        computeItemHeight={() => height}
+        renderItem={(item) => (
+          <p key={item.key} data-key={item.key} style={{ height }}>
+            {item.key}
+          </p>
+        )}
+        pickFocusFallback={() => null}
+        scrollRef={scrollRef}
+      />
+    );
+    const { rerender } = render(draw(50));
+    const nav = screen.getByRole("navigation", { name: "Items" });
+    // Item 20 starts at 1000px, and the view starts 5px into it.
+    act(() => {
+      nav.scrollTop = 1005;
+      fireEvent.scroll(nav);
+    });
+
+    // A browser delivers the scroll event after the commit, so the virtualizer still holds 1005
+    // while the heights change again.
+    rerender(draw(54));
+    expect(nav.scrollTop).toBeCloseTo(1085.4);
+    rerender(draw(49));
+    expect(nav.scrollTop).toBeCloseTo(984.9);
+
+    // The event arrives, and the heights go back, as when a save fails and the setting returns.
+    act(() => {
+      fireEvent.scroll(nav);
+    });
+    rerender(draw(50));
+    expect(nav.scrollTop).toBeCloseTo(1005);
+  });
 });

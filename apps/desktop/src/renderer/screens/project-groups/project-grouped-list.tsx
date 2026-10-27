@@ -16,7 +16,7 @@
  * size with the space above it as its top margin, and the next page is read
  * when the last item is mounted.
  */
-import { memo, useRef, type JSX, type ReactNode } from "react";
+import { memo, useCallback, useRef, type JSX, type ReactNode } from "react";
 import { readErrorMessage } from "@hercule/client-core";
 import type { ProjectGroupEntry, RepositoryRecord } from "@hercule/client-core/project-groups";
 import type { Project } from "@hercule/contract";
@@ -80,12 +80,11 @@ export const findGroupedItemRow = (list: Element, itemId: string): HTMLElement |
 /** Which of the list's heights a row in the table has: the Discussions' one line, or the Wiki's title over a summary. */
 export type TableRowKind = Extract<keyof ListHeights, "oneLineRow" | "twoLineRow">;
 
-/** An entry with the place the list draws it at. */
+/** An entry with the space the list draws above it. */
 interface PlacedEntry<Item extends RepositoryRecord> {
   readonly key: string;
   readonly entry: ProjectGroupEntry<Item>;
   readonly marginTop: number;
-  readonly height: number;
 }
 
 /**
@@ -134,10 +133,6 @@ const computeEntryHeight = <Item extends RepositoryRecord>(
       return width === "table" ? heights[tableRow] : heights.columnRow;
   }
 };
-
-/** Returns the height of a placed entry with the space above it, in CSS pixels. */
-const computePlacedHeight = <Item extends RepositoryRecord>(placed: PlacedEntry<Item>): number =>
-  placed.marginTop + placed.height;
 
 /**
  * Returns the key of the entry that takes focus when the focused entry,
@@ -266,8 +261,14 @@ function ProjectGroupedListAtWidth<Item extends RepositoryRecord>({
     key: entry.key,
     entry,
     marginTop: computeLeading(width, entries, index),
-    height: computeEntryHeight(heights, width, entry, tableRow),
   }));
+  // A new function whenever the heights change, which is how the list knows
+  // to place its items again and keep the top one at the top.
+  const computePlacedHeight = useCallback(
+    (placedEntry: PlacedEntry<Item>): number =>
+      placedEntry.marginTop + computeEntryHeight(heights, width, placedEntry.entry, tableRow),
+    [heights, width, tableRow],
+  );
   const { hasNextPage, isFetching, isFetchingNextPage, isFetchNextPageError, fetchNextPage } =
     nextPage;
   // The next page waits for any read of the list to end, not only a read of

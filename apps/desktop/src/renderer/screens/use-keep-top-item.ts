@@ -23,13 +23,11 @@ interface TopItem {
 }
 
 /**
- * Returns the item that holds the top edge of the view, found by binary
- * search over the items' places, or `null` when the view is at the top, where
- * nothing needs to be kept in place, or no item is placed.
+ * Returns the item that holds `offset`, found by binary search over the
+ * items' places, or `null` when `offset` is at the top, where nothing needs
+ * to be kept in place, or no item is placed.
  */
-const findTopItem = (virtualizer: Placed): TopItem | null => {
-  const offset = virtualizer.scrollOffset ?? 0;
-  const items = virtualizer.measurementsCache;
+const findTopItem = (items: Placed["measurementsCache"], offset: number): TopItem | null => {
   if (offset <= 0 || items.length === 0) return null;
   // The last item that starts at or above the top edge.
   let low = 0;
@@ -45,14 +43,16 @@ const findTopItem = (virtualizer: Placed): TopItem | null => {
 
 /**
  * Scrolls the virtualizer's scroll element so that `top` holds the top edge
- * of the view again, by the same share of its size. Does nothing when the
- * item or the element is gone.
+ * of the view again, by the same share of its size, and returns how far the
+ * element is scrolled then, which the browser may have rounded or limited.
+ * Returns `null`, and scrolls nothing, when the item or the element is gone.
  */
-const scrollToTopItem = (virtualizer: Placed, top: TopItem): void => {
+const scrollToTopItem = (virtualizer: Placed, top: TopItem): number | null => {
   const element = virtualizer.scrollElement;
   const item = virtualizer.measurementsCache[top.index];
-  if (!(element instanceof Element) || item === undefined) return;
+  if (!(element instanceof Element) || item === undefined) return null;
   element.scrollTop = item.start + (top.within * item.size) / top.size;
+  return element.scrollTop;
 };
 
 /**
@@ -98,16 +98,36 @@ export function useItemKeyOfSizes(
  *
  * Every commit notes the item at the top of the view, which costs a binary
  * search, because by the time the sizes have changed the old places are gone.
+ * The virtualizer learns the new scroll position only from the scroll event,
+ * which comes after the commit. Until it does, `scrollOffset` is the old
+ * position, so the item noted after a scroll is the one found from the
+ * position the element reports, and commits keep it until the offset moves.
+ * Otherwise a second change of the sizes before the event would keep the item
+ * the old position holds in the new places.
  */
 export function useKeepTopItem(virtualizer: Placed, sizes: unknown): void {
   const topBefore = useRef<TopItem | null>(null);
   const sizesBefore = useRef(sizes);
+  // The offset the virtualizer held when this hook scrolled, while its scroll
+  // event has not arrived, or `null`.
+  const offsetBeforeScroll = useRef<number | null>(null);
   useLayoutEffect(() => {
-    const top = topBefore.current;
+    const items = virtualizer.measurementsCache;
+    const offset = virtualizer.scrollOffset ?? 0;
     if (sizesBefore.current !== sizes) {
       sizesBefore.current = sizes;
-      if (top !== null) scrollToTopItem(virtualizer, top);
+      const top = topBefore.current;
+      const scrolledTo = top === null ? null : scrollToTopItem(virtualizer, top);
+      if (scrolledTo !== null && Math.abs(scrolledTo - offset) > 0.01) {
+        offsetBeforeScroll.current ??= offset;
+        topBefore.current = findTopItem(items, scrolledTo);
+        return;
+      }
     }
-    topBefore.current = findTopItem(virtualizer);
+    if (offsetBeforeScroll.current !== null) {
+      if (offset === offsetBeforeScroll.current) return;
+      offsetBeforeScroll.current = null;
+    }
+    topBefore.current = findTopItem(items, offset);
   });
 }

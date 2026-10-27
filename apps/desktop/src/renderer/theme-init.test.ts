@@ -9,7 +9,7 @@ import {
 } from "../ipc/appearance";
 import type { Appearance } from "../ipc/contract";
 import script from "./public/theme-init.js?raw";
-import base from "./styles/base.css?raw";
+import { computeLengthAtStep } from "./styles/evaluate-text-size-css";
 import tokens from "./styles/tokens.css?raw";
 
 /**
@@ -356,12 +356,10 @@ describe("the theme script", () => {
     expect(styleReads).toEqual([]);
   });
 
-  it("sets steps that base.css maps to the text tokens, and leaves the default step unmapped", () => {
-    // The default step needs no rule: tokens.css declares it on :root.
-    for (const step of TEXT_SIZE_STEPS.filter((each) => each !== 2)) {
-      expect(base).toContain(`:root[data-text-size="${step}"]`);
-    }
-    expect(base).not.toContain(`:root[data-text-size="2"]`);
+  it("sets steps that the stylesheets turn into text tokens one pixel apart, with the default step unchanged", () => {
+    expect(TEXT_SIZE_STEPS.map((step) => computeLengthAtStep("--t-13", step))).toEqual([
+      12, 13, 14, 15,
+    ]);
   });
 
   it("uses theme names the design tokens define", () => {
