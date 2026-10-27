@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 /**
  * Tests that no code or Deco text inherits Inter's font features.
  *
- * `tokens.css` turns on Inter's tailed l, serifed I and slashed zero for the
+ * `tokens.css` turns on Inter's tailed l and serifed I for the
  * whole page, and font features are inherited. Recursive (code) and Limelight
  * (the wordmark and the headline numerals) have glyphs of their own behind
  * the same feature names, so a rule that sets one of those families must

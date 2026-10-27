@@ -962,7 +962,7 @@ A compact workspace details surface shows runner, actual or last-observed branch
   - A dialog's error shows under its body in `--fail` ink, as an alert, and the dialog stays open.
 - **Self-hosted fonts:** fonts are served from the app bundle, and nothing is fetched from a third party.
   - ~~Bricolage Grotesque is the UI face.~~ Inter is the UI face, page titles included. *(Amended 2026-10-26, [#859](https://github.com/theagenticage/hercule/issues/859).)*
-    - UI text turns on Inter's tailed `l` (`cv05`), serifed `I` (`cv08`) and slashed zero (`zero`). Numbers that must line up, such as ages, counts and times, also take tabular figures. Prose keeps proportional figures.
+    - UI text turns on Inter's tailed `l` (`cv05`) and serifed `I` (`cv08`). The slashed zero stays off: in UI times and counts it reads as code. Numbers that must line up, such as ages, counts and times, also take tabular figures. Prose keeps proportional figures.
     - Code and the Deco face never inherit those features: Recursive and Limelight have their own zero. UI text inside a code block turns them back on.
     - The font files are Inter 4.1, cut to Latin and Latin Extended and keeping the `wght` and `opsz` axes. The browser picks the optical size from the font size.
   - Limelight is used only for the wordmark and numerals.
