@@ -14,7 +14,11 @@ import { describe, expect, it } from "vitest";
  * only a careful look at a screenshot would show it.
  *
  * The test reads every stylesheet of the renderer as text, so a rule added
- * later is checked without a change here.
+ * later is checked without a change here. It checks declarations, not what
+ * the browser computes: a reset shared through another rule fails it, and a
+ * later rule that turns the features on again passes it. The suite has no
+ * real browser, so this is the cheap guard; the captures of `capture:ui`
+ * show what the page really draws.
  */
 
 /** The renderer's source folder, which holds every stylesheet the test reads. */
