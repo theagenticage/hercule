@@ -508,23 +508,40 @@ export async function hideWindow(app: ElectronApplication): Promise<void> {
  * clicking in the window, and waits until Electron reports the page as the
  * focused web contents. A menu item that acts where the focus is, such as Edit
  * > Undo, does nothing before then.
+ *
+ * Another app, or the app of a test running in another file, can take the
+ * focus back before it arrives, so the window asks for it again on every try.
  */
 export async function focusWindow(app: ElectronApplication): Promise<void> {
-  await app.evaluate(({ BrowserWindow }) => {
+  await expect
+    .poll(async () => {
+      await requestWindowFocus(app);
+      return isPageFocused(app);
+    })
+    .toBe(true);
+}
+
+/**
+ * Asks macOS to make the app active and its window and page the keyboard
+ * focus, without waiting for the focus to arrive. `steal` makes the app active
+ * even while another app is.
+ */
+async function requestWindowFocus(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ app: electronApp, BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0]!;
     window.show();
+    electronApp.focus({ steal: true });
     window.focus();
     window.webContents.focus();
   });
-  await expect
-    .poll(() =>
-      app.evaluate(
-        ({ BrowserWindow, webContents }) =>
-          webContents.getFocusedWebContents()?.id ===
-          BrowserWindow.getAllWindows()[0]!.webContents.id,
-      ),
-    )
-    .toBe(true);
+}
+
+/** Checks that Electron reports the app's page as the focused web contents. */
+function isPageFocused(app: ElectronApplication): Promise<boolean> {
+  return app.evaluate(
+    ({ BrowserWindow, webContents }) =>
+      webContents.getFocusedWebContents()?.id === BrowserWindow.getAllWindows()[0]!.webContents.id,
+  );
 }
 
 /** Puts `text` on the system clipboard, as copying it in another app does. */
@@ -572,20 +589,69 @@ export async function chooseMenuItem(
   menuLabel: string,
   itemLabel: string,
 ): Promise<void> {
-  const found = await app.evaluate(
-    ({ Menu }, [menu, item]) => {
+  await clickMenuItem(app, menuLabel, itemLabel, { onlyWhenPageFocused: false });
+}
+
+/**
+ * Chooses the item labelled `itemLabel` in the menu labelled `menuLabel` while
+ * the app's page has the keyboard focus, as a user who clicks the item in the
+ * app's menu bar does. Fails when the menu bar has no such item, or when the
+ * page does not get the focus back before the poll times out.
+ *
+ * An item such as Edit > Undo acts where the focus is, and another app, or
+ * the app of a test running in another file, can take the focus at any time.
+ * Focusing the window first and clicking after leaves a gap in which the
+ * focus can move, and the click then steps nothing in the page. So the check
+ * that the page has the focus and the click run in one call in main, where
+ * the focus cannot change between them. When the check fails, the window asks
+ * for the focus again and the call repeats.
+ */
+export async function chooseMenuItemWithPageFocused(
+  app: ElectronApplication,
+  menuLabel: string,
+  itemLabel: string,
+): Promise<void> {
+  await expect
+    .poll(async () => {
+      await requestWindowFocus(app);
+      return clickMenuItem(app, menuLabel, itemLabel, { onlyWhenPageFocused: true });
+    })
+    .toBe(true);
+}
+
+/**
+ * Clicks the item labelled `itemLabel` in the menu labelled `menuLabel`, and
+ * returns whether it did. With `onlyWhenPageFocused`, it clicks only when
+ * Electron reports the app's page as the focused web contents. Fails when the
+ * menu bar has no such item.
+ */
+async function clickMenuItem(
+  app: ElectronApplication,
+  menuLabel: string,
+  itemLabel: string,
+  { onlyWhenPageFocused }: { readonly onlyWhenPageFocused: boolean },
+): Promise<boolean> {
+  const outcome = await app.evaluate(
+    ({ BrowserWindow, Menu, webContents }, [menu, item, focusRequired]) => {
       const chosen = Menu.getApplicationMenu()
         ?.items.find((each) => each.label === menu)
         ?.submenu?.items.find((each) => each.label === item);
-      if (chosen === undefined) return false;
+      if (chosen === undefined) return "missing";
+      const isPageFocused =
+        webContents.getFocusedWebContents()?.id ===
+        BrowserWindow.getAllWindows()[0]!.webContents.id;
+      if (focusRequired && !isPageFocused) return "unfocused";
       // Electron types `click` as a bare `Function`. Called with no
       // arguments, it runs the item's handler as a click with the mouse does.
       (chosen.click as () => void)();
-      return true;
+      return "clicked";
     },
-    [menuLabel, itemLabel] as const,
+    [menuLabel, itemLabel, onlyWhenPageFocused] as const,
   );
-  if (!found) throw new Error(`the menu bar has no item "${itemLabel}" in "${menuLabel}"`);
+  if (outcome === "missing") {
+    throw new Error(`the menu bar has no item "${itemLabel}" in "${menuLabel}"`);
+  }
+  return outcome === "clicked";
 }
 
 /**

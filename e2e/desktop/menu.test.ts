@@ -15,12 +15,13 @@
  * scripted runner. Run `pnpm build:desktop` and `pnpm build:binary` first.
  */
 import { setTimeout as sleep } from "node:timers/promises";
-import type { ElectronApplication, Page } from "playwright";
+import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
 import { isWindowVisible } from "../../apps/desktop/scripts/packaged-app";
 import {
   arrangeFleet,
   chooseMenuItem,
+  chooseMenuItemWithPageFocused,
   copyToClipboard,
   focusWindow,
   hideWindow,
@@ -49,18 +50,6 @@ async function openThreadComposer() {
   await openThread(page, "Why does the checkout test fail?");
   await focusWindow(app);
   return { app, page, field: page.getByRole("textbox", { name: "Message" }) };
-}
-
-/**
- * Waits for the page to have the keyboard focus, then chooses Edit > `label`.
- * The items step in the focused field, and another window starting on the
- * machine can take the focus from the app at any time, which turns the step
- * into nothing. A user who chooses an item has the app's focus; the wait
- * gives the test the same.
- */
-async function chooseEditItemWithFocus(app: ElectronApplication, label: string): Promise<void> {
-  await focusWindow(app);
-  await chooseMenuItem(app, "Edit", label);
 }
 
 /** Returns the titles of the sidebar's thread rows, top to bottom. */
@@ -151,9 +140,9 @@ describe("the menu bar", () => {
     await field.pressSequentially("Add a retry");
     expect(await readFieldText(field)).toBe("Add a retry");
 
-    await chooseEditItemWithFocus(app, "Undo");
+    await chooseMenuItemWithPageFocused(app, "Edit", "Undo");
     await expect.poll(() => readFieldText(field)).toBe("");
-    await chooseEditItemWithFocus(app, "Redo");
+    await chooseMenuItemWithPageFocused(app, "Edit", "Redo");
     await expect.poll(() => readFieldText(field)).toBe("Add a retry");
   });
 
@@ -164,9 +153,9 @@ describe("the menu bar", () => {
     await page.keyboard.press("Meta+V");
     await expect.poll(() => readFieldText(field)).toBe("Add a retry");
 
-    await chooseEditItemWithFocus(app, "Undo");
+    await chooseMenuItemWithPageFocused(app, "Edit", "Undo");
     await expect.poll(() => readFieldText(field)).toBe("");
-    await chooseEditItemWithFocus(app, "Redo");
+    await chooseMenuItemWithPageFocused(app, "Edit", "Redo");
     await expect.poll(() => readFieldText(field)).toBe("Add a retry");
   });
 
@@ -178,9 +167,9 @@ describe("the menu bar", () => {
     await address.click();
     await address.pressSequentially("http://127.0.0.1:4937");
 
-    await chooseEditItemWithFocus(app, "Undo");
+    await chooseMenuItemWithPageFocused(app, "Edit", "Undo");
     await expect.poll(() => address.inputValue()).toBe("");
-    await chooseEditItemWithFocus(app, "Redo");
+    await chooseMenuItemWithPageFocused(app, "Edit", "Redo");
     await expect.poll(() => address.inputValue()).toBe("http://127.0.0.1:4937");
   });
 
