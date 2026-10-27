@@ -357,6 +357,7 @@
   --divider: oklch(0.34 0.014 52);
   --rim: oklch(0.36 0.014 52);
   --composer-fill: oklch(0.31 0.014 52);
+  --composer-line: oklch(0.56 0.014 52);
 
   --char-l: 0.76;
   --char-c: 0.12;
@@ -579,7 +580,7 @@
   --glass-edge: color-mix(in oklab, white calc(var(--glass-edge-max) * var(--glass-level)), transparent);
   --glass-rim: color-mix(in oklab, var(--rim) calc(100% - 35% * var(--glass-level)), transparent);
   /* The composer is the main input, so its rim comes from --line, not from the quieter --rim. */
-  --composer-rim: color-mix(in oklab, var(--line) calc(100% - 35% * var(--glass-level)), transparent);
+  --composer-rim: color-mix(in oklab, var(--composer-line, var(--line)) calc(100% - 35% * var(--glass-level)), transparent);
   --glass-shadow: 0 1px 2px oklch(0 0 0 / calc(0.04 + 0.04 * var(--glass-level))),
     0 12px 32px -12px oklch(0 0 0 / calc(0.1 + 0.14 * var(--glass-level)));
 
