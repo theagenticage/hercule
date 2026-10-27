@@ -87,8 +87,8 @@
 .run-inputs:not(.run-facts) dd,
 .run-facts dd.is-code {
   font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-feature-settings: normal;
+  font-variant-ligatures: none;
   font-size: var(--t-11);
 }
 /* Not in the book, which draws no facts beside the inputs. What the web

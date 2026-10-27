@@ -1081,6 +1081,7 @@
 .b-words code {
   font-family: var(--font-mono);
   font-feature-settings: normal;
+  font-variant-ligatures: none;
   font-size: 0.9em;
 }
 /* A fenced code block (code-block.tsx) in Intake's smaller type and corners. */

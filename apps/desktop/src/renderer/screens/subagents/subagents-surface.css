@@ -146,6 +146,7 @@
   color: var(--faint);
   font-family: var(--font-mono);
   font-feature-settings: normal;
+  font-variant-ligatures: none;
   font-size: var(--t-11);
 }
 .subagents-stop {

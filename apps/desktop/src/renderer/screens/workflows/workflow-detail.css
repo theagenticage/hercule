@@ -173,8 +173,8 @@
 /* Not in the book. An input's default is JSON, so it is in mono. */
 .table-code {
   font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-feature-settings: normal;
+  font-variant-ligatures: none;
 }
 /* Under the sticky column heads, whose hairline is already there, the first
    row draws none. The first row is the tab panel list's first item, or sits

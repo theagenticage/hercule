@@ -1,12 +1,12 @@
 # Fonts used by Crew Bureau
 
-Every family is a self-hosted woff2 file. Nothing is fetched at runtime. Limelight and Recursive were downloaded once from fontsource's CDN; Inter is subset from the official release (see below).
+Every family is a self-hosted woff2 file. Nothing is fetched at runtime. Limelight was downloaded once from fontsource's CDN; JetBrains Mono is copied unchanged from the `@fontsource-variable/jetbrains-mono` package; Inter is subset from the official release (see below).
 
 | Family | Files | Used for | Axes used | Licence |
 |---|---|---|---|---|
 | Inter (The Inter Project Authors) | `inter-latin-variable-normal.woff2`, `inter-latin-ext-variable-normal.woff2` | All interface text, page titles included | wght 100-900, opsz 14-32 | SIL Open Font License 1.1 |
 | Limelight (Nicole Fally, Sorkin Type) | `limelight-latin-400-normal.woff2` | The wordmark, the logo lettering and a few large numerals. Never body text | none (one weight) | SIL Open Font License 1.1 |
-| Recursive (Arrow Type) | `recursive-latin-full-normal.woff2` | Code blocks, diffs and commands only | MONO 1, CASL 0.5, wght 300-1000 | SIL Open Font License 1.1 |
+| JetBrains Mono (The JetBrains Mono Project Authors) | `jetbrains-mono-latin-wght-normal.woff2`, `jetbrains-mono-latin-ext-wght-normal.woff2` | Code blocks, diffs and commands only | wght 100-800 | SIL Open Font License 1.1 |
 
 ## Inter
 
@@ -36,11 +36,20 @@ pyftsubset InterVariable.woff2 \
 
 Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com), with Reserved Font Name "Limelight". The file is fontsource's unmodified latin file, so it keeps the name.
 
-## Recursive
+## JetBrains Mono
 
-Copyright 2020 The Recursive Project Authors (https://github.com/arrowtype/recursive). The file is fontsource's latin file.
+Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono).
 
-The copyright lines of Limelight and Recursive are those of their `OFL.txt` in the google/fonts repository.
+- Source: the npm package `@fontsource-variable/jetbrains-mono` 5.3.0, https://registry.npmjs.org/@fontsource-variable/jetbrains-mono/-/jetbrains-mono-5.3.0.tgz
+  - Tarball sha256: `996fe6368a480c9ce15d4de22a2682b7c40b403718fee2b15e7272f244fd993f`
+  - Entries used, copied unchanged from `package/files/`:
+    - `jetbrains-mono-latin-wght-normal.woff2` (40,404 bytes, sha256 `18be452724bfdc236c074ca94a249a7f41a86752c7d04ab258ce9ed5651f6a7e`) holds the characters of the `unicode-range` of the first `@font-face` of JetBrains Mono in `tokens.css`.
+    - `jetbrains-mono-latin-ext-wght-normal.woff2` (15,196 bytes, sha256 `79bfdab9ba467e26eea4122e6f2567e188dd8a09a8c730d501fc487c4ab99c6e`) holds those of the second one.
+  - The two `unicode-range` lists are the ones the package's `wght.css` declares for these files, so code with accented names keeps the font.
+- Both files keep the `wght` axis. The Latin file has the `calt` feature, which joins `!=`, `===` and `->` into single glyphs; the app turns ligatures off for code (`font-variant-ligatures: none`).
+- The files are fontsource's, so they keep the name "JetBrains Mono". The font has no Reserved Font Name.
+
+The copyright lines of Limelight and JetBrains Mono are those of their `OFL.txt` in the google/fonts repository.
 
 ## Licence text
 

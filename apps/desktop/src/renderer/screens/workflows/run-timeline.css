@@ -59,7 +59,6 @@
   background: var(--ink);
   color: var(--surface);
   font-family: var(--font-ui);
-  font-variation-settings: normal;
   font-weight: var(--w-bold);
   line-height: 16px;
   transform: translateX(-50%);

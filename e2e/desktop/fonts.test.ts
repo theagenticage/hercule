@@ -35,7 +35,7 @@ describe("the fonts at launch", () => {
 
     const faces = await page.evaluate(async () => {
       await document.fonts.ready;
-      // The first range of each face tells the two subsets of Inter apart.
+      // The first range of each face tells the two subsets of Inter and of JetBrains Mono apart.
       return [...document.fonts].map(({ family, unicodeRange, status }) => ({
         family,
         firstRange: unicodeRange.split(",")[0],
@@ -46,7 +46,8 @@ describe("the fonts at launch", () => {
       { family: "Inter", firstRange: "U+0-FF", status: "loaded" },
       { family: "Inter", firstRange: "U+100-2BA", status: "unloaded" },
       { family: "Limelight", firstRange: "U+0-10FFFF", status: "loaded" },
-      { family: "Recursive", firstRange: "U+0-10FFFF", status: "unloaded" },
+      { family: "JetBrains Mono", firstRange: "U+0-FF", status: "unloaded" },
+      { family: "JetBrains Mono", firstRange: "U+100-2BA", status: "unloaded" },
       // The password field's bullet, drawn from Geneva, a system font; see
       // controls.css. The welcome has no password field.
       { family: "Password bullet", firstRange: "U+2022", status: "unloaded" },
