@@ -887,7 +887,7 @@ input.field[type="password"]:not(:placeholder-shown) {
 }
 .title {
   margin: 0;
-  font-size: var(--t-16);
+  font-size: var(--t-18);
   font-weight: var(--w-bold);
   letter-spacing: -0.01em;
   white-space: nowrap;

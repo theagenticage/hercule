@@ -157,10 +157,11 @@
 }
 
 /* A slice of a session under a header pill and the composer, so the slider
-   shows what it does. */
+   shows what it does. It is 188px tall at the default Text size and grows
+   with the text at the larger steps, so no line is cut off. */
 .glass-demo {
   position: relative;
-  height: 188px;
+  min-height: 188px;
   margin: 0 0 12px;
   overflow: hidden;
   border-radius: var(--r-lg);
@@ -168,9 +169,12 @@
   box-shadow: inset 0 0 0 1px var(--line-soft);
 }
 /* The first and last lines sit wholly under the pill and the composer, so
-   they show through the glass and never poke out at an edge. */
+   they show through the glass and never poke out at an edge. The composer is
+   12px from the bottom and 44px tall, so the 16px of padding and the last
+   paragraph's 8px margin keep the last line inside that band at every Text
+   size. */
 .gd-page {
-  padding: 20px 44px 0;
+  padding: 20px 44px 16px;
   font-size: var(--t-13);
   line-height: 1.55;
 }

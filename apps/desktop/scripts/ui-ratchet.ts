@@ -122,6 +122,11 @@ export const METRICS: Readonly<Record<string, MetricDefinition>> = {
   "coverage.placeholder": reported("Placeholder text fragments", "higher"),
   "coverage.disabled": reported("Disabled text fragments", "higher"),
   "coverage.other": reported("Text fragments of no role", "higher"),
+  "coverage.fixedSizeSamples": reported("Text samples exempt from the type scale", "lower"),
+  "coverage.pieceTextFragments": reported(
+    "Text lines inside drawn pieces, exempt from the type scale",
+    "lower",
+  ),
 
   "nonText.failing": none("Controls failing non-text contrast"),
 

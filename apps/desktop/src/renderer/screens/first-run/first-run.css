@@ -65,7 +65,7 @@
   margin-bottom: 20px;
 }
 .fr-brand .wordmark {
-  font-size: 36px;
+  font-size: var(--t-wordmark-hero);
   line-height: 1;
   letter-spacing: 0.03em;
   padding-top: 2px;

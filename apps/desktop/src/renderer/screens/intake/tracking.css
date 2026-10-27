@@ -145,7 +145,7 @@
   align-items: center;
   gap: 8px;
   margin: 0;
-  font-size: var(--t-16);
+  font-size: var(--t-18);
   font-weight: var(--w-bold);
   letter-spacing: -0.005em;
 }
@@ -490,7 +490,7 @@
   padding: 0 4px;
   border-radius: 5px;
   background: color-mix(in oklab, var(--ink) 6%, transparent);
-  font-size: 12px;
+  font-size: var(--t-12);
   /* Inline code is a name: it never breaks at its hyphen, so "Retry-After" stays one piece. */
   white-space: nowrap;
 }

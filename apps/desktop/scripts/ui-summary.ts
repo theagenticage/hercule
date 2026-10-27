@@ -149,7 +149,14 @@ export function summarizeText(measured: ReadonlyArray<MeasuredFragment>): Metric
   return values;
 }
 
-/** Summarizes the type, shape and spacing values of one page: the sizes, weights and radii in use, how many are off their token, and the share of spacing on the 4px grid. */
+/**
+ * Summarizes the type, shape and spacing values of one page: the sizes, weights and radii in use, how many are off their token, and the share of spacing on the 4px grid.
+ * `coverage.fixedSizeSamples` is how many text samples the page draws in a fixed size on purpose
+ * (the four "Aa" of the Text size control), whose font sizes the sizes and the off-scale count leave out.
+ * `coverage.pieceTextFragments` is how many lines of text sit inside drawn pieces (a face's z's, the avatar's
+ * letter, a plugin mark's initial), whose sizes and weights are left out the same way.
+ * Both are reported, so that a report shows where the exceptions apply.
+ */
 export function summarizeDiscipline(facts: DisciplineFacts): MetricValues {
   const onGrid = facts.spacingValues.filter((value) => {
     const distance = Math.abs(value - 4 * Math.round(value / 4));
@@ -159,6 +166,8 @@ export function summarizeDiscipline(facts: DisciplineFacts): MetricValues {
     "type.sizes": facts.fontSizes.length,
     "type.weights": facts.fontWeights.length,
     "type.offScale": facts.offScaleFontSizes.length,
+    "coverage.fixedSizeSamples": facts.fixedSizeSamples,
+    "coverage.pieceTextFragments": facts.pieceTextFragments,
     "radius.distinct": facts.radii.length,
     "radius.offToken": facts.offTokenRadii.length,
     "spacing.onGrid": facts.spacingValues.length === 0 ? 1 : onGrid / facts.spacingValues.length,

@@ -149,11 +149,15 @@ describe("summarizeDiscipline", () => {
       offScaleFontSizes: ["a { font-size: 13px }"],
       offTokenRadii: [],
       spacingValues: [4, 8, 12.004, 6],
+      fixedSizeSamples: 4,
+      pieceTextFragments: 3,
     });
     expect(values).toEqual({
       "type.sizes": 3,
       "type.weights": 2,
       "type.offScale": 1,
+      "coverage.fixedSizeSamples": 4,
+      "coverage.pieceTextFragments": 3,
       "radius.distinct": 1,
       "radius.offToken": 0,
       "spacing.onGrid": 0.75,
@@ -168,6 +172,8 @@ describe("summarizeDiscipline", () => {
       offScaleFontSizes: [],
       offTokenRadii: [],
       spacingValues: [],
+      fixedSizeSamples: 0,
+      pieceTextFragments: 0,
     };
     expect(summarizeDiscipline(facts)["spacing.onGrid"]).toBe(1);
   });

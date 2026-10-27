@@ -1438,21 +1438,103 @@ function listVisibleElements(readFacts: ReadFacts): Element[] {
 }
 
 /**
+ * Where the one exception to the type scale is drawn: the "Aa" of each step of
+ * Settings > Appearance's Text size control. They are four labels, set at 12,
+ * 13, 14 and 15 px at every Text size, because each shows what its step does to
+ * body text. Their font sizes are left out of `DisciplineFacts` (the sizes in
+ * use and the declarations off the scale), and nothing else of them is: their
+ * contrast, click targets and clipping are measured like any other text.
+ */
+const FIXED_SIZE_SAMPLES = {
+  selector: ".sizes > label",
+  fontSizes: [12, 13, 14, 15],
+} as const;
+
+/**
+ * Returns the elements of `FIXED_SIZE_SAMPLES`: none on a page without the
+ * Text size control, else its four labels. Fails when the selector matches
+ * anything else (another number of elements, or an element whose font size is
+ * not the one the control sets), so that the exception cannot spread to other
+ * text unnoticed.
+ */
+function findFixedSizeSamples(): Element[] {
+  const samples = Array.from(document.querySelectorAll(FIXED_SIZE_SAMPLES.selector));
+  if (samples.length === 0) return samples;
+  const sizes = samples.map((sample) => Number.parseFloat(getComputedStyle(sample).fontSize));
+  if (sizes.join(",") !== FIXED_SIZE_SAMPLES.fontSizes.join(",")) {
+    throw new Error(
+      `The selector "${FIXED_SIZE_SAMPLES.selector}" exempts text from the type scale, and must match ` +
+        `exactly the ${String(FIXED_SIZE_SAMPLES.fontSizes.length)} samples of the Text size control, at ` +
+        `${FIXED_SIZE_SAMPLES.fontSizes.join(", ")} px. It matches ${String(samples.length)} elements, at ` +
+        `${sizes.join(", ")} px.`,
+    );
+  }
+  return samples;
+}
+
+/**
+ * The SVG roots of the pieces the Bureau book governs: a face (`svg.cr`, whose
+ * sleeping pose draws two z's), the user's avatar (`svg.cr-you`, which draws a
+ * letter) and a mark (`svg.br`, whose plugin variant draws an initial). The
+ * letters inside them are drawing units of the piece's viewBox, compared with
+ * the book's own markup by `pnpm compare:bureau`, so they are not UI type: the
+ * type metrics leave out the font sizes and weights of the text inside these
+ * roots (and their off-scale declarations). Their contrast, click targets and
+ * clipping are measured like any other text.
+ */
+const PIECE_ROOTS_SELECTOR = "svg.cr, svg.cr-you, svg.br";
+
+/**
+ * Returns the elements of `PIECE_ROOTS_SELECTOR`. Fails when one of them is not
+ * a drawn piece, which holds only SVG shapes and text: an element that is not
+ * an `svg`, or that holds HTML (a `foreignObject`), would let ordinary UI text
+ * escape the type scale under the name of a piece.
+ */
+function findPieceRoots(): Element[] {
+  const roots = Array.from(document.querySelectorAll(PIECE_ROOTS_SELECTOR));
+  for (const root of roots) {
+    if (!(root instanceof SVGSVGElement) || root.querySelector("foreignObject") !== null) {
+      throw new Error(
+        `The selector "${PIECE_ROOTS_SELECTOR}" exempts the text of drawn pieces from the type scale, ` +
+          `and it matches an element that is not a piece: ${describeElement(root)}. Fix the selector ` +
+          "or the element's class.",
+      );
+    }
+  }
+  return roots;
+}
+
+/**
  * Returns the type, shape and spacing values of the page: see
  * `DisciplineFacts`. The authored declarations come from the style sheets
  * (every rule whose selector matches a visible element) and from inline
  * `style` attributes. A pill or a circle, and zero, are not off-token radii.
+ * The font sizes of the fixed size samples (`FIXED_SIZE_SAMPLES`) and the font
+ * sizes and weights of the text in drawn pieces (`PIECE_ROOTS_SELECTOR`) are
+ * left out.
  */
 export function collectDiscipline(): DisciplineFacts {
   const readFacts = createFactsReader();
   const visible = listVisibleElements(readFacts);
   const visibleSet = new Set(visible);
+  const samples = findFixedSizeSamples();
+  const pieces = findPieceRoots();
+  const isPiece = (element: Element): boolean => pieces.some((piece) => piece.contains(element));
+  const isSample = (element: Element): boolean =>
+    samples.some((sample) => sample.contains(element));
+  const isExemptFromSizes = (element: Element): boolean => isSample(element) || isPiece(element);
+  const visibleTypeSet = new Set(visible.filter((element) => !isExemptFromSizes(element)));
 
   const fontSizes = new Set<number>();
   const fontWeights = new Set<number>();
-  for (const { fragment } of readPaintedTextFragments()) {
-    fontSizes.add(fragment.fontSize);
+  let pieceTextFragments = 0;
+  for (const { fragment, owner } of readPaintedTextFragments()) {
+    if (isPiece(owner)) {
+      pieceTextFragments += 1;
+      continue;
+    }
     fontWeights.add(fragment.fontWeight);
+    if (!isSample(owner)) fontSizes.add(fragment.fontSize);
   }
 
   const radii = new Set<string>();
@@ -1476,9 +1558,13 @@ export function collectDiscipline(): DisciplineFacts {
 
   const offScaleFontSizes = new Set<string>();
   const offTokenRadii = new Set<string>();
-  const noteDeclarations = (name: string, style: CSSStyleDeclaration): void => {
+  const noteDeclarations = (
+    name: string,
+    style: CSSStyleDeclaration,
+    includesFontSizes: boolean,
+  ): void => {
     const declarations = readShapeDeclarations(style);
-    for (const [property, value] of declarations.fontSizes) {
+    for (const [property, value] of includesFontSizes ? declarations.fontSizes : []) {
       if (property === "font-size" ? !isOnScaleFontSize(value) : true) {
         offScaleFontSizes.add(`${name} { ${property}: ${value} }`);
       }
@@ -1489,17 +1575,20 @@ export function collectDiscipline(): DisciplineFacts {
   };
 
   const hasVisibleMatch = new Map<string, boolean>();
+  const matchesElementOf = (elements: ReadonlySet<Element>, selector: string): boolean => {
+    return splitSelectorList(selector).some((part) => {
+      const elementSelector = stripPseudoElements(part);
+      if (elementSelector === null) return false;
+      for (const element of document.querySelectorAll(elementSelector)) {
+        if (elements.has(element)) return true;
+      }
+      return false;
+    });
+  };
   const matchesVisibleElement = (selector: string): boolean => {
     let matches = hasVisibleMatch.get(selector);
     if (matches === undefined) {
-      matches = splitSelectorList(selector).some((part) => {
-        const elementSelector = stripPseudoElements(part);
-        if (elementSelector === null) return false;
-        for (const element of document.querySelectorAll(elementSelector)) {
-          if (visibleSet.has(element)) return true;
-        }
-        return false;
-      });
+      matches = matchesElementOf(visibleSet, selector);
       hasVisibleMatch.set(selector, matches);
     }
     return matches;
@@ -1507,11 +1596,17 @@ export function collectDiscipline(): DisciplineFacts {
   visitStyleRules(({ rule, selector }) => {
     const { fontSizes: sizes, radii: corners } = readShapeDeclarations(rule.style);
     if (sizes.length === 0 && corners.length === 0) return;
-    if (matchesVisibleElement(selector)) noteDeclarations(selector, rule.style);
+    if (matchesVisibleElement(selector)) {
+      noteDeclarations(selector, rule.style, matchesElementOf(visibleTypeSet, selector));
+    }
   });
   for (const element of visible) {
     if (element.hasAttribute("style") && "style" in element) {
-      noteDeclarations(`${describeElement(element)}[style]`, element.style as CSSStyleDeclaration);
+      noteDeclarations(
+        `${describeElement(element)}[style]`,
+        element.style as CSSStyleDeclaration,
+        !isExemptFromSizes(element),
+      );
     }
   }
 
@@ -1525,6 +1620,8 @@ export function collectDiscipline(): DisciplineFacts {
     offScaleFontSizes: [...offScaleFontSizes].sort(text),
     offTokenRadii: [...offTokenRadii].sort(text),
     spacingValues,
+    fixedSizeSamples: samples.length,
+    pieceTextFragments,
   };
 }
 

@@ -30,6 +30,14 @@ export interface UiScreen {
    * match something visible on the screen.
    */
   readonly nonTextParts: ReadonlyArray<NonTextPart>;
+  /**
+   * How many text samples the screen draws in a fixed size on purpose, whose
+   * font sizes the type metrics leave out: 4 on Settings > Appearance, which
+   * shows an "Aa" at each Text size step, and none (the default) on every
+   * other screen. The measurement fails when the page has another number, so
+   * the exception cannot move to other text or stop applying unnoticed.
+   */
+  readonly fixedSizeSamples?: number;
 }
 
 /** One part of a screen whose contrast with its surroundings is measured. See `UiScreen.nonTextParts`. */
@@ -181,6 +189,7 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
       { selector: ".gd-pill .mark", kind: "mark" },
       { selector: ".side-sec .dot", kind: "mark" },
     ],
+    fixedSizeSamples: 4,
   },
 ];
 

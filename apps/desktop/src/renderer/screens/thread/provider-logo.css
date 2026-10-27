@@ -5,6 +5,6 @@
   place-items: center;
   width: 1em;
   height: 1em;
-  font-weight: 700;
+  font-weight: var(--w-bold);
   line-height: 1;
 }

@@ -1087,7 +1087,7 @@
   font-family: var(--font-mono);
   font-feature-settings: normal;
   font-variant-ligatures: none;
-  font-size: 0.9em;
+  font-size: var(--t-13);
 }
 /* A fenced code block (code-block.tsx) in Intake's smaller type and corners. */
 .b-words .code-block {
@@ -1157,7 +1157,7 @@
 }
 .b-msg-head .mono {
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: var(--t-11);
 }
 .b-msg-text {
   margin: 3px 0 0;
@@ -1166,21 +1166,22 @@
   overflow-wrap: anywhere;
 }
 /* Not in the drawing, which shows no avatars: spec 17 draws each message's
-   author's avatar, or initials when there is none. At 18px it fits the
-   line of the name, so a message is as tall as the drawing's. */
+   author's avatar, or initials when there is none. It is 20px, which holds two
+   initials at --t-11 without clipping them, and it grows with the text so
+   the initials still fit at the larger Text sizes. The line of the name is
+   18px tall and a little taller at the larger sizes, so the message's head is
+   2px taller than the drawing's. */
 .b-avatar {
   display: inline-grid;
   flex: none;
   place-items: center;
-  width: 18px;
-  height: 18px;
+  width: calc(20px + var(--text-size-step));
+  height: calc(20px + var(--text-size-step));
   overflow: hidden;
   border-radius: 50%;
   background: var(--sunken);
   color: var(--muted);
-  /* No size token: the smallest, --t-11, puts two initials edge to edge in
-     the 18px circle. */
-  font-size: 9px;
+  font-size: var(--t-11);
   font-weight: var(--w-bold);
 }
 .b-avatar img {

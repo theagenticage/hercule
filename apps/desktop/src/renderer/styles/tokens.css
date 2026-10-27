@@ -81,29 +81,57 @@
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 
   /* Type: modest titles; size hierarchy comes from numerals, color and position.
-     The five text sizes follow the Text size setting of Settings > Appearance.
+     Every font size in the renderer is one of the tokens below, or `inherit`.
+     Four text sizes follow the Text size setting of Settings > Appearance.
      base.css sets --text-size-step from the root element's data-text-size: -1px,
-     0, 1px or 2px for the four steps. The titles below do not follow it, so
-     they stay modest at every step. Each token is still one length wherever
-     var(--t-13) is used, also inside another calc(). */
+     0, 1px or 2px for the four steps. The titles and the display sizes do not
+     follow it, so they stay modest at every step. Each token is still one
+     length wherever var(--t-13) is used, also inside another calc().
+
+     The roles, for the default step:
+       --t-11  metadata: times, counts, badges, keys, eyebrow labels, and code that
+               names something small (a language tag, a fact in a card)
+       --t-12  secondary text: the second line of a row, hints, notes; and compact
+               code, the code that sits inside UI text (a path, a hash, a chip)
+       --t-13  UI body: labels, buttons, rows, fields; and code that is read as
+               code (a code block, the code in a message)
+       --t-14  transcript prose, the composer's text and a section's heading
+               (in the bold weight)
+       --t-18  the title of a pane or a page: the header bar's title, a record's name
+       --t-20  the headline of a page that has no header bar: a first-run step, an
+               empty state, a settings column's heading, the open signal's title
+       --t-num headline numerals
+     Code takes the size of the text around it or one step below it, never a
+     fractional size. The letters drawn inside a piece (the user's avatar, the
+     sleeping face's z, a plugin mark's initial) are not UI type: their size
+     and weight are units of the piece's viewBox, which the Bureau book
+     defines, and the type metrics leave them out. */
   --text-size-step: 0px;
   --t-11: calc(11px + var(--text-size-step));
   --t-12: calc(12px + var(--text-size-step));
-  --t-13: calc(13px + var(--text-size-step));   /* UI body */
-  --t-14: calc(14px + var(--text-size-step));   /* transcript prose */
-  --t-16: calc(16px + var(--text-size-step));
+  --t-13: calc(13px + var(--text-size-step));
+  --t-14: calc(14px + var(--text-size-step));
   /* The fixed line heights of the lines that hold text, which grow by the
      same step as the text and so never clip it. The name is the height at
      the default step. A row of such lines adds the step once per line, in
      row-heights.css. */
   --line-16: calc(16px + var(--text-size-step));
   --line-18: calc(18px + var(--text-size-step));
-  --t-18: 18px;   /* page titles */
-  --t-20: 20px;   /* the largest title on desktop */
-  --t-num: 26px;  /* headline numerals, set in the Deco face */
+  --t-18: 18px;
+  --t-20: 20px;
+  --t-num: 26px;  /* headline numerals */
+  /* Display sizes, set in the Deco face: the wordmark beside the logo (the
+     sign-in lockup, and the larger one on the first-run welcome), and the
+     numeral of an empty state. */
+  --t-wordmark: 32px;
+  --t-wordmark-hero: 36px;
+  --t-numeral-hero: 64px;
+  /* Three weights, the named instances of Inter: Regular, Medium and SemiBold. No
+     text is set heavier than --w-bold, and a weight is never raised to make text
+     easier to read: a text colour that is too faint is fixed in the colour. */
   --w-regular: 400;
-  --w-medium: 520;
-  --w-bold: 640;
+  --w-medium: 500;
+  --w-bold: 600;
 
   /* Space: a 4px grid. */
   --s-1: 4px;
