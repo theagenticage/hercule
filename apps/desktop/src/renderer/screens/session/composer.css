@@ -103,7 +103,9 @@
   float: left;
   width: 100%;
   margin-right: -100%;
-  color: var(--faint);
+  /* A prompt the user reads, at the composer's 14px, so muted: faint is for
+     metadata of 12px or smaller. */
+  color: var(--muted);
   pointer-events: none;
 }
 .composer-row {

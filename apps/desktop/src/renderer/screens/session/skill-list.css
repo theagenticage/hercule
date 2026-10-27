@@ -172,8 +172,8 @@
 }
 
 /* No row matches: the head stays, and two lines stand where the rows were,
-   the first muted and the second faint, under the rows' own `--s-2` of side
-   padding. The two lines are 2px apart, as the two-line items in
+   both muted and the second a size smaller, under the rows' own `--s-2` of
+   side padding. The two lines are 2px apart, as the two-line items in
    Settings > Skills are (`.skill-approvals li`), and the first has the 18px
    line height of a 13px line (`.side-line`, sidebar.css). The padding above
    (2px) and below (`--s-1`) are new values, set by eye against the 32px
@@ -182,13 +182,10 @@
   display: grid;
   gap: 2px;
   padding: 2px var(--s-2) var(--s-1);
+  color: var(--muted);
   font-size: var(--t-13);
   line-height: var(--line-18);
 }
-.composer-skill-list-empty > :first-child {
-  color: var(--muted);
-}
 .composer-skill-list-empty > :last-child {
-  color: var(--faint);
   font-size: var(--t-12);
 }

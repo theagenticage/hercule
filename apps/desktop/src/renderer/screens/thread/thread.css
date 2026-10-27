@@ -143,36 +143,36 @@ button.worked:hover b {
 /* The target, in the mono face when it is code and in the UI face when it
    is words. It is isolated from the label's text direction, because agent
    text may hold bidirectional control characters that would otherwise
-   reorder the label around it. */
+   reorder the label around it. It stays muted while the label turns ink
+   under the pointer, so the row's object does not fade into its verb. */
 .work-target {
-  color: var(--faint);
+  color: var(--muted);
   unicode-bidi: isolate;
-  transition: color var(--dur-1);
 }
-/* A row that opens lights up as the divider does, its icon and chevron
-   with it. */
+/* A row that opens lights up as the divider does: its label turns ink, and
+   its icon and chevron turn muted. The target is content, so it is muted at
+   rest already. */
 button.work-row:hover .work-label {
   color: var(--ink);
 }
-button.work-row:hover .work-target,
 button.work-row:hover > .ic {
   color: var(--muted);
 }
-/* A step that did not complete: the word, such as "declined", in the faint
-   ink, or for a failed step a small cross in the muted ink. Neither is
-   tomato: the agent's work went on, and the turn's ending says when the turn
-   failed. The cross's 12px box has 2px of air on its left, which the
-   negative margin takes back, so it sits by its label as a word would. */
+/* A step that did not complete: the word, such as "declined", "running" or
+   "waiting", or for a failed step a small cross. Both are muted, because they
+   say what became of the step. Neither is tomato: the agent's work went on,
+   and the turn's ending says when the turn failed. The cross's 12px box has
+   2px of air on its left, which the negative margin takes back, so it sits by
+   its label as a word would. */
 .work-result {
   grid-column: 3;
   display: inline-flex;
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-12);
   white-space: nowrap;
 }
 .work-result[role="img"] {
   margin-left: -2px;
-  color: var(--muted);
 }
 .work-time {
   grid-column: 5;
