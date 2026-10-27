@@ -46,6 +46,9 @@ export interface NonTextPart {
   readonly kind: "boundary" | "mark";
 }
 
+/** The selector of the composer's card, the main input of a thread: its edge is measured as `nonText.composerBoundary`. */
+export const COMPOSER_SELECTOR = ".composer-card";
+
 /** The glass levels captured: the default of 40 %, and 0 % (Reduce transparency). */
 export const GLASS_PERCENTS = [40, 0] as const;
 
@@ -80,7 +83,7 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     path: "thread.html",
     contentSelector: 'section.transcript[aria-label="Transcript"] .tx > *',
     nonTextParts: [
-      { selector: ".composer-card", kind: "boundary" },
+      { selector: COMPOSER_SELECTOR, kind: "boundary" },
       { selector: "header.top .icon-btn svg", kind: "mark" },
       { selector: ".composer-row .icon-btn svg", kind: "mark" },
       { selector: ".thread-tabs .mark", kind: "mark" },
@@ -93,7 +96,7 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     path: "thread.html?state=long",
     contentSelector: 'section.transcript[aria-label="Transcript"] .tx > *',
     nonTextParts: [
-      { selector: ".composer-card", kind: "boundary" },
+      { selector: COMPOSER_SELECTOR, kind: "boundary" },
       { selector: "header.top .icon-btn svg", kind: "mark" },
       { selector: ".composer-row .icon-btn svg", kind: "mark" },
       { selector: ".thread-tabs .mark", kind: "mark" },
@@ -104,7 +107,7 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     path: "draft.html",
     contentSelector: ".hello .column > *",
     nonTextParts: [
-      { selector: ".composer-card", kind: "boundary" },
+      { selector: COMPOSER_SELECTOR, kind: "boundary" },
       { selector: "header.top .icon-btn svg", kind: "mark" },
       { selector: ".composer-row .icon-btn svg", kind: "mark" },
     ],
@@ -114,7 +117,7 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     path: "conversation.html",
     contentSelector: 'section.transcript[aria-label="Conversation"] .atx > *',
     nonTextParts: [
-      { selector: ".composer-card", kind: "boundary" },
+      { selector: COMPOSER_SELECTOR, kind: "boundary" },
       { selector: ".composer-row .icon-btn svg", kind: "mark" },
     ],
   },

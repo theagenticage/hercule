@@ -129,6 +129,9 @@ export const METRICS: Readonly<Record<string, MetricDefinition>> = {
   ),
 
   "nonText.failing": none("Controls failing non-text contrast"),
+  // The composer is the main input, so the ratio of its edge is ratcheted
+  // and not only checked against 3 as one of the controls above.
+  "nonText.composerBoundary": higher("Composer edge contrast (WCAG ratio)", 0.005, 3),
 
   "type.sizes": lower("Distinct font sizes", 0, 7),
   "type.weights": lower("Distinct font weights", 0, 3),

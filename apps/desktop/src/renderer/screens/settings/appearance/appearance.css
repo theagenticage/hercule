@@ -211,11 +211,11 @@
   height: 44px;
   padding: 0 16px;
   border-radius: var(--r-xl);
-  background: var(--glass-fill-raised);
+  background: var(--glass-fill-composer);
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
   box-shadow:
-    inset 0 0 0 1px var(--glass-rim),
+    inset 0 0 0 1px var(--composer-rim),
     inset 0 1px 0 var(--glass-edge),
     var(--glass-shadow);
   color: var(--faint);

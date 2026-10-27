@@ -12,6 +12,7 @@ import {
   countColours,
   countDifferingPixels,
   findModeColour,
+  measureBoundaryContrast,
   measureFragmentContrast,
   type DecodedImage,
 } from "./ui-pixels.ts";
@@ -412,6 +413,46 @@ describe("countDifferingPixels", () => {
     expect(() =>
       countDifferingPixels(image, first, { left: 18, top: 2, right: 22, bottom: 6 }, 1),
     ).toThrow(/outside the image/);
+  });
+});
+
+describe("measureBoundaryContrast", () => {
+  const box: ProbeRect = { left: 10, top: 10, right: 50, bottom: 30 };
+  const grey: ProbeColour = [118, 118, 118, 1];
+
+  it("returns the ratio of a border drawn on all sides, which is the check's own ratio", () => {
+    const image = buildImage(60, 40, WHITE);
+    paint(image, [10, 10, 50, 30], grey);
+    paint(image, [12, 12, 48, 28], WHITE);
+    const ratio = measureBoundaryContrast(image, box, 1);
+    expect(ratio).toBeCloseTo(computeWcagContrast(grey, WHITE), 6);
+    expect(checkNonTextPart(image, box, "boundary", 1).passes).toBe(ratio >= 3);
+  });
+
+  it("returns 1 for a box with no border", () => {
+    expect(measureBoundaryContrast(buildImage(60, 40, WHITE), box, 1)).toBe(1);
+  });
+
+  it("returns 1 for a border drawn on one short side only", () => {
+    const image = buildImage(60, 40, WHITE);
+    paint(image, [10, 10, 12, 30], grey);
+    expect(measureBoundaryContrast(image, box, 1)).toBe(1);
+  });
+
+  it("reads the weaker colour when the strong one covers less than half of the perimeter", () => {
+    const image = buildImage(60, 40, WHITE);
+    const pale: ProbeColour = [200, 200, 200, 1];
+    paint(image, [10, 10, 50, 30], pale);
+    paint(image, [12, 12, 48, 28], WHITE);
+    paint(image, [10, 10, 14, 30], grey);
+    expect(measureBoundaryContrast(image, box, 1)).toBeCloseTo(computeWcagContrast(pale, WHITE), 6);
+  });
+
+  it("reads the band at the device scale", () => {
+    const image = buildImage(120, 80, WHITE);
+    paint(image, [20, 20, 100, 60], grey);
+    paint(image, [24, 24, 96, 56], WHITE);
+    expect(measureBoundaryContrast(image, box, 2)).toBeCloseTo(computeWcagContrast(grey, WHITE), 6);
   });
 });
 

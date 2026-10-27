@@ -526,3 +526,60 @@ export function checkNonTextPart(
     outsideColour,
   };
 }
+
+/**
+ * Returns the WCAG contrast ratio that the edge of a control reaches over at
+ * least half of its perimeter. It reads the same pixels as `checkNonTextPart`
+ * with the kind `boundary`: the band 2 CSS px wide just inside `box`, against
+ * the most common colour in the band 3 CSS px wide just outside it. It sorts
+ * the band's pixels by their ratio against that outside colour, highest
+ * first, and returns the ratio of the pixel at which their number reaches
+ * `box` width plus height in device pixels. So the edge passes the check
+ * exactly when this number is at least 3.
+ *
+ * Returns 1 (no contrast at all) when fewer pixels than that lie in the band
+ * or when there are no pixels outside the box to compare with.
+ */
+export function measureBoundaryContrast(
+  image: DecodedImage,
+  box: ProbeRect,
+  scale: number,
+): number {
+  const boxPixels = toPixelRect(box, scale);
+  const outerBand = toPixelRect(
+    {
+      left: box.left - OUTSIDE_BAND,
+      top: box.top - OUTSIDE_BAND,
+      right: box.right + OUTSIDE_BAND,
+      bottom: box.bottom + OUTSIDE_BAND,
+    },
+    scale,
+  );
+  const outsideColour = findModeColour(countColoursIn(image, outerBand, boxPixels));
+  if (outsideColour === null) {
+    return 1;
+  }
+  const innerBox = toPixelRect(
+    {
+      left: box.left + BOUNDARY_BAND,
+      top: box.top + BOUNDARY_BAND,
+      right: box.right - BOUNDARY_BAND,
+      bottom: box.bottom - BOUNDARY_BAND,
+    },
+    scale,
+  );
+  const requiredPixels = (box.right - box.left + (box.bottom - box.top)) * scale;
+  const ratiosByCount = [...countColoursIn(image, boxPixels, innerBox)].map(([packed, count]) => ({
+    ratio: computeWcagContrast(unpackColour(packed), outsideColour),
+    count,
+  }));
+  ratiosByCount.sort((first, second) => second.ratio - first.ratio);
+  let covered = 0;
+  for (const { ratio, count } of ratiosByCount) {
+    covered += count;
+    if (covered >= requiredPixels) {
+      return ratio;
+    }
+  }
+  return 1;
+}
