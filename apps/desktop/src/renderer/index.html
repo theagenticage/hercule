@@ -7,8 +7,8 @@
          rendered the first text. Every face is declared with
          font-display: block, so text stays invisible until its font arrives;
          starting the request early shows text sooner. Only the Latin subset of
-         Inter is preloaded. Limelight and Recursive load the
-         first time text uses them (spec 17, §Performance, rule 6).
+         Inter is preloaded. Limelight and JetBrains Mono (the code font) load
+         the first time text uses them (spec 17, §Performance, rule 6).
          `crossorigin` is required: Chromium always fetches fonts in CORS mode,
          so a preload without it would not match the font's request, and the
          file would be read twice. -->

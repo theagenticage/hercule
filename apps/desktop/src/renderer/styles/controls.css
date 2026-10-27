@@ -605,8 +605,8 @@ input.field[type="password"]:not(:placeholder-shown) {
    set again here. */
 .field > input.mono {
   font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-feature-settings: normal;
+  font-variant-ligatures: none;
   font-size: var(--t-12);
 }
 

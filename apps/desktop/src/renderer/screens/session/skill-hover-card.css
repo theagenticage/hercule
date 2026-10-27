@@ -60,14 +60,13 @@
   text-wrap: pretty;
 }
 /* The path is the one place the card shows a file, so it is in the mono
-   face, which the book keeps for paths. The axes are the app's
-   (`--mono-axes`, as Settings > Skills). */
+   face, which the book keeps for paths. */
 .skill-hover-path {
   margin-top: var(--s-1);
   color: var(--faint);
   font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-feature-settings: normal;
+  font-variant-ligatures: none;
   font-size: var(--t-11);
   overflow-wrap: anywhere;
 }

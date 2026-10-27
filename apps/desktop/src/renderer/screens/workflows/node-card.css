@@ -84,8 +84,8 @@
 }
 .node-facts dd.is-code {
   font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-feature-settings: normal;
+  font-variant-ligatures: none;
   font-size: var(--t-11);
   line-height: var(--line-18);
 }
@@ -110,8 +110,8 @@
 /* A text drawn in mono, which is a text generation step's input. */
 .node-prompt.is-code {
   font-family: var(--font-mono);
-  font-variation-settings: var(--mono-axes);
   font-feature-settings: normal;
+  font-variant-ligatures: none;
   font-size: var(--t-11);
 }
 /* The chevron that ends a row which opens a thread. */

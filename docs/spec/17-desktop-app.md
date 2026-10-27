@@ -963,10 +963,11 @@ A compact workspace details surface shows runner, actual or last-observed branch
 - **Self-hosted fonts:** fonts are served from the app bundle, and nothing is fetched from a third party.
   - ~~Bricolage Grotesque is the UI face.~~ Inter is the UI face, page titles included. *(Amended 2026-10-26, [#859](https://github.com/theagenticage/hercule/issues/859).)*
     - UI text turns on Inter's tailed `l` (`cv05`) and serifed `I` (`cv08`). The slashed zero stays off: in UI times and counts it reads as code. Numbers that must line up, such as ages, counts and times, also take tabular figures. Prose keeps proportional figures.
-    - Code and the Deco face never inherit those features: Recursive and Limelight have their own zero. UI text inside a code block turns them back on.
+    - Code and the Deco face never inherit those features: ~~Recursive~~ JetBrains Mono and Limelight have their own glyphs behind those names. UI text inside a code block turns them back on. *(Amended 2026-10-27, [#860](https://github.com/theagenticage/hercule/issues/860).)*
     - The font files are Inter 4.1, cut to Latin and Latin Extended and keeping the `wght` and `opsz` axes. The browser picks the optical size from the font size.
   - Limelight is used only for the wordmark and numerals.
-  - Recursive is used only for code.
+  - ~~Recursive is used only for code.~~ JetBrains Mono is used only for code. *(Amended 2026-10-27, [#860](https://github.com/theagenticage/hercule/issues/860).)*
+    - The files are the Latin and Latin Extended subsets of Fontsource's variable JetBrains Mono 5.3.0, each with its `unicode-range`, and keep the `wght` axis. Code draws no ligatures: the transcript shows what an agent wrote or will run, so `!=` and `===` read as typed, and a rule that sets the code font also sets `font-variant-ligatures: none`.
 
 ## The Office
 
@@ -2613,7 +2614,7 @@ These rules keep the budgets:
    - So the window draws no blur while the Office is open *(decided 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*. The Office sets the glass level to 0 for the whole window, through the same tokens as Reduce transparency. Its top bar, card, name tags and room labels, and the thread drawer's composer and Requests dock, draw as solid Bureau surfaces, with the glass's rim and shadow. Leaving the Office brings the glass back. [Research: frosted glass over the Office at close to no cost (#341)](https://github.com/theagenticage/hercule/issues/341) looks for a way to bring it back over the Office.
 6. **The first paint is cheap:**
    - Only the Latin subset of ~~Bricolage Grotesque (131 kB)~~ Inter is preloaded. *(Amended 2026-10-26, [#859](https://github.com/theagenticage/hercule/issues/859).)*
-   - Limelight and Recursive load the first time text uses them.
+   - Limelight and ~~Recursive~~ JetBrains Mono load the first time text uses them. *(Amended 2026-10-27, [#860](https://github.com/theagenticage/hercule/issues/860).)*
    - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Everything the first screen imports statically is built into one chunk, the first-screen chunk. Split into files, the first screen costs more bytes: each file is compressed apart, and the files import and export names from each other, which the minifier cannot shorten across a file boundary. One chunk measured 7.4 kB smaller gzipped (see [Measured](#measured)). The app's files are read from the local disk, so splitting buys no caching in return.
    - A screen or dialog that is not on the first screen is imported with `import()`, and is a chunk of its own, loaded the first time it shows: the first run, the project picker, the New project and provider login dialogs, and the draft's starter threads. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Each section of [Settings](#settings) is a chunk of its own too. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So is [Intake](#intake). *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* So are the workflow list, the open workflow and a run's page. The graph's layout loads with the first of the last two to open, and the YAML parser with the open workflow only, because a run's page draws the run's plan, which is already parsed. Neither loads at launch ([What Workflows costs](#what-workflows-costs)). *(Amended 2026-10-15, [#669](https://github.com/theagenticage/hercule/issues/669).)* So are the Discussions and Wiki routes: each list, the open Discussion and the open wiki page ([What Discussions and Wiki cost](#what-discussions-and-wiki-cost)).
    - App code imports each icon from its own module, never from the icons folder's list of every icon, and eslint enforces it. The bundler places a module by what imports it, so an icon only a lazy screen draws then loads with that screen.
@@ -4341,6 +4342,17 @@ The sidebar was drawn from a specimen with 3,000 and with 200 threads, every sec
 
 - The latin-ext file is larger than Bricolage's because Inter covers more of the range; it is not preloaded, so a page in Latin script never fetches it.
 - A cold packaged launch and `firstScreen.report` need a Mac and are still to measure.
+
+**JetBrains Mono as the code font,** measured 2026-10-27 on Linux with `pnpm --filter @hercule/desktop build`, for [#860](https://github.com/theagenticage/hercule/issues/860). JetBrains Mono 5.3.0 replaces Recursive, as Fontsource's latin and latin-ext variable files, which load the first time code shows, as Recursive did.
+
+| Measure | Budget | Before, Recursive | After, JetBrains Mono |
+|---|---|---|---|
+| Processes | none added | - | none added |
+| Memory, work while idle, and per streamed token | none added | - | none added |
+| The code font files | - | 304,988 bytes | 55,600 bytes (40,404 + 15,196) |
+| All woff2 files in `out/renderer` | - | 531,144 bytes | 281,756 bytes |
+| All CSS in `out/renderer` | - | 199,783 bytes | 199,967 bytes |
+| The preload | - | the Inter latin file only | unchanged |
 
 ## Slices
 
