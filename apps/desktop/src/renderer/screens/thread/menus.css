@@ -173,13 +173,14 @@ button.line:hover {
   margin-left: 6px;
 }
 /* Not in the book, whose rows have one line. A row with more to say, in a
-   Draft Thread's menus, says it on a line under the name, smaller and
-   fainter, as the book's glance page does under a Request. */
+   Draft Thread's menus, says it on a line under the name, smaller, as the
+   book's glance page does under a Request. The line explains the choice,
+   such as what an access mode allows, so it is muted, not faint. */
 .line .grow small {
   display: block;
   margin-top: 2px;
   overflow: hidden;
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-11);
   text-overflow: ellipsis;
 }

@@ -154,7 +154,7 @@ function QueuedInputRow({
             Cancel
           </button>
         ) : null}
-        {showsReason ? <span className="queued-note faint">{input.reason}</span> : null}
+        {showsReason ? <span className="queued-note">{input.reason}</span> : null}
         {failureMessage === null ? null : (
           <span className="queued-note queued-error" role="alert">
             {failureMessage}

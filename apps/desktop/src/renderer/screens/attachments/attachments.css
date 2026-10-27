@@ -188,7 +188,7 @@
 /* ---------- The images in a tool's result ---------- */
 /* Under a step, at its left edge: as many 210px tiles as fit in a row, the
    same tiles as the bubble's. An image the controller could not keep is a
-   quiet line under them, in the faint ink and not in the failure colour:
+   quiet line under them, in the muted ink and not in the failure colour:
    the tool still ran, and the reason is information, not an alarm. */
 .tool-result-images {
   display: flex;
@@ -202,7 +202,7 @@
 }
 .tool-result-image-unavailable {
   margin: 0;
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-11);
   line-height: 1.5;
 }

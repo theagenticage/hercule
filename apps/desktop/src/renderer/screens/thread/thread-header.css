@@ -11,10 +11,13 @@
   color: var(--muted);
   font-weight: var(--w-medium);
 }
+/* The slash is a separator, not a title, so it is faint and 12px: the size
+   faint text is limited to. */
 .pill-crumb::after {
   content: "/";
   margin-left: 2px;
   color: var(--faint);
+  font-size: var(--t-12);
   font-weight: var(--w-regular);
 }
 
@@ -125,6 +128,7 @@
   flex: none;
   margin: 0 8px 0 6px;
   color: var(--faint);
+  font-size: var(--t-12);
   font-weight: var(--w-regular);
 }
 /* The gap between the project's tile and its name is the name's own indent,
