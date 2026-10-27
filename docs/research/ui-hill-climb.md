@@ -6,6 +6,8 @@ The idea comes from T3 Code's "council" (Theo, 2026-10-25): LLM reviewers score 
 
 Section 8 records the decisions Rogier made on 2026-10-26. The work is tracked in [#852](https://github.com/theagenticage/hercule/issues/852), with one sub-issue per ticket of rounds 0 to 2.
 
+> **Changed by Rogier on 2026-10-27.** The climb runs only on the scripted metrics (§4.1), with Rogier's own visual check as the judge of looks. The council (§4.2), the nightly workflow (§5 item 4) and the re-colouring of the dark themes (§6 round 2, items 1 to 3) are dropped: the dark themes keep their colours and only their contrast rises to the targets. Blue Train stays. See §8.
+
 ## 1. Scope
 
 - **The desktop app** (`apps/desktop`, the Crew Bureau design system). It is where the UI work happens: 290 desktop commits in the last 14 days, against 2 in the web app's CSS and `packages/ui`.
@@ -375,6 +377,15 @@ Decided by Rogier on 2026-10-26 and 2026-10-27, after the comparison sheets and 
   - "Blue Train" is added as a sixth theme (#875). All five current themes stay.
 - **The climb is driven by the metrics** (2026-10-27). It takes the largest gap between a metric and its target first. The council's fixes come only when every metric meets its target, or for what no metric measures. The council's pairwise vote is a veto against "looks worse", never the reason for a change.
 - **Nightly scope:** the council scores Whitehaven and Orient Express every night, and all five themes once a week.
+
+Decided by Rogier on 2026-10-27, after the first round of PRs:
+
+- **Objective metrics only.** The climb runs on the scripted metrics of §4.1. They exist because they improve visibility for people. If a metric leads to a strange or bad result, the metric is reviewed.
+- **No council.** An LLM does not judge what Rogier finds better looking. The absolute rounds and the pairwise votes are dropped, and Rogier's visual check is the judge of looks.
+- **No nightly workflow** (#857 is closed).
+- **No re-colouring.** The dark themes keep their ground, surfaces, hue and chroma; only lines and text rise until the targets hold (#864, #865). Direction (c) is dropped.
+- **Blue Train stays,** as a new theme (#875).
+- **The merge gates:** CI (the ratchet and the goldens), an adversarial review of the code for correctness, and the Mac checks on atlas.
 
 ### Font licences
 
