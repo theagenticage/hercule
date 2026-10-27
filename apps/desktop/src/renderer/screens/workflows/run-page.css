@@ -74,7 +74,7 @@
 .run-inputs dd {
   margin: 0;
   overflow: hidden;
-  line-height: 18px;
+  line-height: var(--line-18);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

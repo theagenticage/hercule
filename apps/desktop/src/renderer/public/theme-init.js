@@ -1,4 +1,5 @@
-// Applies the Appearance to the document: the theme in use and the glass.
+// Applies the Appearance to the document: the theme in use, the glass and
+// the text size.
 // The page's own code never changes these attributes itself; it dispatches
 // an `appearancechange` event instead, so this file holds all of the work.
 //
@@ -13,6 +14,9 @@
 // - `data-solid-glass`: present when every glass surface is solid, either
 //   because the user turned on Reduce transparency or because the Glass level
 //   is 0.
+// - `data-text-size`: the step of the Text size setting, from 1 to 4. base.css
+//   turns it into the size of the text tokens, so a change of step costs one
+//   style recalculation and one layout of the page, and nothing else.
 //
 // The Appearance is read from main once, synchronously, before the first
 // paint, so a dark Mac never sees a light window first. After that, two
@@ -31,7 +35,9 @@
 // such as `offsetHeight`, would also force a layout pass.
 //
 // Only a change of theme snaps. Dragging the Glass slider sends many events,
-// so a change of glass alone sets only what changed and reads no style.
+// so a change of glass alone sets only what changed and reads no style. A
+// change of text size alone sets only the text size, and only when its step
+// changed.
 //
 // A file rather than an inline snippet, because the window's CSP allows no
 // inline script. The block keeps these names out of the page's global scope.
@@ -70,12 +76,21 @@
     );
   };
 
+  // Sets only a step that is not already set, so that an event for another
+  // part of the Appearance does not touch the attribute.
+  const applyTextSize = () => {
+    const step = String(appearance.textSize);
+    if (root.dataset.textSize !== step) root.dataset.textSize = step;
+  };
+
   applyTheme();
   applyGlass();
+  applyTextSize();
   dark.addEventListener("change", applyTheme);
   document.addEventListener("appearancechange", (event) => {
     appearance = event.detail;
     applyTheme();
     applyGlass();
+    applyTextSize();
   });
 }

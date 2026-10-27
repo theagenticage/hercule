@@ -12,20 +12,17 @@
  * scrolling pane, its band, its table rows and its column rows. The rules
  * this list adds are in `project-grouped-list.css`.
  *
- * The items are virtualized, each drawn at a fixed height with the space
- * above it as its top margin, and the next page is read when the last item
- * is mounted.
+ * The items are virtualized, each drawn at a height that follows the Text
+ * size with the space above it as its top margin, and the next page is read
+ * when the last item is mounted.
  */
-import { memo, useRef, type JSX, type ReactNode } from "react";
+import { memo, useCallback, useRef, type JSX, type ReactNode } from "react";
 import { readErrorMessage } from "@hercule/client-core";
 import type { ProjectGroupEntry, RepositoryRecord } from "@hercule/client-core/project-groups";
 import type { Project } from "@hercule/contract";
 import type { ListPaneWidth } from "../list-pane/list-with-open-pane";
-import {
-  COLUMN_ROW_HEIGHT,
-  COLUMN_ROW_LEADING,
-  GROUP_HEADING_HEIGHT,
-} from "../list-pane/list-row-sizes";
+import { useMeasuredAtTextSize } from "../../app/text-size";
+import { COLUMN_ROW_LEADING, readListHeights, type ListHeights } from "../list-pane/list-row-sizes";
 import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
 import { pickProjectTint, ProjectTile, type ProjectTint } from "../project-tile";
 import { VirtualList } from "../virtual-list";
@@ -53,18 +50,15 @@ export interface NextPageRead {
 /**
  * Where a row sits: what the list tells the screen's row to draw itself at.
  * The row carries `itemKey` as its React key and its `data-key`, and draws
- * itself `height` pixels tall, `marginTop` pixels under the item above it.
+ * itself `marginTop` pixels under the item above it. Its height comes from its
+ * CSS, the same one the list places it by (`LIST_HEIGHT_PROPERTIES`).
  */
 export interface RowPlace {
   readonly itemKey: string;
   readonly marginTop: number;
-  readonly height: number;
   /** Whether the row is in the visible part of the list, which keeps its times current. */
   readonly onScreen: boolean;
 }
-
-/** The height of a repository's sub-heading, in CSS pixels, without the space above it. */
-const REPOSITORY_HEADING_HEIGHT = 22;
 
 /**
  * The height of the band above the rows, in CSS pixels: the floating
@@ -83,12 +77,14 @@ const HEAD_HEIGHT = { table: 88, column: 64, emptyTable: 56 } as const;
 export const findGroupedItemRow = (list: Element, itemId: string): HTMLElement | null =>
   list.querySelector<HTMLElement>(`[data-key^="item:"][data-key$=":${CSS.escape(itemId)}"]`);
 
-/** An entry with the place the list draws it at. */
+/** Which of the list's heights a row in the table has: the Discussions' one line, or the Wiki's title over a summary. */
+export type TableRowKind = Extract<keyof ListHeights, "oneLineRow" | "twoLineRow">;
+
+/** An entry with the space the list draws above it. */
 interface PlacedEntry<Item extends RepositoryRecord> {
   readonly key: string;
   readonly entry: ProjectGroupEntry<Item>;
   readonly marginTop: number;
-  readonly height: number;
 }
 
 /**
@@ -123,23 +119,20 @@ const computeLeading = <Item extends RepositoryRecord>(
 
 /** Returns the height of `entry` without the space above it, in CSS pixels. */
 const computeEntryHeight = <Item extends RepositoryRecord>(
+  heights: ListHeights,
   width: ProjectGroupedListWidth,
   entry: ProjectGroupEntry<Item>,
-  tableRowHeight: number,
+  tableRow: TableRowKind,
 ): number => {
   switch (entry.kind) {
     case "project":
-      return GROUP_HEADING_HEIGHT;
+      return heights.groupHeading;
     case "repository":
-      return REPOSITORY_HEADING_HEIGHT;
+      return heights.repositoryHeading;
     case "item":
-      return width === "table" ? tableRowHeight : COLUMN_ROW_HEIGHT;
+      return width === "table" ? heights[tableRow] : heights.columnRow;
   }
 };
-
-/** Returns the height of a placed entry with the space above it, in CSS pixels. */
-const computePlacedHeight = <Item extends RepositoryRecord>(placed: PlacedEntry<Item>): number =>
-  placed.marginTop + placed.height;
 
 /**
  * Returns the key of the entry that takes focus when the focused entry,
@@ -174,12 +167,7 @@ const ProjectHeading = memo(function ProjectHeading({
   readonly name: string;
 }): JSX.Element {
   return (
-    <h2
-      className="group-h group-h--proj"
-      data-key={itemKey}
-      tabIndex={-1}
-      style={{ marginTop, height: GROUP_HEADING_HEIGHT }}
-    >
+    <h2 className="group-h group-h--proj" data-key={itemKey} tabIndex={-1} style={{ marginTop }}>
       <ProjectTile tint={tint} name={name} />
     </h2>
   );
@@ -196,12 +184,7 @@ const RepositoryHeading = memo(function RepositoryHeading({
   readonly name: string;
 }): JSX.Element {
   return (
-    <h3
-      className="group-h group-h--repo"
-      data-key={itemKey}
-      tabIndex={-1}
-      style={{ marginTop, height: REPOSITORY_HEADING_HEIGHT }}
-    >
+    <h3 className="group-h group-h--repo" data-key={itemKey} tabIndex={-1} style={{ marginTop }}>
       <span>{name}</span>
     </h3>
   );
@@ -215,7 +198,7 @@ interface ProjectGroupedListProps<Item extends RepositoryRecord> {
   readonly entries: readonly ProjectGroupEntry<Item>[];
   readonly projects: readonly Project[];
   readonly tableHeads: ReactNode;
-  readonly tableRowHeight: number;
+  readonly tableRow: TableRowKind;
   readonly renderRow: (item: Item, place: RowPlace) => JSX.Element;
   readonly empty: { readonly title: string; readonly text: string };
   readonly nextPage: NextPageRead;
@@ -231,7 +214,7 @@ interface ProjectGroupedListProps<Item extends RepositoryRecord> {
  * - `projects` is the project list in its own order, which gives each
  *   project its tint.
  * - `tableHeads` is drawn in the band over the table.
- * - `tableRowHeight` is the height of a row in the table, in CSS pixels.
+ * - `tableRow` is the height of a row in the table: `oneLineRow` or `twoLineRow`.
  * - `renderRow` returns the element that draws an item at its `RowPlace`.
  * - `empty` is the title and the line under it that the list shows when it
  *   has no entries.
@@ -260,7 +243,7 @@ function ProjectGroupedListAtWidth<Item extends RepositoryRecord>({
   entries,
   projects,
   tableHeads,
-  tableRowHeight,
+  tableRow,
   renderRow,
   empty,
   nextPage,
@@ -273,12 +256,19 @@ function ProjectGroupedListAtWidth<Item extends RepositoryRecord>({
   const showsScrollbar = useShowsClassicScrollbar(scrollRef) && width === "table";
   const isTable = width === "table";
   const isEmpty = entries.length === 0;
+  const heights = useMeasuredAtTextSize(readListHeights);
   const placed: readonly PlacedEntry<Item>[] = entries.map((entry, index) => ({
     key: entry.key,
     entry,
     marginTop: computeLeading(width, entries, index),
-    height: computeEntryHeight(width, entry, tableRowHeight),
   }));
+  // A new function whenever the heights change, which is how the list knows
+  // to place its items again and keep the top one at the top.
+  const computePlacedHeight = useCallback(
+    (placedEntry: PlacedEntry<Item>): number =>
+      placedEntry.marginTop + computeEntryHeight(heights, width, placedEntry.entry, tableRow),
+    [heights, width, tableRow],
+  );
   const { hasNextPage, isFetching, isFetchingNextPage, isFetchNextPageError, fetchNextPage } =
     nextPage;
   // The next page waits for any read of the list to end, not only a read of
@@ -290,7 +280,7 @@ function ProjectGroupedListAtWidth<Item extends RepositoryRecord>({
     hasNextPage && !isFetching && !isFetchNextPageError ? () => void fetchNextPage() : undefined;
 
   const renderEntry = (
-    { key, entry, marginTop, height }: PlacedEntry<Item>,
+    { key, entry, marginTop }: PlacedEntry<Item>,
     _index: number,
     onScreen: boolean,
   ): JSX.Element => {
@@ -310,7 +300,7 @@ function ProjectGroupedListAtWidth<Item extends RepositoryRecord>({
           <RepositoryHeading key={key} itemKey={key} marginTop={marginTop} name={entry.name} />
         );
       case "item":
-        return renderRow(entry.item, { itemKey: key, marginTop, height, onScreen });
+        return renderRow(entry.item, { itemKey: key, marginTop, onScreen });
     }
   };
 

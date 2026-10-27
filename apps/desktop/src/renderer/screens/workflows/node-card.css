@@ -86,7 +86,7 @@
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
   font-size: var(--t-11);
-  line-height: 18px;
+  line-height: var(--line-18);
 }
 .node-facts dd.is-fail {
   color: var(--fail-ink);

@@ -286,7 +286,12 @@
 
 /* ---------- Segmented controls ---------- */
 /* A row of buttons that picks one of a few values, such as a model option's
-   choices. The pressed button is the value in use. */
+   choices. The pressed button is the value in use.
+   Not in the book: a segment may also be a label around a native radio
+   button, such as the Text size steps. The radio gives the group its
+   semantics and its arrow keys, and is drawn invisibly over its label, so the
+   label looks exactly like a button. The checked radio is the value in use,
+   and a keyboard focus ring goes round its segment. */
 .seg {
   display: inline-flex;
   padding: 2px;
@@ -295,7 +300,8 @@
   background: var(--sunken);
   box-shadow: inset 0 0 0 1px var(--line-soft);
 }
-.seg button {
+.seg button,
+.seg label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -309,8 +315,22 @@
     background var(--dur-2) var(--ease-out),
     color var(--dur-2);
 }
+.seg label {
+  position: relative;
+}
+.seg label > input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+}
+.seg label:has(> input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
 .seg button[aria-pressed="true"],
-.seg button[aria-selected="true"] {
+.seg button[aria-selected="true"],
+.seg label:has(> input:checked) {
   background: var(--raised);
   color: var(--ink);
   box-shadow:

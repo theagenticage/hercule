@@ -11,6 +11,7 @@ import type { WikiPageSummary, WikiRevision } from "@hercule/contract";
 import {
   buildErrorBody,
   buildSidebarHandlers,
+  changeTextSize,
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_THREAD_IDS,
@@ -432,6 +433,22 @@ describe("a page far down a long list", () => {
 });
 
 describe("the wiki list's widths", () => {
+  it("places its headings and its two-line rows again when the Text size changes their heights", async () => {
+    await openWiki();
+    const items = getList().querySelector<HTMLElement>(".virtual-list-items")!;
+    const before = Number.parseFloat(items.style.height);
+
+    // At the largest step a heading and a sub-heading are each 2px taller, and a two-line row 4px.
+    await changeTextSize(4, {
+      "--list-height-group-heading": "26px",
+      "--list-height-repository-heading": "24px",
+      "--list-height-two-line-row": "56px",
+    });
+
+    // Two projects, two repositories with a sub-heading, and three pages.
+    expect(Number.parseFloat(items.style.height) - before).toBe(2 * 2 + 2 * 2 + 3 * 4);
+  });
+
   it("draws the table while no page is open, with its column heads", async () => {
     await openWiki();
 

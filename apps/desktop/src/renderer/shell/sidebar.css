@@ -105,7 +105,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 24px;
+  height: var(--side-height-header);
   margin: 0;
   padding: 0 4px 0 10px;
   color: var(--faint);
@@ -210,9 +210,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 18px;
+  height: var(--line-18);
   font-size: var(--t-13);
-  line-height: 18px;
+  line-height: var(--line-18);
 }
 .side-line .side-name {
   flex: 1;
@@ -247,11 +247,11 @@
 .side-detail {
   display: flex;
   align-items: center;
-  height: 16px;
+  height: var(--line-16);
   min-width: 0;
   color: var(--faint);
   font-size: var(--t-12);
-  line-height: 16px;
+  line-height: var(--line-16);
   white-space: nowrap;
 }
 /* The glyph's slot keeps its width when the provider is unknown, so every
@@ -305,7 +305,7 @@
   justify-content: center;
   gap: 4px;
   min-width: 48px;
-  height: 18px;
+  height: var(--line-18);
   padding: 0 4px;
   border-radius: var(--r-sm);
   color: var(--muted);
@@ -387,17 +387,22 @@
   stroke-width: 2;
 }
 /* Line 2 of a group row leaves room at its end for the dots button and the
-   chevron beside it, which sit over it (`--dots` is set inline). */
+   chevron beside it, which sit over it (`--dots` is set inline). The button's
+   "+n" is drawn in the 11px text, whose characters are 7px wide at the
+   default Text size, so each of its characters (`--dots-characters`, set
+   inline) takes 7/11 of the step more, and the button and the room grow
+   together. */
 .side-thread.has-crew .side-detail {
-  padding-right: calc(var(--dots) + 4px);
+  padding-right: calc(var(--dots) + 4px + var(--dots-characters) * 0.64 * var(--text-size-step));
 }
 /* The dots are one button, drawn over line 2's end, in line 2's vertical
-   centre: 27px from the row's top and 22px tall. It is at least as wide as
-   it is tall, so a group with no counted session, and so no dot, still has a
-   target to unfold it by. */
+   centre: 27px from the row's top and 22px tall. Each px of the Text size's
+   step moves that centre 1.5px down, and the top follows it, rounded to a
+   whole pixel. The button is at least as wide as it is tall, so a group with
+   no counted session, and so no dot, still has a target to unfold it by. */
 .side-dots {
   position: absolute;
-  top: 27px;
+  top: round(calc(27px + 1.5 * var(--text-size-step)), 1px);
   right: 4px;
   display: flex;
   align-items: center;
@@ -641,20 +646,20 @@
   }
 }
 .side-row--wait {
-  min-height: 38px;
+  min-height: var(--side-height-waiting-row);
   padding-left: 6px;
 }
 /* "From runs", the book's label over the runs' sessions in Waiting on you,
    indented to the rows' text: the row's 6px padding, the 24px face and the
    9px gap. The 6px above it is part of the item's leading, set inline. */
 .side-sub {
-  height: 16px;
+  height: var(--side-height-runs-label);
   margin: 0;
   padding-left: 39px;
   color: var(--faint);
   font-size: var(--t-11);
   font-weight: var(--w-regular);
-  line-height: 16px;
+  line-height: var(--line-16);
 }
 /* A run's session's row draws its state mark in the face's 24px slot, so
    every row's text starts at the same place. */
@@ -667,7 +672,7 @@
 }
 .side-row--more,
 .side-row--fewer {
-  min-height: 28px;
+  min-height: var(--side-height-more-row);
   color: var(--muted);
   font-size: var(--t-12);
 }

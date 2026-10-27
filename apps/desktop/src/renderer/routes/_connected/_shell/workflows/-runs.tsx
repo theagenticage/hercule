@@ -18,13 +18,16 @@ import { buildRunRows } from "@hercule/client-core/workflow-detail-rows";
 import type { Trigger, Workflow, WorkflowDefinition } from "@hercule/contract";
 import { NEVER, useClockValue } from "../../../../app/age-clock";
 import { workflowDayRunsQuery, workflowRunsQuery } from "../../../../app/queries";
+import { useMeasuredAtTextSize } from "../../../../app/text-size";
 import { useWaitingRunSessions } from "../../../../app/waiting";
 import {
   TimelineAxis,
   TimelineLanes,
   type RunsView,
 } from "../../../../screens/workflows/run-timeline-board";
-import { RUN_ROW_HEIGHT, RunListRow } from "../../../../screens/workflows/workflow-detail";
+import { readListHeights } from "../../../../screens/list-pane/list-row-sizes";
+import { useKeepTopItem } from "../../../../screens/use-keep-top-item";
+import { RunListRow } from "../../../../screens/workflows/workflow-detail";
 
 /** How many rows past the visible ones the Runs list keeps mounted on each side. */
 const OVERSCAN = 8;
@@ -245,15 +248,20 @@ export function RunList({
     };
   }, [pane, hasRows]);
 
+  // A run's row is a one-line row of the table, whose height follows the Text size.
+  const heights = useMeasuredAtTextSize(readListHeights);
+  const estimateSize = useCallback(() => heights.oneLineRow, [heights]);
+
   // eslint-disable-next-line react-hooks/incompatible-library -- The virtualizer returns an object that changes inside while its identity stays the same, which the React Compiler cannot memoize, so the compiler leaves this component alone.
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => pane,
-    estimateSize: () => RUN_ROW_HEIGHT,
+    estimateSize,
     getItemKey: (index) => rows[index]!.id,
     overscan: OVERSCAN,
     scrollMargin: listTop,
   });
+  useKeepTopItem(virtualizer, estimateSize);
   const virtualItems = virtualizer.getVirtualItems();
   const visible = virtualizer.range;
 

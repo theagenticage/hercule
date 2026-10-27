@@ -63,12 +63,24 @@
   --font-mono: "Recursive", ui-monospace, "SF Mono", monospace;
   --mono-axes: "MONO" 1, "CASL" 0.5, "CRSV" 0;
 
-  /* Type: modest titles; size hierarchy comes from numerals, color and position. */
-  --t-11: 11px;
-  --t-12: 12px;
-  --t-13: 13px;   /* UI body */
-  --t-14: 14px;   /* transcript prose */
-  --t-16: 16px;
+  /* Type: modest titles; size hierarchy comes from numerals, color and position.
+     The five text sizes follow the Text size setting of Settings > Appearance.
+     base.css sets --text-size-step from the root element's data-text-size: -1px,
+     0, 1px or 2px for the four steps. The titles below do not follow it, so
+     they stay modest at every step. Each token is still one length wherever
+     var(--t-13) is used, also inside another calc(). */
+  --text-size-step: 0px;
+  --t-11: calc(11px + var(--text-size-step));
+  --t-12: calc(12px + var(--text-size-step));
+  --t-13: calc(13px + var(--text-size-step));   /* UI body */
+  --t-14: calc(14px + var(--text-size-step));   /* transcript prose */
+  --t-16: calc(16px + var(--text-size-step));
+  /* The fixed line heights of the lines that hold text, which grow by the
+     same step as the text and so never clip it. The name is the height at
+     the default step. A row of such lines adds the step once per line, in
+     row-heights.css. */
+  --line-16: calc(16px + var(--text-size-step));
+  --line-18: calc(18px + var(--text-size-step));
   --t-18: 18px;   /* page titles */
   --t-20: 20px;   /* the largest title on desktop */
   --t-num: 26px;  /* headline numerals, set in the Deco face */

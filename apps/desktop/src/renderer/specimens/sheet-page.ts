@@ -7,7 +7,9 @@ import {
   DAY_THEMES,
   DEFAULT_APPEARANCE,
   NIGHT_THEMES,
+  TEXT_SIZE_STEPS,
   THEMES,
+  type TextSizeStep,
   type Theme,
 } from "../../ipc/appearance";
 import type { Appearance } from "../../ipc/contract";
@@ -61,20 +63,36 @@ function readSheetBroken(): BrokenVariant | undefined {
 }
 
 /**
+ * Returns the step of the Text size the page's `?text-size=` names, or
+ * `undefined` when the URL names none. Fails on anything but 1, 2, 3 or 4.
+ */
+function readSheetTextSize(): TextSizeStep | undefined {
+  const value = new URLSearchParams(location.search).get("text-size");
+  if (value === null) return undefined;
+  const step = TEXT_SIZE_STEPS.find((each) => String(each) === value);
+  if (step === undefined) {
+    throw new Error(`Unknown text size "${value}" in the URL. Use 1, 2, 3 or 4.`);
+  }
+  return step;
+}
+
+/**
  * Draws the page in the look its URL names: the theme of `?theme=`
- * (Whitehaven when the URL names none) and the Glass level of `?glass=`, a
- * whole number from 0 to 100 (the 40 of base.css when the URL names none).
- * Fails on a theme that is not one of the five, or a glass that is not a
- * whole number from 0 to 100.
+ * (Whitehaven when the URL names none), the Glass level of `?glass=`, a
+ * whole number from 0 to 100 (the 40 of base.css when the URL names none),
+ * and the Text size step of `?text-size=`, from 1 to 4 (the default 2, which
+ * changes nothing, when the URL names none). Fails on a theme that is not one
+ * of the five, a glass that is not a whole number from 0 to 100, or a text
+ * size that is not 1, 2, 3 or 4.
  *
  * `?broken=` (`max-contrast`, `cramped` or `noisy`) also overrides tokens, for
  * the UI council's calibration images; without it the page is untouched. Fails
  * on any other value.
  *
- * Glass is set the way `public/theme-init.js` sets it in the app, and both
- * parts are needed: `--glass-percent` sets the glass level of every surface,
- * and `data-solid-glass` turns the backdrop filter off, which a level of 0
- * alone would still draw.
+ * Glass and Text size are set the way `public/theme-init.js` sets them in the
+ * app. Both parts of glass are needed: `--glass-percent` sets the glass level
+ * of every surface, and `data-solid-glass` turns the backdrop filter off,
+ * which a level of 0 alone would still draw.
  */
 export function applySheetAppearance(): void {
   const root = document.documentElement;
@@ -85,6 +103,8 @@ export function applySheetAppearance(): void {
     style.textContent = buildBrokenVariantCss(broken, { day: DAY_THEMES, night: NIGHT_THEMES });
     document.head.append(style);
   }
+  const textSize = readSheetTextSize();
+  if (textSize !== undefined) root.dataset.textSize = String(textSize);
   const glassPercent = readSheetGlass();
   if (glassPercent === undefined) return;
   root.style.setProperty("--glass-percent", String(glassPercent));
@@ -93,20 +113,23 @@ export function applySheetAppearance(): void {
 
 /**
  * Returns the Appearance a Mac would hold for the page the URL describes, so
- * that Settings > Appearance draws the page's own theme and glass. It is the
- * default Appearance with the Glass level of `?glass=`, and the page's theme
+ * that Settings > Appearance draws the page's own theme, glass and text size.
+ * It is the default Appearance with the Glass level of `?glass=`, the Text
+ * size step of `?text-size=`, and the page's theme
  * set as the theme Follow the system would use: the day theme for a light
  * theme, the night theme for a dark one. Fails like `applySheetAppearance`.
  */
 export function readSheetAppearance(): Appearance {
   const theme = readSheetTheme();
   const glassPercent = readSheetGlass() ?? DEFAULT_APPEARANCE.glassPercent;
+  const textSize = readSheetTextSize() ?? DEFAULT_APPEARANCE.textSize;
   const dayTheme = DAY_THEMES.find((each) => each === theme);
   const nightTheme = NIGHT_THEMES.find((each) => each === theme);
   return {
     ...DEFAULT_APPEARANCE,
     theme,
     glassPercent,
+    textSize,
     dayTheme: dayTheme ?? DEFAULT_APPEARANCE.dayTheme,
     nightTheme: nightTheme ?? DEFAULT_APPEARANCE.nightTheme,
   };

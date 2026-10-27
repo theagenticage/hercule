@@ -24,6 +24,9 @@ import {
   type EventDaySection,
   type PluginIdentity,
 } from "@hercule/client-core";
+import { useMeasuredAtTextSize } from "../../app/text-size";
+import { useItemKeyOfSizes, useKeepTopItem } from "../use-keep-top-item";
+import { readIntakeListHeights, ROW_GAP, type IntakeListHeights } from "./list-heights";
 import { SourceMark } from "./source-mark";
 
 /** One drawn line of the list: a day's heading or an event's row. */
@@ -33,12 +36,14 @@ type ListItem =
 
 /**
  * Returns the height of a line, in pixels: a heading is 40px, and a row is
- * 52px with the 2px gap under it, which is 54px in all. The list never
- * measures a row, because a row's two lines never wrap. Drawn rows take their
- * own height; the estimate only sizes the spacers that stand in for undrawn
- * rows.
+ * 52px with the 2px gap under it, which is 54px in all. Those are the heights
+ * of the default Text size; `heights` has them at the Text size in use. The
+ * list never measures a row, because a row's two lines never wrap. Drawn rows
+ * take their own height; the estimate only sizes the spacers that stand in
+ * for undrawn rows.
  */
-const estimateItemHeight = (item: ListItem): number => (item.kind === "section" ? 40 : 54);
+const estimateItemHeight = (heights: IntakeListHeights, item: ListItem): number =>
+  item.kind === "section" ? heights.section : heights.signalRow + ROW_GAP;
 
 /** How many lines past each edge of the visible part stay drawn, so a fast scroll shows no gap. */
 const OVERSCAN = 8;
@@ -120,8 +125,13 @@ export const EverythingList = memo(function EverythingList({
     },
     [selectedIndex],
   );
-  const getItemKey = useCallback((index: number) => items[index]!.key, [items]);
-  const estimateSize = useCallback((index: number) => estimateItemHeight(items[index]!), [items]);
+  const heights = useMeasuredAtTextSize(readIntakeListHeights);
+  const readItemKey = useCallback((index: number) => items[index]!.key, [items]);
+  const getItemKey = useItemKeyOfSizes(readItemKey, heights);
+  const estimateSize = useCallback(
+    (index: number) => estimateItemHeight(heights, items[index]!),
+    [heights, items],
+  );
 
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -131,6 +141,9 @@ export const EverythingList = memo(function EverythingList({
     rangeExtractor,
     overscan: OVERSCAN,
   });
+
+  // The heights themselves change with the Text size, with the same items.
+  useKeepTopItem(virtualizer, heights);
 
   useEffect(() => {
     if (selectedIndex < 0) return;

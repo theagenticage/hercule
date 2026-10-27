@@ -8,21 +8,17 @@
  * - the column, beside the open workflow: the search field in that band,
  *   then each group's heading and its two-line rows.
  *
- * The items are virtualized, each drawn at a fixed height.
+ * The items are virtualized, each drawn at a height that follows the Text size.
  */
-import { useRef, type JSX, type ReactNode } from "react";
+import { useCallback, useRef, type JSX, type ReactNode } from "react";
 import {
   pickWorkflowFocusFallback,
   type WorkflowListItem,
 } from "@hercule/client-core/workflow-rows";
 import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
+import { useMeasuredAtTextSize } from "../../app/text-size";
 import { VirtualList } from "../virtual-list";
-import {
-  COLUMN_ROW_HEIGHT,
-  COLUMN_ROW_LEADING,
-  GROUP_HEADING_HEIGHT,
-  ONE_LINE_ROW_HEIGHT,
-} from "../list-pane/list-row-sizes";
+import { COLUMN_ROW_LEADING, readListHeights, type ListHeights } from "../list-pane/list-row-sizes";
 import { WorkflowColumnRow, WorkflowGroupHeading, WorkflowTableRow } from "./workflow-list-rows";
 import "./workflow-list.css";
 
@@ -51,16 +47,24 @@ const computeTableHeadingLeading = (index: number): number => (index === 0 ? 14 
 const computeColumnHeadingLeading = (index: number): number => (index === 0 ? 8 : 16);
 
 /** Returns the height of an item in the table with the space above it, in CSS pixels. */
-const computeTableItemHeight = (item: WorkflowListItem, index: number): number =>
+const computeTableItemHeight = (
+  heights: ListHeights,
+  item: WorkflowListItem,
+  index: number,
+): number =>
   item.kind === "group-header"
-    ? computeTableHeadingLeading(index) + GROUP_HEADING_HEIGHT
-    : ONE_LINE_ROW_HEIGHT;
+    ? computeTableHeadingLeading(index) + heights.groupHeading
+    : heights.oneLineRow;
 
 /** Returns the height of an item in the column with the space above it, in CSS pixels. */
-const computeColumnItemHeight = (item: WorkflowListItem, index: number): number =>
+const computeColumnItemHeight = (
+  heights: ListHeights,
+  item: WorkflowListItem,
+  index: number,
+): number =>
   item.kind === "group-header"
-    ? computeColumnHeadingLeading(index) + GROUP_HEADING_HEIGHT
-    : COLUMN_ROW_LEADING + COLUMN_ROW_HEIGHT;
+    ? computeColumnHeadingLeading(index) + heights.groupHeading
+    : COLUMN_ROW_LEADING + heights.columnRow;
 
 /** Returns the element that draws `item` in the table, with its times shown in `timezone`. */
 const renderTableItem = (
@@ -145,7 +149,8 @@ const renderColumnItem = (
  * first draws, or `undefined` to start at the top.
  *
  * The caller mounts the list afresh when `width` changes, because every
- * item's height changes with it.
+ * item's height changes with it. The heights are read again when the Text size
+ * changes.
  */
 export function WorkflowList({
   width,
@@ -168,13 +173,21 @@ export function WorkflowList({
   // at the pane's right edge, so the header there does not move.
   const showsScrollbar = useShowsClassicScrollbar(scrollRef) && width === "table";
   const isTable = width === "table";
+  const heights = useMeasuredAtTextSize(readListHeights);
+  const computeItemHeight = useCallback(
+    (item: WorkflowListItem, index: number): number =>
+      isTable
+        ? computeTableItemHeight(heights, item, index)
+        : computeColumnItemHeight(heights, item, index),
+    [isTable, heights],
+  );
   return (
     <VirtualList
       scrollRef={scrollRef}
       className={`workflow-list workflow-list--${width}${showsScrollbar ? " has-scrollbar" : ""}`}
       aria-label="Workflows"
       items={items}
-      computeItemHeight={isTable ? computeTableItemHeight : computeColumnItemHeight}
+      computeItemHeight={computeItemHeight}
       renderItem={(item, index, onScreen) =>
         isTable
           ? renderTableItem(item, index, onScreen, timezone)

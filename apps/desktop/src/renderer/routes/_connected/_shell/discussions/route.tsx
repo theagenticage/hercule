@@ -17,7 +17,6 @@ import {
   useRestoreRowFocus,
   useToggleListPane,
 } from "../../../../screens/list-pane/list-with-open-pane";
-import { ONE_LINE_ROW_HEIGHT } from "../../../../screens/list-pane/list-row-sizes";
 import {
   findGroupedItemRow,
   ProjectGroupedList,
@@ -119,7 +118,7 @@ function DiscussionsLayout(): JSX.Element {
           entries={entries}
           projects={projects}
           tableHeads={<DiscussionTableHeads />}
-          tableRowHeight={ONE_LINE_ROW_HEIGHT}
+          tableRow="oneLineRow"
           renderRow={(discussion, place) => {
             const Row = width === "table" ? DiscussionTableRow : DiscussionColumnRow;
             return (
@@ -134,7 +133,6 @@ function DiscussionsLayout(): JSX.Element {
                 lastPostAt={discussion.lastPostAt}
                 timezone={timezone}
                 marginTop={place.marginTop}
-                height={place.height}
                 onScreen={place.onScreen}
               />
             );

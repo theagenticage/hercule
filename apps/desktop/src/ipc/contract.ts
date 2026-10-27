@@ -30,7 +30,7 @@
 import { Schema } from "effect";
 import type * as ClientCore from "@hercule/client-core";
 import { IDENTITY_PORT, IDENTITY_PORT_COUNT } from "@hercule/contract";
-import { DAY_THEMES, NIGHT_THEMES, THEMES } from "./appearance";
+import { DAY_THEMES, NIGHT_THEMES, TEXT_SIZE_STEPS, THEMES } from "./appearance";
 import { isHttpUrl } from "./http-url";
 
 /**
@@ -331,7 +331,7 @@ export const Appearance = Schema.Struct({
   glassPercent: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
   reduceTransparency: Schema.Boolean,
   density: Schema.Literals(["comfortable", "compact"]),
-  textSize: Schema.Literals([1, 2, 3, 4]),
+  textSize: Schema.Literals(TEXT_SIZE_STEPS),
   openOn: Schema.Literals(["lastScreen", "office"]),
   reduceMotion: Schema.Boolean,
   marks: Schema.Boolean,

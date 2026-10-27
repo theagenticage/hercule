@@ -4306,6 +4306,24 @@ Requests, for the events that read a Done page (a Done page is one `signal.query
 | The first screen's JavaScript, gzipped | a guide of 250 kB | 460.4 kB, unchanged |
 | Main's startup file, minified | 160 kB | 155.8 kB of 160 kB, unchanged |
 
+**Text size,** measured 2026-10-27 on Linux with Playwright's Chromium and a production React build (`NODE_ENV=production`), `pnpm build:desktop`'s bundle check, and Chrome DevTools Protocol counters, for [#862](https://github.com/theagenticage/hercule/issues/862). Before is the tree with the setting and the text tokens (part A) and with rows of fixed heights; After is the tree whose rows and lists follow the text. The change adds no process, no timer, no polling and no subscription that runs while idle: one `MutationObserver` on the root element's `data-text-size` exists while a list or the Office is mounted, and runs only when the attribute changes. It adds no work per streamed token. A change of the Text size sets one attribute, and each virtual list reads its row heights from the custom properties of `row-heights.css` once, in one computed-style read, and places its rows again.
+
+The sidebar was drawn from a specimen with 3,000 and with 200 threads, every section expanded. A change is the time from setting the attribute to the second animation frame after it, the median of 20 changes alternating between the largest step and the default. "Busy" is the renderer's script, layout and style time per change, from the DevTools counters. The machine's load average was 5, so each figure moves by a few milliseconds between runs: the After figures below are the range of three runs.
+
+| Measure | Before | After |
+|---|---|---|
+| 3,000 threads, scrolled to the middle: change, busy, layouts, style passes | 13.1 to 14.4 ms, 4.2 to 4.9 ms, 1, 2 | 17.9 to 25.6 ms, 16.4 to 21.0 ms, 3, 4 |
+| 3,000 threads, at the top | 13.2 ms, 3.4 ms, 1, 2 | 14.4 ms, 5.4 ms, 2, 3 |
+| 200 threads, scrolled to the middle | 13.7 to 14.5 ms, 4.1 ms, 1, 2 | 14.0 to 17.9 ms, 9.6 to 13.2 ms, 3, 4 |
+| 200 threads, at the top | 14.7 ms, 3.6 ms, 1, 2 | 14.3 ms, 4.4 ms, 2, 3 |
+| A long thread (`thread.html?state=long`), at the bottom | 14.9 ms, 11.4 ms, 4, 5 | 14.0 ms, 9.2 ms, 4.5, 5.5 |
+| The first screen's JavaScript and CSS, gzipped | 462.2 kB | 463.6 kB (+1.4 kB) |
+| Every JavaScript and CSS file in `out/renderer`, gzipped with `gzip -9` | 1,035,378 bytes | 1,037,983 bytes (+2,605 bytes, 794 of them CSS) |
+
+- **Before places no row again,** so its text grows inside rows that keep their height, and a scrolled list shows the same rows. After costs one more render, plus one more layout and style pass because the rows' heights are read from the computed style. A list scrolled away from the top costs another render and layout, because the scroll position is in pixels and is put back so that the same row stays at the top (`use-keep-top-item.ts`); the rows that mount for that position are mounted twice, once at the old position in the new heights and once at the right one. At the top that correction does nothing. The 200-thread and the 3,000-thread lists stay inside one frame of the main thread in the quiet runs; the 3,000-thread list scrolled to the middle is over it in the busy runs.
+- **The development build reads far higher** (53 ms and 37 ms of script at 3,000 threads in one run), because React's development build does the same renders much slower. The figures above are the production build's.
+- **Not measured:** the Performance panel's recording of a change in the packaged app on a Mac, which the [budget](#budgets) names for a change of the Text size. It is still to be recorded once on a Mac, with a Performance-panel recording of one change in the packaged app. Memory was not measured as a difference: the heap reading after a forced collection was the same, 76.6 MB, with and without the change, at the tool's resolution. The Office's tags and labels are measured again once per change.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.

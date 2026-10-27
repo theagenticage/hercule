@@ -23,6 +23,14 @@ export const NIGHT_THEMES = [
 ] as const satisfies ReadonlyArray<Theme>;
 export type NightTheme = (typeof NIGHT_THEMES)[number];
 
+/**
+ * The four steps of the Text size, smallest first. Step 2 is the default,
+ * the text tokens as they are; each step moves the five text tokens by one
+ * pixel (spec 17 §Settings, Appearance).
+ */
+export const TEXT_SIZE_STEPS = [1, 2, 3, 4] as const;
+export type TextSizeStep = (typeof TEXT_SIZE_STEPS)[number];
+
 /** The part of the Appearance that decides the theme in use. */
 type ThemeChoice = Pick<Appearance, "theme" | "followSystem" | "dayTheme" | "nightTheme">;
 

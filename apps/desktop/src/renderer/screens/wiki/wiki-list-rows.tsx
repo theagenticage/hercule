@@ -3,11 +3,12 @@
  * with the table's column heads (spec 19 section 8.2). The project and
  * repository headings are the grouped list's (`ProjectGroupedList`).
  *
- * Each row is a link to the page that draws itself at the height and the
- * space above it the list gives it (`RowPlace`), and carries `data-key`, by
- * which the list keeps the focused row mounted. The rows are memoized and take
- * only strings, numbers and booleans, so when a push builds the pages again,
- * only the rows whose values changed draw again.
+ * Each row is a link to the page that draws itself the space above it the
+ * list gives it (`RowPlace`) under the item above, at the height its CSS gives
+ * it, and carries `data-key`, by which the list keeps the focused row
+ * mounted. The rows are memoized and take only strings, numbers and booleans,
+ * so when a push builds the pages again, only the rows whose values changed
+ * draw again.
  */
 import { memo, useId, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
@@ -52,7 +53,6 @@ interface WikiRowProps {
   readonly timezone: string;
   /** Where the list puts the row, as `RowPlace` gives it. */
   readonly marginTop: number;
-  readonly height: number;
   /** Whether the row is in the visible part of the list, which keeps its time current. */
   readonly onScreen: boolean;
 }
@@ -70,7 +70,6 @@ export const WikiTableRow = memo(function WikiTableRow({
   updatedAt,
   timezone,
   marginTop,
-  height,
   onScreen,
 }: WikiRowProps): JSX.Element {
   const summaryId = useId();
@@ -82,7 +81,7 @@ export const WikiTableRow = memo(function WikiTableRow({
       className="table-row"
       activeProps={SELECTED_LINK_PROPS}
       data-key={itemKey}
-      style={{ marginTop, height }}
+      style={{ marginTop }}
       aria-label={title}
       aria-describedby={summaryId}
     >
@@ -116,7 +115,6 @@ export const WikiColumnRow = memo(function WikiColumnRow({
   updatedAt,
   timezone,
   marginTop,
-  height,
   onScreen,
 }: WikiRowProps): JSX.Element {
   const summaryId = useId();
@@ -128,7 +126,7 @@ export const WikiColumnRow = memo(function WikiColumnRow({
       className="column-row"
       activeProps={SELECTED_LINK_PROPS}
       data-key={itemKey}
-      style={{ marginTop, height }}
+      style={{ marginTop }}
       aria-label={title}
       aria-describedby={summaryId}
     >

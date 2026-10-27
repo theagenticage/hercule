@@ -133,6 +133,29 @@
   field-sizing: content;
 }
 
+/* The Text size steps. Each "Aa" is drawn in the size its step gives body
+   text (12, 13, 14 and 15px, for a body of 13px), and these four sizes stay
+   as they are at every step: they show what a step does, so they must not
+   move with it. */
+.set-row > .sizes {
+  flex: none;
+}
+.sizes label {
+  min-width: 40px;
+}
+.sizes label:nth-child(1) {
+  font-size: 12px;
+}
+.sizes label:nth-child(2) {
+  font-size: 13px;
+}
+.sizes label:nth-child(3) {
+  font-size: 14px;
+}
+.sizes label:nth-child(4) {
+  font-size: 15px;
+}
+
 /* A slice of a session under a header pill and the composer, so the slider
    shows what it does. */
 .glass-demo {

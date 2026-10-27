@@ -12,6 +12,7 @@ import {
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
+  changeTextSize,
   renderApp,
   setVisibility,
   SIDEBAR_FIXTURE,
@@ -453,6 +454,21 @@ describe("the workflow list's filters and search", () => {
 });
 
 describe("the workflow list's widths", () => {
+  it("places its headings and rows again when the Text size changes their heights", async () => {
+    await openWorkflows();
+    const items = getList().querySelector<HTMLElement>(".virtual-list-items")!;
+    const before = Number.parseFloat(items.style.height);
+
+    // At the largest step a heading and a row are each 2px taller, as the stylesheet computes them.
+    await changeTextSize(4, {
+      "--list-height-group-heading": "26px",
+      "--list-height-one-line-row": "42px",
+    });
+
+    // Four group headings and five rows.
+    expect(Number.parseFloat(items.style.height) - before).toBe(4 * 2 + 5 * 2);
+  });
+
   it("draws the table while no workflow is open, with the filters, the search and the column heads", async () => {
     await openWorkflows();
 

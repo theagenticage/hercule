@@ -12,6 +12,10 @@
 .wiki-list.workflow-list--table :is(.table-heads, .table-row) {
   grid-template-columns: minmax(0, 1fr) minmax(0, 200px) 72px;
 }
+/* A page's row has two lines, a title over a summary. */
+.wiki-list.workflow-list--table .table-row {
+  height: var(--list-height-two-line-row);
+}
 .table-two {
   display: flex;
   flex-direction: column;
@@ -74,7 +78,7 @@
   color: var(--faint);
   font-size: var(--t-12);
   font-variant-numeric: tabular-nums;
-  line-height: 18px;
+  line-height: var(--line-18);
 }
 .rev > svg {
   margin-top: 1px;
@@ -92,12 +96,12 @@
 .rev-who {
   font-size: var(--t-13);
   font-weight: var(--w-medium);
-  line-height: 18px;
+  line-height: var(--line-18);
 }
 .rev-when {
   color: var(--faint);
   font-size: var(--t-12);
-  line-height: 16px;
+  line-height: var(--line-16);
 }
 .history-more {
   margin: 8px 8px 0;

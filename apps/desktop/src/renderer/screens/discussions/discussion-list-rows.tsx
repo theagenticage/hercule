@@ -4,11 +4,12 @@
  * project and repository headings are the grouped list's
  * (`ProjectGroupedList`).
  *
- * Each row is a link to the Discussion that draws itself at the height and
- * the space above it the list gives it (`RowPlace`), and carries `data-key`,
- * by which the list keeps the focused row mounted. The rows are memoized and
- * take only strings, numbers and booleans, so when a push builds the Discussions again,
- * only the rows whose values changed draw again.
+ * Each row is a link to the Discussion that draws itself the space above it
+ * the list gives it (`RowPlace`) under the item above, at the height its CSS
+ * gives it, and carries `data-key`, by which the list keeps the focused row
+ * mounted. The rows are memoized and take only strings, numbers and booleans,
+ * so when a push builds the Discussions again, only the rows whose values
+ * changed draw again.
  */
 import { memo, type JSX } from "react";
 import { Link } from "@tanstack/react-router";
@@ -53,7 +54,6 @@ interface DiscussionRowProps {
   readonly timezone: string;
   /** Where the list puts the row, as `RowPlace` gives it. */
   readonly marginTop: number;
-  readonly height: number;
   /** Whether the row is in the visible part of the list, which keeps its time current. */
   readonly onScreen: boolean;
 }
@@ -74,7 +74,6 @@ export const DiscussionTableRow = memo(function DiscussionTableRow({
   lastPostAt,
   timezone,
   marginTop,
-  height,
   onScreen,
 }: DiscussionRowProps): JSX.Element {
   const lastPost = useListTime(lastPostAt, timezone, "past", onScreen);
@@ -85,7 +84,7 @@ export const DiscussionTableRow = memo(function DiscussionTableRow({
       className="table-row"
       activeProps={SELECTED_LINK_PROPS}
       data-key={itemKey}
-      style={{ marginTop, height }}
+      style={{ marginTop }}
       aria-label={stripCodeMarks(subject)}
     >
       {kind === "overlap" ? <OverlapMark size={MARK_SIZE} /> : <span></span>}
@@ -116,7 +115,6 @@ export const DiscussionColumnRow = memo(function DiscussionColumnRow({
   lastPostAt,
   timezone,
   marginTop,
-  height,
   onScreen,
 }: DiscussionRowProps): JSX.Element {
   const lastPost = useListTime(lastPostAt, timezone, "past", onScreen);
@@ -127,7 +125,7 @@ export const DiscussionColumnRow = memo(function DiscussionColumnRow({
       className="column-row"
       activeProps={SELECTED_LINK_PROPS}
       data-key={itemKey}
-      style={{ marginTop, height }}
+      style={{ marginTop }}
       aria-label={stripCodeMarks(subject)}
     >
       <span className="column-mark">

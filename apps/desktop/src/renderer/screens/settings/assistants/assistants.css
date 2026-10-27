@@ -47,7 +47,7 @@
    so the rows below it keep sitting on whole pixels and the text in their
    fields is drawn where it is without the lead. */
 .set-sec > p.changes-lead {
-  line-height: 19px;
+  line-height: calc(19px + var(--text-size-step));
 }
 
 /* Assistants as tabs: pick a colleague by face. The book's tab also names

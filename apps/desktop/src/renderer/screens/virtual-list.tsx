@@ -4,8 +4,10 @@
  *
  * Only the items in and near the visible part of the list are mounted, so a
  * list of a thousand items costs about what a list of forty costs. The caller
- * gives each item a fixed height, so the list measures nothing: an item's
- * place follows from the items above it.
+ * gives each item a height, so the list measures nothing: an item's place
+ * follows from the items above it. The heights follow the Text size, so a
+ * caller gives a new `computeItemHeight` when the Text size changes, and the
+ * list places every item again.
  *
  * The mounted items are stacked in normal flow, and an empty spacer stands in
  * for each run of items that is not mounted. No item takes its position as a
@@ -31,6 +33,7 @@ import {
   type RefObject,
 } from "react";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
+import { useItemKeyOfSizes, useKeepTopItem } from "./use-keep-top-item";
 import "./virtual-list.css";
 
 /**
@@ -72,8 +75,9 @@ const focusItem = (list: HTMLElement | null, key: string): void => {
  *   carries it as `data-key`, which the list finds the focused item by.
  * - `computeItemHeight` returns an item's height in CSS pixels, the space
  *   above it included, which the item must draw exactly. The list places
- *   the items again only when `items` changes, so the function must keep its
- *   identity across renders and return the same height for the same `items`.
+ *   the items again when `items` changes and when `computeItemHeight`
+ *   changes, so the function must keep its identity across renders, and
+ *   return the same height for the same item until the heights change.
  * - `renderItem` returns the element that draws an item, told whether the
  *   item is in the visible part of the list, without the items mounted beyond
  *   it.
@@ -174,7 +178,8 @@ export function VirtualList<Item extends { readonly key: string }>({
   );
   // The virtualizer asks only for indexes below `count`, which is
   // `items.length`.
-  const getItemKey = useCallback((index: number) => items[index]!.key, [items]);
+  const readItemKey = useCallback((index: number) => items[index]!.key, [items]);
+  const getItemKey = useItemKeyOfSizes(readItemKey, computeItemHeight);
   const estimateSize = useCallback(
     (index: number) => computeItemHeight(items[index]!, index),
     [items, computeItemHeight],
@@ -192,6 +197,9 @@ export function VirtualList<Item extends { readonly key: string }>({
     scrollMargin: headHeight,
     initialOffset,
   });
+
+  // The heights themselves change with the Text size, with the same items.
+  useKeepTopItem(virtualizer, computeItemHeight);
 
   // The virtualizer starts from `initialOffset`; this moves the element to
   // match, before the first paint.
