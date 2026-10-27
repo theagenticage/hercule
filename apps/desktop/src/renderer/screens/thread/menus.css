@@ -173,13 +173,14 @@ button.line:hover {
   margin-left: 6px;
 }
 /* Not in the book, whose rows have one line. A row with more to say, in a
-   Draft Thread's menus, says it on a line under the name, smaller and
-   fainter, as the book's glance page does under a Request. */
+   Draft Thread's menus, says it on a line under the name, smaller, as the
+   book's glance page does under a Request. The line explains the choice,
+   such as what an access mode allows, so it is muted, not faint. */
 .line .grow small {
   display: block;
   margin-top: 2px;
   overflow: hidden;
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-11);
   text-overflow: ellipsis;
 }
@@ -193,6 +194,15 @@ button.line:hover {
   color: var(--faint);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+/* In a row that cannot be picked, the note says why ("not logged in"), so it
+   is content, not metadata. */
+.line--dimmed .line-note {
+  color: var(--muted);
+}
+/* The model filter's prompt tells the user what to type. */
+.menu-filter::placeholder {
+  color: var(--muted);
 }
 .machine-state[data-state="online"] {
   color: var(--live);

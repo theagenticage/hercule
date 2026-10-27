@@ -236,7 +236,7 @@
 .dock-question-note {
   margin-top: 4px;
   padding: 0 4px;
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-12);
 }
 /* Not in the book, which draws no secret question. The warning that its
@@ -282,7 +282,7 @@
   overflow-wrap: anywhere;
 }
 .dock-permission-operation {
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-12);
 }
 .dock-permission code {

@@ -11,12 +11,13 @@
   padding-right: 4px;
 }
 
-/* Quiet like the book's other faint text: no pill behind it, no pulse, no
-   spinner. The status element sets the type, not the word inside it, so the
-   line it takes has the same height whether the word is there or not. The
-   word fades in once, when it is added. */
+/* Quiet: no pill behind it, no pulse, no spinner. The word says that the
+   transcript may not be current, so it is muted, not faint. The status
+   element sets the type, not the word inside it, so the line it takes has
+   the same height whether the word is there or not. The word fades in once,
+   when it is added. */
 .sync-status {
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-12);
   white-space: nowrap;
 }

@@ -1,7 +1,7 @@
 /* The line shown where the transcript will be while a thread opens
-   (opening.tsx). The book has no loading state, so it is drawn as quietly as
-   the book's quietest text, the "Worked for" divider: --faint, in a small
-   size, centred in the main pane as the not-found headline is. */
+   (opening.tsx). The book has no loading state, so it is drawn quietly: the
+   muted ink, in a small size, centred in the main pane as the not-found
+   headline is. It is the only text of the pane, so it is muted, not faint. */
 .thread-opening {
   flex: 1;
   min-height: 0;
@@ -10,6 +10,6 @@
   align-items: center;
   margin: 0;
   padding: 0 24px 64px;
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-13);
 }

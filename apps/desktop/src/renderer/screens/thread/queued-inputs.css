@@ -78,9 +78,11 @@
   box-shadow: none;
 }
 /* Not in the book. A failed delivery's reason, or a failed Steer or Cancel,
-   takes a line of its own under the row, lined up with the input's text. */
+   takes a line of its own under the row, lined up with the input's text. The
+   reason is a sentence that explains the row, so it is muted, not faint. */
 .queued-note {
   grid-column: text / -1;
+  color: var(--muted);
 }
 .queued-error {
   color: var(--fail-ink);
