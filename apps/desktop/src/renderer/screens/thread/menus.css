@@ -195,6 +195,15 @@ button.line:hover {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+/* In a row that cannot be picked, the note says why ("not logged in"), so it
+   is content, not metadata. */
+.line--dimmed .line-note {
+  color: var(--muted);
+}
+/* The model filter's prompt tells the user what to type. */
+.menu-filter::placeholder {
+  color: var(--muted);
+}
 .machine-state[data-state="online"] {
   color: var(--live);
 }
