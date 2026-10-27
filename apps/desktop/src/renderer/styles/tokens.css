@@ -346,8 +346,8 @@
 [data-theme="dark"] {
   color-scheme: dark;
   --bg: oklch(0.195 0.012 50);
-  --surface: oklch(0.235 0.013 50);
-  --raised: oklch(0.275 0.014 52);
+  --surface: oklch(0.226 0.013 50);
+  --raised: oklch(0.262 0.014 52);
   --sunken: oklch(0.172 0.011 50);
   --ink: oklch(0.94 0.012 85);
   --muted: oklch(0.79 0.016 75);
