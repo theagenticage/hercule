@@ -19,16 +19,16 @@
      the rule of a work stretch, a quote's rail, a text field. A theme keeps them
      visible there, because they carry the reading. --divider draws the dividers of the chrome:
      the edge of a pane, a rule between rows or sections, the rim of a card in a settings page.
-     A chrome divider stays quiet and lets the fill separate the panels, so a theme that needs
-     bolder content lines (Orient Express) sets --divider apart from --line-soft; the other
-     themes set it equal to --line-soft.
+     A chrome divider stays quiet and lets the fill separate the panels, so the dark themes, which
+     need bolder content lines, set --divider apart from --line-soft; the light themes set it
+     equal to --line-soft.
    - --rim draws the rim of the chrome's controls and floating panels: buttons, the header's
-     pills, menus and popovers, the queued inputs (through --glass-rim and --btn-rim). Every
-     theme sets it equal to --line except Orient Express, where it is quiet.
+     pills, menus and popovers, the queued inputs (through --glass-rim and --btn-rim). The light
+     themes set it equal to --line; the dark themes set it apart, quiet.
    - The composer is the main input, so it has the clearest edge on the page: --composer-line,
-     and its fill is --composer-fill. Every theme sets them equal to --line and --raised except
-     Orient Express, where the edge is lighter than --line and the fill one step lighter than
-     --raised, so the edge reaches 3:1 (WCAG 1.4.11). Each theme sets both, so a theme nested
+     and its fill is --composer-fill. The light themes set them equal to --line and
+     --raised; the dark themes make the edge lighter than --line and the fill one step lighter
+     than --raised, so the edge reaches 3:1 (WCAG 1.4.11). Each theme sets both, so a theme nested
      in another never inherits the outer theme's values.
 
    Themes take their names from Poirot's world:
@@ -425,14 +425,14 @@
   --raised: oklch(0.265 0.019 170);
   --sunken: oklch(0.17 0.013 170);
   --ink: oklch(0.945 0.02 95);
-  --muted: oklch(0.78 0.022 110);
-  --faint: oklch(0.66 0.022 130);
-  --line: oklch(0.32 0.02 170);
-  --line-soft: oklch(0.27 0.017 170);
-  --divider: oklch(0.27 0.017 170);
-  --rim: oklch(0.32 0.02 170);
-  --composer-fill: var(--raised);
-  --composer-line: var(--line);
+  --muted: oklch(0.805 0.022 110);
+  --faint: oklch(0.72 0.022 130);
+  --line: oklch(0.48 0.02 170);
+  --line-soft: oklch(0.395 0.017 170);
+  --divider: oklch(0.34 0.017 170);
+  --rim: oklch(0.36 0.02 170);
+  --composer-fill: oklch(0.31 0.019 170);
+  --composer-line: oklch(0.56 0.02 170);
 
   --char-l: 0.77;
   --char-c: 0.12;
@@ -496,14 +496,14 @@
   --raised: oklch(0.27 0.024 350);
   --sunken: oklch(0.175 0.018 350);
   --ink: oklch(0.95 0.012 60);
-  --muted: oklch(0.78 0.022 20);
-  --faint: oklch(0.67 0.024 10);
-  --line: oklch(0.33 0.024 350);
-  --line-soft: oklch(0.275 0.022 350);
-  --divider: oklch(0.275 0.022 350);
-  --rim: oklch(0.33 0.024 350);
-  --composer-fill: var(--raised);
-  --composer-line: var(--line);
+  --muted: oklch(0.805 0.022 20);
+  --faint: oklch(0.735 0.024 10);
+  --line: oklch(0.48 0.024 350);
+  --line-soft: oklch(0.395 0.022 350);
+  --divider: oklch(0.34 0.022 350);
+  --rim: oklch(0.36 0.024 350);
+  --composer-fill: oklch(0.31 0.024 350);
+  --composer-line: oklch(0.56 0.024 350);
 
   --char-l: 0.77;
   --char-c: 0.12;
