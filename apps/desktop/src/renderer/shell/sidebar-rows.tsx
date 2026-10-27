@@ -738,10 +738,11 @@ function GroupRowFrame({
  * of the group asks something (`item.row.ask`, see `AskText`), the question,
  * else where the lead works (`item.row.placeLabel`, see `DetailLine`).
  *
- * - While `item.receded` is true, the row recedes to 72% opacity, and comes
- *   back while the pointer is on it or focus is in it. A working group's row
- *   recedes, unless it holds the open session. The row's words say what it
- *   is doing; the dimming only lets the eye skip it.
+ * - While `item.receded` is true, the row's title is drawn in the muted ink
+ *   instead of the ink, and comes back while the pointer is on the row or
+ *   focus is in it. A working group's row recedes, unless it holds the open
+ *   session. The row's words say what it is doing; the quieter title only
+ *   lets the eye skip it.
  * - When `item.unsent` is true, a composer of the group holds work the user
  *   has not sent: the row is tinted and a pencil sits before the title.
  * - While the pointer is on the row, or the keyboard's focus is in it, a
@@ -1003,9 +1004,10 @@ export const DoneHeader = memo(function DoneHeader({
 /**
  * Renders a group whose Threads are all Done, on the Done shelf, in a thread
  * row's two lines: its title, then how long ago it was marked Done
- * (`item.doneAt`). The row is dimmed to 60%, and comes back while the pointer
- * is on it or focus is in it. While the pointer is on it or the keyboard's
- * focus is in it, a Reopen button shows in the status slot's place. Pressing
+ * (`item.doneAt`). The title is drawn in the muted ink, and comes back to the
+ * ink while the pointer is on the row or focus is in it. While the pointer is
+ * on it or the keyboard's focus is in it, a Reopen button shows in the status
+ * slot's place. Pressing
  * it calls `onReopen` with `item.row.threadIds`, every Thread of the group.
  *
  * - A group of one Thread is a Done thread's row: the second line starts with

@@ -101,14 +101,6 @@ const placeNodeCard = (card: HTMLElement, anchor: HTMLElement): void => {
 /** The states a card is ringed in: `.node-ring` in workflow-graph.css. */
 const RINGED_STATES: ReadonlySet<NodeRunState> = new Set(["waiting", "failed", "listening"]);
 
-/** The states a card stands back in, at half opacity: the run did not reach it, passed it by, or a trigger stayed quiet. */
-const DIMMED_STATES: ReadonlySet<NodeRunState> = new Set([
-  "unreached",
-  "quiet",
-  "cancelled",
-  "skipped",
-]);
-
 /** The class of each way a run travelled along an edge, as the Bureau book names them. */
 const TRAVEL_CLASSES: { readonly [Travel in EdgeOnRun["travel"]]: string } = {
   fired: "is-fired",
@@ -138,45 +130,19 @@ const decideEdgeTone = (onRun: EdgeOnRun | undefined): string => {
 const buildArrowId = (arrowId: string, tone: string): string =>
   tone === "" || tone === "is-not-taken" ? arrowId : `${arrowId}-${tone}`;
 
-/**
- * How a node's state changed while the run's page was open:
- *
- * - `brightened`: its card stood back at half opacity and no longer does;
- * - `dimmed`: the other way round;
- * - `changed`: any other change of state.
- */
-type NodeChange = "brightened" | "dimmed" | "changed";
-
-const NO_CHANGES: ReadonlyMap<string, NodeChange> = new Map();
+const NO_CHANGED_NODES: ReadonlySet<string> = new Set();
 
 /**
- * Returns how each node whose state differs between two overlays of the same
- * graph changed, by node id. A node that is in only one of them has not
- * changed.
+ * Returns the ids of the nodes whose state differs between two overlays of
+ * the same graph. A node that is in only one of them has not changed.
  */
-const listChangedNodes = (
-  before: RunOverlay,
-  after: RunOverlay,
-): ReadonlyMap<string, NodeChange> => {
-  const changes = new Map<string, NodeChange>();
+const listChangedNodes = (before: RunOverlay, after: RunOverlay): ReadonlySet<string> => {
+  const changed = new Set<string>();
   for (const [nodeId, { state }] of after.nodes) {
     const was = before.nodes.get(nodeId)?.state;
-    if (was === undefined || was === state) continue;
-    const wasDimmed = DIMMED_STATES.has(was);
-    const isDimmed = DIMMED_STATES.has(state);
-    changes.set(
-      nodeId,
-      wasDimmed && !isDimmed ? "brightened" : !wasDimmed && isDimmed ? "dimmed" : "changed",
-    );
+    if (was !== undefined && was !== state) changed.add(nodeId);
   }
-  return changes;
-};
-
-/** The class of a node's card that plays its change, or an empty string for none. */
-const CHANGE_CLASSES: { readonly [Change in NodeChange]: string } = {
-  brightened: " is-brightening",
-  dimmed: " is-dimming",
-  changed: "",
+  return changed;
 };
 
 /**
@@ -229,11 +195,12 @@ function EdgeLabel({
  * - A side where the pane cuts the graph off fades out over 48px.
  * - With an `overlay`, the graph draws a run on top: each card's mark on its
  *   top-right corner, a ring on a card that waits on the user, failed or
- *   listens, half opacity on a card the run did not reach or passed by,
+ *   listens, quieter ink on a card the run did not reach or passed by,
  *   "×2" after the id of a step the run came to twice, and the tone of
- *   each edge and of each stub to the end. A node whose state changes while the graph is open brightens or
- *   dims, and its ring and mark come in (spec 17 §Workflows, "Workflows'
- *   motion", items 4 and 5). A card's Open thread calls `onOpenSession`.
+ *   each edge and of each stub to the end. When a node's state changes while
+ *   the graph is open, its ring and mark come in (spec 17 §Workflows,
+ *   "Workflows' motion", items 4 and 5). A card's Open thread calls
+ *   `onOpenSession`.
  * - A click on a node opens its card under it, and moves the focus to the
  *   card, which is a dialog. A click on the same node, Escape, or a click
  *   anywhere else closes it. Escape returns focus to the node, and is not
@@ -269,14 +236,14 @@ export function WorkflowGraph({
   // the changes that are playing, so a second push soon after does not cut
   // their motion short.
   const [shownOverlay, setShownOverlay] = useState(overlay);
-  const [changes, setChanges] = useState(NO_CHANGES);
+  const [changedNodes, setChangedNodes] = useState(NO_CHANGED_NODES);
   if (overlay !== shownOverlay) {
     setShownOverlay(overlay);
     if (overlay === undefined || shownOverlay === undefined) {
-      setChanges(NO_CHANGES);
+      setChangedNodes(NO_CHANGED_NODES);
     } else {
       const next = listChangedNodes(shownOverlay, overlay);
-      if (next.size > 0) setChanges(next);
+      if (next.size > 0) setChangedNodes(next);
     }
   }
 
@@ -510,9 +477,7 @@ export function WorkflowGraph({
               const isNodeOpen = isOpen && openNodeId === node.id;
               const run = overlay?.nodes.get(node.id);
               const runMark = run === undefined ? undefined : findNodeRunMark(run.state);
-              const change = changes.get(node.id);
-              const changeClass = change === undefined ? "" : CHANGE_CLASSES[change];
-              const newClass = change === undefined ? "" : " is-new";
+              const newClass = changedNodes.has(node.id) ? " is-new" : "";
               // A run adds where it is at the node, in the words of the node's card.
               const statusText =
                 run === undefined ? undefined : describeNodeRunStatus(run.state, node.kind);
@@ -524,7 +489,7 @@ export function WorkflowGraph({
                     else nodeRefs.current.set(node.id, element);
                   }}
                   type="button"
-                  className={`node ${isStep ? "node--step" : "node--trigger"}${run === undefined ? "" : ` is-${run.state}`}${changeClass}${isNodeOpen ? " is-open" : ""}`}
+                  className={`node ${isStep ? "node--step" : "node--trigger"}${run === undefined ? "" : ` is-${run.state}`}${isNodeOpen ? " is-open" : ""}`}
                   style={{ left: point.x, top: point.y }}
                   aria-label={`${node.id}, ${node.detail}${statusText === undefined ? "" : `, ${statusText}`}`}
                   aria-haspopup="dialog"

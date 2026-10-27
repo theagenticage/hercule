@@ -411,7 +411,7 @@ describe("a run on the graph", () => {
     expect(isRinged("nightly")).toBe(false);
     expect(isRinged("open_pr")).toBe(false);
 
-    // The state's class picks the ring's colour, and half opacity for a card the run did not reach.
+    // The state's class picks the ring's colour, and the quieter ink of a card the run did not reach.
     expect(listRunClasses(findNode(container, "wait"))).toEqual(["is-unreached"]);
     expect(listRunClasses(findNode(container, "open_pr"))).toEqual(["is-pending"]);
   });
@@ -470,7 +470,7 @@ describe("a run on the graph", () => {
 
   it("plays no change on the run it opens with", () => {
     const { container } = renderRun(buildOverlay({ review: "waiting" }));
-    expect(container.querySelectorAll(".is-new, .is-brightening, .is-dimming")).toHaveLength(0);
+    expect(container.querySelectorAll(".is-new")).toHaveLength(0);
   });
 
   it("plays a node's change made while the graph is open, and only that node's", () => {
@@ -483,17 +483,10 @@ describe("a run on the graph", () => {
     expect(listRunClasses(review)).toEqual(["is-waiting"]);
     expectClasses(review.querySelector(".node-ring"), ["is-new"]);
     expectClasses(review.querySelector(".node-mark"), ["is-new"]);
-    expectClasses(findNode(container, "fix"), ["is-skipped", "is-dimming"]);
+    expect(listRunClasses(findNode(container, "fix"))).toEqual(["is-skipped"]);
     expectClasses(findNode(container, "nightly").querySelector(".node-mark"), [], ["is-new"]);
 
     drawAgain(buildOverlay({ nightly: "fired", review: "working", fix: "skipped" }, {}, {}));
-    expect(listRunClasses(findNode(container, "fix"))).toEqual(["is-skipped"]);
     expect(findNode(container, "review").querySelector(".node-ring")).toBeNull();
-  });
-
-  it("brightens a card the run reaches", () => {
-    const { container, drawAgain } = renderRun(buildOverlay({}));
-    drawAgain(buildOverlay({ review: "working" }));
-    expectClasses(findNode(container, "review"), ["is-working", "is-brightening"]);
   });
 });

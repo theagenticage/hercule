@@ -424,7 +424,7 @@ describe("the renderer's motion", () => {
   it("animates the workflows only on a change, each motion once, on transform and opacity", () => {
     // Spec 17, Workflows' motion: a changed mark pops in on --ease-spring, a
     // run joining a strip steps the older marks left 11px, the open pane
-    // settles in from 14px right, the graph's cards brighten, dim and ring,
+    // settles in from 14px right, the graph's rings and marks come in,
     // and the timeline's first eight bars arrive 30ms apart, each mark
     // popping --dur-2 after its line. Hover transitions are not pinned here.
     const isAnimation = (declaration: Declaration): boolean =>
@@ -453,14 +453,6 @@ describe("the renderer's motion", () => {
       },
     ]);
     expect(readAnimations("workflow-graph.css")).toEqual([
-      {
-        rule: `${NO_PREFERENCE} › .node.is-brightening`,
-        animation: "node-brighten var(--dur-3) var(--ease-out)",
-      },
-      {
-        rule: `${NO_PREFERENCE} › .node.is-dimming`,
-        animation: "node-dim var(--dur-3) var(--ease-out)",
-      },
       {
         rule: `${NO_PREFERENCE} › .node-ring.is-new`,
         animation: "node-ring-in var(--dur-3) var(--ease-out)",
