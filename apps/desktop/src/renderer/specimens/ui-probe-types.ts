@@ -76,6 +76,7 @@ export interface ThemeTokens {
   readonly surface: ProbeColour;
   readonly raised: ProbeColour;
   readonly line: ProbeColour;
+  readonly divider: ProbeColour;
   readonly ink: ProbeColour;
   readonly muted: ProbeColour;
   readonly faint: ProbeColour;

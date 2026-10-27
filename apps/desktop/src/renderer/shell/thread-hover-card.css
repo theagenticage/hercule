@@ -84,7 +84,7 @@
   flex-direction: column;
   margin: 4px -4px 0 -6px;
   padding-top: 6px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
 }
 .thread-hover-member {
   display: flex;
@@ -115,7 +115,7 @@
 .thread-hover-hint {
   margin: 0;
   padding-top: 8px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
   color: var(--muted);
   font-size: var(--t-11);
 }

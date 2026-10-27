@@ -16,7 +16,7 @@
   align-items: center;
   gap: 8px;
   padding: 12px 0 14px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
   color: var(--muted);
 }
 .schedule-sentence .field {

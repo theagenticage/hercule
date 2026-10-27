@@ -137,7 +137,7 @@
   align-items: center;
   gap: 6px 12px;
   padding: 10px 0 8px;
-  box-shadow: inset 0 1px 0 var(--line-soft);
+  box-shadow: inset 0 1px 0 var(--divider);
 }
 /* Tools that pick how the open tab shows, such as List | Timeline, sit at
    the bar's right end. */

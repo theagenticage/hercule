@@ -39,7 +39,7 @@
   background: color-mix(in oklab, var(--raised) 90%, transparent);
   box-shadow:
     var(--shadow-1),
-    inset 0 0 0 1px var(--line-soft);
+    inset 0 0 0 1px var(--divider);
   color: var(--ink);
   font-size: var(--t-11);
   line-height: 1.35;

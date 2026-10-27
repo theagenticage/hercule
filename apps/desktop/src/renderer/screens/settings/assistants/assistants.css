@@ -59,7 +59,7 @@
   align-items: center;
   gap: 4px;
   padding-bottom: 18px;
-  border-bottom: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--divider);
   /* Not in the book, which draws three tabs. Many tabs wrap onto a second
      line rather than pushing the section wider than the window. */
   flex-wrap: wrap;
@@ -158,7 +158,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 1px 8px;
   padding: 7px 0;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
   color: inherit;
   font-size: var(--t-12);
   text-decoration: none;
@@ -185,7 +185,7 @@
 /* The book's `.topics-foot`. */
 .memory-topics-foot {
   padding-top: 8px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
   color: var(--faint);
   font-size: var(--t-12);
 }

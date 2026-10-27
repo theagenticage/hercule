@@ -189,7 +189,7 @@
 .subagents-error--foot {
   margin: 0;
   padding: 8px 18px 0;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
 }
 .subagents-foot {
   display: flex;
@@ -197,7 +197,7 @@
   gap: 8px;
   height: 40px;
   padding: 0 12px 0 18px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
   color: var(--faint);
   font-size: var(--t-12);
   font-variant-numeric: tabular-nums;

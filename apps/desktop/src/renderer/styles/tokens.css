@@ -15,6 +15,13 @@
      with the people in them.
    - Brass (--brass) is ornament only: the office's lamps and tubes, the book's rules. Never text,
      never a state.
+   - Lines come in three tokens. --line and --line-soft draw the edges of content: a code block,
+     the rule of a work stretch, a quote's rail, a text field, the composer. A theme keeps them
+     visible there, because they carry the reading. --divider draws the dividers of the chrome:
+     the edge of a pane, a rule between rows or sections, the rim of a card in a settings page.
+     A chrome divider stays quiet and lets the fill separate the panels, so a theme that needs
+     bolder content lines (Orient Express) sets --divider apart from --line-soft; the other
+     themes set it equal to --line-soft.
 
    Themes take their names from Poirot's world:
      Whitehaven      light, the flagship. Ivory and green-black lacquer, like his Art Deco flat.
@@ -198,6 +205,7 @@
   --faint: oklch(0.5 0.012 165);
   --line: oklch(0.87 0.007 120);
   --line-soft: oklch(0.91 0.006 110);
+  --divider: oklch(0.91 0.006 110);
 
   /* Characters: fill lightness/chroma, the rim shade, text-safe ink and a quiet tint. */
   --char-l: 0.78;
@@ -267,6 +275,7 @@
   --faint: oklch(0.49 0.03 60);
   --line: oklch(0.855 0.022 72);
   --line-soft: oklch(0.895 0.018 76);
+  --divider: oklch(0.895 0.018 76);
 
   --char-l: 0.765;
   --char-c: 0.13;
@@ -327,14 +336,15 @@
 [data-theme="dark"] {
   color-scheme: dark;
   --bg: oklch(0.195 0.012 50);
-  --surface: oklch(0.226 0.013 50);
-  --raised: oklch(0.262 0.014 52);
+  --surface: oklch(0.235 0.013 50);
+  --raised: oklch(0.275 0.014 52);
   --sunken: oklch(0.172 0.011 50);
   --ink: oklch(0.94 0.012 85);
   --muted: oklch(0.79 0.016 75);
   --faint: oklch(0.72 0.016 70);
-  --line: oklch(0.466 0.014 52);
+  --line: oklch(0.48 0.014 52);
   --line-soft: oklch(0.395 0.012 50);
+  --divider: oklch(0.34 0.014 52);
 
   --char-l: 0.76;
   --char-c: 0.12;
@@ -402,6 +412,7 @@
   --faint: oklch(0.66 0.022 130);
   --line: oklch(0.32 0.02 170);
   --line-soft: oklch(0.27 0.017 170);
+  --divider: oklch(0.27 0.017 170);
 
   --char-l: 0.77;
   --char-c: 0.12;
@@ -469,6 +480,7 @@
   --faint: oklch(0.67 0.024 10);
   --line: oklch(0.33 0.024 350);
   --line-soft: oklch(0.275 0.022 350);
+  --divider: oklch(0.275 0.022 350);
 
   --char-l: 0.77;
   --char-c: 0.12;

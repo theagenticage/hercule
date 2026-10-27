@@ -222,18 +222,22 @@ describe("summarizeProse", () => {
 });
 
 describe("summarizeTokens", () => {
-  it("measures the line against each surface and the lightness steps between surfaces", () => {
+  it("measures the line and the divider against each surface and the lightness steps between surfaces", () => {
     const values = summarizeTokens({
       bg: [244, 243, 240, 1],
       surface: [252, 252, 249, 1],
       raised: [255, 255, 255, 1],
       line: [216, 218, 213, 1],
+      divider: [222, 223, 219, 1],
       ink: BLACK,
       muted: BLACK,
       faint: BLACK,
     });
     expect(values["line.minLc"]).toBeGreaterThan(5);
     expect(values["line.minLc"]).toBeLessThan(20);
+    // The divider is the quieter of the two, over the same surfaces.
+    expect(values["divider.minLc"]).toBeGreaterThan(0);
+    expect(values["divider.minLc"]).toBeLessThan(values["line.minLc"] ?? 0);
     // The step from surface to raised is the smaller one.
     expect(values["surface.minStep"]).toBeGreaterThan(0);
     expect(values["surface.minStep"]).toBeLessThan(0.02);

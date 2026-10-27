@@ -26,7 +26,7 @@
 .axis {
   position: relative;
   height: 32px;
-  box-shadow: inset 0 -1px 0 var(--line-soft);
+  box-shadow: inset 0 -1px 0 var(--divider);
   color: var(--faint);
   font-size: var(--t-11);
   font-weight: var(--w-medium);
@@ -78,7 +78,7 @@
 .lanes {
   position: relative;
   height: calc(var(--tracks) * 24px + 16px);
-  box-shadow: inset 0 -1px 0 var(--line-soft);
+  box-shadow: inset 0 -1px 0 var(--divider);
 }
 /* The hour lines behind everything, and the now line in ink. */
 .hour-line,

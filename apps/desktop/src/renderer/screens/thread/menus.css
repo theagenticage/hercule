@@ -104,7 +104,7 @@
 }
 .pop-sec {
   padding: 6px 8px 8px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
 }
 /* Not in the book, whose popover always opens with its `.pop-h`. The model
    menu has no header, so its first section needs no rule above it. */
@@ -204,7 +204,7 @@ button.line:hover {
 .pop-foot {
   margin: 0;
   padding: 9px 14px 11px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
   color: var(--muted);
   font-size: var(--t-12);
 }

@@ -76,7 +76,7 @@
   content: "";
   position: absolute;
   inset: 0 8px auto;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
 }
 .set-row.intake-row.is-pointed {
   background: var(--selected);

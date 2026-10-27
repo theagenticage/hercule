@@ -24,7 +24,7 @@
 }
 .workspace-details-checkout {
   margin-top: 14px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
   padding-top: 14px;
 }
 .workspace-details-note {

@@ -720,7 +720,7 @@ button.side-row--fewer {
   max-height: 40%;
   margin: 0 -12px;
   padding: 8px 12px 12px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
 }
 .side-who-rows {
   display: flex;
@@ -750,7 +750,7 @@ button.side-row--fewer {
   flex: none;
   margin: 0 -12px;
   padding: 9px 16px 10px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
 }
 .side-sum {
   color: var(--faint);

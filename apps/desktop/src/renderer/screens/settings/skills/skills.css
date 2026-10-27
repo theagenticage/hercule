@@ -164,7 +164,7 @@
   align-items: center;
   gap: 10px;
   padding: 7px 14px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
   font-family: var(--font-mono);
   font-feature-settings: normal;
   font-variant-ligatures: none;
@@ -213,7 +213,7 @@
 .skill-patch {
   margin: 0;
   padding: 10px 0;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
   background: var(--sunken);
   font-family: var(--font-mono);
   font-feature-settings: normal;
@@ -252,7 +252,7 @@
 .skill-patch-more.is-alone {
   margin-top: 0;
   padding-top: 6px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
 }
 
 /* ---------- Update all ---------- */
@@ -286,7 +286,7 @@
   border-radius: var(--r-lg);
   background: var(--raised);
   box-shadow:
-    inset 0 0 0 1px var(--line-soft),
+    inset 0 0 0 1px var(--divider),
     var(--shadow-1);
 }
 .skill-md-body {
@@ -309,7 +309,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
 }
 .skill-file {
   min-height: 36px;
@@ -409,7 +409,7 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 10px 14px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
 }
 .skill-import-foot > .time {
   margin-right: auto;

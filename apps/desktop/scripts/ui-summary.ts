@@ -9,6 +9,7 @@
 import type {
   ClippingFacts,
   DisciplineFacts,
+  ProbeColour,
   ProbeTarget,
   ProseFacts,
   TextFragment,
@@ -222,19 +223,27 @@ export function summarizeProse(facts: ProseFacts): MetricValues {
 }
 
 /**
- * Returns the tokens' metrics of a theme: `line.minLc` is the lowest absolute
- * APCA Lc of the line colour drawn over bg, surface and raised, and
- * `surface.minStep` is the smaller of the lightness steps (OKLCH L) from bg to
- * surface and from surface to raised. Fails when a surface token is not
- * opaque, because a surface that shows what is behind it has no lightness.
+ * Returns the tokens' metrics of a theme:
+ * - `line.minLc` is the lowest absolute APCA Lc of the line colour (the edge
+ *   of content) drawn over bg, surface and raised;
+ * - `divider.minLc` is the same for the divider colour (the edge of chrome);
+ * - `surface.minStep` is the smaller of the lightness steps (OKLCH L) from bg
+ *   to surface and from surface to raised.
+ *
+ * Fails when a surface token is not opaque, because a surface that shows what
+ * is behind it has no lightness.
  */
 export function summarizeTokens(tokens: ThemeTokens): MetricValues {
-  const { bg, surface, raised, line } = tokens;
-  const lineContrasts = [bg, surface, raised].map((base) =>
-    Math.abs(computeApcaContrast(blendOver(line, base), base)),
-  );
+  const { bg, surface, raised, line, divider } = tokens;
+  const lowestContrastOverSurfaces = (colour: ProbeColour): number =>
+    Math.min(
+      ...[bg, surface, raised].map((base) =>
+        Math.abs(computeApcaContrast(blendOver(colour, base), base)),
+      ),
+    );
   return {
-    "line.minLc": Math.min(...lineContrasts),
+    "line.minLc": lowestContrastOverSurfaces(line),
+    "divider.minLc": lowestContrastOverSurfaces(divider),
     "surface.minStep": Math.min(
       computeOklchLightness(surface) - computeOklchLightness(bg),
       computeOklchLightness(raised) - computeOklchLightness(surface),
