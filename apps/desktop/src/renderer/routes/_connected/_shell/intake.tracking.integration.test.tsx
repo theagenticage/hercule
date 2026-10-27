@@ -23,6 +23,7 @@ import type { TrackingRead } from "@hercule/client-core";
 import {
   buildErrorBody,
   buildSidebarHandlers,
+  changeTextSize,
   CONTROLLER_URL,
   createFakeBridge,
   holdAnswer,
@@ -526,6 +527,31 @@ describe("opened Tracking", () => {
     expect(isOpen()).toBe(true);
     expect(getTray().textContent).toContain("Signals2");
     expect(getTray().textContent).toContain("Back to Intake");
+  });
+
+  it("estimates the lines it has not drawn by the heights of the Text size in use", async () => {
+    const tasks = [0, 1, 2].map((index) =>
+      buildTask(
+        `01a06d02-7b00-7000-8000-${String(index + 100).padStart(12, "0")}`,
+        `Task ${String(index)}`,
+        index,
+      ),
+    );
+    await openIntake("/intake?tracking=true", {
+      extra: storeTracking(tasks.map((task) => [task, "completed"] as const)),
+    });
+    const rows = getTray().querySelector<HTMLElement>(".tr-rows")!;
+    const before = Number.parseFloat(rows.style.minHeight);
+    const headings = getTray().querySelectorAll(".tr-sec").length;
+
+    // At the largest step a heading is 2px taller, and a row 4px.
+    await changeTextSize(4, {
+      "--intake-height-section": "42px",
+      "--tracking-height-row": "50px",
+    });
+
+    expect(headings).toBeGreaterThan(0);
+    expect(Number.parseFloat(rows.style.minHeight) - before).toBe(headings * 2 + 3 * 4);
   });
 
   it("draws a bounded number of rows for 200 Tracked Tasks, and the selected row wherever it is", async () => {

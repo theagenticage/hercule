@@ -6,6 +6,7 @@
  */
 import { useCallback, useMemo, type RefObject } from "react";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
+import { useItemKeyOfSizes, useKeepTopItem } from "../use-keep-top-item";
 
 /** How many lines past each edge of the visible part stay drawn, so a fast scroll shows no gap. */
 export const VIRTUAL_OVERSCAN = 8;
@@ -32,7 +33,9 @@ export interface VirtualLines<Item> {
 /**
  * Returns the lines to draw for `items`, which scroll inside `scrollRef`.
  * `estimateSize` gives the height of an item in pixels: the list never
- * measures a line, so the heights must be fixed by the lines' styles.
+ * measures a line, so the heights must be fixed by the lines' styles. The
+ * heights follow the Text size, so `estimateSize` keeps its identity across
+ * renders, and a new one makes the list place every line again.
  *
  * The item with the key `selectedKey` is always drawn, so it keeps its place
  * in the tab order while it is scrolled out of view, and so is the item with
@@ -68,7 +71,8 @@ export const useVirtualLines = <Item extends { readonly key: string }>(
     },
     [selectedIndex, focusedIndex],
   );
-  const getItemKey = useCallback((index: number) => items[index]!.key, [items]);
+  const readItemKey = useCallback((index: number) => items[index]!.key, [items]);
+  const getItemKey = useItemKeyOfSizes(readItemKey, estimateSize);
   const estimateIndexSize = useCallback(
     (index: number) => estimateSize(items[index]!),
     [items, estimateSize],
@@ -86,6 +90,9 @@ export const useVirtualLines = <Item extends { readonly key: string }>(
     // sheet's first render then draws its rows, which the motion that opens it needs to find.
     initialRect: { width: 0, height: window.innerHeight },
   });
+
+  // The heights themselves change with the Text size, with the same items.
+  useKeepTopItem(virtualizer, estimateSize);
 
   const scrollToSelected = useCallback((): void => {
     if (selectedIndex >= 0) virtualizer.scrollToIndex(selectedIndex, { align: "auto" });

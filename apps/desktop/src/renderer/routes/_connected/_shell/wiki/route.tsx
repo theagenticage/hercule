@@ -71,9 +71,6 @@ export const Route = createFileRoute("/_connected/_shell/wiki")({
 /** The open page's route, whose search holds `full`. */
 const OPEN_PAGE_ROUTE = "/_connected/_shell/wiki/$pageId";
 
-/** The height of a row in the table, in CSS pixels: two lines, a title over a summary. */
-const TABLE_ROW_HEIGHT = 52;
-
 /** The text the list shows when the Wiki holds no page. */
 const EMPTY_LIST = {
   title: "No wiki pages yet",
@@ -121,7 +118,7 @@ function WikiLayout(): JSX.Element {
           entries={entries}
           projects={projects}
           tableHeads={<WikiTableHeads />}
-          tableRowHeight={TABLE_ROW_HEIGHT}
+          tableRow="twoLineRow"
           renderRow={(page, place) => {
             const Row = width === "table" ? WikiTableRow : WikiColumnRow;
             return (
@@ -135,7 +132,6 @@ function WikiLayout(): JSX.Element {
                 updatedAt={page.updatedAt}
                 timezone={timezone}
                 marginTop={place.marginTop}
-                height={place.height}
                 onScreen={place.onScreen}
               />
             );

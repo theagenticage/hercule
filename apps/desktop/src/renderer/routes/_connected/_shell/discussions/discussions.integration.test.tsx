@@ -11,6 +11,7 @@ import type { DiscussionSummary, Post, Session, SharedFile } from "@hercule/cont
 import {
   buildErrorBody,
   buildSidebarHandlers,
+  changeTextSize,
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_THREAD_IDS,
@@ -375,6 +376,22 @@ describe("the Discussion list", () => {
 });
 
 describe("the Discussion list's widths", () => {
+  it("places its headings and its one-line rows again when the Text size changes their heights", async () => {
+    await openDiscussions();
+    const items = getList().querySelector<HTMLElement>(".virtual-list-items")!;
+    const before = Number.parseFloat(items.style.height);
+
+    // At the largest step a heading and a sub-heading are each 2px taller, and a one-line row 2px.
+    await changeTextSize(4, {
+      "--list-height-group-heading": "26px",
+      "--list-height-repository-heading": "24px",
+      "--list-height-one-line-row": "42px",
+    });
+
+    // Two projects, two repositories with a sub-heading, and three Discussions.
+    expect(Number.parseFloat(items.style.height) - before).toBe(2 * 2 + 2 * 2 + 3 * 2);
+  });
+
   it("draws the table while no Discussion is open, with its column heads", async () => {
     await openDiscussions();
 

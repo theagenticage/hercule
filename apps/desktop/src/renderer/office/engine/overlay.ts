@@ -49,6 +49,7 @@ import type { Colleague } from "../world/types";
 import { countColleaguesByRoom, isWaiting } from "./room-counts";
 import { isCameraMoving, isShown, readCameraView } from "./camera-rig";
 import { isColleagueHidden, registerOverlayHitTest, type OverlayHit } from "./picking";
+import { subscribeToTextSize } from "../../app/text-size";
 import { readColleagueStates, setOffice, type TagMode } from "../office-store";
 import "./overlay.css";
 
@@ -741,12 +742,17 @@ export function createOverlay({
     update();
   });
   resizeObserver.observe(container);
-  // The room labels use the display font; measure again once it has loaded.
-  void document.fonts.ready.then(() => {
+  // A tag's and a label's size is measured once, when its text changes. Two
+  // things change every size without changing a text, so each measures them
+  // all again: the display font that the room labels use once it has loaded,
+  // and the Text size, which the tags and labels follow.
+  const measureEverythingAgain = (): void => {
     for (const tag of tags) tag.dirty = true;
     for (const label of labels) label.dirty = true;
     update();
-  });
+  };
+  void document.fonts.ready.then(measureEverythingAgain);
+  const stopWatchingTextSize = subscribeToTextSize(measureEverythingAgain);
 
   return {
     update,
@@ -768,6 +774,7 @@ export function createOverlay({
       disposed = true;
       registerOverlayHitTest(rigs, null);
       resizeObserver.disconnect();
+      stopWatchingTextSize();
       container.removeEventListener("pointerdown", onPointerDown);
       container.removeEventListener("pointerup", onPointerUp);
       container.removeEventListener("pointermove", onPointerMove);

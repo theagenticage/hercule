@@ -135,6 +135,51 @@ describe("the name tags", () => {
   });
 });
 
+describe("the name tags and the Text size", () => {
+  afterEach(() => {
+    delete document.documentElement.dataset.textSize;
+  });
+
+  it("are measured again when the Text size changes, and not before", async () => {
+    const container = createContainer();
+    const camera = new PerspectiveCamera(45, WIDTH / HEIGHT, 0.1, 100);
+    camera.position.set(0, 5, 20);
+    camera.lookAt(0, 0, 0);
+    // The far colleague stands just behind the near one, so their tags overlap
+    // and the far tag sits one tag's height above the near one.
+    const overlay = createOverlay({
+      container,
+      viewport: container,
+      camera,
+      office: { rooms: [], homes: new Map() },
+      colleagues: WORLD.colleagues,
+      rigs: new Map([
+        ["near", buildRig(0, 0)],
+        ["far", buildRig(0.2, -0.5)],
+      ]),
+    });
+    // The overlay measures the tags again once the fonts have loaded; that is not what this test is about.
+    await document.fonts.ready;
+    overlay.update();
+    const readGap = (): number => {
+      const places = readTagPlaces(container);
+      return readY(places["near"]!) - readY(places["far"]!);
+    };
+    const gapBefore = readGap();
+
+    // Larger text makes every tag taller, but a tag is measured once, when its text changes.
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(36);
+    overlay.update();
+    expect(readGap()).toBe(gapBefore);
+
+    document.documentElement.dataset.textSize = "4";
+    await vi.waitFor(() => {
+      expect(readGap()).toBeGreaterThan(gapBefore);
+    });
+    overlay.dispose();
+  });
+});
+
 describe("the room labels", () => {
   it("take the pointer from a colleague they cover", () => {
     const container = createContainer();

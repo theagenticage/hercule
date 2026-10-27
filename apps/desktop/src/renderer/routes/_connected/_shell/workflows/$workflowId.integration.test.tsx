@@ -19,6 +19,7 @@ import { MAX_TIMELINE_DAYS_BACK } from "@hercule/client-core/timeline-limit";
 import {
   buildErrorBody,
   buildSidebarHandlers,
+  changeTextSize,
   CONTROLLER_URL,
   createFakeBridge,
   renderApp,
@@ -492,6 +493,21 @@ describe("opening another workflow from an open one", () => {
     await screen.findByRole("group", { name: "Runs, Today" });
     expect(countReads(calls, "/api/v1/agents")).toBe(agentReads + 1);
     expect(countReads(calls, "/api/v1/workflow-actions")).toBe(actionReads + 1);
+  });
+});
+
+describe("the Runs list", () => {
+  it("places its rows again when the Text size changes their height", async () => {
+    await openShip();
+    const runCount = (await readRows()).length;
+    const list = (await within(getPanel()).findAllByRole("listitem"))[0]!.parentElement!;
+    const before = Number.parseFloat(list.style.height);
+
+    // At the largest step a one-line row is 2px taller, as the stylesheet computes it.
+    await changeTextSize(4, { "--list-height-one-line-row": "42px" });
+
+    expect(runCount).toBeGreaterThan(0);
+    expect(Number.parseFloat(list.style.height) - before).toBe(runCount * 2);
   });
 });
 

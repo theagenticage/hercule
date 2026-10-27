@@ -4,7 +4,16 @@
  * carries its controls and its checkbox (spec 17 §Row controls and the bulk
  * bar).
  */
-import { memo, useEffect, useId, useMemo, useRef, type JSX, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  type JSX,
+  type ReactNode,
+} from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { DONE_ACTION_ID, type HandoffLeg, type Signal, type SignalView } from "@hercule/contract";
@@ -36,6 +45,8 @@ import { describeMoveTitle, SIGNAL_MOVE_GLYPHS } from "./move-glyphs";
 import { SNOOZE_ANCHOR } from "./snooze-menu";
 import { SignalMark } from "./source-mark";
 import { useRowMotion, type RowExitHandler } from "./use-row-motion";
+import { useMeasuredAtTextSize } from "../../app/text-size";
+import { readIntakeListHeights, ROW_GAP, type IntakeListHeights } from "./list-heights";
 import { useVirtualLines, VIRTUAL_OVERSCAN } from "./use-virtual-lines";
 
 /** What a press on a row's own controls asks for: its checkbox, or one of its moves. */
@@ -65,15 +76,20 @@ type ListItem =
 /**
  * Returns the height of a line, in pixels: a heading is 40px, and a row is
  * 52px with the 2px gap under it, except the last row of a section, which
- * has no gap. The list never measures a row. A row's two lines never wrap,
- * so these heights are close but not exact: the text's line boxes make a row
- * a fraction of a pixel taller, and the "Back" mark's icon adds 2px more.
- * Drawn rows take their own height, and the rows' box only sets a minimum
- * height, so the error reaches only the spacers that stand in for undrawn
- * rows, never the foot under the list.
+ * has no gap. The heights are those of the default Text size; `heights` has
+ * them at the Text size in use. The list never measures a row. A row's two
+ * lines never wrap, so these heights are close but not exact: the text's line
+ * boxes make a row a fraction of a pixel taller, and the "Back" mark's icon
+ * adds 2px more. Drawn rows take their own height, and the rows' box only
+ * sets a minimum height, so the error reaches only the spacers that stand in
+ * for undrawn rows, never the foot under the list.
  */
-const estimateItemHeight = (item: ListItem): number =>
-  item.kind === "section" ? 40 : item.lastInSection ? 52 : 54;
+const estimateItemHeight = (heights: IntakeListHeights, item: ListItem): number =>
+  item.kind === "section"
+    ? heights.section
+    : item.lastInSection
+      ? heights.signalRow
+      : heights.signalRow + ROW_GAP;
 
 /** Returns the sections' headings and rows as one list, in the order they are drawn. */
 const flattenSections = (sections: ReadonlyArray<IntakeSection>): ReadonlyArray<ListItem> =>
@@ -203,10 +219,15 @@ export const IntakeList = memo(function IntakeList({
   );
   const listedItems = useMemo(() => flattenSections(sections), [sections]);
   const items = useRowMotion(listedItems, scope, scrollRef, ghostsRef, { takeLeavingRow });
+  const heights = useMeasuredAtTextSize(readIntakeListHeights);
+  const estimateSize = useCallback(
+    (item: ListItem) => estimateItemHeight(heights, item),
+    [heights],
+  );
   const { lines, totalSize, lastDrawnIndex, selectedIndex, scrollToSelected } = useVirtualLines(
     items,
     scrollRef,
-    estimateItemHeight,
+    estimateSize,
     selectedId,
   );
 

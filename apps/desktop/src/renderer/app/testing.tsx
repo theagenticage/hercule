@@ -51,7 +51,7 @@ import {
   type TranscriptRow,
   type Workspace,
 } from "@hercule/contract";
-import { DEFAULT_APPEARANCE } from "../../ipc/appearance";
+import { DEFAULT_APPEARANCE, type TextSizeStep } from "../../ipc/appearance";
 import type { Bridge } from "../../ipc/bridge";
 import type {
   Appearance,
@@ -476,6 +476,37 @@ export const stubIntersectionObserver = (): ((element: Element, onScreen: boolea
 export const stubElementSize = (width: number, height: number): void => {
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(width);
   vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(height);
+};
+
+/**
+ * Changes the Text size the way a browser does, and waits until what watches
+ * it has run. jsdom computes no `calc()`, so it cannot turn the step into the
+ * row heights of styles/row-heights.css: `heights` names the custom
+ * properties the new step changes, each with the length a browser would
+ * compute for it, such as `{ "--side-height-thread-row": "56px" }`. They are
+ * set on the root element, then `data-text-size` is set to `step`. When the
+ * test ends, the properties and the attribute are put back as they were.
+ */
+export const changeTextSize = async (
+  step: TextSizeStep,
+  heights: Readonly<Record<string, string>>,
+): Promise<void> => {
+  const root = document.documentElement;
+  const before = {
+    step: root.dataset.textSize,
+    heights: Object.keys(heights).map((name) => [name, root.style.getPropertyValue(name)] as const),
+  };
+  onTestFinished(() => {
+    if (before.step === undefined) delete root.dataset.textSize;
+    else root.dataset.textSize = before.step;
+    for (const [name, value] of before.heights) root.style.setProperty(name, value);
+  });
+  await act(async () => {
+    for (const [name, value] of Object.entries(heights)) root.style.setProperty(name, value);
+    root.dataset.textSize = String(step);
+    // The observer that reports the change runs in a microtask.
+    await Promise.resolve();
+  });
 };
 
 /**

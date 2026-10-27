@@ -1,5 +1,6 @@
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { beforeEach, vi } from "vitest";
+import rowHeights from "./styles/row-heights.css?raw";
 
 /**
  * Creates an empty `localStorage` held in memory.
@@ -220,3 +221,26 @@ window.requestIdleCallback = (callback) =>
 window.cancelIdleCallback = (handle) => {
   window.clearTimeout(handle);
 };
+
+/**
+ * jsdom does not compute `calc()` or `var()`, and ignores `@property`, so the
+ * row heights of styles/row-heights.css (`--side-height-thread-row` and the
+ * others) would read as the unresolved text of their `calc()`. Before each
+ * test, this adds a style sheet that sets each one on the root element as a
+ * length, to the `initial-value` its `@property` rule registers, which is its
+ * height at the default Text size. It is a style sheet, not the root
+ * element's `style` attribute, which tests read and clear. It is added before
+ * each test because a test may empty the page's head. A test of a larger
+ * text size sets the properties itself, as a browser would compute them, and
+ * then sets `data-text-size` (`changeTextSize` in app/testing.tsx).
+ */
+beforeEach(() => {
+  const declarations = [
+    ...rowHeights.matchAll(/@property\s+(--[\w-]+)\s*\{[^}]*?initial-value:\s*([^;]+);/g),
+  ].map(([, name, height]) => `${name!}: ${height!.trim()};`);
+  document.head.querySelector("style[data-row-heights]")?.remove();
+  const sheet = document.createElement("style");
+  sheet.dataset.rowHeights = "";
+  sheet.textContent = `:root { ${declarations.join(" ")} }`;
+  document.head.append(sheet);
+});

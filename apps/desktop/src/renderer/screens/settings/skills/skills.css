@@ -130,7 +130,7 @@
   color: var(--you-ink);
   font-size: var(--t-13);
   font-weight: var(--w-medium);
-  line-height: 18px;
+  line-height: var(--line-18);
 }
 .skill-band > span {
   flex: 1;

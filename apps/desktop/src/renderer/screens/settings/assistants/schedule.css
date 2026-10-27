@@ -114,5 +114,5 @@
   margin-top: -9px;
   color: var(--faint);
   font-size: var(--t-12);
-  line-height: 18px;
+  line-height: var(--line-18);
 }

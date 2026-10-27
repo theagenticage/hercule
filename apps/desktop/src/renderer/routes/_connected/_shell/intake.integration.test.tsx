@@ -22,6 +22,7 @@ import {
   buildErrorBody,
   buildFixtureAssistant,
   buildSidebarHandlers,
+  changeTextSize,
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_GITHUB_CONNECTION,
@@ -333,6 +334,21 @@ const findMove = (calls: ReadonlyArray<Call>, path: string) =>
   calls.find((call) => call.method === "POST" && call.path === `/api/v1/signals/${path}`);
 
 describe("Intake's list", () => {
+  it("estimates the lines it has not drawn by the heights of the Text size in use", async () => {
+    await openIntake();
+    const rows = getList().querySelector<HTMLElement>(".asks-rows")!;
+    // Two headings of 40px, and three rows of 52px with a 2px gap under each but a section's last.
+    expect(rows.style.minHeight).toBe(`${String(2 * 40 + 3 * 52 + 2)}px`);
+
+    // At the largest step a heading is 2px taller, and a row 4px.
+    await changeTextSize(4, {
+      "--intake-height-section": "42px",
+      "--intake-height-row": "56px",
+    });
+
+    expect(rows.style.minHeight).toBe(`${String(2 * 42 + 3 * 56 + 2)}px`);
+  });
+
   it("draws Now above Signals, each oldest first, and counts each tab", async () => {
     await openIntake();
     const list = getList();
@@ -1419,6 +1435,24 @@ describe("Intake's Everything view", () => {
   beforeAll(async () => {
     await import("../../../screens/intake/everything-screen");
   }, 0);
+
+  it("estimates the lines it has not drawn by the heights of the Text size in use", async () => {
+    const events = [1, 2, 3].map((id) => buildListedEvent(id));
+    await openEverything(events);
+    await waitFor(() => {
+      expect(getEventRow(events[0]!)).not.toBeNull();
+    });
+    const rows = getEventList().querySelector<HTMLElement>(".asks-rows")!;
+    const before = Number.parseFloat(rows.style.minHeight);
+
+    // At the largest step a row is 4px taller, and the one heading 2px.
+    await changeTextSize(4, {
+      "--intake-height-section": "42px",
+      "--intake-height-row": "56px",
+    });
+
+    expect(Number.parseFloat(rows.style.minHeight) - before).toBe(2 + 3 * 4);
+  });
 
   it("switches to Everything, which reads Intake's events newest first and states the horizon", async () => {
     const events = [1, 2, 3].map((id) => buildListedEvent(id));

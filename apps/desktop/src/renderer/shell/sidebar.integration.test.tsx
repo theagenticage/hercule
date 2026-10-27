@@ -28,6 +28,7 @@ import {
   NO_SIDEBAR_RECORDS,
   renderApp,
   SIDEBAR_FIXTURE,
+  changeTextSize,
   stubApi,
   stubElementSize,
   stubResizeObserver,
@@ -44,7 +45,11 @@ import {
   DISCUSSION_ID,
   WIKI_PAGE_ID,
 } from "../app/testing-discussions-wiki";
-import { ITEM_HEIGHTS } from "./sidebar-items";
+import { readLengths } from "../app/text-size";
+import { ITEM_HEIGHT_PROPERTIES } from "./sidebar-items";
+
+/** Returns the height of a group row at the Text size in use, which the list places its rows by. */
+const readGroupRowHeight = (): number => readLengths(ITEM_HEIGHT_PROPERTIES)["group-row"];
 
 // Every thread row names its thread with `describePose`, so its calls count
 // the rows that drew. The function itself is the real one.
@@ -621,7 +626,7 @@ describe("the sidebar", () => {
     act(() => {
       Object.defineProperty(nav, "scrollTop", {
         configurable: true,
-        value: 235 * ITEM_HEIGHTS["group-row"],
+        value: 235 * readGroupRowHeight(),
       });
       fireEvent.scroll(nav);
     });
@@ -631,6 +636,26 @@ describe("the sidebar", () => {
     expect(nav.querySelectorAll(".side-item").length).toBeLessThanOrEqual(45);
     expect(readFocusedKey()).toBe(focused);
     expect(within(nav).queryByRole("link", { name: "Thread 495, idle" })).not.toBeNull();
+  });
+
+  it("places its rows by the heights of the Text size in use, and again when the Text size changes", async () => {
+    const webshop = SINGLE_THREADS_FIXTURE.projects[0]!;
+    const threads = buildThreads(500, { projectId: webshop.id });
+    const { nav } = await startSidebar({ records: { ...SINGLE_THREADS_FIXTURE, threads } });
+    await userEvent.click(within(nav).getByRole("button", { name: "495 more" }));
+    const items = nav.querySelector<HTMLElement>(".virtual-list-items")!;
+    const heightBefore = Number.parseFloat(items.style.height);
+    const row = nav.querySelector<HTMLElement>(".side-thread")!;
+
+    // At the largest step each group row is 4px taller, as the stylesheet computes it. The
+    // list holds the 500 threads and the fixture's own unprojected thread, 501 group rows.
+    await changeTextSize(4, {
+      [ITEM_HEIGHT_PROPERTIES["group-row"]]: `${String(readGroupRowHeight() + 4)}px`,
+    });
+
+    expect(Number.parseFloat(items.style.height) - heightBefore).toBe(501 * 4);
+    // The rows draw at the same custom property, so the list and the rows agree.
+    expect(row.style.height).toBe("var(--side-height-thread-row)");
   });
 
   it("moves focus to Waiting on you when the focused waiting row is answered", async () => {
@@ -1554,7 +1579,7 @@ describe("the sidebar's card of thread details", () => {
     // reports a top from the item's place among the items, a row's height
     // apart, and the card reports a height that fits the window, so its top
     // is not moved to keep it inside.
-    const rowHeight = ITEM_HEIGHTS["group-row"];
+    const rowHeight = readGroupRowHeight();
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
       this: Element,
     ) {
@@ -1601,7 +1626,7 @@ describe("the sidebar's card of thread details", () => {
     // card is 40px tall plus 130px for each session it lists, so a card that
     // grows by one session no longer fits in the window under its row.
     const resize = stubResizeObserver();
-    const rowHeight = ITEM_HEIGHTS["group-row"];
+    const rowHeight = readGroupRowHeight();
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
       this: Element,
     ) {

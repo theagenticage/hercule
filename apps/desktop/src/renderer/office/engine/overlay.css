@@ -142,7 +142,7 @@
   font-weight: var(--w-bold);
   font-size: var(--t-12);
   letter-spacing: 0.04em;
-  line-height: 18px;
+  line-height: var(--line-18);
   text-transform: uppercase;
 }
 

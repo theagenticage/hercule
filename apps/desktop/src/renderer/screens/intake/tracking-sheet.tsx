@@ -3,6 +3,7 @@
  * §Tracking).
  */
 import {
+  useCallback,
   useEffect,
   useId,
   useImperativeHandle,
@@ -19,6 +20,8 @@ import { ChevronRightIcon } from "../../icons/chevron-right";
 import { Mark } from "../../marks";
 import { TrackingRowItem, type TrackingRowFacts } from "./tracking-row";
 import { describeWaitingOnYou, TRACKING_STATE_MARKS } from "./tracking-states";
+import { useMeasuredAtTextSize } from "../../app/text-size";
+import { readIntakeListHeights, ROW_GAP, type IntakeListHeights } from "./list-heights";
 import { useLineFade } from "./use-line-fade";
 import { useRowMotion } from "./use-row-motion";
 import { useVirtualLines } from "./use-virtual-lines";
@@ -58,12 +61,17 @@ const flattenGroups = (groups: ReadonlyArray<TrackingSheetGroup>): ReadonlyArray
   ]);
 
 /**
- * Returns the height of a line in pixels, as the stylesheet fixes it: a
+ * Returns the height of a line in pixels, as the stylesheet sets it: a
  * heading is 40px, and a row is 46px with the 2px gap under it, except the
- * last row of a group, which has no gap.
+ * last row of a group, which has no gap. Those are the heights of the default
+ * Text size; `heights` has them at the Text size in use.
  */
-const estimateLineHeight = (item: SheetItem): number =>
-  item.kind === "heading" ? 40 : item.lastInGroup ? 46 : 48;
+const estimateLineHeight = (heights: IntakeListHeights, item: SheetItem): number =>
+  item.kind === "heading"
+    ? heights.section
+    : item.lastInGroup
+      ? heights.trackingRow
+      : heights.trackingRow + ROW_GAP;
 
 /**
  * Renders opened Tracking, over the whole list column under the bar's
@@ -142,10 +150,15 @@ export function TrackingSheet({
   });
   // The row that holds the focus, which the virtual list keeps drawn, as it does the selected row.
   const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
+  const heights = useMeasuredAtTextSize(readIntakeListHeights);
+  const estimateSize = useCallback(
+    (item: SheetItem) => estimateLineHeight(heights, item),
+    [heights],
+  );
   const { lines, totalSize, scrollToSelected } = useVirtualLines(
     drawn,
     scrollRef,
-    estimateLineHeight,
+    estimateSize,
     selectedTaskId,
     focusedTaskId,
   );

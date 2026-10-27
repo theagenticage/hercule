@@ -124,7 +124,7 @@ button.worked:hover b {
   align-items: center;
   column-gap: 8px;
   width: 100%;
-  height: 24px;
+  height: calc(24px + var(--text-size-step));
   text-align: left;
 }
 .work-row > .ic {
@@ -214,10 +214,11 @@ button.work-row:hover > .ic {
    scrolls down past ten lines or so. */
 .work-output-text {
   margin: 0;
-  /* Ten lines of 17.6px plus the border. The inset is a transparent border,
-     not padding, because a scroll box clips its text at the padding edge:
-     with padding, the eleventh line would show cut in half below the tenth. */
-  max-height: 192px;
+  /* Ten lines of 1.6 times the text size, plus the border: 192px at the
+     default Text size. The inset is a transparent border, not padding,
+     because a scroll box clips its text at the padding edge: with padding,
+     the eleventh line would show cut in half below the tenth. */
+  max-height: calc(16px + 16 * var(--t-11));
   border: solid transparent;
   border-width: 8px 10px;
   overflow: auto;

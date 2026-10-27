@@ -1,0 +1,133 @@
+/* The heights of the rows that follow their text (spec 17 §Settings,
+   Appearance: "Rows grow with their text; none has a fixed height that clips
+   it").
+
+   A row holds one or two lines of text, so its height is the height it has at
+   the default Text size plus the step once for each line: `--text-size-step`
+   is -1px, 0, 1px or 2px (tokens.css, base.css). At the default step every
+   height is the one the rows had before the setting existed.
+
+   A virtual list places its rows by these heights, so each one is registered
+   with `@property` as a length. A registered property computes to a plain
+   length in pixels, which `readLengths` (app/text-size.ts) reads once for the
+   whole list, where an unregistered one would give back the text of its
+   calc(). The rows draw themselves at the same property, so the list and its
+   rows cannot disagree. `initial-value` is the height at the default step;
+   it is also what the tests, which have no layout engine, read.
+
+   The space between rows is not here: it stays the same at every step. */
+
+/* ---------- The sidebar ---------- */
+
+/* A section's heading, such as Waiting on you or a project's name. */
+@property --side-height-header {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 24px;
+}
+/* A Waiting on you row, two lines. */
+@property --side-height-waiting-row {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 38px;
+}
+/* The label "From runs". */
+@property --side-height-runs-label {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 16px;
+}
+/* A thread's row, a draft's and a done group's, two lines: 6px, the title's
+   line, 6px, the second line, and 6px. */
+@property --side-height-thread-row {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 52px;
+}
+/* A line of an unfolded group, and its "n quiet" line. */
+@property --side-height-group-line {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 32px;
+}
+/* A section's "more" row and its "Show fewer" row. */
+@property --side-height-more-row {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 28px;
+}
+
+/* ---------- The lists beside an open item ---------- */
+
+/* Workflows, Discussions and Wiki. */
+
+/* A group's heading. */
+@property --list-height-group-heading {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 24px;
+}
+/* A repository's sub-heading under a project's heading. */
+@property --list-height-repository-heading {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 22px;
+}
+/* A one-line row in the table. */
+@property --list-height-one-line-row {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 40px;
+}
+/* A two-line row in the table: a title over a summary. */
+@property --list-height-two-line-row {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 52px;
+}
+/* A row in the column, two lines. */
+@property --list-height-column-row {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 46px;
+}
+
+/* ---------- Intake and Tracking ---------- */
+
+/* A section's heading, in Intake's list and in opened Tracking. */
+@property --intake-height-section {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 40px;
+}
+/* A signal's row in Intake's list, two lines. */
+@property --intake-height-row {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 52px;
+}
+/* A row of opened Tracking, two lines. */
+@property --tracking-height-row {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 46px;
+}
+
+:root {
+  --side-height-header: calc(24px + var(--text-size-step));
+  --side-height-waiting-row: calc(38px + 2 * var(--text-size-step));
+  --side-height-runs-label: var(--line-16);
+  --side-height-thread-row: calc(var(--line-18) + var(--line-16) + 18px);
+  --side-height-group-line: calc(32px + var(--text-size-step));
+  --side-height-more-row: calc(28px + var(--text-size-step));
+
+  --list-height-group-heading: calc(24px + var(--text-size-step));
+  --list-height-repository-heading: calc(22px + var(--text-size-step));
+  --list-height-one-line-row: calc(40px + var(--text-size-step));
+  --list-height-two-line-row: calc(52px + 2 * var(--text-size-step));
+  --list-height-column-row: calc(46px + 2 * var(--text-size-step));
+
+  --intake-height-section: calc(40px + var(--text-size-step));
+  --intake-height-row: calc(52px + 2 * var(--text-size-step));
+  --tracking-height-row: calc(46px + 2 * var(--text-size-step));
+}

@@ -105,7 +105,7 @@
   justify-content: flex-end;
   margin-bottom: 4px;
   font-size: var(--t-13);
-  line-height: 18px;
+  line-height: var(--line-18);
   /* The chip's width is left out of the message's width, so a long name
      never stretches a short bubble. A chip wider than its bubble keeps its
      width and reaches past the bubble to the left, where the row is empty. */

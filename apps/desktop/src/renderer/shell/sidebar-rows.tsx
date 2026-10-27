@@ -5,14 +5,14 @@
  * sessions' rows, the draft's row, "more" and "Show fewer" rows, and the Done shelf's heading
  * and rows, drawn as the Bureau book's crew.js draws them.
  *
- * Each item draws itself at its kind's fixed height, with the space above it
- * as its top margin. A row takes its item (`SidebarItemOf`), what the list
- * knows live (`onScreen`, `officeOpen`) and stable callbacks. The list builds
- * its items again on every render, so a row is memoized by what its props
- * hold, not by their identity (`areSameData`): an item that only moves down,
- * because an item arrived above it, keeps every value and does not draw
- * again, and a change to one thread re-renders that thread's rows and
- * nothing else.
+ * Each item draws itself at its kind's height, which follows the Text size
+ * (`buildItemHeight`), with the space above it as its top margin. A row takes
+ * its item (`SidebarItemOf`), what the list knows live (`onScreen`,
+ * `officeOpen`) and stable callbacks. The list builds its items again on every
+ * render, so a row is memoized by what its props hold, not by their identity
+ * (`areSameData`): an item that only moves down, because an item arrived
+ * above it, keeps every value and does not draw again, and a change to one
+ * thread re-renders that thread's rows and nothing else.
  *
  * Every item's root carries the class `side-item`, which the end-to-end
  * tests find the items by. Every element in an item that can take focus
@@ -44,7 +44,7 @@ import { ProjectTile } from "../screens/project-tile";
 import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
 import { AgentLabel, StatusSlot } from "../screens/session-status";
 import { ProviderLogo } from "../screens/thread/provider-logo";
-import { ITEM_HEIGHTS, type SectionKey, type SidebarItemOf } from "./sidebar-items";
+import { buildItemHeight, type SectionKey, type SidebarItemOf } from "./sidebar-items";
 
 /**
  * Checks whether two sets of props hold the same data, comparing objects and
@@ -100,7 +100,7 @@ export const WaitingHeader = memo(function WaitingHeader({
       className="side-h side-item"
       data-key={item.key}
       tabIndex={-1}
-      style={{ marginTop: item.leading, height: ITEM_HEIGHTS["waiting-header"] }}
+      style={{ marginTop: item.leading, height: buildItemHeight("waiting-header") }}
     >
       {/* The space keeps the heading's name "Waiting on you 3", not "Waiting
           on you3". The heading is a flex box, which draws no space between
@@ -236,7 +236,7 @@ export const WaitingThreadRow = memo(function WaitingThreadRow({
       officeOpen={officeOpen}
       className="side-row side-row--wait side-item"
       data-key={item.key}
-      style={{ marginTop: item.leading, height: ITEM_HEIGHTS["waiting-thread-row"] }}
+      style={{ marginTop: item.leading, height: buildItemHeight("waiting-thread-row") }}
       aria-label={`${item.title}, ${describePose("waiting")}`}
       aria-describedby={questionId}
     >
@@ -272,7 +272,7 @@ export const WaitingAssistantRow = memo(function WaitingAssistantRow({
       officeOpen={officeOpen}
       className="side-row side-row--wait side-item"
       data-key={item.key}
-      style={{ marginTop: item.leading, height: ITEM_HEIGHTS["waiting-assistant-row"] }}
+      style={{ marginTop: item.leading, height: buildItemHeight("waiting-assistant-row") }}
       aria-label={`${item.name}, ${describePose("waiting")}`}
       aria-describedby={questionId}
     >
@@ -302,7 +302,7 @@ export const WaitingRunsLabel = memo(function WaitingRunsLabel({
       className="side-sub side-item"
       data-key={item.key}
       tabIndex={-1}
-      style={{ marginTop: item.leading, height: ITEM_HEIGHTS["waiting-runs-label"] }}
+      style={{ marginTop: item.leading, height: buildItemHeight("waiting-runs-label") }}
     >
       From runs
     </h4>
@@ -335,7 +335,7 @@ export const WaitingRunRow = memo(function WaitingRunRow({
       officeOpen={officeOpen}
       className="side-row side-row--wait side-item"
       data-key={item.key}
-      style={{ marginTop: item.leading, height: ITEM_HEIGHTS["waiting-run-row"] }}
+      style={{ marginTop: item.leading, height: buildItemHeight("waiting-run-row") }}
       aria-label={`${item.title}, ${describePose("waiting")}`}
       aria-describedby={questionId}
     >
@@ -373,7 +373,7 @@ export const ProjectHeader = memo(function ProjectHeader({
       className="side-h side-h--proj side-item"
       data-key={item.key}
       tabIndex={-1}
-      style={{ marginTop: item.leading, height: ITEM_HEIGHTS["project-header"] }}
+      style={{ marginTop: item.leading, height: buildItemHeight("project-header") }}
     >
       <ProjectTile tint={tint} name={name} />
       {/* The space keeps the heading's name "webshop 2 need you", not
@@ -519,6 +519,16 @@ const measureDotsWidth = (dotCount: number, hiddenCount: number): number => {
   const buttonWidth = dotCount * 11 + (hiddenCount > 0 ? 13 + 7 * String(hiddenCount).length : 0);
   return dotCount === 1 ? Math.max(MIN_DOTS_BUTTON_WIDTH, buttonWidth + 4) + 8 : buttonWidth + 10;
 };
+
+/**
+ * Returns how many characters the "+n" of the dots button holds for
+ * `hiddenCount` sessions that have no dot of their own, or 0 when there are
+ * none. `measureDotsWidth` counts 7px for each at the default Text size, and
+ * the stylesheet adds the growth of the text to that, by the number of
+ * characters (`--dots-characters`).
+ */
+const countDotsCharacters = (hiddenCount: number): number =>
+  hiddenCount > 0 ? String(hiddenCount).length + 1 : 0;
 
 /**
  * Renders the mark of a session in a group, in the sidebar's rows and in the
@@ -675,11 +685,12 @@ function GroupRowFrame({
       className={classNames.join(" ")}
       style={{
         marginTop: item.leading,
-        height: ITEM_HEIGHTS[item.kind],
+        height: buildItemHeight(item.kind),
         ...(summary === null
           ? {}
           : {
               "--dots": `${String(measureDotsWidth(summary.dots.length, summary.hiddenCount))}px`,
+              "--dots-characters": String(countDotsCharacters(summary.hiddenCount)),
             }),
       }}
     >
@@ -895,7 +906,7 @@ export const GroupLine = memo(function GroupLine({
   return (
     <div
       className={item.last ? "side-member is-last side-item" : "side-member side-item"}
-      style={{ marginTop: item.leading, height: ITEM_HEIGHTS["group-line"] }}
+      style={{ marginTop: item.leading, height: buildItemHeight("group-line") }}
     >
       <ThreadLink
         sessionId={member.sessionId}
@@ -943,7 +954,7 @@ export const QuietLine = memo(function QuietLine({
   return (
     <div
       className={item.last ? "side-member is-last side-item" : "side-member side-item"}
-      style={{ marginTop: item.leading, height: ITEM_HEIGHTS["quiet-line"] }}
+      style={{ marginTop: item.leading, height: buildItemHeight("quiet-line") }}
     >
       <button
         type="button"
@@ -978,7 +989,7 @@ export const DoneHeader = memo(function DoneHeader({
   return (
     <h3
       className="side-h side-h--done side-item"
-      style={{ marginTop: item.leading, height: ITEM_HEIGHTS["done-header"] }}
+      style={{ marginTop: item.leading, height: buildItemHeight("done-header") }}
     >
       {/* The space keeps the button's name "Done 12", not "Done12". */}
       <button type="button" data-key={item.key} aria-expanded={item.open} onClick={onToggle}>
@@ -1081,7 +1092,7 @@ export const DraftRow = memo(function DraftRow({
   return (
     <div
       className="side-thread side-item"
-      style={{ marginTop: item.leading, height: ITEM_HEIGHTS["draft-row"] }}
+      style={{ marginTop: item.leading, height: buildItemHeight("draft-row") }}
     >
       <div
         className="side-row is-unsent is-on"
@@ -1121,7 +1132,7 @@ export const MoreRow = memo(function MoreRow({
       type="button"
       className="side-row side-row--more side-item"
       data-key={item.key}
-      style={{ marginTop: item.leading, height: ITEM_HEIGHTS.more }}
+      style={{ marginTop: item.leading, height: buildItemHeight("more") }}
       // The Done shelf's row adds more rows rather than expanding the section.
       aria-expanded={item.section === "done" ? undefined : false}
       onClick={() => {
@@ -1151,7 +1162,7 @@ export const FewerRow = memo(function FewerRow({
       type="button"
       className="side-row side-row--fewer side-item"
       data-key={item.key}
-      style={{ marginTop: item.leading, height: ITEM_HEIGHTS.fewer }}
+      style={{ marginTop: item.leading, height: buildItemHeight("fewer") }}
       aria-label={item.name}
       aria-expanded
       onClick={() => {

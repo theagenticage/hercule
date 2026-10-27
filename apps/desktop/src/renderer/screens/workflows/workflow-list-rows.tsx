@@ -40,11 +40,7 @@ import { STRIP_RUN_LIMIT } from "../../app/queries";
 import { BoltIcon } from "../../icons/bolt";
 import { ClockIcon } from "../../icons/clock";
 import { Mark } from "../../marks";
-import {
-  COLUMN_ROW_HEIGHT,
-  COLUMN_ROW_LEADING,
-  GROUP_HEADING_HEIGHT,
-} from "../list-pane/list-row-sizes";
+import { COLUMN_ROW_LEADING } from "../list-pane/list-row-sizes";
 import { SELECTED_LINK_PROPS } from "../selected-link-props";
 
 declare module "react" {
@@ -94,12 +90,7 @@ export const WorkflowGroupHeading = memo(function WorkflowGroupHeading({
   readonly isNeedsYou: boolean;
 }): JSX.Element {
   return (
-    <h2
-      className="group-h"
-      data-key={itemKey}
-      tabIndex={-1}
-      style={{ marginTop: leading, height: GROUP_HEADING_HEIGHT }}
-    >
+    <h2 className="group-h" data-key={itemKey} tabIndex={-1} style={{ marginTop: leading }}>
       {/* The space keeps the heading's name "Failing 2", not "Failing2". The
           heading is a flex box, which draws no space between its items. */}
       <span>{title}</span> <b className={isNeedsYou ? "count count--you" : "count"}>{count}</b>
@@ -531,7 +522,7 @@ export const WorkflowColumnRow = memo(function WorkflowColumnRow({
       className={isOff ? "column-row is-off" : "column-row"}
       activeProps={SELECTED_LINK_PROPS}
       data-key={itemKey}
-      style={{ marginTop: COLUMN_ROW_LEADING, height: COLUMN_ROW_HEIGHT }}
+      style={{ marginTop: COLUMN_ROW_LEADING }}
       aria-label={name}
       aria-describedby={statusId}
       ref={rowRef}

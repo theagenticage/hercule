@@ -133,7 +133,7 @@
 
 /* ---------- The list ---------- */
 .asks-sec {
-  height: 40px;
+  height: var(--intake-height-section);
   padding: 10px 10px 0;
 }
 .asks-sec .dot {
@@ -167,7 +167,7 @@
   align-items: center;
   gap: 12px;
   width: 100%;
-  min-height: 52px;
+  min-height: var(--intake-height-row);
   padding: 7px 10px;
   border-radius: var(--r-md);
   text-align: left;
@@ -497,7 +497,7 @@
   padding: 0 10px;
   color: var(--faint);
   font-size: var(--t-11);
-  line-height: 16px;
+  line-height: var(--line-16);
 }
 /* A line of Everything's list that is not an event: no events, no match, the
    end of the list, and a failed read. They share one look. */

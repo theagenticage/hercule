@@ -24,9 +24,6 @@ import { Mark } from "../../marks";
 import "../session/messages.css";
 import "./workflow-detail.css";
 
-/** The height of a run's row in the Runs list, in CSS pixels. */
-export const RUN_ROW_HEIGHT = 40;
-
 /** Renders the clock of a schedule or the bolt of an event, or nothing for null. */
 function FiresOnIcon({ firesOn }: { readonly firesOn: TriggerFiresOn | null }): JSX.Element {
   if (firesOn === "schedule") return <ClockIcon size={12} />;

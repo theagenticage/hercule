@@ -1,7 +1,8 @@
 /* The rules a list grouped by project adds to the workflow list's rules
    (workflow-list.css), as the Bureau book's Discussions and Wiki pages draw
-   them. The space above each heading and row, and each one's height, are set
-   inline, because the list places every item by them. */
+   them. The space above each heading and row is set inline, because the list
+   places every item by it. Each one's height is a custom property that the
+   list places it by too (styles/row-heights.css). */
 
 /* A project's heading: its tile, then its name, in the heading's muted ink
    and in sentence case, unlike a workflow group's uppercase label. */
@@ -19,6 +20,7 @@
 /* A repository's sub-heading: its name in the heading's quiet ink, indented
    to the project's name. */
 .group-h.group-h--repo {
+  height: var(--list-height-repository-heading);
   padding-left: 25px;
   color: var(--faint);
   font-size: var(--t-12);

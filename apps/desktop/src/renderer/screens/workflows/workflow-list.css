@@ -54,12 +54,14 @@
 
 /* A group's heading, with its count right after its name. The space above
    it is set inline by the list, which places every item: 14px under the
-   column heads for the first group, 22px for the others. */
+   column heads for the first group, 22px for the others. Its height follows
+   the Text size, and the list places it by the same custom property
+   (styles/row-heights.css). */
 .group-h {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 24px;
+  height: var(--list-height-group-heading);
   margin: 0;
   padding: 0 8px;
   color: var(--faint);
@@ -99,7 +101,7 @@
   display: grid;
   align-items: center;
   gap: 14px;
-  height: 40px;
+  height: var(--list-height-one-line-row);
   padding: 0 8px;
   border-radius: var(--r-md);
   white-space: nowrap;
@@ -229,11 +231,12 @@ a.table-row:is(:hover, .is-on) + .table-row::before {
 /* The book draws the column's rows as the sidebar's .side-row, .side-lead,
    .side-text, .side-name, .side-meta and .side-end. Those rules belong to
    the shell, so the list keeps its own copy under its own names. The row's
-   height is set inline, because the list places every item by it. */
+   height is a custom property, because the list places every item by it. */
 .column-row {
   display: flex;
   align-items: center;
   gap: 9px;
+  height: var(--list-height-column-row);
   padding: 1px 8px 1px 10px;
   border-radius: var(--r-sm);
   transition: background var(--dur-1);

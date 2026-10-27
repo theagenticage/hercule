@@ -1,8 +1,8 @@
 /**
  * Builds what the sidebar draws from the session presentation and the user's
  * choices: the flat list of items the virtualized list draws (section
- * headers, group rows and their lines, and "more" and "Show fewer" rows, each with a fixed
- * height and the space the book puts above it).
+ * headers, group rows and their lines, and "more" and "Show fewer" rows, each with a
+ * height that follows the Text size and the space the book puts above it).
  *
  * Which groups of sessions are shown, in which order, in what pose, which
  * session a row opens and which lines it unfolds into is decided in
@@ -205,10 +205,15 @@ export type SidebarItemKind = SidebarItem["kind"];
 export type SidebarItemOf<Kind extends SidebarItemKind> = Extract<SidebarItem, { kind: Kind }>;
 
 /**
- * The height of each kind of item, in CSS pixels. Measured with
- * `getBoundingClientRect` in the Bureau book's `desktop/session-active.html`,
- * at 1440 x 900 on a 2x display, in Whitehaven and Orient Express (both give
- * the same numbers):
+ * The custom property of styles/row-heights.css that holds the height of each
+ * kind of item. The list reads the heights from it (`readItemHeights` in
+ * sidebar-list.tsx), and each row draws itself at it (`buildItemHeight`), so
+ * the two agree whatever the Text size is. The values below are the heights
+ * at the default Text size.
+ *
+ * They were measured with `getBoundingClientRect` in the Bureau book's
+ * `desktop/session-active.html`, at 1440 x 900 on a 2x display, in Whitehaven
+ * and Orient Express (both give the same numbers):
  *
  * - a section header (`h3.side-h`) is 24;
  * - a Waiting on you row (`.side-row--wait`) is 38, a thread's, an
@@ -224,22 +229,26 @@ export type SidebarItemOf<Kind extends SidebarItemKind> = Extract<SidebarItem, {
  * group's row are drawn the same way. The Done shelf's heading is a section
  * header. A line of an unfolded group, and the "n quiet" line, are 32.
  */
-export const ITEM_HEIGHTS: Readonly<Record<SidebarItemKind, number>> = {
-  "waiting-header": 24,
-  "waiting-thread-row": 38,
-  "waiting-assistant-row": 38,
-  "waiting-runs-label": 16,
-  "waiting-run-row": 38,
-  "project-header": 24,
-  "group-row": 52,
-  "group-line": 32,
-  "quiet-line": 32,
-  "draft-row": 52,
-  "done-header": 24,
-  "done-group-row": 52,
-  more: 28,
-  fewer: 28,
+export const ITEM_HEIGHT_PROPERTIES: Readonly<Record<SidebarItemKind, string>> = {
+  "waiting-header": "--side-height-header",
+  "waiting-thread-row": "--side-height-waiting-row",
+  "waiting-assistant-row": "--side-height-waiting-row",
+  "waiting-runs-label": "--side-height-runs-label",
+  "waiting-run-row": "--side-height-waiting-row",
+  "project-header": "--side-height-header",
+  "group-row": "--side-height-thread-row",
+  "group-line": "--side-height-group-line",
+  "quiet-line": "--side-height-group-line",
+  "draft-row": "--side-height-thread-row",
+  "done-header": "--side-height-header",
+  "done-group-row": "--side-height-thread-row",
+  more: "--side-height-more-row",
+  fewer: "--side-height-more-row",
 };
+
+/** Returns the CSS `height` that draws an item of `kind` at its height, which follows the Text size. */
+export const buildItemHeight = (kind: SidebarItemKind): string =>
+  `var(${ITEM_HEIGHT_PROPERTIES[kind]})`;
 
 /** The space above a section's first item: the book's `.side-sec { padding-top: 8px }`. */
 const SECTION_LEADING = 8;

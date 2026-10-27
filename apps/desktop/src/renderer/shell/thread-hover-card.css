@@ -90,7 +90,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 26px;
+  height: calc(26px + var(--text-size-step));
   padding: 0 4px 0 6px;
   font-size: var(--t-12);
 }
@@ -106,11 +106,11 @@
   margin-left: auto;
 }
 .thread-hover-more {
-  height: 24px;
+  height: calc(24px + var(--text-size-step));
   padding-left: 21px;
   color: var(--faint);
   font-size: var(--t-12);
-  line-height: 24px;
+  line-height: calc(24px + var(--text-size-step));
 }
 .thread-hover-hint {
   margin: 0;

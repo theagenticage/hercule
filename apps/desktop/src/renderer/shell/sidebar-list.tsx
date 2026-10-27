@@ -1,19 +1,21 @@
 /**
  * The sidebar's list: the items `buildSidebar` returns, virtualized
  * (`VirtualList`), in a `nav` landmark that scrolls. Every item kind has a
- * fixed height (`ITEM_HEIGHTS`).
+ * height of its own that follows the Text size (`ITEM_HEIGHT_PROPERTIES`).
  *
  * While the pointer rests on a group's row, one card beside the sidebar shows
  * the details of the group's lead and, for a group of several sessions, of
  * each session (`useThreadHover`).
  */
-import { useRef, type JSX, type ReactNode } from "react";
+import { useCallback, useRef, type JSX, type ReactNode } from "react";
+import { readLengths, useMeasuredAtTextSize } from "../app/text-size";
 import { VirtualList } from "../screens/virtual-list";
 import {
-  ITEM_HEIGHTS,
+  ITEM_HEIGHT_PROPERTIES,
   pickFocusFallback,
   type SectionKey,
   type SidebarItem,
+  type SidebarItemKind,
 } from "./sidebar-items";
 import {
   DoneGroupRow,
@@ -138,8 +140,8 @@ const renderItem = (
   }
 };
 
-/** Returns the height of `item`, with the space above it, in CSS pixels. */
-const computeItemHeight = (item: SidebarItem): number => item.leading + ITEM_HEIGHTS[item.kind];
+/** Reads the height of each kind of item from the page's CSS, in CSS pixels. */
+const readItemHeights = (): Record<SidebarItemKind, number> => readLengths(ITEM_HEIGHT_PROPERTIES);
 
 /**
  * Renders the list in the `nav` landmark with the id `id` and the name
@@ -168,6 +170,12 @@ export function SidebarList({
   readonly children?: ReactNode;
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement>(null);
+  const heights = useMeasuredAtTextSize(readItemHeights);
+  // Returns the height of `item`, with the space above it, in CSS pixels.
+  const computeItemHeight = useCallback(
+    (item: SidebarItem): number => item.leading + heights[item.kind],
+    [heights],
+  );
   const { listHandlers, placement, details, unfolds } = useThreadHover(items, scrollRef);
   return (
     <>
