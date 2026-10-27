@@ -488,6 +488,11 @@
   color: var(--ink);
   font: inherit;
 }
+/* The placeholder tells the user what to type, so it is muted like the reply
+   box's: faint is for metadata. */
+.asks-search input::placeholder {
+  color: var(--muted);
+}
 .asks-stamp {
   width: 168px;
 }
