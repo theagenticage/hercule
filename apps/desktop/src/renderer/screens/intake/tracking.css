@@ -238,8 +238,11 @@
   color: var(--ink);
   font-size: var(--t-13);
 }
+/* The row's state line says what the Task is doing, as a signal row's second
+   line says who asks, so it is muted like that line. Only the age at the
+   row's end is metadata. */
 .tr-run-sub {
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-12);
 }
 /* The workflow's name keeps its colleague's hue, whatever the line's colour. */
@@ -601,10 +604,11 @@
 .tr-pane .tr-step-who:hover {
   text-decoration-color: currentColor;
 }
+/* A link, so it is muted, not faint. */
 .tr-pane .tr-step-thread {
   flex: none;
   margin-left: auto;
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-12);
   text-decoration: underline;
   text-underline-offset: 2px;
