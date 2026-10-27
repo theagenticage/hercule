@@ -84,7 +84,7 @@ Lessons for us:
 
 ## 4. The scorecard
 
-Two layers. The scripted layer is a hard gate: a PR may not make any of its numbers worse. The judged layer decides what to do next and whether a change is better.
+Two layers. The scripted layer is a hard gate: a PR may not make any of its numbers worse. It also decides what to do next: the climb takes the largest gap between a metric and its target. The judged layer is a check that a change does not look worse, and it finds what no metric measures (decided by Rogier on 2026-10-27).
 
 ### 4.1 Scripted metrics (`pnpm ui:metrics`)
 
@@ -193,7 +193,7 @@ Build these first, in this order. Each item is its own small PR.
 4. **The nightly "UI hill climb" workflow,** modelled on the Performance hunt (`4890db19`):
    - **Steps:**
      - **Score** (GPT-6.1 Sol, high): reads the brief and the latest captures, and returns the scores and the prioritized fix list.
-     - **Climb** (Opus, high effort): takes the top MUST that is still open, makes the one change, captures again, and runs the metrics.
+     - **Climb** (Opus, high effort): takes the largest gap between a `ui:metrics` number and its target. Only when every metric meets its target, or for something no metric measures, it takes the council's top open MUST, then SHOULD. It makes the one change, captures again, and runs the metrics.
      - **Judge** (GPT-6.1 Sol, high, a fresh session): the pairwise before/after vote, in both orders.
      - **Review** (a fresh Opus at extra-high effort): checks that the change is one thing, that no metric got worse, and that the pairwise vote is a real win. It also checks that the desktop cost is stated, and that spec 17 is amended where a behaviour changed.
      - **Ship** (Sonnet): commits, and writes a PR body with the 1x before/after images, the metric diff and the vote table.
@@ -362,6 +362,19 @@ Decided by Rogier on 2026-10-26, in the grilling round before the tickets were w
 - **The calibration screenshots** were captured on atlas on 2026-10-26 and stored outside the repo (section 5, item 3).
 - **The sixth theme** is a night theme named "Blue Train", ticketed after the dark examples sheet.
 - **Rounds 0 to 2 are built by one coordinator:** Opus 5.5, with a Sol thread for sparring and review, and Sonnet 5.5 subagents for the implementation (section 5).
+
+Decided by Rogier on 2026-10-26 and 2026-10-27, after the comparison sheets and the first PRs:
+
+- **Fonts.**
+  - **UI font:** Inter 4, everywhere, page titles included. Bricolage goes, and Limelight stays for the wordmark and numerals. Inter keeps its tailed l and serifed I (`cv05`, `cv08`) and drops the slashed zero, which the council's vote found reads as code in UI times and counts.
+  - **Code font:** JetBrains Mono, with ligatures off.
+  - **SF Pro and SF Mono were compared live** and not chosen. The Linux checks could not see them.
+- **Dark themes.**
+  - Orient Express, Nile and End House are retuned in direction (c): a lighter warm-grey ground with Ocean-style larger layer steps.
+  - Lines meet the APCA Lc 15 target.
+  - "Blue Train" is added as a sixth theme (#875). All five current themes stay.
+- **The climb is driven by the metrics** (2026-10-27). It takes the largest gap between a metric and its target first. The council's fixes come only when every metric meets its target, or for what no metric measures. The council's pairwise vote is a veto against "looks worse", never the reason for a change.
+- **Nightly scope:** the council scores Whitehaven and Orient Express every night, and all five themes once a week.
 
 ### Font licences
 
