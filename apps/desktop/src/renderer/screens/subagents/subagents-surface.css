@@ -145,6 +145,7 @@
   text-overflow: ellipsis;
   color: var(--faint);
   font-family: var(--font-mono);
+  font-feature-settings: normal;
   font-size: var(--t-11);
 }
 .subagents-stop {

@@ -144,6 +144,7 @@
   color: var(--ink);
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
+  font-feature-settings: normal;
   font-size: var(--t-18);
   font-weight: 600;
   letter-spacing: 0.14em;

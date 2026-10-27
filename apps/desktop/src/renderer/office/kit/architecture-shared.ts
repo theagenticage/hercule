@@ -318,7 +318,7 @@ export function readCssColor(token: Token, lightness = 0): string {
  * generic family keeps a canvas drawn before the face loads in a sans-serif.
  */
 export function buildUiFont(pixels: number): string {
-  return `640 ${String(pixels)}px "Bricolage Grotesque", sans-serif`;
+  return `640 ${String(pixels)}px "Inter", sans-serif`;
 }
 
 /** A canvas texture that redraws itself when the theme changes and when the display face arrives. */

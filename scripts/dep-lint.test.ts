@@ -74,17 +74,17 @@ import { Schema } from "effect";
 contextBridge.exposeInMainWorld("hercule", { decode: Schema.decodeUnknownSync(Schema.String) });`,
   // Vite's `?url` suffix is dropped and the file itself is resolved.
   "renderer-clean.tsx": `import "./renderer.css";
-import bricolage from "./fonts/bricolage.woff2?url";
-export const Frame = () => <link rel="preload" href={bricolage} as="font" />;`,
+import inter from "./fonts/inter.woff2?url";
+export const Frame = () => <link rel="preload" href={inter} as="font" />;`,
   // A path from the root is served from the page's public folder, so it is
   // no import of the renderer's.
   "renderer.css": `@font-face {
-  font-family: "Bricolage Grotesque";
+  font-family: "Inter";
   src:
-    url("fonts/bricolage.woff2") format("woff2"),
+    url("fonts/inter.woff2") format("woff2"),
     url("/fonts/served.woff2") format("woff2");
 }`,
-  "fonts/bricolage.woff2": "wOF2",
+  "fonts/inter.woff2": "wOF2",
   "renderer-electron.tsx": `import { ipcRenderer } from "electron";
 export const read = () => ipcRenderer.invoke("controller.read");`,
   "renderer-node-prefixed.tsx": `import { readFileSync } from "node:fs";

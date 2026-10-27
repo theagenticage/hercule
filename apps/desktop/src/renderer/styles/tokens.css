@@ -26,18 +26,16 @@
    :root, so a theme preview can nest one inside another page. */
 
 @font-face {
-  font-family: "Bricolage Grotesque";
-  src: url("fonts/bricolage-grotesque-latin-standard-normal.woff2") format("woff2");
-  font-weight: 200 800;
-  font-stretch: 75% 100%;
+  font-family: "Inter";
+  src: url("fonts/inter-latin-variable-normal.woff2") format("woff2");
+  font-weight: 100 900;
   font-display: block;
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: "Bricolage Grotesque";
-  src: url("fonts/bricolage-grotesque-latin-ext-standard-normal.woff2") format("woff2");
-  font-weight: 200 800;
-  font-stretch: 75% 100%;
+  font-family: "Inter";
+  src: url("fonts/inter-latin-ext-variable-normal.woff2") format("woff2");
+  font-weight: 100 900;
   font-display: block;
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
@@ -56,9 +54,16 @@
 
 /* ---------- Theme-independent scales ---------- */
 :root {
-  --font-ui: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-ui: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Inter's tailed l, serifed I and slashed zero. The page sets them once, and every child
+     inherits them, so each rule that sets another face resets them: code and the Deco face
+     with `font-feature-settings: normal` (Recursive and Limelight have their own zero), and
+     UI text inside a code block with this token again. The `font` shorthand also resets them.
+     Figures that must line up add `font-variant-numeric: tabular-nums`, never
+     `font-feature-settings: "tnum"`, which would replace these three. */
+  --font-ui-features: "cv05", "cv08", "zero";
   /* The Deco face: the wordmark, the logo lettering and a few large numerals. Never UI text. */
-  --font-deco: "Limelight", "Bricolage Grotesque", serif;
+  --font-deco: "Limelight", serif;
   /* Code, diffs, commands and branch names only. Never labels, counts or states. */
   --font-mono: "Recursive", ui-monospace, "SF Mono", monospace;
   --mono-axes: "MONO" 1, "CASL" 0.5, "CRSV" 0;
@@ -512,6 +517,7 @@
   --btn-rim: color-mix(in oklab, var(--line) calc(100% - 25% * var(--glass-level)), transparent);
 
   font-family: var(--font-ui);
+  font-feature-settings: var(--font-ui-features);
   color: var(--ink);
 }
 

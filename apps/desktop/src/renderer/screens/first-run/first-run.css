@@ -273,6 +273,7 @@
   background: var(--sunken);
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
+  font-feature-settings: normal;
   font-size: var(--t-12);
 }
 .fr .cmd > :first-child {
@@ -284,6 +285,7 @@
 /* The box is set in the code font for the command, but its button is not code. */
 .fr .cmd .btn {
   font-family: var(--font-ui);
+  font-feature-settings: var(--font-ui-features);
   font-variation-settings: normal;
 }
 

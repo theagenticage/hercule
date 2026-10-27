@@ -1,11 +1,11 @@
 /**
  * Tests which fonts the app reads at launch (spec 17, §Performance, rule 6).
- * The page preloads the Latin subset of Bricolage Grotesque, the UI font, so
+ * The page preloads the Latin subset of Inter, the UI font, so
  * that its request starts while the HTML parses. Every other face loads only
  * when text first needs it.
  *
  * The test starts the packaged test package on the first run's welcome, whose
- * text and buttons use Bricolage and whose wordmark uses Limelight. Run
+ * text and buttons use Inter and whose wordmark uses Limelight. Run
  * `pnpm build:desktop` first.
  */
 import type { Request } from "playwright";
@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { launchForTest } from "./harness";
 
 /** The file name of the preloaded font, without the hash Vite adds to it. */
-const PRELOADED_FONT = "bricolage-grotesque-latin-standard-normal";
+const PRELOADED_FONT = "inter-latin-variable-normal";
 
 /**
  * Returns the file name in `url` without the 8-character hash Vite adds to an
@@ -23,7 +23,7 @@ const PRELOADED_FONT = "bricolage-grotesque-latin-standard-normal";
 const stripFontHash = (url: string): string => url.replace(/^.*\/([^/]+)-[\w-]{8}\.woff2$/, "$1");
 
 describe("the fonts at launch", () => {
-  it("reads Bricolage Latin once, from the preload, and every other face only when text uses it", async () => {
+  it("reads Inter Latin once, from the preload, and every other face only when text uses it", async () => {
     const { page } = await launchForTest();
     // Playwright can attach to the page after its first requests have gone
     // out, so the test loads the page again with a listener already in place.
@@ -35,7 +35,7 @@ describe("the fonts at launch", () => {
 
     const faces = await page.evaluate(async () => {
       await document.fonts.ready;
-      // The first range of each face tells the two subsets of Bricolage apart.
+      // The first range of each face tells the two subsets of Inter apart.
       return [...document.fonts].map(({ family, unicodeRange, status }) => ({
         family,
         firstRange: unicodeRange.split(",")[0],
@@ -43,8 +43,8 @@ describe("the fonts at launch", () => {
       }));
     });
     expect(faces).toEqual([
-      { family: "Bricolage Grotesque", firstRange: "U+0-FF", status: "loaded" },
-      { family: "Bricolage Grotesque", firstRange: "U+100-2BA", status: "unloaded" },
+      { family: "Inter", firstRange: "U+0-FF", status: "loaded" },
+      { family: "Inter", firstRange: "U+100-2BA", status: "unloaded" },
       { family: "Limelight", firstRange: "U+0-10FFFF", status: "loaded" },
       { family: "Recursive", firstRange: "U+0-10FFFF", status: "unloaded" },
       // The password field's bullet, drawn from Geneva, a system font; see
