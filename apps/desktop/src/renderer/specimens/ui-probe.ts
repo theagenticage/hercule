@@ -1438,33 +1438,41 @@ function listVisibleElements(readFacts: ReadFacts): Element[] {
 }
 
 /**
- * Where the one exception to the type scale is drawn: the "Aa" of each step of
- * Settings > Appearance's Text size control. They are four labels, set at 12,
- * 13, 14 and 15 px at every Text size, because each shows what its step does to
- * body text. Their font sizes are left out of `DisciplineFacts` (the sizes in
- * use and the declarations off the scale), and nothing else of them is: their
- * contrast, click targets and clipping are measured like any other text.
+ * Where the one exception to the type scale is drawn: the "Aa" glyphs of the
+ * steps of Settings > Appearance's Text size control. There are four, each a
+ * span inside a label, set at 12, 13, 14 and 15 px at every Text size, because
+ * each shows what its step does to body text. Their font sizes are left out of
+ * `DisciplineFacts` (the sizes in use and the declarations off the scale), and
+ * nothing else of them is: their contrast, click targets and clipping are
+ * measured like any other text. The sizes are declared on the labels and
+ * inherited by the glyphs, so a declaration that matches a glyph's label is
+ * left out too.
  */
 const FIXED_SIZE_SAMPLES = {
-  selector: ".sizes > label",
+  selector: ".sizes > label > span",
+  text: "Aa",
   fontSizes: [12, 13, 14, 15],
 } as const;
 
 /**
- * Returns the elements of `FIXED_SIZE_SAMPLES`: none on a page without the
- * Text size control, else its four labels. Fails when the selector matches
- * anything else (another number of elements, or an element whose font size is
- * not the one the control sets), so that the exception cannot spread to other
- * text unnoticed.
+ * Returns the glyph elements of `FIXED_SIZE_SAMPLES`: none on a page without
+ * the Text size control, else its four "Aa" spans. Fails unless the selector
+ * matches exactly those four glyphs, each holding only "Aa" and drawn at the
+ * size its step shows, so that the exception cannot spread to other text, and
+ * a rule that changes a glyph's size (on the glyph or on its label) cannot
+ * hide behind it.
  */
 function findFixedSizeSamples(): Element[] {
   const samples = Array.from(document.querySelectorAll(FIXED_SIZE_SAMPLES.selector));
   if (samples.length === 0) return samples;
   const sizes = samples.map((sample) => Number.parseFloat(getComputedStyle(sample).fontSize));
-  if (sizes.join(",") !== FIXED_SIZE_SAMPLES.fontSizes.join(",")) {
+  const isExpected =
+    sizes.join(",") === FIXED_SIZE_SAMPLES.fontSizes.join(",") &&
+    samples.every((sample) => sample.textContent === FIXED_SIZE_SAMPLES.text);
+  if (!isExpected) {
     throw new Error(
       `The selector "${FIXED_SIZE_SAMPLES.selector}" exempts text from the type scale, and must match ` +
-        `exactly the ${String(FIXED_SIZE_SAMPLES.fontSizes.length)} samples of the Text size control, at ` +
+        `exactly the ${String(FIXED_SIZE_SAMPLES.fontSizes.length)} "${FIXED_SIZE_SAMPLES.text}" glyphs of the Text size control, at ` +
         `${FIXED_SIZE_SAMPLES.fontSizes.join(", ")} px. It matches ${String(samples.length)} elements, at ` +
         `${sizes.join(", ")} px.`,
     );
@@ -1522,7 +1530,10 @@ export function collectDiscipline(): DisciplineFacts {
   const isPiece = (element: Element): boolean => pieces.some((piece) => piece.contains(element));
   const isSample = (element: Element): boolean =>
     samples.some((sample) => sample.contains(element));
-  const isExemptFromSizes = (element: Element): boolean => isSample(element) || isPiece(element);
+  const isSampleOrItsLabel = (element: Element): boolean =>
+    isSample(element) || samples.some((sample) => sample.parentElement === element);
+  const isExemptFromSizes = (element: Element): boolean =>
+    isSampleOrItsLabel(element) || isPiece(element);
   const visibleTypeSet = new Set(visible.filter((element) => !isExemptFromSizes(element)));
 
   const fontSizes = new Set<number>();

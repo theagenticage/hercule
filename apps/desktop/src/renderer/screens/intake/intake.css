@@ -1166,26 +1166,31 @@
   overflow-wrap: anywhere;
 }
 /* Not in the drawing, which shows no avatars: spec 17 draws each message's
-   author's avatar, or initials when there is none. It is 20px, which holds two
-   initials at --t-11 without clipping them, and it grows with the text so
-   the initials still fit at the larger Text sizes. The line of the name is
-   18px tall and a little taller at the larger sizes, so the message's head is
-   2px taller than the drawing's. */
+   author's avatar, or initials when there is none. It is a circle 20px tall
+   (more at the larger Text sizes, as the text grows), and a pill when two
+   wide initials such as "WW" are wider than the circle, so no initial is
+   cut off at any Text size. The line of the name is 18px tall, so the
+   message's head is 2px taller than the drawing's. */
 .b-avatar {
+  --b-avatar-size: calc(20px + var(--text-size-step));
   display: inline-grid;
   flex: none;
   place-items: center;
-  width: calc(20px + var(--text-size-step));
-  height: calc(20px + var(--text-size-step));
+  min-width: var(--b-avatar-size);
+  height: var(--b-avatar-size);
+  padding: 0 4px;
   overflow: hidden;
-  border-radius: 50%;
+  border-radius: var(--r-pill);
   background: var(--sunken);
   color: var(--muted);
   font-size: var(--t-11);
   font-weight: var(--w-bold);
 }
+.b-avatar:has(> img) {
+  padding: 0;
+}
 .b-avatar img {
-  width: 100%;
+  width: var(--b-avatar-size);
   height: 100%;
   object-fit: cover;
 }
