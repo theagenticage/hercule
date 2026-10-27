@@ -127,7 +127,8 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     contentSelector: 'section.asks-detail[aria-label="The open signal"] > *',
     nonTextParts: [
       { selector: ".asks-modes", kind: "boundary" },
-      { selector: ".ask-box", kind: "boundary" },
+      // No checkbox (.ask-box): a row's checkbox is hidden until the pointer or the focus is
+      // on it, or the row is checked, and no row of this specimen is.
       { selector: ".asks-sec .dot", kind: "mark" },
       { selector: ".ask-mark:not(.ask-mark--face) svg", kind: "mark" },
       { selector: ".ask-act svg", kind: "mark" },
