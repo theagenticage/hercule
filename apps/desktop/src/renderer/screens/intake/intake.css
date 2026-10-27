@@ -399,11 +399,17 @@
 }
 
 /* The bulk highlight, while a bulk button has hover or focus: the checked
-   rows it leaves alone fade, and the rows it acts on get an accent rule at
-   their left edge. It shows with no transition, so it keeps up with the
+   rows it leaves alone step back through colour, each text one step quieter
+   (the title and the state from the ink to the muted ink, the second line
+   and the end of the row to the faint ink), and the rows it acts on get an
+   accent rule at their left edge. The marks, the faces and the sizes stay
+   as they are. It shows with no transition, so it keeps up with the
    pointer. Not in the drawing, which draws no highlight: spec 17's. */
-.ask-item.is-kept {
-  opacity: 0.4;
+.ask-item.is-kept :is(.ask-title, .ask-state) {
+  color: var(--muted);
+}
+.ask-item.is-kept :is(.ask-sub, .ask-until) {
+  color: var(--faint);
 }
 .ask-item.is-acted::before {
   content: "";

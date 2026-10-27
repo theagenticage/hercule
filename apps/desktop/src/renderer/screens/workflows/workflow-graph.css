@@ -162,6 +162,12 @@
     inset 0 0 0 1px var(--node-rim),
     var(--node-lift);
   text-align: left;
+}
+/* Hover and open fade in, which answers the user. The run's state classes
+   change a card's fill and rim as well, and those change in one frame: the
+   card has no transition at rest, and a transition on the way out is not
+   told apart from a state change. */
+.node:is(:hover, .is-open) {
   transition:
     background var(--dur-1),
     box-shadow var(--dur-1);
@@ -273,21 +279,27 @@
    ink, the lead's icon in the faint ink, and the card flat on the page inside
    a dashed rim, as an edge the run did not take is dashed. They have no
    mark, as a step that waits to start has none, and that step keeps its
-   raised card and the full ink. The book draws these at half opacity. */
-.node:is(.is-unreached, .is-quiet, .is-cancelled, .is-skipped) {
+   raised card and the full ink. The book draws these at half opacity.
+   `:where` keeps the specificity low, so an open card (`.is-open`) and a
+   hovered one still change the rim, the lift and the fill as any card does. */
+.node:where(.is-unreached, .is-quiet, .is-cancelled, .is-skipped) {
   --node-fill: transparent;
   --node-rim: transparent;
   --node-lift: 0 0 #0000;
   --node-title-ink: var(--muted);
   --node-lead-ink: var(--faint);
 }
-.node:is(.is-unreached, .is-quiet, .is-cancelled, .is-skipped)::before {
+.node:where(.is-unreached, .is-quiet, .is-cancelled, .is-skipped)::before {
   content: "";
   position: absolute;
   inset: 0;
   border: 1px dashed var(--line);
   border-radius: inherit;
   pointer-events: none;
+}
+/* An open card shows its solid rim in place of the dashed one. */
+.node.is-open::before {
+  display: none;
 }
 .node.is-waiting {
   --node-ring: var(--you);
