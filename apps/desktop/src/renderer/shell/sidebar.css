@@ -167,15 +167,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.side-meta,
 .side-ask {
   font-size: var(--t-12);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.side-meta {
-  color: var(--faint);
 }
 /* The pencil before an unsent row's title, in the accent's ink. Lowered
    1.5px from the baseline, its strokes sit centred on the title's capitals. */
@@ -694,11 +690,13 @@ button.side-row--fewer {
 }
 
 /* Not in the book, which always has threads: the line an empty list shows,
-   in a row's second-line style (`side-meta`), where the first section's
-   heading would start. */
+   where the first section's heading would start. It is a sentence the user
+   reads, not metadata, so it is muted, not faint. */
 .side-empty {
   margin: 0;
   padding: 8px 10px 0;
+  color: var(--muted);
+  font-size: var(--t-12);
 }
 
 /* The Assistants section (the book's `.side-sec` with `.side-row--who`). The

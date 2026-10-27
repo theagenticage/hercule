@@ -38,8 +38,8 @@
   text-overflow: ellipsis;
 }
 
-/* The second line of a row in the column, in the sidebar's .side-meta
-   style: what the row's item holds, in faint ink. */
+/* The second line of a row in the column, as the sidebar's rows draw theirs:
+   what the row's item holds, in faint ink. */
 .column-meta {
   overflow: hidden;
   color: var(--faint);

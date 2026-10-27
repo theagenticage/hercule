@@ -108,7 +108,7 @@
 .thread-hover-more {
   height: calc(24px + var(--text-size-step));
   padding-left: 21px;
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-12);
   line-height: calc(24px + var(--text-size-step));
 }
@@ -116,6 +116,6 @@
   margin: 0;
   padding-top: 8px;
   border-top: 1px solid var(--line-soft);
-  color: var(--faint);
+  color: var(--muted);
   font-size: var(--t-11);
 }

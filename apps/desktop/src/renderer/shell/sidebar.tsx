@@ -272,7 +272,7 @@ export const Sidebar = memo(function Sidebar({
             <SystemSection />
           </>
         ) : (
-          items.length === 0 && <p className="side-meta side-empty">No threads yet</p>
+          items.length === 0 && <p className="side-empty">No threads yet</p>
         )}
       </SidebarList>
       <DoneToastHost place="sidebar" />
