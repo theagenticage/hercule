@@ -3,8 +3,6 @@
  * the Bureau book's run page draws them (docs/design/crew-bureau-2/desktop/
  * run.html, its data in workflows.js's `RUNS`), as the controller would
  * return them at the specimen's clock, Tuesday 29 September 2026, 09:41 UTC.
- * `pnpm compare:bureau` compares the page the app builds from them with the
- * book's page.
  *
  * The runs are the book's `?state=` runs, each written below as the book
  * writes its step timeline: one step record per row, in the row's order,
@@ -16,7 +14,7 @@
  *   and still running. Its security step's session waits on the user to
  *   allow `npm audit fix --force`, and open_pr waits for security. It
  *   works in a workspace of its own, which the app draws as a Workspace row
- *   that the book's page does not have (run-reference.ts adds it);
+ *   that the book's page does not have;
  * - `failed`: started by release_train on Friday 25 September at 14:00, and
  *   failed after 40 minutes at the iteration limit of the review loop.
  *
@@ -31,8 +29,7 @@
  * controller froze it when each run started.
  *
  * Three more runs, which the book does not draw, show a text generation
- * step. They are runs of Screen mail, a workflow of their own, and
- * `pnpm compare:bureau` does not compare them:
+ * step. They are runs of Screen mail, a workflow of their own:
  *
  * - `text-generation-done`: completed, its screen step having returned;
  * - `text-generation-waiting`: running, its screen step pending while text

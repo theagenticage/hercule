@@ -2,8 +2,6 @@
  * The records of the sidebar rows specimen (sidebar-rows.tsx): the four rows
  * the Workbench, refined drawing shows in `?state=rows`, which draw its
  * rule for the dots at 1, 2, 3 and 10 Threads, and the Threads behind them.
- * `pnpm compare:bureau` compares the specimen's sidebar with the drawing's,
- * edited by sidebar-rows-reference.ts to show the same data.
  *
  * Each row sits under a project of its own, so that every row has a project
  * heading, where the drawing puts a caption over each row. The Threads run on
@@ -33,7 +31,7 @@ import type { SidebarRecords } from "./shell-page";
  * The four projects, one per row, in the order the sidebar lists them: by
  * when each project's newest group started, newest first.
  */
-export const ROW_PROJECTS: ReadonlyArray<Project> = [
+const ROW_PROJECTS: ReadonlyArray<Project> = [
   buildProject("p-reporting", "reporting"),
   buildProject("p-webshop", "webshop"),
   buildProject("p-payments-api", "payments-api"),
@@ -42,9 +40,6 @@ export const ROW_PROJECTS: ReadonlyArray<Project> = [
 
 /** The session the specimen opens: the lead of the group of ten, whose row the drawing marks as open. */
 export const OPEN_SESSION_ID = "s-result-lead";
-
-/** The counts line the sidebar's foot draws for the specimen's sessions: five work, three wait on the user, eight are idle. */
-export const ROWS_COUNTS = { working: 5, waiting: 3, idle: 8 } as const;
 
 const PAYMENTS_REPO = buildRepo(
   "res-payments-api",

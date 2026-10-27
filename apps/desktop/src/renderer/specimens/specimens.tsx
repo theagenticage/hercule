@@ -3,6 +3,11 @@
  * components. `pnpm compare:bureau` compares it pixel for pixel with the
  * reference sheet, which draws the same cells with the Bureau book's crew.js.
  *
+ * index.html loads the book's tokens.css after the app's, so this sheet draws
+ * on the book's palette like the reference sheet does. Retuning an app theme
+ * therefore does not fail the comparison, which checks how the pieces are
+ * drawn. The faces, marks and icons use only tokens that the book defines.
+ *
  * The page takes two options from its URL:
  * - `?theme=whitehaven` or `?theme=orient-express`;
  * - `?animated=1` passes `animated` to every face, so the working faces tap

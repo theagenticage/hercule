@@ -15,7 +15,7 @@ Before writing code:
 1. **`GLOSSARY.md`** - the vocabulary. Use its terms exactly, in code identifiers too, and respect the "Avoid" lists.
 2. **The spec document that owns your area** - `docs/spec/` (map in `docs/spec/README.md`). Normative text you can build from.
 3. **The ADRs that touch your area** - `docs/adr/`. The "why" behind the spec.
-4. **For UI work**: `docs/design-language.md` for the web app; for the desktop app, `docs/spec/17-desktop-app.md` and the Crew Bureau pages it names.
+4. **For UI work**: `docs/design-language.md` for the web app; for the desktop app, `docs/spec/17-desktop-app.md`, which says what to build, and the goldens in `apps/desktop/ui-goldens/` and `tokens.css`, which say how it looks (the Crew Bureau book is the frozen record of how it was first drawn).
 
 If what you're about to build contradicts the spec or an ADR, stop and say so explicitly ("Contradicts ADR-0007 because..."). Never silently deviate; never silently pick one of several possible readings. If the spec leaves your question open, check `docs/spec/16-open-items.md` first - it may already be marked an implementer's choice or handed to a ticket.
 
@@ -155,11 +155,22 @@ pnpm build:binary  # vite build, the bundle budget check, then bun build --compi
 pnpm test:binary   # ./hercule serves the embedded web app beside the API
 ```
 
-The desktop pair works the same way. `pnpm test:desktop` launches the packaged app, so it needs the build before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. On a pull request, CI runs only `pnpm build:desktop` and `pnpm compare:bureau`, on macOS; on `main`, the `edge-build` job also runs `e2e/desktop/package.test.ts` on the signed app it builds for the `edge` prerelease. The rest of the end-to-end suite checks windows, pixels and timing, and CI's virtual Macs differ from a user's Mac in all three, so run `pnpm test:desktop` on a Mac before a PR that changes the desktop app.
+The desktop pair works the same way. `pnpm test:desktop` launches the packaged app, so it needs the build before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. On a pull request, CI runs `pnpm build:desktop` and `pnpm compare:bureau` on macOS, and `pnpm --filter @hercule/desktop ui:metrics` on Linux; on `main`, the `edge-build` job also runs `e2e/desktop/package.test.ts` on the signed app it builds for the `edge` prerelease. The rest of the end-to-end suite checks windows, pixels and timing, and CI's virtual Macs differ from a user's Mac in all three, so run `pnpm test:desktop` on a Mac before a PR that changes the desktop app.
 
 ```
 pnpm build:desktop # vite build of main, preload and renderer, the bundle budget check, then the release and test packages
 pnpm test:desktop  # Playwright drives the test package: window, security, fuses, IPC
+```
+
+The desktop app's looks are checked in two places. The app is its own pixel reference (ADR 0047):
+
+- **The goldens** are 60 PNGs in `apps/desktop/ui-goldens/`: the 12 screens of `capture:ui` at 1x, in the five themes. `ui:metrics` records them on Linux and compares every pixel exactly, in the same pass as its metrics and their ratchet. When a golden fails on a screen you meant to change, re-record with `--write-goldens`, then look at every golden that moved in the diff before committing it, as for the Android goldens below. Rendering that only a Mac shows, such as font smoothing, is not in them: check it by eye on a Mac.
+- **The piece sheet** (faces, marks, icons) is compared with the frozen Crew Bureau book by `pnpm compare:bureau`, on macOS. The book is not edited.
+
+```
+pnpm --filter @hercule/desktop ui:metrics                   # the metrics, the ratchet, and the goldens
+pnpm --filter @hercule/desktop ui:metrics --write-goldens   # re-record the goldens (never bypasses the ratchet)
+pnpm --filter @hercule/desktop ui:metrics --write-baseline  # re-write the metrics baseline; a worse number needs its reason in the PR body
 ```
 
 The Android app has a check of its own, which no `pnpm` command runs. CI runs it in a job of its own, `android`, on a macOS runner: the screenshot goldens are recorded on a Mac, and Linux rasterises vector shapes slightly differently. It needs JDK 21 (newer JDKs are too new for the Android Gradle plugin) and the Android SDK with platforms 36 and 37 and build-tools 37, located by `JAVA_HOME` and `ANDROID_HOME`; `apps/android/README.md` has the paths. Run it before a PR that changes `apps/android`:

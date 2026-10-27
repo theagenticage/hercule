@@ -2,9 +2,7 @@
  * The records of the Intake specimen (intake.tsx): Rogier's To do in the
  * Intake design (docs/design/intake-directions/asks/desktop/intake.html),
  * the same six asks as signals from the Sentry, GitHub, Linear and Slack
- * plugins, in the same order. `pnpm compare:bureau` compares the `review`
- * scene with the design's page, edited by intake-reference.ts to open the
- * same ask.
+ * plugins, in the same order.
  *
  * Each scene opens Intake on one state. `node scripts/capture-intake.ts`
  * captures each scene in both themes:
@@ -1360,7 +1358,7 @@ const buildDoneTripScene = (name: string, openIndex: number | null): IntakeScene
   };
 };
 
-/** Every scene, in the order they are captured. The first is the one `pnpm compare:bureau` compares. */
+/** Every scene, in the order they are captured. The first is the one the Intake screen is captured with. */
 export const INTAKE_SCENES: ReadonlyArray<IntakeScene> = [
   buildScene("review", REVIEW, REVIEW_URL),
   buildScene("changes", CHANGES, "https://github.com/rogier/webshop/pull/1298"),

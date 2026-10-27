@@ -5,6 +5,17 @@
     <title>Specimen sheet</title>
   </head>
   <body>
+    <!-- The Bureau book's own tokens and fonts, so that this sheet draws on the
+         same palette as reference.html whatever the app's theme looks like
+         now. scripts/sheet-server.ts serves docs/design under /design/.
+         - Colours: this stylesheet is not in a cascade layer, and the app's
+           tokens.css is (see styles/base-layer.css), so every token the book
+           defines takes the book's value here. A token the book does not
+           define keeps the app's.
+         - Fonts: a later @font-face for the same family wins. Vite adds the
+           app's stylesheets to <head> when specimens.tsx loads, so this link
+           sits in <body> to come after them. -->
+    <link rel="stylesheet" href="/design/crew-bureau-2/tokens.css" />
     <div id="sheet"></div>
     <script type="module" src="./specimens.tsx"></script>
   </body>

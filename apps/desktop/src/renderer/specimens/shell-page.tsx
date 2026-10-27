@@ -2,30 +2,21 @@
  * Draws the app's real shell and sidebar from a fixture's records, for the
  * specimens that show the shell:
  *
- * - sidebar.tsx, whose sidebar `pnpm compare:bureau` compares with the
- *   Bureau book's;
+ * - sidebar.tsx and sidebar-rows.tsx, which draw the sidebar;
  * - sidebar-states.tsx, which draws the sidebar states the book never draws;
- * - thread.tsx, which also opens a thread, and whose thread screen
- *   `pnpm compare:bureau` compares with the book's;
- * - draft.tsx, which opens a Draft Thread in a project, and whose draft
- *   screen `pnpm compare:bureau` compares with the book's;
+ * - thread.tsx and thread-header.tsx, which also open a thread;
+ * - draft.tsx, which opens a Draft Thread in a project;
  * - assistant-states.tsx, which draws the Assistants section and opens an
  *   assistant's page;
- * - settings-assistants.tsx, which opens Settings > Assistants, and whose
- *   main pane `pnpm compare:bureau` compares with the book's;
+ * - settings-assistants.tsx, which opens Settings > Assistants;
  * - settings-profiles.tsx, which opens Settings > Permission profiles, the
- *   list or one profile's page, and whose main pane `pnpm compare:bureau`
- *   compares with the book's;
- * - settings-connections.tsx, which opens Settings > Connections, and whose
- *   main pane `pnpm compare:bureau` compares with the book's;
+ *   list or one profile's page;
+ * - settings-connections.tsx, which opens Settings > Connections;
  * - intake.tsx, which opens Intake, with or without a signal's pane;
- * - workflows.tsx, which opens Workflows, and whose workflow list
- *   `pnpm compare:bureau` compares with the book's table;
- * - run.tsx, which opens a run's page, and whose main pane
- *   `pnpm compare:bureau` compares with the book's;
+ * - workflows.tsx, which opens Workflows;
+ * - run.tsx, which opens a run's page;
  * - discussions.tsx and wiki.tsx, which open Discussions and the Wiki, a
- *   list with an open Discussion or page, and whose main panes
- *   `pnpm compare:bureau` compares with the book's.
+ *   list with an open Discussion or page.
  *
  * The page builds a router whose routes have the app's route ids, so the
  * sidebar and the screens find the controller in their route context, and

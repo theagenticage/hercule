@@ -3,8 +3,7 @@
  * ten Threads of one workspace that the Workbench, refined drawing shows in
  * `?state=stress` (docs/design/sidebar-directions/shared/world.js, `STRESS`),
  * with its lead open. The drawing's header at `?header=a` draws one tab per
- * Thread; `pnpm compare:bureau` compares it with the app's header, edited by
- * thread-header-reference.ts to show the same data.
+ * Thread.
  *
  * The ten Threads keep the drawing's titles, roles, poses, ages and order:
  * each started and was last active the minutes before `SPECIMEN_NOW` that

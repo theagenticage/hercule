@@ -164,12 +164,13 @@ jobs:
       # Builds the release package and the test package, and checks the
       # renderer's bundle budget and main's startup file.
       - run: pnpm build:desktop
-      # Compares the app with the Crew Bureau book in docs/design/crew-bureau-2,
-      # pixel for pixel: its faces, icons and marks; its sidebar; its thread
-      # screen, at rest and scrolled; and its draft screen.
+      # Compares the app's faces, marks and icons with the Crew Bureau book in
+      # docs/design/crew-bureau-2, pixel for pixel, on the book's palette.
+      # It compares nothing else: the app's screens are compared with the
+      # app's own goldens by the `ui-metrics` job (ADR 0047).
       - run: pnpm compare:bureau
       # When the comparison fails, its captures show why, where the log
-      # cannot: the book's page, the app's screen, and the difference between
+      # cannot: the book's sheet, the app's sheet, and the difference between
       # them. They are kept for a week.
       - if: failure()
         uses: actions/upload-artifact@v7
@@ -184,6 +185,16 @@ jobs:
   # fails when any number is worse than `apps/desktop/ui-metrics.baseline.json`.
   # A regression is accepted only by editing the baseline in the pull request
   # and giving the reason in its body.
+  #
+  # The same pass compares the screenshots it takes (12 screens per theme, 60
+  # in all) with the goldens in `apps/desktop/ui-goldens/`, pixel for pixel
+  # (docs/adr/0047-the-desktop-app-is-its-own-pixel-reference.md). Each shard
+  # compares only the goldens of its themes, and every shard checks
+  # `provenance.json`; together the shards check every golden. A change that
+  # is meant to move pixels re-records them from a full run, with
+  # `pnpm --filter @hercule/desktop ui:metrics --write-goldens` (a shard
+  # cannot write goldens), and every golden that moved is looked at before it
+  # is committed.
   #
   # It runs on Linux in Playwright's Chromium, with no Electron and no
   # controller, so it needs no macOS runner. Its budget is 3 minutes of
@@ -235,7 +246,7 @@ jobs:
           # fonts), the scripts that load, measure and compare it, what the
           # specimens import from other packages (the IPC types and the
           # default appearance, the theme lists), and the toolchain.
-          touched=$(git diff --name-only "$BASE_SHA"...HEAD | grep -E '^(apps/desktop/src/renderer/|apps/desktop/src/ipc/|apps/desktop/scripts/ui-|apps/desktop/scripts/capture-ui\.ts$|apps/desktop/scripts/sheet-server\.ts$|apps/desktop/vite\.renderer\.config\.ts$|apps/desktop/package\.json$|apps/desktop/ui-metrics\.baseline\.json$|pnpm-lock\.yaml$|package\.json$|\.bun-version$|packages/client-core/|packages/contract/|\.github/workflows/ci\.yml$|\.github/actions/)' || true)
+          touched=$(git diff --name-only "$BASE_SHA"...HEAD | grep -E '^(apps/desktop/src/renderer/|apps/desktop/src/ipc/|apps/desktop/scripts/ui-|apps/desktop/scripts/capture-ui\.ts$|apps/desktop/scripts/sheet-server\.ts$|apps/desktop/vite\.renderer\.config\.ts$|apps/desktop/package\.json$|apps/desktop/ui-metrics\.baseline\.json$|apps/desktop/ui-goldens/|pnpm-lock\.yaml$|package\.json$|\.bun-version$|packages/client-core/|packages/contract/|\.github/workflows/ci\.yml$|\.github/actions/)' || true)
           if [ -n "$touched" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "The UI metrics apply, because of:"
@@ -266,9 +277,11 @@ jobs:
       - if: steps.changes.outputs.run == 'true'
         run: pnpm --filter @hercule/desktop ui:metrics --themes ${{ matrix.themes }}
 
-      # The log shows the report. The goldens and the numbers of the run show
-      # what moved, and `metrics.json` is what to write into the baseline when
-      # the change is meant. They are kept for a week.
+      # The log shows the report. The screenshots, the diff images of the
+      # goldens (`golden-diff/`, the differing pixels in magenta) and the
+      # numbers of the run show what moved, and `metrics.json` is what to
+      # write into the baseline when the change is meant. They are kept for a
+      # week.
       - if: failure() && steps.changes.outputs.run == 'true'
         uses: actions/upload-artifact@v7
         with:

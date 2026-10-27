@@ -30,9 +30,6 @@
  *   and the line under them asks the user to connect GitHub.
  *
  * Everything else is the sidebar specimen's (sidebar-fixture.ts).
- *
- * The reference sheet reads this module too (draft-reference.ts), to edit the
- * book's draft where the app draws the fixture's data instead of the book's.
  */
 import type { ThreadPicks } from "@hercule/client-core";
 import {

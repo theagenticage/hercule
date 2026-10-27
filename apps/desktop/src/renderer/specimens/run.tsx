@@ -1,9 +1,9 @@
 /**
  * The run page specimen: the app's real shell with a run's page open, its
  * run built from the Bureau book's runs of Ship release (run-fixture.ts).
- * `pnpm compare:bureau` compares it with the book's page
- * (docs/design/crew-bureau-2/desktop/run.html), opening both with the same
- * parameters, which the page reads as the book's page does:
+ * `capture:ui` captures it and `ui:metrics` measures it. The page reads
+ * the same parameters as the Bureau book's page
+ * (docs/design/crew-bureau-2/desktop/run.html):
  *
  * - `?state=waiting`, the default, opens the run that waits for an
  *   approval; `?state=failed` opens the run that failed at its iteration
@@ -17,8 +17,8 @@
  *   the header's action does.
  *
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`.
- * Like the book's page, it draws the graph without the fade at its cut edge
- * (see `stillGraphPane`).
+ * It draws the graph without the fade at its cut edge (see
+ * `stillGraphPane`).
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.

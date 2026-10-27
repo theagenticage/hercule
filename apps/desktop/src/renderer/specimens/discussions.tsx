@@ -1,9 +1,9 @@
 /**
  * The Discussions specimen: the app's real shell with Discussions open, its
  * list and its open Discussion built from the records of
- * discussions-fixture.ts. `pnpm compare:bureau` compares it with the book's
- * page (docs/design/crew-bureau-2/desktop/discussions.html), opening both with
- * the same parameter, which the page reads as the book's page does:
+ * discussions-fixture.ts. `capture:ui` captures it and `ui:metrics` measures
+ * it. The page reads the same `?view=` as the Bureau book's page
+ * (docs/design/crew-bureau-2/desktop/discussions.html):
  *
  * - `?view=table`, the default, shows the list as a table, with no Discussion
  *   open;

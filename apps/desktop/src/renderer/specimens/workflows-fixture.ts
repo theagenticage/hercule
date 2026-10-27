@@ -2,8 +2,7 @@
  * The records of the Workflows specimen (workflows.tsx): the 44 workflows of
  * the Bureau book's workflow list (docs/design/crew-bureau-2/desktop/
  * workflows.html), as the controller would return them at the specimen's
- * clock, Tuesday 29 September 2026, 09:41 UTC. `pnpm compare:bureau`
- * compares the list the app builds from them with the book's table.
+ * clock, Tuesday 29 September 2026, 09:41 UTC.
  *
  * The records are the reads the list is built from, so the specimen goes
  * through the app's real row builder: the workflows, their triggers, each

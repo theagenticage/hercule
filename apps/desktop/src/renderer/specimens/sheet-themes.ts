@@ -6,14 +6,15 @@
  */
 
 /**
- * The two themes every sheet is compared with the Bureau book in: Whitehaven
- * (light) and Orient Express (dark). The book draws its pages in these two.
+ * The two themes the Bureau book draws its pages in, and so the two themes
+ * `pnpm compare:bureau` compares the sheet of pieces in: Whitehaven (light)
+ * and Orient Express (dark).
  */
 export const THEMES = ["whitehaven", "orient-express"];
 
 /**
  * All five Bureau themes, in the order tokens.css defines them. A capture for
- * a check by eye uses these, because the book draws no page to compare the
- * other three with.
+ * a check by eye uses these, because the book draws no page in the
+ * other three.
  */
 export const ALL_THEMES = ["whitehaven", "styles", "orient-express", "nile", "end-house"];

@@ -20,9 +20,6 @@
  * - Each Connection received the book's count of events in the last 24
  *   hours, spread over the hours unevenly, with Sentry's and GitHub's rising
  *   in the later hours, as the book draws them.
- *
- * The reference module (settings-connections-reference.ts) reads this module
- * too, to edit the book's page where the app draws the fixture's words.
  */
 import type {
   Connection,
@@ -114,14 +111,14 @@ const buildConnection = (
 });
 
 /** Intercom, which failed: its health reads the controller's detail. */
-export const FAILED_INTERCOM: Connection = {
+const FAILED_INTERCOM: Connection = {
   ...buildConnection("c-intercom", "intercom/intercom", "support", "Acme support"),
   status: "error",
   statusDetail: "reconnecting since 09:12",
 };
 
 /** The Connections, in the order the book lists its event sources. */
-export const CONNECTIONS: ReadonlyArray<Connection> = [
+const CONNECTIONS: ReadonlyArray<Connection> = [
   buildConnection("c-sentry", "sentry/sentry", "webshop-prod", "Acme · rogier"),
   buildConnection("c-github", "github/github", "rogier", "rogier-acme"),
   buildConnection("c-stripe", "stripe/stripe", "live", "Acme Inc."),
@@ -177,7 +174,7 @@ const EVENT_COUNTS: EventCountsByConnection = {
 /**
  * The records the specimen draws beside the section: the Settings >
  * Assistants specimen's sidebar with its first four threads, as the
- * Appearance specimen draws it. The comparison covers only the main pane.
+ * Appearance specimen draws it. The main pane is what the page is about.
  */
 export const CONNECTIONS_SIDEBAR_RECORDS: SidebarRecords = {
   ...SETTINGS_ASSISTANTS_RECORDS,

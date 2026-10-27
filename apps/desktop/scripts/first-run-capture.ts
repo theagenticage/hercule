@@ -14,8 +14,7 @@
  *
  * A state the book does not draw gets only its app capture. Then it prints
  * how many pixels differ in each pair and exits with 0. It fails no
- * comparison: the first run is checked by eye, and `pnpm compare:bureau` is
- * the comparison that gates.
+ * comparison: the first run is checked by eye.
  *
  * Electron loads this file as TypeScript by stripping its types, so it uses
  * only syntax that stripping can erase: no enums, namespaces or parameter

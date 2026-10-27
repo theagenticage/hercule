@@ -197,7 +197,8 @@ const viteAssetUrlSyntax = {
 
 /**
  * The desktop renderer's specimen sheets are a development tool for
- * `pnpm compare:bureau`, served by the dev server alone. A renderer file
+ * `pnpm compare:bureau`, `capture:ui` and `ui:metrics`, served by the dev
+ * server alone. A renderer file
  * outside them that imported them would put them in the release app.
  */
 const specimensMessage =
@@ -321,13 +322,9 @@ export default tseslint.config(
     },
   },
   {
-    // The reference sheet, and the references' redrawn faces (drawn by
-    // sheet-page.ts), draw the Bureau book's pieces, which the book's crew.js
-    // returns as strings of markup.
-    files: [
-      "apps/desktop/src/renderer/specimens/reference.ts",
-      "apps/desktop/src/renderer/specimens/sheet-page.ts",
-    ],
+    // The reference sheet draws the Bureau book's pieces, which the book's
+    // crew.js returns as strings of markup.
+    files: ["apps/desktop/src/renderer/specimens/reference.ts"],
     rules: {
       "no-restricted-syntax": browserSyntax({ more: desktopRendererSyntax }),
     },

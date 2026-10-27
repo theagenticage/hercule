@@ -1,7 +1,7 @@
 /**
  * Captures the Office as the first run furnishes it, beside the Bureau book's
  * first run, for a check by eye: `pnpm --filter @hercule/desktop capture:room`.
- * It fails no comparison; `pnpm compare:bureau` is the comparison that gates.
+ * It fails no comparison.
  *
  * It serves the sheets and runs Electron with scripts/room-capture.ts as its
  * main file (see scripts/sheet-server.ts), which writes each step's pair, and

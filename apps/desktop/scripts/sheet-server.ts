@@ -20,7 +20,7 @@ const packageDir = fileURLToPath(new URL("..", import.meta.url));
  * The folder of every design. The book's pages load files from outside the
  * book's own folder: session-active.html loads ../../shared/page.js.
  */
-export const designDir = fileURLToPath(new URL("../../../docs/design", import.meta.url));
+const designDir = fileURLToPath(new URL("../../../docs/design", import.meta.url));
 
 /** The content type of each kind of file the designs serve. Anything else is not served. */
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
@@ -89,7 +89,7 @@ async function runElectron(
       // Each change to a page redraws its tiles whole. By default Chromium
       // redraws only the changed part of a tile, and an antialiased edge
       // that crosses that part's border can come out different. A book page
-      // is drawn by the book's script and again after the reference module's
+      // is drawn by the book's script and again after a capture module's
       // edits, and whether the first drawing had reached the tiles depends
       // on timing. So the same book page came out two ways, about one load
       // in two, though its layout was the same to the sub-pixel: the graph's
