@@ -14,11 +14,12 @@
     "scripts/**/*.ts",
     "vite.*.config.ts",
     "vitest.*.config.ts",
-    // The motion test reads every stylesheet of the renderer with `node:fs`,
-    // and each route folder's React Compiler test compiles the pages' sources
+    // The motion test and the font features test read every stylesheet of the
+    // renderer with `node:fs`, and each route folder's React Compiler test compiles the pages' sources
     // it reads the same way, so both belong to the Node program, although each
     // sits beside the files it checks. tsconfig.renderer.json leaves them out.
     "src/renderer/styles/motion.test.ts",
+    "src/renderer/styles/fonts.test.ts",
     "src/renderer/routes/**/react-compiler.test.ts"
   ]
 }

@@ -167,6 +167,7 @@
   border-top: 1px solid var(--line-soft);
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
+  font-feature-settings: normal;
   font-size: 12px;
 }
 .skill-plus {
@@ -178,12 +179,14 @@
 .skill-changes-head :is(.skill-plus, .skill-minus) {
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
+  font-feature-settings: normal;
   font-size: 12px;
 }
 .skill-changes-row .chip {
   height: 18px;
   padding: 0 6px;
   font-family: var(--font-ui);
+  font-feature-settings: var(--font-ui-features);
   font-variation-settings: normal;
   font-size: var(--t-11);
 }
@@ -203,6 +206,7 @@
 .skill-omitted {
   color: var(--faint);
   font-family: var(--font-ui);
+  font-feature-settings: var(--font-ui-features);
   font-variation-settings: normal;
   font-size: var(--t-12);
 }
@@ -213,6 +217,7 @@
   background: var(--sunken);
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
+  font-feature-settings: normal;
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -317,6 +322,7 @@
   overflow: hidden;
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
+  font-feature-settings: normal;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -345,6 +351,7 @@
   color: var(--faint);
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
+  font-feature-settings: normal;
   font-size: 12px;
   text-align: right;
 }

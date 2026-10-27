@@ -32,6 +32,7 @@
   color: var(--faint);
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
+  font-feature-settings: normal;
   font-size: var(--t-11);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -74,6 +75,7 @@
   border-radius: 0 0 var(--code-block-radius) var(--code-block-radius);
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
+  font-feature-settings: normal;
   font-size: 12.5px;
   line-height: 1.6;
   white-space: pre;

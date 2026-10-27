@@ -520,6 +520,7 @@
 .ev-stamp {
   color: var(--ink);
   font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
 }
 
 /* The foot under To do: how many signals were cleared today. */
@@ -1079,6 +1080,7 @@
 }
 .b-words code {
   font-family: var(--font-mono);
+  font-feature-settings: normal;
   font-size: 0.9em;
 }
 /* A fenced code block (code-block.tsx) in Intake's smaller type and corners. */

@@ -961,7 +961,10 @@ A compact workspace details surface shows runner, actual or last-observed branch
   - The action's colour follows the same line: `danger` for what cannot be undone, `accent` otherwise. Focus asks a different question, so a grant change is `accent` and still focuses Cancel.
   - A dialog's error shows under its body in `--fail` ink, as an alert, and the dialog stays open.
 - **Self-hosted fonts:** fonts are served from the app bundle, and nothing is fetched from a third party.
-  - Bricolage Grotesque is the UI face.
+  - ~~Bricolage Grotesque is the UI face.~~ Inter is the UI face, page titles included. *(Amended 2026-10-26, [#859](https://github.com/theagenticage/hercule/issues/859).)*
+    - UI text turns on Inter's tailed `l` (`cv05`) and serifed `I` (`cv08`). The slashed zero stays off: in UI times and counts it reads as code. Numbers that must line up, such as ages, counts and times, also take tabular figures. Prose keeps proportional figures.
+    - Code and the Deco face never inherit those features: Recursive and Limelight have their own zero. UI text inside a code block turns them back on.
+    - The font files are Inter 4.1, cut to Latin and Latin Extended and keeping the `wght` and `opsz` axes. The browser picks the optical size from the font size.
   - Limelight is used only for the wordmark and numerals.
   - Recursive is used only for code.
 
@@ -2609,7 +2612,7 @@ These rules keep the budgets:
      - by Chromium's source, one `backdrop-filter` anywhere in the window turns off macOS's own compositing of the window's layers (Core Animation), so the GPU process composites every layer of the window for each frame the Office draws. This cause was read from the source. A later measurement found the GPU process woke as often with glass on the top bar alone as with all of the glass, so the compositing does change. But the cost follows how much is blurred: glass on the top bar alone cost the GPU process about 4 points, a quarter of what all of the glass cost with v1's settings (14). That was one session, with the camera at rest.
    - So the window draws no blur while the Office is open *(decided 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*. The Office sets the glass level to 0 for the whole window, through the same tokens as Reduce transparency. Its top bar, card, name tags and room labels, and the thread drawer's composer and Requests dock, draw as solid Bureau surfaces, with the glass's rim and shadow. Leaving the Office brings the glass back. [Research: frosted glass over the Office at close to no cost (#341)](https://github.com/theagenticage/hercule/issues/341) looks for a way to bring it back over the Office.
 6. **The first paint is cheap:**
-   - Only the Latin subset of Bricolage Grotesque (131 kB) is preloaded.
+   - Only the Latin subset of ~~Bricolage Grotesque (131 kB)~~ Inter is preloaded. *(Amended 2026-10-26, [#859](https://github.com/theagenticage/hercule/issues/859).)*
    - Limelight and Recursive load the first time text uses them.
    - *(Added 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* Everything the first screen imports statically is built into one chunk, the first-screen chunk. Split into files, the first screen costs more bytes: each file is compressed apart, and the files import and export names from each other, which the minifier cannot shorten across a file boundary. One chunk measured 7.4 kB smaller gzipped (see [Measured](#measured)). The app's files are read from the local disk, so splitting buys no caching in return.
    - A screen or dialog that is not on the first screen is imported with `import()`, and is a chunk of its own, loaded the first time it shows: the first run, the project picker, the New project and provider login dialogs, and the draft's starter threads. *(Amended 2026-10-04, [#402](https://github.com/theagenticage/hercule/issues/402).)* Each section of [Settings](#settings) is a chunk of its own too. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* So is [Intake](#intake). *(Amended 2026-10-11, [#548](https://github.com/theagenticage/hercule/issues/548).)* So are the workflow list, the open workflow and a run's page. The graph's layout loads with the first of the last two to open, and the YAML parser with the open workflow only, because a run's page draws the run's plan, which is already parsed. Neither loads at launch ([What Workflows costs](#what-workflows-costs)). *(Amended 2026-10-15, [#669](https://github.com/theagenticage/hercule/issues/669).)* So are the Discussions and Wiki routes: each list, the open Discussion and the open wiki page ([What Discussions and Wiki cost](#what-discussions-and-wiki-cost)).
@@ -4323,6 +4326,21 @@ The sidebar was drawn from a specimen with 3,000 and with 200 threads, every sec
 - **Before places no row again,** so its text grows inside rows that keep their height, and a scrolled list shows the same rows. After costs one more render, plus one more layout and style pass because the rows' heights are read from the computed style. A list scrolled away from the top costs another render and layout, because the scroll position is in pixels and is put back so that the same row stays at the top (`use-keep-top-item.ts`); the rows that mount for that position are mounted twice, once at the old position in the new heights and once at the right one. At the top that correction does nothing. The 200-thread and the 3,000-thread lists stay inside one frame of the main thread in the quiet runs; the 3,000-thread list scrolled to the middle is over it in the busy runs.
 - **The development build reads far higher** (53 ms and 37 ms of script at 3,000 threads in one run), because React's development build does the same renders much slower. The figures above are the production build's.
 - **Not measured:** the Performance panel's recording of a change in the packaged app on a Mac, which the [budget](#budgets) names for a change of the Text size. It is still to be recorded once on a Mac, with a Performance-panel recording of one change in the packaged app. Memory was not measured as a difference: the heap reading after a forced collection was the same, 76.6 MB, with and without the change, at the tool's resolution. The Office's tags and labels are measured again once per change.
+
+**Inter as the UI font,** measured 2026-10-27 on Linux with `pnpm --filter @hercule/desktop build`, for [#859](https://github.com/theagenticage/hercule/issues/859). Inter 4.1 replaces Bricolage Grotesque. It ships as two subsets of the official file, a latin one that is preloaded and a latin-ext one that loads only when a character in its range shows.
+
+| Measure | Budget | Before, Bricolage | After, Inter |
+|---|---|---|---|
+| Processes | none added | - | none added |
+| Memory, work while idle, and per streamed token | none added | - | none added |
+| The preloaded UI font file | - | 131,548 bytes | 73,268 bytes |
+| Both UI font files | - | 185,136 bytes (131,548 + 53,588) | 203,076 bytes (73,268 + 129,808) |
+| All woff2 files in `out/renderer` | - | 513,204 bytes | 531,144 bytes |
+| All CSS in `out/renderer` | - | 196,949 bytes | 197,913 bytes |
+| The first screen's CSS | - | 66,860 bytes | 66,968 bytes |
+
+- The latin-ext file is larger than Bricolage's because Inter covers more of the range; it is not preloaded, so a page in Latin script never fetches it.
+- A cold packaged launch and `firstScreen.report` need a Mac and are still to measure.
 
 ## Slices
 

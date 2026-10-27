@@ -223,6 +223,7 @@
 }
 .office-room .wall-word {
   font-family: var(--font-deco);
+  font-feature-settings: normal;
   letter-spacing: 0.04em;
   fill: color-mix(in oklab, var(--ink) 50%, var(--room-inlay-2));
 }

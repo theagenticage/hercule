@@ -461,10 +461,10 @@ input.field {
 }
 
 /* Chromium draws each character of a password as a bullet (U+2022) in the
-   field's font. Bricolage's bullet is 2.5px across at 13px, less than half
-   the bullet of a macOS secure text field. Enlarging it with size-adjust does
-   not help: a glyph grows away from the baseline, so at the right size the
-   bullet floats above the x-height.
+   field's font. Inter's bullet is 4.1px across at 13px (0.3125em, read from
+   the font's outline), less than the 5.5px bullet of a macOS secure text
+   field. Enlarging it with size-adjust does not help: a glyph grows away from
+   the baseline, so at the right size the bullet floats above the x-height.
 
    So this face takes only that one character from Geneva, which macOS
    installs in /System/Library/Fonts. Measured at 13px against an
@@ -472,18 +472,18 @@ input.field {
    - Geneva's bullet is 5.5px across, as the native bullet is.
    - Its centre is 5.1px above the baseline; the native one is 5px.
    The app runs only on macOS. Another platform would need its own local()
-   source. Without Geneva, the bullet falls back to Bricolage's small one.
+   source. Without Geneva, the bullet falls back to Inter's smaller one.
 
-   Bricolage stays the field's first font, so the line height, the placeholder
-   and the caret follow it. The ascent and descent below are Bricolage's.
-   With Geneva's own, a line of bullets sits 0.5px lower than an empty line,
-   and the caret jumps down at the first character. */
+   Inter stays the field's first font, so the line height, the placeholder
+   and the caret follow it. The ascent and descent below are Inter's own
+   (1984 and 494 of 2048 units). With Geneva's, a line of bullets would sit
+   lower than an empty line, and the caret would jump at the first character. */
 @font-face {
   font-family: "Password bullet";
   src: local("Geneva");
   unicode-range: U+2022;
-  ascent-override: 93%;
-  descent-override: 27%;
+  ascent-override: 96.875%;
+  descent-override: 24.12%;
 }
 input.field[type="password"] {
   font-family: "Password bullet", var(--font-ui);
@@ -606,6 +606,7 @@ input.field[type="password"]:not(:placeholder-shown) {
 .field > input.mono {
   font-family: var(--font-mono);
   font-variation-settings: var(--mono-axes);
+  font-feature-settings: normal;
   font-size: var(--t-12);
 }
 
@@ -780,6 +781,7 @@ input.field[type="password"]:not(:placeholder-shown) {
 .time {
   color: var(--faint);
   font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 /* A small round dot. `.dot--fail` is the book's tomato dot: something

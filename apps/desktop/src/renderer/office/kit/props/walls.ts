@@ -260,7 +260,7 @@ function drawSign(canvas: HTMLCanvasElement, count: number): void {
   context.textAlign = "center";
   context.textBaseline = "alphabetic";
   context.fillStyle = brass;
-  context.font = '640 64px "Bricolage Grotesque", sans-serif';
+  context.font = '640 64px "Inter", sans-serif';
   context.letterSpacing = "10px";
   context.fillText("NOW SERVING", canvas.width / 2, 96);
   // Two thin rules either side of the numeral, level with its middle.
@@ -268,7 +268,7 @@ function drawSign(canvas: HTMLCanvasElement, count: number): void {
   context.fillRect(canvas.width - 380, 299, 230, 5);
   context.letterSpacing = "0px";
   context.fillStyle = numeral;
-  context.font = '210px Limelight, "Bricolage Grotesque", serif';
+  context.font = "210px Limelight, serif";
   context.fillText(String(Math.min(99, Math.max(0, count))), canvas.width / 2, 372);
 }
 

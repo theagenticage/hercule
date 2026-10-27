@@ -82,6 +82,7 @@
 .asks-zero-num {
   color: var(--ink);
   font-family: var(--font-deco);
+  font-feature-settings: normal;
   font-size: 64px;
   line-height: 1;
   font-variant-numeric: lining-nums proportional-nums;
