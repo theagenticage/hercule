@@ -163,15 +163,9 @@
     var(--node-lift);
   text-align: left;
 }
-/* Hover and open fade in, which answers the user. The run's state classes
-   change a card's fill and rim as well, and those change in one frame: the
-   card has no transition at rest, and a transition on the way out is not
-   told apart from a state change. */
-.node:is(:hover, .is-open) {
-  transition:
-    background var(--dur-1),
-    box-shadow var(--dur-1);
-}
+/* A card's fill and rim change in one frame, on hover and open as well as
+   when the run's state changes: CSS cannot tell what caused a change, and a
+   state change must never be seen halfway. */
 .node--step {
   --node-fill: var(--raised);
   --node-rim: var(--line-soft);
