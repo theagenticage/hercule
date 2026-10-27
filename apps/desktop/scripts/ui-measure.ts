@@ -27,6 +27,7 @@ import type {
 } from "../src/renderer/specimens/ui-probe-types.ts";
 import { screenshotVariant } from "./ui-capture.ts";
 import {
+  COMPOSER_SELECTOR,
   GLASS_PERCENTS,
   isDarkTheme,
   RUN_WIDE_THEME,
@@ -37,6 +38,7 @@ import {
 import {
   checkFocusRing,
   checkNonTextPart,
+  measureBoundaryContrast,
   countDifferingPixels,
   measureFragmentContrast,
   type DecodedImage,
@@ -399,6 +401,28 @@ async function countFailingNonTextParts(
   return failing;
 }
 
+/**
+ * Returns `nonText.composerBoundary` for a screen that has a composer: the
+ * WCAG ratio its edge reaches (the lowest of its boxes), read from the golden.
+ * Returns nothing for a screen without a composer.
+ */
+async function measureComposerBoundary(
+  probe: PageProbe,
+  golden: DecodedImage,
+  variant: UiVariant,
+): Promise<MetricValues> {
+  const hasComposer = variant.screen.nonTextParts.some(
+    ({ selector }) => selector === COMPOSER_SELECTOR,
+  );
+  if (!hasComposer) return {};
+  const [boxes] = await probe.measureParts([COMPOSER_SELECTOR]);
+  return {
+    "nonText.composerBoundary": Math.min(
+      ...(boxes ?? []).map((box) => measureBoundaryContrast(golden, box, METRICS_SCALE)),
+    ),
+  };
+}
+
 /** How long each kind of work took on one page, in seconds. */
 export interface PageTimings {
   readonly contrast: number;
@@ -502,6 +526,7 @@ export async function measurePage(
   lap("other");
 
   add({ "nonText.failing": await countFailingNonTextParts(probe, golden, variant) });
+  add(await measureComposerBoundary(probe, golden, variant));
 
   const targets = await probe.collectTargets();
   add(summarizeTargets(targets));

@@ -79,6 +79,25 @@ describe("compareWithBaseline", () => {
     expect(result.passed).toBe(true);
   });
 
+  it("ratchets the composer's edge contrast as a ratio that must not fall", () => {
+    const key = "orient-express/thread/nonText.composerBoundary";
+    expect(METRICS["nonText.composerBoundary"]?.ratchet).toBe(true);
+    expect(METRICS["nonText.composerBoundary"]?.direction).toBe("higher");
+    expect(compareWithBaseline({ [key]: 2.2 }, { [key]: 2.3 }).worse).toHaveLength(1);
+    expect(compareWithBaseline({ [key]: 2.296 }, { [key]: 2.3 }).worse).toEqual([]);
+    expect(compareWithBaseline({ [key]: 2.5 }, { [key]: 2.3 }).better).toHaveLength(1);
+  });
+
+  it("ratchets the line and the surface step of a theme, but only reports the divider", () => {
+    expect(METRICS["line.minLc"]?.ratchet).toBe(true);
+    expect(METRICS["surface.minStep"]?.ratchet).toBe(true);
+    expect(METRICS["divider.minLc"]?.ratchet).toBe(false);
+    const key = "orient-express/tokens/divider.minLc";
+    const result = compareWithBaseline({ [key]: 3 }, { [key]: 8 });
+    expect(result.worse).toEqual([]);
+    expect(result.passed).toBe(true);
+  });
+
   describe("the ink floor in a dark theme", () => {
     const dark = "nile/thread/contrast.ink.minLc";
 

@@ -26,7 +26,7 @@
   min-height: 0;
   padding: 14px;
   overflow-y: auto;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
 }
 /* The fieldset only disables the fields while a save runs, so the
    browser's margin, padding, border and minimum width for one are reset. */
@@ -46,7 +46,7 @@
 }
 .configure-connection-group + .configure-connection-group {
   padding-top: 18px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
 }
 .configure-connection-group > h3 {
   margin: 0;

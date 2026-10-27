@@ -56,7 +56,12 @@ export interface FocusRingResult {
 /** Whether the edge or the mark of a control stands out from what surrounds it, and the pixel counts behind the answer. */
 export interface NonTextResult {
   readonly passes: boolean;
-  /** Device pixels in the examined region whose WCAG ratio against the outside colour is at least 3. */
+  /**
+   * For a mark, the device pixels of the box whose WCAG ratio against the
+   * outside colour is at least 3. For a boundary, the positions along the
+   * box's perimeter where the edge reaches that ratio (see
+   * `measureEdgeRatios`).
+   */
   readonly qualifyingPixels: number;
   /** The least `qualifyingPixels` that passes: the box's width plus its height, in device pixels. */
   readonly requiredPixels: number;
@@ -466,9 +471,9 @@ export function countDifferingPixels(
  * it, for WCAG 1.4.11. The outside colour is the most common colour in a band
  * 3 CSS px wide just outside `box`.
  *
- * - `boundary`: the examined pixels are a band 2 CSS px wide just inside the
- *   box's edge. A visible border passes by covering at least half of the
- *   band's perimeter with pixels that contrast with the outside.
+ * - `boundary`: the edge passes when it reaches a WCAG ratio of 3 along at
+ *   least half of the box's perimeter, read position by position (see
+ *   `measureEdgeRatios`). How thick the border is does not matter.
  * - `mark`: the examined pixels are the whole box. The mark passes by
  *   covering at least as many contrasting pixels as the box's width plus its
  *   height, which a line across the box does and a single dot does not.
@@ -483,38 +488,26 @@ export function checkNonTextPart(
   kind: "boundary" | "mark",
   scale: number,
 ): NonTextResult {
-  const boxPixels = toPixelRect(box, scale);
-  const outerBand = toPixelRect(
-    {
-      left: box.left - OUTSIDE_BAND,
-      top: box.top - OUTSIDE_BAND,
-      right: box.right + OUTSIDE_BAND,
-      bottom: box.bottom + OUTSIDE_BAND,
-    },
-    scale,
-  );
-  const outsideColour = findModeColour(countColoursIn(image, outerBand, boxPixels));
+  if (kind === "boundary") {
+    const { outsideColour, ratios } = measureEdgeRatios(image, box, scale);
+    const qualifyingPixels = ratios.filter((ratio) => ratio >= MINIMUM_NON_TEXT_RATIO).length;
+    const requiredPixels = ratios.length / 2;
+    return {
+      passes: outsideColour !== null && qualifyingPixels >= requiredPixels,
+      qualifyingPixels,
+      requiredPixels,
+      outsideColour,
+    };
+  }
   const requiredPixels = (box.right - box.left + (box.bottom - box.top)) * scale;
+  const outsideColour = readOutsideColour(image, box, scale);
   if (outsideColour === null) {
     return { passes: false, qualifyingPixels: 0, requiredPixels, outsideColour: null };
   }
-
-  const innerBox =
-    kind === "boundary"
-      ? toPixelRect(
-          {
-            left: box.left + BOUNDARY_BAND,
-            top: box.top + BOUNDARY_BAND,
-            right: box.right - BOUNDARY_BAND,
-            bottom: box.bottom - BOUNDARY_BAND,
-          },
-          scale,
-        )
-      : null;
   const outside = packColour(outsideColour);
   const hasContrast = buildContrastMemo();
   let qualifyingPixels = 0;
-  forEachPixel(image, boxPixels, innerBox, (packed) => {
+  forEachPixel(image, toPixelRect(box, scale), null, (packed) => {
     if (hasContrast(outside, packed)) {
       qualifyingPixels += 1;
     }
@@ -525,4 +518,98 @@ export function checkNonTextPart(
     requiredPixels,
     outsideColour,
   };
+}
+
+/**
+ * Returns the most common colour in the band 3 CSS px wide just outside
+ * `box`, or null when that band has no pixels on the image.
+ */
+function readOutsideColour(image: DecodedImage, box: ProbeRect, scale: number): ProbeColour | null {
+  const outerBand = toPixelRect(
+    {
+      left: box.left - OUTSIDE_BAND,
+      top: box.top - OUTSIDE_BAND,
+      right: box.right + OUTSIDE_BAND,
+      bottom: box.bottom + OUTSIDE_BAND,
+    },
+    scale,
+  );
+  return findModeColour(countColoursIn(image, outerBand, toPixelRect(box, scale)));
+}
+
+/**
+ * Measures how well the edge of `box` stands out, position by position along
+ * its perimeter. Each column of the box gives two positions, one in the band
+ * 2 CSS px deep along the top and one along the bottom; each row gives two,
+ * along the left and the right. So there are twice the box's width plus
+ * height, in device pixels. A position's ratio is the highest WCAG ratio of
+ * its band pixels against the outside colour (see `readOutsideColour`), so a
+ * 1 px border counts as much as a 2 px one, and a thick border on one side
+ * cannot stand in for the others. A position with no pixels on the image has
+ * ratio 1.
+ *
+ * Returns the outside colour and the ratios. With no outside colour, every
+ * ratio is 1.
+ */
+function measureEdgeRatios(
+  image: DecodedImage,
+  box: ProbeRect,
+  scale: number,
+): { readonly outsideColour: ProbeColour | null; readonly ratios: ReadonlyArray<number> } {
+  const { left, top, right, bottom } = toPixelRect(box, scale);
+  const depth = Math.round(BOUNDARY_BAND * scale);
+  const outsideColour = readOutsideColour(image, box, scale);
+  if (outsideColour === null) {
+    return { outsideColour, ratios: Array<number>(2 * (right - left + bottom - top)).fill(1) };
+  }
+  const ratioByColour = new Map<number, number>();
+  const readRatio = (x: number, y: number): number => {
+    if (x < 0 || y < 0 || x >= image.width || y >= image.height) return 1;
+    const packed = readPackedPixel(image, x, y);
+    let ratio = ratioByColour.get(packed);
+    if (ratio === undefined) {
+      ratio = computeWcagContrast(unpackColour(packed), outsideColour);
+      ratioByColour.set(packed, ratio);
+    }
+    return ratio;
+  };
+  const ratios: number[] = [];
+  for (let x = left; x < right; x += 1) {
+    let topRatio = 1;
+    let bottomRatio = 1;
+    for (let step = 0; step < depth; step += 1) {
+      topRatio = Math.max(topRatio, readRatio(x, top + step));
+      bottomRatio = Math.max(bottomRatio, readRatio(x, bottom - 1 - step));
+    }
+    ratios.push(topRatio, bottomRatio);
+  }
+  for (let y = top; y < bottom; y += 1) {
+    let leftRatio = 1;
+    let rightRatio = 1;
+    for (let step = 0; step < depth; step += 1) {
+      leftRatio = Math.max(leftRatio, readRatio(left + step, y));
+      rightRatio = Math.max(rightRatio, readRatio(right - 1 - step, y));
+    }
+    ratios.push(leftRatio, rightRatio);
+  }
+  return { outsideColour, ratios };
+}
+
+/**
+ * Returns the WCAG contrast ratio that the edge of `box` reaches along at
+ * least half of its perimeter: the ratios of `measureEdgeRatios`, sorted
+ * highest first, read at the middle position. So `checkNonTextPart` passes the boundary exactly
+ * when this number is at least 3.
+ *
+ * Returns 1 (no contrast at all) when there are no pixels outside the box to
+ * compare with.
+ */
+export function measureBoundaryContrast(
+  image: DecodedImage,
+  box: ProbeRect,
+  scale: number,
+): number {
+  const { ratios } = measureEdgeRatios(image, box, scale);
+  const sorted = [...ratios].sort((first, second) => second - first);
+  return sorted[ratios.length / 2 - 1] ?? 1;
 }

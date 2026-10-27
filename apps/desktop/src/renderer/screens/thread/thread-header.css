@@ -157,7 +157,7 @@
   width: 1px;
   height: 18px;
   padding: 0 6px 0 8px;
-  background: var(--line);
+  background: var(--rim);
   background-clip: content-box;
 }
 /* A tab whose label is the session's title, because it has no role, is cut

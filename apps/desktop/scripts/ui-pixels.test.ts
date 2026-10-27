@@ -12,6 +12,7 @@ import {
   countColours,
   countDifferingPixels,
   findModeColour,
+  measureBoundaryContrast,
   measureFragmentContrast,
   type DecodedImage,
 } from "./ui-pixels.ts";
@@ -415,6 +416,60 @@ describe("countDifferingPixels", () => {
   });
 });
 
+describe("measureBoundaryContrast", () => {
+  const box: ProbeRect = { left: 10, top: 10, right: 50, bottom: 30 };
+  const grey: ProbeColour = [118, 118, 118, 1];
+
+  it("returns the ratio of a border drawn on all sides, which is the check's own ratio", () => {
+    const image = buildImage(60, 40, WHITE);
+    paint(image, [10, 10, 50, 30], grey);
+    paint(image, [12, 12, 48, 28], WHITE);
+    const ratio = measureBoundaryContrast(image, box, 1);
+    expect(ratio).toBeCloseTo(computeWcagContrast(grey, WHITE), 6);
+    expect(checkNonTextPart(image, box, "boundary", 1).passes).toBe(ratio >= 3);
+  });
+
+  it("returns 1 for a box with no border", () => {
+    expect(measureBoundaryContrast(buildImage(60, 40, WHITE), box, 1)).toBe(1);
+  });
+
+  it("returns 1 for a border drawn on one short side only", () => {
+    const image = buildImage(60, 40, WHITE);
+    paint(image, [10, 10, 12, 30], grey);
+    expect(measureBoundaryContrast(image, box, 1)).toBe(1);
+  });
+
+  it("reads the weaker colour when the strong one covers less than half of the perimeter", () => {
+    const image = buildImage(60, 40, WHITE);
+    const pale: ProbeColour = [200, 200, 200, 1];
+    paint(image, [10, 10, 50, 30], pale);
+    paint(image, [12, 12, 48, 28], WHITE);
+    paint(image, [10, 10, 14, 30], grey);
+    expect(measureBoundaryContrast(image, box, 1)).toBeCloseTo(computeWcagContrast(pale, WHITE), 6);
+  });
+
+  it("reads the band at the device scale", () => {
+    const image = buildImage(120, 80, WHITE);
+    paint(image, [20, 20, 100, 60], grey);
+    paint(image, [24, 24, 96, 56], WHITE);
+    expect(measureBoundaryContrast(image, box, 2)).toBeCloseTo(computeWcagContrast(grey, WHITE), 6);
+  });
+
+  it("returns 1 for a thick border along the top only, though its pixels outnumber half the perimeter", () => {
+    const image = buildImage(60, 40, WHITE);
+    paint(image, [10, 10, 50, 12], grey);
+    expect(measureBoundaryContrast(image, box, 1)).toBe(1);
+    expect(checkNonTextPart(image, box, "boundary", 1).passes).toBe(false);
+  });
+
+  it("counts a border one device pixel thin as fully as a thick one", () => {
+    const image = buildImage(120, 80, WHITE);
+    paint(image, [20, 20, 100, 60], grey);
+    paint(image, [21, 21, 99, 59], WHITE);
+    expect(measureBoundaryContrast(image, box, 2)).toBeCloseTo(computeWcagContrast(grey, WHITE), 6);
+  });
+});
+
 describe("checkNonTextPart", () => {
   const box: ProbeRect = { left: 10, top: 10, right: 50, bottom: 30 };
   const grey: ProbeColour = [118, 118, 118, 1];
@@ -427,7 +482,7 @@ describe("checkNonTextPart", () => {
     expect(result.passes).toBe(true);
     expect(result.outsideColour).toEqual(WHITE);
     expect(result.requiredPixels).toBe(60);
-    expect(result.qualifyingPixels).toBe(40 * 20 - 36 * 16);
+    expect(result.qualifyingPixels).toBe(2 * (40 + 20));
   });
 
   it("fails a boundary with no border", () => {
@@ -445,7 +500,8 @@ describe("checkNonTextPart", () => {
     const image = buildImage(60, 40, WHITE);
     paint(image, [10, 10, 12, 30], grey);
     const result = checkNonTextPart(image, box, "boundary", 1);
-    expect(result.qualifyingPixels).toBe(40);
+    // The left side's 20 rows, and its two columns along the top and the bottom.
+    expect(result.qualifyingPixels).toBe(20 + 2 * 2);
     expect(result.passes).toBe(false);
   });
 
@@ -463,7 +519,7 @@ describe("checkNonTextPart", () => {
     const result = checkNonTextPart(image, box, "boundary", 2);
     expect(result.passes).toBe(true);
     expect(result.requiredPixels).toBe(120);
-    expect(result.qualifyingPixels).toBe(80 * 40 - 72 * 32);
+    expect(result.qualifyingPixels).toBe(2 * (80 + 40));
   });
 
   describe("marks", () => {
@@ -505,16 +561,20 @@ describe("checkNonTextPart", () => {
   });
 
   it("reads only the part of the band that is on the image", () => {
+    // The box reaches 4 px past the image's left edge, so its left side is not drawn.
     const image = buildImage(60, 40, WHITE);
-    paint(image, [0, 0, 60, 2], grey);
+    paint(image, [0, 10, 50, 30], grey);
+    paint(image, [0, 12, 48, 28], WHITE);
     const result = checkNonTextPart(
       image,
-      { left: 0, top: 0, right: 60, bottom: 20 },
+      { left: -4, top: 10, right: 50, bottom: 30 },
       "boundary",
       1,
     );
     expect(result.outsideColour).toEqual(WHITE);
-    expect(result.qualifyingPixels).toBe(120);
+    // The top and the bottom on the image, 50 columns each, and the right side's 20 rows.
+    expect(result.qualifyingPixels).toBe(2 * 50 + 20);
+    expect(result.requiredPixels).toBe(54 + 20);
     expect(result.passes).toBe(true);
   });
 });

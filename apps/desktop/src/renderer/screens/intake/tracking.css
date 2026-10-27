@@ -21,7 +21,7 @@
   flex: none;
   padding: 4px 10px 8px;
   background: var(--surface);
-  box-shadow: inset 0 1px 0 var(--line-soft);
+  box-shadow: inset 0 1px 0 var(--divider);
 }
 /* Opened, it covers the column from just under the hairline that closes the
    title bar, so the hairline runs on unbroken. The view switcher is covered:
@@ -47,7 +47,7 @@
 .tr-bar--back {
   flex: none;
   padding: 4px 10px;
-  box-shadow: inset 0 1px 0 var(--line-soft);
+  box-shadow: inset 0 1px 0 var(--divider);
 }
 .tr-bar-btn {
   display: flex;
@@ -667,14 +667,14 @@
   grid-template-columns: 132px minmax(0, 1fr);
   gap: 12px;
   padding: 7px 0;
-  box-shadow: inset 0 -1px 0 var(--line-soft);
+  box-shadow: inset 0 -1px 0 var(--divider);
   font-size: var(--t-13);
   line-height: 1.5;
 }
 .tr-pane .tr-out > div:first-child {
   box-shadow:
-    inset 0 1px 0 var(--line-soft),
-    inset 0 -1px 0 var(--line-soft);
+    inset 0 1px 0 var(--divider),
+    inset 0 -1px 0 var(--divider);
 }
 .tr-pane .tr-out dt {
   color: var(--muted);

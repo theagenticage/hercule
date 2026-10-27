@@ -15,6 +15,21 @@
      with the people in them.
    - Brass (--brass) is ornament only: the office's lamps and tubes, the book's rules. Never text,
      never a state.
+   - Lines come in three tokens. --line and --line-soft draw the edges of content: a code block,
+     the rule of a work stretch, a quote's rail, a text field. A theme keeps them
+     visible there, because they carry the reading. --divider draws the dividers of the chrome:
+     the edge of a pane, a rule between rows or sections, the rim of a card in a settings page.
+     A chrome divider stays quiet and lets the fill separate the panels, so a theme that needs
+     bolder content lines (Orient Express) sets --divider apart from --line-soft; the other
+     themes set it equal to --line-soft.
+   - --rim draws the rim of the chrome's controls and floating panels: buttons, the header's
+     pills, menus and popovers, the queued inputs (through --glass-rim and --btn-rim). Every
+     theme sets it equal to --line except Orient Express, where it is quiet.
+   - The composer is the main input, so it has the clearest edge on the page: --composer-line,
+     and its fill is --composer-fill. Every theme sets them equal to --line and --raised except
+     Orient Express, where the edge is lighter than --line and the fill one step lighter than
+     --raised, so the edge reaches 3:1 (WCAG 1.4.11). Each theme sets both, so a theme nested
+     in another never inherits the outer theme's values.
 
    Themes take their names from Poirot's world:
      Whitehaven      light, the flagship. Ivory and green-black lacquer, like his Art Deco flat.
@@ -198,6 +213,10 @@
   --faint: oklch(0.5 0.012 165);
   --line: oklch(0.87 0.007 120);
   --line-soft: oklch(0.91 0.006 110);
+  --divider: oklch(0.91 0.006 110);
+  --rim: oklch(0.87 0.007 120);
+  --composer-fill: var(--raised);
+  --composer-line: var(--line);
 
   /* Characters: fill lightness/chroma, the rim shade, text-safe ink and a quiet tint. */
   --char-l: 0.78;
@@ -267,6 +286,10 @@
   --faint: oklch(0.49 0.03 60);
   --line: oklch(0.855 0.022 72);
   --line-soft: oklch(0.895 0.018 76);
+  --divider: oklch(0.895 0.018 76);
+  --rim: oklch(0.855 0.022 72);
+  --composer-fill: var(--raised);
+  --composer-line: var(--line);
 
   --char-l: 0.765;
   --char-c: 0.13;
@@ -331,10 +354,14 @@
   --raised: oklch(0.262 0.014 52);
   --sunken: oklch(0.172 0.011 50);
   --ink: oklch(0.94 0.012 85);
-  --muted: oklch(0.77 0.016 75);
-  --faint: oklch(0.66 0.016 70);
-  --line: oklch(0.32 0.014 52);
-  --line-soft: oklch(0.275 0.012 50);
+  --muted: oklch(0.79 0.016 75);
+  --faint: oklch(0.72 0.016 70);
+  --line: oklch(0.48 0.014 52);
+  --line-soft: oklch(0.395 0.012 50);
+  --divider: oklch(0.34 0.012 50);
+  --rim: oklch(0.36 0.014 52);
+  --composer-fill: oklch(0.31 0.014 52);
+  --composer-line: oklch(0.56 0.014 52);
 
   --char-l: 0.76;
   --char-c: 0.12;
@@ -402,6 +429,10 @@
   --faint: oklch(0.66 0.022 130);
   --line: oklch(0.32 0.02 170);
   --line-soft: oklch(0.27 0.017 170);
+  --divider: oklch(0.27 0.017 170);
+  --rim: oklch(0.32 0.02 170);
+  --composer-fill: var(--raised);
+  --composer-line: var(--line);
 
   --char-l: 0.77;
   --char-c: 0.12;
@@ -469,6 +500,10 @@
   --faint: oklch(0.67 0.024 10);
   --line: oklch(0.33 0.024 350);
   --line-soft: oklch(0.275 0.022 350);
+  --divider: oklch(0.275 0.022 350);
+  --rim: oklch(0.33 0.024 350);
+  --composer-fill: var(--raised);
+  --composer-line: var(--line);
 
   --char-l: 0.77;
   --char-c: 0.12;
@@ -543,18 +578,21 @@
      They sit here rather than on :root alone so a nested [data-theme] preview recomputes them. */
   --glass-fill: color-mix(in oklab, var(--surface) calc(100% - 24% * var(--glass-level)), transparent);
   --glass-fill-raised: color-mix(in oklab, var(--raised) calc(100% - 24% * var(--glass-level)), transparent);
+  --glass-fill-composer: color-mix(in oklab, var(--composer-fill) calc(100% - 24% * var(--glass-level)), transparent);
   --glass-fill-thin: color-mix(in oklab, var(--surface) calc(100% - 30% * var(--glass-level)), transparent);
   --glass-blur: calc(min(1, var(--glass-level) * 1000) * (12px + 16px * var(--glass-level)));
   --glass-sat: calc(1 + 0.25 * var(--glass-level));
   --glass-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
   --glass-edge: color-mix(in oklab, white calc(var(--glass-edge-max) * var(--glass-level)), transparent);
-  --glass-rim: color-mix(in oklab, var(--line) calc(100% - 35% * var(--glass-level)), transparent);
+  --glass-rim: color-mix(in oklab, var(--rim) calc(100% - 35% * var(--glass-level)), transparent);
+  /* The composer is the main input, so its rim comes from --composer-line, not from the quieter --rim. */
+  --composer-rim: color-mix(in oklab, var(--composer-line) calc(100% - 35% * var(--glass-level)), transparent);
   --glass-shadow: 0 1px 2px oklch(0 0 0 / calc(0.04 + 0.04 * var(--glass-level))),
     0 12px 32px -12px oklch(0 0 0 / calc(0.1 + 0.14 * var(--glass-level)));
 
   /* The button material: a neutral tablet that turns faintly see-through as the level rises. */
   --btn-fill: color-mix(in oklab, var(--raised) calc(100% - 30% * var(--glass-level)), transparent);
-  --btn-rim: color-mix(in oklab, var(--line) calc(100% - 25% * var(--glass-level)), transparent);
+  --btn-rim: color-mix(in oklab, var(--rim) calc(100% - 25% * var(--glass-level)), transparent);
 
   font-family: var(--font-ui);
   font-feature-settings: var(--font-ui-features);

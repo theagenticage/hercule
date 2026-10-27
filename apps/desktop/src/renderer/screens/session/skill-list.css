@@ -108,7 +108,7 @@
    bars (settings.css), which show nothing while at rest. A list that is not
    at its maximum height shows every row, so it ends on its last row.
    The maximum height is the 6px of padding above the first row and seven
-   and a half rows. The hairline above is `.pop-sec`'s (`--line-soft`), which
+   and a half rows. The hairline above is `.pop-sec`'s (`--divider`), which
    also gives a row that scrolls under the head a clean edge to be cut by.
    The padding is `.pop.popover-menu`'s 6px, which has no token, and
    `scroll-padding-block` keeps a row that scrolls into view off the edge by
@@ -117,7 +117,7 @@
   max-height: calc(6px + 7.5 * var(--composer-skill-list-row));
   overflow-y: auto;
   padding: 6px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
   scroll-padding-block: 6px;
 }
 /* A row is the popover menu item (`.popover-menu [role="menuitem"]`):

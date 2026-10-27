@@ -84,7 +84,16 @@ const PROSE_SELECTOR = ":is(.msg-body, .bubble) :is(p, li)";
 const NOT_PROSE_SELECTOR = "pre, table";
 
 /** The theme tokens `resolveThemeTokens` reads, in the order of `ThemeTokens`. */
-const THEME_TOKEN_NAMES = ["bg", "surface", "raised", "line", "ink", "muted", "faint"] as const;
+const THEME_TOKEN_NAMES = [
+  "bg",
+  "surface",
+  "raised",
+  "line",
+  "divider",
+  "ink",
+  "muted",
+  "faint",
+] as const;
 
 /** Two fragments overlap only when their boxes share more than this many square pixels. */
 const OVERLAP_THRESHOLD_PX2 = 2;
@@ -314,7 +323,7 @@ function createRoleTokens(): (element: Element) => Pick<ThemeTokens, "ink" | "mu
  */
 export function resolveThemeTokens(): ThemeTokens {
   const root = document.documentElement;
-  const [bg, surface, raised, line, ink, muted, faint] = THEME_TOKEN_NAMES.map((name) =>
+  const [bg, surface, raised, line, divider, ink, muted, faint] = THEME_TOKEN_NAMES.map((name) =>
     resolveToken(root, name),
   );
   return {
@@ -322,6 +331,7 @@ export function resolveThemeTokens(): ThemeTokens {
     surface: surface!,
     raised: raised!,
     line: line!,
+    divider: divider!,
     ink: ink!,
     muted: muted!,
     faint: faint!,

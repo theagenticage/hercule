@@ -97,7 +97,7 @@
   min-width: 0;
   min-height: 0;
   background: var(--surface);
-  box-shadow: -1px 0 0 var(--line-soft);
+  box-shadow: -1px 0 0 var(--divider);
 }
 
 /* The toast of a Done move, in the main pane while the sidebar is hidden (a

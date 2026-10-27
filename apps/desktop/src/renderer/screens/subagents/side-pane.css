@@ -12,7 +12,7 @@
   flex-direction: column;
   min-height: 0;
   background: var(--surface);
-  box-shadow: -1px 0 0 var(--line-soft);
+  box-shadow: -1px 0 0 var(--divider);
 }
 /* The strip along the pane's left edge that the user drags, 8px wide and
    centred on the edge. It is outside the shell's drag strip, so a drag that

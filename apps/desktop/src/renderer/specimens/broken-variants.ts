@@ -37,8 +37,8 @@ const EVERY_SCOPE = ":root,\n[data-theme]";
 
 /**
  * Returns the `max-contrast` stylesheet. `--ink` is pure black in the light
- * themes and pure white in the dark themes; `--muted`, `--faint`, `--line`
- * and `--line-soft` equal it. The backgrounds stay as the theme has them.
+ * themes and pure white in the dark themes; `--muted`, `--faint`, `--line`,
+ * `--line-soft`, `--divider` and `--rim` equal it. The backgrounds stay as the theme has them.
  */
 function buildMaxContrastCss({ day, night }: ThemesByKind): string {
   const body = (ink: string): string => `{
@@ -47,6 +47,8 @@ function buildMaxContrastCss({ day, night }: ThemesByKind): string {
   --faint: ${ink} !important;
   --line: ${ink} !important;
   --line-soft: ${ink} !important;
+  --divider: ${ink} !important;
+  --rim: ${ink} !important;
 }`;
   return `${selectThemes(day)} ${body("black")}\n${selectThemes(night)} ${body("white")}`;
 }
@@ -102,9 +104,11 @@ function buildNoisyCss({ day, night }: ThemesByKind): string {
   --sunken: oklch(${String(sunken)} 0.3 320) !important;
   --line: color-mix(in oklab, var(--ink) 55%, transparent) !important;
   --line-soft: color-mix(in oklab, var(--ink) 40%, transparent) !important;
+  --divider: color-mix(in oklab, var(--ink) 40%, transparent) !important;
+  --rim: color-mix(in oklab, var(--ink) 55%, transparent) !important;
 }`;
   return `${selectThemes(day)} ${surfaces(0.965, 0.99, 1, 0.945)}
-${selectThemes(night)} ${surfaces(0.195, 0.226, 0.262, 0.172)}
+${selectThemes(night)} ${surfaces(0.195, 0.235, 0.275, 0.172)}
 * {
   border-width: 2px !important;
 }

@@ -96,7 +96,7 @@
 .connection-list .conn {
   min-height: 52px;
   padding: 6px 4px;
-  border-top: 1px solid var(--line-soft);
+  border-top: 1px solid var(--divider);
 }
 .connection-list .conn.is-fail {
   background: linear-gradient(90deg, var(--fail-tint), transparent 70%);

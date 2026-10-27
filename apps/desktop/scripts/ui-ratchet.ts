@@ -129,6 +129,9 @@ export const METRICS: Readonly<Record<string, MetricDefinition>> = {
   ),
 
   "nonText.failing": none("Controls failing non-text contrast"),
+  // The composer is the main input, so the ratio of its edge is ratcheted
+  // and not only checked against 3 as one of the controls above.
+  "nonText.composerBoundary": higher("Composer edge contrast (WCAG ratio)", 0.005, 3),
 
   "type.sizes": lower("Distinct font sizes", 0, 7),
   "type.weights": lower("Distinct font weights", 0, 3),
@@ -155,6 +158,9 @@ export const METRICS: Readonly<Record<string, MetricDefinition>> = {
   "reading.proseMeasureOff": lower("Prose line length outside 60 to 75 characters", 0.01, 0),
 
   "line.minLc": higher("Lowest line contrast (Lc)", LC_TOLERANCE, 15),
+  // Reported, not ratcheted: a chrome divider is meant to be quiet, and the
+  // fill of the panels does the separating, so its contrast has no floor.
+  "divider.minLc": reported("Lowest divider contrast (Lc)", "higher"),
   "surface.minStep": higher("Smallest surface lightness step", 0.0005, 0.025),
 
   "glyphs.confusablePairs": none("Confusable glyph pairs"),
