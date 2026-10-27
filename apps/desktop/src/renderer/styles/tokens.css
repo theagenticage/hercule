@@ -27,7 +27,9 @@
      themes set it equal to --line; the dark themes set it apart, quiet.
    - The composer is the main input, so it has the clearest edge on the page: --composer-line,
      and its fill is --composer-fill. Every theme sets the edge apart from --line, so it
-     reaches 3:1 (WCAG 1.4.11): darker than --line in the light themes, lighter in the dark ones.
+     reaches 3:1 against the page (WCAG 1.4.11): darker than --line in the light themes, lighter
+     in the dark ones. Over the thread's dock it reaches a little less, 2.4 to
+     2.9.
      The dark themes also make the fill one step lighter than --raised; the light themes keep
      --raised, which is already the lightest fill. Each theme sets both, so a theme nested
      in another never inherits the outer theme's values.
