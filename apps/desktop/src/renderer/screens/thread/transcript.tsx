@@ -51,7 +51,7 @@ import { AgentSentMessage } from "./agent-sent-message";
 import {
   AgentMessage,
   ErrorNote,
-  NoticeNote,
+  RuntimeNoticeNote,
   PendingLine,
   TurnEnding,
   WaitingNote,
@@ -78,7 +78,7 @@ const SPAWN_LINE_HEIGHT_ESTIMATE = 32;
 const AGENT_CHARS_PER_LINE = 100;
 const USER_CHARS_PER_LINE = 80;
 
-/** Roughly how many characters fit on one line of a warning, a notice or an error: 12px text, beside its dot or icon. */
+/** Roughly how many characters fit on one line of a warning, a runtime notice or an error: 12px text, beside its dot or icon. */
 const NOTE_CHARS_PER_LINE = 110;
 
 /** The height of one line of an agent message, in CSS pixels: 14px text at a line height of 1.6. */
@@ -96,7 +96,7 @@ const SENDER_ROW_HEIGHT = 22;
 /**
  * Estimates a block's height before it is measured, from the book's
  * measurements: the lines of text, a meta line 20.4px with its margin, a
- * divider or a note 17.4px (a warning, a notice or an error, 17.4px a line), a
+ * divider or a note 17.4px (a warning, a runtime notice or an error, 17.4px a line), a
  * bubble's padding and time 40px, and the spawn lines under a divider. Only
  * blocks that were never mounted use the estimate.
  */
@@ -127,7 +127,7 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
     case "waiting":
       return 17.4;
     case "warning":
-    case "notice":
+    case "runtime-notice":
     case "error":
       return 17.4 * Math.max(1, Math.ceil(block.message.length / NOTE_CHARS_PER_LINE));
   }
@@ -331,9 +331,14 @@ export function Transcript({
         return (
           <WarningNote message={block.message} at={block.at} timezone={timezone} today={today} />
         );
-      case "notice":
+      case "runtime-notice":
         return (
-          <NoticeNote message={block.message} at={block.at} timezone={timezone} today={today} />
+          <RuntimeNoticeNote
+            message={block.message}
+            at={block.at}
+            timezone={timezone}
+            today={today}
+          />
         );
       case "error":
         return (

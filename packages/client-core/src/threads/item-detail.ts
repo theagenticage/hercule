@@ -24,7 +24,7 @@ export const readCompactionDetail = (detail: unknown): ContextCompactionDetail |
 
 /**
  * Returns the words after "Compacted the context" for a compaction item's
- * `detail`, such as "182k → 31k tokens (auto)":
+ * decoded `detail`, such as "182k → 31k tokens (auto)":
  *
  * - both counts known: "182k → 31k tokens";
  * - only the count before known: "from 182k tokens";
@@ -33,11 +33,9 @@ export const readCompactionDetail = (detail: unknown): ContextCompactionDetail |
  * - "" when no count is known, whatever the trigger. A compaction with no
  *   numbers reads just "Compacted the context".
  *
- * Returns "" for a detail that does not decode, such as one written by an
- * older runner.
  */
-export const describeCompactionTarget = (detail: unknown): string => {
-  const { trigger, tokensBefore, tokensAfter } = readCompactionDetail(detail) ?? {};
+export const describeCompactionTarget = (detail: ContextCompactionDetail): string => {
+  const { trigger, tokensBefore, tokensAfter } = detail;
   const before = tokensBefore === undefined ? undefined : formatTokenCount(tokensBefore);
   const after = tokensAfter === undefined ? undefined : formatTokenCount(tokensAfter);
   const size =
@@ -50,10 +48,6 @@ export const describeCompactionTarget = (detail: unknown): string => {
           : "";
   return size === "" || trigger === undefined ? size : `${size} (${trigger})`;
 };
-
-/** Returns the summary a compaction item's `detail` holds, or "" when it holds none. */
-export const readCompactionSummary = (detail: unknown): string =>
-  readCompactionDetail(detail)?.summary ?? "";
 
 /**
  * Returns the label an `unknown` item's `detail` holds, such as

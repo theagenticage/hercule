@@ -1,10 +1,10 @@
 /**
- * Tests `describeCompactionTarget`, `readCompactionSummary` and
+ * Tests `readCompactionDetail`, `describeCompactionTarget` and
  * `readUnknownLabel`, which read the details every adapter shares for a
  * compaction and an unknown item.
  */
 import { describe, expect, it } from "vitest";
-import { describeCompactionTarget, readCompactionSummary, readUnknownLabel } from "./item-detail";
+import { describeCompactionTarget, readCompactionDetail, readUnknownLabel } from "./item-detail";
 
 describe("describeCompactionTarget", () => {
   it.each([
@@ -17,33 +17,42 @@ describe("describeCompactionTarget", () => {
     [{ trigger: "auto", tokensBefore: 182_000 }, "from 182k tokens (auto)"],
     [{ tokensBefore: 182_000 }, "from 182k tokens"],
     [{ trigger: "manual", tokensAfter: 31_000 }, "to 31k tokens (manual)"],
-  ])("reads %j as %s", (detail, target) => {
+  ] as const)("reads %j as %s", (detail, target) => {
     expect(describeCompactionTarget(detail)).toBe(target);
   });
 
   it.each([
-    ["no detail", undefined],
     ["an empty detail", {}],
     ["a trigger alone", { trigger: "auto" }],
-    ["a detail that is not an object", "compacted"],
-    // The shape the runner wrote before the shared detail existed.
-    ["the old field names", { trigger: "auto", preTokens: 182_000, postTokens: 31_000 }],
-    ["a count that is not a number", { tokensBefore: "182k" }],
-    ["an unknown trigger", { trigger: "sometimes", tokensBefore: 182_000 }],
-  ])("reads %s as no words", (_name, detail) => {
+    ["a summary alone", { summary: "The user asked for a login fix." }],
+  ] as const)("reads %s as no words", (_name, detail) => {
     expect(describeCompactionTarget(detail)).toBe("");
   });
 });
 
-describe("readCompactionSummary", () => {
-  it("returns the summary the detail holds", () => {
-    expect(readCompactionSummary({ summary: "The user asked for a login fix." })).toBe(
-      "The user asked for a login fix.",
-    );
+describe("readCompactionDetail", () => {
+  it("returns the detail it decodes", () => {
+    expect(readCompactionDetail({ trigger: "auto", tokensBefore: 182_000 })).toEqual({
+      trigger: "auto",
+      tokensBefore: 182_000,
+    });
   });
 
-  it.each([undefined, {}, { summary: 7 }, "text"])("returns '' for %j", (detail) => {
-    expect(readCompactionSummary(detail)).toBe("");
+  it("keeps only the fields it knows, so the old field names read as no counts", () => {
+    // The shape the runner wrote before the shared detail existed.
+    expect(
+      readCompactionDetail({ trigger: "auto", preTokens: 182_000, postTokens: 31_000 }),
+    ).toEqual({ trigger: "auto" });
+  });
+
+  it.each([
+    ["no detail", undefined],
+    ["a detail that is not an object", "compacted"],
+    ["a count that is not a number", { tokensBefore: "182k" }],
+    ["an unknown trigger", { trigger: "sometimes", tokensBefore: 182_000 }],
+    ["a summary that is not text", { summary: 7 }],
+  ])("returns nothing for %s", (_name, detail) => {
+    expect(readCompactionDetail(detail)).toBeUndefined();
   });
 });
 

@@ -286,13 +286,13 @@ button.work-row:hover > .ic {
    A runtime notice, such as "Conversation was cleared", is the warning
    note's neutral sibling: it reports something that happened, and it is
    neither a problem nor a failure. It is the same note with the info icon
-   where the dot is, so a notice and a warning side by side start their
+   where the dot is, so a runtime notice and a warning side by side start their
    words at one edge. The icon is a 14px box like the dot's column and sits
    centred on the first line, and the words and the icon are in the muted
-   ink as the warning's are. A long notice wraps, and the icon stays on its
+   ink as the warning's are. A long runtime notice wraps, and the icon stays on its
    first line. */
 .warning-note,
-.notice-note,
+.runtime-notice-note,
 .error-note {
   display: grid;
   grid-template-columns: 14px 1fr;
@@ -313,20 +313,20 @@ button.work-row:hover > .ic {
 .error-note .dot {
   background: var(--fail);
 }
-.notice-icon {
+.runtime-notice-icon {
   display: flex;
   justify-self: center;
   margin-top: calc((1lh - 14px) / 2);
 }
 .warning-note p,
-.notice-note p,
+.runtime-notice-note p,
 .error-note p {
   margin: 0;
   overflow-wrap: anywhere;
   user-select: text;
 }
 .warning-note .time,
-.notice-note .time,
+.runtime-notice-note .time,
 .error-note .time {
   margin-left: 6px;
   user-select: none;

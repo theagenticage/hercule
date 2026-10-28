@@ -167,7 +167,11 @@ const buildWarning = (
   });
 
 /** Returns a `runtime.notice` row, in turn `turnId` or, when it is undefined, between turns. */
-const buildNotice = (seconds: number, turnId: string | undefined, message: string): TranscriptRow =>
+const buildRuntimeNotice = (
+  seconds: number,
+  turnId: string | undefined,
+  message: string,
+): TranscriptRow =>
   buildRow({
     _tag: "runtime.notice",
     ...buildEnvelope(seconds),
@@ -863,19 +867,21 @@ describe("buildThreadBlocks", () => {
       buildTurnStarted("t1", 0),
       ...buildUserMessage("t1", "u1", 0, "Fix it"),
       ...buildCommand("t1", "c1", 1, 2),
-      buildNotice(3, "t1", "Recalled 2 memories"),
+      buildRuntimeNotice(3, "t1", "Recalled 2 memories"),
       ...buildCommand("t1", "c2", 4, 5),
       ...buildAgentMessage("t1", "a1", 6, "Done."),
       buildTurnCompleted("t1", 8),
-      // Between turns, a notice names no turn.
-      buildNotice(9, undefined, "Conversation was cleared"),
+      // Between turns, a runtime notice names no turn.
+      buildRuntimeNotice(9, undefined, "Conversation was cleared"),
       buildTurnStarted("t2", 10),
       ...buildUserMessage("t2", "u2", 10, "Thanks"),
     ];
 
     const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
 
-    expect(blocks.map((block) => (block.kind === "notice" ? block.message : block.key))).toEqual([
+    expect(
+      blocks.map((block) => (block.kind === "runtime-notice" ? block.message : block.key)),
+    ).toEqual([
       "user:u1",
       "work:c1",
       "Recalled 2 memories",
@@ -888,23 +894,23 @@ describe("buildThreadBlocks", () => {
       "c1",
       "c2",
     ]);
-    expect(blocks.find((block) => block.kind === "notice")).toMatchObject({
-      kind: "notice",
+    expect(blocks.find((block) => block.kind === "runtime-notice")).toMatchObject({
+      kind: "runtime-notice",
       at: buildInstant(3),
     });
   });
 
-  it("shows no status line when a notice follows the running work, because the divider above it still shows the work", () => {
+  it("shows no status line when a runtime notice follows the running work, because the divider above it still shows the work", () => {
     const rows = [
       buildTurnStarted("t1", 0),
       ...buildUserMessage("t1", "u1", 0, "Hi"),
       buildItemStarted("t1", "c1", "command_execution", 1),
-      buildNotice(2, "t1", "Recalled 1 memory"),
+      buildRuntimeNotice(2, "t1", "Recalled 1 memory"),
     ];
 
     const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
 
-    expect(blocks.map((block) => block.kind)).toEqual(["user", "work", "notice"]);
+    expect(blocks.map((block) => block.kind)).toEqual(["user", "work", "runtime-notice"]);
   });
 
   it("places a runtime error where its row sits, inside the work stretch and above the failed turn's ending", () => {
@@ -1388,6 +1394,25 @@ describe("buildThreadBlocks: compaction and unknown steps, drawn as work rows", 
     ]);
 
     expect(rows[0]).toMatchObject({ target: "from 182k tokens", result: "failed", canOpen: false });
+  });
+
+  it("merges what a compaction started with and what it completed with, the completion winning", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "k1", "context_compaction", 1, {
+        trigger: "auto",
+        tokensBefore: 182_000,
+        tokensAfter: 40_000,
+      }),
+      buildItemCompleted("t1", "k1", "context_compaction", 5, "completed", {
+        tokensAfter: 31_000,
+        summary: "The user asked for a login fix.",
+      }),
+    ]);
+
+    expect(rows[0]).toMatchObject({
+      target: "182k → 31k tokens (auto)",
+      output: "The user asked for a login fix.",
+    });
   });
 
   it("draws a compaction written with the old field names as the bare words, with no counts and no summary", () => {

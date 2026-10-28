@@ -317,15 +317,15 @@ export const WarningNote = memo(function WarningNote({
 });
 
 /**
- * Renders a notice the provider reported that is neither a warning nor an
+ * Renders a runtime notice the provider reported that is neither a warning nor an
  * error, such as "Conversation was cleared" or "Recalled 3 memories": the
- * info icon, the notice's `message` as the runner wrote it, and its time.
+ * info icon, the runtime notice's `message` as the runner wrote it, and its time.
  *
  * It is the warning note's neutral sibling. It stands in the same place,
  * with the same measurements, and the info icon takes the dot's column. The
  * icon is named "Notice", so a screen reader says what kind of note this is.
  */
-export const NoticeNote = memo(function NoticeNote({
+export const RuntimeNoticeNote = memo(function RuntimeNoticeNote({
   message,
   at,
   timezone,
@@ -338,8 +338,8 @@ export const NoticeNote = memo(function NoticeNote({
 }): JSX.Element {
   const time = formatBlockTime(at, timezone, today);
   return (
-    <div className="notice-note">
-      <span className="notice-icon" role="img" aria-label="Notice">
+    <div className="runtime-notice-note">
+      <span className="runtime-notice-icon" role="img" aria-label="Notice">
         <InfoIcon size={14} />
       </span>
       <p>

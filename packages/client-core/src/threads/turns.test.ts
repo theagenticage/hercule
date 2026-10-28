@@ -1183,6 +1183,22 @@ describe("buildTurns: compaction and unknown items", () => {
     });
   });
 
+  it("merges what a compaction started with and what it completed with, the completion winning", () => {
+    const rows = buildItemRows(
+      "context_compaction",
+      { trigger: "auto", tokensBefore: 182_000, tokensAfter: 40_000 },
+      {
+        status: "completed",
+        detail: { tokensAfter: 31_000, summary: "The user asked for a fix." },
+      },
+    );
+
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING)[0]!.items[0]).toMatchObject({
+      target: "182k → 31k tokens (auto)",
+      result: "completed",
+    });
+  });
+
   it("shows a compaction row written with the old field names without any counts", () => {
     const rows = buildItemRows("context_compaction", undefined, {
       status: "completed",

@@ -250,7 +250,7 @@ describe("Transcript", () => {
       />,
     );
 
-    const note = container.querySelector(".notice-note")!;
+    const note = container.querySelector(".runtime-notice-note")!;
     expect(within(note as HTMLElement).getByRole("img", { name: "Notice" })).toBeDefined();
     expect(note.querySelector("p")?.firstChild?.textContent).toBe(message);
   });

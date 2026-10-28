@@ -11,15 +11,19 @@
  * So each message is placed by its `item.started` row, and its text is
  * gathered from its rows wherever they sit.
  */
-import { isAsyncQuestion, type Input, type TranscriptRow } from "@hercule/contract";
+import {
+  isAsyncQuestion,
+  type ContextCompactionDetail,
+  type Input,
+  type TranscriptRow,
+} from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
 import type { AgentState } from "./agent-state";
-import { readCompactionDetail, readUnknownLabel } from "./item-detail";
 import { findOpenItem } from "./open-item";
 import { readInputSender } from "./sender";
 import {
   buildCompletedItem,
-  buildThreadItem,
+  buildStartedItem,
   buildUserMessage,
   describeToolCallTarget,
   type ThreadItem,
@@ -62,10 +66,10 @@ export interface WorkItem extends ThreadItem {
    */
   readonly toolName: string;
   /**
-   * The label of an `unknown` item, such as `claude: system/foo_bar`: what
-   * the adapter received that no mapping covers. Empty when the item has none,
-   * as on a row written before the label existed, and for any item that is not
-   * an `unknown` one.
+   * The label of an `unknown` item, such as `claude: system/foo_bar`: it names
+   * a message no decision covers, or a known message that could not be read.
+   * Empty when the item has none, as on a row written before the label
+   * existed, and for any item that is not an `unknown` one.
    */
   readonly fallbackLabel: string;
   /**
@@ -197,10 +201,10 @@ export interface ErrorBlock {
  * A neutral note the runner or the harness reported, that is not a problem: a
  * conversation that was cleared, or memories that were recalled (spec 06).
  */
-export interface NoticeBlock {
-  readonly kind: "notice";
+export interface RuntimeNoticeBlock {
+  readonly kind: "runtime-notice";
   readonly key: string;
-  /** The notice's text, as the runner wrote it. */
+  /** The runtime notice's text, as the runner wrote it. */
   readonly message: string;
   readonly at: string;
 }
@@ -212,7 +216,7 @@ export type ThreadBlock =
   | EndingBlock
   | PendingBlock
   | WaitingBlock
-  | NoticeBlock
+  | RuntimeNoticeBlock
   | WarningBlock
   | ErrorBlock;
 
@@ -262,7 +266,7 @@ type Slot =
   | BuildingAgent
   | BuildingEnding
   | WaitingBlock
-  | NoticeBlock
+  | RuntimeNoticeBlock
   | WarningBlock
   | ErrorBlock;
 
@@ -324,16 +328,6 @@ const readWorkItemTarget = (
 };
 
 /**
- * Returns what a completed item returned (`WorkItem.resultContent`): a
- * compaction's summary, or any other item's `detail.content`. The summary is
- * read with the schema, so a summary of the wrong type reads as nothing.
- */
-const readResultContent = (kind: WorkItem["kind"], detail: unknown): unknown =>
-  kind === "context_compaction"
-    ? readCompactionDetail(detail)?.summary
-    : readJsonObject(detail)?.content;
-
-/**
  * Returns the blocks of one agent's transcript in reading order: the
  * session's own agent's, or a subagent's. `agent` is that agent's state, and
  * decides what the rows cannot: whether the last turn still runs, the
@@ -356,14 +350,14 @@ const readResultContent = (kind: WorkItem["kind"], detail: unknown): unknown =>
  * - A `warning` block per `runtime.warning` row, where the row sits. It does
  *   not end the work stretch it falls in: the stretch's divider stays one,
  *   above the warning, and items that start after the warning still join it.
- * - A `notice` block per `runtime.notice` row, placed and kept in the stretch
+ * - A `runtime-notice` block per `runtime.notice` row, placed and kept in the stretch
  *   in the same way.
  * - An `error` block per `runtime.error` row, where the row sits. Like a
  *   warning, it does not end the work stretch it falls in.
  * - A `pending` block at the end while the agent has no open Request (an
  *   async question does not count, because the agent keeps working), no
  *   agent message holds the working face, the last block other than a
- *   notice, warning or error is not the running turn's running `work` block,
+ *   runtime notice, warning or error is not the running turn's running `work` block,
  *   and either the last turn has not finished or, before any turn, the agent
  *   is working.
  *
@@ -374,7 +368,7 @@ const readResultContent = (kind: WorkItem["kind"], detail: unknown): unknown =>
  * busy, because a face is drawn only beside text.
  *
  * Each block's key is built from an item id, a turn id, a request id or, for
- * a notice, a warning or an error, its row's position, so it stays the same as rows
+ * a runtime notice, a warning or an error, its row's position, so it stays the same as rows
  * are appended.
  */
 export const buildThreadBlocks = (
@@ -392,7 +386,12 @@ export const buildThreadBlocks = (
   const agents = new Map<string, BuildingAgent>();
   const workItems = new Map<
     string,
-    { readonly stretch: BuildingStretch; readonly index: number }
+    {
+      readonly stretch: BuildingStretch;
+      readonly index: number;
+      /** The decoded start detail of a compaction (`StartedItem.compaction`). */
+      readonly startedCompaction: ContextCompactionDetail | undefined;
+    }
   >();
   // An object rather than a `let`, because the helpers below reassign it and
   // TypeScript does not see an assignment made inside a closure.
@@ -509,8 +508,13 @@ export const buildThreadBlocks = (
             slots.push(turn.stretch);
           }
           const stretch = turn.stretch;
-          workItems.set(event.itemId, { stretch, index: stretch.items.length });
-          const threadItem = buildThreadItem(event);
+          const started = buildStartedItem(event);
+          workItems.set(event.itemId, {
+            stretch,
+            index: stretch.items.length,
+            startedCompaction: started.compaction,
+          });
+          const threadItem = started.item;
           const name = event.kind === "tool_call" ? readJsonObject(event.detail)?.name : undefined;
           stretch.items.push({
             ...threadItem,
@@ -518,7 +522,7 @@ export const buildThreadBlocks = (
             paths: readItemPaths(event),
             startedAt: event.at,
             toolName: typeof name === "string" ? name : "",
-            fallbackLabel: event.kind === "unknown" ? readUnknownLabel(event.detail) : "",
+            fallbackLabel: started.unknownLabel,
             resultContent: undefined,
           });
         }
@@ -536,9 +540,13 @@ export const buildThreadBlocks = (
         const work = workItems.get(event.itemId);
         if (work !== undefined) {
           const item = work.stretch.items[work.index]!;
+          const completed = buildCompletedItem(item, work.startedCompaction, event);
           work.stretch.items[work.index] = {
-            ...buildCompletedItem(item, event),
-            resultContent: readResultContent(item.kind, event.detail),
+            ...completed.item,
+            resultContent:
+              item.kind === "context_compaction"
+                ? completed.completion?.summary
+                : readJsonObject(event.detail)?.content,
           };
         }
         break;
@@ -576,10 +584,10 @@ export const buildThreadBlocks = (
         break;
       }
       case "runtime.notice": {
-        // Like a warning, a notice is not a step of the work and does not end the stretch.
+        // Like a warning, a runtime notice is not a step of the work and does not end the stretch.
         slots.push({
-          kind: "notice",
-          key: `notice:${String(row.position)}`,
+          kind: "runtime-notice",
+          key: `runtime-notice:${String(row.position)}`,
           message: event.message,
           at: event.at,
         });
@@ -634,7 +642,7 @@ export const buildThreadBlocks = (
     switch (slot.kind) {
       case "user":
       case "waiting":
-      case "notice":
+      case "runtime-notice":
       case "warning":
       case "error":
         blocks.push(slot);
@@ -685,10 +693,11 @@ export const buildThreadBlocks = (
   // for" divider already shows the agent is busy, so a status line under it
   // would say the same twice. A finished
   // stretch of an earlier turn shows no such divider, so it does not count.
-  // A notice, a warning or an error reports on the work and is not a step of
+  // A runtime notice, a warning or an error reports on the work and is not a step of
   // it, so a running stretch above one still shows the agent is busy.
   const lastBlock = blocks.findLast(
-    (block) => block.kind !== "notice" && block.kind !== "warning" && block.kind !== "error",
+    (block) =>
+      block.kind !== "runtime-notice" && block.kind !== "warning" && block.kind !== "error",
   );
   const endsOnRunningWork =
     lastBlock?.kind === "work" &&

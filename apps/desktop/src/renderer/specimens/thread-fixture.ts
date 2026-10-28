@@ -312,10 +312,10 @@ const COMPACTION_SUMMARY = [
  * - "Conversation was cleared", before the turn starts, in no turn;
  * - "Recalled 3 memories", between two reads of the first stretch;
  * - a step the runner could not map, labelled `claude: system/foo_bar`;
- * - a long notice that wraps, in the second stretch;
+ * - a long runtime notice that wraps, in the second stretch;
  * - a compaction that finished, with its token counts and its summary.
  */
-const FIX_STEPS_WITH_NOTICES: ReadonlyArray<TranscriptStep> = [
+const FIX_STEPS_WITH_RUNTIME_NOTICES: ReadonlyArray<TranscriptStep> = [
   [-90, { _tag: "runtime.notice", message: "Conversation was cleared" }],
   ...FIX_STEPS.flatMap((step): TranscriptStep[] => {
     const [seconds] = step;
@@ -472,10 +472,10 @@ export const FIX_THREAD_WITH_WARNINGS: ThreadScreenRecords = {
   transcript: buildTranscript(FIX_STEPS_WITH_WARNINGS),
 };
 
-/** The Fix thread with notices, a labelled unknown step and a finished compaction, for the thread specimen's `?state=notices`. */
-export const FIX_THREAD_WITH_NOTICES: ThreadScreenRecords = {
+/** The Fix thread with runtime notices, a labelled unknown step and a finished compaction, for the thread specimen's `?state=runtime-notices`. */
+export const FIX_THREAD_WITH_RUNTIME_NOTICES: ThreadScreenRecords = {
   ...FIX_THREAD,
-  transcript: buildTranscript(FIX_STEPS_WITH_NOTICES),
+  transcript: buildTranscript(FIX_STEPS_WITH_RUNTIME_NOTICES),
 };
 
 /** The Fix thread while a compaction runs, for the thread specimen's `?state=compacting`. */

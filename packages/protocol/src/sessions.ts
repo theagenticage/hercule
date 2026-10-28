@@ -668,10 +668,11 @@ const TurnCompleted = defineEvent("turn.completed", {
 });
 
 /**
- * The `detail` of an `unknown` item: what the harness sent that no mapping
- * covers, written as `<harness>: <message type>`, such as
- * `claude: system/foo_bar`. A client shows it so a missing mapping is visible
- * and not a bare "Step". The label is absent on rows written before it existed.
+ * The `detail` of an `unknown` item: the label names a message that no decision
+ * covers, or a known message that could not be read. It is written as
+ * `<harness>: <message type>`, such as `claude: system/foo_bar`. A client shows
+ * it so the gap is visible and not a bare "Step". The label is absent on rows
+ * written before it existed.
  */
 export const UnknownItemDetail = Schema.Struct({ label: Schema.optionalKey(Fact) });
 
