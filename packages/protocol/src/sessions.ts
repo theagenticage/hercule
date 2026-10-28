@@ -27,8 +27,6 @@ import {
   WorkspaceStepKey,
 } from "./primitives";
 
-export { MAX_MESSAGE_LENGTH };
-
 /**
  * How much a session may do without asking first (spec 06 section 8). It is
  * part of `SessionSpec`, so the protocol owns it and the plugin host
@@ -780,8 +778,11 @@ const RuntimeWarning = defineEvent("runtime.warning", {
 
 /**
  * `class` is the only open vocabulary here. Adapters map into Codex's
- * `codexErrorInfo` enum as the reference set, with `unknown` for the rest. It
- * stays a string, so a class this build does not know still reaches the user.
+ * `codexErrorInfo` enum as the reference set, with `unknown` for the rest. A
+ * refused input or a failed start is reported with `class` set to the
+ * `AdapterError` tag (PascalCase, such as `HarnessNotInstalled`), next to the
+ * vendor classes, which are snake_case. It stays a string, so a class this
+ * build does not know still reaches the user.
  */
 const RuntimeError = defineEvent("runtime.error", {
   ...attribution,
@@ -1079,8 +1080,8 @@ export const SessionRespondToQuestionResult = Schema.Union([
     answerId: Fact,
     ok: Schema.Literal(false),
     /**
-     * Written for the user: says why the answer did not reach the agent, or
-     * that it is not known whether it did.
+     * Written for the user: gives the reason the answer did not reach the agent,
+     * or states that it is not known whether it did.
      */
     message: Message,
   }),
@@ -1106,7 +1107,7 @@ export const SessionInputResult = Schema.Union([
     _tag: Schema.Literal("sessionInputResult"),
     requestId: Fact,
     ok: Schema.Literal(false),
-    /** Why it was not delivered. Its `_tag` tells the controller what happens to the input. */
+    /** Why it was not delivered. The controller reads its `_tag` to decide what happens to the input. */
     error: AdapterError,
   }),
 ]);

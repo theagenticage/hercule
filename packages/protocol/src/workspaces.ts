@@ -12,11 +12,8 @@
  */
 import { Schema } from "effect";
 
-import { Fact, StorageId, Subdirectory, Timestamp } from "./primitives";
-import { MAX_MESSAGE_LENGTH } from "./sessions";
+import { Fact, Message, StorageId, Subdirectory, Timestamp } from "./primitives";
 import { MAX_REPOSITORY_SKILLS, MAX_SKIPPED_REASON_LENGTH, RepositorySkill } from "./skills";
-
-const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
 
 /** The most checkouts one workspace holds; a multi-repo workspace is a handful. */
 export const MAX_CHECKOUTS = 32;

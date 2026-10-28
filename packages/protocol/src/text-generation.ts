@@ -9,8 +9,8 @@
  */
 import { Schema } from "effect";
 import { OutputSchema } from "./output-schema";
-import { Fact, InstanceId, InstanceSecrets } from "./primitives";
-import { MAX_MESSAGE_LENGTH, Usage } from "./sessions";
+import { Fact, InstanceId, InstanceSecrets, MAX_MESSAGE_LENGTH } from "./primitives";
+import { Usage } from "./sessions";
 
 /**
  * The capability for text generation. A runner lists it at hello when it
@@ -48,7 +48,7 @@ const Text = Schema.String.check(Schema.isMaxLength(MAX_TEXT_GENERATION_TEXT_LEN
 
 // Never blank: the controller shows the message to the user as the reason a
 // call failed, and an empty reason explains nothing.
-const Message = Schema.String.check(
+const NonBlankMessage = Schema.String.check(
   Schema.isPattern(/\S/, { title: "message", description: "text that is not only whitespace" }),
   Schema.isMaxLength(MAX_MESSAGE_LENGTH),
 );
@@ -103,9 +103,9 @@ export const TextGenerationOutcome = Schema.Union([
     value: Schema.Json,
     usage: Schema.NullOr(Usage),
   }),
-  Schema.Struct({ outcome: Schema.Literal("invalid-output"), reason: Message }),
+  Schema.Struct({ outcome: Schema.Literal("invalid-output"), reason: NonBlankMessage }),
   Schema.Struct({ outcome: Schema.Literal("timeout") }),
-  Schema.Struct({ outcome: Schema.Literal("failed"), message: Message }),
+  Schema.Struct({ outcome: Schema.Literal("failed"), message: NonBlankMessage }),
 ]);
 
 export type TextGenerationOutcome = Schema.Schema.Type<typeof TextGenerationOutcome>;

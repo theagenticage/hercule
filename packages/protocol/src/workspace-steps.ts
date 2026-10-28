@@ -13,10 +13,8 @@
  */
 import { Schema } from "effect";
 
-import { Fact, SessionId, StorageId, WorkspaceStepKey } from "./primitives";
-import { GitIdentity, MAX_MESSAGE_LENGTH } from "./sessions";
-
-const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
+import { Fact, Message, SessionId, StorageId, WorkspaceStepKey } from "./primitives";
+import { GitIdentity } from "./sessions";
 
 /**
  * The most step keys one frame lists. A runner runs one step at a time per

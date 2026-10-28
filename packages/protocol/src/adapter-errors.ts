@@ -5,8 +5,8 @@
  * The runner sends one of these in a refused `SessionInputResult`, and the
  * controller decides from its `_tag` what happens to the input and to the
  * session. Every class carries a `message` that is written for the user and
- * shown as written, so it says what went wrong and, where it helps, what to do
- * next.
+ * shown as written, so it describes what went wrong and, where it helps, what to
+ * do next.
  */
 import { Schema } from "effect";
 
@@ -79,8 +79,8 @@ export class InputNotDelivered extends Schema.TaggedError<InputNotDelivered>()(
  * supervisor only answers the controller with a refused result carrying this
  * error, and the thread shows nothing.
  *
- * The message is shown to the user as written, so it says what happens to the
- * input.
+ * The message is shown to the user as written, so it describes what happens to
+ * the input.
  */
 export class SteerRefused extends Schema.TaggedError<SteerRefused>()("SteerRefused", {
   message: Message,
@@ -115,7 +115,7 @@ export class AdapterFailed extends Schema.TaggedError<AdapterFailed>()("AdapterF
   message: Message,
 }) {}
 
-/** Every failure a provider adapter can report for a session start or an input, told apart by `_tag`. */
+/** Every failure a provider adapter can report for a session start or an input. The `_tag` identifies the class. */
 export const AdapterError = Schema.Union([
   HarnessNotInstalled,
   HarnessLoginMissing,
@@ -137,11 +137,11 @@ export type AdapterError = Schema.Schema.Type<typeof AdapterError>;
  *
  * The runner reports it to the controller as a failed
  * `SessionRespondToQuestionResult`, so the user is told and can answer again.
- * The message says what went wrong and whether the answer may still have
+ * The message describes what went wrong and whether the answer may still have
  * arrived.
  *
- * It is not part of `AdapterError`: it never answers a session start or an
- * input, so it never travels in a `SessionInputResult`.
+ * It is not part of `AdapterError`: it is never the failure of a session start
+ * or an input, so it never travels in a `SessionInputResult`.
  */
 export class AnswerNotDelivered extends Schema.TaggedError<AnswerNotDelivered>()(
   "AnswerNotDelivered",

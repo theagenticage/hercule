@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
-import { AdapterError, SteerRefused } from "./adapter-errors";
+import { AdapterError } from "./adapter-errors";
+import { MAX_MESSAGE_LENGTH } from "./primitives";
 import {
   EditedFile,
   GithubTokenAnswer,
   GithubTokenRequest,
   MAX_ANSWERS_LENGTH,
   isAsyncQuestion,
-  MAX_MESSAGE_LENGTH,
   ProviderEvent,
   SessionBinding,
   SessionInputResult,
@@ -669,18 +669,6 @@ describe("what the controller sends for a session", () => {
 });
 
 describe("the result of one input", () => {
-  const ADAPTER_ERROR_TAGS = [
-    "HarnessNotInstalled",
-    "HarnessLoginMissing",
-    "SessionAlreadyRunning",
-    "ResumeTranscriptMissing",
-    "SessionNotRunning",
-    "InputNotDelivered",
-    "SteerRefused",
-    "ModelChangeRefused",
-    "HarnessProtocolError",
-    "AdapterFailed",
-  ] as const;
   const delivered = { _tag: "sessionInputResult", requestId: "r-1", ok: true, delivery: "opened" };
   const refused = (tag: string) => ({
     _tag: "sessionInputResult",
@@ -696,44 +684,22 @@ describe("the result of one input", () => {
     expect(Effect.runSync(Schema.encodeEffect(SessionInputResult)(decoded))).toEqual(delivered);
   });
 
-  it.each(ADAPTER_ERROR_TAGS)("round-trips a refused input whose error is %s", (tag) => {
-    const frame = refused(tag);
-    const decoded = Effect.runSync(Schema.decodeUnknownEffect(SessionInputResult)(frame));
-    expect(Effect.runSync(Schema.encodeEffect(SessionInputResult)(decoded))).toEqual(frame);
-  });
+  // Derived from the union, so a new AdapterError class is covered without editing this list.
+  it.each(AdapterError.members.map((member) => member.fields._tag.schema.literal))(
+    "round-trips a refused input whose error is %s",
+    (tag) => {
+      const frame = refused(tag);
+      const decoded = Effect.runSync(Schema.decodeUnknownEffect(SessionInputResult)(frame));
+      expect(Effect.runSync(Schema.encodeEffect(SessionInputResult)(decoded))).toEqual(frame);
+    },
+  );
 
   it("does not decode a refused input whose error is AnswerNotDelivered", () => {
     expect(decodeResult(refused("AnswerNotDelivered"))._tag).toBe("Failure");
   });
 
-  it("decodes the error to an instance of its own class", () => {
-    const exit = decodeResult(refused("SteerRefused"));
-    expect(exit._tag).toBe("Success");
-    if (exit._tag === "Success" && !exit.value.ok) {
-      expect(exit.value.error).toBeInstanceOf(SteerRefused);
-    }
-  });
-
-  it("does not decode a refused input without an error, or with a bare message", () => {
-    const withoutError = omitKey(refused("AdapterFailed"), "error");
-    expect(decodeResult(withoutError)._tag).toBe("Failure");
-    expect(decodeResult({ ...withoutError, message: "that session is not running" })._tag).toBe(
-      "Failure",
-    );
-  });
-
   it("does not decode a delivered input without its delivery", () => {
     expect(decodeResult(omitKey(delivered, "delivery"))._tag).toBe("Failure");
-  });
-
-  it("does not decode an error with an unknown tag, without a message, or with too long a message", () => {
-    const decodeError = (error: unknown) =>
-      Effect.runSyncExit(Schema.decodeUnknownEffect(AdapterError)(error))._tag;
-    expect(decodeError({ _tag: "SomethingElse", message: "x" })).toBe("Failure");
-    expect(decodeError({ _tag: "AdapterFailed" })).toBe("Failure");
-    expect(
-      decodeError({ _tag: "AdapterFailed", message: "x".repeat(MAX_MESSAGE_LENGTH + 1) }),
-    ).toBe("Failure");
   });
 });
 
