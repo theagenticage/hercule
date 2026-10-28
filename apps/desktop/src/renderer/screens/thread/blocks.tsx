@@ -29,6 +29,7 @@ import {
   describeTurnEnding,
   describeWaitingNote,
   describeWorkStretch,
+  MAX_UNBROKEN_CODE_WORD,
   splitCodeSpans,
   summarizeWork,
   type EndingBlock,
@@ -324,8 +325,10 @@ export const WarningNote = memo(function WarningNote({
  * in the failure ink, and its time in the muted ink. The dot is named
  * "Error", so a screen reader says what kind of note this is. A command the
  * runner wrote between backticks, such as the one that installs a missing
- * harness, is drawn as inline code. Each word of the command stays whole, so
- * the command wraps only at its spaces, never inside a flag or an id.
+ * harness, is drawn as inline code. A word of the command stays whole, so the
+ * command wraps only at its spaces, never inside a flag or an id. A word too
+ * long to always fit a line, such as a path, is left as plain text in the
+ * code, so it breaks anywhere and the chip covers every line of it.
  */
 export const ErrorNote = memo(function ErrorNote({
   message,
@@ -349,7 +352,11 @@ export const ErrorNote = memo(function ErrorNote({
               {part.text.split(" ").map((word, wordIndex) => (
                 <Fragment key={wordIndex}>
                   {wordIndex === 0 ? null : " "}
-                  <span className="code-word">{word}</span>
+                  {word.length <= MAX_UNBROKEN_CODE_WORD ? (
+                    <span className="code-word">{word}</span>
+                  ) : (
+                    word
+                  )}
                 </Fragment>
               ))}
             </code>

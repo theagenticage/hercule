@@ -228,19 +228,17 @@ describe("Transcript", () => {
     expect(note.querySelector("p")?.firstChild?.textContent).toBe(message);
   });
 
-  it("draws the command a runtime error ends with as inline code", () => {
-    const command =
-      "hercule runner install-harness 01a1f00d-0000-7000-8000-000000000001 --provider claude-code";
-    const message = `Claude Code is not installed on this runner. Install it with: \`${command}\``;
+  /** Renders the thread with one more runtime error row, and returns what render returns. */
+  const renderWithRuntimeError = (message: string, errorClass: string) => {
     const rows = [
       ...THREAD.transcript,
       ...buildNextRows(THREAD.session.id, THREAD.transcript, {
         _tag: "runtime.error",
-        class: "HarnessNotInstalled",
+        class: errorClass,
         message,
       }),
     ];
-    const { container } = render(
+    return render(
       <Transcript
         sessionId={THREAD.session.id}
         faceSeed={THREAD.session.id}
@@ -252,9 +250,29 @@ describe("Transcript", () => {
         onBottomChange={() => {}}
       />,
     );
+  };
+
+  it("draws the command a runtime error ends with as inline code", () => {
+    const command =
+      "hercule runner install-harness 01a1f00d-0000-7000-8000-000000000001 --provider claude-code";
+    const { container } = renderWithRuntimeError(
+      `Claude Code is not installed on this runner. Install it with: \`${command}\``,
+      "HarnessNotInstalled",
+    );
 
     const code = container.querySelector(".error-note code")!;
     expect(code.textContent).toBe(command);
     expect(container.querySelector(".error-note p")?.textContent).not.toContain("`");
+  });
+
+  it("keeps the words of a command whole, except a word too long to always fit a line", () => {
+    const path = `/home/${"very-long-directory-name-".repeat(7)}file.ts`;
+    const { container } = renderWithRuntimeError(`Could not read \`cat ${path}\`.`, "unknown");
+
+    const code = container.querySelector(".error-note code")!;
+    expect(code.textContent).toBe(`cat ${path}`);
+    expect([...code.querySelectorAll(".code-word")].map((word) => word.textContent)).toEqual([
+      "cat",
+    ]);
   });
 });

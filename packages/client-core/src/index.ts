@@ -708,7 +708,7 @@ export {
   type ThreadBlock,
   type WorkBlock,
 } from "./threads/blocks";
-export { splitCodeSpans } from "./threads/code-spans";
+export { MAX_UNBROKEN_CODE_WORD, splitCodeSpans } from "./threads/code-spans";
 export { applyThreadChoice, type ThreadChoice } from "./threads/thread-choice";
 export {
   resolveThreadConfig,

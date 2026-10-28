@@ -4,8 +4,8 @@
  * quiet line, not a card: the mark and words carry the colour (design language
  * §Color doctrine), and nothing is filled.
  */
-import type { JSX } from "react";
-import { splitCodeSpans, type ThreadNotice } from "@hercule/client-core";
+import { Fragment, type JSX } from "react";
+import { MAX_UNBROKEN_CODE_WORD, splitCodeSpans, type ThreadNotice } from "@hercule/client-core";
 import { FailedMark, cn } from "@hercule/ui";
 import { INLINE_CODE } from "../markdown";
 
@@ -19,9 +19,10 @@ const NOTICE_CODE = cn(INLINE_CODE, "py-0 text-ink");
 
 /**
  * Draws a notice's message. A command the runner wrote between backticks is
- * inline code. Each word of the command stays whole, so the command wraps
- * only at its spaces and never inside a flag or an id; a word wider than the
- * line still breaks, rather than overflowing.
+ * inline code. A word of the command stays whole, so the command wraps only at
+ * its spaces and never inside a flag or an id. A word too long to always fit
+ * a line, such as a path, is left as plain text in the code, so it breaks
+ * anywhere and the chip covers every line of it.
  */
 function NoticeMessage({ message }: { readonly message: string }): JSX.Element {
   return (
@@ -30,10 +31,14 @@ function NoticeMessage({ message }: { readonly message: string }): JSX.Element {
         part.kind === "code" ? (
           <code key={index} className={NOTICE_CODE}>
             {part.text.split(" ").map((word, wordIndex) => (
-              <span key={wordIndex}>
+              <Fragment key={wordIndex}>
                 {wordIndex === 0 ? null : " "}
-                <span className="inline-block max-w-full">{word}</span>
-              </span>
+                {word.length <= MAX_UNBROKEN_CODE_WORD ? (
+                  <span className="whitespace-nowrap">{word}</span>
+                ) : (
+                  word
+                )}
+              </Fragment>
             ))}
           </code>
         ) : (
