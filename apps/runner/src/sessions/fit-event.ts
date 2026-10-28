@@ -84,6 +84,7 @@ const EVENT_SUBJECTS: Record<
   "content.delta": "A piece of streamed text",
   "session.usage.updated": "A usage update",
   "runtime.warning": "A warning",
+  "runtime.notice": "A notice",
   "runtime.error": "An error",
   "request.opened": "A request",
   "request.resolved": "The end of a request",

@@ -484,18 +484,18 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 7 cannot decode an async question or the answer result frame.
-  it("refuses a runner on protocol version 7 and says to upgrade it", async () => {
+  // Version 8 never sends the notice that version 9 has, and a version 8 controller cannot decode it.
+  it("refuses a runner on protocol version 8 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dialRunnerSocket(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 7 }));
+      wire.send(buildHello({ protocolVersion: 8 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(8);
+      expect(PROTOCOL_VERSION).toBe(9);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 8 and the runner does not; " +
-          "upgrade the runner to a build that uses version 8",
+        "this controller uses runner protocol version 9 and the runner does not; " +
+          "upgrade the runner to a build that uses version 9",
       );
       expect(wire.frames).toEqual([]);
     });

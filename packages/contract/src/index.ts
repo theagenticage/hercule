@@ -13,10 +13,12 @@ export { api } from "./api";
 
 export {
   canonicalizeRemote,
+  ContextCompactionDetail,
   findSkillReferences,
   isSkillNameCharacter,
   isSkillReferencePrefix,
   readSkillReferenceName,
+  UnknownItemDetail,
   type SkillReference,
 } from "@hercule/protocol";
 
