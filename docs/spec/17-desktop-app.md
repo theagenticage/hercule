@@ -4338,6 +4338,17 @@ Requests, for the events that read a Done page (a Done page is one `signal.query
 | The first screen's JavaScript, gzipped | a guide of 250 kB | 460.4 kB, unchanged |
 | Main's startup file, minified | 160 kB | 155.8 kB of 160 kB, unchanged |
 
+**Inline code in an error note,** for [#896](https://github.com/theagenticage/hercule/issues/896). An error note in the thread (a `runtime.error` row) draws a backtick span of its message as inline code, so the command that installs a missing harness reads as a command. The change is one split of the message into text and code parts, and about 0.5 kB of JavaScript and 21 lines of CSS in the lazy agent-page chunk.
+
+| Measure | Budget | After |
+|---|---|---|
+| Processes | none added | none added |
+| Memory | none added | none added |
+| Work while idle, and per streamed token | none added | none: one split of the message, when the note renders |
+| The lazy agent-page chunk | recorded; not budgeted | about 0.5 kB bigger |
+| The first screen's JavaScript, gzipped | a guide of 250 kB | unchanged |
+| Main's startup file, minified | 160 kB | unchanged |
+
 **Text size,** measured 2026-10-27 on Linux with Playwright's Chromium and a production React build (`NODE_ENV=production`), `pnpm build:desktop`'s bundle check, and Chrome DevTools Protocol counters, for [#862](https://github.com/theagenticage/hercule/issues/862). Before is the tree with the setting and the text tokens (part A) and with rows of fixed heights; After is the tree whose rows and lists follow the text. The change adds no process, no timer, no polling and no subscription that runs while idle: one `MutationObserver` on the root element's `data-text-size` exists while a list or the Office is mounted, and runs only when the attribute changes. It adds no work per streamed token. A change of the Text size sets one attribute, and each virtual list reads its row heights from the custom properties of `row-heights.css` once, in one computed-style read, and places its rows again.
 
 The sidebar was drawn from a specimen with 3,000 and with 200 threads, every section expanded. A change is the time from setting the attribute to the second animation frame after it, the median of 20 changes alternating between the largest step and the default. "Busy" is the renderer's script, layout and style time per change, from the DevTools counters. The machine's load average was 5, so each figure moves by a few milliseconds between runs: the After figures below are the range of three runs.
