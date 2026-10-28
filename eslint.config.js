@@ -48,6 +48,36 @@ const bannedChildProcessCalls = [
   },
 ];
 
+/**
+ * Effect compiles a schema into a parser the first time it decodes, encodes or
+ * checks with it, and keeps that parser in a `WeakMap` keyed by the schema
+ * object. So `Schema.decodeUnknownEffect(ModuleSchema)` inside a function is
+ * cheap: the schema is one object and is compiled once. A schema built in the
+ * call, such as `Schema.decodeUnknownEffect(Schema.fromJsonString(X))(text)`,
+ * is a new object on every call and is compiled again each time. This selector
+ * matches a call to a function of Effect's Schema module that parses a value
+ * with a schema, whose first argument is itself a call, inside any function
+ * (declaration, expression, generator or arrow). Those functions are:
+ * - `decode` and `encode`, each with an optional `Unknown`, and each ending in
+ *   `Effect`, `Exit`, `Option`, `Promise`, `Result` or `Sync`
+ *   (`decodeUnknownEffect`, `encodeSync`, ...)
+ * - `is` and `asserts`
+ *
+ * Builders such as `decodeTo`, `encodeTo`, `decode`, `encode` and `encodeKeys`
+ * are not matched: they build a new schema and compile nothing, so using them
+ * inside a function is no worse than any other schema builder.
+ * Every file imports Effect's Schema module under the name `Schema`, so the
+ * callee is matched by that name.
+ */
+const inlineSchemaCalls = [
+  {
+    selector:
+      ":function CallExpression[callee.object.name='Schema'][callee.property.name=/^(is|asserts|(decode|encode)(Unknown)?(Effect|Exit|Option|Promise|Result|Sync))$/][arguments.0.type='CallExpression']",
+    message:
+      "This builds a new schema on every call, and Effect compiles it again each time. Build the schema once at module level and use that.",
+  },
+];
+
 /** What the browser packages may not import, on top of the bans everywhere. */
 const noEffectMessage =
   "The React codebase writes no Effect code; go through @hercule/contract or @hercule/client-core (spec 14).";
@@ -171,6 +201,7 @@ const browserImports = ({ allowed, more = [] } = {}) => [
 const browserSyntax = ({ allowed, more = [] } = {}) => [
   "error",
   ...bannedChildProcessCalls,
+  ...inlineSchemaCalls,
   ...workflowEditorFenceCalls,
   ...yamlCalls,
   ...editorLibraryFences.filter((fence) => fence !== allowed).flatMap((fence) => fence.calls),
@@ -280,7 +311,12 @@ export default tseslint.config(
         "error",
         { paths: [...bannedEverywhere, ...bannedChildProcess], patterns: editorLibraryPatterns },
       ],
-      "no-restricted-syntax": ["error", ...bannedChildProcessCalls, ...editorLibraryCalls],
+      "no-restricted-syntax": [
+        "error",
+        ...bannedChildProcessCalls,
+        ...inlineSchemaCalls,
+        ...editorLibraryCalls,
+      ],
       // `import { type X } from "./x"` keeps an import of `./x` after the types
       // are removed, because the repository compiles with verbatimModuleSyntax.
       // `import type { X }` removes the import with them.
@@ -410,6 +446,7 @@ export default tseslint.config(
       "no-restricted-syntax": [
         "error",
         ...bannedChildProcessCalls,
+        ...inlineSchemaCalls,
         ...editorLibraryFences
           .filter((fence) => fence !== dagreFence)
           .flatMap((fence) => fence.calls),
@@ -435,6 +472,7 @@ export default tseslint.config(
       "no-restricted-syntax": [
         "error",
         ...bannedChildProcessCalls,
+        ...inlineSchemaCalls,
         ...editorLibraryCalls,
         viteGlobSyntax,
       ],
@@ -487,7 +525,7 @@ export default tseslint.config(
         "error",
         { paths: bannedEverywhere, patterns: editorLibraryPatterns },
       ],
-      "no-restricted-syntax": ["error", ...editorLibraryCalls],
+      "no-restricted-syntax": ["error", ...inlineSchemaCalls, ...editorLibraryCalls],
     },
   },
   {

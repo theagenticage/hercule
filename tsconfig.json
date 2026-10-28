@@ -16,7 +16,8 @@
     "scripts/**/*.ts",
     "install.test.ts",
     "vitest.config.ts",
-    "eslint.config.js"
+    "eslint.config.js",
+    "eslint.config.test.ts"
   ],
   "exclude": [
     "**/node_modules",

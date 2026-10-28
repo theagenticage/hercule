@@ -169,7 +169,7 @@ Contract sources:
 | Auth | `Authorization: Bearer <token>` (Effect `HttpApiSecurity.bearer`, `packages/contract/src/security.ts`) |
 | Request body | JSON. Send `Content-Type: application/json` (a `; charset=utf-8` suffix is fine). If the header is absent, the body is read as JSON. Any other content type gets 400 `validation` in the envelope, issue `{"path":[],"message":"the request body must be application/json"}` [Observed]. A body over 2 MiB gets a bare `413` with no envelope (`apps/controller/src/http/server.ts:135`) |
 | Response body | Always JSON (`application/json`), success or error |
-| Success status | Always **200**, including create operations. Only `HttpApiSchema.status(...)` changes it, and none of the ten operations here use it (`effect/http-api/HttpApiSchema.ts:984`) |
+| Success status | Always **200**, including create operations. Only `HttpApiSchema.status(...)` changes it, and none of the ten operations here use it (`effect/unstable/httpapi/HttpApiSchema.ts:984`) |
 | Empty success | An operation whose success schema is `Struct({})` returns `200` with body `{}` |
 | Path matching | Case-insensitive, and the path is normalized (`apps/controller/src/http/gate.ts:10-14`). Always send the canonical lowercase path anyway |
 
@@ -248,7 +248,7 @@ A request goes through these checks in this order. The first one that fails deci
 
 #### 2. Encodings (Effect Schema 4 over JSON)
 
-HttpApi sends bodies through `Schema.toCodecJson` and path, query and headers through `Schema.toCodecStringTree` (`effect/http-api/HttpApiEndpoint.ts:1081-1088, 1366-1384`). The table below shows how each type looks on the wire.
+HttpApi sends bodies through `Schema.toCodecJson` and path, query and headers through `Schema.toCodecStringTree` (`effect/unstable/httpapi/HttpApiEndpoint.ts:1081-1088, 1366-1384`). The table below shows how each type looks on the wire.
 
 | Schema type | JSON body encoding | Used by these ops? |
 |---|---|---|
@@ -305,7 +305,7 @@ Every credential the controller mints is a login token, an API key token, or a w
 
 #### 3. Query-string encoding (GET)
 
-The query is decoded with `toCodecStringTree` wrapped in `toCodecArrayFromSingle` (`effect/http-api/HttpApiBuilder.ts:769`). The URL is parsed by `searchParamsFromURL` (`effect/http/HttpServerRequest.ts:146`).
+The query is decoded with `toCodecStringTree` wrapped in `toCodecArrayFromSingle` (`effect/unstable/httpapi/HttpApiBuilder.ts:769`). The URL is parsed by `searchParamsFromURL` (`effect/unstable/http/HttpServerRequest.ts:146`).
 
 | Kind | How to send | Example |
 |---|---|---|
