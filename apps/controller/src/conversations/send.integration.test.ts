@@ -443,7 +443,7 @@ describe("conversation.send when the current session cannot be resumed", () => {
     });
   });
 
-  it("cancels a message held through an idle unload when the session cannot be resumed, and writes that the assistant did not get the message", async () => {
+  it("cancels a message held through an idle unload when the session cannot be resumed, and writes that there was a problem delivering the message", async () => {
     await withAgentFleet(
       async (arranged) => {
         const { conversation } = await readDefaultConversation(arranged);
@@ -475,7 +475,7 @@ describe("conversation.send when the current session cannot be resumed", () => {
         expect(notice).toMatchObject({
           senderLabel: "Hercule",
           text:
-            "Hercule did not get your message: the session could not be resumed " +
+            "There was a problem delivering your message to Hercule: the session could not be resumed " +
             "(that runner is draining and takes no new sessions). " +
             "Send the message again to start a new session.",
           sessionId: session.id,

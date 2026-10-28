@@ -57,7 +57,7 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
  * has no transcript to resume, so the queued-input sweep gives up on it.
  */
 const NEVER_STARTED =
-  "Ada did not get your message: the session could not be resumed (that session left no " +
+  "There was a problem delivering your message to Ada: the session could not be resumed (that session left no " +
   "provider-native session, so its transcript is gone and there is nothing to resume). " +
   "Send the message again to start a new session.";
 
@@ -617,7 +617,7 @@ describe("a conversation's start that the runner failed for good", () => {
         arranged,
         conversation.id,
         session!.id,
-        `Ada did not get your message: ${message}`,
+        `There was a problem delivering your message to Ada: ${message}`,
       );
       expect((await listInputs(arranged, session!.id))[0]).toMatchObject({
         status: "cancelled",

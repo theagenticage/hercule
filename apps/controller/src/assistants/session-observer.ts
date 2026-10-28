@@ -16,7 +16,7 @@
  *   resumed for whatever waits, and nobody was cut off.
  * - Input that is given up on for good (the session cannot be resumed, or the
  *   runner failed it in a way that sending it again would not mend) writes
- *   "<name> did not get your message: <why>".
+ *   "There was a problem delivering your message to <name>: <why>".
  *
  * A session that answers no conversation, or whose assistant is gone, writes
  * nothing, so a late report from a deleted assistant's session is ignored.
@@ -34,7 +34,7 @@ import { buildSessionStamp } from "../actor";
 import { readAssistantTexts, SessionObserver, type StoredSession } from "../sessions";
 import {
   buildInterruptedText,
-  buildMessageNotReceivedText,
+  buildDeliveryProblemText,
   buildTurnFailedText,
   buildTurnStoppedText,
   buildUnreachableText,
@@ -200,7 +200,7 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         yield* appendNotice({
           conversationId: answered.value.conversationId,
           name: answered.value.name,
-          text: buildMessageNotReceivedText(answered.value.name, refusal),
+          text: buildDeliveryProblemText(answered.value.name, refusal),
           sessionId: session.id,
         });
       }),

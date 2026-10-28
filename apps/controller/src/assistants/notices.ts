@@ -10,11 +10,12 @@
  * - "<name> can't be reached: <why>", when a message could not be delivered:
  *   no session could take it, or the session exited before it could start a
  *   turn and is held back from resuming;
- * - "<name> did not get your message: <why>", when a message was given up on
- *   for good: the session cannot be resumed, the runner failed it in a way
- *   that sending it again would not mend, or it asked for something the
- *   harness refused. The assistant itself may be fine, so the notice does not
- *   say it cannot be reached.
+ * - "There was a problem delivering your message to <name>: <why>", when a
+ *   message was given up on for good: the session cannot be resumed, the
+ *   runner failed it in a way that sending it again would not mend, or it
+ *   asked for something the harness refused. The wording claims neither that
+ *   the assistant is unreachable (it may be fine) nor that the message never
+ *   arrived (after a protocol error the harness may have taken it).
  *
  * A notice is stamped with the system.
  */
@@ -76,8 +77,8 @@ export const buildUnreachableText = (name: string, why: string): string =>
   `${name} can't be reached: ${why}`;
 
 /** Builds the notice text for a message that was given up on for good, for the reason `why`. */
-export const buildMessageNotReceivedText = (name: string, why: string): string =>
-  `${name} did not get your message: ${why}`;
+export const buildDeliveryProblemText = (name: string, why: string): string =>
+  `There was a problem delivering your message to ${name}: ${why}`;
 
 /** The conversation a session answers, and its assistant's name and reply mode. */
 export interface AnsweredConversation {
