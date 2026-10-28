@@ -560,7 +560,11 @@
   --room-paper: oklch(0.88 0.02 60);
 }
 
-/* ---------- Blue Train: dark, a blue-grey night. A tinted blue ground; every other token is Orient Express's. ---------- */
+/* ---------- Blue Train: dark, a blue-grey night. ----------
+   Its grounds, text, lines, composer, hat and scrim are its own blue-grey, and its tints
+   (--char-tint-l, --you-tint, --fail-tint, --ok-tint) are set for that ground, all tuned to
+   the same contrast targets as the other dark themes. Every other token is Orient Express's:
+   the accent, the selection, the crew hues, the semantic colours, the shadows and the rooms. */
 [data-theme="blue-train"] {
   color-scheme: dark;
   --bg: oklch(0.243 0.024 251);
