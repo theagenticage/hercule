@@ -4,9 +4,9 @@
  */
 import { readFile } from "node:fs/promises";
 import * as Effect from "effect/Effect";
-import { describeError, endSentence } from "../report";
+import { describeError } from "../report";
+import { buildAdapterFailed } from "./adapter-error-builders";
 import type { LocalAttachment } from "./index";
-import { truncateMessage } from "./text";
 
 /**
  * Reads an image the runner cached and returns its bytes in standard base64.
@@ -17,9 +17,7 @@ export const readAttachmentBase64 = (attachment: LocalAttachment): Effect.Effect
   Effect.tryPromise({
     try: () => readFile(attachment.path, { encoding: "base64" }),
     catch: (error) =>
-      truncateMessage(
-        endSentence(
-          `The image "${attachment.name}" could not be read on this runner: ${describeError(error)}`,
-        ),
-      ),
+      buildAdapterFailed(
+        `The image "${attachment.name}" could not be read on this runner: ${describeError(error)}`,
+      ).message,
   });

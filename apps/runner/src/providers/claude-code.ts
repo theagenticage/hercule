@@ -32,7 +32,6 @@ import {
   AdapterFailed,
   AnswerNotDelivered,
   MAX_FACT_ITEMS,
-  MAX_MESSAGE_LENGTH,
   SessionNotRunning,
   SteerRefused,
   type AccessMode,
@@ -77,9 +76,11 @@ import type { AttachmentUploader } from "../attachments";
 import type { ResolvedSkillReference } from "../skills";
 import { buildSkillSteerRefusedMessage } from "./steer-refused-message";
 import {
+  buildAdapterFailed,
   buildHarnessNotInstalled,
-  buildHarnessStartFailed,
+  buildStartFailure,
   buildInputStopped,
+  buildModelChangeLost,
   buildModelChangeRefused,
   buildSessionAlreadyRunning,
   buildSessionNotRunning,
@@ -694,15 +695,10 @@ const buildNativeSkillOverrides = (
 ): Effect.Effect<Settings, AdapterFailed> => {
   if (!loadsProject) return Effect.succeed({});
   return runBoundedListing(listNativeClaudeSkills(directories)).pipe(
-    Effect.mapError(
-      (reason) =>
-        new AdapterFailed({
-          message:
-            `The runner could not turn off the skills Claude Code would load natively from \`.claude/skills\`: ${endSentence(reason)} The Thread did not start.`.slice(
-              0,
-              MAX_MESSAGE_LENGTH,
-            ),
-        }),
+    Effect.mapError((reason) =>
+      buildAdapterFailed(
+        `The runner could not turn off the skills Claude Code would load natively from \`.claude/skills\`: ${endSentence(reason)} The Thread did not start.`,
+      ),
     ),
     Effect.map((names): Settings =>
       names.length === 0
@@ -759,13 +755,9 @@ const buildSessionSettings = (
           return path;
         },
         catch: (error) =>
-          new AdapterFailed({
-            message: truncateMessage(
-              endSentence(
-                `The runner could not write the settings file for ${CLAUDE_CODE_NAME}: ${describeError(error)}`,
-              ),
-            ),
-          }),
+          buildAdapterFailed(
+            `The runner could not write the settings file for ${CLAUDE_CODE_NAME}: ${describeError(error)}`,
+          ),
       }),
   );
 
@@ -854,7 +846,7 @@ const buildUserContent = (
     );
   }
   const readImages = Effect.forEach(attachments, readAttachmentBase64).pipe(
-    Effect.mapError((message) => new AdapterFailed({ message })),
+    Effect.mapError(buildAdapterFailed),
   );
   return Effect.map(readImages, (images) => [
     ...(leading === "" ? [] : [buildTextBlock(leading)]),
@@ -1088,6 +1080,12 @@ const resolveNativeSession = (
   };
 };
 
+/** Why the harness did not accept a control request (`sendControlRequest`). */
+interface ControlFailure {
+  readonly _tag: "Refused" | "NoAnswer";
+  readonly reason: string;
+}
+
 /** One session this adapter is hosting. */
 interface Live {
   readonly binding: SessionBinding;
@@ -1130,21 +1128,35 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   };
 
   /**
-   * Sends one control request with a time limit. Returns why it failed, or
-   * `undefined` when it succeeded. Never fails itself.
+   * Sends one control request with a time limit and returns how it failed, or
+   * `undefined` when the harness accepted it. Never fails itself. The two
+   * failures need different handling, so they have different tags:
+   *
+   * - `Refused`: the harness answered and said no. The request had no effect.
+   * - `NoAnswer`: the harness did not answer within `CONTROL_DEADLINE`, or the
+   *   session ended while the request waited. Whether the request had an
+   *   effect is unknown. The SDK rejects a request of a closed process with an
+   *   ordinary error, so the session's state is what tells the two apart.
    */
-  const sendControlRequest = (request: Promise<void>): Effect.Effect<string | undefined> =>
+  const sendControlRequest = (
+    held: Live,
+    request: Promise<void>,
+  ): Effect.Effect<ControlFailure | undefined> =>
     Effect.map(
       Effect.timeoutOption(
         Effect.match(Effect.tryPromise({ try: () => request, catch: describeError }), {
-          onFailure: (why: string) => why,
+          onFailure: (reason: string): ControlFailure =>
+            held.stopping !== undefined || live.get(held.binding.sessionId) !== held
+              ? { _tag: "NoAnswer", reason }
+              : { _tag: "Refused", reason },
           onSuccess: () => undefined,
         }),
         CONTROL_DEADLINE,
       ),
-      Option.getOrElse(
-        () => `the harness did not answer within ${Duration.format(CONTROL_DEADLINE)}`,
-      ),
+      Option.getOrElse((): ControlFailure | undefined => ({
+        _tag: "NoAnswer",
+        reason: `the harness did not answer within ${Duration.format(CONTROL_DEADLINE)}`,
+      })),
     );
 
   /**
@@ -1297,12 +1309,12 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
    *   harness that keeps refusing is not asked at every message.
    */
   const stopSubagent = (held: Live, subagentId: SubagentId): Effect.Effect<void> =>
-    Effect.map(sendControlRequest(held.stream.stopTask(subagentId)), (refused) => {
+    Effect.map(sendControlRequest(held, held.stream.stopTask(subagentId)), (failure) => {
       // Once the session stops, the harness is going away and every subagent
       // with it, so a refusal is no news to the user.
       const sessionStopped =
         held.stopping !== undefined || live.get(held.binding.sessionId) !== held;
-      if (refused === undefined || sessionStopped) return;
+      if (failure === undefined || sessionStopped) return;
       clearRefusedStop(held.state.subagents, subagentId);
       emit({
         _tag: "runtime.warning",
@@ -1310,7 +1322,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         sessionId: held.binding.sessionId,
         at: held.state.now(),
         subagentId,
-        message: `the subagent was not stopped: ${refused}`,
+        message: `the subagent was not stopped: ${failure.reason}`,
       });
     });
 
@@ -1540,7 +1552,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
                     ),
                     input,
                   }),
-                catch: (error) => buildHarnessStartFailed(CLAUDE_CODE_NAME, describeError(error)),
+                catch: (error) => buildStartFailure(CLAUDE_CODE_NAME, describeError(error)),
               });
             }),
           ),
@@ -1600,10 +1612,16 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // the model, the input fails: sending it under the old model would run
         // a turn the caller did not ask for.
         if (model !== undefined && model !== before.model && before.state.turnId === undefined) {
-          const refused = yield* sendControlRequest(before.stream.setModel(model));
-          if (refused !== undefined) {
+          const failure = yield* sendControlRequest(before, before.stream.setModel(model));
+          if (failure !== undefined) {
             return yield* Effect.fail(
-              buildModelChangeRefused(CLAUDE_CODE_NAME, `switch to the model ${model}`, refused),
+              failure._tag === "Refused"
+                ? buildModelChangeRefused(
+                    CLAUDE_CODE_NAME,
+                    `switch to the model ${model}`,
+                    failure.reason,
+                  )
+                : buildModelChangeLost(CLAUDE_CODE_NAME, failure.reason),
             );
           }
           before.model = model;
@@ -1625,7 +1643,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           turn.skillReferences.length > 0
         ) {
           return yield* Effect.fail(
-            new SteerRefused({ message: buildSkillSteerRefusedMessage("Claude") }),
+            new SteerRefused({ message: buildSkillSteerRefusedMessage(CLAUDE_CODE_NAME) }),
           );
         }
         const { turnId, events } = openTurn(held.state);
@@ -1673,7 +1691,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         withdrawAllParks(held.parks);
         // The turn completing as `interrupted` is the only report. If the
         // request fails, the harness is already gone, which has the same result.
-        return Effect.asVoid(sendControlRequest(held.stream.interrupt()));
+        return Effect.asVoid(sendControlRequest(held, held.stream.interrupt()));
       }),
 
     stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>

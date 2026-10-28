@@ -54,20 +54,30 @@ export const runProcess: Run = (command, env) =>
 
 /**
  * Checks whether a spawn failed because the executable does not exist. Bun
- * throws an error with code `ENOENT` when the command is missing from the
- * path or from `PATH`.
+ * throws an error with code `ENOENT` for three different causes, and the
+ * error does not tell which one it was:
  *
- * Bun throws the same `ENOENT` when the working directory of the spawn is
- * missing, and the error does not say which of the two it was. So the answer
- * is `true` only when `cwd` is `null` (the spawn sets no working directory)
- * or the directory exists. The directory is checked only after a spawn has
- * failed, so a successful spawn pays nothing.
+ * - the executable is missing,
+ * - the working directory is missing,
+ * - the executable is a script whose interpreter is missing, such as
+ *   `#!/usr/bin/env node` on a PATH without node.
+ *
+ * So the answer is `true` only for `ENOENT` when the executable itself does
+ * not exist and the working directory is `null` (the spawn sets none) or
+ * exists. Otherwise the harness is present but cannot run, and the caller says
+ * so. `spawn.binary` is the path of the executable and `spawn.cwd` the working
+ * directory the spawn set. The files are checked only after a spawn has failed, so a successful
+ * spawn pays nothing.
  */
-export const isExecutableNotFound = (error: unknown, cwd: string | null): boolean =>
+export const isExecutableNotFound = (
+  error: unknown,
+  spawn: { readonly binary: string; readonly cwd: string | null },
+): boolean =>
   error instanceof Error &&
   "code" in error &&
   error.code === "ENOENT" &&
-  (cwd === null || existsSync(cwd));
+  !existsSync(spawn.binary) &&
+  (spawn.cwd === null || existsSync(spawn.cwd));
 
 /**
  * Returns the ids of the processes that hold `file` open: from `lsof` on

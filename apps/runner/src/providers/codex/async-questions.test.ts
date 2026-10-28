@@ -9,7 +9,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { AnswerNotDelivered, ProviderEvent } from "@hercule/protocol";
+import { AnswerNotDelivered, MAX_MESSAGE_LENGTH, ProviderEvent } from "@hercule/protocol";
 import { RPC_DEADLINE } from "./rpc";
 import {
   buildRefusal,
@@ -327,6 +327,37 @@ describe("a Codex async question", () => {
 
     expect(listSentParams(run.requests, "turn/start")).toHaveLength(3);
     expect(filterByTag(run.seen, "request.resolved")).toHaveLength(1);
+  });
+
+  it("fails with a message that fits in an error when Codex refuses the answer with a long reason", async () => {
+    let starts = 0;
+    const run = await startBusySession({
+      "turn/start": () => {
+        starts += 1;
+        return starts === 2
+          ? buildRefusal("x".repeat(MAX_MESSAGE_LENGTH * 2), -32603)
+          : { turn: { id: TURN, items: [], itemsView: "full", status: "inProgress" } };
+      },
+    });
+    const requestId = await askAsyncQuestion(run);
+    await completeTurn(run);
+
+    const failure = await fail(run, requestId, { Question: "Yes" });
+
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
+    expect(failure.message.length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH);
+  });
+
+  it("fails with a message that fits in an error when it is not known whether Codex took the answer and the reason is long", async () => {
+    const run = await startBusySession({
+      "turn/steer": () => ({ error: { message: "x".repeat(MAX_MESSAGE_LENGTH * 2) } }),
+    });
+    const requestId = await askAsyncQuestion(run);
+
+    const failure = await fail(run, requestId, { Question: "Yes" });
+
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
+    expect(failure.message.length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH);
   });
 
   it("closes the question, warns the session and never sends again when it is not known whether Codex took the answer", async () => {

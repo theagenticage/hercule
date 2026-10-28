@@ -1,11 +1,15 @@
 import { MAX_MESSAGE_LENGTH } from "@hercule/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  buildAdapterFailed,
+  buildAnswerNotDelivered,
   buildHarnessNotInstalled,
-  buildHarnessStartFailed,
+  buildHarnessNotRunnable,
+  buildHarnessProtocolError,
   buildInputLost,
   buildInputRefused,
   buildModelChangeRefused,
+  buildStartFailure,
 } from "./adapter-error-builders";
 
 const TOO_LONG = "x".repeat(MAX_MESSAGE_LENGTH * 2);
@@ -25,8 +29,20 @@ describe("the messages of the adapter error builders", () => {
     expect(buildInputRefused("Codex", "busy.").message).toBe("Codex refused the input: busy.");
   });
 
+  it("tells the user that a harness that exists could not be run, and to check its PATH", () => {
+    const failure = buildHarnessNotRunnable("pi", "spawn failed");
+    expect(failure._tag).toBe("AdapterFailed");
+    expect(failure.message).toContain("installed");
+    expect(failure.message).toContain("PATH");
+    expect(failure.message).toContain("spawn failed");
+  });
+
   it.each([
-    ["buildHarnessStartFailed", () => buildHarnessStartFailed("pi", TOO_LONG)],
+    ["buildAdapterFailed", () => buildAdapterFailed(TOO_LONG)],
+    ["buildHarnessProtocolError", () => buildHarnessProtocolError(TOO_LONG)],
+    ["buildAnswerNotDelivered", () => buildAnswerNotDelivered(TOO_LONG)],
+    ["buildStartFailure", () => buildStartFailure("pi", TOO_LONG)],
+    ["buildHarnessNotRunnable", () => buildHarnessNotRunnable("pi", TOO_LONG)],
     ["buildInputRefused", () => buildInputRefused("pi", TOO_LONG)],
     ["buildInputLost", () => buildInputLost("pi", TOO_LONG)],
     ["buildModelChangeRefused", () => buildModelChangeRefused("pi", "change the model", TOO_LONG)],

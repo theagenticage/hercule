@@ -3,7 +3,7 @@ import { HarnessLoginMissing, HarnessNotInstalled, type AdapterError } from "@he
 import { endSentence } from "../report";
 
 /** What the commands that set a harness up are written with. */
-export interface SetupTarget {
+interface SetupTarget {
   readonly runnerId: string;
   readonly providerId: string;
   readonly instanceId: string;

@@ -12,9 +12,11 @@ import { mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Random from "effect/Random";
 import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import type {
   AccessMode,
@@ -58,8 +60,11 @@ import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { isExecutableNotFound, runProcess, spawnAppServer, stopChild, type Run } from "../process";
 import { buildSkillSteerRefusedMessage } from "../steer-refused-message";
 import {
+  buildAdapterFailed,
+  buildAnswerNotDelivered,
   buildHarnessNotInstalled,
-  buildHarnessStartFailed,
+  buildHarnessNotRunnable,
+  buildHarnessProtocolError,
   buildInputLost,
   buildInputRefused,
   buildSessionNotRunning,
@@ -67,7 +72,7 @@ import {
 } from "../adapter-error-builders";
 import { truncateMessage } from "../text";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
-import { endSentence, now } from "../../report";
+import { describeError, now } from "../../report";
 import { ASKED } from "./approvals";
 import {
   buildAnswerEnvelope,
@@ -126,12 +131,9 @@ import type {
   ThreadForkParams,
   ThreadResumeParams,
   ThreadStartParams,
-  ThreadStartResponse,
   TurnInterruptParams,
   TurnStartParams,
-  TurnStartResponse,
   TurnSteerParams,
-  TurnSteerResponse,
   UserInput,
 } from "./types";
 
@@ -142,9 +144,44 @@ const CODEX_BINARY = "codex";
 /** The name the user knows this harness by, as it appears in the messages shown to them. */
 const CODEX_NAME = "Codex";
 
-/** Returns the message of a thrown value, whatever it is. */
-const describeError = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+/**
+ * The parts of the reply to `thread/start`, `thread/resume` and `thread/fork`
+ * that the adapter reads. The reply of a request is `unknown` on the wire, so
+ * the adapter decodes it instead of casting: a success reply of another shape
+ * must fail the call, not crash it after Codex may have taken the input.
+ */
+const ThreadOpenedReply = Schema.Struct({ thread: Schema.Struct({ id: Schema.String }) });
+
+/** The part of the reply to `turn/start` that the adapter reads. */
+const TurnStartedReply = Schema.Struct({ turn: Schema.Struct({ id: Schema.String }) });
+
+/** The part of the reply to `turn/steer` that the adapter reads. */
+const TurnSteeredReply = Schema.Struct({ turnId: Schema.String });
+
+const decodeThreadOpenedReply = Schema.decodeUnknownOption(ThreadOpenedReply);
+const decodeTurnStartedReply = Schema.decodeUnknownOption(TurnStartedReply);
+const decodeTurnSteeredReply = Schema.decodeUnknownOption(TurnSteeredReply);
+
+/**
+ * Returns a function that decodes the success reply of `method` and fails with
+ * an `RpcError` when the reply does not have the shape the adapter reads. The
+ * error has no `code`, like every failure on this side of the connection, so
+ * callers treat it as a reply they cannot trust, not as a refusal by Codex.
+ */
+const readReply =
+  <A>(decode: (reply: unknown) => Option.Option<A>, method: string) =>
+  (reply: unknown): Effect.Effect<A, RpcError> =>
+    Option.match(decode(reply), {
+      onSome: (decoded) => Effect.succeed(decoded),
+      onNone: () =>
+        Effect.fail({
+          message: `${CODEX_NAME} sent a reply to ${method} that has an unexpected shape`,
+        }),
+    });
+
+const readThreadOpenedReply = (method: string) => readReply(decodeThreadOpenedReply, method);
+const readTurnStartedReply = readReply(decodeTurnStartedReply, "turn/start");
+const readTurnSteeredReply = readReply(decodeTurnSteeredReply, "turn/steer");
 
 /**
  * How many of the app-server's last non-frame lines are kept, so they can be
@@ -267,10 +304,8 @@ const buildInputError = (error: RpcError): AdapterError =>
  */
 const buildStartError = (host: AppServer, what: string, error: RpcError): AdapterError =>
   error.code === undefined
-    ? new HarnessProtocolError({
-        message: truncateMessage(endSentence(`${what}: ${describeRpcError(host, error)}`)),
-      })
-    : new AdapterFailed({ message: truncateMessage(endSentence(`${what}: ${error.message}`)) });
+    ? buildHarnessProtocolError(`${what}: ${describeRpcError(host, error)}`)
+    : buildAdapterFailed(`${what}: ${error.message}`);
 
 /**
  * Checks whether an `account/read` reply shows that Codex needs a login and
@@ -788,22 +823,18 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       const env = yield* Effect.try({
         try: () => prepareEnv(ctx),
         catch: (error) =>
-          new AdapterFailed({
-            message: truncateMessage(
-              endSentence(
-                `${CODEX_NAME} could not prepare its folders on this runner: ${describeError(error)}`,
-              ),
-            ),
-          }),
+          buildAdapterFailed(
+            `${CODEX_NAME} could not prepare its folders on this runner: ${describeError(error)}`,
+          ),
       });
       return yield* Effect.try({
         try: () => startHost(env, binary, sessionId, overrides, textGeneration),
         catch: (error) =>
-          // Codex is spawned with no working directory, so a missing
-          // executable is the only cause of `ENOENT`.
-          isExecutableNotFound(error, null)
+          // Codex is spawned with no working directory, so `ENOENT` means the
+          // binary is missing or its interpreter is.
+          isExecutableNotFound(error, { binary, cwd: null })
             ? buildHarnessNotInstalled(CODEX_NAME)
-            : buildHarnessStartFailed(CODEX_NAME, describeError(error)),
+            : buildHarnessNotRunnable(CODEX_NAME, describeError(error)),
       });
     });
 
@@ -1268,8 +1299,11 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       const before = held.threads.root.state.model;
       if (input.modelSelection !== undefined)
         held.threads.root.state.model = input.modelSelection.model;
-      const answer = yield* Effect.mapError(
-        retryWhileOverloaded(held.host.rpc.request("turn/start", params)),
+      const started = yield* Effect.mapError(
+        Effect.flatMap(
+          retryWhileOverloaded(held.host.rpc.request("turn/start", params)),
+          readTurnStartedReply,
+        ),
         (error) => {
           // No turn started, so restore the previous model for the next turn
           // to report.
@@ -1277,7 +1311,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           return buildInputError(error);
         },
       );
-      return { turnId: (answer as TurnStartResponse).turn.id, delivery: "opened" };
+      return { turnId: started.turn.id, delivery: "opened" };
     });
 
   /**
@@ -1295,21 +1329,21 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     expectedTurnId: string,
   ): Effect.Effect<SendResult | undefined, AdapterError> =>
     Effect.matchEffect(
-      retryWhileOverloaded(
-        held.host.rpc.request("turn/steer", {
-          threadId: held.binding.nativeSessionId,
-          input: buildUserInput(input, skillItems),
-          expectedTurnId,
-        } satisfies TurnSteerParams),
+      Effect.flatMap(
+        retryWhileOverloaded(
+          held.host.rpc.request("turn/steer", {
+            threadId: held.binding.nativeSessionId,
+            input: buildUserInput(input, skillItems),
+            expectedTurnId,
+          } satisfies TurnSteerParams),
+        ),
+        readTurnSteeredReply,
       ),
       {
         onFailure: (error) =>
           isSteerNotTaken(error) ? Effect.succeed(undefined) : Effect.fail(buildInputError(error)),
-        onSuccess: (answer) =>
-          Effect.succeed<SendResult>({
-            turnId: (answer as TurnSteerResponse).turnId,
-            delivery: "steered",
-          }),
+        onSuccess: (steered) =>
+          Effect.succeed<SendResult>({ turnId: steered.turnId, delivery: "steered" }),
       },
     );
 
@@ -1341,7 +1375,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           // queued and runs normally when this turn ends.
           if (running !== undefined && skills.translated.length > 0)
             return yield* Effect.fail(
-              new SteerRefused({ message: buildSkillSteerRefusedMessage("Codex") }),
+              new SteerRefused({ message: buildSkillSteerRefusedMessage(CODEX_NAME) }),
             );
           yield* held.threads.submitInput(ticket, running);
           const steered =
@@ -1426,16 +1460,20 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
             }
             if (!maybeDelivered) {
               question.state = "open";
+              // The advice comes before the reason, because the reason is text
+              // from Codex and the builder cuts the end of a long message.
               return Effect.fail(
-                new AnswerNotDelivered({
-                  message: `The agent did not take the answer: ${failure.message}. Answer again to retry.`,
-                }),
+                buildAnswerNotDelivered(
+                  `The agent did not take the answer, so answer again to retry. The reason was: ${failure.message}`,
+                ),
               );
             }
-            const message = `Codex did not confirm the answer (${failure.message}). It may not have reached the agent, so the question was closed. If the agent does not react, reply in the thread.`;
+            const failed = buildAnswerNotDelivered(
+              `${CODEX_NAME} did not confirm the answer, so it may not have reached the agent, and the question was closed. If the agent does not react, reply in the thread. The reason was: ${failure.message}`,
+            );
             closeAsyncQuestion(held, question, { decision: "cancel" });
-            warn(held.host, message);
-            return Effect.fail(new AnswerNotDelivered({ message }));
+            warn(held.host, failed.message);
+            return Effect.fail(failed);
           },
           onSuccess: (sent) =>
             Effect.sync(() => {
@@ -1552,14 +1590,14 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           // quote the input.
           yield* Effect.mapError(initializeAppServer(host), (error) => error.message);
           const opened = yield* Effect.mapError(
-            host.rpc.request("thread/start", buildTextGenerationThread(spec, ctx.cwd)),
+            Effect.flatMap(
+              host.rpc.request("thread/start", buildTextGenerationThread(spec, ctx.cwd)),
+              readThreadOpenedReply("thread/start"),
+            ),
             (error) => error.message,
           );
           yield* Effect.mapError(
-            host.rpc.request(
-              "turn/start",
-              buildTextGenerationTurn((opened as ThreadStartResponse).thread.id, spec),
-            ),
+            host.rpc.request("turn/start", buildTextGenerationTurn(opened.thread.id, spec)),
             (error) => error.message,
           );
           return decideTextGenerationOutcome(spec, yield* watch.ended);
@@ -1588,16 +1626,25 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         const userInstructions = yield* readUserInstructions(ctx.userMaterial);
         const host = yield* startSessionHost(sessionId, spec, ctx, binary);
         const carried = spec.continue;
-        const opened = yield* Effect.matchEffect(
+        const method =
           carried === undefined
-            ? host.rpc.request("thread/start", {
-                ...buildThreadParams(spec, ctx, userInstructions),
-                ephemeral: false,
-              } satisfies ThreadStartParams)
-            : host.rpc.request(carried.mode === "resume" ? "thread/resume" : "thread/fork", {
-                threadId: carried.nativeSessionId,
-                ...buildThreadParams(spec, ctx, userInstructions),
-              } satisfies ThreadResumeParams & ThreadForkParams),
+            ? "thread/start"
+            : carried.mode === "resume"
+              ? "thread/resume"
+              : "thread/fork";
+        const opened = yield* Effect.matchEffect(
+          Effect.flatMap(
+            carried === undefined
+              ? host.rpc.request(method, {
+                  ...buildThreadParams(spec, ctx, userInstructions),
+                  ephemeral: false,
+                } satisfies ThreadStartParams)
+              : host.rpc.request(method, {
+                  threadId: carried.nativeSessionId,
+                  ...buildThreadParams(spec, ctx, userInstructions),
+                } satisfies ThreadResumeParams & ThreadForkParams),
+            readThreadOpenedReply(method),
+          ),
           {
             onFailure: (error: RpcError) => {
               // The thread did not open, so kill the host rather than leave a
@@ -1609,7 +1656,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
             },
             // A fork is a new thread, so the session takes the id in the
             // reply; the thread it was forked from is left alone.
-            onSuccess: (answer) => Effect.succeed((answer as ThreadStartResponse).thread.id),
+            onSuccess: (answer) => Effect.succeed(answer.thread.id),
           },
         );
         const binding: SessionBinding = {

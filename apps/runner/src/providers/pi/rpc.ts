@@ -46,22 +46,31 @@ export class PiExited extends Schema.TaggedError<PiExited>()("PiExited", {
 }) {}
 
 /**
- * The failure of `send` when the command could not be written to pi, or pi
- * did not answer in time. It is not known whether pi acted on the command.
+ * The failure of `send` when the command could not be written to pi. It is
+ * not known whether pi acted on the command.
  */
 export class PiUnreachable extends Schema.TaggedError<PiUnreachable>()("PiUnreachable", {
   message: Schema.String,
 }) {}
 
+/**
+ * The failure of `send` when pi did not respond within the command's
+ * deadline. Pi may be busy rather than gone, and it is not known whether it
+ * acted on the command.
+ */
+export class PiTimedOut extends Schema.TaggedError<PiTimedOut>()("PiTimedOut", {
+  message: Schema.String,
+}) {}
+
 /** Every failure of `send`, told apart by `_tag`. */
-export type PiRpcFailure = PiRefusedCommand | PiExited | PiUnreachable;
+export type PiRpcFailure = PiRefusedCommand | PiExited | PiUnreachable | PiTimedOut;
 
 export interface PiRpc {
   /**
    * Sends one command and waits for pi's response with the same id. Returns
    * the response frame. Fails with `PiRefusedCommand` when pi answers with an
-   * error, `PiExited` when pi exits before it answers, and `PiUnreachable`
-   * when the write fails or pi does not answer in time. Only
+   * error, `PiExited` when pi exits before it answers, `PiUnreachable` when
+   * the write fails, and `PiTimedOut` when pi does not answer in time. Only
    * `PiRefusedCommand` proves that the command did not take effect.
    */
   readonly send: (
@@ -75,16 +84,56 @@ export interface PiRpc {
 }
 
 /**
- * How long `send` waits for pi's response. Five seconds is enough because every
- * command is local: a write to a process on this machine and a response on the
+ * How long `send` waits for pi's response to a command that pi answers from
+ * its own state: a write to a process on this machine and a response on the
  * same pipe, never a request to a model. The runner handles a session's frames
  * one at a time, in order, so a pi that stops responding would otherwise block
  * every later frame of its session.
  */
 export const RPC_DEADLINE: Duration.Duration = Duration.seconds(5);
 
+/**
+ * How long `send` waits for the response to `prompt`. pi (0.85.1, `AgentSession.prompt`)
+ * sends this response only after its preflight, and the preflight can wait
+ * on a model: when the context is nearly full it first compacts it, which asks
+ * the model for a summary, and it can also run a slash command of an
+ * extension or refresh an expired login before it answers. pi sets no limit
+ * on any of these. Two minutes covers an ordinary compaction. It is also
+ * as long as this wait may be: when the controller connection drops,
+ * tearing it down waits for the `prompt` in flight, and that holds up the
+ * runner's reconnect. Two minutes keeps that in line with Codex (30 seconds
+ * per request, with retries) and with the two-minute image download. A
+ * `prompt` that takes longer fails the input with `HarnessProtocolError`,
+ * and the session ends.
+ */
+export const PROMPT_RPC_DEADLINE: Duration.Duration = Duration.minutes(2);
+
+/**
+ * How long `send` waits for the response to `set_model`. pi checks that the
+ * new model's provider has a login first, and refreshing an expired login is
+ * a request over the network.
+ */
+export const SET_MODEL_RPC_DEADLINE: Duration.Duration = Duration.seconds(30);
+
+/**
+ * Returns how long `send` waits for the response to a command of type
+ * `commandType`. `steer` and `set_thinking_level` only change pi's own state
+ * and use `RPC_DEADLINE`, like `abort`: the callers of `abort` ignore its
+ * failure, so waiting longer for the idle pi it ends with buys nothing.
+ */
+const getResponseDeadline = (commandType: unknown): Duration.Duration => {
+  switch (commandType) {
+    case "prompt":
+      return PROMPT_RPC_DEADLINE;
+    case "set_model":
+      return SET_MODEL_RPC_DEADLINE;
+    default:
+      return RPC_DEADLINE;
+  }
+};
+
 /** The message of the `PiExited` failure: pi exited, or closed its output, before it responded. */
-export const PI_GONE = "pi exited or closed its output";
+const PI_GONE = "pi exited or closed its output";
 
 /** Returns the message of an error, or the text of any other thrown value. */
 export const describeError = (error: unknown): string =>
@@ -165,13 +214,14 @@ export const makeRpc = (
           pending.delete(id);
           return Effect.fail(new PiUnreachable({ message: describeError(error) }));
         }
+        const deadline = getResponseDeadline(command["type"]);
         return Deferred.await(settled).pipe(
           Effect.timeoutOrElse({
-            duration: RPC_DEADLINE,
+            duration: deadline,
             orElse: () =>
               Effect.fail(
-                new PiUnreachable({
-                  message: `pi did not answer ${String(command["type"])} within ${Duration.format(RPC_DEADLINE)}`,
+                new PiTimedOut({
+                  message: `pi did not answer ${String(command["type"])} within ${Duration.format(deadline)}`,
                 }),
               ),
           }),

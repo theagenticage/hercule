@@ -48,12 +48,12 @@ import {
 } from "@hercule/protocol";
 import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } from "../providers";
 import {
+  buildAdapterFailed,
   buildInputStopped,
   buildSessionAlreadyRunning,
   buildSessionNotRunning,
   buildSessionStopping,
 } from "../providers/adapter-error-builders";
-import { truncateMessage } from "../providers/text";
 import { describeCause, endSentence, now } from "../report";
 import {
   buildLoadedSkills,
@@ -110,15 +110,6 @@ interface RunningStep {
  */
 const SETTLED_STEP_REFUSAL =
   "The step ended before its prompt was delivered, so the prompt was not run.";
-
-/**
- * Builds the `AdapterFailed` error for a failure whose text this runner does
- * not control, such as a message from the file system or the controller. The
- * text is cut to the protocol's limit, because an `AdapterFailed` with a
- * longer message cannot be built.
- */
-const buildAdapterFailed = (message: string): AdapterFailed =>
-  new AdapterFailed({ message: truncateMessage(message) });
 
 /** Builds the error for a start that the runner refuses because it is shutting down. */
 const buildShuttingDown = (): AdapterFailed =>
@@ -1162,8 +1153,13 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       // `HarnessProtocolError` is the exception: the conversation with the
       // harness broke down, so the harness is stopped as a crash instead,
       // after the answer. The adapter does nothing when it no longer holds
-      // the session. The stop sets `pendingStop`, which keeps the idle wait
-      // from being armed.
+      // the session. `requestStop` sets `pendingStop` as soon as it is
+      // called, which keeps the idle wait from being armed and makes the
+      // session's later inputs fail with `SessionNotRunning`. The stop itself
+      // runs in the connection's scope, because a harness that just stopped
+      // answering may make the stop wait (Codex asks its app-server to
+      // interrupt the turn), and the session's later frames must not queue
+      // behind that wait.
       const refuseHeldInput = (error: AdapterError): Effect.Effect<void> =>
         Effect.andThen(
           refuseInput(frame, error),
@@ -1173,7 +1169,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               connection.workspaceSteps.forgetAgentStep(step.key);
             }
             if (error._tag === "HarnessProtocolError") {
-              return requestStop(frame.sessionId, held, "crash");
+              return Effect.asVoid(
+                Effect.forkIn(requestStop(frame.sessionId, held, "crash"), connection.scope),
+              );
             }
             return isIdle(held) ? armIdleUnload(held, frame.sessionId) : Effect.void;
           }),
@@ -1645,7 +1643,13 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                         editWatch.recordRequestOnRunningItem(frame.sessionId, requestId),
                     },
             }),
-            (error) => buildCrashedStart(appendSetupInstructions(error, setupTarget)),
+            // An adapter that already hosts the session says so, like the
+            // duplicate check above. The running session is not touched, so
+            // this start is refused without a crash or an exit.
+            (error): UndeliveredStart =>
+              error._tag === "SessionAlreadyRunning"
+                ? { error, exitReason: undefined }
+                : buildCrashedStart(appendSetupInstructions(error, setupTarget)),
           ),
           () =>
             Effect.gen(function* () {
@@ -1754,17 +1758,26 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       // `sendInputAndAnswer` requires.
       //
       // So tearing down a dropped connection, which interrupts every frame
-      // still being handled and waits for each, waits for this part too. The
-      // connection handles each session's frames apart from the others', so
-      // only this session's later frames wait behind it, never a ping or
-      // another session. The wait is bounded by the deadline each adapter
-      // puts on its requests to the harness:
+      // still being handled and waits for each, waits for this part too.
+      // Within the connection, only this session's later frames wait behind
+      // it, never a ping or another session. But the teardown is also the end
+      // of the connection attempt (`socket.ts` closes the connection's scope
+      // when the attempt ends), and the reconnect loop starts the next
+      // attempt, with its hello and sessions report, only after that.
+      // So the whole runner stays disconnected for as long as the slowest
+      // harness call in flight takes to answer or time out. The wait is
+      // bounded by the deadline each adapter puts on its requests to the
+      // harness:
       //
       // - Codex: `RPC_DEADLINE`, 30 seconds per app-server request. A start
       //   makes two (the handshake and opening the thread). Its input makes
       //   one or two more (a steer, then a new turn), and each of those is
       //   retried up to three times while Codex reports it is overloaded.
-      // - pi: `RPC_DEADLINE`, 5 seconds per command.
+      // - pi: `PROMPT_RPC_DEADLINE`, 2 minutes, for the `prompt` command that
+      //   opens a turn, because pi answers it only after its preflight, which
+      //   can ask a model to compact the context. `SET_MODEL_RPC_DEADLINE`,
+      //   30 seconds, for the model change before it. `RPC_DEADLINE`, 5
+      //   seconds, for every other command.
       // - Claude Code: `CONTROL_DEADLINE`, 5 seconds, for a change of model
       //   before the input. Its start and the input itself do not wait on
       //   the harness.

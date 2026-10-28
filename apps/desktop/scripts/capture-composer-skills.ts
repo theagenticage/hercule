@@ -104,7 +104,7 @@ const FAILING_TITLE = "Thread whose skills fail";
 const OPENING_MESSAGE =
   "$debug why checkout fails for EU cards that need 3‑D Secure since deploy #1289, then run $webshop:release-checklist: it checks the rollout before we ship.";
 const REFUSAL =
-  "Not steered: Claude can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.";
+  "Not steered: Claude Code can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.";
 
 /** Everything a capture needs: the skills world and the threads the scenes use. */
 interface World extends SkillsWorld {

@@ -293,8 +293,9 @@ export interface ProviderAdapter {
    * block until somebody sent input. The Claude adapter picks the native
    * session id itself instead.
    *
-   * Fails with an `AdapterError`, which says why the session did not start
-   * (for example `HarnessNotInstalled` or `ResumeTranscriptMissing`).
+   * Fails with an `AdapterError` whose tag and message give the reason the
+   * session did not start (for example `HarnessNotInstalled` or
+   * `ResumeTranscriptMissing`).
    * `AdapterFailed` covers every cause that has no tag of its own.
    */
   readonly startSession: (
@@ -314,9 +315,12 @@ export interface ProviderAdapter {
    * before it changes anything, and the input waits in the queue.
    *
    * Every other failure is an `AdapterError` too, and means the input failed.
-   * Its tag says whether the harness certainly did not take the input
-   * (`InputNotDelivered`, `SessionNotRunning`), whether that is unknown
-   * (`HarnessProtocolError`), or neither (`AdapterFailed`).
+   * The tag tells which of three cases it is:
+   *
+   * - the harness certainly did not take the input (`InputNotDelivered`,
+   *   `SessionNotRunning`);
+   * - it is unknown whether the harness took the input (`HarnessProtocolError`);
+   * - neither of those (`AdapterFailed`).
    */
   readonly sendInput: (
     sessionId: string,

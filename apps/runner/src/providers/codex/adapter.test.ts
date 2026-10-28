@@ -700,20 +700,40 @@ describe("a session that cannot start", () => {
     expect(spawns).toEqual([]);
   });
 
-  it("fails with HarnessNotInstalled when spawning the binary fails with ENOENT", async () => {
+  it("fails with HarnessNotInstalled when spawning a binary that does not exist fails with ENOENT", async () => {
     const seam: CodexSeam = {
       appServer: () => {
         throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
       },
       run: () => Effect.die("a session must not run a command"),
     };
-    const ctx = buildContext(createCodexHome());
+    const home = createCodexHome();
+    const ctx = { ...buildContext(home), binary: join(home, "no-such-codex") };
 
     const refused = await Effect.runPromise(
       Effect.flip(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx)),
     );
 
     expect(refused).toBeInstanceOf(HarnessNotInstalled);
+  });
+
+  it("says Codex is installed but cannot run when ENOENT comes for a binary that exists", async () => {
+    // A launcher script whose interpreter is missing fails like this.
+    const seam: CodexSeam = {
+      appServer: () => {
+        throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+      },
+      run: () => Effect.die("a session must not run a command"),
+    };
+    const ctx = { ...buildContext(createCodexHome()), binary: process.execPath };
+
+    const refused = await Effect.runPromise(
+      Effect.flip(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx)),
+    );
+
+    expect(refused._tag).toBe("AdapterFailed");
+    expect(refused.message).toContain("installed");
+    expect(refused.message).toContain("PATH");
   });
 
   it("fails with AdapterFailed when spawning fails for another reason, or the home cannot be prepared", async () => {
@@ -1718,6 +1738,39 @@ describe("a turn the server is too busy to start", () => {
     // A request the server rejected for its content would just be rejected
     // three more times.
     expect(listSentParams(requests, "turn/start")).toHaveLength(1);
+  });
+
+  it("fails with HarnessProtocolError, not a defect, when turn/start succeeds with a reply that has no turn", async () => {
+    // The prompt may have been accepted, so the failure must say so by its type.
+    const { adapter, ctx } = createDriving({ "turn/start": () => ({}) });
+    await Effect.runPromise(adapter.startSession(SESSION, SPEC, ctx));
+
+    const failure = await Effect.runPromise(
+      Effect.flip(adapter.sendInput(SESSION, { text: "hi" })),
+    );
+
+    expect(failure).toBeInstanceOf(HarnessProtocolError);
+    expect(failure.message).toContain("turn/start");
+  });
+
+  it("fails with HarnessProtocolError, not a defect, when turn/steer succeeds with a reply that has no turn id", async () => {
+    const run = await startBusySession({ "turn/steer": () => ({}) });
+
+    const failure = await Effect.runPromise(
+      Effect.flip(run.adapter.sendInput(SESSION, { text: "carry on" })),
+    );
+
+    expect(failure).toBeInstanceOf(HarnessProtocolError);
+    expect(failure.message).toContain("turn/steer");
+  });
+
+  it("fails the start with HarnessProtocolError when thread/start succeeds with a reply that has no thread", async () => {
+    const { adapter, ctx } = createDriving({ "thread/start": () => ({}) });
+
+    const failure = await Effect.runPromise(Effect.flip(adapter.startSession(SESSION, SPEC, ctx)));
+
+    expect(failure).toBeInstanceOf(HarnessProtocolError);
+    expect(failure.message).toContain("thread/start");
   });
 });
 

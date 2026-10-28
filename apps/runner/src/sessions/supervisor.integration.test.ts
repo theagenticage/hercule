@@ -183,6 +183,11 @@ interface Fake {
    * ignoring the signal. Its session is only ever abandoned, never seen out.
    */
   stopsSilently: boolean;
+  /**
+   * When set, `stopSession` waits for it to complete before it records the
+   * stop, like a harness that is slow to take a stop.
+   */
+  stopGate: Deferred.Deferred<void> | undefined;
 }
 
 const createFake = (): Fake => {
@@ -208,6 +213,7 @@ const createFake = (): Fake => {
     answerFails: undefined,
     dies: false,
     stopsSilently: false,
+    stopGate: undefined,
     emit: (event) => {
       PubSub.publishUnsafe(events, event);
     },
@@ -284,18 +290,24 @@ const createFake = (): Fake => {
        * only place that reason can enter the stream.
        */
       stopSession: (sessionId, reason) =>
-        Effect.sync(() => {
-          stops.push({ sessionId, reason });
-          if (fake.stopsSilently) return;
-          held.delete(sessionId);
-          fake.emit({
-            _tag: "session.exited",
-            eventId: `e-exited-${String(stops.length)}`,
-            sessionId,
-            at,
-            reason,
-          });
-        }),
+        Effect.suspend(() =>
+          fake.stopGate === undefined ? Effect.void : Deferred.await(fake.stopGate),
+        ).pipe(
+          Effect.andThen(() =>
+            Effect.sync(() => {
+              stops.push({ sessionId, reason });
+              if (fake.stopsSilently) return;
+              held.delete(sessionId);
+              fake.emit({
+                _tag: "session.exited",
+                eventId: `e-exited-${String(stops.length)}`,
+                sessionId,
+                at,
+                reason,
+              });
+            }),
+          ),
+        ),
     },
   };
   return fake;
@@ -734,6 +746,34 @@ describe("the input a start carries", () => {
   });
 });
 
+describe("a start for a session the adapter already hosts", () => {
+  it("is refused as already running, with no runtime error and no exit, and the running session is left alone", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    const OTHER = "0199e0e7-0000-7000-8000-0000000000f8";
+    const OTHER_REQUEST = "0199e0e7-0000-7000-8000-0000000000f7";
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("sent session.started", () => listSessionEvents(sent).length === 1);
+        // The supervisor has no entry for OTHER, so only the adapter knows the session is hosted.
+        fake.fails = new SessionAlreadyRunning({ message: "this session is already running" });
+        yield* supervisor.start({ ...START, sessionId: OTHER, requestId: OTHER_REQUEST });
+        yield* waitUntil("answered both starts", () => listInputResults(sent).length === 2);
+        yield* supervisor.report;
+      }),
+    );
+
+    expect(listInputResults(sent)[1]).toMatchObject({ requestId: OTHER_REQUEST, ok: false });
+    expect(readRefusalTag(listInputResults(sent)[1])).toBe("SessionAlreadyRunning");
+    expect(listSessionEvents(sent).map((frame) => frame.event._tag)).toEqual(["session.started"]);
+    expect(fake.stops).toEqual([]);
+  });
+});
+
 describe("an input the harness cannot steer into the running turn", () => {
   it("is answered as refused with the harness's message, and puts no runtime error in the thread", async () => {
     const fake = createFake();
@@ -816,6 +856,55 @@ describe("an input the harness fails on mid-session, with the conversation broke
         (frame) => frame._tag === "sessionEvent" && frame.event._tag === "session.exited",
       ),
     );
+  });
+});
+
+describe("the stop after an input the harness fails on with the conversation broken", () => {
+  it("does not hold up the session's later inputs, which are refused as not running", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    const message = "The Codex process went away before it answered.";
+    const LATER_REQUEST = "0199e0e7-0000-7000-8000-0000000000f9";
+    let reached = 0;
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("sent session.started", () => listSessionEvents(sent).length === 1);
+        fake.stopGate = yield* Deferred.make<void>();
+        Object.assign(fake.adapter, {
+          sendInput: () => {
+            reached += 1;
+            return Effect.fail(new HarnessProtocolError({ message }));
+          },
+        });
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: REQUEST,
+          sessionId: SESSION,
+          input: { text: "go on" },
+        });
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: LATER_REQUEST,
+          sessionId: SESSION,
+          input: { text: "and this" },
+        });
+        // The stop is still waiting on the harness, and the later input is answered anyway.
+        yield* waitUntil("answered all three inputs", () => listInputResults(sent).length === 3);
+        expect(fake.stops).toEqual([]);
+        yield* Deferred.succeed(fake.stopGate, undefined);
+        yield* waitUntil("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    const later = listInputResults(sent).find((result) => result.requestId === LATER_REQUEST);
+    expect(readRefusalTag(later)).toBe("SessionNotRunning");
+    // The adapter was asked for the first input only.
+    expect(reached).toBe(1);
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "crash" }]);
   });
 });
 
@@ -1565,7 +1654,7 @@ describe("a session that cannot run here", () => {
 
     const events = listSessionEvents(sent).map((frame) => frame.event);
     expect(events[0]).toMatchObject({
-      message: expect.stringContaining("does not support the provider"),
+      message: expect.stringContaining("does not support the provider") as unknown,
     });
     expect(events[1]).toMatchObject({ _tag: "session.exited", reason: "crash" });
     expectStartInputRefused(sent, "does not support the provider");

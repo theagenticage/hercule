@@ -46,7 +46,12 @@ import {
   type TextGenerationOutcome,
   type TextGenerationSpec,
 } from "@hercule/protocol";
-import { buildClaudePromptParts, makeClaudeCodeAdapter, type ClaudeSeam } from "./claude-code";
+import {
+  CONTROL_DEADLINE,
+  buildClaudePromptParts,
+  makeClaudeCodeAdapter,
+  type ClaudeSeam,
+} from "./claude-code";
 import { PROBE_DEADLINE } from "./probe";
 import { resolveSkillReferences, type LoadedSkills } from "../skills";
 import type { AdapterTurnInput, EditMarks, ProviderAdapter, ProviderRunnerContext } from "./index";
@@ -1163,7 +1168,7 @@ describe("a Claude Code session", () => {
     expect(refusal).toBeInstanceOf(SteerRefused);
     expect(refusal).toMatchObject({
       message:
-        "Not steered: Claude can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
+        "Not steered: Claude Code can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
     });
     // Nothing reached the harness and nothing was published.
     expect(run.sent).toHaveLength(1);
@@ -1722,6 +1727,36 @@ describe("changing the model", () => {
     );
     expect(run.models).toEqual(["claude-opus-4-8"]);
     expect(retried.delivery).toBe("opened");
+  });
+
+  it("fails the input as a lost conversation, not a refusal, when the harness never answers the model change", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    run.holdsModel = true;
+
+    const said = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sending = yield* Effect.forkChild(
+            Effect.flip(
+              run.adapter.sendInput(SESSION, {
+                text: "hello",
+                modelSelection: { model: "claude-opus-4-8", options: {} },
+              }),
+            ),
+          );
+          while (run.models.length === 0) yield* Effect.yieldNow;
+          yield* TestClock.adjust(CONTROL_DEADLINE);
+          return yield* Fiber.join(sending);
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    // The model may have changed, so "the session keeps its current model" would be a guess.
+    expect(said._tag).toBe("HarnessProtocolError");
+    expect(said.message).toContain("did not answer");
+    expect(run.sent).toEqual([]);
   });
 });
 

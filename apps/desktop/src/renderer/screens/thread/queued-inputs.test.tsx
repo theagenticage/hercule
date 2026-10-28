@@ -157,7 +157,7 @@ describe("the queued inputs", () => {
 
   it("shows a refused Steer once, in the failure line, when the input's reason is the same text", async () => {
     const user = userEvent.setup();
-    const refusal = "Not steered: Claude can't start a skill in the middle of a turn.";
+    const refusal = "Not steered: Claude Code can't start a skill in the middle of a turn.";
     await renderQueue(
       {
         [`POST ${INPUTS}/${OLDER.id}/steer`]: {

@@ -145,22 +145,33 @@ describe("recognising a spawn of a missing executable", () => {
   };
 
   it("is true for the error Bun throws when the executable does not exist", () => {
-    const error = catchSpawnError(join(directory, "no-such-harness"));
-    expect(isExecutableNotFound(error, null)).toBe(true);
-    expect(isExecutableNotFound(error, directory)).toBe(true);
+    const binary = join(directory, "no-such-harness");
+    const error = catchSpawnError(binary);
+    expect(isExecutableNotFound(error, { binary, cwd: null })).toBe(true);
+    expect(isExecutableNotFound(error, { binary, cwd: directory })).toBe(true);
   });
 
   it("is false when the spawn failed because its working directory is missing", () => {
     // Bun throws the same ENOENT for a missing directory, even for a command that exists.
-    const error = catchSpawnError("/bin/sh", join(directory, "no-such-directory"));
-    expect(isExecutableNotFound(error, join(directory, "no-such-directory"))).toBe(false);
+    const cwd = join(directory, "no-such-directory");
+    const error = catchSpawnError("/bin/sh", cwd);
+    expect(isExecutableNotFound(error, { binary: "/bin/sh", cwd })).toBe(false);
+  });
+
+  it("is false when the executable exists but its interpreter does not", () => {
+    // A script with `#!/usr/bin/env node` on a PATH without node fails like this.
+    const script = join(directory, "script-without-interpreter");
+    writeFileSync(script, `#!${join(directory, "no-such-interpreter")}\n`, { mode: 0o755 });
+    const error = catchSpawnError(script);
+    expect(isExecutableNotFound(error, { binary: script, cwd: null })).toBe(false);
   });
 
   it("is false for an error with another code, and for a value that is not an error", () => {
-    expect(isExecutableNotFound(Object.assign(new Error("denied"), { code: "EACCES" }), null)).toBe(
-      false,
-    );
-    expect(isExecutableNotFound(new Error("boom"), null)).toBe(false);
-    expect(isExecutableNotFound("ENOENT", null)).toBe(false);
+    const spawn = { binary: join(directory, "no-such-harness"), cwd: null };
+    expect(
+      isExecutableNotFound(Object.assign(new Error("denied"), { code: "EACCES" }), spawn),
+    ).toBe(false);
+    expect(isExecutableNotFound(new Error("boom"), spawn)).toBe(false);
+    expect(isExecutableNotFound("ENOENT", spawn)).toBe(false);
   });
 });

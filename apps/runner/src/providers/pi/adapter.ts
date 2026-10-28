@@ -54,8 +54,11 @@ import type {
   UserMaterial,
 } from "../index";
 import {
+  buildAdapterFailed,
   buildHarnessNotInstalled,
-  buildHarnessStartFailed,
+  buildHarnessNotRunnable,
+  buildHarnessProtocolError,
+  buildStartFailure,
   buildInputLost,
   buildInputRefused,
   buildInputStopped,
@@ -77,7 +80,7 @@ import {
 } from "../process";
 import { truncateFact, truncateMessage } from "../text";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
-import { endSentence, now } from "../../report";
+import { now } from "../../report";
 import {
   ACCESS_MODE_VARIABLE,
   AGENT_FILE_VARIABLE,
@@ -270,28 +273,47 @@ class SpawnFailed extends Error {
  * did not get a response. When pi refused the command, it did not take the
  * input. In every other case the runner cannot tell whether pi took it.
  */
-const buildInputFailure = (failure: PiRpcFailure): InputNotDelivered | HarnessProtocolError =>
-  failure._tag === "PiRefusedCommand"
-    ? buildInputRefused(PI_NAME, failure.message)
-    : buildInputLost(PI_NAME, failure.message);
+const buildInputFailure = (failure: PiRpcFailure): InputNotDelivered | HarnessProtocolError => {
+  switch (failure._tag) {
+    case "PiRefusedCommand":
+      return buildInputRefused(PI_NAME, failure.message);
+    case "PiTimedOut":
+      // Pi may still be running, so the message must not say that contact was lost.
+      return buildHarnessProtocolError(
+        `${PI_NAME} did not acknowledge the input in time, so the input may or may not have arrived: ${failure.message}`,
+      );
+    default:
+      return buildInputLost(PI_NAME, failure.message);
+  }
+};
 
 /**
  * Builds the failure of `sendInput` for a `set_model` or `set_thinking_level`
  * command that did not get a response. The session keeps the model it had
- * when pi refused the change.
+ * when pi refused the change. When pi answered too late, or the runner lost
+ * contact with it, the change may or may not have happened.
  */
 const buildModelChangeFailure = (
   failure: PiRpcFailure,
-): ModelChangeRefused | HarnessProtocolError =>
-  failure._tag === "PiRefusedCommand"
-    ? buildModelChangeRefused(PI_NAME, "change the model or thinking level", failure.message)
-    : new HarnessProtocolError({
-        message: truncateMessage(
-          endSentence(
-            `The runner lost contact with ${PI_NAME} while changing the model, so the change may or may not have happened: ${failure.message}`,
-          ),
-        ),
-      });
+): ModelChangeRefused | HarnessProtocolError => {
+  switch (failure._tag) {
+    case "PiRefusedCommand":
+      return buildModelChangeRefused(
+        PI_NAME,
+        "change the model or thinking level",
+        failure.message,
+      );
+    case "PiTimedOut":
+      // Pi may still be running, so the message must not say that contact was lost.
+      return buildHarnessProtocolError(
+        `${PI_NAME} did not acknowledge the model change in time, so it may or may not have happened: ${failure.message}`,
+      );
+    default:
+      return buildHarnessProtocolError(
+        `The runner lost contact with ${PI_NAME} while changing the model, so the change may or may not have happened: ${failure.message}`,
+      );
+  }
+};
 
 /** A session this adapter hosts, and the adapter's state for its pi processes. */
 interface Held {
@@ -1768,13 +1790,9 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           try: () => prepareHome(ctx, sessionId, instructions),
           catch: (error) => {
             deleteUnusedInstructions();
-            return new AdapterFailed({
-              message: truncateMessage(
-                endSentence(
-                  `The runner could not prepare ${PI_NAME}'s folder for the session: ${describeError(error)}`,
-                ),
-              ),
-            });
+            return buildAdapterFailed(
+              `The runner could not prepare ${PI_NAME}'s folder for the session: ${describeError(error)}`,
+            );
           },
         });
         const child = yield* Effect.try({
@@ -1800,11 +1818,16 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
             ),
           catch: (error) => {
             deleteUnusedInstructions();
-            // Only a failure of the spawn itself, with the binary not found,
-            // means pi is not installed. A failed file write is not that.
-            return error instanceof SpawnFailed && isExecutableNotFound(error.cause, ctx.cwd)
+            if (!(error instanceof SpawnFailed)) {
+              // A failed file write before the spawn.
+              return buildStartFailure(PI_NAME, describeError(error));
+            }
+            // Only a spawn that failed because the binary is missing means pi
+            // is not installed. Otherwise the binary exists but cannot run,
+            // for example because node is not on the PATH of the runner.
+            return isExecutableNotFound(error.cause, { binary, cwd: ctx.cwd })
               ? buildHarnessNotInstalled(PI_NAME)
-              : buildHarnessStartFailed(PI_NAME, describeError(error));
+              : buildHarnessNotRunnable(PI_NAME, describeError(error));
           },
         });
         // A resumed session continues the native session. A fork is a new
