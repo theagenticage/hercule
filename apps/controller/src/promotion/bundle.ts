@@ -49,6 +49,7 @@ export const TransferHeader = Schema.Struct({
 });
 
 export type TransferHeader = Schema.Schema.Type<typeof TransferHeader>;
+const decodeTransferHeader = Schema.decodeUnknownEffect(Schema.fromJsonString(TransferHeader));
 
 /** A transfer that does not match this format, or a file of it that could not be read. */
 export class TransferBundleError extends Schema.TaggedError<TransferBundleError>()(
@@ -144,9 +145,7 @@ export const readTransferLayout = (
       return yield* new TransferBundleError({ message: "the promotion transfer broke off" });
     }
     const json = new TextDecoder().decode(yield* readRange(path, HEADER_START, headerEnd));
-    const header = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TransferHeader))(
-      json,
-    ).pipe(
+    const header = yield* decodeTransferHeader(json).pipe(
       Effect.mapError(
         () =>
           new TransferBundleError({

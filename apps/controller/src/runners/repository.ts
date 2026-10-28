@@ -139,6 +139,7 @@ const buildDocumentDecoder = <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   what: string,
 ) => {
+  // eslint-disable-next-line no-restricted-syntax -- This builds the schema once per decoder, and each decoder is built once, at module level below.
   const decode = Schema.decodeUnknownExit(Schema.fromJsonString(schema));
   return (id: string, column: string | null): Effect.Effect<S["Type"] | null> => {
     if (column === null) return Effect.succeed(null);
@@ -154,14 +155,14 @@ const buildDocumentDecoder = <S extends Schema.ConstraintDecoder<unknown>>(
   };
 };
 
-const factsIn = buildDocumentDecoder(RunnerFacts, "facts");
-const watermarkIn = buildDocumentDecoder(RunnerWatermark, "watermark");
-const capabilitiesIn = buildDocumentDecoder(RunnerCapabilities, "negotiated capabilities");
+const decodeFacts = buildDocumentDecoder(RunnerFacts, "facts");
+const decodeWatermark = buildDocumentDecoder(RunnerWatermark, "watermark");
+const decodeCapabilities = buildDocumentDecoder(RunnerCapabilities, "negotiated capabilities");
 
 const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
   Effect.gen(function* () {
     const id = uuidToString(row.id);
-    const facts = yield* factsIn(id, row.facts);
+    const facts = yield* decodeFacts(id, row.facts);
     return {
       id,
       name: row.name,
@@ -171,7 +172,7 @@ const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
       version: row.binary_version,
       labels: JSON.parse(row.labels) as ReadonlyArray<string>,
       facts,
-      watermark: yield* watermarkIn(id, row.watermark),
+      watermark: yield* decodeWatermark(id, row.watermark),
       maxConcurrentSessions: computeEffectiveCap(row.max_concurrent_sessions, facts),
       diskWatermarkBytes: computeEffectiveWatermark(row.disk_watermark_bytes),
       lastSeenAt: row.last_seen_at,
@@ -182,7 +183,7 @@ const toDetail = (row: RunnerRow): Effect.Effect<RunnerDetail> =>
   Effect.gen(function* () {
     return {
       ...(yield* toRunner(row)),
-      negotiatedCapabilities: yield* capabilitiesIn(
+      negotiatedCapabilities: yield* decodeCapabilities(
         uuidToString(row.id),
         row.negotiated_capabilities,
       ),
@@ -315,11 +316,14 @@ const make = Effect.gen(function* () {
         (rows) =>
           Effect.forEach(rows, (row) => {
             const id = uuidToString(row.id);
-            return Effect.map(capabilitiesIn(id, row.negotiated_capabilities), (capabilities) => ({
-              id,
-              placeable: row.placeable === 1,
-              capabilities: capabilities ?? [],
-            }));
+            return Effect.map(
+              decodeCapabilities(id, row.negotiated_capabilities),
+              (capabilities) => ({
+                id,
+                placeable: row.placeable === 1,
+                capabilities: capabilities ?? [],
+              }),
+            );
           }),
       ),
 
@@ -426,7 +430,7 @@ const make = Effect.gen(function* () {
           readonly watermark: string | null;
           readonly disk_watermark_bytes: number | null;
         }>`SELECT watermark, disk_watermark_bytes FROM runners WHERE id = ${key}`;
-        const was = yield* watermarkIn(id, rows[0]?.watermark ?? null);
+        const was = yield* decodeWatermark(id, rows[0]?.watermark ?? null);
         const effective = computeEffectiveWatermark(rows[0]?.disk_watermark_bytes ?? null);
         yield* sql`UPDATE runners
                    SET watermark = ${JSON.stringify(watermark)}, updated_at = ${at}

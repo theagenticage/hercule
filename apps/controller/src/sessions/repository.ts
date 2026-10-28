@@ -53,6 +53,10 @@ import { buildUnfinishedClause } from "./unfinished";
 import { attributeEvent, TOOL_CALL_KINDS, type StreamRow } from "./stream";
 import { StoredTokenUsage, type StoredUsage } from "./usage";
 
+const decodeSessionLibrarySkills = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(SessionLibrarySkill)),
+);
+
 /**
  * Builds a SQL expression, over a row of `sessions` under the given alias,
  * that is true when the session can be resumed. All of these must hold:
@@ -1158,11 +1162,7 @@ const make = Effect.gen(function* () {
         `;
         const column = rows[0]?.library_skills;
         if (column == null) return Option.none();
-        return Option.some(
-          yield* Schema.decodeUnknownEffect(
-            Schema.fromJsonString(Schema.Array(SessionLibrarySkill)),
-          )(column).pipe(Effect.orDie),
-        );
+        return Option.some(yield* decodeSessionLibrarySkills(column).pipe(Effect.orDie));
       }),
 
     /**

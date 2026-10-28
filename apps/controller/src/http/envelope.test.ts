@@ -6,10 +6,12 @@ import { HttpApiSchemaError } from "effect/http-api/HttpApiError";
 import { createForbiddenError, createNotFoundError } from "@hercule/contract";
 import { findApiError, buildErrorResponse } from "./envelope";
 
+const decodeAccountFixture = Schema.decodeUnknownExit(
+  Schema.Struct({ username: Schema.NonEmptyString, timezone: Schema.NonEmptyString }),
+);
+
 const createSchemaError = (kind: HttpApiSchemaError["kind"], input: unknown) => {
-  const result = Schema.decodeUnknownExit(
-    Schema.Struct({ username: Schema.NonEmptyString, timezone: Schema.NonEmptyString }),
-  )(input, { errors: "all" });
+  const result = decodeAccountFixture(input, { errors: "all" });
   if (result._tag !== "Failure") throw new Error("the fixture is supposed to fail decoding");
   const cause = result.cause.reasons[0];
   if (cause?._tag !== "Fail") throw new Error("the fixture is supposed to fail, not die");
