@@ -56,7 +56,8 @@ import {
   openTurn,
   classifyTool,
   isAnyAgentWorking,
-  endCompactionOnExit,
+  buildRuntimeEvent,
+  completeCompactionAtEnd,
   type Normalizing,
 } from "./claude-code-normalize";
 import {
@@ -205,23 +206,52 @@ const describeError = (error: unknown): string => {
 };
 
 /**
+ * The most distinct labels one session's log hears of. Labels come from text
+ * Claude sends, so a harness that sends a new type with every message would
+ * otherwise fill the log and the set that remembers them.
+ */
+const MAX_REPORTED_UNKNOWN_LABELS = 100;
+
+/**
  * Returns the function that writes a session's `reportUnknownMessage` lines to
  * the runner's log. It captures the services of the fiber that runs this
  * effect, loggers included, because the harness's messages are read outside
  * any fiber, and a line written there would miss `runner.log`. The line names
  * the message type and never holds the message itself.
+ *
+ * Each label is logged once per session, up to `MAX_REPORTED_UNKNOWN_LABELS`.
+ * One more line then says that further types are not logged, and nothing is
+ * logged after it.
  */
 const captureUnknownMessageReporter = (
   sessionId: string,
 ): Effect.Effect<Normalizing["reportUnknownMessage"]> =>
-  Effect.map(Effect.context<never>(), (services) => (label, error) => {
-    const text =
-      error === undefined
-        ? `Claude sent a message that no mapping decides how to show: ${label}`
-        : `Claude sent a message this runner could not read: ${label}. Error: ${describeError(error)}`;
-    void Effect.runForkWith(services)(
-      Effect.logWarning(text).pipe(Effect.annotateLogs({ sessionId })),
-    );
+  Effect.map(Effect.context<never>(), (services) => {
+    const reported = new Set<string>();
+    let capReported = false;
+    const logWarning = (text: string): void => {
+      void Effect.runForkWith(services)(
+        Effect.logWarning(text).pipe(Effect.annotateLogs({ sessionId })),
+      );
+    };
+    return (label, error) => {
+      if (reported.has(label)) return;
+      if (reported.size >= MAX_REPORTED_UNKNOWN_LABELS) {
+        if (!capReported) {
+          capReported = true;
+          logWarning(
+            `Claude sent more than ${MAX_REPORTED_UNKNOWN_LABELS} different unknown message types in this session. Further ones are not logged.`,
+          );
+        }
+        return;
+      }
+      reported.add(label);
+      logWarning(
+        error === undefined
+          ? `Claude sent a message type this runner has no decision for: ${label}`
+          : `Claude sent a message this runner could not read: ${label}. Error: ${describeError(error)}`,
+      );
+    };
   });
 
 /**
@@ -1295,14 +1325,14 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         held.stopping !== undefined || live.get(held.binding.sessionId) !== held;
       if (refused === undefined || sessionStopped) return;
       clearRefusedStop(held.state.subagents, subagentId);
-      emit({
-        _tag: "runtime.warning",
-        eventId: held.state.mint(),
-        sessionId: held.binding.sessionId,
-        at: held.state.now(),
-        subagentId,
-        message: `the subagent was not stopped: ${refused}`,
-      });
+      emit(
+        buildRuntimeEvent(
+          held.state,
+          "runtime.warning",
+          `the subagent was not stopped: ${refused}`,
+          subagentId,
+        ),
+      );
     });
 
   /**
@@ -1322,15 +1352,13 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     if (held.stopping !== undefined) return Effect.void;
     const { subagents } = held.state;
     if (!subagents.byId.has(subagentId)) {
-      emit({
-        _tag: "runtime.warning",
-        eventId: held.state.mint(),
-        sessionId: held.binding.sessionId,
-        at: held.state.now(),
-        message: truncateMessage(
+      emit(
+        buildRuntimeEvent(
+          held.state,
+          "runtime.warning",
           `subagent ${subagentId} is not known to this process, so nothing was stopped`,
         ),
-      });
+      );
       return Effect.void;
     }
     const targets = [subagentId, ...collectDescendants(subagents, subagentId)];
@@ -1440,7 +1468,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       // which nobody can answer.
       withdrawAllParks(held.parks);
       // A compaction still running has no later message to complete it.
-      for (const event of endCompactionOnExit(held.state)) emit(event);
+      const compactionEnd: Array<ProviderEvent> = [];
+      completeCompactionAtEnd(held.state, compactionEnd);
+      for (const event of compactionEnd) emit(event);
       // Compare by identity: a session started again under the same id has a
       // new entry, and that entry belongs to a different pump.
       if (live.get(sessionId) === held) live.delete(sessionId);

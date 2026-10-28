@@ -20,7 +20,7 @@ import {
   CLAUDE_SDK_MESSAGE,
   normalize,
   buildNormalizingState,
-  endCompactionOnExit,
+  completeCompactionAtEnd,
   isAnyAgentWorking,
   openTurn,
   type Normalizing,
@@ -328,8 +328,8 @@ const buildSystem = (subtype: string, fields: Readonly<Record<string, unknown>> 
 });
 
 /**
- * The seven messages Claude Code 2.1.310 sent for `/compact`, in order, as
- * measured on the real CLI. The summary is the plain-string synthetic user
+ * The seven messages Claude Code sent for `/compact`, in order, as measured
+ * on the real CLI. The summary is the plain-string synthetic user
  * message, and the result counts no model turn.
  */
 const SUMMARY = "This session is being continued from a previous conversation. Summary: ...";
@@ -1079,6 +1079,69 @@ describe("notices and warnings", () => {
     });
   }
 
+  const unreadable: ReadonlyArray<readonly [string, unknown, string]> = [
+    [
+      "an informational message whose content is a list",
+      buildSystem("informational", { content: ["Stop hook ran"], level: "info" }),
+      "claude: system/informational",
+    ],
+    [
+      "a model refusal fallback whose content is an object",
+      buildSystem("model_refusal_fallback", { content: { text: "x" } }),
+      "claude: system/model_refusal_fallback",
+    ],
+    [
+      "a model refusal with no fallback whose content is missing",
+      buildSystem("model_refusal_no_fallback", {}),
+      "claude: system/model_refusal_no_fallback",
+    ],
+    [
+      "a notification whose text is a list",
+      buildSystem("notification", { key: "k", text: ["Update available"] }),
+      "claude: system/notification",
+    ],
+    [
+      "a local command output whose content is a list",
+      buildSystem("local_command_output", { content: ["Total cost"] }),
+      "claude: system/local_command_output",
+    ],
+    [
+      "a memory recall whose memories are a string",
+      buildSystem("memory_recall", { mode: "select", memories: "x".repeat(57) }),
+      "claude: system/memory_recall",
+    ],
+  ];
+
+  for (const [name, message, label] of unreadable) {
+    it(`shows ${name} as the labelled unknown item, and no notice`, () => {
+      const { running, reports } = buildReportingState();
+      const events = normalize(running, message as SDKMessage);
+      expect(listNotes(events)).toEqual([]);
+      expect(events.map(formatEvent).map((line) => line.replace(/ id-\d+/, ""))).toEqual([
+        "turn.started",
+        "item.started unknown",
+        "item.completed unknown completed",
+        "turn.completed completed",
+      ]);
+      expect(reports.map((report) => report.label)).toEqual([label]);
+      expect(reports[0]?.error).toBeInstanceOf(Error);
+    });
+  }
+
+  it("marks a notice cut to the length of a message", () => {
+    const events = normalize(
+      buildTestState(),
+      buildSystem("notification", {
+        key: "k",
+        text: `${"n".repeat(MAX_MESSAGE_LENGTH - 2)}😀tail`,
+      }) as unknown as SDKMessage,
+    );
+    const [notice] = events;
+    expect(notice?._tag === "runtime.notice" ? notice.message : undefined).toBe(
+      `${"n".repeat(MAX_MESSAGE_LENGTH - 2)}…`,
+    );
+  });
+
   it("shows no notice for a recall of no memories", () => {
     expect(
       normalizeMessages([buildSystem("memory_recall", { mode: "select", memories: [] })]),
@@ -1127,6 +1190,19 @@ describe("a usage limit", () => {
       }) as unknown as SDKMessage,
     );
     expect(listNotes(events)).toHaveLength(1);
+  });
+
+  it("warns once while the limit stays blocked, and again when it becomes blocked after being allowed", () => {
+    const running = buildTestState();
+    const blocked = buildRateLimit({ status: "rejected", resetsAt: RESET_AT });
+    const events = [
+      blocked,
+      blocked,
+      buildRateLimit({ status: "rejected", resetsAt: RESET_AT + 60 }),
+      buildRateLimit({ status: "allowed" }),
+      blocked,
+    ].map((message) => listNotes(normalize(running, message as unknown as SDKMessage)));
+    expect(events.map((notes) => notes.length)).toEqual([1, 0, 0, 0, 1]);
   });
 
   const notBlocked: ReadonlyArray<readonly [string, Readonly<Record<string, unknown>>]> = [
@@ -1199,14 +1275,14 @@ describe("a message nobody decided how to show", () => {
   ];
 
   for (const [name, message, label] of cases) {
-    it(`shows ${name} as an item with the label ${label}, and reports it once`, () => {
+    it(`shows ${name} as an item with the label ${label}, and reports it`, () => {
       const { running, reports } = buildReportingState();
       const first = normalize(running, message as SDKMessage);
       expect(listUnknownLabels(first)).toEqual([label]);
       expect(reports).toEqual([{ label, error: undefined }]);
-      // The second one still shows. Only the log line is once per label.
+      // Every message is reported. Logging a label once is up to the reporter.
       expect(listUnknownLabels(normalize(running, message as SDKMessage))).toEqual([label]);
-      expect(reports).toHaveLength(1);
+      expect(reports).toHaveLength(2);
     });
   }
 
@@ -1234,12 +1310,41 @@ describe("a message nobody decided how to show", () => {
     expect(reports[0]?.error).toBeInstanceOf(Error);
   });
 
-  it("keeps working when the report to the log throws", () => {
-    const running = buildTestState(undefined, undefined, () => {
-      throw new Error("the log is full");
-    });
-    const events = normalize(running, HOLOGRAM as unknown as SDKMessage);
-    expect(listUnknownLabels(events)).toEqual(["claude: hologram"]);
+  it("writes control and direction characters of the type and subtype as escapes", () => {
+    const events = normalize(buildTestState(), {
+      type: "system",
+      subtype: "foo\nbar\u202ebaz",
+    } as unknown as SDKMessage);
+    expect(listUnknownLabels(events)).toEqual(["claude: system/foo\\u{a}bar\\u{202e}baz"]);
+  });
+
+  it("closes the synthetic turn a malformed model output message opened", () => {
+    for (const message of [
+      { type: "assistant", parent_tool_use_id: null },
+      { type: "stream_event", parent_tool_use_id: null },
+      { type: "result", subtype: "success" },
+    ]) {
+      const running = buildTestState();
+      const lines = normalize(running, message as unknown as SDKMessage)
+        .map(formatEvent)
+        .map((line) => line.replace(/ id-\d+/, ""));
+      expect(lines.slice(-3), message.type).toEqual([
+        "item.started unknown",
+        "item.completed unknown completed",
+        "turn.completed completed",
+      ]);
+      expect(running.turnId, message.type).toBeUndefined();
+    }
+  });
+
+  it("leaves the turn that was already open when a malformed model output message arrives", () => {
+    const running = buildStateInTurn();
+    const lines = normalize(running, {
+      type: "assistant",
+      parent_tool_use_id: null,
+    } as unknown as SDKMessage).map(formatEvent);
+    expect(lines).toEqual(["item.started unknown id-3", "item.completed unknown id-3 completed"]);
+    expect(running.turnId).toBeDefined();
   });
 
   it("cuts a very long type to fit the label", () => {
@@ -1352,9 +1457,9 @@ describe("a context compaction", () => {
     expect(listCompactionDetails(events)).toEqual([COMPLETED_DETAIL]);
   });
 
-  it("completes without a summary at any message that is not the summary", () => {
+  it("completes without a summary at any conversation message that is not the summary", () => {
     const notSummaries: ReadonlyArray<readonly [string, unknown]> = [
-      ["a notice", buildSystem("informational", { content: "hi", level: "info" })],
+      ["an assistant message", ASSISTANT_TEXT],
       ["the user's own input", { ...COMPACT_SUMMARY, isSynthetic: false }],
       ["a tool result", TOOL_RESULT],
     ];
@@ -1392,7 +1497,23 @@ describe("a context compaction", () => {
     const events = [COMPACTING, COMPACT_BOUNDARY, long].flatMap((message) =>
       normalize(running, message as SDKMessage),
     );
-    expect(listCompactionDetails(events)[0]?.summary).toHaveLength(MAX_MESSAGE_LENGTH);
+    const summary = listCompactionDetails(events)[0]?.summary;
+    expect(summary).toHaveLength(MAX_MESSAGE_LENGTH);
+    // A cut summary says so, and a cut inside an emoji drops the whole emoji.
+    expect(summary?.endsWith("…")).toBe(true);
+  });
+
+  it("drops a whole emoji from a summary cut inside it", () => {
+    const text = `${"s".repeat(MAX_MESSAGE_LENGTH - 2)}😀tail`;
+    const running = buildStateInTurn();
+    const events = [
+      COMPACTING,
+      COMPACT_BOUNDARY,
+      { ...COMPACT_SUMMARY, message: { content: text } },
+    ].flatMap((message) => normalize(running, message as SDKMessage));
+    expect(listCompactionDetails(events)[0]?.summary).toBe(
+      `${"s".repeat(MAX_MESSAGE_LENGTH - 2)}…`,
+    );
   });
 
   it("fails when the turn ends before the boundary arrives", () => {
@@ -1406,17 +1527,23 @@ describe("a context compaction", () => {
   });
 
   it("fails when the session exits before the boundary arrives, and completes when it exits after", () => {
+    const completeAtEnd = (running: Normalizing): ReadonlyArray<Event> => {
+      const events: Array<Event> = [];
+      completeCompactionAtEnd(running, events);
+      return events;
+    };
+
     const early = buildStateInTurn();
     normalize(early, COMPACTING as SDKMessage);
-    expect(endCompactionOnExit(early).map(formatEvent)).toEqual([
+    expect(completeAtEnd(early).map(formatEvent)).toEqual([
       "item.completed context_compaction id-3 failed",
     ]);
-    expect(endCompactionOnExit(early)).toEqual([]);
+    expect(completeAtEnd(early)).toEqual([]);
 
     const late = buildStateInTurn();
     normalize(late, COMPACTING as SDKMessage);
     normalize(late, COMPACT_BOUNDARY as SDKMessage);
-    expect(listCompactionDetails(endCompactionOnExit(late))).toEqual([
+    expect(listCompactionDetails(completeAtEnd(late))).toEqual([
       { trigger: "manual", tokensBefore: 21326, tokensAfter: 6086 },
     ]);
   });
@@ -1430,6 +1557,189 @@ describe("a context compaction", () => {
       normalize(running, message as SDKMessage),
     );
     expect(listCompactionDetails(events)).toEqual([{ tokensBefore: 100, summary: SUMMARY }]);
+  });
+
+  it("ends as an interrupted turn when the user aborts while it compacts", () => {
+    const aborted = { ...RESULT, terminal_reason: "aborted_streaming" };
+    expect(normalizeMessages([COMPACTING, aborted], buildStateInTurn())).toEqual([
+      "item.started context_compaction id-3",
+      "item.completed context_compaction id-3 failed",
+      "session.usage.updated",
+      "turn.completed interrupted",
+    ]);
+    // Past the boundary the item has its counts, and the abort still ends the turn.
+    const afterBoundary = buildStateInTurn();
+    const events = [COMPACTING, COMPACT_BOUNDARY, aborted].flatMap((message) =>
+      normalize(afterBoundary, message as SDKMessage),
+    );
+    expect(events.map(formatEvent).slice(-3)).toEqual([
+      "item.completed context_compaction id-3 completed",
+      "session.usage.updated",
+      "turn.completed interrupted",
+    ]);
+    expect(listCompactionDetails(events)).toEqual([
+      { trigger: "manual", tokensBefore: 21326, tokensAfter: 6086 },
+    ]);
+  });
+
+  it("ends the user's turn with its own result after a failed compaction", () => {
+    const failed = buildSystem("status", { status: null, compact_result: "failed" });
+    expect(normalizeMessages([COMPACTING, failed, RESULT], buildStateInTurn())).toEqual([
+      "item.started context_compaction id-3",
+      "item.completed context_compaction id-3 failed",
+      "session.usage.updated",
+      "turn.completed completed",
+    ]);
+  });
+
+  it("runs two compactions in a row, each in a synthetic turn that closes with it", () => {
+    const running = buildTestState();
+    const events = [...COMPACT_SEQUENCE, ...COMPACT_SEQUENCE].flatMap((message) =>
+      normalize(running, message as SDKMessage),
+    );
+    expect(listCompactionDetails(events)).toEqual([COMPLETED_DETAIL, COMPLETED_DETAIL]);
+    expect(events.filter((event) => event._tag === "turn.started")).toHaveLength(2);
+    expect(events.filter((event) => event._tag === "turn.completed")).toHaveLength(2);
+    expect(isAnyAgentWorking(running)).toBe(false);
+  });
+
+  it("fails when the status ends with no result before a boundary, and closes the turn it opened", () => {
+    const ended = buildSystem("status", { status: null });
+    expect(normalizeMessages([COMPACTING, ended])).toEqual([
+      "turn.started",
+      "item.started context_compaction id-3",
+      "item.completed context_compaction id-3 failed",
+      "turn.completed completed",
+    ]);
+    expect(normalizeMessages([COMPACTING, ended], buildStateInTurn())).toEqual([
+      "item.started context_compaction id-3",
+      "item.completed context_compaction id-3 failed",
+    ]);
+  });
+
+  it("does not fail on a status that ends with a result, or on one after the boundary", () => {
+    const succeeded = buildSystem("status", { status: null, compact_result: "success" });
+    const running = buildStateInTurn();
+    const events = [COMPACTING, succeeded, COMPACT_BOUNDARY].flatMap((message) =>
+      normalize(running, message as SDKMessage),
+    );
+    expect(events.map(formatEvent)).toEqual(["item.started context_compaction id-3"]);
+    // Past the boundary a status passes by: it neither fails nor completes the item.
+    const ended = normalize(running, buildSystem("status", { status: null }) as SDKMessage);
+    expect(ended).toEqual([]);
+    expect(running.compaction).toBeDefined();
+  });
+
+  it("is not completed by a system message, a rate limit event or a tool progress tick", () => {
+    const passingBy = [
+      buildSystem("informational", { content: "hi", level: "info" }),
+      buildSystem("status", { status: "requesting" }),
+      INIT,
+      RATE_LIMIT,
+      { type: "tool_progress", session_id: NATIVE },
+    ];
+    const running = buildStateInTurn();
+    const events = [COMPACTING, COMPACT_BOUNDARY, ...passingBy].flatMap((message) =>
+      normalize(running, message as SDKMessage),
+    );
+    expect(listCompactionDetails(events)).toEqual([]);
+    expect(listCompactionDetails(normalize(running, COMPACT_SUMMARY as SDKMessage))).toEqual([
+      COMPLETED_DETAIL,
+    ]);
+  });
+
+  describe("when a frame fails after the compaction completed with it", () => {
+    const failing: ReadonlyArray<readonly [string, unknown]> = [
+      [
+        "an assistant message with no message",
+        { type: "assistant", session_id: NATIVE, parent_tool_use_id: null, message: null },
+      ],
+      [
+        "a user message with no message",
+        { type: "user", session_id: NATIVE, parent_tool_use_id: null, message: null },
+      ],
+    ];
+
+    for (const [name, frame] of failing) {
+      it(`still completes the compaction and its turn before ${name}`, () => {
+        const lines = normalizeMessages([COMPACTING, COMPACT_BOUNDARY, frame]).map((line) =>
+          line.replace(/ id-\d+/, ""),
+        );
+        expect(lines).toEqual([
+          "turn.started",
+          "item.started context_compaction",
+          "item.completed context_compaction completed",
+          "turn.completed completed",
+          "turn.started",
+          "item.started unknown",
+          "item.completed unknown completed",
+          "turn.completed completed",
+        ]);
+      });
+    }
+
+    it("puts the raw payload on the unknown item, not on the compaction it completed", () => {
+      const running = buildTestState();
+      const broken = {
+        type: "assistant",
+        session_id: NATIVE,
+        parent_tool_use_id: null,
+        message: null,
+      };
+      for (const message of [COMPACTING, COMPACT_BOUNDARY]) {
+        normalize(running, message as SDKMessage);
+      }
+      const events = normalize(running, broken as unknown as SDKMessage);
+      const withRaw = events.filter((event) => "raw" in event && event.raw !== undefined);
+      expect(withRaw.map(formatEvent).map((line) => line.replace(/ id-\d+/, ""))).toEqual([
+        "item.started unknown",
+      ]);
+    });
+  });
+
+  describe("with a subagent working", () => {
+    const registered = () => {
+      const running = buildTestState();
+      for (const message of [
+        buildAgentCall(null, AGENT_CALL),
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+      ]) {
+        normalize(running, message as unknown as SDKMessage);
+      }
+      return running;
+    };
+
+    it("is not completed by a task_notification of the subagent or a notice, and the notice shows", () => {
+      const running = registered();
+      const between = [
+        COMPACTING,
+        COMPACT_BOUNDARY,
+        buildTaskNotification(SUBAGENT, AGENT_CALL),
+        buildSystem("informational", { content: "Stop hook ran", level: "info" }),
+      ].flatMap((message) => normalize(running, message as unknown as SDKMessage));
+      expect(listCompactionDetails(between)).toEqual([]);
+      expect(listNotes(between)).toEqual(['runtime.notice "Stop hook ran" in a turn']);
+
+      const events = normalize(running, COMPACT_SUMMARY as unknown as SDKMessage);
+      expect(listCompactionDetails(events)).toEqual([COMPLETED_DETAIL]);
+    });
+
+    it("is not completed by a frame of the subagent between the boundary and the summary", () => {
+      const running = registered();
+      const frames = [
+        COMPACTING,
+        COMPACT_BOUNDARY,
+        buildSubagentText(AGENT_CALL, "msg_sub_1", "found it"),
+        {
+          ...buildStreamEvent({ type: "message_start", message: { id: "msg_sub_2" } }),
+          parent_tool_use_id: AGENT_CALL,
+        },
+      ].flatMap((message) => normalize(running, message as unknown as SDKMessage));
+      expect(listCompactionDetails(frames)).toEqual([]);
+
+      const events = normalize(running, COMPACT_SUMMARY as unknown as SDKMessage);
+      expect(listCompactionDetails(events)).toEqual([COMPLETED_DETAIL]);
+    });
   });
 
   it("encodes every event of the sequence with the protocol schema", () => {
