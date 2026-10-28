@@ -1337,6 +1337,15 @@ describe("a message nobody decided how to show", () => {
     }
   });
 
+  it("keeps the raw payload on the unknown item of a stream_event that could not be read", () => {
+    const events = normalize(buildStateInTurn(), {
+      type: "stream_event",
+      parent_tool_use_id: null,
+    } as unknown as SDKMessage);
+    const unknown = events.find((event) => event._tag === "item.started");
+    expect(unknown?.raw?.source).toBe(CLAUDE_SDK_MESSAGE);
+  });
+
   it("leaves the turn that was already open when a malformed model output message arrives", () => {
     const running = buildStateInTurn();
     const lines = normalize(running, {
@@ -1628,6 +1637,19 @@ describe("a context compaction", () => {
     const ended = normalize(running, buildSystem("status", { status: null }) as SDKMessage);
     expect(ended).toEqual([]);
     expect(running.compaction).toBeDefined();
+  });
+
+  it("keeps running through a null status that carries a permission mode", () => {
+    const modeUpdate = buildSystem("status", { status: null, permissionMode: "bypassPermissions" });
+    const running = buildStateInTurn();
+    const events = [COMPACTING, modeUpdate, COMPACT_BOUNDARY, COMPACT_SUMMARY].flatMap((message) =>
+      normalize(running, message as SDKMessage),
+    );
+    expect(events.map(formatEvent)).toEqual([
+      "item.started context_compaction id-3",
+      "item.completed context_compaction id-3 completed",
+    ]);
+    expect(listCompactionDetails(events)).toEqual([COMPLETED_DETAIL]);
   });
 
   it("is not completed by a system message, a rate limit event or a tool progress tick", () => {

@@ -1415,6 +1415,32 @@ describe("buildThreadBlocks: compaction and unknown steps, drawn as work rows", 
     });
   });
 
+  it("opens a compaction to the summary it started with when the completion has none", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "k1", "context_compaction", 1, {
+        trigger: "auto",
+        tokensBefore: 182_000,
+        summary: "the summary",
+      }),
+      buildItemCompleted("t1", "k1", "context_compaction", 5, "completed", { tokensAfter: 31_000 }),
+    ]);
+
+    expect(rows[0]).toMatchObject({
+      target: "182k → 31k tokens (auto)",
+      output: "the summary",
+      canOpen: true,
+    });
+  });
+
+  it("opens a failed compaction to the summary it started with, though its completion has no detail", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "k1", "context_compaction", 1, { summary: "the summary" }),
+      buildItemCompleted("t1", "k1", "context_compaction", 5, "failed"),
+    ]);
+
+    expect(rows[0]).toMatchObject({ output: "the summary", canOpen: true });
+  });
+
   it("draws a compaction written with the old field names as the bare words, with no counts and no summary", () => {
     const rows = buildRowsOf([
       buildItemStarted("t1", "k1", "context_compaction", 1, { trigger: "auto" }),

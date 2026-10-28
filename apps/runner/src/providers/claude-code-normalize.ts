@@ -124,6 +124,10 @@ export interface Normalizing {
    * decide, or one it could not read. `error` is what failed while reading a
    * message of a known type. It is called for every such message, so the
    * caller decides how often the log hears of one label.
+   *
+   * It must never throw: `normalize` promises never to throw, and it calls
+   * this from inside its fallback for a message it cannot read. The adapter's
+   * reporter forks the log effect, so it cannot throw.
    */
   readonly reportUnknownMessage: (label: string, error?: unknown) => void;
   /** The compaction in progress, or `undefined` when none is. */
@@ -1284,10 +1288,11 @@ const completeCompactionAfterBoundary = (state: Normalizing, sdk: SDKMessage, ou
  * - `compacting` starts the running item (a second one while it runs is
  *   ignored);
  * - `compact_result: "failed"` fails it;
- * - a `null` status with no `compact_result` before the boundary fails it too:
- *   Claude reports a successful compaction as `null` with
- *   `compact_result: "success"`, so a bare `null` means the compaction ended
- *   without a result.
+ * - a `null` status with no `compact_result` and no `permissionMode` before the
+ *   boundary fails it too: Claude reports a successful compaction as `null`
+ *   with `compact_result: "success"`, so a bare `null` means the compaction
+ *   ended without a result. A `null` status that carries a `permissionMode` is
+ *   a permission-mode update, not an ending.
  *
  * Every other status is dropped: the session's status comes from its turns.
  */
@@ -1303,6 +1308,7 @@ const trackCompactionStatus = (
   } else if (
     sdk.status === null &&
     sdk.compact_result === undefined &&
+    sdk.permissionMode === undefined &&
     state.compaction?.boundary === undefined
   ) {
     completeCompaction(state, out, "failed");
@@ -1562,8 +1568,10 @@ const normalizeFrame = (state: Normalizing, sdk: SDKMessage): Emit => {
     closeUnsolicitedTurn(state, agent, out, ownStart, fellBack || isSelfContained(sdk));
   }
   // There are thousands of deltas. A copy of the message on each one would
-  // double the stream, and each delta already carries its text.
-  if (sdk.type === "stream_event") return out;
+  // double the stream, and each delta already carries its text. A delta that
+  // fell back to an unknown item has no text to carry, so it keeps its raw
+  // payload.
+  if (sdk.type === "stream_event" && !fellBack) return out;
   const at = out.findIndex((event, index) => index >= ownStart && !isTurnOpeningEvent(event));
   const found = out[at];
   if (found !== undefined) {

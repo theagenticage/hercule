@@ -311,15 +311,18 @@ export const buildStartedItem = (event: ItemStarted): StartedItem => {
 
 /**
  * Returns `item` once its `item.completed` row `event` has landed: its result
- * is the row's status, and `completion` is the compaction detail the row
- * decodes to, or `undefined`.
+ * is the row's status, and `compaction` is the detail of a compaction item
+ * with the start and the completion merged, or `undefined` for any other kind
+ * and when neither decodes.
  *
  * A compaction reports its token counts and summary when it completes, and
  * may have reported some of them (the trigger, the count before) when it
- * started. `startedCompaction` is the detail the start decoded to. When the
- * row holds a compaction detail, the target is read from the two merged, a
- * field of the completion winning over the same field of the start. Without
- * one, such as on a failed compaction, the target the start gave stays.
+ * started. `startedCompaction` is the detail the start decoded to. The merge
+ * lets a field of the completion win over the same field of the start, so a
+ * summary given at the start survives a completion that has none. When the row
+ * holds a compaction detail, the target is read from the merged detail.
+ * Without one, such as on a failed compaction, the target the start gave
+ * stays.
  *
  * The desktop's blocks build their items on this too, so both screens end up
  * with the same words.
@@ -328,18 +331,22 @@ export const buildCompletedItem = <Item extends ThreadItem>(
   item: Item,
   startedCompaction: ContextCompactionDetail | undefined,
   event: ItemCompleted,
-): { readonly item: Item; readonly completion: ContextCompactionDetail | undefined } => {
+): { readonly item: Item; readonly compaction: ContextCompactionDetail | undefined } => {
   const completion =
     item.kind === "context_compaction" ? readCompactionDetail(event.detail) : undefined;
+  const compaction =
+    startedCompaction === undefined && completion === undefined
+      ? undefined
+      : { ...startedCompaction, ...completion };
   return {
     item: {
       ...item,
       result: event.status,
-      ...(completion === undefined
+      ...(completion === undefined || compaction === undefined
         ? {}
-        : { target: describeCompactionTarget({ ...startedCompaction, ...completion }) }),
+        : { target: describeCompactionTarget(compaction) }),
     },
-    completion,
+    compaction,
   };
 };
 

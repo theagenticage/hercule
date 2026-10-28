@@ -545,7 +545,7 @@ export const buildThreadBlocks = (
             ...completed.item,
             resultContent:
               item.kind === "context_compaction"
-                ? completed.completion?.summary
+                ? completed.compaction?.summary
                 : readJsonObject(event.detail)?.content,
           };
         }
