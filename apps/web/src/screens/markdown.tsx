@@ -49,7 +49,7 @@ const INLINE_TAGS = { strong: "strong", emphasis: "em", strikethrough: "del" } a
 // A translucent tint rather than an opaque chip, because inline code
 // appears both on the page and inside the user's bubble. A translucent
 // colour shows on both backgrounds; an opaque one would vanish on one of them.
-const INLINE_CODE = "rounded-control bg-line-soft px-1 py-px font-mono text-[0.92em]";
+export const INLINE_CODE = "rounded-control bg-line-soft px-1 py-px font-mono text-[0.92em]";
 
 const BULLETED_LIST = `${STACKED} list-disc space-y-1 pl-5 marker:text-faint`;
 const NUMBERED_LIST = `${STACKED} list-decimal space-y-1 pl-5 marker:text-faint`;

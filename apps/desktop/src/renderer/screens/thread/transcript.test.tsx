@@ -201,12 +201,12 @@ describe("Transcript", () => {
   });
 
   it("draws a runtime error as a note named Error, with the runner's text", () => {
-    const message = "Could not load skill `review`. The Thread did not start.";
+    const message = "Could not load skill review. The Thread did not start.";
     const rows = [
       ...THREAD.transcript,
       ...buildNextRows(THREAD.session.id, THREAD.transcript, {
         _tag: "runtime.error",
-        class: "unknown",
+        class: "HarnessNotInstalled",
         message,
       }),
     ];
@@ -226,5 +226,35 @@ describe("Transcript", () => {
     const note = container.querySelector(".error-note")!;
     expect(within(note as HTMLElement).getByRole("img", { name: "Error" })).toBeDefined();
     expect(note.querySelector("p")?.firstChild?.textContent).toBe(message);
+  });
+
+  it("draws the command a runtime error ends with as inline code", () => {
+    const command =
+      "hercule runner install-harness 01a1f00d-0000-7000-8000-000000000001 --provider claude-code";
+    const message = `Claude Code is not installed on this runner. Install it with: \`${command}\``;
+    const rows = [
+      ...THREAD.transcript,
+      ...buildNextRows(THREAD.session.id, THREAD.transcript, {
+        _tag: "runtime.error",
+        class: "HarnessNotInstalled",
+        message,
+      }),
+    ];
+    const { container } = render(
+      <Transcript
+        sessionId={THREAD.session.id}
+        faceSeed={THREAD.session.id}
+        blocks={buildThreadBlocks(rows, buildSessionAgentState(THREAD.session))}
+        pose="working"
+        describeAgent={() => "Claude Code · Claude Sonnet 5"}
+        attachOpenParagraph={() => undefined}
+        composerStack={null}
+        onBottomChange={() => {}}
+      />,
+    );
+
+    const code = container.querySelector(".error-note code")!;
+    expect(code.textContent).toBe(command);
+    expect(container.querySelector(".error-note p")?.textContent).not.toContain("`");
   });
 });

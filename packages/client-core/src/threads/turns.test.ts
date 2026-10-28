@@ -214,7 +214,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING).turns;
 
     expect(turns).toHaveLength(2);
 
@@ -291,7 +291,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING).turns;
 
     expect(turns[0]!.assistantText).toBe("Sleep 1 of 4 finished.\n\nSleep 2 of 4 finished.");
   });
@@ -322,7 +322,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING).turns;
 
     expect(turns[0]!.items[0]!.target).toBe("ls -la");
   });
@@ -343,7 +343,7 @@ describe("buildTurns", () => {
         }),
       ],
       AGENT_ASKING_NOTHING,
-    );
+    ).turns;
 
     expect(turns[0]!.items[0]!.target).toBe("3-D Secure challenge timeout");
   });
@@ -363,7 +363,7 @@ describe("buildTurns", () => {
         }),
       ],
       AGENT_ASKING_NOTHING,
-    );
+    ).turns;
 
     expect(turns[0]!.items[0]!.target).toBe("handlePaymentResult");
   });
@@ -383,7 +383,7 @@ describe("buildTurns", () => {
         }),
       ],
       AGENT_ASKING_NOTHING,
-    );
+    ).turns;
 
     expect(turns[0]!.items[0]!.target).toBe("src/a.ts");
   });
@@ -404,7 +404,7 @@ describe("buildTurns", () => {
         }),
       ],
       AGENT_ASKING_NOTHING,
-    );
+    ).turns;
 
     expect(turns[0]!.items[0]!.target).toBe(JSON.stringify(detail));
   });
@@ -424,7 +424,7 @@ describe("buildTurns", () => {
         }),
       ],
       AGENT_ASKING_NOTHING,
-    );
+    ).turns;
     expect(fileChange[0]!.items[0]!.target).toBe("src/auth.ts");
 
     const described = buildTurns(
@@ -441,7 +441,7 @@ describe("buildTurns", () => {
         }),
       ],
       AGENT_ASKING_NOTHING,
-    );
+    ).turns;
     expect(described[0]!.items[0]!.target).toBe("Search the web");
 
     const named = buildTurns(
@@ -458,7 +458,7 @@ describe("buildTurns", () => {
         }),
       ],
       AGENT_ASKING_NOTHING,
-    );
+    ).turns;
     expect(named[0]!.items[0]!.target).toBe("some_mcp_tool");
 
     const bare = buildTurns(
@@ -475,7 +475,7 @@ describe("buildTurns", () => {
         }),
       ],
       AGENT_ASKING_NOTHING,
-    );
+    ).turns;
     expect(bare[0]!.items[0]!.target).toBe(JSON.stringify({ foo: "bar" }));
   });
 
@@ -522,7 +522,7 @@ describe("buildTurns", () => {
       // No item.completed for tool3, and no turn.completed: the turn is live.
     ];
 
-    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING).turns;
 
     expect(turns).toHaveLength(1);
     expect(turns[0]!.duration).toBeNull();
@@ -558,7 +558,7 @@ describe("buildTurns", () => {
         ...endTurn("stopped", "interrupted"),
       ],
       AGENT_ASKING_NOTHING,
-    );
+    ).turns;
 
     expect(turns.map((turn) => [turn.turnId, turn.endState, turn.duration])).toEqual([
       ["done", "completed", 22000],
@@ -628,7 +628,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING).turns;
 
     expect(turns[0]!.items).toEqual([
       expect.objectContaining({ itemId: "edit4", verb: "edit", result: "failed" }),
@@ -681,7 +681,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING).turns;
 
     expect(turns[0]!.items).toEqual([
       expect.objectContaining({ itemId: "novel1", verb: "unknown" }),
@@ -757,7 +757,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING).turns;
 
     expect(turns[0]!.items).toEqual([]);
     expect(turns[0]!.assistantText).toBe("Hi!");
@@ -802,7 +802,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING).turns;
 
     expect(turns[0]!.items[0]!.target).toBe("");
   });
@@ -870,7 +870,7 @@ describe("buildTurns", () => {
       }),
     ];
 
-    const turns = buildTurns(rows, AGENT_ASKING_NOTHING);
+    const turns = buildTurns(rows, AGENT_ASKING_NOTHING).turns;
 
     expect(turns).toHaveLength(1);
     expect(turns[0]!.userMessages).toEqual([
@@ -924,20 +924,21 @@ describe("buildTurns: the item an open request is about", () => {
   ];
 
   it("marks the item of the open request as awaiting approval, and only that one", () => {
-    const items = buildTurns(buildParkedRows(), buildAgentAskingAbout("tool9"))[0]!.items;
+    const items = buildTurns(buildParkedRows(), buildAgentAskingAbout("tool9")).turns[0]!.items;
 
     expect(items.find((item) => item.itemId === "tool9")!.result).toBe("awaiting approval");
     expect(items.find((item) => item.itemId === "tool10")!.result).toBe("running");
   });
 
   it("marks the item of each open request as awaiting approval", () => {
-    const items = buildTurns(buildParkedRows(), buildAgentAskingAbout("tool9", "tool10"))[0]!.items;
+    const items = buildTurns(buildParkedRows(), buildAgentAskingAbout("tool9", "tool10")).turns[0]!
+      .items;
 
     expect(items.map((item) => item.result)).toEqual(["awaiting approval", "awaiting approval"]);
   });
 
   it("marks every open item as running when no request is open", () => {
-    const items = buildTurns(buildParkedRows(), AGENT_ASKING_NOTHING)[0]!.items;
+    const items = buildTurns(buildParkedRows(), AGENT_ASKING_NOTHING).turns[0]!.items;
 
     expect(items.map((item) => item.result)).toEqual(["running", "running"]);
   });
@@ -959,7 +960,7 @@ describe("buildTurns: the item an open request is about", () => {
     ];
 
     expect(
-      buildTurns(rows, buildAgentAskingAbout("tool9"))[0]!.items.find(
+      buildTurns(rows, buildAgentAskingAbout("tool9")).turns[0]!.items.find(
         (item) => item.itemId === "tool9",
       )!.result,
     ).toBe("completed");
@@ -998,7 +999,7 @@ describe("buildTurns: the item an open request is about", () => {
       buildUserStarted("u3", { text: "", attachments: [second] }),
     ];
 
-    const [turn] = buildTurns(rows, AGENT_ASKING_NOTHING);
+    const [turn] = buildTurns(rows, AGENT_ASKING_NOTHING).turns;
 
     expect(turn?.userMessages.map((message) => message.attachments)).toEqual([
       [first],
@@ -1021,11 +1022,12 @@ describe("buildTurns: the item an open request is about", () => {
       }),
     ];
 
-    const attachments = buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userMessages[0]?.attachments;
+    const attachments = buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]?.userMessages[0]
+      ?.attachments;
     expect(attachments).toEqual([]);
     // A memoized message compares its props by identity, so a fresh empty
     // list on each streamed row would draw it again for nothing.
-    expect(buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userMessages[0]?.attachments).toBe(
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]?.userMessages[0]?.attachments).toBe(
       attachments,
     );
   });
@@ -1055,7 +1057,7 @@ describe("buildTurns: the skills of a message", () => {
         buildUserStarted("u2", { text: "plain" }),
       ],
       AGENT_ASKING_NOTHING,
-    );
+    ).turns;
 
     expect(turn?.userMessages.map((message) => message.skills)).toEqual([
       ["review", "webshop:release"],
@@ -1071,7 +1073,7 @@ describe("buildTurns: the skills of a message", () => {
         buildUserStarted("u3", { text: "x", skills: [4] }),
       ],
       AGENT_ASKING_NOTHING,
-    );
+    ).turns;
 
     expect(turn?.userMessages.map((message) => message.skills)).toEqual([["review"], [], []]);
   });
@@ -1079,9 +1081,134 @@ describe("buildTurns: the skills of a message", () => {
   it("gives a message with no skills the same empty list every time the rows are grouped", () => {
     const rows = [buildUserStarted("u1", { text: "Fix the login bug" })];
 
-    const skills = buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userMessages[0]?.skills;
+    const skills = buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]?.userMessages[0]?.skills;
     expect(skills).toEqual([]);
-    expect(buildTurns(rows, AGENT_ASKING_NOTHING)[0]?.userMessages[0]?.skills).toBe(skills);
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]?.userMessages[0]?.skills).toBe(skills);
+  });
+});
+
+describe("buildTurns notices", () => {
+  const INSTALL_COMMAND = "hercule runner install-harness r1 --provider claude-code";
+  const base = (position: number, at: string) => ({
+    eventId: `n${position}`,
+    sessionId: SESSION_ID,
+    at,
+  });
+  const row = (position: number, event: TranscriptRow["event"]): TranscriptRow => ({
+    position,
+    at: event.at,
+    event,
+  });
+  const turnStarted = (position: number, turnId: string, at: string): TranscriptRow =>
+    row(position, { _tag: "turn.started", ...base(position, at), turnId });
+  const turnCompleted = (position: number, turnId: string, at: string): TranscriptRow =>
+    row(position, { _tag: "turn.completed", ...base(position, at), turnId, state: "failed" });
+  const errorRow = (position: number, at: string, over: { turnId?: string; message?: string }) =>
+    row(position, {
+      _tag: "runtime.error",
+      ...base(position, at),
+      class: "HarnessNotInstalled",
+      ...over,
+    });
+
+  it("puts an error that names its turn in that turn, with the message as the runner wrote it", () => {
+    const { turns, outsideNotices } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        errorRow(2, "2026-09-08T10:00:01.000Z", { turnId: "t1", message: "Context window full." }),
+        turnCompleted(3, "t1", "2026-09-08T10:00:02.000Z"),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(outsideNotices).toEqual([]);
+    expect(turns[0]?.notices).toEqual([
+      {
+        key: "runtime.error:2",
+        severity: "error",
+        message: "Context window full.",
+        at: "2026-09-08T10:00:01.000Z",
+      },
+    ]);
+  });
+
+  it("puts an error with no turn id in the turn that is open where its row sits", () => {
+    const { turns, outsideNotices } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        errorRow(2, "2026-09-08T10:00:01.000Z", { message: "Rate limited." }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(outsideNotices).toEqual([]);
+    expect(turns[0]?.notices.map((notice) => notice.message)).toEqual(["Rate limited."]);
+  });
+
+  it("keeps an error outside every turn when no turn ever began, as when a session fails to start", () => {
+    const { turns, outsideNotices } = buildTurns(
+      [
+        errorRow(1, "2026-09-08T10:00:00.000Z", {
+          message: `Claude Code is not installed on this runner. Install it with: \`${INSTALL_COMMAND}\``,
+        }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(turns).toEqual([]);
+    expect(outsideNotices).toEqual([
+      {
+        key: "runtime.error:1",
+        severity: "error",
+        message: expect.stringContaining(INSTALL_COMMAND) as unknown,
+        at: "2026-09-08T10:00:00.000Z",
+        turnsBefore: 0,
+      },
+    ]);
+  });
+
+  it("counts the turns before an outside notice, and treats a completed or a restarted session's turn as closed", () => {
+    const { turns, outsideNotices } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        turnCompleted(2, "t1", "2026-09-08T10:00:01.000Z"),
+        errorRow(3, "2026-09-08T10:00:02.000Z", { message: "after a completed turn" }),
+        turnStarted(4, "t2", "2026-09-08T10:00:03.000Z"),
+        row(5, {
+          _tag: "session.exited",
+          ...base(5, "2026-09-08T10:00:04.000Z"),
+          reason: "crash",
+        }),
+        errorRow(6, "2026-09-08T10:00:05.000Z", { message: "after an abandoned turn" }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(turns.map((turn) => turn.notices)).toEqual([[], []]);
+    expect(outsideNotices.map((notice) => [notice.message, notice.turnsBefore])).toEqual([
+      ["after a completed turn", 1],
+      ["after an abandoned turn", 2],
+    ]);
+  });
+
+  it("returns a warning as a warning, and an error with no message as its class", () => {
+    const { turns } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        row(2, {
+          _tag: "runtime.warning",
+          ...base(2, "2026-09-08T10:00:01.000Z"),
+          message: "Retrying the request.",
+        }),
+        errorRow(3, "2026-09-08T10:00:02.000Z", {}),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(turns[0]?.notices.map((notice) => [notice.severity, notice.message])).toEqual([
+      ["warning", "Retrying the request."],
+      ["error", "HarnessNotInstalled"],
+    ]);
   });
 });
 

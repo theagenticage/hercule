@@ -652,6 +652,64 @@ describe("Thread: transcript", () => {
     expect(screen.queryByText(/^Worked for/)).toBeNull();
   });
 
+  it("shows the error of a thread that failed to start, with the command as inline code", async () => {
+    const command = "hercule runner install-harness r1 --provider claude-code";
+    await openApp(buildSession({ status: "exited" }), [
+      buildTranscriptRow(0, {
+        _tag: "runtime.error",
+        eventId: "e0",
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.000Z",
+        class: "HarnessNotInstalled",
+        message: `Claude Code is not installed on this runner. Install it with: \`${command}\``,
+      }),
+    ]);
+
+    const note = (await screen.findByText(/is not installed on this runner/)).closest("p")!;
+    expect(note.querySelector("code")?.textContent).toBe(command);
+    expect(note.textContent).toBe(
+      `Error: Claude Code is not installed on this runner. Install it with: ${command}`,
+    );
+    // No turn ever began, so nothing else is drawn for the failure.
+    expect(screen.queryByText(/^Cut short$/)).toBeNull();
+  });
+
+  it("shows an error and a warning inside the turn they fell in, above its ending", async () => {
+    await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(
+        buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+        buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+        [
+          {
+            _tag: "runtime.warning",
+            eventId: "",
+            sessionId: SESSION_ID,
+            at: "2026-09-08T10:00:01.000Z",
+            turnId: "t1",
+            message: "Retrying the request.",
+          },
+          {
+            _tag: "runtime.error",
+            eventId: "",
+            sessionId: SESSION_ID,
+            at: "2026-09-08T10:00:02.000Z",
+            turnId: "t1",
+            class: "context_window_exceeded",
+            message: "The context window is full.",
+          },
+        ],
+        buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z", "failed"),
+      ),
+    );
+
+    const warning = await screen.findByText(/Retrying the request\./);
+    const error = await screen.findByText(/The context window is full\./);
+    const ending = await screen.findByText(`Failed after ${formatDuration(5000)}`);
+    expect(warning.compareDocumentPosition(error) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(error.compareDocumentPosition(ending) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("leaves out the target of a tool item that reported none, so no separator is doubled", async () => {
     const user = userEvent.setup();
     // An item that started with no detail has an empty target.

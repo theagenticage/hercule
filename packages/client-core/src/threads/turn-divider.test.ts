@@ -37,6 +37,7 @@ const buildTurn = (over: Partial<ThreadTurn> = {}): ThreadTurn => ({
   startedAt: STARTED_AT,
   duration: 5_000,
   endState: "completed",
+  notices: [],
   ...over,
 });
 

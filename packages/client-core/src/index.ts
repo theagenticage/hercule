@@ -708,6 +708,7 @@ export {
   type ThreadBlock,
   type WorkBlock,
 } from "./threads/blocks";
+export { splitCodeSpans } from "./threads/code-spans";
 export { applyThreadChoice, type ThreadChoice } from "./threads/thread-choice";
 export {
   resolveThreadConfig,
@@ -930,8 +931,11 @@ export {
 export {
   buildTurns,
   mayBeRunningTurn,
+  type OutsideNotice,
   type ThreadItem,
+  type ThreadNotice,
   type ThreadTurn,
+  type ThreadTurns,
   type ThreadUserMessage,
 } from "./threads/turns";
 export {

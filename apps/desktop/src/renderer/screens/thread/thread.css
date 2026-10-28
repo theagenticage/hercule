@@ -297,6 +297,27 @@ button.work-row:hover > .ic {
   overflow-wrap: anywhere;
   user-select: text;
 }
+/* A command in the note takes the chip that inline code has in a message
+   (markdown.css), in the note's own size. The chip has no vertical padding:
+   the note's lines are close, and with it the chips of two wrapped lines
+   would touch and read as one slab. */
+.error-note code {
+  padding: 0 5px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+/* A word of the command is not broken at a hyphen: it would otherwise let a
+   flag such as `--runner` split across two lines. An inline block is
+   unbreakable while it fits on a line, and the spaces between the words stay
+   breakable, so a long command still wraps inside the note. A word wider than
+   the line, such as a long path, breaks inside itself instead of overflowing:
+   the note's text already allows a break anywhere, and the maximum width keeps
+   the block from growing past the line. The 10px is the chip's padding on both
+   sides, which a word that fills the line would otherwise push past the note. */
+.error-note .code-word {
+  display: inline-block;
+  max-width: calc(100% - 10px);
+}
 .warning-note .time,
 .error-note .time {
   margin-left: 6px;

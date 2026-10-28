@@ -21,7 +21,7 @@
  * current day, so every block draws again when the day changes and "09:04"
  * becomes "4 Sep 09:04".
  */
-import { memo, type JSX } from "react";
+import { Fragment, memo, type JSX } from "react";
 import {
   buildWorkRows,
   describeMessageMeta,
@@ -29,6 +29,7 @@ import {
   describeTurnEnding,
   describeWaitingNote,
   describeWorkStretch,
+  splitCodeSpans,
   summarizeWork,
   type EndingBlock,
   type Pose,
@@ -321,7 +322,10 @@ export const WarningNote = memo(function WarningNote({
  * failed, such as one whose context window is full. It is the warning note
  * drawn in the failure colours: the book's tomato dot, the error's `message`
  * in the failure ink, and its time in the muted ink. The dot is named
- * "Error", so a screen reader says what kind of note this is.
+ * "Error", so a screen reader says what kind of note this is. A command the
+ * runner wrote between backticks, such as the one that installs a missing
+ * harness, is drawn as inline code. Each word of the command stays whole, so
+ * the command wraps only at its spaces, never inside a flag or an id.
  */
 export const ErrorNote = memo(function ErrorNote({
   message,
@@ -339,7 +343,20 @@ export const ErrorNote = memo(function ErrorNote({
     <div className="error-note">
       <i className="dot" role="img" aria-label="Error" />
       <p>
-        {message}
+        {splitCodeSpans(message).map((part, index) =>
+          part.kind === "code" ? (
+            <code key={index}>
+              {part.text.split(" ").map((word, wordIndex) => (
+                <Fragment key={wordIndex}>
+                  {wordIndex === 0 ? null : " "}
+                  <span className="code-word">{word}</span>
+                </Fragment>
+              ))}
+            </code>
+          ) : (
+            part.text
+          ),
+        )}
         {time === undefined ? null : <span className="time">{time}</span>}
       </p>
     </div>

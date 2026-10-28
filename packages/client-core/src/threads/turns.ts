@@ -12,7 +12,9 @@
  *   it was steered from `detail.steered`, and the agent that sent it from
  *   `detail.senderSessionId`;
  * - the assistant's text is the turn's `assistant_text` deltas joined in
- *   transcript order.
+ *   transcript order;
+ * - a `runtime.error` or `runtime.warning` row becomes a notice, in the turn
+ *   it belongs to or, when it belongs to none, between the turns around it.
  */
 import { Schema } from "effect";
 import { Attachment, type SessionStatus, type TranscriptRow } from "@hercule/contract";
@@ -137,6 +139,28 @@ export const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
   };
 };
 
+/**
+ * A `runtime.error` or `runtime.warning` row: something went wrong around the
+ * work, such as a harness that is not installed. The message is shown as the
+ * runner wrote it, and may hold a command between backticks.
+ */
+export interface ThreadNotice {
+  /** Unique within one transcript: the row's position, with its severity. */
+  readonly key: string;
+  readonly severity: "error" | "warning";
+  readonly message: string;
+  readonly at: string;
+}
+
+/**
+ * A notice that belongs to no turn, such as the error of a session that
+ * failed to start: no turn ever began, so there is nothing to put it in.
+ */
+export interface OutsideNotice extends ThreadNotice {
+  /** How many turns began before the notice, so a screen places it between turns. */
+  readonly turnsBefore: number;
+}
+
 export interface ThreadTurn {
   readonly turnId: string;
   /** The messages sent into this turn, in transcript order: the one that opened it, then any steered in. */
@@ -150,6 +174,8 @@ export interface ThreadTurn {
    * stopped. `null` while no `turn.completed` has arrived, like `duration`.
    */
   readonly endState: TurnEndState | null;
+  /** The notices that fell inside this turn, in transcript order. */
+  readonly notices: readonly ThreadNotice[];
 }
 
 /** The verb shown for each item kind. It is one word per kind, never more detailed. */
@@ -268,6 +294,7 @@ interface Building {
   items: ThreadItem[];
   itemIndex: Map<string, number>;
   assistantText: string;
+  notices: ThreadNotice[];
   /**
    * The item of the last `assistant_text` delta, used to insert a paragraph
    * break when a new item starts.
@@ -291,14 +318,36 @@ export const mayBeRunningTurn = (status: SessionStatus): boolean =>
   status !== "exited" && status !== "queued";
 
 /**
- * Returns the turns of one agent's transcript, in the order they first
- * appear. `agent` is that agent's state: an item one of its open Requests is
- * about shows `awaiting approval`.
+ * Returns a `runtime.error` or `runtime.warning` row as a notice. A row with
+ * no message gets its error class as the message.
  */
-export const buildTurns = (
-  rows: readonly TranscriptRow[],
-  agent: AgentState,
-): readonly ThreadTurn[] => {
+const buildNotice = (
+  row: TranscriptRow,
+  event: Extract<ProviderEvent, { _tag: "runtime.error" | "runtime.warning" }>,
+): ThreadNotice => ({
+  key: `${event._tag}:${String(row.position)}`,
+  severity: event._tag === "runtime.error" ? "error" : "warning",
+  message: event._tag === "runtime.error" ? (event.message ?? event.class) : event.message,
+  at: event.at,
+});
+
+/** What `buildTurns` returns: the turns, and the notices that fell outside all of them. */
+export interface ThreadTurns {
+  readonly turns: readonly ThreadTurn[];
+  readonly outsideNotices: readonly OutsideNotice[];
+}
+
+/**
+ * Returns the turns of one agent's transcript, in the order they first
+ * appear, and the notices that belong to no turn. `agent` is that agent's
+ * state: an item one of its open Requests is about shows `awaiting approval`.
+ *
+ * A notice belongs to the turn its row names. A notice with no turn id
+ * belongs to the turn that is open where its row sits: begun, and not yet
+ * completed, nor cut off by the session starting or exiting. With no such
+ * turn, it is an outside notice.
+ */
+export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): ThreadTurns => {
   const awaitingItemIds = new Set(agent.openRequests.map((request) => request.itemId));
   const turns = new Map<string, Building>();
 
@@ -314,23 +363,45 @@ export const buildTurns = (
       items: [],
       itemIndex: new Map(),
       assistantText: "",
+      notices: [],
       lastAssistantItemId: null,
     };
     turns.set(turnId, made);
     return made;
   };
 
+  const outsideNotices: OutsideNotice[] = [];
+  let openTurnId: string | null = null;
+
   for (const row of rows) {
     const event: ProviderEvent = row.event;
     switch (event._tag) {
       case "turn.started": {
         findOrStartTurn(event.turnId, event.at).startedAt = event.at;
+        openTurnId = event.turnId;
         break;
       }
       case "turn.completed": {
         const turn = findOrStartTurn(event.turnId, event.at);
         turn.completedAt = event.at;
         turn.endState = event.state;
+        openTurnId = null;
+        break;
+      }
+      case "session.started":
+      case "session.exited": {
+        openTurnId = null;
+        break;
+      }
+      case "runtime.error":
+      case "runtime.warning": {
+        const notice = buildNotice(row, event);
+        const turnId = event.turnId ?? openTurnId;
+        if (turnId === null) {
+          outsideNotices.push({ ...notice, turnsBefore: turns.size });
+        } else {
+          findOrStartTurn(turnId, event.at).notices.push(notice);
+        }
         break;
       }
       case "item.started": {
@@ -370,7 +441,7 @@ export const buildTurns = (
     }
   }
 
-  return Array.from(turns.values()).map((turn) => ({
+  const builtTurns = Array.from(turns.values()).map((turn) => ({
     turnId: turn.turnId,
     userMessages: turn.userMessages,
     // Only a running item can be waiting for an open Request. An item the
@@ -386,5 +457,7 @@ export const buildTurns = (
     duration:
       turn.completedAt === null ? null : Date.parse(turn.completedAt) - Date.parse(turn.startedAt),
     endState: turn.endState,
+    notices: turn.notices,
   }));
+  return { turns: builtTurns, outsideNotices };
 };
