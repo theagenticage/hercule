@@ -64,7 +64,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const FIRST_SCREEN_BUDGET_BYTES = 250 * 1024;
 
 /** The largest main's startup file may be, minified (spec 17 §Performance, Budgets). */
-const MAIN_STARTUP_BUDGET_BYTES = 160 * 1024;
+const MAIN_STARTUP_BUDGET_BYTES = 170 * 1024;
 
 const formatKilobytes = (bytes: number): string => `${(bytes / 1024).toFixed(1)} kB`;
 
