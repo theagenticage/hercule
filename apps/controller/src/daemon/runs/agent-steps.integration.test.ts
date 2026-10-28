@@ -1682,7 +1682,7 @@ describe("agent steps over the runner socket", () => {
           wire.answering(() => {
             if (refused) return "opened";
             refused = true;
-            return { message: "the harness is not ready for input" };
+            return { error: new AdapterFailed({ message: "the harness is not ready for input" }) };
           });
           const agentId = await createAgent(arranged.harness.base, arranged.token);
           const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {

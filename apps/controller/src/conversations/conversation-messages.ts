@@ -1,7 +1,8 @@
 /**
  * The service that appends a message to a conversation. Every writer of a
  * message goes through it: the owner's send, an assistant's reply, and a
- * notice that an assistant was interrupted or can't be reached. It also
+ * notice that an assistant was interrupted, can't be reached, or did not get
+ * a message. It also
  * lists which assistant texts a turn's replies already hold, so the writer of
  * replies never stores one text twice.
  *

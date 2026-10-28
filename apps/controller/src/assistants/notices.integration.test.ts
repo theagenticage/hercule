@@ -24,7 +24,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
-import { HarnessNotInstalled, type ExitReason } from "@hercule/protocol";
+import { AdapterFailed, HarnessNotInstalled, type ExitReason } from "@hercule/protocol";
 import type { Conversation, ConversationMessage, Session } from "@hercule/contract";
 import { withTransaction } from "../db";
 import { get, post, send } from "../http/testing";
@@ -57,8 +57,8 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
  * has no transcript to resume, so the queued-input sweep gives up on it.
  */
 const NEVER_STARTED =
-  "Ada can't be reached: the session could not be resumed: that session left no " +
-  "provider-native session, so its transcript is gone and there is nothing to resume. " +
+  "Ada did not get your message: the session could not be resumed (that session left no " +
+  "provider-native session, so its transcript is gone and there is nothing to resume). " +
   "Send the message again to start a new session.";
 
 /** The conversation of these tests: the default assistant's, renamed to Ada, and its session, busy with the turn "hi" opened. */
@@ -525,7 +525,9 @@ describe("a session that exits while idle with a message still waiting", () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged);
       const next = await runTurn(arranged, session.id, 2, "t1", []);
-      arranged.wire.answering(() => ({ message: "the harness is not ready" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "the harness is not ready" }),
+      }));
       await sendMessage(arranged, conversation.id, "are you there?");
       await waitUntil("stored the refusal on the input", async () =>
         (await listInputs(arranged, session.id)).find(
@@ -562,7 +564,9 @@ describe("a resumed session that exits before it starts a turn", () => {
       await reportExit(arranged, session.id, next, "idle_unload");
       // A runner whose start fails refuses the input the start carries, and
       // then reports the exit.
-      arranged.wire.answering(() => ({ message: "the harness crashed" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "the harness crashed" }),
+      }));
       await sendMessage(arranged, conversation.id, "are you there?");
       await waitForStartFrames(arranged, session.id, 2);
       await waitUntil("recorded the refusal", async () => {
@@ -613,7 +617,7 @@ describe("a conversation's start that the runner failed for good", () => {
         arranged,
         conversation.id,
         session!.id,
-        `Ada can't be reached: ${message}`,
+        `Ada did not get your message: ${message}`,
       );
       expect((await listInputs(arranged, session!.id))[0]).toMatchObject({
         status: "cancelled",

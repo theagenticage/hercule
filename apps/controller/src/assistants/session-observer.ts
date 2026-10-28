@@ -14,8 +14,9 @@
  *   message tries again.
  * - Any other exit writes nothing, an idle unload included: the session is
  *   resumed for whatever waits, and nobody was cut off.
- * - Input dropped because the session cannot be resumed writes "<name> can't
- *   be reached: <why>".
+ * - Input that is given up on for good (the session cannot be resumed, or the
+ *   runner failed it in a way that sending it again would not mend) writes
+ *   "<name> did not get your message: <why>".
  *
  * A session that answers no conversation, or whose assistant is gone, writes
  * nothing, so a late report from a deleted assistant's session is ignored.
@@ -33,6 +34,7 @@ import { buildSessionStamp } from "../actor";
 import { readAssistantTexts, SessionObserver, type StoredSession } from "../sessions";
 import {
   buildInterruptedText,
+  buildMessageNotReceivedText,
   buildTurnFailedText,
   buildTurnStoppedText,
   buildUnreachableText,
@@ -198,7 +200,7 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         yield* appendNotice({
           conversationId: answered.value.conversationId,
           name: answered.value.name,
-          text: buildUnreachableText(answered.value.name, refusal),
+          text: buildMessageNotReceivedText(answered.value.name, refusal),
           sessionId: session.id,
         });
       }),

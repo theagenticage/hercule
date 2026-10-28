@@ -24,7 +24,12 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
-import { SteerRefused, type SessionInput, type SessionInterrupt } from "@hercule/protocol";
+import {
+  AdapterFailed,
+  SteerRefused,
+  type SessionInput,
+  type SessionInterrupt,
+} from "@hercule/protocol";
 import type { DiscussionCreated, Grant, Input, Post, SessionInputOutcome } from "@hercule/contract";
 import { readDefaultConversation, startConversationSession } from "../../conversations/testing";
 import { mintUuid, uuidFromString, withTransaction } from "../../db";
@@ -210,7 +215,7 @@ describe("a Discussion Input at a turn's end", () => {
     await withAgentFleet(async (arranged) => {
       const [first, second] = await spawnPair(arranged);
       await arrangeNewPost(arranged, first, second);
-      arranged.wire.answering(() => ({ message: "not now" }));
+      arranged.wire.answering(() => ({ error: new AdapterFailed({ message: "not now" }) }));
 
       await endTurn(arranged, first.session.id, 2);
       const [refused] = await waitForSettledDiscussionInputs(arranged, first.session.id, 1);
@@ -270,7 +275,7 @@ describe("a Discussion Input at a turn's end", () => {
       await arrangeNewPost(arranged, first, second);
       // A refused input goes back to waiting, and the session stays idle
       // with nothing on the wire. No delivery tick runs to send it again.
-      arranged.wire.answering(() => ({ message: "not now" }));
+      arranged.wire.answering(() => ({ error: new AdapterFailed({ message: "not now" }) }));
       const typed = await post(
         arranged.harness.base,
         `/api/v1/sessions/${first.session.id}/input`,

@@ -19,7 +19,10 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
+  HarnessNotInstalled,
   SessionSpec,
+  SteerRefused,
+  type AdapterError,
   type ModelSelection,
   type ProviderEvent,
   type SessionInputResult,
@@ -102,6 +105,9 @@ const buildRealSecretsLayer = () =>
 /** The session ids the edit observer was told about, in order. */
 const observedEdits: Array<string> = [];
 
+/** The reasons `SessionObserver.inputsDropped` was told about, in order. */
+const droppedReasons: Array<string> = [];
+
 /**
  * Ignores everything it is told: these tests do not look at what another
  * domain does with it. Only the edit observer notes which sessions it was
@@ -113,7 +119,7 @@ const ignoreSessions = Layer.mergeAll(
     SessionObserver.of({
       sessionReported: () => Effect.void,
       sessionExited: () => Effect.void,
-      inputsDropped: () => Effect.void,
+      inputsDropped: ({ refusal }) => Effect.sync(() => void droppedReasons.push(refusal)),
     }),
   ),
   Layer.succeed(
@@ -1192,6 +1198,84 @@ describe("an answer that an input opened a turn", () => {
     expect(result.applied.status).toBe("busy");
     expect(result.applied.input).toMatchObject({ status: "delivered", delivery: "opened" });
     expect(result.status).toBe("idle");
+  });
+});
+
+describe("a refusal for an input that a concurrent path already settled", () => {
+  /** Builds the runner's refusal of the input `requestId` with `error`. */
+  const refusalOf = (requestId: string, error: AdapterError): SessionInputResult => ({
+    _tag: "sessionInputResult",
+    requestId,
+    ok: false,
+    error,
+  });
+
+  it("tells the observer the input was dropped when the failure cancels the claimed input", async () => {
+    droppedReasons.length = 0;
+    const input = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const inputs = yield* inputRepository;
+        const runnerId = mintId();
+        const row = yield* insertIdleSessionWithSentInput(runnerId);
+        const answer = refusalOf(row.id, new HarnessNotInstalled({ message: "no harness" }));
+        yield* sessions.recordInputAnswer(
+          row,
+          { _tag: "sent", answer: Option.some(answer) },
+          runnerId,
+        );
+        return Option.getOrThrow(yield* inputs.read(row.id));
+      }),
+    );
+
+    expect(input).toMatchObject({ status: "cancelled", reason: "no harness" });
+    expect(droppedReasons).toEqual(["no harness"]);
+  });
+
+  it("tells the observer nothing when ordered ingestion already marked the input delivered", async () => {
+    droppedReasons.length = 0;
+    const { recorded, input } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const inputs = yield* inputRepository;
+        const runnerId = mintId();
+        const row = yield* insertIdleSessionWithSentInput(runnerId);
+        yield* sessions.applyInputResult(runnerId, openedAnswer(row.id));
+        const answer = refusalOf(row.id, new HarnessNotInstalled({ message: "no harness" }));
+        const recorded = yield* sessions.recordInputAnswer(
+          row,
+          { _tag: "sent", answer: Option.some(answer) },
+          runnerId,
+        );
+        return { recorded, input: Option.getOrThrow(yield* inputs.read(row.id)) };
+      }),
+    );
+
+    expect(input).toMatchObject({ status: "delivered", delivery: "opened" });
+    expect(recorded._tag).toBe("notDelivered");
+    expect(droppedReasons).toEqual([]);
+  });
+
+  it("does not report a refused steer as queued when the input was already delivered", async () => {
+    const { recorded, input } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const inputs = yield* inputRepository;
+        const runnerId = mintId();
+        const row = yield* insertIdleSessionWithSentInput(runnerId);
+        yield* sessions.applyInputResult(runnerId, openedAnswer(row.id));
+        const answer = refusalOf(row.id, new SteerRefused({ message: "no steering now" }));
+        const recorded = yield* sessions.recordInputAnswer(
+          row,
+          { _tag: "sent", answer: Option.some(answer) },
+          runnerId,
+        );
+        return { recorded, input: Option.getOrThrow(yield* inputs.read(row.id)) };
+      }),
+    );
+
+    expect(input.status).toBe("delivered");
+    expect(recorded._tag).toBe("notDelivered");
   });
 });
 

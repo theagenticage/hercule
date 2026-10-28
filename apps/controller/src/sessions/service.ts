@@ -136,7 +136,6 @@ import {
 import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
-import { decideRefusedInputReaction } from "./refused-input";
 import { isResumeHeld } from "./resume-hold";
 import {
   readSessionOrFail,
@@ -433,9 +432,8 @@ export interface AppliedReport {
  *   cancelled because the runner failed it, its session exited or its step's
  *   run ended;
  * - `steerDeferred`: the runner could not fold the input into the running
- *   turn, and the input is waiting again, to run as the next turn. `reason`
- *   is what the runner said. It is not a failure, so the caller tells its
- *   own caller the input is queued;
+ *   turn, and the input is waiting again, to run as the next turn. It is not
+ *   a failure, so the caller tells its own caller the input is queued;
  * - `unconfirmed`: the input is an agent step's prompt that got no answer,
  *   so it is marked `sent` and never sent again. `resultRequest` asks the
  *   runner how the step's turn ended; the caller tells it to the runner.
@@ -443,7 +441,7 @@ export interface AppliedReport {
 export type RecordedInputAnswer =
   | { readonly _tag: "delivered"; readonly delivery: Delivery }
   | { readonly _tag: "notDelivered"; readonly reason: string }
-  | { readonly _tag: "steerDeferred"; readonly reason: string }
+  | { readonly _tag: "steerDeferred" }
   | { readonly _tag: "unconfirmed"; readonly resultRequest: AgentStepResultRequest };
 
 /** Returns a stored input as the API shows it: each image without the digest only a runner checks. */
@@ -1455,7 +1453,11 @@ const make = Effect.gen(function* () {
    * `SessionObserver`: the step fails when the input is an agent step's
    * prompt, and the conversation gets a notice when the session answers one.
    * Part of `returnUndeliveredInput` and `failUndeliveredInput`. The row
-   * changes only while it still holds this send's claim (`row.sentAt`).
+   * changes only while it still holds this send's claim (`row.sentAt`), and
+   * `SessionObserver` is told only when it changed: a concurrent path may
+   * have settled the input already (ordered ingestion marked it delivered, or
+   * the conversation's abandonment cancelled it), and a second notice or step
+   * failure for it would be false.
    */
   const cancelUndeliveredInput = (
     row: StoredInput,
@@ -1463,7 +1465,7 @@ const make = Effect.gen(function* () {
     reason: string,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
+      if (!(yield* inputs.cancelWithReason(row.id, row.sentAt, reason))) return;
       yield* observer.inputsDropped({
         session,
         refusal: reason,
@@ -1474,8 +1476,10 @@ const make = Effect.gen(function* () {
   /**
    * Puts an input the runner did not take back to waiting with `reason`, so
    * the next send of the session's input tries again. Part of
-   * `recordInputAnswer`. Returns `true` when the input is waiting again. The
-   * input is cancelled instead, and this returns `false`, in three cases:
+   * `recordInputAnswer`. Returns `true` when this call put the input back to
+   * waiting. Returns `false` when the input was cancelled instead (three
+   * cases below), or when a concurrent path had already settled it (marked it
+   * delivered, or cancelled it), so the row did not change. The three cases:
    *
    * - The input is an agent step's prompt and the step's run has ended. The
    *   run's end cancelled the step's prompts still waiting
@@ -1530,8 +1534,7 @@ const make = Effect.gen(function* () {
         } else if (dropped) {
           yield* cancelUndeliveredInput(row, now.value, reason);
         } else {
-          yield* inputs.requeue(row.id, row.sentAt, reason);
-          waiting = true;
+          waiting = yield* inputs.requeue(row.id, row.sentAt, reason);
         }
         yield* announceSessionChangeById(row.sessionId);
         return waiting;
@@ -1541,7 +1544,7 @@ const make = Effect.gen(function* () {
   /**
    * Cancels an input the runner failed, with `reason`, instead of putting it
    * back to waiting. Part of `recordInputAnswer`, for a failure that sending
-   * the input again would not mend (`decideRefusedInputReaction`).
+   * the input again would not mend.
    * `SessionObserver` is told (`cancelUndeliveredInput`): an agent step's
    * prompt fails its step, and a conversation gets a notice with `reason`.
    * Without it, the owner's message would vanish unexplained.
@@ -2734,7 +2737,7 @@ const make = Effect.gen(function* () {
           const session = found.value;
           if (session.status !== "exited") return;
           if (session.conversationId === null && session.runId === null) return;
-          const reason = `the session could not be resumed: ${refusal}`;
+          const reason = `the session could not be resumed (${refusal})`;
           const cancelled = yield* inputs.cancelQueued(sessionId, reason);
           if (cancelled.count === 0) return;
           yield* announceSessionChange(session);
@@ -2890,8 +2893,7 @@ const make = Effect.gen(function* () {
      * - The runner refused the input, or the frame never left the controller
      *   because the runner had no connection: the runner cannot have run the
      *   input. The reason is the runner's own message, or `NOT_SENT`. What
-     *   happens next depends on the kind of failure the runner reported
-     *   (`decideRefusedInputReaction`):
+     *   happens next depends on the kind of failure the runner reported:
      *   - Most failures put the input back to waiting
      *     (`returnUndeliveredInput`), and `notDelivered` is returned.
      *   - A refused steer also puts it back to waiting, but it is no
@@ -2958,18 +2960,42 @@ const make = Effect.gen(function* () {
           return { _tag: "delivered", delivery: answer.delivery } as const;
         }
         const reason = answer.error.message;
-        switch (decideRefusedInputReaction(answer.error)) {
-          case "requeue":
+        // There is no default branch, so a new kind of failure does not
+        // compile until it is given a reaction here: a missing case leaves
+        // the function without a return value on that path.
+        //
+        // An input fails, instead of going back to waiting, in two cases:
+        //
+        // - The failure is about the session's setup (the harness is not
+        //   installed or not logged in, the transcript to resume is
+        //   missing). Sending the input again would fail the same way, and
+        //   the runner ends the session.
+        // - The failure leaves it unknown whether the harness took the input
+        //   (`HarnessProtocolError`), or the input asked for a model change
+        //   the harness refused (`ModelChangeRefused`). Sending the first
+        //   again could run it twice when the conversation resumes, and the
+        //   second would be refused again.
+        switch (answer.error._tag) {
+          case "SessionNotRunning":
+          case "InputNotDelivered":
+          case "SessionAlreadyRunning":
+          case "AdapterFailed":
             yield* returnUndeliveredInput(row, reason);
             return { _tag: "notDelivered", reason } as const;
-          case "requeueSteer":
-            // The input can be cancelled instead of waiting (a Discussion
-            // Input, or a session that has just exited for good). Then it
-            // is not queued, and saying so would be wrong.
+          case "SteerRefused":
+            // The refusal is no failure: the input runs as the next turn. But
+            // the input may have been cancelled instead of put back to
+            // waiting (a Discussion Input, or a session that has just exited
+            // for good), or settled by a concurrent path. Then it is not
+            // queued, and saying so would be wrong.
             return (yield* returnUndeliveredInput(row, reason))
-              ? ({ _tag: "steerDeferred", reason } as const)
+              ? ({ _tag: "steerDeferred" } as const)
               : ({ _tag: "notDelivered", reason } as const);
-          case "fail":
+          case "ModelChangeRefused":
+          case "HarnessNotInstalled":
+          case "HarnessLoginMissing":
+          case "ResumeTranscriptMissing":
+          case "HarnessProtocolError":
             yield* failUndeliveredInput(row, reason);
             return { _tag: "notDelivered", reason } as const;
         }

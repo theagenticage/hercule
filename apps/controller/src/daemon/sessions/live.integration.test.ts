@@ -11,11 +11,12 @@
  * already doing work as they do for a Thread.
  */
 import { describe, expect, it, vi } from "vitest";
-import type {
-  SessionInput,
-  SessionInterrupt,
-  SessionRespondToApprovalRequest,
-  SessionStop,
+import {
+  AdapterFailed,
+  type SessionInput,
+  type SessionInterrupt,
+  type SessionRespondToApprovalRequest,
+  type SessionStop,
 } from "@hercule/protocol";
 import type { Session } from "@hercule/contract";
 import { post, readErrorBody, send } from "../../http/testing";
@@ -108,7 +109,7 @@ const queueMessage = async (
   session: Session,
   text: string,
 ): Promise<string> => {
-  arranged.wire.answering(() => ({ message: "no steering now" }));
+  arranged.wire.answering(() => ({ error: new AdapterFailed({ message: "no steering now" }) }));
   await sendMessage(arranged, session.conversationId!, text);
   const row = await waitUntil("put the refused steer back in the queue", async () => {
     const found = (await listInputs(arranged, session.id)).find((one) => one.text === text);

@@ -84,22 +84,23 @@ const arrangeInputSentTwice = Effect.gen(function* () {
 
 /**
  * Arranges an input sent twice, runs `answer` with the input's id as the
- * late answer to the first send, and returns the row as it is afterwards.
+ * late answer to the first send, and returns whether the answer changed the
+ * row, and the row as it is afterwards.
  */
 const answerFirstSend = (
   answer: (
     inputs: Effect.Success<typeof inputRepository>,
     inputId: string,
-  ) => Effect.Effect<void, unknown>,
-): Promise<StoredInput> =>
+  ) => Effect.Effect<boolean, unknown>,
+): Promise<{ readonly changed: boolean; readonly row: StoredInput }> =>
   Effect.runPromise(
     Effect.gen(function* () {
       const inputs = yield* inputRepository;
       const { sessionId, inputId } = yield* arrangeInputSentTwice;
-      yield* answer(inputs, inputId);
+      const changed = yield* answer(inputs, inputId);
       const row = yield* inputs.one(sessionId, inputId);
       if (Option.isNone(row)) return yield* Effect.die("the input was just written");
-      return row.value;
+      return { changed, row: row.value };
     }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
   );
 
@@ -108,26 +109,29 @@ const SENT_AGAIN = { status: "queued", sentAt: SECOND_SEND, reason: null, delive
 
 describe("a late answer to a send that was released and sent again", () => {
   it("does not mark the input delivered", async () => {
-    const row = await answerFirstSend((inputs, id) =>
+    const { changed, row } = await answerFirstSend((inputs, id) =>
       inputs.markDelivered(id, FIRST_SEND, "steered", at),
     );
 
+    expect(changed).toBe(false);
     expect(row).toMatchObject(SENT_AGAIN);
   });
 
   it("does not put the input back to waiting", async () => {
-    const row = await answerFirstSend((inputs, id) =>
+    const { changed, row } = await answerFirstSend((inputs, id) =>
       inputs.requeue(id, FIRST_SEND, "the harness refused it"),
     );
 
+    expect(changed).toBe(false);
     expect(row).toMatchObject(SENT_AGAIN);
   });
 
   it("does not cancel the input", async () => {
-    const row = await answerFirstSend((inputs, id) =>
+    const { changed, row } = await answerFirstSend((inputs, id) =>
       inputs.cancelWithReason(id, FIRST_SEND, "the session exited"),
     );
 
+    expect(changed).toBe(false);
     expect(row).toMatchObject(SENT_AGAIN);
   });
 });
@@ -136,18 +140,20 @@ describe("a late answer to a send that was released and sent again", () => {
 // changed anything.
 describe("an answer to the send that holds the row", () => {
   it("marks the input delivered", async () => {
-    const row = await answerFirstSend((inputs, id) =>
+    const { changed, row } = await answerFirstSend((inputs, id) =>
       inputs.markDelivered(id, SECOND_SEND, "steered", at),
     );
 
+    expect(changed).toBe(true);
     expect(row).toMatchObject({ status: "delivered", sentAt: null, delivery: "steered" });
   });
 
   it("puts the input back to waiting, with the reason", async () => {
-    const row = await answerFirstSend((inputs, id) =>
+    const { changed, row } = await answerFirstSend((inputs, id) =>
       inputs.requeue(id, SECOND_SEND, "the harness refused it"),
     );
 
+    expect(changed).toBe(true);
     expect(row).toMatchObject({
       status: "queued",
       sentAt: null,
@@ -157,10 +163,11 @@ describe("an answer to the send that holds the row", () => {
   });
 
   it("cancels the input, with the reason", async () => {
-    const row = await answerFirstSend((inputs, id) =>
+    const { changed, row } = await answerFirstSend((inputs, id) =>
       inputs.cancelWithReason(id, SECOND_SEND, "the session exited"),
     );
 
+    expect(changed).toBe(true);
     expect(row).toMatchObject({ status: "cancelled", sentAt: null, reason: "the session exited" });
   });
 });

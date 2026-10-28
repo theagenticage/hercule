@@ -40,6 +40,7 @@ import type {
   SessionRespondToQuestion,
 } from "@hercule/protocol";
 import {
+  AdapterFailed,
   HarnessNotInstalled,
   HarnessProtocolError,
   InputNotDelivered,
@@ -1786,7 +1787,9 @@ describe("input.steer", () => {
   it("puts an input the runner rejected back to queued, with sentAt cleared and the runner's message as the reason", async () => {
     await withFleet(async (arranged) => {
       const { session, inputId } = await makeBusyWithQueuedInput(arranged);
-      arranged.wire.answering(() => ({ message: "no such model here" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "no such model here" }),
+      }));
 
       const response = await steerInput(arranged, session.id, inputId);
 
@@ -1832,7 +1835,9 @@ describe("session.input with steer", () => {
   it("answers queued with the input's id when the runner refuses the steer, and keeps the input waiting", async () => {
     await withFleet(async (arranged) => {
       const session = await startBusySession(arranged, "hello");
-      arranged.wire.answering(() => ({ message: "the harness is not ready" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "the harness is not ready" }),
+      }));
 
       const response = await sendInput(arranged, session.id, { text: "steer me", steer: true });
 
@@ -1855,7 +1860,7 @@ describe("session.input with steer", () => {
       await waitForFrames(arranged.wire, "sessionInput", 1);
       reportExited(arranged.wire, session.id, 3);
       await waitForSession(arranged, session.id, (one) => one.status === "exited");
-      arranged.wire.release({ message: "the harness exited" });
+      arranged.wire.release({ error: new AdapterFailed({ message: "the harness exited" }) });
       const response = await pending;
 
       expect(response.status, await response.clone().text()).toBe(409);
@@ -2850,7 +2855,9 @@ describe("session.stop", () => {
       // A runner that receives the stop before it spawned the harness spawns
       // none: it refuses the start's input and reports the exit itself.
       arranged.wire.release({
-        message: "the session was stopped before its input was handed over",
+        error: new AdapterFailed({
+          message: "the session was stopped before its input was handed over",
+        }),
       });
       reportExited(arranged.wire, session.id, 1);
 
@@ -3516,7 +3523,9 @@ describe("a start that carries the session's first input", () => {
   it("puts a refused start input back to waiting with the runner's reason, and sends it once the session is idle", async () => {
     await withFleet(
       async (arranged) => {
-        arranged.wire.answering(() => ({ message: "the harness is not ready" }));
+        arranged.wire.answering(() => ({
+          error: new AdapterFailed({ message: "the harness is not ready" }),
+        }));
         const session = await spawnSessionOrFail(arranged, { prompt: "one" });
         const start = (await waitForStartFrames(arranged, session.id, 1))[0]!;
         const refused = await waitUntil("recorded the refusal", async () => {
@@ -3617,7 +3626,9 @@ describe("a start that carries the session's first input", () => {
 
   it("cancels a starting session's start input once the runner refused it", async () => {
     await withFleet(async (arranged) => {
-      arranged.wire.answering(() => ({ message: "the harness is not ready" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "the harness is not ready" }),
+      }));
       const session = await spawnSessionOrFail(arranged, { prompt: "one" });
       const start = (await waitForStartFrames(arranged, session.id, 1))[0]!;
       await waitUntil("recorded the refusal", async () => {
@@ -3700,7 +3711,7 @@ const reportFailedStart = async (
   order: "refusal first" | "exit first",
 ): Promise<void> => {
   if (order === "refusal first") {
-    arranged.wire.release({ message: "the harness crashed" });
+    arranged.wire.release({ error: new AdapterFailed({ message: "the harness crashed" }) });
     await waitUntil("recorded the refusal", async () => {
       const [row] = await listInputs(arranged, sessionId);
       return row?.reason === "the harness crashed" ? true : undefined;
@@ -3718,7 +3729,7 @@ const reportFailedStart = async (
   await waitForSession(arranged, sessionId, (one) => one.exitedAt !== null);
   if (order === "exit first") {
     // The withheld start is answered now, after the exit was applied.
-    arranged.wire.release({ message: "the harness crashed" });
+    arranged.wire.release({ error: new AdapterFailed({ message: "the harness crashed" }) });
   }
 };
 
@@ -4832,7 +4843,9 @@ describe("session.input into an exited session", () => {
       const session = await startAndEndSession(arranged, "hello");
       // A runner whose start fails refuses the input the start carries, and
       // then reports the exit.
-      arranged.wire.answering(() => ({ message: "the harness would not start" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "the harness would not start" }),
+      }));
       const first = await sendInput(arranged, session.id, { text: "are you there" });
       expect(first.status, await first.clone().text()).toBe(200);
       const { inputId } = (await first.json()) as { inputId: string };
