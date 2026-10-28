@@ -19,7 +19,7 @@
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import { PromotionState } from "../../promotion";
 import { RunnerConnections } from "../../runners";
 import { absorbFailures } from "../absorbing";

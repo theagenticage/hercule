@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { uuidFromString, uuidToString } from "./id";
 import { withTransaction } from "./client";
 import { TestDatabase } from "./testing";

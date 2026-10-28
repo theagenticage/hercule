@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 import { SignalYourWork } from "@hercule/contract";
 import { inTransaction } from "../db/testing";
 import { completeSetup, get, withServer } from "../http/testing";

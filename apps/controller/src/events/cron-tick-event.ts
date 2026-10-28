@@ -4,8 +4,8 @@
  * time, and its payload names that trigger.
  */
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import type { CronTickEventPayload } from "@hercule/contract";
 import { appendEvent } from "./append";
 import { CRON_TICK_EVENT_KIND } from "./kinds";

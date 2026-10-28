@@ -39,7 +39,7 @@
  * under the old key moves to the new one, so it keeps applying.
  */
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 const ORPHAN = "+24 hours";
 const IDLE = "+30 days";

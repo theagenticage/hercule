@@ -15,8 +15,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as Statement from "effect/unstable/sql/Statement";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import { MAX_TRACKING_HANDOFFS, type Grant, type TrackingRun } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { inTransaction, TestDatabase } from "../db/testing";

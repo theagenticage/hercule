@@ -14,7 +14,7 @@
  *   `PluginError`, which the host retries with backoff.
  */
 import { Clock, Effect, Schema } from "effect";
-import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClient from "effect/http/HttpClient";
 import { AuthError, MAX_EMITTED_FIELD_BYTES, PluginError } from "@hercule/plugin-host";
 import {
   computeRateLimitWaitSeconds,

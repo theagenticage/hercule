@@ -64,7 +64,9 @@ describe("deriveCatalogJsonSchema", () => {
 
   it("returns the root unchanged when the root has no identifier", () => {
     expect(deriveCatalogJsonSchema(Schema.Struct({ count: Schema.Int }))).toEqual(
-      Schema.toJsonSchemaDocument(Schema.Struct({ count: Schema.Int })).schema,
+      Schema.toJsonSchemaDocument(Schema.Struct({ count: Schema.Int }), {
+        onExcessProperty: "error",
+      }).schema,
     );
   });
 });

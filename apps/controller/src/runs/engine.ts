@@ -113,8 +113,8 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import { isSqlError, type SqlError } from "effect/sql/SqlError";
 import {
   createDecodeValidationError,
   createInvalidStateError,

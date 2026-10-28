@@ -12,7 +12,7 @@
  * (`TriggerHealth`), which also decides when the user hears about it.
  */
 import * as Effect from "effect/Effect";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import { admitsEvent, TriggerEffects, TriggerHealth } from "../../../workflows";
 import type { Route, RoutingTable } from "../event-router";
 

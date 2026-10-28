@@ -4,7 +4,7 @@
  * handling: the runner's join, socket and attachment fetch, and the promotion
  * transfer, preview and switch.
  */
-import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 
 /** Returns the request's bearer token, or `undefined` when it has none. */
 export const readBearerToken = (

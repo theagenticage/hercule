@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { SortDirection } from "@hercule/contract";
 import { TASK_SORT_COLUMNS } from "../../tasks/repository";
 import { uuidFromString } from "../id";

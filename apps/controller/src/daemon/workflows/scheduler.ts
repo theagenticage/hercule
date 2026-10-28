@@ -11,7 +11,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import { CronTriggerScheduler, FIRING_TOLERANCE } from "../../workflows";
 import { PromotionState } from "../../promotion";
 import { absorbFailures } from "../absorbing";

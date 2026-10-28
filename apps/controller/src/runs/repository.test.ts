@@ -21,8 +21,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Exit, Option } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as Statement from "effect/unstable/sql/Statement";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import { inTransaction, TestDatabase } from "../db/testing";
 import type { RunFilter, RunSummary, WorkflowDefinition } from "@hercule/contract";
 import { mintUuid, uuidFromString, uuidToString } from "../db";

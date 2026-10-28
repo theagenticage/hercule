@@ -22,8 +22,8 @@ import {
   WorkspacePath,
   StartingRevision,
 } from "@hercule/protocol";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { closedStruct } from "../closed";
 import {
   Conflict,
@@ -66,7 +66,7 @@ export const MAX_BRANCH_LENGTH = 255;
  *   not a valid ref component.
  */
 export const Branch = Schema.String.check(
-  Schema.isLengthBetween(1, MAX_BRANCH_LENGTH),
+  Schema.isBetweenLength(1, MAX_BRANCH_LENGTH),
   // The control characters are intended: git rejects them in a ref name, and
   // the name is validated here rather than by a git command that fails halfway.
   Schema.isPattern(

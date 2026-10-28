@@ -601,9 +601,8 @@ describe("what a connection leaves behind", () => {
         const joined = await enlist(harness);
         const wire = await dialRunnerSocket(harness.base, joined.credential);
 
-        // Both at once, without waiting for an answer to the first. The
-        // transport gives each frame its own fiber, so a controller that
-        // handled the two in parallel would sign twice, write the row twice and
+        // Both at once, without waiting for an answer to the first. A
+        // controller that handled the two in parallel would sign twice, write the row twice and
         // answer twice, for a frame anyone holding the credential can send as
         // often as they like.
         wire.send(buildHello());
@@ -3046,6 +3045,22 @@ const sendAndAwaitHeld = async (
   );
 };
 
+/**
+ * Waits until no work waits at the promotion gate, which is when the
+ * controller has stopped handling a frame that was held there. Fails after
+ * four seconds, with an error naming `what`, when some work still waits.
+ */
+const awaitHeldWorkToEnd = async (harness: ServerHarness, what: string): Promise<void> => {
+  await Effect.runPromise(
+    awaitHeldWork(harness.promotion, 0).pipe(
+      Effect.timeoutOrElse({
+        duration: Duration.seconds(4),
+        orElse: () => Effect.die(new Error(`the frozen controller kept ${what}`)),
+      }),
+    ),
+  );
+};
+
 describe("a runner connection during a promotion", () => {
   it("holds a hello that arrives while frozen, and answers it with the new address once sealed", async () => {
     await withServer(async (harness) => {
@@ -3151,6 +3166,44 @@ describe("a runner connection during a promotion", () => {
       // replaced connection and writes nothing.
       expect((await readRunner(harness.base, token, joined.runnerId)).connectivity).toBe("online");
       expect((await readStateTransitions(harness)).at(-1)).toBe("online");
+      second.close();
+    }, QUIET_LOOP_TIMINGS);
+  });
+
+  it("drops a held hello when its runner hangs up, so the thaw does not bring a gone runner online", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+      const promotionToken = await freezeController(harness.base, token);
+
+      const wire = await dialRunnerSocket(harness.base, joined.credential);
+      await sendAndAwaitHeld(harness, "the hello", () => wire.send(buildHello()));
+      wire.close();
+      await awaitHeldWorkToEnd(harness, "the hello of a runner that hung up");
+
+      await thaw(harness.base, promotionToken);
+      expect(await readConnectivityFromDatabase(harness, joined.runnerId)).not.toBe("online");
+      expect(await readStateTransitions(harness)).toEqual([]);
+    }, QUIET_LOOP_TIMINGS);
+  });
+
+  it("keeps the newer connection of a runner whose older connection hung up with a held hello", async () => {
+    await withServer(async (harness) => {
+      const token = await completeSetupWithNoProviderInstance(harness);
+      const joined = await enlist(harness);
+      const promotionToken = await freezeController(harness.base, token);
+
+      const first = await dialRunnerSocket(harness.base, joined.credential);
+      await sendAndAwaitHeld(harness, "the first hello", () => first.send(buildHello()));
+      first.close();
+      await awaitHeldWorkToEnd(harness, "the hello of a runner that hung up");
+      const second = await dialRunnerSocket(harness.base, joined.credential);
+      await sendAndAwaitHeld(harness, "the second hello", () => second.send(buildHello()));
+
+      await thaw(harness.base, promotionToken);
+      await waitForFrame<ControllerHello>(second, "controllerHello");
+      expect((await readRunner(harness.base, token, joined.runnerId)).connectivity).toBe("online");
+      expect(await readStateTransitions(harness)).toEqual(["online"]);
       second.close();
     }, QUIET_LOOP_TIMINGS);
   });

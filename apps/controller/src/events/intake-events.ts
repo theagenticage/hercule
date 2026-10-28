@@ -18,9 +18,9 @@
  * and gets a plugin's level of the settings through the `PluginIntake` port.
  */
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Fragment } from "effect/unstable/sql/Statement";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
+import type { Fragment } from "effect/sql/Statement";
 import type { IntakeOverrides } from "@hercule/contract";
 import { applyIntakeOverrides, type PluginIntake } from "../intake-settings";
 import { buildHasSignalBehind } from "./event-facts";

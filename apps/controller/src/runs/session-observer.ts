@@ -17,7 +17,7 @@
  * after ending the sessions, with a message that names the runner's fate.
  */
 import * as Effect from "effect/Effect";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import { SessionObserver, type StoredSession } from "../sessions";
 
 /** What the runs domain's observer needs from the run service. */

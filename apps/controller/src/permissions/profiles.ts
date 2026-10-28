@@ -16,8 +16,8 @@
  * user may edit them, but never delete them.
  */
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { ProfileGrants, type Grant } from "@hercule/contract";
 import {
   decodeCursor,

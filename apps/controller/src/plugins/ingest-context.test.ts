@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Cause, Effect, Exit } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   MAX_EMITTED_FIELD_BYTES,
   type EmittedEvent,

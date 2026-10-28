@@ -5,8 +5,8 @@
  * provider added in a later release still gets its default instance.
  */
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { SYSTEM_ACTOR } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";

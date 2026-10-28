@@ -6,7 +6,7 @@
  * the route table in `operations.ts` can be looked up from a request without a
  * second naming scheme.
  */
-import * as HttpApi from "effect/unstable/httpapi/HttpApi";
+import * as HttpApi from "effect/http-api/HttpApi";
 import { API_PREFIX } from "./operations";
 import { agent } from "./groups/agent";
 import { apiKey } from "./groups/api-key";

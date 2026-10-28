@@ -19,7 +19,7 @@
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import type * as Schema from "effect/Schema";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import type { StepError, WorkspacePolicy } from "@hercule/contract";
 import { isBuiltInControllerActionId, runsInWorkspace } from "../plugins";
 import { isGitActionId } from "../workflows";

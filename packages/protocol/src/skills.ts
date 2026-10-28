@@ -120,7 +120,7 @@ export const RepositorySkill = Schema.Struct({
   checkoutName: CheckoutName,
   /** The skill's folder name. */
   name: SkillName,
-  description: Schema.String.check(Schema.isLengthBetween(1, MAX_SKILL_DESCRIPTION_LENGTH)),
+  description: Schema.String.check(Schema.isBetweenLength(1, MAX_SKILL_DESCRIPTION_LENGTH)),
   /**
    * The skill's folder relative to the workspace root, such as
    * `web/.agents/skills/release`, or `.agents/skills/release` for a checkout

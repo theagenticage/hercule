@@ -14,9 +14,9 @@
  * including the signals domain's Ignore Rule tables.
  */
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Fragment } from "effect/unstable/sql/Statement";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
+import type { Fragment } from "effect/sql/Statement";
 import {
   CORE_SIGNAL_KINDS,
   type EventFacts,

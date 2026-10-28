@@ -5,9 +5,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientError from "effect/unstable/http/HttpClientError";
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import type * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { ActionError, type ActionContext } from "@hercule/plugin-host";
 import {
   buildFakeIssue,

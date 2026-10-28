@@ -39,8 +39,8 @@ import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import type { RunnerConnectivity, RunnerFacts, RunnerWatermark } from "@hercule/contract";
 import {
   GOING_AWAY_CLOSE_CODE,

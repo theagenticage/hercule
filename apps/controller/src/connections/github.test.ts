@@ -20,7 +20,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import { TestClock } from "effect/testing";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as SqlClient from "effect/sql/SqlClient";
 import { GITHUB_CONNECTION_TYPE } from "@hercule/contract";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase, inTransaction } from "../db/testing";

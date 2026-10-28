@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber } from "effect";
 import type { LiveMessage, Skill, SkillDetail } from "@hercule/contract";
 import { computeSkillRevisionHash, type SkillFile } from "@hercule/protocol";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   collectPushes,
   completeSetup,

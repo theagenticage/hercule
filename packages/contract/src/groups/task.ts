@@ -12,8 +12,8 @@
  */
 import { TaskPriority } from "@hercule/plugin-host";
 import { Schema } from "effect";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
 import { Actor, ExternalRef, Id, Timestamp } from "../ids";
 import { DEFAULT_PAGE_LIMIT, page, pageParams } from "../pagination";

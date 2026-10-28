@@ -12,8 +12,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Context, Effect, Fiber, Layer, Option } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Run, StepRecord, Validation } from "@hercule/contract";
 import { CurrentActor } from "../actor";
 import { AfterCommit, mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";

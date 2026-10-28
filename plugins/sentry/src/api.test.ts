@@ -5,9 +5,9 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber, type Layer, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientError from "effect/unstable/http/HttpClientError";
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import type * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { AuthError, PluginError } from "@hercule/plugin-host";
 import {
   callSentry,

@@ -7,7 +7,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import type * as HttpClientRequest from "effect/http/HttpClientRequest";
 import {
   buildIngestHarness,
   readStubRequestTarget,

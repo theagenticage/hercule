@@ -19,9 +19,9 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import { FileSystem } from "effect/FileSystem";
 import type { PlatformError } from "effect/PlatformError";
-import * as Migrator from "effect/unstable/sql/Migrator";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as Migrator from "effect/sql/Migrator";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import * as SqliteMigrator from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { migrations } from "./migrations/index";
 

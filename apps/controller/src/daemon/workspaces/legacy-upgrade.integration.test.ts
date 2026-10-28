@@ -12,7 +12,7 @@ import {
 import { join, relative } from "node:path";
 import { Database } from "bun:sqlite";
 import { Effect, Layer } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { afterAll, describe, expect, it } from "vitest";
 import { ALL_GRANTS, type Session, type Workspace } from "@hercule/contract";
 import type { SessionStart, WorkspaceProvision } from "@hercule/protocol";

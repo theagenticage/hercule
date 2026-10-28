@@ -19,8 +19,8 @@
  * caller.
  */
 import { Schema, Struct } from "effect";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
@@ -182,7 +182,7 @@ export const EVENT_COUNT_HOURS = 24;
 export const ConnectionEventCounts = Schema.Struct({
   connectionId: Id,
   hourly: Schema.Array(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))).check(
-    Schema.isLengthBetween(EVENT_COUNT_HOURS, EVENT_COUNT_HOURS),
+    Schema.isBetweenLength(EVENT_COUNT_HOURS, EVENT_COUNT_HOURS),
   ),
 });
 

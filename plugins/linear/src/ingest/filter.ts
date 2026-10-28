@@ -5,7 +5,7 @@
  * otherwise silently match nothing, and every issue would look as if it left.
  */
 import { Effect, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import { PluginError } from "@hercule/plugin-host";
 import { callLinear, type LinearFailure } from "../api";
 import {

@@ -21,9 +21,9 @@
  */
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
-import * as HttpServerError from "effect/unstable/http/HttpServerError";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
-import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError";
+import * as HttpServerError from "effect/http/HttpServerError";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import { HttpApiSchemaError } from "effect/http-api/HttpApiError";
 import {
   ERROR_STATUS,
   createInternalError,

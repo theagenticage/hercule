@@ -12,8 +12,8 @@
  * the actor the same way.
  */
 import { Context, Effect, Layer } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Actor, InvalidateKind, MutableLiveTopic } from "@hercule/contract";
 import { announce, nowIso } from "../db";
 import { appendPlatformSourceEvent } from "./platform-source-event";

@@ -21,7 +21,7 @@
  * from the database only until it is complete.
  */
 import * as Effect from "effect/Effect";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
+import * as HttpRouter from "effect/http/HttpRouter";
 import {
   ALL_OPERATIONS,
   OPERATIONS,

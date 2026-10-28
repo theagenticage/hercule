@@ -21,7 +21,7 @@
  * always in the stored list, and its departure is seen.
  */
 import { Clock, Effect, Option } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import {
   checkEmittedEvent,
   PluginError,

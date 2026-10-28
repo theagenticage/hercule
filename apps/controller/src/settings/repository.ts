@@ -14,8 +14,8 @@
  * an error rather than a value the caller misreads.
  */
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { Id, SETTING_VALUES } from "@hercule/contract";
 import { nowIso, uuidFromString } from "../db";
 

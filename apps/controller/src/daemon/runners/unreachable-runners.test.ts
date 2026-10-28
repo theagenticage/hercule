@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { hashToken } from "../../credentials";
 import { withTransaction } from "../../db";
 import { TestDatabase } from "../../db/testing";

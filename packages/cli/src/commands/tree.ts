@@ -33,7 +33,7 @@ import {
   type Requirement,
 } from "@hercule/contract";
 import * as Schema from "effect/Schema";
-import * as HttpApi from "effect/unstable/httpapi/HttpApi";
+import * as HttpApi from "effect/http-api/HttpApi";
 
 /**
  * How a flag's or positional's text is converted into a value. A

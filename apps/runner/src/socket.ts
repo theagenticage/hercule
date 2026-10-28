@@ -27,7 +27,7 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as Socket from "effect/socket/Socket";
 import { VERSION } from "@hercule/home/version";
 import {
   AGENT_STEPS_CAPABILITY,
@@ -347,7 +347,7 @@ export const connect = (
           }),
       ),
     );
-    const writeToSocket = yield* socket.writer;
+    const writer = yield* socket.writer;
     // Opened once the socket has stopped reading, which is when it closed.
     const socketClosed = Latch.makeUnsafe(false);
     // One instance per connection, so `parkOnClosedWrite` can tell it apart
@@ -362,7 +362,7 @@ export const connect = (
      */
     const write = (chunk: string | Socket.CloseEvent): Effect.Effect<void, Socket.SocketError> =>
       Effect.raceFirst(
-        writeToSocket(chunk),
+        writer.write(chunk),
         Effect.flatMap(socketClosed.await, () => Effect.fail(socketClosedError)),
       );
     /**
@@ -1017,6 +1017,28 @@ export const connect = (
       ),
     );
 
+    // Opens the connection, sends the hello as soon as it is open, then hands
+    // every frame to `receive` until the connection ends. Every ending fails
+    // with a `SocketError`, a clean close included.
+    const receiveFrames = Effect.gen(function* () {
+      const pull = yield* Socket.readerString(socket);
+      yield* write(
+        encodeFrameText({
+          _tag: "runnerHello",
+          protocolVersion: PROTOCOL_VERSION,
+          capabilities: CAPABILITIES,
+          binaryVersion: VERSION,
+          nonce,
+          facts: options.facts,
+        }),
+      ).pipe(Effect.ignore, Effect.andThen(Effect.sync(() => opened.openUnsafe())));
+      yield* Effect.forever(
+        Effect.map(pull, (batch) => {
+          for (const raw of batch) receive(raw);
+        }),
+      );
+    });
+
     /**
      * Waits for the proof, then attaches the session supervisor and starts the periodic
      * reports. The deadline applies only until the proof arrives. A deadline
@@ -1079,20 +1101,7 @@ export const connect = (
     // another protocol version, and that ends the connection too.
     yield* Effect.raceFirst(
       Effect.raceFirst(
-        socket
-          .runString(receive, {
-            onOpen: write(
-              encodeFrameText({
-                _tag: "runnerHello",
-                protocolVersion: PROTOCOL_VERSION,
-                capabilities: CAPABILITIES,
-                binaryVersion: VERSION,
-                nonce,
-                facts: options.facts,
-              }),
-            ).pipe(Effect.ignore, Effect.andThen(Effect.sync(() => opened.openUnsafe()))),
-          })
-          .pipe(Effect.ensuring(Effect.sync(() => socketClosed.openUnsafe()))),
+        receiveFrames.pipe(Effect.ensuring(Effect.sync(() => socketClosed.openUnsafe()))),
         parkOnClosedWrite(handleFrames),
       ),
       parkOnClosedWrite(reporting),

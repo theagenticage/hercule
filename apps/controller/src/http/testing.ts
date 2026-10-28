@@ -20,12 +20,12 @@ import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import * as HttpServer from "effect/unstable/http/HttpServer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as RpcClient from "effect/unstable/rpc/RpcClient";
-import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
-import type * as RpcGroup from "effect/unstable/rpc/RpcGroup";
-import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
+import * as HttpServer from "effect/http/HttpServer";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as RpcClient from "effect/rpc/RpcClient";
+import type { RpcClientError } from "effect/rpc/RpcClientError";
+import type * as RpcGroup from "effect/rpc/RpcGroup";
+import * as RpcSerialization from "effect/rpc/RpcSerialization";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import * as BunSocket from "@effect/platform-bun/BunSocket";
 import {
@@ -256,7 +256,7 @@ unreachableGithub.failReads("a test controller reads no GitHub");
 /** Returns an address `fetch` can use; the server binds an ephemeral port on loopback. */
 export const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
   const address = server.address;
-  if (address._tag !== "TcpAddress") throw new Error("expected a TCP address");
+  if (address._tag === "UnixPathAddress") throw new Error("expected a TCP address");
   return `http://127.0.0.1:${address.port}`;
 });
 
@@ -737,7 +737,8 @@ export const completeSetup = async (base: string): Promise<string> => {
     body: { username: USERNAME, password: PASSWORD, timezone: "Europe/Amsterdam" },
     token: SETUP_TOKEN,
   });
-  if (response.status !== 200) throw new Error(`setup.complete answered ${response.status}`);
+  if (response.status !== 200)
+    throw new Error(`setup.complete answered ${response.status}: ${await response.text()}`);
   return ((await response.json()) as { token: string }).token;
 };
 
@@ -752,23 +753,32 @@ export type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof live>, RpcClie
 /** Returns the socket URL: `/ws` on the same host and port as the API. */
 export const buildSocketUrl = (base: string): string => `${base.replace(/^http:/, "ws:")}/ws`;
 
-export const buildLiveConnection = (base: string) =>
-  RpcClient.layerProtocolSocket().pipe(
+/**
+ * Builds the client side of a live connection. `pingTimeout` is how long the
+ * client waits for a pong before it drops the connection as silent. It defaults
+ * to the RPC client's own five seconds.
+ */
+export const buildLiveConnection = (base: string, pingTimeout?: Duration.Input) =>
+  RpcClient.layerProtocolSocket({ pingTimeout }).pipe(
     Layer.provide(BunSocket.layerWebSocket(buildSocketUrl(base))),
     Layer.provide(RpcSerialization.layerJson),
   );
 
-/** Opens one connection while `body` runs, with the JSON serialization a browser uses. */
+/**
+ * Opens one connection while `body` runs, with the JSON serialization a browser
+ * uses. `pingTimeout` is passed on to {@link buildLiveConnection}.
+ */
 export const onSocket = (
   base: string,
   body: (client: LiveClient) => Effect.Effect<void, unknown, Scope.Scope>,
+  pingTimeout?: Duration.Input,
 ): Promise<void> =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
         const client = yield* RpcClient.make(live);
         yield* body(client);
-      }).pipe(Effect.provide(buildLiveConnection(base))),
+      }).pipe(Effect.provide(buildLiveConnection(base, pingTimeout))),
     ).pipe(Effect.orDie),
   );
 

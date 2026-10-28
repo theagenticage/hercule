@@ -4,8 +4,8 @@
  */
 import type * as Effect from "effect/Effect";
 import type { PlatformError } from "effect/PlatformError";
-import type { HttpPlatform } from "effect/unstable/http/HttpPlatform";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import type { HttpPlatform } from "effect/http/HttpPlatform";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import type { AttachmentFile } from "../attachments";
 
 /**

@@ -10,8 +10,8 @@
  * applied; every other hash gets `404`.
  */
 import * as Effect from "effect/Effect";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as HttpRouter from "effect/http/HttpRouter";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { RUNNER_SKILL_REVISIONS_PATH } from "@hercule/protocol";
 import { SkillService } from "../skills";
 import { respondToRunner } from "./respond-to-runner";

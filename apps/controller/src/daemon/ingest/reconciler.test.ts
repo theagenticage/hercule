@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 import { TestClock } from "effect/testing";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { ConnectionStatus } from "@hercule/contract";
 import { AuthError } from "@hercule/plugin-host";
 import { connectionRepository, type StoredConnection } from "../../connections";

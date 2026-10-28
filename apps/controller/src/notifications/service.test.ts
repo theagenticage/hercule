@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { Deferred, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   createNotFoundError,
   type AnswerOperation,

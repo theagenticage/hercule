@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Clock, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   MAX_TASK_LABELS,
   MAX_TASK_TITLE_LENGTH,

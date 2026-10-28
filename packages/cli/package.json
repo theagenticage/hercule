@@ -10,6 +10,6 @@
     "@hercule/client-core": "workspace:*",
     "@hercule/contract": "workspace:*",
     "@hercule/home": "workspace:*",
-    "effect": "4.0.0-rc.112"
+    "effect": "4.0.7"
   }
 }

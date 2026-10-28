@@ -11,7 +11,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
 import type { Agent as AgentRecord, Assistant, Session } from "@hercule/contract";

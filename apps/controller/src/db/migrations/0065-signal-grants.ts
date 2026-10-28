@@ -15,7 +15,7 @@
  * custom one its name, the custom one would be widened without them knowing.
  */
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { nowIso } from "../time";
 
 export default Effect.gen(function* () {

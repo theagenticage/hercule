@@ -6,8 +6,8 @@
  */
 import { expect } from "vitest";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Actor, Event } from "@hercule/contract";
 import { get } from "../http/testing";
 import type { AuditKind } from "./audit-log";

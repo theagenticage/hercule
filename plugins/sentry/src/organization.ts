@@ -5,7 +5,7 @@
  * working.
  */
 import { Effect, type Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import { PluginError } from "@hercule/plugin-host";
 import { callSentry, decodeSentryBody, readPages, SENTRY_API_URL, type SentryFailure } from "./api";
 import { ApiMember, ApiOrganization, buildMemberLabel } from "./sentry-objects";

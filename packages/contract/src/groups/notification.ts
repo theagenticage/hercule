@@ -19,8 +19,8 @@
 import { DescribeLinePart, PluginId } from "@hercule/plugin-host";
 import { Fact } from "@hercule/protocol";
 import { Schema } from "effect";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import {
   CapExceeded,
   Conflict,

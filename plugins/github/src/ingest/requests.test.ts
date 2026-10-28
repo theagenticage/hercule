@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Result } from "effect";
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import type * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { TEST_TOKEN } from "../actions/testing";
 import { readStubRequestTarget, runAgainstStub, stubGithub, type StubResponse } from "../testing";
 import { MAX_EMITTED_FIELD_BYTES } from "@hercule/plugin-host";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { skillRepository } from "./repository";

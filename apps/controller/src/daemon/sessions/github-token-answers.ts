@@ -8,7 +8,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import type { GithubTokenAnswer, GithubTokenRequest } from "@hercule/protocol";
 import { githubTokens } from "../../connections";
 import { hashToken } from "../../credentials";

@@ -13,10 +13,10 @@
  * the user `ada`.
  */
 import { Effect, Layer, Option, type Result, Schema } from "effect";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import type * as HttpClientError from "effect/unstable/http/HttpClientError";
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import * as HttpClient from "effect/http/HttpClient";
+import type * as HttpClientError from "effect/http/HttpClientError";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import {
   checkEmittedEvent,
   PluginError,
@@ -129,8 +129,8 @@ export const readRequestBody = (request: HttpClientRequest.HttpClientRequest): u
 
 /** Reads a request as the fake records it. The parameters may be in the URL or passed beside it. */
 export const readFakeRequest = (request: HttpClientRequest.HttpClientRequest): FakeRequest => {
-  const url = new URL(request.url);
-  for (const [name, value] of request.urlParams) url.searchParams.append(name, value);
+  // Appends the request's parameters, unwrapping any Redacted value, to the URL's own query.
+  const url = Option.getOrThrow(HttpClientRequest.toUrl(request));
   return {
     method: request.method,
     origin: url.origin,

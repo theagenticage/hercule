@@ -14,7 +14,7 @@
  * workspaces continue to use runner-local storage.
  */
 import * as Effect from "effect/Effect";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import type { WorkspaceProvision, StartingRevision } from "@hercule/protocol";
 import type { Actor, CheckoutForm, WorkspaceKind } from "@hercule/contract";
 import type { AuditLog } from "../events";

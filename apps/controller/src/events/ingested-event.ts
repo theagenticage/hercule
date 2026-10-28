@@ -6,8 +6,8 @@
  * actor of this system made (spec 08 §2).
  */
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { uuidFromString } from "../db";
 import { appendEvent } from "./append";
 

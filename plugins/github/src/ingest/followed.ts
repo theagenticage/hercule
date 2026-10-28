@@ -60,7 +60,7 @@
  * logs a warning naming how many it left for the next poll.
  */
 import { Effect, Option, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import { PluginError, type IngestContext, type KeyValueStore } from "@hercule/plugin-host";
 import { isUserAccount, type GithubIdentity } from "../identity";
 import {

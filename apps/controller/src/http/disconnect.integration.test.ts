@@ -28,7 +28,7 @@
 import { connect } from "node:net";
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as SqlClient from "effect/sql/SqlClient";
 import { withTransaction } from "../db";
 import { completeSetup, get, PASSWORD, post, USERNAME, withServer } from "./testing";
 

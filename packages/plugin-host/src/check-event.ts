@@ -21,7 +21,7 @@ import { PluginError } from "./plugin";
 
 /** Builds the schema of a string of at least `minimum` and at most `maximum` characters. */
 const buildBoundedString = (minimum: number, maximum: number) =>
-  Schema.String.check(Schema.isLengthBetween(minimum, maximum));
+  Schema.String.check(Schema.isBetweenLength(minimum, maximum));
 
 const ExternalRef = Schema.String.check(
   Schema.isMaxLength(MAX_EXTERNAL_REF_LENGTH),

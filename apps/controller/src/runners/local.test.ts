@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Option } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { bootWith, type BootOutcome, type ControllerServices } from "../bootstrap";
 import { operationLayers, serve } from "../http";

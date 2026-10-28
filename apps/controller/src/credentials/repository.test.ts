@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { Page } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { Users, UsersLayer } from "../users";

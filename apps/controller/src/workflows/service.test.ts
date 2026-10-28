@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
 import { EventKindsLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";

@@ -15,9 +15,9 @@
  */
 import { Schema } from "effect";
 import { ConnectionStatus, MAX_CONTRIBUTION_NAME_LENGTH } from "@hercule/plugin-host";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
+import * as HttpApiSchema from "effect/http-api/HttpApiSchema";
 import {
   Forbidden,
   Internal,

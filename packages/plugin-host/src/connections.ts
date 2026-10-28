@@ -8,7 +8,7 @@
  * the status and the screen.
  */
 import { Effect, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import type { PluginError } from "./plugin";
 import { ContributionWord } from "./contributions";
 import { SchemaValue } from "./manifest";

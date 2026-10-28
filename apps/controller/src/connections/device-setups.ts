@@ -11,8 +11,8 @@
  * writes, so the caller runs it in a transaction of its own.
  */
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import {
   buildSetupTargetRow,
   parseSetupTargetRow,

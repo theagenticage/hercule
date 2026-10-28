@@ -21,8 +21,8 @@
  * controller's business, and a `Context.Reference` keeps it out of every
  * handler's requirements.
  */
-import * as HttpApiMiddleware from "effect/unstable/httpapi/HttpApiMiddleware";
-import * as HttpApiSecurity from "effect/unstable/httpapi/HttpApiSecurity";
+import * as HttpApiMiddleware from "effect/http-api/HttpApiMiddleware";
+import * as HttpApiSecurity from "effect/http-api/HttpApiSecurity";
 import { ControllerSealed, Forbidden, PromotionInProgress, Unauthenticated } from "./errors";
 
 /** Any credential: a login bearer token, an API key or a session token. */

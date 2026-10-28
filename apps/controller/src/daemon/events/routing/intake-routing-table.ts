@@ -30,8 +30,8 @@
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Event, SignalResolution } from "@hercule/contract";
 import { SYSTEM_ACTOR } from "../../../actor";
 import { connectionRepository } from "../../../connections";

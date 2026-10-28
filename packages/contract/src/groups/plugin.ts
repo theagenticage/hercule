@@ -7,8 +7,8 @@
  */
 import { Schema } from "effect";
 import { PluginCapability, PluginId, PluginMark } from "@hercule/plugin-host";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { closedStruct } from "../closed";
 import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
 import { Authenticated } from "../security";

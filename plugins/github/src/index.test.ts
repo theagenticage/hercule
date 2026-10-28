@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Result, Schema, SchemaAST } from "effect";
-import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as HttpClientError from "effect/http/HttpClientError";
 import type {
   ConnectionTypeContribution,
   EventSourceContribution,

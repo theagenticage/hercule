@@ -15,7 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { mintUuid, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { inputRepository, type StoredInput } from "./inputs";

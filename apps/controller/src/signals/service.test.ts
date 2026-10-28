@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 import {
   decodeAnswerOperation,
   DONE_ACTION_ID,

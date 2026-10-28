@@ -8,7 +8,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import { listSecretFields, type ProviderDefinition } from "@hercule/plugin-host";
 import type { SecretDecryptError } from "./cipher";
 import { buildProviderInstanceOwner, Secrets } from "./repository";

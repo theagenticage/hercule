@@ -24,7 +24,7 @@ const controllerRoot = resolve(import.meta.dirname, "../..");
 // tests read just the token from that URL.
 const controllerCode = `
   import { Effect } from "effect";
-  import * as HttpServer from "effect/unstable/http/HttpServer";
+  import * as HttpServer from "effect/http/HttpServer";
   import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
   import { claudeCode } from "@hercule/plugin-claude-code";
   import { bootWith } from ${JSON.stringify(join(controllerRoot, "bootstrap.ts"))};
@@ -35,7 +35,7 @@ const controllerCode = `
   }, () => Effect.gen(function* () {
     yield* serve(undefined);
     const { address } = yield* HttpServer.HttpServer;
-    if (address._tag !== "TcpAddress") throw new Error("expected a TCP address");
+    if (address._tag === "UnixPathAddress") throw new Error("expected a TCP address");
     console.log("proof controller listening on port " + address.port);
     yield* Effect.never;
   }).pipe(Effect.provide(operationLayers),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { Grant } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { withTransaction } from "../db";

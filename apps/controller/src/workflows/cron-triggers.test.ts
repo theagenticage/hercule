@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Cron, Effect, Layer } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { TriggerKey, TriggerPausedBy } from "@hercule/contract";
 import { uuidFromString, withTransaction } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";

@@ -8,8 +8,8 @@
  * what the run then does, is the run service's decision.
  */
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Notifier } from "../../../notifications";
 import { RunService } from "../../../runs";
 import { subscriptionRepository } from "../../../subscriptions";

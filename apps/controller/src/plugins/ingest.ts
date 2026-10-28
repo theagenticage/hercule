@@ -37,7 +37,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Semaphore from "effect/Semaphore";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { MAX_FEED_INTERVAL_SECONDS, summarizeCause } from "@hercule/contract";
 import {
   AuthError,

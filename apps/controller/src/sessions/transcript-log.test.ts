@@ -9,8 +9,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import type { ProviderEvent } from "@hercule/protocol";
 import { mintUuid, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";

@@ -22,6 +22,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
+import type { ServeError } from "effect/http/HttpServerError";
 import type * as Scope from "effect/Scope";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
 import { bracketIpv6 } from "@hercule/home";
@@ -34,13 +35,14 @@ export { boot, bootWith, hashToken, buildSetupUrl } from "./bootstrap";
 export type { BootError, BootOptions, BootOutcome, ControllerServices } from "./bootstrap";
 
 /**
- * Returns one clear line describing a boot failure, for stderr. No stack, no
- * Effect internals.
+ * Returns one clear line describing a failure to start, for stderr. No stack, no
+ * Effect internals. A `ServeError` is the listener failing to start, for
+ * example because the bind host does not resolve.
  *
  * Exported so the wording can be tested on its own: it is the only thing a
  * failing `hercule serve` ever prints.
  */
-export function explain(error: BootError): string {
+export function explain(error: BootError | ServeError): string {
   switch (error._tag) {
     case "InvalidOptionError":
       return `${error.option}: ${error.message}`;
@@ -52,6 +54,8 @@ export function explain(error: BootError): string {
       return error.cause instanceof Error
         ? `${error.message}: ${error.cause.message}`
         : error.message;
+    case "ServeError":
+      return `Cannot start the listener: ${error.cause instanceof Error ? error.cause.message : String(error.cause)}`;
     default:
       return error.message;
   }

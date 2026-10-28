@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
-import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as HttpClientError from "effect/http/HttpClientError";
 import { AuthError, PluginError } from "@hercule/plugin-host";
 import {
   buildIngestHarness,

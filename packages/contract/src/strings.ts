@@ -12,7 +12,7 @@ import { Schema } from "effect";
 
 /** A string of at least `minimum` and at most `maximum` characters. */
 export const bounded = (minimum: number, maximum: number) =>
-  Schema.String.check(Schema.isLengthBetween(minimum, maximum));
+  Schema.String.check(Schema.isBetweenLength(minimum, maximum));
 
 /**
  * Counts the characters of a text as a person counts them: one per Unicode

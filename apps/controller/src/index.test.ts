@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import { MigrationError } from "effect/unstable/sql/Migrator";
+import { ServeError } from "effect/http/HttpServerError";
+import { MigrationError } from "effect/sql/Migrator";
 import { HerculeHomeError } from "./config";
 import { explain, STILL_STOPPING, untilStopped } from "./index";
 
@@ -35,6 +36,11 @@ describe("explain", () => {
       cause: new Error(reason),
     });
     expect(explain(failure)).toBe(`Migration "40_connection-account-id" failed: ${reason}`);
+  });
+
+  it("gives the reason the listener could not start", () => {
+    const failure = new ServeError({ cause: new Error("getaddrinfo ENOTFOUND no-such-host") });
+    expect(explain(failure)).toBe("Cannot start the listener: getaddrinfo ENOTFOUND no-such-host");
   });
 });
 

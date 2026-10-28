@@ -7,7 +7,7 @@
  * once an hour.
  */
 import { Clock, Effect, Option, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import { PluginError, type KeyValueStore } from "@hercule/plugin-host";
 import { ListedTeam } from "./feed-objects";
 import { decodeGithubValue, fetchListing, type FeedError } from "./requests";

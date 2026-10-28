@@ -18,8 +18,8 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import type * as Schema from "effect/Schema";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Event, WorkflowDefinition } from "@hercule/contract";
 import { afterCommit, nowIso } from "../db";
 import {

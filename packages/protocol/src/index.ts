@@ -154,7 +154,7 @@ export const Capabilities = Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT
  * verify.
  */
 const Base64 = Schema.String.check(
-  Schema.isLengthBetween(4, 1024),
+  Schema.isBetweenLength(4, 1024),
   Schema.isPattern(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/, {
     title: "base64",
     description: "standard base64",
@@ -483,7 +483,7 @@ export type InstallResult = Schema.Schema.Type<typeof InstallResult>;
  */
 export const MAX_AUTHORIZE_URL_LENGTH = 2048;
 
-const AuthorizeUrl = Schema.String.check(Schema.isLengthBetween(1, MAX_AUTHORIZE_URL_LENGTH));
+const AuthorizeUrl = Schema.String.check(Schema.isBetweenLength(1, MAX_AUTHORIZE_URL_LENGTH));
 
 /**
  * Asks the runner to start the vendor's own login for one instance. The
@@ -503,7 +503,7 @@ export const LoginCode = Schema.Struct({
   _tag: Schema.Literal("loginCode"),
   requestId: RequestId,
   instanceId: InstanceId,
-  code: Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH)),
+  code: Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH)),
 });
 
 export type LoginCode = Schema.Schema.Type<typeof LoginCode>;

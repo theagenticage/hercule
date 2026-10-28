@@ -20,7 +20,7 @@
  * up to a second longer.
  */
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 /** The item kinds that counted as tool calls when this migration was written. */
 export const MIGRATED_TOOL_CALL_KINDS = [

@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
 import { TestClock } from "effect/testing";
-import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as HttpClientError from "effect/http/HttpClientError";
 import type { ActionError } from "@hercule/plugin-host";
 import {
   runAgainstStub,

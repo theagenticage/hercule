@@ -19,9 +19,9 @@
  * cannot learn about, or write into, other runners' sessions.
  */
 import * as Effect from "effect/Effect";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as HttpRouter from "effect/http/HttpRouter";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { createNotFoundError } from "@hercule/contract";
 import { RUNNER_ATTACHMENTS_PATH } from "@hercule/protocol";
 import { AttachmentService } from "../attachments";

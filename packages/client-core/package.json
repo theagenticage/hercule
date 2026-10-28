@@ -29,7 +29,7 @@
     "@hercule/contract": "workspace:*",
     "@tanstack/query-core": "5.102.8",
     "decode-named-character-reference": "1.3.0",
-    "effect": "4.0.0-rc.112",
+    "effect": "4.0.7",
     "marked": "18.0.14",
     "yaml": "2.9.1"
   }

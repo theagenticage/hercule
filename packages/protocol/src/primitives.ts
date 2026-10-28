@@ -18,7 +18,7 @@ export const MAX_FACT_LENGTH = 512;
 export const MAX_FACT_ITEMS = 64;
 
 /** A name, a version or a path a peer reports about itself, and never a document. */
-export const Fact = Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH));
+export const Fact = Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH));
 
 /** An instant on the wire: ISO-8601 UTC with milliseconds. */
 export const Timestamp = Schema.String.check(
@@ -37,7 +37,7 @@ export type Timestamp = Schema.Schema.Type<typeof Timestamp>;
  * for the path to escape it.
  */
 export const InstanceId = Schema.String.check(
-  Schema.isLengthBetween(1, 64),
+  Schema.isBetweenLength(1, 64),
   Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: "instance id", description: "an identifier" }),
 );
 
@@ -48,7 +48,7 @@ export const InstanceId = Schema.String.check(
  * would be a path traversal followed by an `rm -rf`.
  */
 export const SessionId = Schema.String.check(
-  Schema.isLengthBetween(1, 64),
+  Schema.isBetweenLength(1, 64),
   Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: "session id", description: "an identifier" }),
 );
 
@@ -60,7 +60,7 @@ export const SessionId = Schema.String.check(
  * that root would be a path traversal followed by an `rm -rf`.
  */
 export const StorageId = Schema.String.check(
-  Schema.isLengthBetween(1, 64),
+  Schema.isBetweenLength(1, 64),
   Schema.isPattern(/^[A-Za-z0-9_-]+$/, { title: "storage id", description: "an identifier" }),
 );
 
@@ -71,7 +71,7 @@ export const StorageId = Schema.String.check(
  * called `.github`, so a leading dot alone is no reason to reject a name.
  */
 export const Subdirectory = Schema.String.check(
-  Schema.isLengthBetween(1, 64),
+  Schema.isBetweenLength(1, 64),
   Schema.isPattern(/^(?!\.$|\.\.$|\.git$)[A-Za-z0-9._-]+$/i, {
     title: "subdirectory",
     description: "one path segment",
@@ -97,7 +97,7 @@ export type Sequenced = Schema.Schema.Type<typeof Sequenced>;
  * contain one.
  */
 const SecretName = Schema.String.check(
-  Schema.isLengthBetween(1, 256),
+  Schema.isBetweenLength(1, 256),
   Schema.isPattern(/^[^|]+$/, { title: "secret name", description: "no `|`" }),
 );
 

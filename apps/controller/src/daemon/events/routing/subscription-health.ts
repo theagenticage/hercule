@@ -4,8 +4,8 @@
  * and the signal table both route to subscriptions, so they share it.
  */
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { nowIso } from "../../../db";
 import { Notifier } from "../../../notifications";
 import { subscriptionRepository } from "../../../subscriptions";

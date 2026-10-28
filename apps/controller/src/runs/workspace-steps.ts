@@ -19,7 +19,7 @@ import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Run, WorkflowDefinition } from "@hercule/contract";
 import type { WorkspaceStepKey } from "@hercule/protocol";
 

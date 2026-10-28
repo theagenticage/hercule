@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import * as HttpApi from "effect/unstable/httpapi/HttpApi";
-import * as OpenApi from "effect/unstable/httpapi/OpenApi";
+import * as HttpApi from "effect/http-api/HttpApi";
+import * as OpenApi from "effect/http-api/OpenApi";
 import { api } from "./api";
 import { ALL_GRANTS } from "./grants";
 import { ALL_OPERATIONS, isOperationId, OPERATIONS, type OperationId } from "./operations";

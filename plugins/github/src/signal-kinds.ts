@@ -13,8 +13,8 @@
  * core checks.
  */
 import { Effect, Schema } from "effect";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import {
   MAX_BLOCK_MESSAGES,
   MAX_BLOCK_NAME_LENGTH,

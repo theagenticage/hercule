@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Struct from "effect/Struct";
 import type { EventWithFacts, Notification, Run, SpawnBound } from "@hercule/contract";
 import { uuidFromString, withTransaction } from "../../../db";

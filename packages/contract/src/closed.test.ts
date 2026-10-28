@@ -62,7 +62,7 @@ describe("settings.update's payload", () => {
 
 describe("a closed record", () => {
   const Example = closedRecord(
-    Schema.String.check(Schema.isLengthBetween(1, 3, { message: "Write 1 to 3 characters." })),
+    Schema.String.check(Schema.isBetweenLength(1, 3, { message: "Write 1 to 3 characters." })),
     Schema.Number,
   );
 

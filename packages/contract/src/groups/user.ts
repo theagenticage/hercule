@@ -7,8 +7,8 @@
  * bearer token alone cannot take the account over.
  */
 import { Schema } from "effect";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Authenticated } from "../security";
 import { NewPassword, PresentedPassword, Username } from "../strings";

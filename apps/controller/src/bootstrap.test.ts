@@ -13,7 +13,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { HOST_API, PluginError, type Plugin } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "./actor";
 import { boot, bootWith, hashToken, buildSetupUrl, type BootOutcome } from "./bootstrap";

@@ -30,7 +30,7 @@ import type { RepositorySkill, RepositorySkillsInspection } from "@hercule/proto
 import { REPOSITORY_SKILLS_CAPABILITY } from "@hercule/protocol";
 import type { Runner, SessionSkillList } from "@hercule/contract";
 import { Effect } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { get, post, send } from "../../http/testing";
 import { withTransaction } from "../../db";
 import {

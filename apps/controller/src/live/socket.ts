@@ -33,10 +33,10 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
-import * as RpcServer from "effect/unstable/rpc/RpcServer";
-import type * as Rpc from "effect/unstable/rpc/Rpc";
+import * as HttpRouter from "effect/http/HttpRouter";
+import * as RpcSerialization from "effect/rpc/RpcSerialization";
+import * as RpcServer from "effect/rpc/RpcServer";
+import type * as Rpc from "effect/rpc/Rpc";
 import {
   createDecodeValidationError,
   createInternalError,

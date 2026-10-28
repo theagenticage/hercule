@@ -6,8 +6,8 @@
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { DESKTOP_APP_ORIGIN } from "@hercule/contract";
 import { withCors } from "./cors";
 

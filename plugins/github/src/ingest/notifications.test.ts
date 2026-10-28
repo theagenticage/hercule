@@ -8,7 +8,7 @@ import {
   type IngestHarness,
   type StubResponse,
 } from "../testing";
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import type * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { pollNotifications } from "./notifications";
 
 const LAST_MODIFIED = "Thu, 01 Oct 2026 10:00:00 GMT";

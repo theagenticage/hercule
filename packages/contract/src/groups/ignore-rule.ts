@@ -14,8 +14,8 @@
  * the operations.
  */
 import { Schema } from "effect";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { Conflict, Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
 import { closedRecord } from "../closed";
 import { Actor, Id, Timestamp } from "../ids";
@@ -38,7 +38,7 @@ import {
  */
 const IgnoreRuleMatch = closedRecord(
   Schema.String.check(
-    Schema.isLengthBetween(1, MAX_SIGNAL_MATCH_FIELD_NAME_LENGTH, {
+    Schema.isBetweenLength(1, MAX_SIGNAL_MATCH_FIELD_NAME_LENGTH, {
       message: `A match field's name has 1 to ${MAX_SIGNAL_MATCH_FIELD_NAME_LENGTH} characters, as a kind declares its match fields.`,
     }),
   ),

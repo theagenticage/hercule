@@ -29,8 +29,8 @@
  * `run.cancelled` into the event pipeline, with one of the payloads below.
  */
 import { Schema, Struct } from "effect";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { closedStruct } from "../closed";
 import {
   CapExceeded,

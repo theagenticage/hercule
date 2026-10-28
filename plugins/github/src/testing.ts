@@ -9,10 +9,10 @@
  * - the GitHub account the test Connection belongs to.
  */
 import { Effect, Layer, Option, type Result, Schema } from "effect";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import type * as HttpClientError from "effect/unstable/http/HttpClientError";
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import * as HttpClient from "effect/http/HttpClient";
+import type * as HttpClientError from "effect/http/HttpClientError";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import {
   checkEmittedEvent,
   type PluginError,
@@ -137,8 +137,8 @@ export interface StubRequestTarget {
 export const readStubRequestTarget = (
   request: HttpClientRequest.HttpClientRequest,
 ): StubRequestTarget => {
-  const url = new URL(request.url);
-  for (const [name, value] of request.urlParams) url.searchParams.set(name, value);
+  // Appends the request's parameters, unwrapping any Redacted value, to the URL's own query.
+  const url = Option.getOrThrow(HttpClientRequest.toUrl(request));
   return { path: url.pathname, query: Object.fromEntries(url.searchParams) };
 };
 

@@ -21,12 +21,12 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as HttpRouter from "effect/http/HttpRouter";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
-import * as Semaphore from "effect/Semaphore";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as Socket from "effect/socket/Socket";
 import { createInternalError, createUnauthenticatedError } from "@hercule/contract";
 import {
   AGENT_STEPS_CAPABILITY,
@@ -173,7 +173,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
     const identity = yield* ControllerIdentity;
     const promotion = yield* PromotionState;
     const pings = yield* RunnerPingSchedule;
-    const write = yield* socket.writer;
+    const { write } = yield* socket.writer;
 
     const mine: Connection = mintConnection();
     let greeted = false;
@@ -350,10 +350,28 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
         return message satisfies never;
       });
 
-    // The transport forks a fiber per frame, so without this lock two frames
-    // arriving together would update the same variables at once.
-    const frames = yield* Semaphore.make(1);
-    const receiveFrame = (raw: string) => frames.withPermits(1)(handleFrame(raw));
+    // Frames are handled one at a time, in arrival order, so two frames
+    // arriving together never update the same variables at once.
+    //
+    // Reading and handling are separate fibers. The socket reports a close
+    // only to the next read, so a loop that reads again after each handler
+    // would not notice a close while a handler is still waiting (for example
+    // a hello held by a promotion's freeze), and the handler would go on to
+    // greet a runner that is gone. Here the read failing on the close
+    // interrupts the handler in progress.
+    //
+    // The queue is unbounded on purpose: only an authenticated runner can
+    // send frames, and Bun's server socket cannot pause a sender, so a bound
+    // here would only move the backlog into the socket's own read buffer.
+    const receiveFrames = Effect.gen(function* () {
+      const pull = yield* Socket.readerString(socket);
+      const frames = yield* Queue.unbounded<string>();
+      const readFrames = Effect.forever(
+        Effect.flatMap(pull, (batch) => Queue.offerAll(frames, batch)),
+      );
+      const handleFramesInOrder = Effect.forever(Effect.flatMap(Queue.take(frames), handleFrame));
+      return yield* Effect.raceFirst(readFrames, handleFramesInOrder);
+    });
 
     /**
      * Sends a ping every interval, and closes the connection when the runner
@@ -386,7 +404,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
 
     yield* Effect.ensuring(
       Effect.race(
-        Effect.tapCause(socket.runString(receiveFrame), (cause) =>
+        Effect.tapCause(receiveFrames, (cause) =>
           Effect.logError("A runner's connection ended in an error", cause),
         ).pipe(Effect.ignore),
         Effect.race(ask, closeWhenAsked),

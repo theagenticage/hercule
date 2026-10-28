@@ -9,8 +9,8 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { PluginError, type ConnectionStatus, type KeyValueStore } from "@hercule/plugin-host";
 import { uuidFromString, withTransaction } from "../db";
 

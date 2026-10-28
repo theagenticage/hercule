@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { deviceSetupRepository } from "../../connections/device-setups";
 import { oauthSetupRepository } from "../../connections/oauth-setups";
 import { TestDatabaseWriter } from "../testing";

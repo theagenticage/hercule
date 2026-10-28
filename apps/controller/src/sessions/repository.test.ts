@@ -16,8 +16,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as Statement from "effect/unstable/sql/Statement";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import { LIVE_SESSION_STATUSES, type SessionKind } from "@hercule/contract";
 import type { ProviderEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";

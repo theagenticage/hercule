@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Cause, Schema } from "effect";
-import * as HttpServerError from "effect/unstable/http/HttpServerError";
-import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
-import { HttpApiSchemaError } from "effect/unstable/httpapi/HttpApiError";
+import * as HttpServerError from "effect/http/HttpServerError";
+import type * as HttpServerResponse from "effect/http/HttpServerResponse";
+import { HttpApiSchemaError } from "effect/http-api/HttpApiError";
 import { createForbiddenError, createNotFoundError } from "@hercule/contract";
 import { findApiError, buildErrorResponse } from "./envelope";
 

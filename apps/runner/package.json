@@ -13,7 +13,7 @@
     "@hercule/process-log": "workspace:*",
     "@hercule/protocol": "workspace:*",
     "@hercule/service": "workspace:*",
-    "effect": "4.0.0-rc.112"
+    "effect": "4.0.7"
   },
   "devDependencies": {
     "@hercule/contract": "workspace:*"

@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { Clock, Deferred, Duration, Effect, Fiber, Option, Redacted } from "effect";
 import { TestClock } from "effect/testing";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { AuthError, PluginError, type FeedDeclaration } from "@hercule/plugin-host";
 import { MAX_FEED_INTERVAL_SECONDS } from "@hercule/contract";
 import { connectionRepository, type StoredConnection } from "../connections";

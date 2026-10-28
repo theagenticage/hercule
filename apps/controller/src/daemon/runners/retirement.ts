@@ -9,7 +9,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { RunnerDetail } from "@hercule/contract";
 import { withTransaction } from "../../db";
 import { RunnerConnections, RunnerService, type MoveError, type RetireInput } from "../../runners";

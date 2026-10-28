@@ -5,7 +5,7 @@ import { join } from "node:path";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import type { FileSystem } from "effect/FileSystem";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem";
 import { openDatabaseWriter, withTransaction } from "./client";
 import {

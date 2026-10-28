@@ -27,8 +27,8 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Ref from "effect/Ref";
 import * as Semaphore from "effect/Semaphore";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   ConnectionUnavailable,
   type ConnectionStatus,

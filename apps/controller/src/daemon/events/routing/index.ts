@@ -19,7 +19,7 @@
  *   plugin's `build`, and a slow `build` must not hold back the tick.
  */
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as SqlClient from "effect/sql/SqlClient";
 import type { AuditLog } from "../../../events";
 import type { PluginIntake } from "../../../intake-settings";
 import type { Notifier } from "../../../notifications";

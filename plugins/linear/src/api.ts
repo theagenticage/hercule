@@ -5,8 +5,8 @@
  * fake Linear can tell the queries apart by name.
  */
 import { Clock, Duration, Effect, Option, Schema } from "effect";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { AuthError, PluginError } from "@hercule/plugin-host";
 import { cutText } from "./text";
 
