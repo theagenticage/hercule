@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Fiber, Option, Stream } from "effect";
+import { Duration, Effect, Fiber, Logger, Option, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import type {
   Options,
@@ -638,6 +638,26 @@ describe("a Claude Code session", () => {
     // report of this runner's sessions is sent only once, at hello.
     expect(run.seen[0]?.providerRefs).toEqual({ nativeSessionId: binding.nativeSessionId });
     expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([binding]);
+  });
+
+  it("writes one line to the log of the process that started the session for a message nobody decided how to show, and never the message", async () => {
+    const run = createDriving();
+    const warnings: Array<string> = [];
+    const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (logLevel === "Warn") warnings.push(String(message));
+    });
+    await Effect.runPromise(
+      Effect.provide(run.adapter.startSession(SESSION, SPEC, WORKING), Logger.layer([collecting])),
+    );
+
+    const unknown = { type: "system", subtype: "foo_bar", secret: "do-not-log-this" };
+    run.say(unknown);
+    run.say(unknown);
+    await waitUntil("showed both messages", () => filterItems(run.seen, "unknown").length === 4);
+
+    expect(warnings).toEqual([
+      "Claude sent a message that no mapping decides how to show: claude: system/foo_bar",
+    ]);
   });
 
   it("runs a workspace-less session in its scratch cwd, with the instance's home and no setting source", async () => {

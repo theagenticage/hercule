@@ -56,6 +56,7 @@ import {
   openTurn,
   classifyTool,
   isAnyAgentWorking,
+  endCompactionOnExit,
   type Normalizing,
 } from "./claude-code-normalize";
 import {
@@ -202,6 +203,26 @@ const describeError = (error: unknown): string => {
   const said = truncateFact(error instanceof Error ? error.message : String(error));
   return said === "" ? "the harness failed with an empty error message" : said;
 };
+
+/**
+ * Returns the function that writes a session's `reportUnknownMessage` lines to
+ * the runner's log. It captures the services of the fiber that runs this
+ * effect, loggers included, because the harness's messages are read outside
+ * any fiber, and a line written there would miss `runner.log`. The line names
+ * the message type and never holds the message itself.
+ */
+const captureUnknownMessageReporter = (
+  sessionId: string,
+): Effect.Effect<Normalizing["reportUnknownMessage"]> =>
+  Effect.map(Effect.context<never>(), (services) => (label, error) => {
+    const text =
+      error === undefined
+        ? `Claude sent a message that no mapping decides how to show: ${label}`
+        : `Claude sent a message this runner could not read: ${label}. Error: ${describeError(error)}`;
+    void Effect.runForkWith(services)(
+      Effect.logWarning(text).pipe(Effect.annotateLogs({ sessionId })),
+    );
+  });
 
 /**
  * Builds the effort option from a list of effort levels. The levels come from
@@ -1418,6 +1439,8 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       // for ever, and it leaves an approval card on a session that is gone,
       // which nobody can answer.
       withdrawAllParks(held.parks);
+      // A compaction still running has no later message to complete it.
+      for (const event of endCompactionOnExit(held.state)) emit(event);
       // Compare by identity: a session started again under the same id has a
       // new entry, and that entry belongs to a different pump.
       if (live.get(sessionId) === held) live.delete(sessionId);
@@ -1484,70 +1507,73 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           instanceId: spec.instanceId,
         };
         const input = createPushable<SDKUserMessage>();
-        return Effect.map(
-          Effect.flatMap(buildSessionSettings(ctx, spec.workspaceId !== null), (settings) =>
-            Effect.suspend(() => {
-              // Checked after the settings file is written, which waits: the
-              // check and `live.set` below must follow each other with no
-              // wait between them. Two harnesses under one Hercule session id
-              // would mix up their events and their exits, so the second
-              // start fails.
-              if (live.has(sessionId)) {
-                return Effect.fail(`session ${sessionId} is already running here`);
-              }
-              return Effect.try({
-                try: () =>
-                  seam.stream({
-                    options: buildSessionOptions(
-                      ctx,
-                      spec,
-                      binary,
-                      native.options,
-                      buildCanUseTool(sessionId, spec.accessMode),
-                      buildRefuseMessageToOtherSession(sessionId),
-                      settings,
-                    ),
-                    input,
-                  }),
-                catch: describeError,
-              });
-            }),
-          ),
-          (stream) => {
-            const held: Live = {
-              binding,
-              input,
-              stream,
-              state: buildNormalizingState(
+        return Effect.flatMap(captureUnknownMessageReporter(sessionId), (reportUnknownMessage) =>
+          Effect.map(
+            Effect.flatMap(buildSessionSettings(ctx, spec.workspaceId !== null), (settings) =>
+              Effect.suspend(() => {
+                // Checked after the settings file is written, which waits: the
+                // check and `live.set` below must follow each other with no
+                // wait between them. Two harnesses under one Hercule session id
+                // would mix up their events and their exits, so the second
+                // start fails.
+                if (live.has(sessionId)) {
+                  return Effect.fail(`session ${sessionId} is already running here`);
+                }
+                return Effect.try({
+                  try: () =>
+                    seam.stream({
+                      options: buildSessionOptions(
+                        ctx,
+                        spec,
+                        binary,
+                        native.options,
+                        buildCanUseTool(sessionId, spec.accessMode),
+                        buildRefuseMessageToOtherSession(sessionId),
+                        settings,
+                      ),
+                      input,
+                    }),
+                  catch: describeError,
+                });
+              }),
+            ),
+            (stream) => {
+              const held: Live = {
+                binding,
+                input,
+                stream,
+                state: buildNormalizingState(
+                  sessionId,
+                  () => crypto.randomUUID(),
+                  now,
+                  spec.outputSchema,
+                  reportUnknownMessage,
+                  spec.continue?.subagents,
+                ),
+                attachmentUploader: ctx.attachmentUploader,
+                editMarks: ctx.editMarks,
+                shellItems: new Map(),
+                uploads: new AbortController(),
+                parks: new Map(),
+                stopping: undefined,
+                inputGeneration: 0,
+                model: spec.modelSelection.model,
+              };
+              live.set(sessionId, held);
+              void pumpEvents(sessionId, held);
+              // The event carries the native id because the controller has no
+              // other way to learn it: `sessionsReport` is sent only once, at
+              // hello, so it never includes a session started after that.
+              emit({
+                _tag: "session.started",
+                eventId: held.state.mint(),
                 sessionId,
-                () => crypto.randomUUID(),
-                now,
-                spec.outputSchema,
-                spec.continue?.subagents,
-              ),
-              attachmentUploader: ctx.attachmentUploader,
-              editMarks: ctx.editMarks,
-              shellItems: new Map(),
-              uploads: new AbortController(),
-              parks: new Map(),
-              stopping: undefined,
-              inputGeneration: 0,
-              model: spec.modelSelection.model,
-            };
-            live.set(sessionId, held);
-            void pumpEvents(sessionId, held);
-            // The event carries the native id because the controller has no
-            // other way to learn it: `sessionsReport` is sent only once, at
-            // hello, so it never includes a session started after that.
-            emit({
-              _tag: "session.started",
-              eventId: held.state.mint(),
-              sessionId,
-              at: held.state.now(),
-              providerRefs: { nativeSessionId: binding.nativeSessionId },
-            });
-            return binding;
-          },
+                at: held.state.now(),
+                providerRefs: { nativeSessionId: binding.nativeSessionId },
+              });
+              return binding;
+            },
+          ),
         );
       }),
 

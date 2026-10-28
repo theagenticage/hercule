@@ -8,8 +8,11 @@ import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
+  ContextCompactionDetail,
   MAX_FRAME_BYTES,
+  MAX_MESSAGE_LENGTH,
   ProviderEvent,
+  UnknownItemDetail,
   type ContinuedSubagent,
   type OutputSchema,
 } from "@hercule/protocol";
@@ -17,7 +20,10 @@ import {
   CLAUDE_SDK_MESSAGE,
   normalize,
   buildNormalizingState,
+  endCompactionOnExit,
   isAnyAgentWorking,
+  openTurn,
+  type Normalizing,
 } from "./claude-code-normalize";
 import { measureFrameBytes } from "../frame-size";
 import { deferUntilTurnOpens, type RequestOpened } from "./claude-code-subagents";
@@ -37,9 +43,14 @@ const TOOL = "toolu_016JZjZUP3FNEkwxFk3eJZao";
 
 /**
  * Builds a state with readable ids, numbered in the order they are created: the
- * tenth is `id-10`.
+ * tenth is `id-10`. `reportUnknownMessage` is what the runner's log would
+ * get; most tests do not look at it.
  */
-const buildTestState = (outputSchema?: OutputSchema, seeded?: ReadonlyArray<ContinuedSubagent>) => {
+const buildTestState = (
+  outputSchema?: OutputSchema,
+  seeded?: ReadonlyArray<ContinuedSubagent>,
+  reportUnknownMessage: Normalizing["reportUnknownMessage"] = () => {},
+) => {
   let minted = 0;
   return buildNormalizingState(
     SESSION,
@@ -48,8 +59,18 @@ const buildTestState = (outputSchema?: OutputSchema, seeded?: ReadonlyArray<Cont
     // No schema means the session replies in free text, as most turns in this
     // file do. Tests that need structured output pass a schema.
     outputSchema,
+    reportUnknownMessage,
     seeded,
   );
+};
+
+/** Builds a state whose reports to the runner's log are collected in `reports`. */
+const buildReportingState = () => {
+  const reports: Array<{ readonly label: string; readonly error: unknown }> = [];
+  const running = buildTestState(undefined, undefined, (label, error) => {
+    reports.push({ label, error });
+  });
+  return { running, reports };
 };
 
 /** An output schema, like the one a session started for an Agent gets on every turn. */
@@ -298,6 +319,48 @@ const RATE_LIMIT = {
 
 const STATUS = { type: "system", subtype: "status", status: "requesting", session_id: NATIVE };
 
+/** Builds a `system` message of the given subtype. */
+const buildSystem = (subtype: string, fields: Readonly<Record<string, unknown>> = {}) => ({
+  type: "system",
+  subtype,
+  session_id: NATIVE,
+  ...fields,
+});
+
+/**
+ * The seven messages Claude Code 2.1.310 sent for `/compact`, in order, as
+ * measured on the real CLI. The summary is the plain-string synthetic user
+ * message, and the result counts no model turn.
+ */
+const SUMMARY = "This session is being continued from a previous conversation. Summary: ...";
+const COMPACTING = buildSystem("status", { status: "compacting" });
+const COMPACT_BOUNDARY = buildSystem("compact_boundary", {
+  compact_metadata: { trigger: "manual", pre_tokens: 21326, post_tokens: 6086 },
+});
+const COMPACT_SUMMARY = {
+  type: "user",
+  session_id: NATIVE,
+  isSynthetic: true,
+  isReplay: false,
+  parent_tool_use_id: null,
+  message: { role: "user", content: SUMMARY },
+};
+const COMPACT_SEQUENCE = [
+  COMPACTING,
+  buildSystem("status", { status: null, compact_result: "success" }),
+  INIT,
+  COMPACT_BOUNDARY,
+  COMPACT_SUMMARY,
+  {
+    type: "user",
+    session_id: NATIVE,
+    isReplay: true,
+    parent_tool_use_id: null,
+    message: { role: "user", content: "<local-command-stdout>Compacted </local-command-stdout>" },
+  },
+  { ...RESULT, num_turns: 0, local_command: "compact" },
+];
+
 describe("normalizing SDK messages one at a time", () => {
   const cases: ReadonlyArray<{
     readonly name: string;
@@ -448,8 +511,9 @@ describe("normalizing SDK messages one at a time", () => {
       events: ["turn.started", "session.usage.updated", "turn.completed completed"],
     },
     {
-      // Rate limits belong in the capability snapshot, and status updates hold
-      // nothing useful, so both are dropped on purpose (spec 06 section 6.7).
+      // A rate limit that still allows work and a plain status update hold
+      // nothing a reader needs, so both are dropped on purpose (spec 06
+      // section 6.7).
       name: "drops informational messages instead of turning them into items",
       messages: [RATE_LIMIT, STATUS],
       events: [],
@@ -483,23 +547,11 @@ describe("normalizing SDK messages one at a time", () => {
       events: ["runtime.warning"],
     },
     {
-      name: "reports a compaction as a context_compaction item",
-      messages: [
-        {
-          type: "system",
-          subtype: "compact_boundary",
-          compact_metadata: { trigger: "auto", pre_tokens: 150000, post_tokens: 40000 },
-          session_id: NATIVE,
-        },
-      ],
-      // Compaction can happen between turns, so it closes the turn it opened:
-      // no `result` will arrive for that turn.
-      events: [
-        "turn.started",
-        "item.started context_compaction id-3",
-        "item.completed context_compaction id-3 completed",
-        "turn.completed completed",
-      ],
+      // The item completes at the message after the boundary, which may hold
+      // the summary, so the turn it opened stays open until then.
+      name: "starts a context_compaction item at a boundary no status announced",
+      messages: [COMPACT_BOUNDARY],
+      events: ["turn.started", "item.started context_compaction id-3"],
     },
   ];
 
@@ -840,7 +892,7 @@ describe("item details", () => {
   });
 });
 
-describe("runtime warnings and compaction details", () => {
+describe("runtime warnings", () => {
   it("reports the retry attempt and the error that caused it", () => {
     const running = buildTestState();
     const events = normalize(running, {
@@ -857,22 +909,6 @@ describe("runtime warnings and compaction details", () => {
     expect(warned?._tag === "runtime.warning" ? warned.message : undefined).toBe(
       "retrying after overloaded: attempt 1 of 3",
     );
-  });
-
-  it("reports the context size before and after a compaction", () => {
-    const running = buildTestState();
-    const events = normalize(running, {
-      type: "system",
-      subtype: "compact_boundary",
-      compact_metadata: { trigger: "auto", pre_tokens: 150000, post_tokens: 40000 },
-      session_id: NATIVE,
-    } as unknown as SDKMessage);
-    const opened = events.find((event) => event._tag === "item.started");
-    expect(opened?._tag === "item.started" ? opened.detail : undefined).toEqual({
-      trigger: "auto",
-      preTokens: 150000,
-      postTokens: 40000,
-    });
   });
 });
 
@@ -950,6 +986,461 @@ describe("malformed messages", () => {
       expect(kinds).toContain("item.started unknown");
     });
   }
+});
+
+/**
+ * Lists the notices and warnings in `events` as their kind and text, and where
+ * the event sits: in a turn, or between turns.
+ */
+const listNotes = (events: ReadonlyArray<Event>): ReadonlyArray<string> =>
+  events.flatMap((event) =>
+    event._tag === "runtime.notice" || event._tag === "runtime.warning"
+      ? [
+          `${event._tag} ${JSON.stringify(event.message)} ${event.turnId === undefined ? "between turns" : "in a turn"}`,
+        ]
+      : [],
+  );
+
+/** Returns a state whose session has a turn open, as when the user has just sent input. */
+const buildStateInTurn = () => {
+  const running = buildTestState();
+  openTurn(running);
+  return running;
+};
+
+describe("notices and warnings", () => {
+  const cases: ReadonlyArray<{
+    readonly name: string;
+    readonly message: unknown;
+    readonly kind: "runtime.notice" | "runtime.warning";
+    readonly text: string;
+  }> = [
+    {
+      name: "an informational message, whatever its level",
+      message: buildSystem("informational", { content: "Stop hook ran", level: "warning" }),
+      kind: "runtime.notice",
+      text: "Stop hook ran",
+    },
+    {
+      name: "a model refusal that fell back to another model",
+      message: buildSystem("model_refusal_fallback", { content: "Retrying with another model" }),
+      kind: "runtime.notice",
+      text: "Retrying with another model",
+    },
+    {
+      name: "a notification",
+      message: buildSystem("notification", { key: "k", text: "Update available", priority: "low" }),
+      kind: "runtime.notice",
+      text: "Update available",
+    },
+    {
+      name: "one recalled memory",
+      message: buildSystem("memory_recall", { mode: "select", memories: [{ path: "/m/a.md" }] }),
+      kind: "runtime.notice",
+      text: "Recalled 1 memory",
+    },
+    {
+      name: "several recalled memories",
+      message: buildSystem("memory_recall", {
+        mode: "select",
+        memories: [{ path: "/m/a.md" }, { path: "/m/b.md" }, { path: "/m/c.md" }],
+      }),
+      kind: "runtime.notice",
+      text: "Recalled 3 memories",
+    },
+    {
+      name: "a cleared conversation",
+      message: { type: "conversation_reset", new_conversation_id: "c-2", session_id: NATIVE },
+      kind: "runtime.notice",
+      text: "Conversation was cleared",
+    },
+    {
+      name: "a model refusal with no fallback",
+      message: buildSystem("model_refusal_no_fallback", { content: "The model refused" }),
+      kind: "runtime.warning",
+      text: "The model refused",
+    },
+  ];
+
+  for (const one of cases) {
+    it(`shows ${one.name} inside a turn, on that turn`, () => {
+      const running = buildStateInTurn();
+      const events = normalize(running, one.message as SDKMessage);
+      expect(listNotes(events)).toEqual([`${one.kind} ${JSON.stringify(one.text)} in a turn`]);
+      expect(events).toHaveLength(1);
+    });
+
+    it(`shows ${one.name} between turns, without opening a turn`, () => {
+      const running = buildTestState();
+      const events = normalize(running, one.message as SDKMessage);
+      expect(listNotes(events)).toEqual([`${one.kind} ${JSON.stringify(one.text)} between turns`]);
+      expect(events).toHaveLength(1);
+      expect(running.turnId).toBeUndefined();
+    });
+  }
+
+  it("shows no notice for a recall of no memories", () => {
+    expect(
+      normalizeMessages([buildSystem("memory_recall", { mode: "select", memories: [] })]),
+    ).toEqual([]);
+  });
+});
+
+describe("a usage limit", () => {
+  const RESET_AT = Date.UTC(2026, 9, 28, 14, 0) / 1000;
+  const buildRateLimit = (info: Readonly<Record<string, unknown>>) => ({
+    type: "rate_limit_event",
+    session_id: NATIVE,
+    rate_limit_info: info,
+  });
+
+  it("warns when it is rejected, with the time it resets in UTC", () => {
+    const running = buildStateInTurn();
+    const events = normalize(
+      running,
+      buildRateLimit({ status: "rejected", resetsAt: RESET_AT }) as unknown as SDKMessage,
+    );
+    expect(listNotes(events)).toEqual([
+      'runtime.warning "Usage limit reached, resets at 2026-10-28 14:00 UTC" in a turn',
+    ]);
+  });
+
+  it("warns without a reset time when the message gives none", () => {
+    expect(
+      listNotes(
+        normalize(
+          buildTestState(),
+          buildRateLimit({ status: "rejected" }) as unknown as SDKMessage,
+        ),
+      ),
+    ).toEqual(['runtime.warning "Usage limit reached" between turns']);
+  });
+
+  it("warns when the overage that could cover it is rejected too", () => {
+    const events = normalize(
+      buildTestState(),
+      buildRateLimit({
+        status: "rejected",
+        resetsAt: RESET_AT,
+        overageStatus: "rejected",
+        isUsingOverage: false,
+      }) as unknown as SDKMessage,
+    );
+    expect(listNotes(events)).toHaveLength(1);
+  });
+
+  const notBlocked: ReadonlyArray<readonly [string, Readonly<Record<string, unknown>>]> = [
+    ["allowed", { status: "allowed" }],
+    ["close to the limit", { status: "allowed_warning", utilization: 0.9 }],
+    ["rejected but overage is allowed", { status: "rejected", overageStatus: "allowed" }],
+    [
+      "rejected but overage is allowed with a warning",
+      { status: "rejected", overageStatus: "allowed_warning" },
+    ],
+    ["rejected but overage is in use", { status: "rejected", isUsingOverage: true }],
+    [
+      "rejected but overage is in use, by its other name",
+      { status: "rejected", overageInUse: true },
+    ],
+  ];
+
+  for (const [name, info] of notBlocked) {
+    it(`shows nothing when the limit is ${name}`, () => {
+      expect(normalizeMessages([buildRateLimit(info)])).toEqual([]);
+    });
+  }
+});
+
+describe("output of a slash command Claude ran itself", () => {
+  const OUTPUT = buildSystem("local_command_output", { content: "Total cost: $0.01" });
+
+  it("is an assistant message in the open turn", () => {
+    const running = buildStateInTurn();
+    const events = normalize(running, OUTPUT as unknown as SDKMessage);
+    expect(events.map(formatEvent)).toEqual([
+      "item.started assistant_message id-3",
+      'content.delta assistant_text "Total cost: $0.01"',
+      "item.completed assistant_message id-3 completed",
+    ]);
+  });
+
+  it("is an assistant message in a synthetic turn that closes after it, between turns", () => {
+    expect(normalizeMessages([OUTPUT])).toEqual([
+      "turn.started",
+      "item.started assistant_message id-3",
+      'content.delta assistant_text "Total cost: $0.01"',
+      "item.completed assistant_message id-3 completed",
+      "turn.completed completed",
+    ]);
+  });
+});
+
+describe("a message nobody decided how to show", () => {
+  /** Returns the label of each `unknown` item that started in `events`. */
+  const listUnknownLabels = (events: ReadonlyArray<Event>): ReadonlyArray<string | undefined> =>
+    events.flatMap((event) =>
+      event._tag === "item.started" && event.kind === "unknown"
+        ? [Schema.decodeUnknownSync(UnknownItemDetail)(event.detail).label]
+        : [],
+    );
+
+  const HOLOGRAM = { type: "hologram", session_id: NATIVE };
+
+  const cases: ReadonlyArray<readonly [string, unknown, string]> = [
+    ["a type the SDK does not list", HOLOGRAM, "claude: hologram"],
+    ["a system subtype the SDK does not list", buildSystem("foo_bar"), "claude: system/foo_bar"],
+    ["a system message with no subtype", { type: "system", session_id: NATIVE }, "claude: system"],
+    ["a message with no type", { session_id: NATIVE }, "claude: message with no type"],
+    [
+      "a type named like an object method",
+      { type: "constructor", session_id: NATIVE },
+      "claude: constructor",
+    ],
+  ];
+
+  for (const [name, message, label] of cases) {
+    it(`shows ${name} as an item with the label ${label}, and reports it once`, () => {
+      const { running, reports } = buildReportingState();
+      const first = normalize(running, message as SDKMessage);
+      expect(listUnknownLabels(first)).toEqual([label]);
+      expect(reports).toEqual([{ label, error: undefined }]);
+      // The second one still shows. Only the log line is once per label.
+      expect(listUnknownLabels(normalize(running, message as SDKMessage))).toEqual([label]);
+      expect(reports).toHaveLength(1);
+    });
+  }
+
+  it("closes the synthetic turn it opened right after the item", () => {
+    const running = buildTestState();
+    const lines = normalize(running, HOLOGRAM as unknown as SDKMessage).map(formatEvent);
+    expect(lines).toEqual([
+      "turn.started",
+      "item.started unknown id-3",
+      "item.completed unknown id-3 completed",
+      "turn.completed completed",
+    ]);
+    expect(running.turnId).toBeUndefined();
+  });
+
+  it("labels a known message whose fields cannot be read, and reports what failed", () => {
+    const { running, reports } = buildReportingState();
+    const events = normalize(running, {
+      type: "system",
+      subtype: "compact_boundary",
+    } as SDKMessage);
+    expect(listUnknownLabels(events)).toEqual(["claude: system/compact_boundary"]);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]?.label).toBe("claude: system/compact_boundary");
+    expect(reports[0]?.error).toBeInstanceOf(Error);
+  });
+
+  it("keeps working when the report to the log throws", () => {
+    const running = buildTestState(undefined, undefined, () => {
+      throw new Error("the log is full");
+    });
+    const events = normalize(running, HOLOGRAM as unknown as SDKMessage);
+    expect(listUnknownLabels(events)).toEqual(["claude: hologram"]);
+  });
+
+  it("cuts a very long type to fit the label", () => {
+    const events = normalize(buildTestState(), { type: "x".repeat(2000) } as unknown as SDKMessage);
+    const [label] = listUnknownLabels(events);
+    expect(label?.length).toBeLessThanOrEqual(512);
+    expect(label?.startsWith("claude: xxx")).toBe(true);
+  });
+
+  it("does not report a message that was dropped on purpose", () => {
+    const { running, reports } = buildReportingState();
+    normalize(running, buildSystem("permission_denied", { tool_name: "Bash" }) as SDKMessage);
+    normalize(running, { type: "tool_progress", session_id: NATIVE } as SDKMessage);
+    expect(reports).toEqual([]);
+  });
+});
+
+describe("a context compaction", () => {
+  /** Returns the detail of each `item.completed` event of a compaction. */
+  const listCompactionDetails = (events: ReadonlyArray<Event>) =>
+    events.flatMap((event) =>
+      event._tag === "item.completed" && event.kind === "context_compaction"
+        ? [
+            event.detail === undefined
+              ? undefined
+              : Schema.decodeUnknownSync(ContextCompactionDetail)(event.detail),
+          ]
+        : [],
+    );
+
+  const COMPLETED_DETAIL = {
+    trigger: "manual",
+    tokensBefore: 21326,
+    tokensAfter: 6086,
+    summary: SUMMARY,
+  };
+
+  it("runs as one item from the compacting status to the summary, inside a turn the user started", () => {
+    const running = buildStateInTurn();
+    const events = COMPACT_SEQUENCE.flatMap((message) => normalize(running, message as SDKMessage));
+    expect(events.map(formatEvent)).toEqual([
+      "item.started context_compaction id-3",
+      "item.completed context_compaction id-3 completed",
+      // The result ends the user's turn, as for any other message.
+      "session.usage.updated",
+      "turn.completed completed",
+    ]);
+    const started = events.find((event) => event._tag === "item.started");
+    expect(started?._tag === "item.started" ? started.detail : undefined).toEqual({});
+    expect(listCompactionDetails(events)).toEqual([COMPLETED_DETAIL]);
+  });
+
+  it("runs in a synthetic turn that closes with it, and the trailing result adds no turn", () => {
+    const running = buildTestState();
+    const events = COMPACT_SEQUENCE.flatMap((message) => normalize(running, message as SDKMessage));
+    expect(events.map(formatEvent)).toEqual([
+      "turn.started",
+      "item.started context_compaction id-3",
+      "item.completed context_compaction id-3 completed",
+      "turn.completed completed",
+      "session.usage.updated",
+    ]);
+    expect(listCompactionDetails(events)).toEqual([COMPLETED_DETAIL]);
+    expect(isAnyAgentWorking(running)).toBe(false);
+  });
+
+  it("keeps the synthetic turn open while the compaction runs", () => {
+    const running = buildTestState();
+    normalize(running, COMPACTING as SDKMessage);
+    normalize(running, COMPACT_SEQUENCE[1] as SDKMessage);
+    normalize(running, COMPACT_BOUNDARY as SDKMessage);
+    expect(isAnyAgentWorking(running)).toBe(true);
+  });
+
+  it("shows one item when the compacting status arrives twice", () => {
+    const lines = normalizeMessages([COMPACTING, COMPACTING], buildStateInTurn());
+    expect(lines).toEqual(["item.started context_compaction id-3"]);
+  });
+
+  it("fails when the status reports the compaction failed, and closes the turn it opened", () => {
+    const failed = buildSystem("status", {
+      status: null,
+      compact_result: "failed",
+      compact_error: "too large",
+    });
+    expect(normalizeMessages([COMPACTING, failed])).toEqual([
+      "turn.started",
+      "item.started context_compaction id-3",
+      "item.completed context_compaction id-3 failed",
+      "turn.completed completed",
+    ]);
+    // In the user's turn, the turn stays open for its own result.
+    expect(normalizeMessages([COMPACTING, failed], buildStateInTurn())).toEqual([
+      "item.started context_compaction id-3",
+      "item.completed context_compaction id-3 failed",
+    ]);
+  });
+
+  it("starts the item at the boundary when no status announced it, with what the boundary knows", () => {
+    const running = buildStateInTurn();
+    const events = [COMPACT_BOUNDARY, COMPACT_SUMMARY].flatMap((message) =>
+      normalize(running, message as SDKMessage),
+    );
+    const started = events.find((event) => event._tag === "item.started");
+    expect(started?._tag === "item.started" ? started.detail : undefined).toEqual({
+      trigger: "manual",
+      tokensBefore: 21326,
+      tokensAfter: 6086,
+    });
+    expect(listCompactionDetails(events)).toEqual([COMPLETED_DETAIL]);
+  });
+
+  it("completes without a summary at any message that is not the summary", () => {
+    const notSummaries: ReadonlyArray<readonly [string, unknown]> = [
+      ["a notice", buildSystem("informational", { content: "hi", level: "info" })],
+      ["the user's own input", { ...COMPACT_SUMMARY, isSynthetic: false }],
+      ["a tool result", TOOL_RESULT],
+    ];
+    for (const [name, message] of notSummaries) {
+      const running = buildStateInTurn();
+      const events = [COMPACTING, COMPACT_BOUNDARY, message].flatMap((frame) =>
+        normalize(running, frame as SDKMessage),
+      );
+      expect(listCompactionDetails(events), name).toEqual([
+        { trigger: "manual", tokensBefore: 21326, tokensAfter: 6086 },
+      ]);
+    }
+  });
+
+  it("completes before the message that follows it, which keeps the turn it opened", () => {
+    const running = buildTestState();
+    const lines = [COMPACTING, COMPACT_BOUNDARY, ASSISTANT_TOOL_USE].flatMap((message) =>
+      normalize(running, message as SDKMessage).map(formatEvent),
+    );
+    expect(lines.slice(0, 5)).toEqual([
+      "turn.started",
+      "item.started context_compaction id-3",
+      "item.completed context_compaction id-3 completed",
+      "turn.completed completed",
+      "turn.started",
+    ]);
+  });
+
+  it("cuts a summary to the length of a message", () => {
+    const long = {
+      ...COMPACT_SUMMARY,
+      message: { role: "user", content: "s".repeat(MAX_MESSAGE_LENGTH + 100) },
+    };
+    const running = buildStateInTurn();
+    const events = [COMPACTING, COMPACT_BOUNDARY, long].flatMap((message) =>
+      normalize(running, message as SDKMessage),
+    );
+    expect(listCompactionDetails(events)[0]?.summary).toHaveLength(MAX_MESSAGE_LENGTH);
+  });
+
+  it("fails when the turn ends before the boundary arrives", () => {
+    const lines = normalizeMessages([COMPACTING, RESULT], buildStateInTurn());
+    expect(lines).toEqual([
+      "item.started context_compaction id-3",
+      "item.completed context_compaction id-3 failed",
+      "session.usage.updated",
+      "turn.completed completed",
+    ]);
+  });
+
+  it("fails when the session exits before the boundary arrives, and completes when it exits after", () => {
+    const early = buildStateInTurn();
+    normalize(early, COMPACTING as SDKMessage);
+    expect(endCompactionOnExit(early).map(formatEvent)).toEqual([
+      "item.completed context_compaction id-3 failed",
+    ]);
+    expect(endCompactionOnExit(early)).toEqual([]);
+
+    const late = buildStateInTurn();
+    normalize(late, COMPACTING as SDKMessage);
+    normalize(late, COMPACT_BOUNDARY as SDKMessage);
+    expect(listCompactionDetails(endCompactionOnExit(late))).toEqual([
+      { trigger: "manual", tokensBefore: 21326, tokensAfter: 6086 },
+    ]);
+  });
+
+  it("drops a count it cannot read and keeps the rest", () => {
+    const running = buildStateInTurn();
+    const boundary = buildSystem("compact_boundary", {
+      compact_metadata: { trigger: "sometimes", pre_tokens: 100, post_tokens: "many" },
+    });
+    const events = [boundary, COMPACT_SUMMARY].flatMap((message) =>
+      normalize(running, message as SDKMessage),
+    );
+    expect(listCompactionDetails(events)).toEqual([{ tokensBefore: 100, summary: SUMMARY }]);
+  });
+
+  it("encodes every event of the sequence with the protocol schema", () => {
+    const encode = Schema.encodeUnknownSync(ProviderEvent);
+    const running = buildStateInTurn();
+    for (const message of COMPACT_SEQUENCE) {
+      for (const event of normalize(running, message as SDKMessage)) {
+        expect(() => encode(event)).not.toThrow();
+      }
+    }
+  });
 });
 
 /**
@@ -1608,68 +2099,29 @@ describe("a subagent's tool calls and denials", () => {
     });
   });
 
-  const buildPermissionDenied = (agentId: string | undefined) => ({
-    type: "system",
-    subtype: "permission_denied",
-    tool_name: "Write",
-    tool_use_id: SUBAGENT_TOOL,
-    ...(agentId === undefined ? {} : { agent_id: agentId }),
-    decision_reason_type: "mode",
-    message: "Permission to use Write has been denied.",
-    uuid: "uuid-denied",
-    session_id: NATIVE,
-  });
-
-  it("attributes a permission denial to the subagent whose call was denied", () => {
-    expect(
-      normalizeMessages([
-        buildTaskStarted(SUBAGENT, AGENT_CALL),
-        buildSubagentToolUse(AGENT_CALL, "Write"),
-        buildPermissionDenied(SUBAGENT),
-      ]).slice(-2),
-    ).toEqual([
-      `item.started unknown id-8 @${SUBAGENT}`,
-      `item.completed unknown id-8 completed @${SUBAGENT}`,
-    ]);
-  });
-
-  it("attributes a permission denial with no agent id to the session's own agent", () => {
-    expect(normalizeMessages([buildPermissionDenied(undefined)])).toEqual([
-      "turn.started",
-      "item.started unknown id-3",
-      "item.completed unknown id-3 completed",
-      "turn.completed completed",
-    ]);
-  });
-
-  // Attributed to the session's own agent, the denial would open a turn of
-  // that agent, which is not working.
-  it("holds a permission denial from an unknown agent until task_started names it", () => {
+  // The denied tool item already ends failed when its `tool_result` arrives,
+  // so the denial itself is dropped, whichever agent it names.
+  it("drops a permission denial, and it opens no turn for any agent", () => {
+    const buildPermissionDenied = (agentId: string | undefined) => ({
+      type: "system",
+      subtype: "permission_denied",
+      tool_name: "Write",
+      tool_use_id: SUBAGENT_TOOL,
+      ...(agentId === undefined ? {} : { agent_id: agentId }),
+      decision_reason_type: "mode",
+      message: "Permission to use Write has been denied.",
+      uuid: "uuid-denied",
+      session_id: NATIVE,
+    });
     const running = buildTestState();
-    expect(normalize(running, buildPermissionDenied(SUBAGENT) as unknown as SDKMessage)).toEqual(
-      [],
-    );
-    const lines = normalize(
-      running,
-      buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage,
-    ).map(formatEvent);
-    expect(lines.filter((line) => line.startsWith("item.started"))).toEqual([
-      `item.started user_message id-4 @${SUBAGENT}`,
-      `item.started unknown id-7 @${SUBAGENT}`,
-    ]);
-    expect(lines.some((line) => !line.includes("@") && line.startsWith("turn."))).toBe(false);
-  });
-
-  it("keeps a permission denial from an unknown agent held past another subagent's task_started", () => {
-    const running = buildTestState();
-    const denied = buildPermissionDenied("a0unknown0000000");
-    normalize(running, denied as unknown as SDKMessage);
-    expect(
-      normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage).map(
-        formatEvent,
-      ),
-    ).toEqual([`subagent.started ${SUBAGENT} parent=main item=${AGENT_CALL}`]);
-    expect(running.heldFrames).toEqual([denied]);
+    normalize(running, buildTaskStarted(SUBAGENT, AGENT_CALL) as unknown as SDKMessage);
+    for (const agentId of [undefined, SUBAGENT, "a0unknown0000000"]) {
+      expect(normalize(running, buildPermissionDenied(agentId) as unknown as SDKMessage)).toEqual(
+        [],
+      );
+    }
+    expect(running.heldFrames).toEqual([]);
+    expect(running.turnId).toBeUndefined();
   });
 });
 
