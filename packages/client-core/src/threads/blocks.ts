@@ -14,9 +14,11 @@
 import { isAsyncQuestion, type Input, type TranscriptRow } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
 import type { AgentState } from "./agent-state";
+import { readCompactionDetail, readUnknownLabel } from "./item-detail";
 import { findOpenItem } from "./open-item";
 import { readInputSender } from "./sender";
 import {
+  buildCompletedItem,
   buildThreadItem,
   buildUserMessage,
   describeToolCallTarget,
@@ -60,11 +62,19 @@ export interface WorkItem extends ThreadItem {
    */
   readonly toolName: string;
   /**
-   * The `detail.content` of the item's `item.completed` row, as the adapter
-   * sent it: a string, a list of content blocks, or `undefined` while the
-   * item runs or when it returned nothing. It is kept as it is, and only read
-   * for its text when a row shows it (`buildWorkRows`), so building the
-   * transcript does no work for results nobody opens.
+   * The label of an `unknown` item, such as `claude: system/foo_bar`: what
+   * the adapter received that no mapping covers. Empty when the item has none,
+   * as on a row written before the label existed, and for any item that is not
+   * an `unknown` one.
+   */
+  readonly fallbackLabel: string;
+  /**
+   * What the item's `item.completed` row returned, as the adapter sent it: the
+   * `detail.content` (a string, a list of content blocks), or, for a
+   * compaction, the `detail.summary` string. It is `undefined` while the item
+   * runs or when it returned nothing. It is kept as it is, and only read for
+   * its text when a row shows it (`buildWorkRows`), so building the transcript
+   * does no work for results nobody opens.
    */
   readonly resultContent: unknown;
 }
@@ -183,6 +193,18 @@ export interface ErrorBlock {
   readonly at: string;
 }
 
+/**
+ * A neutral note the runner or the harness reported, that is not a problem: a
+ * conversation that was cleared, or memories that were recalled (spec 06).
+ */
+export interface NoticeBlock {
+  readonly kind: "notice";
+  readonly key: string;
+  /** The notice's text, as the runner wrote it. */
+  readonly message: string;
+  readonly at: string;
+}
+
 export type ThreadBlock =
   | UserBlock
   | WorkBlock
@@ -190,6 +212,7 @@ export type ThreadBlock =
   | EndingBlock
   | PendingBlock
   | WaitingBlock
+  | NoticeBlock
   | WarningBlock
   | ErrorBlock;
 
@@ -239,6 +262,7 @@ type Slot =
   | BuildingAgent
   | BuildingEnding
   | WaitingBlock
+  | NoticeBlock
   | WarningBlock
   | ErrorBlock;
 
@@ -300,6 +324,16 @@ const readWorkItemTarget = (
 };
 
 /**
+ * Returns what a completed item returned (`WorkItem.resultContent`): a
+ * compaction's summary, or any other item's `detail.content`. The summary is
+ * read with the schema, so a summary of the wrong type reads as nothing.
+ */
+const readResultContent = (kind: WorkItem["kind"], detail: unknown): unknown =>
+  kind === "context_compaction"
+    ? readCompactionDetail(detail)?.summary
+    : readJsonObject(detail)?.content;
+
+/**
  * Returns the blocks of one agent's transcript in reading order: the
  * session's own agent's, or a subagent's. `agent` is that agent's state, and
  * decides what the rows cannot: whether the last turn still runs, the
@@ -322,13 +356,16 @@ const readWorkItemTarget = (
  * - A `warning` block per `runtime.warning` row, where the row sits. It does
  *   not end the work stretch it falls in: the stretch's divider stays one,
  *   above the warning, and items that start after the warning still join it.
+ * - A `notice` block per `runtime.notice` row, placed and kept in the stretch
+ *   in the same way.
  * - An `error` block per `runtime.error` row, where the row sits. Like a
  *   warning, it does not end the work stretch it falls in.
  * - A `pending` block at the end while the agent has no open Request (an
  *   async question does not count, because the agent keeps working), no
  *   agent message holds the working face, the last block other than a
- *   warning or an error is not the running turn's running `work` block, and either the
- *   last turn has not finished or, before any turn, the agent is working.
+ *   notice, warning or error is not the running turn's running `work` block,
+ *   and either the last turn has not finished or, before any turn, the agent
+ *   is working.
  *
  * The working face is on one block at most: the agent message the agent is
  * writing; else the running turn's last agent message, when nothing started
@@ -337,7 +374,7 @@ const readWorkItemTarget = (
  * busy, because a face is drawn only beside text.
  *
  * Each block's key is built from an item id, a turn id, a request id or, for
- * a warning or an error, its row's position, so it stays the same as rows
+ * a notice, a warning or an error, its row's position, so it stays the same as rows
  * are appended.
  */
 export const buildThreadBlocks = (
@@ -481,6 +518,7 @@ export const buildThreadBlocks = (
             paths: readItemPaths(event),
             startedAt: event.at,
             toolName: typeof name === "string" ? name : "",
+            fallbackLabel: event.kind === "unknown" ? readUnknownLabel(event.detail) : "",
             resultContent: undefined,
           });
         }
@@ -497,10 +535,10 @@ export const buildThreadBlocks = (
         }
         const work = workItems.get(event.itemId);
         if (work !== undefined) {
+          const item = work.stretch.items[work.index]!;
           work.stretch.items[work.index] = {
-            ...work.stretch.items[work.index]!,
-            result: event.status,
-            resultContent: readJsonObject(event.detail)?.content,
+            ...buildCompletedItem(item, event),
+            resultContent: readResultContent(item.kind, event.detail),
           };
         }
         break;
@@ -535,6 +573,16 @@ export const buildThreadBlocks = (
         });
         const stretch = state.current?.stretch ?? null;
         if (stretch !== null) stretch.frozenAt = event.at;
+        break;
+      }
+      case "runtime.notice": {
+        // Like a warning, a notice is not a step of the work and does not end the stretch.
+        slots.push({
+          kind: "notice",
+          key: `notice:${String(row.position)}`,
+          message: event.message,
+          at: event.at,
+        });
         break;
       }
       case "runtime.warning": {
@@ -586,6 +634,7 @@ export const buildThreadBlocks = (
     switch (slot.kind) {
       case "user":
       case "waiting":
+      case "notice":
       case "warning":
       case "error":
         blocks.push(slot);
@@ -636,9 +685,11 @@ export const buildThreadBlocks = (
   // for" divider already shows the agent is busy, so a status line under it
   // would say the same twice. A finished
   // stretch of an earlier turn shows no such divider, so it does not count.
-  // A warning or an error reports on the work and is not a step of it, so a
-  // running stretch above one still shows the agent is busy.
-  const lastBlock = blocks.findLast((block) => block.kind !== "warning" && block.kind !== "error");
+  // A notice, a warning or an error reports on the work and is not a step of
+  // it, so a running stretch above one still shows the agent is busy.
+  const lastBlock = blocks.findLast(
+    (block) => block.kind !== "notice" && block.kind !== "warning" && block.kind !== "error",
+  );
   const endsOnRunningWork =
     lastBlock?.kind === "work" &&
     lastBlock.endedAt === null &&

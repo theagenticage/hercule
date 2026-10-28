@@ -18,11 +18,12 @@ import { Schema } from "effect";
 import { Attachment, type SessionStatus, type TranscriptRow } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
 import type { AgentState } from "./agent-state";
+import { describeCompactionTarget, readCompactionDetail, readUnknownLabel } from "./item-detail";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
 type ItemKind = ItemStarted["kind"];
-type ItemStatus = Extract<ProviderEvent, { _tag: "item.completed" }>["status"];
+type ItemCompleted = Extract<ProviderEvent, { _tag: "item.completed" }>;
 type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
 
 export interface ThreadItem {
@@ -247,16 +248,52 @@ export const describeToolCallTarget = (detail: unknown): ToolCallTarget => {
 };
 
 /**
+ * Returns the target of an item that has just started: for a compaction, its
+ * token counts (`describeCompactionTarget`); for an `unknown` item that has
+ * one, the label the adapter wrote; for any other item, a one-line summary of
+ * its detail.
+ */
+const describeStartedTarget = (event: ItemStarted): string => {
+  if (event.kind === "context_compaction") return describeCompactionTarget(event.detail);
+  if (event.kind === "unknown") {
+    const label = readUnknownLabel(event.detail);
+    if (label !== "") return label;
+  }
+  return summarizeDetail(event.detail);
+};
+
+/**
  * Returns the row the transcript shows for an item that has just started: its
- * verb, a one-line summary of its detail as the target, and `running` as its
- * result until its `item.completed` row lands.
+ * verb, its target (`describeStartedTarget`), and `running` as its result
+ * until its `item.completed` row lands.
  */
 export const buildThreadItem = (event: ItemStarted): ThreadItem => ({
   itemId: event.itemId,
   kind: event.kind,
   verb: readItemVerb(event.kind),
-  target: summarizeDetail(event.detail),
+  target: describeStartedTarget(event),
   result: "running",
+});
+
+/**
+ * Returns `item` once its `item.completed` row `event` has landed: its result
+ * is the row's status. A compaction reports its token counts and summary only
+ * when it completes, so when the row holds a compaction detail, the target is
+ * read from that detail instead of the start's. Without one, such as on a
+ * failed compaction, the target the start gave stays.
+ *
+ * The desktop's blocks build their items on this too, so both screens end up
+ * with the same words.
+ */
+export const buildCompletedItem = <Item extends ThreadItem>(
+  item: Item,
+  event: ItemCompleted,
+): Item => ({
+  ...item,
+  result: event.status,
+  ...(item.kind === "context_compaction" && readCompactionDetail(event.detail) !== undefined
+    ? { target: describeCompactionTarget(event.detail) }
+    : {}),
 });
 
 interface Building {
@@ -348,8 +385,7 @@ export const buildTurns = (
         if (event.kind === "user_message" || event.kind === "assistant_message") break;
         const index = turn.itemIndex.get(event.itemId);
         if (index === undefined) break;
-        const status: ItemStatus = event.status;
-        turn.items[index] = { ...turn.items[index]!, result: status };
+        turn.items[index] = buildCompletedItem(turn.items[index]!, event);
         break;
       }
       case "content.delta": {

@@ -13,6 +13,7 @@ import type { JSX } from "react";
 import type { WorkRow, WorkRowIcon } from "@hercule/client-core";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { CloseIcon } from "../../icons/close";
+import { CompressIcon } from "../../icons/compress";
 import { CrewIcon } from "../../icons/crew";
 import { EyeIcon } from "../../icons/eye";
 import { FileIcon } from "../../icons/file";
@@ -21,6 +22,7 @@ import type { IconProps } from "../../icons/icon-frame";
 import { ListIcon } from "../../icons/list";
 import { MoreIcon } from "../../icons/more";
 import { PuzzleIcon } from "../../icons/puzzle";
+import { QuestionIcon } from "../../icons/question";
 import { SearchIcon } from "../../icons/search";
 import { SparkleIcon } from "../../icons/sparkle";
 import { TerminalIcon } from "../../icons/terminal";
@@ -40,6 +42,8 @@ const WORK_ROW_ICONS: Record<WorkRowIcon, (props: IconProps) => JSX.Element> = {
   sparkle: SparkleIcon,
   close: CloseIcon,
   more: MoreIcon,
+  question: QuestionIcon,
+  compress: CompressIcon,
 };
 
 /**
@@ -96,7 +100,7 @@ export function WorkRowList({
                 today={today}
               />
             ) : (
-              <WorkRowOutput text={row.output} images={row.images} />
+              <WorkRowOutput text={row.output} isCode={row.outputIsCode} images={row.images} />
             )}
           </li>
         );
@@ -193,18 +197,24 @@ function WorkRowResult({ result }: { readonly result: WorkRow["result"] }): JSX.
 /**
  * Renders what an open step returned: its text, in a box that scrolls past
  * its maximum height, and under it the images, as tiles. A step that
- * returned only images draws no empty box.
+ * returned only images draws no empty box. Text that `isCode`
+ * (`WorkRow.outputIsCode`) is drawn in the mono face in whole lines; any
+ * other text, such as a compaction's summary, in the UI face, wrapped.
  */
 function WorkRowOutput({
   text,
+  isCode,
   images,
 }: {
   readonly text: string;
+  readonly isCode: boolean;
   readonly images: WorkRow["images"];
 }): JSX.Element {
   return (
     <div className="work-output">
-      {text === "" ? null : <pre className="work-output-text">{text}</pre>}
+      {text === "" ? null : (
+        <pre className={isCode ? "work-output-text" : "work-output-text is-prose"}>{text}</pre>
+      )}
       {images.length === 0 ? null : <ToolResultImages images={images} />}
     </div>
   );

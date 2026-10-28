@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import type { Input, OpenRequest, Session, Subagent, TranscriptRow } from "@hercule/contract";
 import { buildSessionAgentState, buildSubagentAgentState } from "./agent-state";
 import { appendSendingMessages, buildThreadBlocks, type ThreadBlock } from "./blocks";
+import { buildWorkRows } from "./work-rows";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemKind = Extract<ProviderEvent, { _tag: "item.started" }>["kind"];
@@ -160,6 +161,15 @@ const buildWarning = (
 ): TranscriptRow =>
   buildRow({
     _tag: "runtime.warning",
+    ...buildEnvelope(seconds),
+    ...(turnId === undefined ? {} : { turnId }),
+    message,
+  });
+
+/** Returns a `runtime.notice` row, in turn `turnId` or, when it is undefined, between turns. */
+const buildNotice = (seconds: number, turnId: string | undefined, message: string): TranscriptRow =>
+  buildRow({
+    _tag: "runtime.notice",
     ...buildEnvelope(seconds),
     ...(turnId === undefined ? {} : { turnId }),
     message,
@@ -848,6 +858,55 @@ describe("buildThreadBlocks", () => {
     });
   });
 
+  it("places each runtime notice where its row sits, without splitting the work stretch", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Fix it"),
+      ...buildCommand("t1", "c1", 1, 2),
+      buildNotice(3, "t1", "Recalled 2 memories"),
+      ...buildCommand("t1", "c2", 4, 5),
+      ...buildAgentMessage("t1", "a1", 6, "Done."),
+      buildTurnCompleted("t1", 8),
+      // Between turns, a notice names no turn.
+      buildNotice(9, undefined, "Conversation was cleared"),
+      buildTurnStarted("t2", 10),
+      ...buildUserMessage("t2", "u2", 10, "Thanks"),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+
+    expect(blocks.map((block) => (block.kind === "notice" ? block.message : block.key))).toEqual([
+      "user:u1",
+      "work:c1",
+      "Recalled 2 memories",
+      "agent:a1",
+      "Conversation was cleared",
+      "user:u2",
+      "pending",
+    ]);
+    expect(findBlock(blocks, "work", "work:c1").items.map((item) => item.itemId)).toEqual([
+      "c1",
+      "c2",
+    ]);
+    expect(blocks.find((block) => block.kind === "notice")).toMatchObject({
+      kind: "notice",
+      at: buildInstant(3),
+    });
+  });
+
+  it("shows no status line when a notice follows the running work, because the divider above it still shows the work", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Hi"),
+      buildItemStarted("t1", "c1", "command_execution", 1),
+      buildNotice(2, "t1", "Recalled 1 memory"),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+
+    expect(blocks.map((block) => block.kind)).toEqual(["user", "work", "notice"]);
+  });
+
   it("places a runtime error where its row sits, inside the work stretch and above the failed turn's ending", () => {
     const rows = [
       buildTurnStarted("t1", 0),
@@ -1272,6 +1331,97 @@ describe("buildThreadBlocks", () => {
     );
 
     expect(work.items[0]).toMatchObject({ result: "failed", resultContent: "killed" });
+  });
+});
+
+describe("buildThreadBlocks: compaction and unknown steps, drawn as work rows", () => {
+  /** Builds the work rows of the only stretch of a turn holding the item rows `itemRows`. */
+  const buildRowsOf = (itemRows: readonly TranscriptRow[]) => {
+    const blocks = buildThreadBlocks(
+      [buildTurnStarted("t1", 0), ...buildUserMessage("t1", "u1", 0, "Hi"), ...itemRows],
+      buildSessionAgentState(BUSY),
+    );
+    return buildWorkRows(blocks.flatMap((block) => (block.kind === "work" ? block.items : [])));
+  };
+
+  it("draws a compaction that completed with its counts and summary: the words and an openable summary", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "k1", "context_compaction", 1),
+      buildItemCompleted("t1", "k1", "context_compaction", 5, "completed", {
+        trigger: "auto",
+        tokensBefore: 182_000,
+        tokensAfter: 31_000,
+        summary: "The user asked for a login fix.",
+      }),
+    ]);
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        icon: "compress",
+        label: "Compacted the context",
+        target: "182k → 31k tokens (auto)",
+        targetIsCode: false,
+        result: "completed",
+        output: "The user asked for a login fix.",
+        canOpen: true,
+      }),
+    ]);
+  });
+
+  it("draws a running compaction with no counts and nothing to open", () => {
+    const rows = buildRowsOf([buildItemStarted("t1", "k1", "context_compaction", 1)]);
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        label: "Compacted the context",
+        target: "",
+        result: "running",
+        canOpen: false,
+      }),
+    ]);
+  });
+
+  it("keeps the counts a compaction started with when it fails with no detail", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "k1", "context_compaction", 1, { tokensBefore: 182_000 }),
+      buildItemCompleted("t1", "k1", "context_compaction", 5, "failed"),
+    ]);
+
+    expect(rows[0]).toMatchObject({ target: "from 182k tokens", result: "failed", canOpen: false });
+  });
+
+  it("draws a compaction written with the old field names as the bare words, with no counts and no summary", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "k1", "context_compaction", 1, { trigger: "auto" }),
+      buildItemCompleted("t1", "k1", "context_compaction", 5, "completed", {
+        trigger: "auto",
+        preTokens: 182_000,
+        postTokens: 31_000,
+      }),
+    ]);
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        icon: "compress",
+        label: "Compacted the context",
+        target: "",
+        canOpen: false,
+      }),
+    ]);
+  });
+
+  it("draws an unknown step by its label, and one with no detail as a bare Step", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "x1", "unknown", 1, { label: "claude: system/foo_bar" }),
+      buildItemCompleted("t1", "x1", "unknown", 1),
+      buildItemStarted("t1", "x2", "unknown", 2),
+      buildItemCompleted("t1", "x2", "unknown", 2),
+    ]);
+
+    expect(rows.map((row) => [row.icon, row.label, row.target])).toEqual([
+      ["question", "claude: system/foo_bar", ""],
+      ["more", "Step", ""],
+    ]);
   });
 });
 

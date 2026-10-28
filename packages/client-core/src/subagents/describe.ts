@@ -169,13 +169,14 @@ export const describeSubagentLine = (
 
 /**
  * Formats a token count the short way a row has room for: "950", "41.7k",
- * "1.2M". Thousands and millions keep one decimal.
+ * "182k", "1.2M". Thousands and millions keep one decimal, and only when it
+ * is not zero.
  */
 export const formatTokenCount = (tokens: number): string => {
   if (tokens < 1000) return String(tokens);
   const thousands = Math.round(tokens / 100) / 10;
-  if (thousands < 1000) return `${thousands.toFixed(1)}k`;
-  return `${(Math.round(tokens / 100_000) / 10).toFixed(1)}M`;
+  if (thousands < 1000) return `${String(thousands)}k`;
+  return `${String(Math.round(tokens / 100_000) / 10)}M`;
 };
 
 /**

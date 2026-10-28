@@ -35,18 +35,3 @@ export const listContextTokenChoices = (stored: number): ReadonlyArray<number> =
  */
 export const formatContextFraction = (fraction: number): string =>
   `${String(Math.round(fraction * 1000) / 10)}%`;
-
-/**
- * Formats a token limit the short way a select shows it: "950", "200k",
- * "1.5k", "1M", "1.5M". Thousands and millions keep one decimal, and only
- * when it is not zero.
- *
- * `formatTokenCount` always keeps the decimal ("200.0k"), which suits a
- * count that changes as a session runs, but not a limit the user picks.
- */
-export const formatTokenLimit = (tokens: number): string => {
-  if (tokens < 1000) return String(tokens);
-  const thousands = Math.round(tokens / 100) / 10;
-  if (thousands < 1000) return `${String(thousands)}k`;
-  return `${String(Math.round(tokens / 100_000) / 10)}M`;
-};

@@ -20,6 +20,7 @@ const buildItem = (kind: WorkItem["kind"], fields: Partial<WorkItem> = {}): Work
   paths: [],
   startedAt: "2026-09-30T09:00:00.000Z",
   toolName: "",
+  fallbackLabel: "",
   resultContent: undefined,
   ...fields,
 });
@@ -49,7 +50,7 @@ describe("buildWorkRows", () => {
     ["tool_call", "puzzle", "Used a tool"],
     ["subagent", "crew", "Subagent"],
     ["plan", "list", "Planned"],
-    ["context_compaction", "more", "Compacted the context"],
+    ["context_compaction", "compress", "Compacted the context"],
     ["error", "close", "Error"],
     ["unknown", "more", "Step"],
   ] as const)("draws a single %s step with the %s icon and the label %s", (kind, icon, label) => {
@@ -78,6 +79,7 @@ describe("buildWorkRows", () => {
         startedAt: "2026-09-30T09:00:05.000Z",
         result: "failed",
         output: "1 test failed",
+        outputIsCode: true,
         images: [],
         steps: [],
         canOpen: true,
@@ -332,5 +334,58 @@ describe("buildWorkRows", () => {
     );
 
     expect(rows[0]!.result).toBe(result);
+  });
+
+  it("draws an unknown step that has a label as the label with the question icon and no target", () => {
+    const [row] = buildWorkRows([
+      buildItem("unknown", {
+        fallbackLabel: "claude: system/foo_bar",
+        target: "claude: system/foo_bar",
+      }),
+    ]);
+
+    expect(row).toMatchObject({
+      icon: "question",
+      label: "claude: system/foo_bar",
+      target: "",
+      canOpen: false,
+    });
+  });
+
+  it("draws an unknown step with no label as a bare Step, as rows written before the label did", () => {
+    const [row] = buildWorkRows([buildItem("unknown")]);
+
+    expect(row).toMatchObject({ icon: "more", label: "Step", target: "" });
+  });
+
+  it("draws a compaction with its counts as the target and opens it to its summary", () => {
+    const [row] = buildWorkRows([
+      buildItem("context_compaction", {
+        target: "182k → 31k tokens (auto)",
+        resultContent: "The user asked for a login fix.",
+      }),
+    ]);
+
+    expect(row).toMatchObject({
+      icon: "compress",
+      label: "Compacted the context",
+      target: "182k → 31k tokens (auto)",
+      targetIsCode: false,
+      output: "The user asked for a login fix.",
+      outputIsCode: false,
+      canOpen: true,
+    });
+  });
+
+  it("draws a running compaction with nothing to open", () => {
+    const [row] = buildWorkRows([buildItem("context_compaction", { result: "running" })]);
+
+    expect(row).toMatchObject({
+      label: "Compacted the context",
+      target: "",
+      result: "running",
+      output: "",
+      canOpen: false,
+    });
   });
 });

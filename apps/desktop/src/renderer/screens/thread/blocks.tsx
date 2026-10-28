@@ -36,6 +36,7 @@ import {
 } from "@hercule/client-core";
 import { useAgeLabel, useDurationText } from "../../app/age-clock";
 import { ChevronRightIcon } from "../../icons/chevron-right";
+import { InfoIcon } from "../../icons/info";
 import type { Look } from "../../faces";
 import { Mark } from "../../marks";
 import { Markdown } from "../session/markdown";
@@ -307,6 +308,40 @@ export const WarningNote = memo(function WarningNote({
   return (
     <div className="warning-note">
       <i className="dot" role="img" aria-label="Warning" />
+      <p>
+        {message}
+        {time === undefined ? null : <span className="time">{time}</span>}
+      </p>
+    </div>
+  );
+});
+
+/**
+ * Renders a notice the provider reported that is neither a warning nor an
+ * error, such as "Conversation was cleared" or "Recalled 3 memories": the
+ * info icon, the notice's `message` as the runner wrote it, and its time.
+ *
+ * It is the warning note's neutral sibling. It stands in the same place,
+ * with the same measurements, and the info icon takes the dot's column. The
+ * icon is named "Notice", so a screen reader says what kind of note this is.
+ */
+export const NoticeNote = memo(function NoticeNote({
+  message,
+  at,
+  timezone,
+  today,
+}: {
+  readonly message: string;
+  readonly at: string;
+  readonly timezone: string;
+  readonly today: number;
+}): JSX.Element {
+  const time = formatBlockTime(at, timezone, today);
+  return (
+    <div className="notice-note">
+      <span className="notice-icon" role="img" aria-label="Notice">
+        <InfoIcon size={14} />
+      </span>
       <p>
         {message}
         {time === undefined ? null : <span className="time">{time}</span>}
