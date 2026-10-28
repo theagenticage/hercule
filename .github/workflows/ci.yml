@@ -181,12 +181,12 @@ jobs:
 
   # The ratchet of the desktop UI hill climb (docs/research/ui-hill-climb.md,
   # section 4.1): `ui:metrics` measures contrast, edges, discipline, targets,
-  # focus, resilience and reading on the specimen pages, in five themes, and
+  # focus, resilience and reading on the specimen pages, in six themes, and
   # fails when any number is worse than `apps/desktop/ui-metrics.baseline.json`.
   # A regression is accepted only by editing the baseline in the pull request
   # and giving the reason in its body.
   #
-  # The same pass compares the screenshots it takes (12 screens per theme, 60
+  # The same pass compares the screenshots it takes (12 screens per theme, 72
   # in all) with the goldens in `apps/desktop/ui-goldens/`, pixel for pixel
   # (docs/adr/0047-the-desktop-app-is-its-own-pixel-reference.md). Each shard
   # compares only the goldens of its themes, and every shard checks
@@ -218,12 +218,14 @@ jobs:
     strategy:
       # A failure in one shard must not hide the numbers of the other.
       fail-fast: false
-      # Two themes and three. The first shard also measures the run-wide
+      # Three themes each. The first shard also measures the run-wide
       # metrics, and on 2026-10-26 a split of three and two took 99 s and
-      # 50 s to measure.
+      # 50 s to measure. With six themes, run on one machine on 2026-10-28,
+      # each shard took 36 s. A test (scripts/ui-screens.test.ts) fails
+      # unless every theme is in exactly one shard.
       matrix:
         themes:
-          - whitehaven,styles
+          - whitehaven,styles,blue-train
           - orient-express,nile,end-house
     steps:
       - uses: actions/checkout@v7

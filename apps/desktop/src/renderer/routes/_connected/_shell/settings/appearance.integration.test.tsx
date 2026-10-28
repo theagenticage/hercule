@@ -100,7 +100,7 @@ const listTextSizeSteps = (): Array<{ name: string; checked: boolean }> =>
     .map((step) => ({ name: step.getAttribute("aria-label") ?? "", checked: step.checked }));
 
 describe("Settings > Appearance", () => {
-  it("says it saves on this Mac, and draws a card for each of the five themes", async () => {
+  it("says it saves on this Mac, and draws a card for each of the six themes", async () => {
     await openAppearance();
 
     expect(document.querySelector(".bar .time")?.textContent).toBe("Saved on this Mac");
@@ -110,6 +110,7 @@ describe("Settings > Appearance", () => {
       "Orient Express dark",
       "Nile dark",
       "End House dark",
+      "Blue Train dark",
     ]);
   });
 
@@ -163,6 +164,7 @@ describe("Settings > Appearance", () => {
       "Orient Express",
       "Nile",
       "End House",
+      "Blue Train",
     ]);
 
     await userEvent.selectOptions(day, "Styles");

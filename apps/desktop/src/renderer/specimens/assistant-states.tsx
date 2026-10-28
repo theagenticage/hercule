@@ -2,10 +2,10 @@
  * The assistant states specimen: the app's real shell, sidebar and assistant
  * page, drawn from one scene of assistant-states-fixture.ts, to check by eye
  * the Assistants section and an assistant's page. `node
- * scripts/capture-assistant.ts` captures every scene in all five themes.
+ * scripts/capture-assistant.ts` captures every scene in all six themes.
  *
  * The page takes its scene from `?scene=1` and up, and its theme from
- * `?theme=`, one of the five in sheet-themes.ts.
+ * `?theme=`, one of the six in sheet-themes.ts.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.

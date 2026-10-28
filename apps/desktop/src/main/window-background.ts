@@ -20,6 +20,7 @@ export const WINDOW_BACKGROUND: Readonly<Record<Theme, string>> = {
   "orient-express": "#1a1310",
   nile: "#0e1714",
   "end-house": "#1d1217",
+  "blue-train": "#17212b",
 };
 
 /**

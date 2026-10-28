@@ -7,4 +7,5 @@ export const THEME_NAMES: { readonly [Name in Theme]: string } = {
   "orient-express": "Orient Express",
   nile: "Nile",
   "end-house": "End House",
+  "blue-train": "Blue Train",
 };

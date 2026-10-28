@@ -13,8 +13,15 @@
 export const THEMES = ["whitehaven", "orient-express"];
 
 /**
- * All five Bureau themes, in the order tokens.css defines them. A capture for
+ * All six Bureau themes, in the order tokens.css defines them. A capture for
  * a check by eye uses these, because the book draws no page in the
- * other three.
+ * other four.
  */
-export const ALL_THEMES = ["whitehaven", "styles", "orient-express", "nile", "end-house"];
+export const ALL_THEMES = [
+  "whitehaven",
+  "styles",
+  "orient-express",
+  "nile",
+  "end-house",
+  "blue-train",
+];

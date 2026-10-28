@@ -12,7 +12,7 @@ const WORKING_LOOK: Look = { hue: "iris", shape: "egg", accessories: [], headwea
 
 /**
  * Renders the Theme section of Settings > Appearance: a card for each of
- * Bureau's five themes, each with a preview drawn in its theme. The card of
+ * Bureau's six themes, each with a preview drawn in its theme. The card of
  * `themeInUse` is pressed. Pressing a card calls `onPick` with its theme.
  * `error` is why the last pick failed to save, shown under the cards as a
  * row shows its own, or `null`.
@@ -32,9 +32,7 @@ export function ThemeSection({
   return (
     <section className="set-sec">
       <h2>Theme</h2>
-      <p>
-        Five rooms from the casebook, one crew. Every colleague keeps its colors in every theme.
-      </p>
+      <p>Six rooms from the casebook, one crew. Every colleague keeps its colors in every theme.</p>
       <div className="themes">
         {THEMES.map((theme) => (
           <button

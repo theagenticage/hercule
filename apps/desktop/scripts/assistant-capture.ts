@@ -2,7 +2,7 @@
  * Electron's main process for scripts/capture-assistant.ts, which starts it
  * through scripts/sheet-server.ts.
  *
- * For each of the five themes, it opens one hidden
+ * For each of the six themes, it opens one hidden
  * 1440 × 900 window at a time for each scene of the assistant states
  * specimen (specimens/assistant-states.tsx), and captures the part of the
  * window the scene names: the sidebar's region (x 0-272, the full height),

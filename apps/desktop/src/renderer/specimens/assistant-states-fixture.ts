@@ -2,7 +2,7 @@
  * The records of the assistant states specimen (assistant-states.tsx): the
  * scenes that draw the Assistants section and an assistant's page, for a
  * check by eye. `node scripts/capture-assistant.ts` captures each scene in
- * all five themes.
+ * all six themes.
  *
  * The assistants are those of the prototype the design was drawn from, with
  * its ids, so `buildLook` gives each one the hue the Bureau book casts it in:

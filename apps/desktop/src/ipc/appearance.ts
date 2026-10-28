@@ -7,8 +7,15 @@
  */
 import type { Appearance } from "./contract";
 
-/** Bureau's five themes, in the order the Appearance page shows them. */
-export const THEMES = ["whitehaven", "styles", "orient-express", "nile", "end-house"] as const;
+/** Bureau's six themes, in the order the Appearance page shows them. */
+export const THEMES = [
+  "whitehaven",
+  "styles",
+  "orient-express",
+  "nile",
+  "end-house",
+  "blue-train",
+] as const;
 export type Theme = (typeof THEMES)[number];
 
 /** The light themes, which Follow the system may use by day. */
@@ -20,6 +27,7 @@ export const NIGHT_THEMES = [
   "orient-express",
   "nile",
   "end-house",
+  "blue-train",
 ] as const satisfies ReadonlyArray<Theme>;
 export type NightTheme = (typeof NIGHT_THEMES)[number];
 

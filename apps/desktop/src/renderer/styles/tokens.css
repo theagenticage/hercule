@@ -37,6 +37,7 @@
      Orient Express  dark, the flagship. Pullman marquetry: warm wood-black and ivory.
      Nile            dark. The river at night: green-black and papyrus.
      End House       dark. Old claret and aubergine.
+     Blue Train      dark. A blue-grey night sleeper: steel blue and ivory.
    `light` = Whitehaven, `dark` = Orient Express. Themes sit on [data-theme] selectors, not only
    :root, so a theme preview can nest one inside another page. */
 
@@ -557,6 +558,81 @@
   --room-fabric: oklch(0.46 0.08 355);
   --room-cork: oklch(0.52 0.06 55);
   --room-paper: oklch(0.88 0.02 60);
+}
+
+/* ---------- Blue Train: dark, a blue-grey night. ----------
+   Its grounds, text, lines, composer, hat and scrim are its own blue-grey, and its tints
+   (--char-tint-l, --you-tint, --fail-tint, --ok-tint) are set for that ground, all tuned to
+   the same contrast targets as the other dark themes. Every other token is Orient Express's:
+   the accent, the selection, the crew hues, the semantic colours, the shadows and the rooms. */
+[data-theme="blue-train"] {
+  color-scheme: dark;
+  --bg: oklch(0.243 0.024 251);
+  --surface: oklch(0.29 0.03 247);
+  --raised: oklch(0.328 0.022 254);
+  --sunken: oklch(0.222 0.022 251);
+  --ink: oklch(0.947 0.008 326);
+  --muted: oklch(0.84 0.014 250);
+  --faint: oklch(0.785 0.014 250);
+  --line: oklch(0.505 0.039 245);
+  --line-soft: oklch(0.425 0.03 248);
+  --divider: oklch(0.39 0.03 248);
+  --rim: oklch(0.4 0.039 245);
+  --composer-fill: oklch(0.345 0.022 254);
+  --composer-line: oklch(0.6 0.039 245);
+
+  --char-l: 0.76;
+  --char-c: 0.12;
+  --char-shade: 0.09;
+  --char-ink-l: 0.8;
+  --char-tint-l: 0.37;
+  --char-tint-c: 0.045;
+  --face-ink: oklch(0.22 0.03 55);
+  --blush: oklch(0.7 0.14 15 / 0.42);
+  --hat: oklch(0.45 0.02 250);
+
+  --accent: oklch(0.76 0.1 162);
+  --accent-fg: oklch(0.2 0.035 165);
+  --accent-ink: oklch(0.8 0.1 162);
+  --you: oklch(0.82 0.15 80);
+  --you-ink: oklch(0.84 0.14 82);
+  --you-tint: oklch(0.37 0.05 75);
+  --fail: oklch(0.68 0.17 28);
+  --fail-ink: oklch(0.76 0.14 30);
+  --fail-tint: oklch(0.36 0.055 28);
+  --ok: oklch(0.78 0.13 150);
+  --ok-tint: oklch(0.36 0.045 150);
+  --brass: oklch(0.72 0.09 82);
+
+  --proj-webshop: oklch(0.44 0.055 62);
+  --proj-payments: oklch(0.43 0.055 290);
+  --proj-ops: oklch(0.44 0.055 162);
+
+  --glass-edge-max: 16%;
+  --scrim: oklch(0.12 0.02 251 / 0.55);
+  --ground: var(--bg);
+
+  --shadow-1: 0 1px 1px oklch(0 0 0 / 0.25), 0 1px 3px oklch(0 0 0 / 0.2);
+  --shadow-2: 0 1px 2px oklch(0 0 0 / 0.3), 0 10px 28px -8px oklch(0 0 0 / 0.45);
+  --shadow-3: 0 2px 4px oklch(0 0 0 / 0.3), 0 28px 60px -16px oklch(0 0 0 / 0.6);
+
+  --room-floor: oklch(0.33 0.02 55);
+  --room-inlay: oklch(0.42 0.04 65);
+  --room-inlay-2: oklch(0.24 0.015 50);
+  --room-wall: oklch(0.285 0.018 50);
+  --room-panel: oklch(0.42 0.06 45);
+  --room-wood: oklch(0.47 0.07 48);
+  --room-desk: oklch(0.43 0.015 60);
+  --room-metal: oklch(0.5 0.014 90);
+  --room-lamp: oklch(0.62 0.11 162);
+  --room-plant: oklch(0.58 0.1 150);
+  --room-lawn: oklch(0.4 0.045 150);
+  --room-sun: oklch(0.5 0.07 75);
+  --room-screen: oklch(0.19 0.012 50);
+  --room-shade: oklch(0.12 0.012 50);
+  --room-fabric: oklch(0.45 0.07 162);
+  --room-cork: oklch(0.52 0.06 65);
+  --room-paper: oklch(0.88 0.02 85);
 }
 
 /* ---------- Derived tokens: same recipe in every theme ---------- */

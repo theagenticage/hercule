@@ -8,7 +8,7 @@
   box-sizing: border-box;
 }
 
-/* In each of the five themes, `--bg` is the exact 8-bit sRGB colour
+/* In each of the six themes, `--bg` is the exact 8-bit sRGB colour
    that main gives the native window (src/main/window-background.ts), not the
    book's oklch value. tokens.css keeps the oklch value.
 
@@ -45,6 +45,10 @@
 
 [data-theme="end-house"] {
   --bg: #1d1217;
+}
+
+[data-theme="blue-train"] {
+  --bg: #17212b;
 }
 
 /* The glass level comes from the Appearance's Glass slider: theme-init.js
