@@ -17,6 +17,16 @@ export const MAX_FACT_LENGTH = 512;
 /** The most facts one list may hold, so a peer cannot send a list without end. */
 export const MAX_FACT_ITEMS = 64;
 
+/**
+ * The longest piece of free text a harness may put in an event. A `Fact` is too
+ * short: an error body or a stack trace over 512 bytes would make the frame
+ * undecodable, which would cost the runner its socket and every session on it.
+ */
+export const MAX_MESSAGE_LENGTH = 4096;
+
+/** Free text a peer reports, such as an error message: at most `MAX_MESSAGE_LENGTH` characters. */
+export const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
+
 /** A name, a version or a path a peer reports about itself, and never a document. */
 export const Fact = Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH));
 

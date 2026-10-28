@@ -1173,6 +1173,10 @@ describe("session frames on one connection", () => {
       (frame): frame is SessionInputResult => frame._tag === "sessionInputResult",
     );
 
+  /** Returns the message of a refused input result, or an empty string when it was not refused. */
+  const readRefusalMessage = (result: SessionInputResult | undefined): string =>
+    result !== undefined && !result.ok ? result.error.message : "";
+
   const listStepResults = (stub: Stub): ReadonlyArray<WorkspaceStepResult> =>
     stub.received.filter(
       (frame): frame is WorkspaceStepResult => frame._tag === "workspaceStepResult",
@@ -1554,7 +1558,7 @@ describe("session frames on one connection", () => {
         requestId: buildStart(SESSION_A).requestId,
         ok: false,
       });
-      expect(listInputResults(stub)[0]?.message).toContain(
+      expect(readRefusalMessage(listInputResults(stub)[0])).toContain(
         "was stopped before its input was handed over",
       );
       expect(fake.inputs).toEqual([]);
@@ -1659,7 +1663,7 @@ describe("session frames on one connection", () => {
 
     await waitUntil(() => listInputResults(stub).length === 2);
     expect(listInputResults(stub)[1]).toMatchObject({ requestId: again.requestId, ok: false });
-    expect(listInputResults(stub)[1]?.message).toContain(
+    expect(readRefusalMessage(listInputResults(stub)[1])).toContain(
       "was stopped before its input was handed over",
     );
     expect(fake.inputs).toEqual([[SESSION_A, `start ${SESSION_A}`]]);

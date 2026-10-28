@@ -15,6 +15,7 @@ import { expect } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
+  AdapterFailed,
   AGENT_STEPS_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
@@ -244,7 +245,12 @@ const dial = (
       writeMessage(
         typeof answer === "string"
           ? { _tag: "sessionInputResult", requestId: frame.requestId, ok: true, delivery: answer }
-          : { _tag: "sessionInputResult", requestId: frame.requestId, ok: false, ...answer },
+          : {
+              _tag: "sessionInputResult",
+              requestId: frame.requestId,
+              ok: false,
+              error: new AdapterFailed(answer),
+            },
       );
     socket.onmessage = (event) => {
       const frame = decodeFrame(JSON.parse(String(event.data)) as unknown);

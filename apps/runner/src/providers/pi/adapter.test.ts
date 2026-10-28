@@ -8,9 +8,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
+import { AnswerNotDelivered } from "@hercule/protocol";
 import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
-import { AnswerNotDelivered } from "../answer-not-delivered";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
 import {

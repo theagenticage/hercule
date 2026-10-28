@@ -41,7 +41,13 @@ import type {
   WorkspaceStepResult,
   WorkspaceReport,
 } from "@hercule/protocol";
-import { MAX_FRAME_BYTES, type GithubTokenAnswer } from "@hercule/protocol";
+import {
+  AdapterFailed,
+  AnswerNotDelivered,
+  MAX_FRAME_BYTES,
+  SteerRefused,
+  type GithubTokenAnswer,
+} from "@hercule/protocol";
 import { FIXTURE_SCHEMA } from "@hercule/protocol/testing";
 import type { ProviderAdapter, ProviderRunnerContext } from "../providers";
 import type { Machine } from "./context";
@@ -62,8 +68,6 @@ import { writeStartMark } from "../edit-marks/testing";
 import { makeSupervising, type SessionSupervisor, type Supervising } from "./supervisor";
 import { makeAttachmentCache, type AttachmentCache } from "../attachments";
 import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
-import { AnswerNotDelivered } from "../providers/answer-not-delivered";
-import { SteerRefused } from "../providers/steer-refused";
 import { makeSessionSkillsFolders } from "../skills";
 import {
   buildTestSkillRevision,
@@ -510,6 +514,10 @@ const listInputResults = (
 ): ReadonlyArray<SessionInputResult> =>
   sent.filter((frame): frame is SessionInputResult => frame._tag === "sessionInputResult");
 
+/** Returns the message of a refused input result, or an empty string when it was not refused. */
+const readRefusalMessage = (result: SessionInputResult | undefined): string =>
+  result !== undefined && !result.ok ? result.error.message : "";
+
 /**
  * Checks that the input a start carried was answered once, as refused, with
  * a reason that contains `reason`.
@@ -518,7 +526,7 @@ const expectStartInputRefused = (sent: ReadonlyArray<RunnerToController>, reason
   const results = listInputResults(sent);
   expect(results).toHaveLength(1);
   expect(results[0]).toMatchObject({ requestId: START_REQUEST, ok: false });
-  expect(results[0]?.message ?? "").toContain(reason);
+  expect(readRefusalMessage(results[0])).toContain(reason);
 };
 
 describe("one session, start to exit", () => {
@@ -733,7 +741,7 @@ describe("an input the harness cannot steer into the running turn", () => {
       _tag: "sessionInputResult",
       requestId: REQUEST,
       ok: false,
-      message,
+      error: new SteerRefused({ message }),
     });
     expect(listSessionEvents(sent).map((frame) => frame.event._tag)).toEqual(["session.started"]);
   });
@@ -838,11 +846,8 @@ describe("the images of an input", () => {
     );
 
     expect(fake.inputs).toEqual([START_INPUT]);
-    expect(listInputResults(sent).at(-1)).toMatchObject({
-      requestId: REQUEST,
-      ok: false,
-      message: expect.stringContaining(reason) as unknown,
-    });
+    expect(listInputResults(sent).at(-1)).toMatchObject({ requestId: REQUEST, ok: false });
+    expect(readRefusalMessage(listInputResults(sent).at(-1))).toContain(reason);
   });
 });
 
@@ -957,7 +962,9 @@ describe("a start the controller sends twice", () => {
         _tag: "sessionInputResult",
         requestId: START_REQUEST,
         ok: false,
-        message: `session ${SESSION} is already running on this runner`,
+        error: new AdapterFailed({
+          message: `session ${SESSION} is already running on this runner`,
+        }),
       },
     ]);
   });
@@ -1524,8 +1531,7 @@ describe("a session that cannot run here", () => {
     // can show is better than a bare flag.
     expect(listInputResults(sent)).toHaveLength(1);
     expect(listInputResults(sent)[0]).toMatchObject({ requestId: REQUEST, ok: false });
-    expect(listInputResults(sent)[0]?.message ?? "").toContain(SESSION);
-    expect(listInputResults(sent)[0]?.delivery).toBeUndefined();
+    expect(readRefusalMessage(listInputResults(sent)[0])).toContain(SESSION);
   });
 });
 
@@ -2470,7 +2476,7 @@ describe("a session that sits idle between turns", () => {
         _tag: "sessionInputResult",
         requestId: START_REQUEST,
         ok: false,
-        message: "the harness is not ready for input",
+        error: new AdapterFailed({ message: "the harness is not ready for input" }),
       },
     ]);
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "idle_unload" }]);
@@ -2592,7 +2598,7 @@ describe("a session that sits idle between turns", () => {
 
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
     expect(listInputResults(sent).at(-1)).toMatchObject({ requestId: REQUEST, ok: false });
-    expect(listInputResults(sent).at(-1)?.message).toContain("is stopping");
+    expect(readRefusalMessage(listInputResults(sent).at(-1))).toContain("is stopping");
     // The harness was never handed the input.
     expect(fake.inputs).toEqual([START_INPUT]);
   });
@@ -2936,7 +2942,7 @@ describe("an announced shutdown", () => {
         _tag: "sessionInputResult",
         requestId: START_REQUEST,
         ok: false,
-        message: "the runner is shutting down",
+        error: new AdapterFailed({ message: "the runner is shutting down" }),
       },
     ]);
   });
@@ -3108,7 +3114,7 @@ describe("a start that follows a stop of the same id", () => {
     );
 
     expect(listInputResults(sent)[1]).toMatchObject({ requestId: REQUEST, ok: false });
-    expect(listInputResults(sent)[1]?.message).toContain("is still stopping");
+    expect(readRefusalMessage(listInputResults(sent)[1])).toContain("is still stopping");
     // No second harness was asked for, and the old one was not stopped twice.
     expect(fake.contexts).toHaveLength(1);
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
@@ -3801,7 +3807,10 @@ describe("an agent step's turn", () => {
         _tag: "sessionInputResult",
         requestId: REQUEST,
         ok: false,
-        message: "the step ended before its prompt reached the harness, so the prompt was not run",
+        error: new AdapterFailed({
+          message:
+            "the step ended before its prompt reached the harness, so the prompt was not run",
+        }),
       },
     ]);
     expect(listStepResults(sent)).toEqual([]);
@@ -3868,7 +3877,10 @@ describe("an agent step's turn", () => {
         _tag: "sessionInputResult",
         requestId: START_REQUEST,
         ok: false,
-        message: "the step ended before its prompt reached the harness, so the prompt was not run",
+        error: new AdapterFailed({
+          message:
+            "the step ended before its prompt reached the harness, so the prompt was not run",
+        }),
       },
     ]);
     expect(listExitReasons(sent)).toEqual(["idle_unload"]);
@@ -3895,9 +3907,10 @@ describe("an agent step's turn", () => {
       }),
     );
 
-    expect(listInputResults(sent)).toMatchObject([
-      { requestId: START_REQUEST, ok: false, message: "the harness is not ready for input" },
-    ]);
+    expect(listInputResults(sent)).toMatchObject([{ requestId: START_REQUEST, ok: false }]);
+    expect(readRefusalMessage(listInputResults(sent)[0])).toBe(
+      "the harness is not ready for input",
+    );
     expect(listStepResults(sent).map((frame) => frame.outcome)).toMatchObject([
       { status: "failed", code: "interrupted" },
     ]);
@@ -4888,7 +4901,7 @@ describe("the skills a start names", () => {
     );
 
     expectStartInputRefused(sent, "The Thread did not start.");
-    expect(listInputResults(sent)[0]?.message).toContain(
+    expect(readRefusalMessage(listInputResults(sent)[0])).toContain(
       "The runner could not prepare the session's skills folder:",
     );
     expect(listExitReasons(sent)).toEqual(["crash"]);
@@ -5047,7 +5060,7 @@ describe("the Git boundary at a workspace root", () => {
       sent,
       "The runner could not prepare the workspace folder for the session: the .git file that marks the workspace folder could not be created (EACCES). The Thread did not start.",
     );
-    expect(listInputResults(sent)[0]?.message).not.toContain(root);
+    expect(readRefusalMessage(listInputResults(sent)[0])).not.toContain(root);
     expect(fake.contexts).toEqual([]);
     expect(existsSync(join(root, ".git"))).toBe(false);
   });

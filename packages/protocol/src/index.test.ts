@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import {
+  AdapterFailed,
   ControllerToRunner,
   JoinAnswer,
   LocalAnnouncement,
@@ -174,6 +175,12 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   },
   { _tag: "githubTokenRequest", requestId: REQUEST_ID, sessionToken: "a-session-token" },
   { _tag: "sessionInputResult", requestId: REQUEST_ID, ok: true, delivery: "steered" },
+  {
+    _tag: "sessionInputResult",
+    requestId: REQUEST_ID,
+    ok: false,
+    error: new AdapterFailed({ message: "the harness refused the input" }),
+  },
   {
     _tag: "sessionRespondToQuestionResult",
     answerId: "0199e0e7-0000-7000-8000-000000000010",
@@ -400,8 +407,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 8, the version that added async questions and the answer result", () => {
-    expect(PROTOCOL_VERSION).toBe(8);
+  it("is 9, the version that added the typed error on a refused input result", () => {
+    expect(PROTOCOL_VERSION).toBe(9);
   });
 });
 

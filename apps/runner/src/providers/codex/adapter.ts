@@ -32,6 +32,7 @@ import type {
   TextGenerationOutcome,
   TextGenerationSpec,
 } from "@hercule/protocol";
+import { AnswerNotDelivered, SteerRefused } from "@hercule/protocol";
 import type { LoginCommand } from "../login";
 import type {
   AdapterTurnInput,
@@ -42,12 +43,11 @@ import type {
   UserMaterial,
 } from "../index";
 import type { ResolvedSkillReference } from "../../skills";
-import { AnswerNotDelivered } from "../answer-not-delivered";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { runProcess, spawnAppServer, stopChild, type Run } from "../process";
-import { buildSkillSteerRefusedMessage, SteerRefused } from "../steer-refused";
+import { buildSkillSteerRefusedMessage } from "../steer-refused-message";
 import { truncateMessage } from "../text";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { now } from "../../report";

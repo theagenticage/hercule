@@ -26,9 +26,11 @@ import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import {
+  AdapterFailed,
   MAX_MESSAGE_LENGTH,
   isAsyncQuestion,
   lintOutputSchema,
+  type AdapterError,
   type ExitReason,
   type ProviderEvent,
   type RunnerToController,
@@ -39,15 +41,11 @@ import {
   type SessionRespondToQuestion,
   type SessionStart,
   type SessionStop,
+  type SteerRefused,
   type SubagentId,
   type WorkspaceStepKey,
 } from "@hercule/protocol";
-import {
-  describeMissingAdapter,
-  type AdapterTurnInput,
-  type ProviderAdapter,
-  type SteerRefused,
-} from "../providers";
+import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } from "../providers";
 import { now, describeCause } from "../report";
 import {
   buildLoadedSkills,
@@ -1016,7 +1014,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     /** Sends the answer to one input: the `sessionInputResult` the controller waits for under `requestId`. */
     const sendInputResult = (
       requestId: string,
-      result: Omit<SessionInputResult, "_tag" | "requestId">,
+      result: SessionInputResult extends infer Result
+        ? Result extends unknown
+          ? Omit<Result, "_tag" | "requestId">
+          : never
+        : never,
     ): Effect.Effect<void> => reply({ _tag: "sessionInputResult", requestId, ...result });
 
     /**
@@ -1025,12 +1027,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
      */
     const answerInputRefused = (
       frame: SessionInput | SessionStart,
-      message: string,
-    ): Effect.Effect<void> =>
-      sendInputResult(frame.requestId, {
-        ok: false,
-        message: message.slice(0, MAX_MESSAGE_LENGTH),
-      });
+      error: AdapterError,
+    ): Effect.Effect<void> => sendInputResult(frame.requestId, { ok: false, error });
 
     /**
      * Answers an input as refused, and reports the reason on the session's
@@ -1041,7 +1039,13 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       frame: SessionInput | SessionStart,
       message: string,
     ): Effect.Effect<void> =>
-      Effect.andThen(reportFailure(frame.sessionId, message), answerInputRefused(frame, message));
+      Effect.andThen(
+        reportFailure(frame.sessionId, message),
+        answerInputRefused(
+          frame,
+          new AdapterFailed({ message: message.slice(0, MAX_MESSAGE_LENGTH) }),
+        ),
+      );
 
     /**
      * Returns the input an adapter delivers: the frame's input, with each
@@ -1135,7 +1139,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         Effect.andThen(
           typeof refusal === "string"
             ? refuseInput(frame, refusal)
-            : answerInputRefused(frame, refusal.message),
+            : answerInputRefused(frame, refusal),
           Effect.suspend(() => {
             if (step !== undefined && held.step === step) {
               held.step = undefined;
@@ -1199,7 +1203,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       Effect.andThen(
         sendInputResult(frame.requestId, {
           ok: false,
-          message: undelivered.message.slice(0, MAX_MESSAGE_LENGTH),
+          error: new AdapterFailed({ message: undelivered.message.slice(0, MAX_MESSAGE_LENGTH) }),
         }),
         Effect.suspend(() => {
           switch (undelivered.exitReason) {

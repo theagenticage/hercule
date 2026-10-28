@@ -24,13 +24,13 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber, Logger, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { CODEX_VERSION } from "@hercule/home/version";
+import { SteerRefused } from "@hercule/protocol";
 import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hercule/protocol";
 import { SESSION_MARKS_DIR_VARIABLE, takeStartMarks } from "../../edit-marks";
 import type { EditMarks, ProviderRunnerContext } from "../index";
 import { INSTALL_DEADLINE } from "../install";
 import { makeCodexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
 import { PROBE_DEADLINE } from "../probe";
-import { SteerRefused } from "../steer-refused";
 import {
   METADATA_DEADLINE,
   MAX_PENDING_FRAMES,

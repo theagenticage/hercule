@@ -35,6 +35,7 @@ import type {
   TextGenerationSpec,
   TurnState,
 } from "@hercule/protocol";
+import { AnswerNotDelivered } from "@hercule/protocol";
 import type {
   AdapterTurnInput,
   LocalAttachment,
@@ -43,7 +44,6 @@ import type {
   TextGenerationContext,
   UserMaterial,
 } from "../index";
-import { AnswerNotDelivered } from "../answer-not-delivered";
 import { readAttachmentBase64 } from "../attachments";
 import { buildUserMessage } from "../events";
 import { joinInstructions } from "../prompt";

@@ -539,9 +539,6 @@ const ALREADY_SENT = "that input has already been sent to the runner";
 const FIRST_INPUT_NOT_CANCELLABLE =
   "this input is what the session starts with, so it cannot be cancelled; stop the session instead";
 
-/** The reason stored on an input the runner refused without giving one. */
-const REFUSED = "that session's runner rejected the input";
-
 /**
  * The reason stored on an input whose frame left the controller but got no
  * answer: the connection ended before the runner answered, or no answer
@@ -2886,11 +2883,11 @@ const make = Effect.gen(function* () {
           );
         }
         const answer = sent.answer.value;
-        if (answer.ok && answer.delivery !== undefined) {
+        if (answer.ok) {
           yield* recordDelivery(row, answer.delivery, runnerId);
           return { _tag: "delivered", delivery: answer.delivery } as const;
         }
-        const reason = answer.message ?? REFUSED;
+        const reason = answer.error.message;
         yield* returnUndeliveredInput(row, reason);
         return { _tag: "notDelivered", reason } as const;
       }),
@@ -2929,7 +2926,7 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          if (!result.ok || result.delivery === undefined) return;
+          if (!result.ok) return;
           const found = yield* inputs.read(result.requestId);
           if (Option.isNone(found) || found.value.sentAt === null) return;
           const row = found.value;

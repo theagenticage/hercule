@@ -60,6 +60,7 @@ import {
   WorkspaceStepSettle,
 } from "./workspace-steps";
 
+export * from "./adapter-errors";
 export * from "./attachments";
 export * from "./image-signatures";
 export * from "./identity-port";
@@ -108,8 +109,12 @@ export {
  *   decode an async question or the result frame, and an older runner never
  *   sends the result that a newer controller waits for, so the two refuse each
  *   other at hello.
+ * - Version 9 replaced the `message` of a refused `SessionInputResult` with a
+ *   typed `error`. An older controller could not decode the refused result, and
+ *   an older runner sends a refusal the newer controller cannot read, so the
+ *   two refuse each other at hello.
  */
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 /**
  * The close code and reason the controller uses to end the connection of a

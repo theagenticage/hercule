@@ -12,6 +12,7 @@ import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import type { Input, Run, Session } from "@hercule/contract";
 import {
+  AdapterFailed,
   buildWorkspaceActionCapability,
   type ActionStepStart,
   type ControllerToRunner,
@@ -435,7 +436,7 @@ const unloadSessionBeforePromptAnswered = async (
     _tag: "sessionInputResult",
     requestId: sent.requestId,
     ok: false,
-    message: "that session is not running",
+    error: new AdapterFailed({ message: "that session is not running" }),
   });
 };
 
@@ -770,7 +771,7 @@ describe("agent steps over the runner socket", () => {
             _tag: "sessionInputResult",
             requestId: sent.requestId,
             ok: false,
-            message: "that session is not running",
+            error: new AdapterFailed({ message: "that session is not running" }),
           });
 
           // The prompt goes back to waiting, and the session is resumed in
@@ -842,7 +843,7 @@ describe("agent steps over the runner socket", () => {
           _tag: "sessionInputResult",
           requestId: resumed.requestId,
           ok: false,
-          message: "that session is not running",
+          error: new AdapterFailed({ message: "that session is not running" }),
         });
         await waitUntil("put the refused prompt back to waiting", async () => {
           const prompt = (await listInputs(arranged, sessionId)).find(
@@ -967,8 +968,10 @@ describe("agent steps over the runner socket", () => {
             _tag: "sessionInputResult",
             requestId: sent.requestId,
             ok: false,
-            message:
-              "the step ended before its prompt reached the harness, so the prompt was not run",
+            error: new AdapterFailed({
+              message:
+                "the step ended before its prompt reached the harness, so the prompt was not run",
+            }),
           });
           await waitUntil("cancelled the refused prompt", async () =>
             (await listInputs(arranged, sessionId)).find((one) => one.status === "cancelled"),
@@ -1470,7 +1473,7 @@ describe("agent steps over the runner socket", () => {
             _tag: "sessionInputResult",
             requestId: sent.requestId,
             ok: false,
-            message: "the harness is not ready for input",
+            error: new AdapterFailed({ message: "the harness is not ready for input" }),
           });
           // The runner handles the request after the prompt it refused, and
           // ran no turn for that prompt, so it answers with `interrupted`.
@@ -1602,7 +1605,7 @@ describe("agent steps over the runner socket", () => {
           _tag: "sessionInputResult",
           requestId: sent.requestId,
           ok: false,
-          message: "that session is not running",
+          error: new AdapterFailed({ message: "that session is not running" }),
         });
 
         const ended = await waitForRunEnded(arranged, runId, "failed");

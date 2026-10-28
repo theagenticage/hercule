@@ -9,8 +9,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { ProviderEvent } from "@hercule/protocol";
-import { AnswerNotDelivered } from "../answer-not-delivered";
+import { AnswerNotDelivered, ProviderEvent } from "@hercule/protocol";
 import { RPC_DEADLINE } from "./rpc";
 import {
   buildRefusal,

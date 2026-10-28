@@ -9,6 +9,7 @@
  */
 import { Schema } from "effect";
 
+import { AdapterError } from "./adapter-errors";
 import { AttachmentReference } from "./attachments";
 import { OutputSchema } from "./output-schema";
 import { MAX_SKILLS, LibrarySkillRevision } from "./skills";
@@ -18,11 +19,15 @@ import {
   InstanceSecrets,
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
+  MAX_MESSAGE_LENGTH,
+  Message,
   Sequenced,
   SessionId,
   Timestamp,
   WorkspaceStepKey,
 } from "./primitives";
+
+export { MAX_MESSAGE_LENGTH };
 
 /**
  * How much a session may do without asking first (spec 06 section 8). It is
@@ -37,15 +42,6 @@ export const AccessMode = Schema.Literals([
 ]);
 
 export type AccessMode = Schema.Schema.Type<typeof AccessMode>;
-
-/**
- * The longest piece of free text a harness may put in an event. A `Fact` is too
- * short: an error body or a stack trace over 512 bytes would make the frame
- * undecodable, which would cost the runner its socket and every session on it.
- */
-export const MAX_MESSAGE_LENGTH = 4096;
-
-const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
 
 /**
  * A duration on the wire, in milliseconds. The controller converts
@@ -1099,14 +1095,21 @@ export type SessionRespondToQuestionResult = Schema.Schema.Type<
  * id: the controller learns the turn from `turn.started`, and a field nothing
  * reads would sooner or later be wrong.
  */
-export const SessionInputResult = Schema.Struct({
-  _tag: Schema.Literal("sessionInputResult"),
-  requestId: Fact,
-  ok: Schema.Boolean,
-  delivery: Schema.optionalKey(Delivery),
-  /** Why it was not delivered, so the caller gets a reason rather than only a flag. */
-  message: Schema.optionalKey(Message),
-});
+export const SessionInputResult = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal("sessionInputResult"),
+    requestId: Fact,
+    ok: Schema.Literal(true),
+    delivery: Delivery,
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("sessionInputResult"),
+    requestId: Fact,
+    ok: Schema.Literal(false),
+    /** Why it was not delivered. Its `_tag` tells the controller what happens to the input. */
+    error: AdapterError,
+  }),
+]);
 
 export type SessionInputResult = Schema.Schema.Type<typeof SessionInputResult>;
 
