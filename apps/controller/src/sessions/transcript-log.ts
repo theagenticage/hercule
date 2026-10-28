@@ -21,8 +21,8 @@
  * while the live topic's cursor is the raw position.
  */
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import type { ProviderEvent, SubagentId } from "@hercule/protocol";
 import type { TranscriptRow } from "@hercule/contract";
 import { UUID_PATTERN, uuidFromString } from "../db";

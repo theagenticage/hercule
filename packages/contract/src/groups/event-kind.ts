@@ -5,8 +5,8 @@
  * it is short, so it has no filter and no paging.
  */
 import { Schema } from "effect";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { Forbidden, Internal, Unauthenticated } from "../errors";
 import { Authenticated } from "../security";
 import { EventKind } from "./event-record";

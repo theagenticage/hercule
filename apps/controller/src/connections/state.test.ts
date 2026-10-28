@@ -12,7 +12,7 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { withTransaction } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { connectionRepository } from "./repository";

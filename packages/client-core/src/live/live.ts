@@ -49,11 +49,11 @@ import {
   type Validation,
 } from "@hercule/contract";
 import { Effect, Fiber, Latch, Layer, Result, Schedule, Stream } from "effect";
-import * as RpcClient from "effect/unstable/rpc/RpcClient";
-import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
-import type * as RpcGroup from "effect/unstable/rpc/RpcGroup";
-import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as RpcClient from "effect/rpc/RpcClient";
+import type { RpcClientError } from "effect/rpc/RpcClientError";
+import type * as RpcGroup from "effect/rpc/RpcGroup";
+import * as RpcSerialization from "effect/rpc/RpcSerialization";
+import * as Socket from "effect/socket/Socket";
 import type { HerculeClient } from "../client";
 import { ApiError } from "../errors";
 import { buildQueryKeys, type LiveQueryKey } from "./keys";

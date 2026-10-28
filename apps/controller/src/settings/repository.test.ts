@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { uuidFromString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { Settings, SettingsLayer } from "./repository";

@@ -12,7 +12,7 @@ export class UnsupportedConfigSchema extends Schema.TaggedError<UnsupportedConfi
 ) {}
 
 /**
- * Effect derives a struct with no properties as "an object or an array" rather
+ * Effect derives a struct with no properties as "anything but null" rather
  * than as an empty object schema. A plugin with nothing to configure is the
  * ordinary case, so that shape is converted to an empty object instead of
  * rejected.
@@ -119,21 +119,13 @@ export const listSecretFields = (
 };
 
 /**
- * Checks whether a branch has only a `type` key with the given type, as both
- * branches of an empty struct do.
+ * Checks whether the derived root is the one Effect gives a struct with no
+ * properties: a `not` keyword whose value is exactly `{ type: "null" }`. Other
+ * keys on the root are not looked at.
  */
-const isBareType = (branch: unknown, type: string) => {
-  const keys = Object.keys(branch as object);
-  return keys.length === 1 && (branch as JsonSchema.JsonSchema).type === type;
-};
-
 const derivesAsEmptyStruct = (root: JsonSchema.JsonSchema): boolean => {
-  const branches = root.anyOf;
-  if (!Array.isArray(branches) || branches.length !== 2) return false;
-  return (
-    branches.some((branch) => isBareType(branch, "object")) &&
-    branches.some((branch) => isBareType(branch, "array"))
-  );
+  const excluded = root["not"] as JsonSchema.JsonSchema | undefined;
+  return excluded?.type === "null" && Object.keys(excluded).length === 1;
 };
 
 /** Returns why one property cannot be rendered, or `undefined` when it can. */
@@ -200,7 +192,7 @@ const findRequiredChoicesReason = (
 export const deriveConfigJsonSchema = (
   schema: Schema.Top,
 ): Result.Result<JsonSchema.JsonSchema, UnsupportedConfigSchema> => {
-  const root = Schema.toJsonSchemaDocument(schema).schema;
+  const root = Schema.toJsonSchemaDocument(schema, { onExcessProperty: "error" }).schema;
 
   if (derivesAsEmptyStruct(root)) return Result.succeed(EMPTY_OBJECT);
 

@@ -499,7 +499,7 @@ export const QuestionAnswers = Schema.Record(
     Schema.NonEmptyArray(AnswerText).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   ]),
 ).check(
-  Schema.isPropertiesLengthBetween(1, MAX_FACT_ITEMS),
+  Schema.isBetweenProperties(1, MAX_FACT_ITEMS),
   Schema.makeFilter((answers) =>
     countAnswerCharacters(answers) <= MAX_ANSWERS_LENGTH
       ? true
@@ -722,7 +722,7 @@ const EDITED_PATH_SEGMENT = String.raw`(?!\.\.?(?:/|$))[^/]+`;
 export const EditedFile = Schema.Struct({
   resourceId: Fact,
   path: Schema.String.check(
-    Schema.isLengthBetween(1, MAX_EDITED_FILE_PATH_LENGTH),
+    Schema.isBetweenLength(1, MAX_EDITED_FILE_PATH_LENGTH),
     Schema.isPattern(new RegExp(`^${EDITED_PATH_SEGMENT}(?:/${EDITED_PATH_SEGMENT})*$`), {
       title: "path",
       description: "a relative path with `/` separators and no empty, `.` or `..` segment",
@@ -745,7 +745,7 @@ const ItemCompleted = defineEvent("item.completed", {
   ...itemFields,
   status: ItemStatus,
   editedFiles: Schema.optionalKey(
-    Schema.Array(EditedFile).check(Schema.isLengthBetween(1, MAX_EDITED_FILES)),
+    Schema.Array(EditedFile).check(Schema.isBetweenLength(1, MAX_EDITED_FILES)),
   ),
 });
 
@@ -922,7 +922,7 @@ export const SessionStart = Schema.Struct({
    * session also uses it to prove its identity when it asks this machine for a
    * git credential.
    */
-  token: Schema.String.check(Schema.isLengthBetween(1, MAX_TOKEN_LENGTH)),
+  token: Schema.String.check(Schema.isBetweenLength(1, MAX_TOKEN_LENGTH)),
   /**
    * `GH_TOKEN` for this session. Present only when a GitHub Connection backs
    * the session and the controller read a usable token from it: an expired
@@ -1139,7 +1139,7 @@ export const FILES_EDITED_CAPABILITY = "filesEdited";
 export const FilesEdited = Schema.Struct({
   _tag: Schema.Literal("filesEdited"),
   sessionId: Fact,
-  editedFiles: Schema.Array(EditedFile).check(Schema.isLengthBetween(1, MAX_EDITED_FILES)),
+  editedFiles: Schema.Array(EditedFile).check(Schema.isBetweenLength(1, MAX_EDITED_FILES)),
 });
 
 export type FilesEdited = Schema.Schema.Type<typeof FilesEdited>;

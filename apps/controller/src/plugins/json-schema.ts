@@ -32,7 +32,7 @@ const containsReferenceTo = (value: unknown, pointer: string): boolean => {
  * refers to it (a recursive schema).
  */
 export const deriveCatalogJsonSchema = (schema: Schema.Top): JsonSchema.JsonSchema => {
-  const document = Schema.toJsonSchemaDocument(schema);
+  const document = Schema.toJsonSchemaDocument(schema, { onExcessProperty: "error" });
   const pointer = document.schema["$ref"];
   const rootDefinitionName =
     typeof pointer === "string" && pointer.startsWith(DEFINITIONS_POINTER)

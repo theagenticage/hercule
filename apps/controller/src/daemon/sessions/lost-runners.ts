@@ -15,8 +15,8 @@
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { withTransaction } from "../../db";
 import { PromotionState } from "../../promotion";
 import { runnerRepository } from "../../runners";

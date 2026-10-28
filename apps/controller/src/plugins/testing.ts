@@ -8,8 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll } from "vitest";
 import { Effect, Layer, Option, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import {
   HOST_API,
   PluginError,

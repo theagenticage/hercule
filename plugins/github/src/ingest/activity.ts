@@ -7,7 +7,7 @@
  * finds it.
  */
 import { Effect, Option, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import type { EmittedEvent, IngestContext, PluginError } from "@hercule/plugin-host";
 import { readReviewVerdict, type ReviewVerdict } from "../github-objects";
 import { findMention, isUserAccount, type GithubIdentity } from "../identity";

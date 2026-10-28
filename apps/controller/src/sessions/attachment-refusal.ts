@@ -9,8 +9,8 @@
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { createValidationError, type Validation } from "@hercule/contract";
 import { ATTACHMENTS_CAPABILITY, type ModelDescriptor } from "@hercule/protocol";
 import { providerRepository } from "../providers";

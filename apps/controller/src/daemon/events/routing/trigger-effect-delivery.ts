@@ -18,7 +18,7 @@
  * runner and needs no fiber of its own.
  */
 import * as Effect from "effect/Effect";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import { TriggerEffects } from "../../../workflows";
 import { absorbFailures } from "../../absorbing";
 import type { Delivery } from "../event-router";

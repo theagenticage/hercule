@@ -19,9 +19,9 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
-import { isSqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
+import { isSqlError } from "effect/sql/SqlError";
 import type { StepError, WorkflowDefinition } from "@hercule/contract";
 import type { WorkspaceStepFailureCode } from "@hercule/protocol";
 import { buildRunActor, CurrentActor } from "../actor";

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   BUILT_IN_SKILL_NAME,
   MAX_SKILLS,

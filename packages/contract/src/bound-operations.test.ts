@@ -1,6 +1,6 @@
 import type { AnswerPlace } from "@hercule/plugin-host";
 import { Cause, Effect, Exit, Schema } from "effect";
-import * as HttpApi from "effect/unstable/httpapi/HttpApi";
+import * as HttpApi from "effect/http-api/HttpApi";
 import { describe, expect, it } from "vitest";
 import { api } from "./api";
 import {

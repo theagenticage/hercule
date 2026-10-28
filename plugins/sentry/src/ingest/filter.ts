@@ -5,7 +5,7 @@
  * search takes.
  */
 import { Effect } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import { PluginError } from "@hercule/plugin-host";
 import type { SentryFailure } from "../api";
 import type { SentryConnectionConfig } from "../connection-type";

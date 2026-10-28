@@ -9,9 +9,9 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Fragment } from "effect/unstable/sql/Statement";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
+import type { Fragment } from "effect/sql/Statement";
 import type {
   AccessMode,
   DisallowedTool,
@@ -52,6 +52,10 @@ import { DEFAULT_ABSOLUTE_TIMEOUT_MS } from "./options";
 import { buildUnfinishedClause } from "./unfinished";
 import { attributeEvent, TOOL_CALL_KINDS, type StreamRow } from "./stream";
 import { StoredTokenUsage, type StoredUsage } from "./usage";
+
+const decodeSessionLibrarySkills = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(SessionLibrarySkill)),
+);
 
 /**
  * Builds a SQL expression, over a row of `sessions` under the given alias,
@@ -1158,11 +1162,7 @@ const make = Effect.gen(function* () {
         `;
         const column = rows[0]?.library_skills;
         if (column == null) return Option.none();
-        return Option.some(
-          yield* Schema.decodeUnknownEffect(
-            Schema.fromJsonString(Schema.Array(SessionLibrarySkill)),
-          )(column).pipe(Effect.orDie),
-        );
+        return Option.some(yield* decodeSessionLibrarySkills(column).pipe(Effect.orDie));
       }),
 
     /**

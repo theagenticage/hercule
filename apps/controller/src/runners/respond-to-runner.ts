@@ -6,8 +6,8 @@
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
-import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import type * as HttpServerRequest from "effect/http/HttpServerRequest";
+import type * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { createUnauthenticatedError } from "@hercule/contract";
 import { readBearerToken } from "../http/bearer";
 import { buildErrorResponse, respondToFailures } from "../http/envelope";

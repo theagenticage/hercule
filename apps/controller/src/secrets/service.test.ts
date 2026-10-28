@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Layer, Option, Redacted } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { Validation } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { TestDatabase } from "../db/testing";

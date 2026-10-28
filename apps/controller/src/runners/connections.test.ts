@@ -22,7 +22,7 @@ import type {
   RunnerLifecycle,
   RunnerWatermark,
 } from "@hercule/contract";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   PROTOCOL_VERSION,
   REPOSITORY_SKILLS_CAPABILITY,

@@ -1,19 +1,19 @@
 import { api } from "@hercule/contract";
 import { Effect } from "effect";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpApi from "effect/unstable/httpapi/HttpApi";
-import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import * as HttpApiMiddleware from "effect/unstable/httpapi/HttpApiMiddleware";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpApi from "effect/http-api/HttpApi";
+import * as HttpApiClient from "effect/http-api/HttpApiClient";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
+import * as HttpApiMiddleware from "effect/http-api/HttpApiMiddleware";
 import { assert, describe, expectTypeOf, it, vi } from "vitest";
 import type { RequiredClientMiddleware } from "./client";
 import { ApiError, ConnectionError, RequestError, createClient, type FetchLike } from "./index";
 
 // Wraps the real `HttpApiClient.endpoint` in a spy, so a test can see which
 // operations the client builds. Every call still reaches the real function.
-vi.mock("effect/unstable/httpapi/HttpApiClient", async (importOriginal) => {
+vi.mock("effect/http-api/HttpApiClient", async (importOriginal) => {
   const actual = await importOriginal<typeof HttpApiClient>();
   return { ...actual, endpoint: vi.fn(actual.endpoint) };
 });

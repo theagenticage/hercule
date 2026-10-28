@@ -38,7 +38,8 @@ describe("deriveConfigJsonSchema", () => {
       token: { type: "string", title: "API token", description: "Used for every call" },
       nickname: { type: "string", description: "Optional nickname" },
       ratio: { type: "number", title: "Ratio" },
-      count: { type: "integer" },
+      // `Schema.Int` is a safe integer, and the derived schema now says so.
+      count: { type: "integer", minimum: -9007199254740991, maximum: 9007199254740991 },
       enabled: { type: "boolean" },
       mode: { type: "string", enum: ["a", "b", "c"], title: "Mode" },
       tags: { type: "array", items: { type: "string" }, description: "Tags" },
@@ -60,7 +61,7 @@ describe("deriveConfigJsonSchema", () => {
   );
 
   // Every plugin with nothing to configure uses this shape, and Effect derives
-  // it as "an object or an array" rather than as an empty object schema.
+  // it as "anything but null" rather than as an empty object schema.
   it("accepts a struct with no properties", () => {
     const result = deriveConfigJsonSchema(Schema.Struct({}));
 

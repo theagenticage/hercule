@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Logger, Result } from "effect";
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import type * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { TEST_TOKEN } from "../actions/testing";
 import {
   answerUserRequests,

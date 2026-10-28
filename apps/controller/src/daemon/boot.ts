@@ -8,8 +8,8 @@
  * belongs to the layer above them.
  */
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { nowIso, withTransaction } from "../db";
 import { endStrandedInputs } from "../sessions";
 import { subscriptionRepository } from "../subscriptions";

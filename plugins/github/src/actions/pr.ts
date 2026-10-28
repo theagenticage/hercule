@@ -4,7 +4,7 @@
  * pushed.
  */
 import { Clock, Effect, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import { ActionError, type DescribeLinePart } from "@hercule/plugin-host";
 import { readGithubExplanation, type GithubResponse } from "../api";
 import {

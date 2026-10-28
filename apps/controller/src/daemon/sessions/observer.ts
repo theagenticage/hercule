@@ -12,7 +12,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as SqlClient from "effect/sql/SqlClient";
 import { makeAssistantSessionObserver } from "../../assistants";
 import type { ConversationMessages } from "../../conversations";
 import { makeRunSessionObserver, RunService } from "../../runs";

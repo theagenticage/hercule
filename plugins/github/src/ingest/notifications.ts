@@ -26,7 +26,7 @@
  * anyway.
  */
 import { Clock, Effect, Option, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import type { EmittedEvent, IngestContext, PollResult } from "@hercule/plugin-host";
 import { buildItemEvent, buildItemPlace, buildItemRef, buildRepoEvent } from "../subject";
 import { recordFollowedHints } from "./followed";

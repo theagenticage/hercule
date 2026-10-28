@@ -229,34 +229,34 @@ describe("check-bundle-budget --main-startup", () => {
   it("passes a startup file within the budget, whatever the lazy chunks beside it weigh", async () => {
     const { stdout } = await checkMainStartup(await createMainBuild(150 * 1024));
 
-    expect(stdout).toContain("is 150.0 kB minified; the budget is 160.0 kB.");
+    expect(stdout).toContain("is 150.0 kB minified; the budget is 170.0 kB.");
   });
 
   it("fails a startup file over the budget, and names the file, its size and the spec", async () => {
-    const file = await createMainBuild(170 * 1024);
+    const file = await createMainBuild(180 * 1024);
 
     const stderr = await readMainStartupFailure(file);
 
     expect(stderr).toContain(
-      `${relative(root, file)} is 170.0 kB minified, over main's startup budget of 160.0 kB`,
+      `${relative(root, file)} is 180.0 kB minified, over main's startup budget of 170.0 kB`,
     );
     expect(stderr).toContain(`Spec 17 §Performance owns the number, in the "Main's startup" row`);
   });
 
   it("counts the chunks the startup file imports statically", async () => {
-    const file = await createMainBuild(100 * 1024, 70 * 1024);
+    const file = await createMainBuild(100 * 1024, 80 * 1024);
 
     const stderr = await readMainStartupFailure(file);
 
     expect(stderr).toContain(
-      `${relative(root, file)}, with the chunk it imports statically, is 170.0 kB minified, over main's startup budget of 160.0 kB`,
+      `${relative(root, file)}, with the chunk it imports statically, is 180.0 kB minified, over main's startup budget of 170.0 kB`,
     );
   });
 
   it("with --guide, warns about a startup file over the budget and passes it", async () => {
-    const { stderr } = await checkMainStartup(await createMainBuild(170 * 1024), "--guide");
+    const { stderr } = await checkMainStartup(await createMainBuild(180 * 1024), "--guide");
 
-    expect(stderr).toContain("over main's startup budget of 160.0 kB");
+    expect(stderr).toContain("over main's startup budget of 170.0 kB");
     expect(stderr).toContain("The budget is a guide for now, so the check passes.");
   });
 

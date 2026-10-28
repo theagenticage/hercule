@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import * as Statement from "effect/unstable/sql/Statement";
+import * as Statement from "effect/sql/Statement";
 import type {
   AnswerOperation,
   DescribeLine,

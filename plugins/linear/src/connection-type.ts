@@ -9,7 +9,7 @@
  * ids and a rename in Linear changes nothing.
  */
 import { Effect, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import {
   ConnectionValidationFailed,
   PluginError,

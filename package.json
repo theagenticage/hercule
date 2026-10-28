@@ -21,14 +21,14 @@
     "compare:bureau": "pnpm --filter @hercule/desktop compare:bureau"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.7",
     "@electron/asar": "3.4.1",
     "@electron/fuses": "1.8.0",
     "@eslint/js": "10.0.1",
     "@types/bun": "1.4.4",
     "@types/node": "26.4.1",
-    "@vitest/coverage-istanbul": "4.1.11",
-    "effect": "4.0.0-rc.112",
+    "@vitest/coverage-istanbul": "5.0.5",
+    "effect": "4.0.7",
     "eslint": "10.9.1",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-react-hooks": "7.1.1",
@@ -40,14 +40,14 @@
     "playwright": "1.63.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.69.0",
-    "vitest": "4.1.11"
+    "vitest": "5.0.5"
   },
   "pnpm": {
     "ignoredOptionalDependencies": [
       "@anthropic-ai/claude-agent-sdk-*"
     ],
     "overrides": {
-      "effect": "4.0.0-rc.112",
+      "effect": "4.0.7",
       "typescript": "6.0.3"
     },
     "ignoredBuiltDependencies": [

@@ -5,7 +5,7 @@
  * judge a definition against the same references.
  */
 import * as Effect from "effect/Effect";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import { isId, type WorkflowDefinition, type WorkflowIssues } from "@hercule/contract";
 import { agentRepository } from "../agents";
 import { connectionRepository } from "../connections";

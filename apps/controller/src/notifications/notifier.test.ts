@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { NotificationCreateInput, NotificationSubject } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { withTransaction } from "../db";

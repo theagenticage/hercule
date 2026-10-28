@@ -7,7 +7,7 @@
  * reused and a landed migration is never edited.
  */
 import * as Effect from "effect/Effect";
-import type { ResolvedMigration } from "effect/unstable/sql/Migrator";
+import type { ResolvedMigration } from "effect/sql/Migrator";
 import initial from "./0001-initial";
 import usersAndCredentials from "./0002-users-and-credentials";
 import tasksAndProjects from "./0003-tasks-and-projects";

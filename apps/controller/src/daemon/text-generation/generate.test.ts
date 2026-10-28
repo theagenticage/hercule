@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as SqlClient from "effect/sql/SqlClient";
 import type { TextGenerationOutcome, TextGenerationRequest } from "@hercule/protocol";
 import { TestDatabase } from "../../db/testing";
 import { AuditLogLayer } from "../../events";

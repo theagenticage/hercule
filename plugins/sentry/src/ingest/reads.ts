@@ -4,7 +4,7 @@
  * one request, and the poll caps how many it makes.
  */
 import { Effect } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import { callSentry, decodeSentryBody, type SentryFailure } from "../api";
 import type { LatestEvent } from "../kinds";
 import type { OrganizationAccess } from "../organization";

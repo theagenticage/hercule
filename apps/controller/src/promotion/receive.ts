@@ -44,7 +44,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { HomePaths } from "@hercule/home";
 import { buildSkillArchive, MAX_SKILL_BYTES, verifySkillRevisionArchive } from "@hercule/protocol";
 import { buildAttachmentPath, buildAttachmentsDirectory } from "../attachments";

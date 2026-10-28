@@ -3,7 +3,7 @@
  * request's head commit.
  */
 import { Clock, Effect, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import { ActionError } from "@hercule/plugin-host";
 import type { GithubRequest } from "../api";
 import { isFailedConclusion, type GithubCheckSuite } from "../github-objects";

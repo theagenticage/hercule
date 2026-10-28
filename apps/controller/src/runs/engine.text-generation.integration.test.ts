@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Deferred, Effect, FiberMap, Layer } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { Run, StepRecord } from "@hercule/contract";
 import { buildWorkspaceActionCapability, WORKSPACE_LIFECYCLE_CAPABILITY } from "@hercule/protocol";
 import { CurrentActor } from "../actor";

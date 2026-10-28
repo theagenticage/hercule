@@ -16,8 +16,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as Statement from "effect/unstable/sql/Statement";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import { MAX_LEG_LIVE_RUNS, type Grant, type RunStatus } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { TaskTrackingRunsLayer } from "../daemon/runs";

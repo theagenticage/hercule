@@ -13,9 +13,9 @@
  * router and the delivery agree on the counts.
  */
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
-import type { Fragment } from "effect/unstable/sql/Statement";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
+import type { Fragment } from "effect/sql/Statement";
 import { DEFAULT_SPAWN_BOUND, type SpawnBound } from "@hercule/contract";
 import type { Settings } from "../settings";
 

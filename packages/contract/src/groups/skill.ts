@@ -15,9 +15,9 @@
  */
 import { Schema } from "effect";
 import { MAX_SKILLS, SkillFileMode, SkillName, SkillRevisionHash } from "@hercule/protocol";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
-import * as HttpApiSchema from "effect/unstable/httpapi/HttpApiSchema";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
+import * as HttpApiSchema from "effect/http-api/HttpApiSchema";
 import {
   CapExceeded,
   Conflict,
@@ -259,7 +259,7 @@ export const SkillImportInput = Schema.Struct({
   ),
   sourceBranch: Schema.optionalKey(
     Schema.String.check(
-      Schema.isLengthBetween(1, MAX_SKILL_SOURCE_FIELD_LENGTH),
+      Schema.isBetweenLength(1, MAX_SKILL_SOURCE_FIELD_LENGTH),
       refuseUnsafeUrlText("sourceBranch"),
     ),
   ),

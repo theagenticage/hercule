@@ -20,7 +20,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import type { StepError, WorkflowDefinition } from "@hercule/contract";
 import { MAX_TEXT_GENERATION_TEXT_LENGTH } from "@hercule/protocol";
 import { nowIso } from "../db";

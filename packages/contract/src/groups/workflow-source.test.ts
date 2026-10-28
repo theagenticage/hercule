@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Result } from "effect";
-import * as FastCheck from "effect/testing/FastCheck";
+import * as FastCheck from "fast-check";
 import { nestInLists } from "@hercule/protocol/testing";
 import {
   decodeWorkflowDefinition,

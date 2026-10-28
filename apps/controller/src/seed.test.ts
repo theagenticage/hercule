@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { ALL_GRANTS } from "@hercule/contract";
 import { TestDatabase } from "./db/testing";
 import { withTransaction } from "./db";

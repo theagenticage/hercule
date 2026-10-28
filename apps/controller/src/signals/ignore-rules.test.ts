@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 import type { Grant, IgnoreRuleCreateInput, SignalMatch } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { mintUuid, uuidToString } from "../db";

@@ -19,8 +19,8 @@
  * The schema itself rejects unknown keys; `closedStruct` explains why.
  */
 import { Schema } from "effect";
-import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
-import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
+import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { AccessMode, MAX_FACT_LENGTH } from "@hercule/protocol";
 import { closedStruct, optional } from "../closed";
 import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
@@ -87,7 +87,7 @@ export type ThreadRows = Schema.Schema.Type<typeof ThreadRows>;
  */
 export const InstanceModel = closedStruct({
   instanceId: Id,
-  model: Schema.String.check(Schema.isLengthBetween(1, MAX_FACT_LENGTH)),
+  model: Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH)),
 });
 
 export type InstanceModel = Schema.Schema.Type<typeof InstanceModel>;

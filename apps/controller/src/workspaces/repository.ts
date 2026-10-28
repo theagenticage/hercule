@@ -10,8 +10,8 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import {
   WorkspaceRemoval,
   WorkspaceProvision,
@@ -280,6 +280,11 @@ const RemovalAudit = Schema.Struct({
   refusalMessage: Schema.optionalKey(Schema.String),
 });
 export type RemovalAudit = Schema.Schema.Type<typeof RemovalAudit>;
+const decodeRemovalAudit = Schema.decodeUnknownEffect(Schema.fromJsonString(RemovalAudit));
+const decodeWorkspaceRemoval = Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceRemoval));
+const decodeWorkspaceProvision = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(WorkspaceProvision),
+);
 export interface StoredRemoval {
   readonly frame: WorkspaceRemoval;
   readonly previousStatus: "provisioning" | "ready" | "failed";
@@ -361,12 +366,8 @@ const make = Effect.gen(function* () {
           SELECT removal_instruction, disposal_previous_status, disposal_audit FROM workspaces WHERE id = ${uuidFromString(id)}`;
         const row = rows[0];
         if (row?.removal_instruction == null) return Option.none();
-        const frame = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceRemoval))(
-          row.removal_instruction,
-        ).pipe(Effect.orDie);
-        const audit = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(RemovalAudit))(
-          row.disposal_audit,
-        ).pipe(Effect.orDie);
+        const frame = yield* decodeWorkspaceRemoval(row.removal_instruction).pipe(Effect.orDie);
+        const audit = yield* decodeRemovalAudit(row.disposal_audit).pipe(Effect.orDie);
         return Option.some({ frame, audit, previousStatus: row.disposal_previous_status });
       }),
 
@@ -406,9 +407,7 @@ const make = Effect.gen(function* () {
         }>`SELECT removal_instruction FROM workspaces
           WHERE runner_id = ${uuidFromString(runnerId)} AND status = 'disposing' ORDER BY created_at`;
         return yield* Effect.forEach(rows, (row) =>
-          Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceRemoval))(
-            row.removal_instruction,
-          ).pipe(Effect.orDie),
+          decodeWorkspaceRemoval(row.removal_instruction).pipe(Effect.orDie),
         );
       }),
 
@@ -516,9 +515,7 @@ const make = Effect.gen(function* () {
           UPDATE workspaces SET preparation_instruction = COALESCE(preparation_instruction, ${JSON.stringify(frame)})
           WHERE id = ${uuidFromString(id)} RETURNING preparation_instruction
         `;
-        return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceProvision))(
-          rows[0]?.preparation_instruction,
-        ).pipe(Effect.orDie);
+        return yield* decodeWorkspaceProvision(rows[0]?.preparation_instruction).pipe(Effect.orDie);
       }),
 
     /** Returns the frozen creation instruction, or none for a legacy workspace. */
@@ -531,11 +528,7 @@ const make = Effect.gen(function* () {
         `;
         const frame = rows[0]?.preparation_instruction;
         if (frame === undefined || frame === null) return Option.none();
-        return Option.some(
-          yield* Schema.decodeUnknownEffect(Schema.fromJsonString(WorkspaceProvision))(frame).pipe(
-            Effect.orDie,
-          ),
-        );
+        return Option.some(yield* decodeWorkspaceProvision(frame).pipe(Effect.orDie));
       }),
 
     insert: (workspace: {

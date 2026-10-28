@@ -8,7 +8,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { withTransaction } from "../../../db";
 import {
   at,

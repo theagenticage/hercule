@@ -20,7 +20,7 @@
  */
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 /**
  * The database holds connections, which this migration cannot give an

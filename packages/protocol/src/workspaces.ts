@@ -33,14 +33,14 @@ export const supportsWorkspaceLifecycle = (capabilities: ReadonlyArray<string>):
 
 /** An explicitly supplied absolute path on one supported runner. */
 export const WorkspacePath = Schema.String.check(
-  Schema.isLengthBetween(1, 4096),
+  Schema.isBetweenLength(1, 4096),
   // eslint-disable-next-line no-control-regex
   Schema.isPattern(/^\/[^\u0000]*$/, { title: "workspace path", description: "an absolute path" }),
 );
 
 /** A configured Git remote name, passed to Git as an argument rather than shell text. */
 export const GitRemoteName = Schema.String.check(
-  Schema.isLengthBetween(1, 255),
+  Schema.isBetweenLength(1, 255),
   // eslint-disable-next-line no-control-regex
   Schema.isPattern(/^(?!-)[^\u0000-\u0020\u007f]+$/, { title: "Git remote name" }),
 );
@@ -269,7 +269,7 @@ export const RepositorySkillsPreview = Schema.Struct({
   _tag: Schema.Literal("repositorySkillsPreview"),
   requestId: Fact,
   checkouts: Schema.Array(RepositorySkillsPreviewCheckout).check(
-    Schema.isLengthBetween(1, MAX_CHECKOUTS),
+    Schema.isBetweenLength(1, MAX_CHECKOUTS),
   ),
 });
 

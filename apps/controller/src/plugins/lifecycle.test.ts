@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Cause, Deferred, Duration, Effect, Fiber, Option, Redacted, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   HOST_API,
   PluginError,

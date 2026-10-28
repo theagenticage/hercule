@@ -22,7 +22,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { isSqlError, type SqlError } from "effect/unstable/sql/SqlError";
+import { isSqlError, type SqlError } from "effect/sql/SqlError";
 import {
   formatIssue,
   isApiError,

@@ -36,7 +36,7 @@
  * `checks-own`, outside the per-repository keys.
  */
 import { Clock, Effect, Option, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import { PluginError, type IngestContext, type PollResult } from "@hercule/plugin-host";
 import { GithubCheckSuite, isFailedConclusion, ListedCheckRun } from "../github-objects";
 import { isUserAccount, type GithubIdentity } from "../identity";

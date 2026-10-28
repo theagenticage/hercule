@@ -9,7 +9,7 @@
  */
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Forbidden, NotFound, RunStatus, Unauthenticated } from "@hercule/contract";
 
 /** What `subscription.create` reads about the run a run target names. */

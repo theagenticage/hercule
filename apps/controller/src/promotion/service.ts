@@ -6,8 +6,8 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import type { Forbidden, MintedPromotionToken, Unauthenticated } from "@hercule/contract";
 import { requireUserActor, buildActorStamp } from "../actor";
 import { nowIso, withTransaction } from "../db";

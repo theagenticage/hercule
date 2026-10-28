@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { buildHomePaths } from "@hercule/home";
 import type { Assistant, Conversation } from "@hercule/contract";
 import { AssistantService } from "../assistants";

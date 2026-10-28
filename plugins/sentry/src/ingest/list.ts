@@ -3,7 +3,7 @@
  * the issues that were in the set at the last poll and may have left it.
  */
 import { Effect, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import { PluginError } from "@hercule/plugin-host";
 import { callSentry, decodeSentryBody, readPages, type SentryFailure } from "../api";
 import { MAX_LIST_PAGES, type OrganizationAccess } from "../organization";

@@ -14,8 +14,8 @@
 import { describe, expect, it } from "vitest";
 import { Clock, Duration, Effect, Exit, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { ConstraintError, LockTimeoutError, SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import { ConstraintError, LockTimeoutError, SqlError } from "effect/sql/SqlError";
 import { DEFAULT_SPAWN_BOUND, type TriggerKey } from "@hercule/contract";
 import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { buildAnnouncementRecorder, inTransaction, TestDatabase } from "../db/testing";

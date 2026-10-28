@@ -14,7 +14,7 @@ import {
   type Issue,
 } from "@hercule/contract";
 import { Schema } from "effect";
-import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as HttpClientError from "effect/http/HttpClientError";
 
 /** The wire envelope, exactly as the API sends it. */
 export interface ErrorEnvelope {

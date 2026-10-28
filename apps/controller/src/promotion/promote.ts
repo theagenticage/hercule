@@ -116,6 +116,12 @@ const Refusal = Schema.Union([
 
 const decodeRefusal = Schema.decodeUnknownEffect(Schema.fromJsonString(Refusal));
 
+/** Decodes the JSON text of the old controller's answer to a switch request. */
+const decodeSwitchAnswer = Schema.decodeUnknownEffect(Schema.fromJsonString(SwitchAnswer));
+
+/** Decodes the JSON text of the old controller's answer to the preview request. */
+const decodePromotionPreview = Schema.decodeUnknownEffect(Schema.fromJsonString(PromotionPreview));
+
 /** Returns `text` with a full stop at the end, unless it already ends a sentence. */
 const endSentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
 
@@ -298,9 +304,13 @@ export const promote = (options: PromoteOptions): Effect.Effect<void, PromoteErr
         })),
       );
 
-    /** Reads a JSON answer from the old controller with `schema`. */
-    const readAnswer = <S extends Schema.Top>(answer: Answer, schema: S) =>
-      Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(answer.text).pipe(
+    /**
+     * Decodes the text of an answer from the old controller with `decode`, and
+     * returns the decoded value. Fails with `PromoteError` when the text does
+     * not decode, which means the old controller runs another version of Hercule.
+     */
+    const readAnswer = <A>(answer: Answer, decode: (text: string) => Effect.Effect<A, unknown>) =>
+      decode(answer.text).pipe(
         Effect.mapError(() => refuse(`${from} sent an answer this version of Hercule cannot read`)),
       );
 
@@ -339,7 +349,7 @@ export const promote = (options: PromoteOptions): Effect.Effect<void, PromoteErr
       if (answer.ok) {
         // A switch repeated with the same token gets the seal of the first
         // one, which may have come from another machine with another address.
-        const { newAddress } = yield* readAnswer(answer, SwitchAnswer);
+        const { newAddress } = yield* readAnswer(answer, decodeSwitchAnswer);
         return newAddress === announceAddress
           ? ({ _tag: "Sealed" } as const)
           : ({ _tag: "SealedElsewhere", newAddress } as const);
@@ -427,7 +437,7 @@ export const promote = (options: PromoteOptions): Effect.Effect<void, PromoteErr
       out(`Contacting ${from}...`);
       const previewed = yield* fetchAnswer("GET", TRANSFER_PATH);
       if (!previewed.ok) return yield* refuse((yield* readRefusal(previewed)).message);
-      const preview = yield* readAnswer(previewed, PromotionPreview);
+      const preview = yield* readAnswer(previewed, decodePromotionPreview);
       out(`Controller ${preview.controllerId} at ${from}.`);
       if (preview.runners.length === 0) out("It has no runners.");
       else {

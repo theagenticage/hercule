@@ -40,12 +40,12 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Reactivity from "effect/unstable/reactivity/Reactivity";
+import * as Reactivity from "effect/reactivity/Reactivity";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { SqlError } from "effect/unstable/sql/SqlError";
-import * as Statement from "effect/unstable/sql/Statement";
+import * as SqlClient from "effect/sql/SqlClient";
+import { SqlError } from "effect/sql/SqlError";
+import * as Statement from "effect/sql/Statement";
 import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient";
 import { withAnnouncements } from "./after-commit";
 
@@ -261,6 +261,7 @@ const buildClient = (
 ): Effect.Effect<SqlClient.SqlClient, never, Reactivity.Reactivity> =>
   Effect.map(
     SqlClient.make({
+      driver: "sqlite-bun",
       acquirer: reads,
       transactionAcquirer: writer.reserve,
       compiler: Statement.makeCompilerSqlite(),
@@ -372,6 +373,9 @@ export const openDatabase = <E = never, R = never>(
         Effect.catchDefect((defect) =>
           Effect.fail(createDatabaseError(files.databaseFile, defect)),
         ),
+        Effect.catchTag("SqlError", (error) =>
+          Effect.fail(createDatabaseError(files.databaseFile, error)),
+        ),
       );
       return yield* buildClient(writer, reader.reserve);
     }),
@@ -471,21 +475,22 @@ const takeWriterGate = (
  *   the after-commit work runs after that, so a slow listener does not hold up
  *   the next write. Two transactions can therefore announce in either order.
  *
- * Upstream bug that the gate works around: Effect's `makeWithTransaction`
- * (`effect/unstable/sql/SqlClient`) acquires the connection inside
- * `Effect.uninterruptibleMask` without restoring it, so the driver's own wait
- * for the connection restores to "uninterruptible", and a transaction queued
- * behind another cannot be interrupted. It is present in 4.0.0-rc.112 through
- * 4.0.5 and is reported upstream as
- * https://github.com/Effect-TS/effect/issues/9514. In 4.0.5 the module moved
- * from `effect/unstable/sql/SqlClient` to `effect/sql/SqlClient`. The gate
- * waits first, in the caller's own interruptibility, so by the time Effect asks
- * the driver for the writer it is free. The interruptible wait can go once
- * Effect ships a fix; the gate itself stays, because
- * {@link holdWriter} uses it too. Only the wait for the gate is interruptible:
- * the permit itself is taken inside the uninterruptible region and released by
- * a finalizer, so no interrupt can land between taking it and the code that
- * gives it back (see {@link takeWriterGate}).
+ * The writer gate:
+ *
+ * - The gate has one permit. {@link holdWriter} keeps it while it holds the
+ *   writer, and every outermost transaction keeps it from before it asks the
+ *   driver for the writer until it is done. So a transaction waits for the
+ *   writer's current user (another transaction or a `holdWriter`) at the gate,
+ *   and when it asks the driver, the writer is free.
+ * - The wait for the permit is interruptible. `withTransaction` runs inside
+ *   `Effect.uninterruptibleMask`, so a plain wait on the gate would be
+ *   uninterruptible too, and a transaction queued behind another user could
+ *   not be interrupted. `restore` runs that wait in the caller's own
+ *   interruptibility.
+ * - Only that wait is interruptible. The permit itself is taken inside the
+ *   uninterruptible region and released by a finalizer, so no interrupt can
+ *   land between taking it and the code that gives it back (see
+ *   {@link takeWriterGate}).
  */
 export const withTransaction = <A, E, R>(
   sql: SqlClient.SqlClient,

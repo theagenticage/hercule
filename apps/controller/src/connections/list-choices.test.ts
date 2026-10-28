@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Layer, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { PluginError, type ConfigChoice } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";

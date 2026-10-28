@@ -16,8 +16,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Deferred, Effect, Exit, Fiber, Layer, Logger, Option, Redacted } from "effect";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import {
   SessionSpec,
   type ModelSelection,

@@ -106,7 +106,7 @@
  * missing from it, which holds the item's own `updated_at`.
  */
 import { Effect, Option, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import type { IngestContext, PollResult } from "@hercule/plugin-host";
 import { isUserAccount, type GithubIdentity } from "../identity";
 import { buildItemEvent, buildItemPlace, type GithubItem } from "../subject";

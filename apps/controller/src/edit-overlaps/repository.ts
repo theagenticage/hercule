@@ -4,8 +4,8 @@
  * written when sessions overlap, are the service's.
  */
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { uuidFromString, uuidToString } from "../db";
 import type { OverlapFile } from "../discussions";
 import { buildUnfinishedClause } from "../sessions";

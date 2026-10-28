@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Result } from "effect";
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import type * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { PluginError } from "@hercule/plugin-host";
 import {
   buildIngestHarness,

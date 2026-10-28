@@ -8,7 +8,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { buildHomePaths, HerculeHome } from "../config";
 import { withTransaction } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";

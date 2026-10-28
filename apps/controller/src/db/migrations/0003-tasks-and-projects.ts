@@ -21,7 +21,7 @@
  * one at a time, never edited, and each has its own actor and timestamp.
  */
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

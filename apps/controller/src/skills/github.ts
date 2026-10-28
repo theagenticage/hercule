@@ -24,10 +24,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import type * as HttpClientError from "effect/unstable/http/HttpClientError";
-import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as HttpClient from "effect/http/HttpClient";
+import type * as HttpClientError from "effect/http/HttpClientError";
+import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { MAX_SKILL_FILES } from "@hercule/contract";
 import {
   convertToSkillFileMode,

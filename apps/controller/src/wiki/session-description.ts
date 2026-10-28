@@ -5,8 +5,8 @@
  * the other parts; everything the Wiki says about itself is written here.
  */
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { prepareForQuoting, type Grant } from "@hercule/contract";
 import { wikiPageRepository, type WikiOverview } from "./repository";
 

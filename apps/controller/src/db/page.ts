@@ -41,8 +41,8 @@
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { Fragment } from "effect/unstable/sql/Statement";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { Fragment } from "effect/sql/Statement";
 import {
   MAX_PAGE_LIMIT,
   SortDirection,

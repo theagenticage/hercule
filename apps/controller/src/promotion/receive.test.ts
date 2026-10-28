@@ -16,8 +16,8 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { buildHomePaths, type HomePaths } from "@hercule/home";
 import {
   buildSkillArchive,

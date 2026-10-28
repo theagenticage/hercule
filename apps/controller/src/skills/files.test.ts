@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Deferred, Effect, Fiber, Layer } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { buildSkillArchive, type SkillFile } from "@hercule/protocol";
 import { buildHomePaths, HerculeHome } from "../config";
 import { withTransaction } from "../db";

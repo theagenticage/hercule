@@ -20,7 +20,7 @@
  * one write before the events are emitted (`commitPoll`).
  */
 import { Clock, Effect, Option, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import {
   PluginError,
   type AuthError,

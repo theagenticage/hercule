@@ -6,8 +6,8 @@
  * or a newly linked repository is used from the next poll on.
  */
 import { Effect, Schema } from "effect";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import {
   AuthError,
   PluginError,

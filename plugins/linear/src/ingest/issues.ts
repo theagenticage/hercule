@@ -36,7 +36,7 @@
  * because the next poll emits the outbox again.
  */
 import { Clock, Effect, Option } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import {
   PluginError,
   type AuthError,

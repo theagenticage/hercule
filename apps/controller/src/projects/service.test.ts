@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { MAX_PROJECT_NAME_LENGTH } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { uuidFromString, uuidToString } from "../db";

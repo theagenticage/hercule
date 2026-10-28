@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { SessionStart } from "@hercule/protocol";
 import type { Session } from "@hercule/contract";
 import { buildHomePaths, type HomePaths } from "@hercule/home";

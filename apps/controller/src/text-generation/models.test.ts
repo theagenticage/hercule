@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { ProviderDefinition } from "@hercule/plugin-host";
 import { TEXT_GENERATION_CAPABILITY, type ProbeResult } from "@hercule/protocol";
 import { nowIso, uuidFromString, withTransaction } from "../db";

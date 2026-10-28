@@ -13,8 +13,8 @@
  * version; adding the grant takes a migration, not a seed.
  */
 import { Effect } from "effect";
-import { SqlClient } from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import { SqlClient } from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { ALL_GRANTS, GRANTS_ONLY_THE_USER_GIVES, type Grant } from "@hercule/contract";
 import { withTransaction } from "./db";
 import { PermissionProfiles, type GrantsError } from "./permissions";

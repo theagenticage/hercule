@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { Users, UsersLayer } from "./repository";
 

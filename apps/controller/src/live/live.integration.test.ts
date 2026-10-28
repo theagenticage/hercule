@@ -36,7 +36,7 @@ import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
-import * as RpcClient from "effect/unstable/rpc/RpcClient";
+import * as RpcClient from "effect/rpc/RpcClient";
 import {
   CapExceeded,
   DESKTOP_APP_ORIGIN,
@@ -941,57 +941,64 @@ describe("what an event subscription receives", () => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
 
-      await onSocket(base, (client) =>
-        Effect.gen(function* () {
-          yield* client.hello({ v: 1, ticket });
+      await onSocket(
+        base,
+        (client) =>
+          Effect.gen(function* () {
+            yield* client.hello({ v: 1, ticket });
 
-          // A very slow subscriber: it takes a delta and then spends so long on
-          // it that the controller cannot deliver the next thousand.
-          const seen: Array<Delta> = [];
-          const slow = yield* Effect.forkChild(
-            Stream.runForEach(client.subscribe({ topic: "event" }), (message) =>
-              Effect.gen(function* () {
-                if (message._tag === "delta") seen.push(message);
-                yield* Effect.sleep("5 millis");
-              }),
-            ),
-          );
-          yield* Effect.promise(() => expectHeld(reader, 1, "event"));
+            // A very slow subscriber: it takes a delta and then spends so long on
+            // it that the controller cannot deliver the next thousand.
+            const seen: Array<Delta> = [];
+            const slow = yield* Effect.forkChild(
+              Stream.runForEach(client.subscribe({ topic: "event" }), (message) =>
+                Effect.gen(function* () {
+                  if (message._tag === "delta") seen.push(message);
+                  yield* Effect.sleep("5 millis");
+                }),
+              ),
+            );
+            yield* Effect.promise(() => expectHeld(reader, 1, "event"));
 
-          // Well past the limit of a thousand queued deltas, by enough that the
-          // slow reads cannot keep the queue under it.
-          yield* Effect.promise(async () => {
-            for (let batch = 0; batch < 45; batch++) {
-              await Promise.all(
-                Array.from({ length: 50 }, (_, index) =>
-                  createTask(base, token, `flood ${String(batch)}-${String(index)}`),
-                ),
-              );
-            }
-          });
+            // Well past the limit of a thousand queued deltas, by enough that the
+            // slow reads cannot keep the queue under it.
+            yield* Effect.promise(async () => {
+              for (let batch = 0; batch < 45; batch++) {
+                await Promise.all(
+                  Array.from({ length: 50 }, (_, index) =>
+                    createTask(base, token, `flood ${String(batch)}-${String(index)}`),
+                  ),
+                );
+              }
+            });
 
-          const failure = yield* awaitOutcome(Fiber.join(slow), "20 seconds");
-          expect(failure).toBeInstanceOf(CapExceeded);
-          expect((failure as CapExceeded).error.code).toBe("cap_exceeded");
-          expect((failure as CapExceeded).error.details).toMatchObject({ cap: 1000 });
+            const failure = yield* awaitOutcome(Fiber.join(slow), "20 seconds");
+            expect(failure).toBeInstanceOf(CapExceeded);
+            expect((failure as CapExceeded).error.code).toBe("cap_exceeded");
+            expect((failure as CapExceeded).error.details).toMatchObject({ cap: 1000 });
 
-          // The controller no longer keeps anything for it.
-          yield* Effect.promise(() => expectHeld(reader, 0, "event"));
+            // The controller no longer keeps anything for it.
+            yield* Effect.promise(() => expectHeld(reader, 0, "event"));
 
-          // And the client can resume where it left off: what it missed is
-          // still in the log, replayed from its last cursor.
-          const last = expectPresent(seen[seen.length - 1]);
-          const again = yield* collectMessages(client, {
-            topic: "event",
-            cursor: expectPresent(last.cursor),
-          });
-          expect(
-            yield* Effect.promise(() => waitWithin(2000, () => again.received.length >= 1)),
-          ).toBe(true);
-          const replayed = expectPresent(listDeltas(again)[0]);
-          expect(listEventItems(replayed)[0]?.id).toBe(Number(last.cursor) + 1);
-          yield* Fiber.interrupt(again.fiber);
-        }),
+            // And the client can resume where it left off: what it missed is
+            // still in the log, replayed from its last cursor.
+            const last = expectPresent(seen[seen.length - 1]);
+            const again = yield* collectMessages(client, {
+              topic: "event",
+              cursor: expectPresent(last.cursor),
+            });
+            expect(
+              yield* Effect.promise(() => waitWithin(2000, () => again.received.length >= 1)),
+            ).toBe(true);
+            const replayed = expectPresent(listDeltas(again)[0]);
+            expect(listEventItems(replayed)[0]?.id).toBe(Number(last.cursor) + 1);
+            yield* Fiber.interrupt(again.fiber);
+          }),
+        // The RPC client reads frames one at a time into a small queue, so a
+        // subscriber that sleeps on every message delays the pongs too. With
+        // the default five seconds, the client would drop this healthy
+        // connection as silent before the controller ends the subscription.
+        "60 seconds",
       );
     });
   }, 120_000);

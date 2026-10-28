@@ -13,9 +13,9 @@
  * the key's Effect Schema, so a stored value that does not match the schema is
  * an error rather than a value the caller misreads.
  */
-import { Context, Effect, Layer, Option, Schema } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import { Context, Effect, Layer, Option, Record, Schema } from "effect";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { Id, SETTING_VALUES } from "@hercule/contract";
 import { nowIso, uuidFromString } from "../db";
 
@@ -67,13 +67,20 @@ const DefaultRunnerId = Schema.fromJsonString(Schema.NullOr(Id));
 const createSettingError = (message: string): SettingError =>
   new SettingError({ scope: "controller", key: DEFAULT_RUNNER_ID, message });
 
+/** Wraps each schema of one scope to convert from and to JSON text, keeping its key. */
+const buildStoredCodecs = (
+  schemas: Readonly<Record<string, Schema.Codec<unknown>>>,
+): Readonly<Record<string, Schema.Codec<unknown, string>>> =>
+  Record.map(schemas, (schema) => Schema.fromJsonString(schema));
+
 /**
- * Builds the codec for one key: its declared schema, wrapped to convert from
- * and to the JSON text in the `value` column. The lookup takes a plain string,
- * so only the caller's typed key keeps the value type correct.
+ * The codec of every declared key, built once when the module loads so that
+ * Effect compiles each parser once. Each codec is the key's declared schema,
+ * wrapped to convert from and to the JSON text in the `value` column. The
+ * lookup takes a plain string, so only the caller's typed key keeps the value
+ * type correct.
  */
-const buildStoredCodec = (scope: TypedScope, key: string): Schema.Codec<unknown, string> =>
-  Schema.fromJsonString((SETTING_SCHEMAS[scope] as Record<string, Schema.Codec<unknown>>)[key]!);
+const STORED_CODECS = Record.map(SETTING_SCHEMAS, buildStoredCodecs);
 
 /**
  * Decodes one stored value to the key's declared type. Fails with
@@ -84,7 +91,7 @@ const decode = (
   key: string,
   value: string,
 ): Effect.Effect<unknown, SettingError> =>
-  Schema.decodeUnknownEffect(buildStoredCodec(scope, key))(value).pipe(
+  Schema.decodeUnknownEffect(STORED_CODECS[scope][key]!)(value).pipe(
     Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
   );
 
@@ -97,7 +104,7 @@ const encode = (
   key: string,
   value: unknown,
 ): Effect.Effect<string, SettingError> =>
-  Schema.encodeUnknownEffect(buildStoredCodec(scope, key))(value).pipe(
+  Schema.encodeUnknownEffect(STORED_CODECS[scope][key]!)(value).pipe(
     Effect.mapError((error) => new SettingError({ scope, key, message: error.message })),
   );
 

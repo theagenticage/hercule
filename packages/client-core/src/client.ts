@@ -10,12 +10,13 @@
  */
 import { api, MAX_INPUT_ANSWER_WAIT, type Attachment } from "@hercule/contract";
 import { Context, Duration, Effect, Result } from "effect";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import type * as HttpApi from "effect/unstable/httpapi/HttpApi";
-import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
-import type * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import type * as HttpClientResponse from "effect/http/HttpClientResponse";
+import type * as HttpApi from "effect/http-api/HttpApi";
+import * as HttpApiClient from "effect/http-api/HttpApiClient";
+import type * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import type { ImageFile } from "./attachments/files";
 import { ApiError, toClientError } from "./errors";
 import type { TokenStore } from "./token-store";
@@ -29,14 +30,26 @@ import type { TokenStore } from "./token-store";
  */
 export const MAX_INPUT_ANSWER_WAIT_MS = Duration.toMillis(MAX_INPUT_ANSWER_WAIT);
 
+/**
+ * The decoded value of a call. A derived method is generic in its response
+ * mode, so matching it against a function type instantiates the mode with all
+ * three values, and the success type becomes a union of the decoded value, the
+ * raw response, and the pair of both. Removing the two shapes that carry the
+ * raw response leaves the decoded value.
+ */
+type DecodedOnly<Success> = Exclude<
+  Success,
+  HttpClientResponse.HttpClientResponse | readonly [unknown, HttpClientResponse.HttpClientResponse]
+>;
+
 /** The derived client, with every Effect method turned into a promise method. */
 type Promisified<T> = {
   readonly [K in keyof T]: T[K] extends (
     request: infer Request,
   ) => Effect.Effect<infer Success, unknown, unknown>
     ? void extends Request
-      ? () => Promise<Success>
-      : (request: Omit<Request, "responseMode">) => Promise<Success>
+      ? () => Promise<DecodedOnly<Success>>
+      : (request: Omit<Request, "responseMode" | "sseOptions">) => Promise<DecodedOnly<Success>>
     : Promisified<T[K]>;
 };
 

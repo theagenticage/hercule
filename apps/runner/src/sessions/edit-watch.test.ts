@@ -31,7 +31,7 @@ import { cleanTemporaries, createTemporaryDir, runGitOrThrow } from "../workspac
 import { takeInitialState, type InitialState } from "./checkout-edits";
 import { startEditWatch, type AttachedConnection, type EditWatchConnection } from "./edit-watch";
 
-const watchScopes: Array<Scope.Scope> = [];
+const watchScopes: Array<Scope.Closeable> = [];
 
 afterAll(async () => {
   await Promise.all(watchScopes.map((scope) => Effect.runPromise(Scope.close(scope, Exit.void))));

@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 import type { IgnoreRule } from "@hercule/contract";
 import { mintUuid, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";

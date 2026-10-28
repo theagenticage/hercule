@@ -6,7 +6,7 @@
  * `../testing`.
  */
 import { Result } from "effect";
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import type * as HttpClientRequest from "effect/http/HttpClientRequest";
 import type { ActionContext, ActionError } from "@hercule/plugin-host";
 
 /** The token every test's Connection holds. */

@@ -25,7 +25,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect, Exit, Fiber, Option } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type {
   ModelDescriptor,
   ProbeRequest,

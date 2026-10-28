@@ -20,8 +20,8 @@
  * through its start needs instead.
  */
 import * as Effect from "effect/Effect";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 import { flattenToOneLine } from "@hercule/contract";
 import { describeDiscussionsToSession } from "../../discussions";
 import { permissionRequestRepository } from "../../permissions";

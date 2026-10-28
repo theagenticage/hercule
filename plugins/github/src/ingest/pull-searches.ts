@@ -6,7 +6,7 @@
  * reaches the user wherever they live.
  */
 import { Effect, Schema } from "effect";
-import type * as HttpClient from "effect/unstable/http/HttpClient";
+import type * as HttpClient from "effect/http/HttpClient";
 import { REPO_NAME_PATTERN } from "../repo-name";
 import { FoundIssue } from "./feed-objects";
 import { decodeGithubValue, fetchListing, type FeedError } from "./requests";

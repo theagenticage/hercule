@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Layer, Option } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 import type { IgnoreRule, SignalMatch } from "@hercule/contract";
 import type { SignalDraft } from "@hercule/plugin-host";
 import { FakeBoundOperationsLayer } from "../bound-actions/testing";

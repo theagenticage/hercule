@@ -11,7 +11,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { SessionInput, SessionRespondToApprovalRequest } from "@hercule/protocol";
 import type { BoundAction, Notification, Session, Task } from "@hercule/contract";
 import { withTransaction } from "../db";

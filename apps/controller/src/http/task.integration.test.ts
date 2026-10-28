@@ -7,10 +7,10 @@
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpApiClient from "effect/http-api/HttpApiClient";
 import { api, type Task, type TaskPriority } from "@hercule/contract";
 import { completeSetup, get, post, send, withServer } from "./testing";
 

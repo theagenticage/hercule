@@ -26,7 +26,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { taskRepository } from "../tasks";

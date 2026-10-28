@@ -24,7 +24,7 @@
  * custom profile named `unrestricted` is not widened.
  */
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { nowIso } from "../time";
 
 /** The grants each shipped profile gains, by the profile's name. */

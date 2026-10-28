@@ -9,7 +9,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { SYSTEM_ACTOR } from "../actor";
 import { AfterCommit, resumeWrites, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
