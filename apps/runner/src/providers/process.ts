@@ -3,7 +3,7 @@
  * so a test can check what an adapter would run (above all, the vendor
  * installer) without running it.
  */
-import { readdirSync, readlinkSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -51,6 +51,23 @@ export const runProcess: Run = (command, env) =>
     },
     catch: (error) => (error instanceof Error ? error.message : String(error)),
   }).pipe(Effect.catch((message) => Effect.succeed({ code: 1, stdout: "", stderr: message })));
+
+/**
+ * Checks whether a spawn failed because the executable does not exist. Bun
+ * throws an error with code `ENOENT` when the command is missing from the
+ * path or from `PATH`.
+ *
+ * Bun throws the same `ENOENT` when the working directory of the spawn is
+ * missing, and the error does not say which of the two it was. So the answer
+ * is `true` only when `cwd` is `null` (the spawn sets no working directory)
+ * or the directory exists. The directory is checked only after a spawn has
+ * failed, so a successful spawn pays nothing.
+ */
+export const isExecutableNotFound = (error: unknown, cwd: string | null): boolean =>
+  error instanceof Error &&
+  "code" in error &&
+  error.code === "ENOENT" &&
+  (cwd === null || existsSync(cwd));
 
 /**
  * Returns the ids of the processes that hold `file` open: from `lsof` on

@@ -8,7 +8,9 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import type { OpenRequest, ProviderEvent, SessionSpec, Usage } from "@hercule/protocol";
+import type { InputNotDelivered } from "@hercule/protocol";
 import { now } from "../../report";
+import { buildInputStopped, buildSessionNotRunning } from "../adapter-error-builders";
 import { truncateFact, truncateMessage } from "../text";
 import type { Asked } from "./approvals";
 import {
@@ -615,7 +617,7 @@ export const makeCodexThreads = (options: {
   };
 
   const prepareUsage = Effect.gen(function* () {
-    if (phase !== "live") return yield* Effect.fail("The Codex session is stopping or exited.");
+    if (phase !== "live") return yield* Effect.fail(buildSessionNotRunning());
     if (preparation === "ready") return;
     if (preparation !== undefined) return yield* Deferred.await(preparation.done);
     if (restoreIds.size === 0) {
@@ -812,12 +814,9 @@ export const makeCodexThreads = (options: {
       inputs.add(ticket);
       return ticket;
     },
-    submitInput: (ticket: CodexInput, turnId?: string): Effect.Effect<void, string> =>
+    submitInput: (ticket: CodexInput, turnId?: string): Effect.Effect<void, InputNotDelivered> =>
       Effect.suspend(() => {
-        if (phase !== "live" || ticket.stop !== undefined)
-          return Effect.fail(
-            "The Codex input was stopped before it reached the harness. Send a new message to continue.",
-          );
+        if (phase !== "live" || ticket.stop !== undefined) return Effect.fail(buildInputStopped());
         ticket.submission = { turnId };
         return Effect.void;
       }),

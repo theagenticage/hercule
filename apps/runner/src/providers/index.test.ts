@@ -74,6 +74,7 @@ describe("the adapters in this runner build", () => {
     };
     const supervisor = makeSupervising(adapters).forConnection({
       scope,
+      runnerId: "runner-1",
       machine,
       githubTokenCopies: makeGithubTokenCopies({
         ask: () => Promise.reject(new Error("no controller")),

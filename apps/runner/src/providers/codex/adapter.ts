@@ -32,7 +32,16 @@ import type {
   TextGenerationOutcome,
   TextGenerationSpec,
 } from "@hercule/protocol";
-import { AnswerNotDelivered, SteerRefused } from "@hercule/protocol";
+import {
+  AdapterFailed,
+  AnswerNotDelivered,
+  HarnessLoginMissing,
+  HarnessNotInstalled,
+  HarnessProtocolError,
+  SessionNotRunning,
+  SteerRefused,
+  type AdapterError,
+} from "@hercule/protocol";
 import type { LoginCommand } from "../login";
 import type {
   AdapterTurnInput,
@@ -46,11 +55,19 @@ import type { ResolvedSkillReference } from "../../skills";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
-import { runProcess, spawnAppServer, stopChild, type Run } from "../process";
+import { isExecutableNotFound, runProcess, spawnAppServer, stopChild, type Run } from "../process";
 import { buildSkillSteerRefusedMessage } from "../steer-refused-message";
+import {
+  buildHarnessNotInstalled,
+  buildHarnessStartFailed,
+  buildInputLost,
+  buildInputRefused,
+  buildSessionNotRunning,
+  describeStartFailure,
+} from "../adapter-error-builders";
 import { truncateMessage } from "../text";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
-import { now } from "../../report";
+import { endSentence, now } from "../../report";
 import { ASKED } from "./approvals";
 import {
   buildAnswerEnvelope,
@@ -76,6 +93,7 @@ import {
   initializeAppServer,
   makeProbe,
   describeRpcError,
+  readAccount,
   STANDARD_TIER,
   type AppServer,
 } from "./probe";
@@ -99,6 +117,7 @@ import type {
   ApprovalsReviewer,
   AskForApproval,
   DynamicToolCallResponse,
+  GetAccountResponse,
   ItemCompletedNotification,
   ItemStartedNotification,
   JsonValue,
@@ -119,6 +138,13 @@ import type {
 export const CODEX = "codex";
 
 const CODEX_BINARY = "codex";
+
+/** The name the user knows this harness by, as it appears in the messages shown to them. */
+const CODEX_NAME = "Codex";
+
+/** Returns the message of a thrown value, whatever it is. */
+const describeError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 /**
  * How many of the app-server's last non-frame lines are kept, so they can be
@@ -215,25 +241,45 @@ const METHOD_NOT_FOUND = -32601;
  */
 const INVALID_REQUEST = -32600;
 
-/** Why an input did not reach Codex, and whether Codex may have taken it anyway. */
-interface InputFailure {
-  readonly message: string;
-  readonly maybeDelivered: boolean;
-}
-
-/** Wraps a failure that happened before the input was sent, so Codex has not seen it. */
-const buildNotSent = (message: string): InputFailure => ({ message, maybeDelivered: false });
+/**
+ * Converts the failure of a request that carried an input into an adapter
+ * error. An error Codex replied with proves it did not take the input, so it
+ * becomes `InputNotDelivered`. A failure with no `code` happened on this side
+ * of the connection (a timeout, a lost connection or a failed write), and the
+ * input may have arrived before it, so it becomes `HarnessProtocolError`.
+ */
+const buildInputError = (error: RpcError): AdapterError =>
+  error.code === undefined
+    ? buildInputLost(CODEX_NAME, error.message)
+    : buildInputRefused(CODEX_NAME, error.message);
 
 /**
- * Converts the failure of a request that carried an input. An error Codex
- * replied with proves it did not take the input. A failure with no `code`
- * happened on this side of the connection (a timeout, a lost connection or a
- * failed write), and the input may have arrived before it.
+ * Converts the failure of a request made while a session starts into an
+ * adapter error. An error Codex replied with (it has a `code`) means the
+ * app-server is running and refused the request, so it becomes
+ * `AdapterFailed`. A failure with no `code` means the connection broke or
+ * timed out, so it becomes `HarnessProtocolError`. `what` names the failed
+ * step and starts the message.
+ *
+ * The app-server answered a refusal, so its own message names the reason. A
+ * failure with no answer is explained better by what the process wrote to
+ * its error output (see `describeRpcError`).
  */
-const describeRequestFailure = (error: RpcError): InputFailure => ({
-  message: error.message,
-  maybeDelivered: error.code === undefined,
-});
+const buildStartError = (host: AppServer, what: string, error: RpcError): AdapterError =>
+  error.code === undefined
+    ? new HarnessProtocolError({
+        message: truncateMessage(endSentence(`${what}: ${describeRpcError(host, error)}`)),
+      })
+    : new AdapterFailed({ message: truncateMessage(endSentence(`${what}: ${error.message}`)) });
+
+/**
+ * Checks whether an `account/read` reply shows that Codex needs a login and
+ * has none. A Codex whose model provider needs no OpenAI login
+ * (`requiresOpenaiAuth` is false) has no account and still runs, so that case
+ * is not a missing login. An API key login is an account of type `apiKey`.
+ */
+const isLoginMissing = ({ account, requiresOpenaiAuth }: GetAccountResponse): boolean =>
+  account === null && requiresOpenaiAuth;
 
 /**
  * Checks whether Codex refused a `turn/steer` itself, with a JSON-RPC error.
@@ -442,7 +488,7 @@ const readUserInstructions = (
       if (!statSync(path).isFile()) throw new Error("it is not a regular file");
       return readFileSync(path, "utf8");
     },
-    catch: (error) => (error instanceof Error ? error.message : String(error)),
+    catch: describeError,
   }).pipe(
     Effect.catch((reason) =>
       Effect.as(
@@ -643,7 +689,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   const startHost = (
-    ctx: ProviderRunnerContext,
+    env: Readonly<Record<string, string | undefined>>,
     binary: string,
     sessionId: string | undefined,
     overrides: ReadonlyArray<string>,
@@ -662,7 +708,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         "check_for_update_on_startup=false",
         ...overrides,
       ],
-      prepareEnv(ctx),
+      env,
     );
     const rememberComplaint = (line: string): void => {
       complaints.push(line);
@@ -721,11 +767,15 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   /**
-   * Starts an app-server, failing with the error message if it cannot be
-   * started. A home directory the runner cannot write to is an expected
-   * failure, not a defect. `overrides` are more `-c` arguments for this one
-   * process; a probe has none. `textGeneration` is the watch that receives
-   * the notifications of a host that serves a text generation, not a session.
+   * Starts an app-server. Fails with `HarnessNotInstalled` when the binary
+   * does not exist, and with `AdapterFailed` for any other reason, such as a
+   * home directory the runner cannot write to: that is an expected failure,
+   * not a defect. `overrides` are more `-c` arguments for this one process; a
+   * probe has none. `textGeneration` is the watch that receives the
+   * notifications of a host that serves a text generation, not a session.
+   *
+   * The environment is prepared apart from the spawn, so that an `ENOENT`
+   * from creating the home folders is not taken for a missing binary.
    */
   const openHost = (
     ctx: ProviderRunnerContext,
@@ -733,10 +783,28 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     sessionId?: string,
     overrides: ReadonlyArray<string> = [],
     textGeneration?: TextGenerationWatch,
-  ): Effect.Effect<Host, string> =>
-    Effect.try({
-      try: () => startHost(ctx, binary, sessionId, overrides, textGeneration),
-      catch: (error) => (error instanceof Error ? error.message : String(error)),
+  ): Effect.Effect<Host, HarnessNotInstalled | AdapterFailed> =>
+    Effect.gen(function* () {
+      const env = yield* Effect.try({
+        try: () => prepareEnv(ctx),
+        catch: (error) =>
+          new AdapterFailed({
+            message: truncateMessage(
+              endSentence(
+                `${CODEX_NAME} could not prepare its folders on this runner: ${describeError(error)}`,
+              ),
+            ),
+          }),
+      });
+      return yield* Effect.try({
+        try: () => startHost(env, binary, sessionId, overrides, textGeneration),
+        catch: (error) =>
+          // Codex is spawned with no working directory, so a missing
+          // executable is the only cause of `ENOENT`.
+          isExecutableNotFound(error, null)
+            ? buildHarnessNotInstalled(CODEX_NAME)
+            : buildHarnessStartFailed(CODEX_NAME, describeError(error)),
+      });
     });
 
   const probe = makeProbe(openHost);
@@ -746,12 +814,8 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * `<librarySkillsFolder>/skills`, the session's skills from the Skill
    * Library, and from `<folder>/skills` for each of its repository skills
    * folders (spec 06 section 9.4), all in one request. Does nothing for a
-   * session with neither. Fails with a message when the app-server refuses
-   * the request.
-   *
-   * The app-server is already running here, so a refusal it answered names
-   * the real reason, and its recent stderr would only be an unrelated line.
-   * Its stderr is used only when no answer came, because the process is gone.
+   * session with neither. Fails with an `AdapterError` when the app-server
+   * refuses the request or does not answer it (see `buildStartError`).
    *
    * The app-server keeps these roots in memory only, so every new app-server
    * process needs this call, including one started to resume or fork a thread.
@@ -763,7 +827,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     host: Host,
     librarySkillsFolder: string | undefined,
     repositorySkillsFolders: ReadonlyArray<string> = [],
-  ): Effect.Effect<void, string> => {
+  ): Effect.Effect<void, AdapterError> => {
     const folders = [
       ...(librarySkillsFolder === undefined ? [] : [librarySkillsFolder]),
       ...repositorySkillsFolders,
@@ -775,18 +839,34 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
             extraRoots: folders.map((folder) => join(folder, "skills")),
           } satisfies SkillsExtraRootsSetParams),
           (error) =>
-            `Codex did not accept the session's skills folders: ${
-              error.code === undefined ? describeRpcError(host, error) : error.message
-            }`,
+            buildStartError(host, "Codex did not accept the session's skills folders", error),
         );
   };
+
+  /**
+   * Checks that Codex has the login it needs on this runner. Fails with
+   * `HarnessLoginMissing` when it needs one and has none, and with another
+   * `AdapterError` when the account cannot be read.
+   */
+  const requireLogin = (host: Host): Effect.Effect<void, AdapterError> =>
+    Effect.flatMap(
+      Effect.mapError(readAccount(host), (error) =>
+        buildStartError(host, "Codex could not tell whether it is logged in", error),
+      ),
+      (account) =>
+        isLoginMissing(account)
+          ? Effect.fail(
+              new HarnessLoginMissing({ message: "Codex is not logged in on this runner." }),
+            )
+          : Effect.void,
+    );
 
   const startSessionHost = (
     sessionId: string,
     spec: SessionSpec,
     ctx: ProviderRunnerContext,
     binary: string,
-  ): Effect.Effect<Host, string> =>
+  ): Effect.Effect<Host, AdapterError> =>
     Effect.suspend(() => {
       // A session resumed in place starts again under the same id. An entry
       // left here belongs to the run that ended: it must not be used, and must
@@ -804,16 +884,25 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       return Effect.flatMap(openHost(ctx, binary, sessionId, overrides), (host) =>
         Effect.matchEffect(
           Effect.andThen(
-            Effect.mapError(initializeAppServer(host), (error) => describeRpcError(host, error)),
+            Effect.andThen(
+              Effect.mapError(
+                initializeAppServer(host),
+                (error) =>
+                  new HarnessProtocolError({
+                    message: describeStartFailure(CODEX_NAME, describeRpcError(host, error)),
+                  }),
+              ),
+              requireLogin(host),
+            ),
             setSkillRoots(host, ctx.librarySkillsFolder, ctx.repositorySkillsFolders),
           ),
           {
-            // Registered only after the handshake and the skill roots succeed.
-            // A host registered without them could not serve the session, and
-            // its child would outlive the runner.
-            onFailure: (message) => {
+            // Registered only after the handshake, the login check and the
+            // skill roots succeed. A host registered without them could not
+            // serve the session, and its child would outlive the runner.
+            onFailure: (error) => {
               host.kill();
-              return Effect.fail(message);
+              return Effect.fail(error);
             },
             onSuccess: () => {
               hosts.set(sessionId, host);
@@ -1141,12 +1230,10 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       discard: true,
     });
 
-  const getHostedSession = (sessionId: string): Effect.Effect<Held, string> =>
+  const getHostedSession = (sessionId: string): Effect.Effect<Held, SessionNotRunning> =>
     Effect.suspend(() => {
       const held = sessions.get(sessionId);
-      return held === undefined
-        ? Effect.fail(`session ${sessionId} is not running here`)
-        : Effect.succeed(held);
+      return held === undefined ? Effect.fail(buildSessionNotRunning()) : Effect.succeed(held);
     });
 
   /**
@@ -1160,7 +1247,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     held: Held,
     input: AdapterTurnInput,
     skillItems: ReadonlyArray<UserInput>,
-  ): Effect.Effect<SendResult, InputFailure> =>
+  ): Effect.Effect<SendResult, AdapterError> =>
     Effect.gen(function* () {
       // Codex takes the schema per turn, not per thread, so every turn of the
       // session sends it. If it were sent only once, the second turn of an
@@ -1187,7 +1274,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           // No turn started, so restore the previous model for the next turn
           // to report.
           held.threads.root.state.model = before;
-          return describeRequestFailure(error);
+          return buildInputError(error);
         },
       );
       return { turnId: (answer as TurnStartResponse).turn.id, delivery: "opened" };
@@ -1206,7 +1293,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     input: AdapterTurnInput,
     skillItems: ReadonlyArray<UserInput>,
     expectedTurnId: string,
-  ): Effect.Effect<SendResult | undefined, InputFailure> =>
+  ): Effect.Effect<SendResult | undefined, AdapterError> =>
     Effect.matchEffect(
       retryWhileOverloaded(
         held.host.rpc.request("turn/steer", {
@@ -1217,9 +1304,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       ),
       {
         onFailure: (error) =>
-          isSteerNotTaken(error)
-            ? Effect.succeed(undefined)
-            : Effect.fail(describeRequestFailure(error)),
+          isSteerNotTaken(error) ? Effect.succeed(undefined) : Effect.fail(buildInputError(error)),
         onSuccess: (answer) =>
           Effect.succeed<SendResult>({
             turnId: (answer as TurnSteerResponse).turnId,
@@ -1235,20 +1320,20 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
    * here, so both are fenced the same way: an input that arrives after the
    * agent was stopped is refused instead of reopening the turn.
    *
-   * Fails with an `InputFailure`, which says whether Codex may have taken the
-   * input, or with `SteerRefused` when the input has a skill and a turn is
-   * running.
+   * Fails with an `AdapterError`. `InputNotDelivered` means Codex did not
+   * take the input, `HarnessProtocolError` means it may have, and
+   * `SteerRefused` means the input has a skill and a turn is running.
    */
   const deliverInput = (
     held: Held,
     input: AdapterTurnInput,
     skills: SkillInputs,
-  ): Effect.Effect<SendResult, InputFailure | SteerRefused> =>
+  ): Effect.Effect<SendResult, AdapterError> =>
     Effect.gen(function* () {
       const ticket = held.threads.beginInput();
       const sent = yield* Effect.onExit(
         Effect.gen(function* () {
-          yield* Effect.mapError(held.threads.prepareUsage, buildNotSent);
+          yield* held.threads.prepareUsage;
           const running = held.threads.root.turnId;
           // Codex's app server accepts a `skill` item on `turn/steer` but
           // does not load the skill, so the chip would show a skill that
@@ -1258,13 +1343,13 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
             return yield* Effect.fail(
               new SteerRefused({ message: buildSkillSteerRefusedMessage("Codex") }),
             );
-          yield* Effect.mapError(held.threads.submitInput(ticket, running), buildNotSent);
+          yield* held.threads.submitInput(ticket, running);
           const steered =
             running === undefined
               ? undefined
               : yield* steerTurn(held, input, skills.items, running);
           if (steered !== undefined) return steered;
-          yield* Effect.mapError(held.threads.submitInput(ticket), buildNotSent);
+          yield* held.threads.submitInput(ticket);
           return yield* startTurn(held, input, skills.items);
         }),
         () => Effect.sync(() => held.threads.finishInput(ticket)),
@@ -1329,7 +1414,8 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       return Effect.uninterruptible(
         Effect.matchEffect(deliverInput(held, input, { items: [], translated: [] }), {
           onFailure: (failure) => {
-            const maybeDelivered = "maybeDelivered" in failure && failure.maybeDelivered;
+            // Only a failure of the connection leaves it unknown whether Codex took the input.
+            const maybeDelivered = failure._tag === "HarnessProtocolError";
             if (!isOpen()) {
               return Effect.fail(
                 new AnswerNotDelivered({
@@ -1454,7 +1540,10 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   ): Effect.Effect<TextGenerationOutcome, string> => {
     const watch = watchTextGeneration();
     return Effect.acquireUseRelease(
-      openHost(ctx, ctx.binary, undefined, TEXT_GENERATION_PROCESS_OVERRIDES, watch),
+      Effect.mapError(
+        openHost(ctx, ctx.binary, undefined, TEXT_GENERATION_PROCESS_OVERRIDES, watch),
+        (error) => error.message,
+      ),
       (host) =>
         Effect.gen(function* () {
           // A failure is reported by the request's own error, never by the
@@ -1495,7 +1584,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     startSession: (sessionId, spec, ctx) =>
       Effect.gen(function* () {
         const binary = ctx.binary;
-        if (binary === undefined) return yield* Effect.fail(`no ${CODEX_BINARY} on this machine`);
+        if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(CODEX_NAME));
         const userInstructions = yield* readUserInstructions(ctx.userMaterial);
         const host = yield* startSessionHost(sessionId, spec, ctx, binary);
         const carried = spec.continue;
@@ -1514,7 +1603,9 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
               // The thread did not open, so kill the host rather than leave a
               // process running that nothing uses.
               releaseHost(host);
-              return Effect.fail(error.message);
+              return Effect.fail(
+                buildStartError(host, "Codex could not open the session's thread", error),
+              );
             },
             // A fork is a new thread, so the session takes the id in the
             // reply; the thread it was forked from is left alone.
@@ -1568,7 +1659,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
     sendInput: (
       sessionId: string,
       input: AdapterTurnInput,
-    ): Effect.Effect<SendResult, string | SteerRefused> =>
+    ): Effect.Effect<SendResult, AdapterError> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
         const references = input.skillReferences ?? [];
@@ -1579,9 +1670,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           yield* Effect.logWarning(
             `Gave Codex no skill item for ${[...skipped].join(", ")}: its SKILL.md is missing or resolves outside the skill folder.`,
           );
-        const sent = yield* Effect.mapError(deliverInput(held, input, skills), (failure) =>
-          failure instanceof SteerRefused ? failure : failure.message,
-        );
+        const sent = yield* deliverInput(held, input, skills);
         for (const event of sessions.get(sessionId) !== held
           ? []
           : buildUserMessage({

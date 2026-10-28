@@ -272,7 +272,7 @@ describe.skipIf(binary === undefined)("the Skill Library in a real Codex app-ser
     const librarySkillsFolder = createScratchDir("session-skills");
     writeSkill(join(librarySkillsFolder, "skills"), "implement");
     const { adapter, listSkills } = makeSkillListingAdapter();
-    const ctx = buildContext(createScratchDir("home"));
+    const ctx = buildContext(createHomeWithoutLoginRequirement());
     const sessionId = "0199e0e7-0000-7000-8000-00000000ff09";
     try {
       await Effect.runPromise(
@@ -310,7 +310,7 @@ describe.skipIf(binary === undefined)("repository skills in a real Codex app-ser
       join(repositorySkillsFolder, "skills", "deploy"),
     );
     const { adapter, listSkills } = makeSkillListingAdapter();
-    const ctx = buildContext(createScratchDir("home"));
+    const ctx = buildContext(createHomeWithoutLoginRequirement());
     const sessionId = "0199e0e7-0000-7000-8000-00000000ff0a";
     try {
       await Effect.runPromise(
@@ -336,6 +336,38 @@ describe.skipIf(binary === undefined)("repository skills in a real Codex app-ser
     }
   });
 });
+
+/**
+ * Builds the `config.toml` text that points Codex at a model provider of its
+ * own at `baseUrl`. Such a provider needs no OpenAI login, so a session on it
+ * starts in a home with no login.
+ */
+const buildFixtureProviderConfig = (baseUrl: string): string =>
+  [
+    'model_provider = "fixture"',
+    'model = "gpt-5.4"',
+    "[model_providers.fixture]",
+    'name = "Isolated fixture"',
+    `base_url = "${baseUrl}"`,
+    'env_key = "HERCULE_CODEX_FIXTURE_KEY"',
+    'wire_api = "responses"',
+    "supports_websockets = false",
+  ].join("\n");
+
+/**
+ * Creates an instance home whose Codex uses a model provider that needs no
+ * login, and returns its path. For a test that starts a session and runs no
+ * turn, so the provider's address is never called.
+ */
+const createHomeWithoutLoginRequirement = (): string => {
+  const home = createScratchDir("home");
+  mkdirSync(join(home, "codex"));
+  writeFileSync(
+    join(home, "codex", "config.toml"),
+    buildFixtureProviderConfig("http://127.0.0.1:9/v1"),
+  );
+  return home;
+};
 
 /**
  * Starts a local Responses API fixture whose model runs one shell command,
@@ -389,16 +421,7 @@ const startCommandModel = (command: string) => {
     },
   });
   return {
-    config: [
-      'model_provider = "fixture"',
-      'model = "gpt-5.4"',
-      "[model_providers.fixture]",
-      'name = "Isolated fixture"',
-      `base_url = "${server.url.toString()}v1"`,
-      'env_key = "HERCULE_CODEX_FIXTURE_KEY"',
-      'wire_api = "responses"',
-      "supports_websockets = false",
-    ].join("\n"),
+    config: buildFixtureProviderConfig(`${server.url.toString()}v1`),
     stop: () => server.stop(true),
   };
 };

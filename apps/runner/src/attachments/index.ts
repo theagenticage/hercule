@@ -42,7 +42,8 @@ import {
 } from "@hercule/protocol";
 import type { LocalAttachment } from "../providers";
 import { parseErrorEnvelopeMessage } from "../error-envelope";
-import { truncateFact } from "../providers/text";
+import { truncateFact, truncateMessage } from "../providers/text";
+import { endSentence } from "../report";
 
 export interface AttachmentCache {
   /**
@@ -173,7 +174,11 @@ export const makeAttachmentCache = (options: {
         return started;
       },
       catch: (error) =>
-        `the image "${reference.name}" could not be fetched from the controller: ${describeError(error)}`,
+        truncateMessage(
+          endSentence(
+            `The image "${reference.name}" could not be fetched from the controller: ${describeError(error)}`,
+          ),
+        ),
     }).pipe(Effect.as({ ...reference, path }));
   };
 

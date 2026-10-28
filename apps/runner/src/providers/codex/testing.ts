@@ -192,7 +192,8 @@ export const TURN = "0199e0e7-0000-7000-8000-0000000000fb";
 const DEFAULT_ANSWERS: Answers = {
   initialize: () => INITIALIZE,
   "skills/extraRoots/set": () => ({}),
-  "account/read": () => LOGGED_OUT,
+  // A session refuses to start without a login, so the default account is logged in.
+  "account/read": () => CHATGPT,
   "model/list": () => MODELS,
   "thread/start": () => ({ thread: { id: THREAD } }),
   "thread/resume": () => ({ thread: { id: RESUMED } }),

@@ -35,7 +35,16 @@ import type {
   TextGenerationSpec,
   TurnState,
 } from "@hercule/protocol";
-import { AnswerNotDelivered } from "@hercule/protocol";
+import {
+  AdapterFailed,
+  AnswerNotDelivered,
+  HarnessProtocolError,
+  InputNotDelivered,
+  ModelChangeRefused,
+  ResumeTranscriptMissing,
+  SessionNotRunning,
+  type AdapterError,
+} from "@hercule/protocol";
 import type {
   AdapterTurnInput,
   LocalAttachment,
@@ -44,14 +53,31 @@ import type {
   TextGenerationContext,
   UserMaterial,
 } from "../index";
+import {
+  buildHarnessNotInstalled,
+  buildHarnessStartFailed,
+  buildInputLost,
+  buildInputRefused,
+  buildInputStopped,
+  buildModelChangeRefused,
+  buildSessionAlreadyRunning,
+  buildSessionNotRunning,
+} from "../adapter-error-builders";
 import { readAttachmentBase64 } from "../attachments";
 import { buildUserMessage } from "../events";
 import { joinInstructions } from "../prompt";
 import { buildFailedProbe } from "../probe";
-import { killProcessesHolding, runProcess, spawnPi, stopChild, type Run } from "../process";
+import {
+  isExecutableNotFound,
+  killProcessesHolding,
+  runProcess,
+  spawnPi,
+  stopChild,
+  type Run,
+} from "../process";
 import { truncateFact, truncateMessage } from "../text";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
-import { now } from "../../report";
+import { endSentence, now } from "../../report";
 import {
   ACCESS_MODE_VARIABLE,
   AGENT_FILE_VARIABLE,
@@ -76,12 +102,22 @@ import {
 } from "./normalize";
 import { readPiHome } from "./edited-path";
 import { DEFAULT_THINKING, makePiInstall, makeProbe, ZAI } from "./probe";
-import { describeError, makeRpc, PI_GONE, type PiChild, type PiRpc, type PiSpawn } from "./rpc";
+import {
+  describeError,
+  makeRpc,
+  type PiChild,
+  type PiRpc,
+  type PiRpcFailure,
+  type PiSpawn,
+} from "./rpc";
 import { buildPiPrompt } from "./skill-prompt";
 
 export const PI = "pi";
 
 const PI_BINARY = "pi";
+
+/** The name the user knows this harness by, as it appears in the messages shown to them. */
+const PI_NAME = "pi";
 
 /**
  * The Z.ai key: its secret name in the instance config, and the environment
@@ -201,21 +237,61 @@ const MAX_RUNNING_SUBAGENTS = 4;
 const MAX_SUBAGENT_DEPTH = 2;
 
 /**
- * Reads each image as base64, in pi's `images` shape. Fails with a message
- * naming the image when a cached file cannot be read. pi's size limit is not
- * checked here: the probe declares it, and the controller never sends a
- * larger image.
+ * Reads each image as base64, in pi's `images` shape. Fails with
+ * `AdapterFailed`, naming the image, when a cached file cannot be read. pi's
+ * size limit is not checked here: the probe declares it, and the controller
+ * never sends a larger image.
  */
 const readPiImages = (
   attachments: ReadonlyArray<LocalAttachment>,
-): Effect.Effect<ReadonlyArray<Record<string, string>>, string> =>
+): Effect.Effect<ReadonlyArray<Record<string, string>>, AdapterFailed> =>
   Effect.forEach(attachments, (attachment) =>
     Effect.map(readAttachmentBase64(attachment), (data) => ({
       type: "image",
       data,
       mimeType: attachment.mimeType,
     })),
-  );
+  ).pipe(Effect.mapError((message) => new AdapterFailed({ message })));
+
+/**
+ * The error `spawnAgent` throws when the pi process itself could not be
+ * started, as opposed to a file that had to be written before it. The original
+ * error is kept as `cause`, so `startSession` can tell a missing pi binary
+ * from a full disk.
+ */
+class SpawnFailed extends Error {
+  constructor(cause: unknown) {
+    super(describeError(cause), { cause });
+  }
+}
+
+/**
+ * Builds the failure of `sendInput` for a `prompt` or `steer` command that
+ * did not get a response. When pi refused the command, it did not take the
+ * input. In every other case the runner cannot tell whether pi took it.
+ */
+const buildInputFailure = (failure: PiRpcFailure): InputNotDelivered | HarnessProtocolError =>
+  failure._tag === "PiRefusedCommand"
+    ? buildInputRefused(PI_NAME, failure.message)
+    : buildInputLost(PI_NAME, failure.message);
+
+/**
+ * Builds the failure of `sendInput` for a `set_model` or `set_thinking_level`
+ * command that did not get a response. The session keeps the model it had
+ * when pi refused the change.
+ */
+const buildModelChangeFailure = (
+  failure: PiRpcFailure,
+): ModelChangeRefused | HarnessProtocolError =>
+  failure._tag === "PiRefusedCommand"
+    ? buildModelChangeRefused(PI_NAME, "change the model or thinking level", failure.message)
+    : new HarnessProtocolError({
+        message: truncateMessage(
+          endSentence(
+            `The runner lost contact with ${PI_NAME} while changing the model, so the change may or may not have happened: ${failure.message}`,
+          ),
+        ),
+      });
 
 /** A session this adapter hosts, and the adapter's state for its pi processes. */
 interface Held {
@@ -1082,12 +1158,12 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         Effect.sync(() => {
           // A pi that exited is reported by `watchChild`, with its stderr as
           // the reason, which tells more than this error does.
-          if (error === PI_GONE) return;
+          if (error._tag === "PiExited") return;
           endSubagent(
             held,
             subagent,
-            { state: "failed", error: `pi did not take the subagent's task: ${error}` },
-            { error: `The subagent could not start: ${error}` },
+            { state: "failed", error: `pi did not take the subagent's task: ${error.message}` },
+            { error: `The subagent could not start: ${error.message}` },
           );
         }),
       ),
@@ -1173,7 +1249,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         Effect.sync(() => {
           // Nothing will end this turn now, so end it here. A turn left open
           // would make the session look busy forever.
-          warn(held.binding.sessionId, `could not ask pi again for an answer: ${error}`);
+          warn(held.binding.sessionId, `could not ask pi again for an answer: ${error.message}`);
           for (const event of endTurn(state)) emit(event);
         }),
       ),
@@ -1336,7 +1412,9 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
   /**
    * Starts one agent's pi process with `argv`, on its own copy of the
    * extension at `extensionFile`, and returns the process. Throws when the
-   * copy cannot be written or pi cannot start, after deleting the copy.
+   * copy cannot be written or pi cannot start, after deleting the copy. A
+   * failure to start pi is thrown as `SpawnFailed`; a failure to write the copy
+   * is thrown as the file system's own error.
    *
    * When the process exits, every process its bash calls left running is
    * killed, the copy is deleted, and then `onReleased` runs. Each bash call
@@ -1359,10 +1437,15 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     let child: PiChild;
     try {
       writeFileAtomically(extensionFile, EXTENSION_SOURCE);
-      child = seam.spawn(argv, env, cwd);
     } catch (error) {
       removeExtension();
       throw error;
+    }
+    try {
+      child = seam.spawn(argv, env, cwd);
+    } catch (error) {
+      removeExtension();
+      throw new SpawnFailed(error);
     }
     const release = (): Promise<void> =>
       Effect.runPromise(seam.killProcessesHolding(extensionFile)).then(() => {
@@ -1450,39 +1533,43 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
 
   const probe = makeProbe(seam.spawn, seam.run);
 
-  const getHostedSession = (sessionId: string): Effect.Effect<Held, string> =>
+  /** Returns the session this adapter hosts, or fails with `SessionNotRunning` when it hosts none. */
+  const getHostedSession = (sessionId: string): Effect.Effect<Held, SessionNotRunning> =>
     Effect.suspend(() => {
       const held = sessions.get(sessionId);
-      return held === undefined
-        ? Effect.fail(`session ${sessionId} is not running here`)
-        : Effect.succeed(held);
+      return held === undefined ? Effect.fail(buildSessionNotRunning()) : Effect.succeed(held);
     });
 
   /**
    * Sets the model and its thinking level before the prompt that uses them.
-   * pi takes each as a separate command. Fails when pi rejects either one, and
-   * the input then fails too: prompting anyway would run the turn on the model
-   * the user meant to replace.
+   * pi takes each as a separate command. Fails with `ModelChangeRefused` when
+   * pi rejects either one, and the input then fails too: prompting anyway
+   * would run the turn on the model the user meant to replace. Fails with
+   * `InputNotDelivered` when the input was stopped in the meantime.
    */
   const selectModel = (
     held: Held,
     selection: ModelSelection,
     generation: number,
-  ): Effect.Effect<void, string> =>
+  ): Effect.Effect<void, ModelChangeRefused | HarnessProtocolError | InputNotDelivered> =>
     Effect.gen(function* () {
       const root = held.root;
-      yield* root.rpc.send({ type: "set_model", provider: ZAI, modelId: selection.model });
+      yield* root.rpc
+        .send({ type: "set_model", provider: ZAI, modelId: selection.model })
+        .pipe(Effect.mapError(buildModelChangeFailure));
       // Record the model now, not after the level: pi has already switched
       // model, and if pi then rejected the level, turns would report the old
       // model.
       root.state.model = selection.model;
       held.modelSelection = { ...held.modelSelection, model: selection.model };
       if (held.inputGeneration !== generation || held.stopping)
-        return yield* Effect.fail("the input was stopped before delivery");
-      yield* root.rpc.send({
-        type: "set_thinking_level",
-        level: getSessionThinkingLevel(selection),
-      });
+        return yield* Effect.fail(buildInputStopped());
+      yield* root.rpc
+        .send({
+          type: "set_thinking_level",
+          level: getSessionThinkingLevel(selection),
+        })
+        .pipe(Effect.mapError(buildModelChangeFailure));
       held.modelSelection = selection;
     });
 
@@ -1611,7 +1698,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           yield* Effect.catch(agent.rpc.send({ type: "prompt", message: spec.input }), (error) =>
             // A pi that already exited is reported below, by the watch on its
             // exit.
-            error === PI_GONE ? Effect.void : Effect.fail(error),
+            error._tag === "PiExited" ? Effect.void : Effect.fail(error.message),
           );
           return yield* Deferred.await(settled);
         }),
@@ -1641,12 +1728,12 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     startSession: (sessionId, spec, ctx) =>
       Effect.gen(function* () {
         const binary = ctx.binary;
-        if (binary === undefined) return yield* Effect.fail(`no ${PI_BINARY} on this machine`);
+        if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(PI_NAME));
         // The entry stays until its pi has exited, so this session's pi is
         // still running. A second pi under the same id would write the same
         // transcript and leave the first one orphaned.
         if (sessions.has(sessionId)) {
-          return yield* Effect.fail(`session ${sessionId} is still running here`);
+          return yield* Effect.fail(buildSessionAlreadyRunning());
         }
         const carried = spec.continue;
         const transcript =
@@ -1656,7 +1743,10 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           // resumed session's id: the conversation would silently lose its
           // history.
           return yield* Effect.fail(
-            `the transcript of session ${carried.nativeSessionId} is no longer on this runner`,
+            new ResumeTranscriptMissing({
+              message:
+                "The conversation cannot be resumed on this runner: pi's record of it is no longer here. Start a new thread to continue the work.",
+            }),
           );
         }
         // Compute the path before the launch, because `prepareHome` below
@@ -1666,10 +1756,30 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         const systemPromptFile =
           instructions === undefined ? undefined : buildSystemPromptPath(ctx.home, sessionId);
         const extensionFile = buildExtensionPath(ctx.home, sessionId);
+        // A pi that never started has no session to end, and ending the
+        // session is what deletes the instructions file. So delete it here, or
+        // the instructions of every failed launch would stay in the home.
+        const deleteUnusedInstructions = (): void => {
+          if (systemPromptFile !== undefined) {
+            attempt(() => rmSync(systemPromptFile, { force: true }));
+          }
+        };
+        yield* Effect.try({
+          try: () => prepareHome(ctx, sessionId, instructions),
+          catch: (error) => {
+            deleteUnusedInstructions();
+            return new AdapterFailed({
+              message: truncateMessage(
+                endSentence(
+                  `The runner could not prepare ${PI_NAME}'s folder for the session: ${describeError(error)}`,
+                ),
+              ),
+            });
+          },
+        });
         const child = yield* Effect.try({
-          try: () => {
-            prepareHome(ctx, sessionId, instructions);
-            return spawnAgent(
+          try: () =>
+            spawnAgent(
               [
                 binary,
                 ...buildArgv(
@@ -1687,16 +1797,14 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
               // into whatever directory the runner was started from.
               ctx.cwd,
               extensionFile,
-            );
-          },
+            ),
           catch: (error) => {
-            // A pi that never started has no session to end, and ending the
-            // session is what deletes this file. So delete it here, or the
-            // instructions of every failed launch would stay in the home.
-            if (systemPromptFile !== undefined) {
-              attempt(() => rmSync(systemPromptFile, { force: true }));
-            }
-            return error instanceof Error ? error.message : String(error);
+            deleteUnusedInstructions();
+            // Only a failure of the spawn itself, with the binary not found,
+            // means pi is not installed. A failed file write is not that.
+            return error instanceof SpawnFailed && isExecutableNotFound(error.cause, ctx.cwd)
+              ? buildHarnessNotInstalled(PI_NAME)
+              : buildHarnessStartFailed(PI_NAME, describeError(error));
           },
         });
         // A resumed session continues the native session. A fork is a new
@@ -1746,7 +1854,10 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         return binding;
       }),
 
-    sendInput: (sessionId: string, input: AdapterTurnInput): Effect.Effect<SendResult, string> =>
+    sendInput: (
+      sessionId: string,
+      input: AdapterTurnInput,
+    ): Effect.Effect<SendResult, AdapterError> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
         const images = yield* readPiImages(input.attachments ?? []);
@@ -1754,7 +1865,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         if (input.modelSelection !== undefined)
           yield* selectModel(held, input.modelSelection, generation);
         if (held.inputGeneration !== generation || held.stopping)
-          return yield* Effect.fail("the input was stopped before delivery");
+          return yield* Effect.fail(buildInputStopped());
         // A turn is in flight exactly while the state holds its id. An input
         // during a turn steers it, instead of opening a second turn and
         // leaving the first one with nothing to end it.
@@ -1776,7 +1887,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
             Effect.sync(() => {
               if (!steered) root.state.turnId = undefined;
             }),
-        );
+        ).pipe(Effect.mapError(buildInputFailure));
         // A successful prompt reply acknowledges delivery even when Stop
         // raced it. Abort again if that reply accepted work after the first
         // abort; never let the delayed acceptance restart the stopped turn.

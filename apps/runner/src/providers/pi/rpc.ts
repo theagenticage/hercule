@@ -11,6 +11,7 @@
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import type { FramedChild } from "../process";
 
 /**
@@ -27,16 +28,45 @@ export type PiSpawn = (
   cwd: string | null,
 ) => PiChild;
 
+/**
+ * The failure of `send` when pi answered the command with an error. pi read
+ * the command and refused it, so the command did not take effect. `message`
+ * is pi's own error text.
+ */
+export class PiRefusedCommand extends Schema.TaggedError<PiRefusedCommand>()("PiRefusedCommand", {
+  message: Schema.String,
+}) {}
+
+/**
+ * The failure of `send` when pi exited, or closed its output, before it
+ * answered. It is not known whether pi acted on the command first.
+ */
+export class PiExited extends Schema.TaggedError<PiExited>()("PiExited", {
+  message: Schema.String,
+}) {}
+
+/**
+ * The failure of `send` when the command could not be written to pi, or pi
+ * did not answer in time. It is not known whether pi acted on the command.
+ */
+export class PiUnreachable extends Schema.TaggedError<PiUnreachable>()("PiUnreachable", {
+  message: Schema.String,
+}) {}
+
+/** Every failure of `send`, told apart by `_tag`. */
+export type PiRpcFailure = PiRefusedCommand | PiExited | PiUnreachable;
+
 export interface PiRpc {
   /**
    * Sends one command and waits for pi's response with the same id. Returns
-   * the response frame. Fails with pi's error message when pi rejects the
-   * command, and with a message of its own when pi exits or does not respond
-   * in time.
+   * the response frame. Fails with `PiRefusedCommand` when pi answers with an
+   * error, `PiExited` when pi exits before it answers, and `PiUnreachable`
+   * when the write fails or pi does not answer in time. Only
+   * `PiRefusedCommand` proves that the command did not take effect.
    */
   readonly send: (
     command: Record<string, unknown>,
-  ) => Effect.Effect<Record<string, unknown>, string>;
+  ) => Effect.Effect<Record<string, unknown>, PiRpcFailure>;
   /**
    * Reads pi's stdout until it closes. No response reaches `send` until this
    * is running.
@@ -53,7 +83,7 @@ export interface PiRpc {
  */
 export const RPC_DEADLINE: Duration.Duration = Duration.seconds(5);
 
-/** The error `send` fails with when pi exited, or closed its output, before it responded. */
+/** The message of the `PiExited` failure: pi exited, or closed its output, before it responded. */
 export const PI_GONE = "pi exited or closed its output";
 
 /** Returns the message of an error, or the text of any other thrown value. */
@@ -70,7 +100,7 @@ export const makeRpc = (
    */
   onLine: (line: string, frame: unknown) => void,
 ): PiRpc => {
-  const pending = new Map<string, Deferred.Deferred<Record<string, unknown>, string>>();
+  const pending = new Map<string, Deferred.Deferred<Record<string, unknown>, PiRpcFailure>>();
   let next = 1;
   let gone = false;
 
@@ -84,9 +114,12 @@ export const makeRpc = (
       frame["success"] === true
         ? Effect.succeed(frame)
         : Effect.fail(
-            typeof frame["error"] === "string"
-              ? frame["error"]
-              : "pi rejected the command without giving a reason",
+            new PiRefusedCommand({
+              message:
+                typeof frame["error"] === "string"
+                  ? frame["error"]
+                  : "pi rejected the command without giving a reason",
+            }),
           ),
     );
   };
@@ -113,16 +146,16 @@ export const makeRpc = (
     gone = true;
     for (const [id, waiting] of pending) {
       pending.delete(id);
-      Deferred.doneUnsafe(waiting, Effect.fail(PI_GONE));
+      Deferred.doneUnsafe(waiting, Effect.fail(new PiExited({ message: PI_GONE })));
     }
   };
 
   return {
     send: (command) =>
       Effect.suspend(() => {
-        if (gone) return Effect.fail(PI_GONE);
+        if (gone) return Effect.fail(new PiExited({ message: PI_GONE }));
         const id = `hercule-${next++}`;
-        const settled = Deferred.makeUnsafe<Record<string, unknown>, string>();
+        const settled = Deferred.makeUnsafe<Record<string, unknown>, PiRpcFailure>();
         // Register the waiter before writing, because pi can respond before
         // `write` returns. Remove it again if the write itself fails.
         pending.set(id, settled);
@@ -130,14 +163,16 @@ export const makeRpc = (
           child.write(`${JSON.stringify({ ...command, id })}\n`);
         } catch (error) {
           pending.delete(id);
-          return Effect.fail(describeError(error));
+          return Effect.fail(new PiUnreachable({ message: describeError(error) }));
         }
         return Deferred.await(settled).pipe(
           Effect.timeoutOrElse({
             duration: RPC_DEADLINE,
             orElse: () =>
               Effect.fail(
-                `pi did not answer ${String(command["type"])} within ${Duration.format(RPC_DEADLINE)}`,
+                new PiUnreachable({
+                  message: `pi did not answer ${String(command["type"])} within ${Duration.format(RPC_DEADLINE)}`,
+                }),
               ),
           }),
           Effect.ensuring(Effect.sync(() => void pending.delete(id))),

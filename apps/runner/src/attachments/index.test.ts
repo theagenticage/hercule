@@ -138,9 +138,8 @@ describe("the attachment cache", () => {
 
     const failure = await Effect.runPromise(Effect.flip(cache.fetch(dir, [IMAGE_A])));
 
-    expect(failure).toBe(
-      `the image "${IMAGE_A.name}" could not be fetched from the controller: the bytes the controller sent do not match the image's checksum`,
-    );
+    expect(failure).toContain(IMAGE_A.name);
+    expect(failure).toContain(`the bytes the controller sent do not match the image's checksum`);
     expect(readdirSync(dir)).toEqual([]);
   });
 
@@ -151,8 +150,9 @@ describe("the attachment cache", () => {
 
     const failure = await Effect.runPromise(Effect.flip(cache.fetch(dir, [IMAGE_A])));
 
-    expect(failure).toBe(
-      `the image "${IMAGE_A.name}" could not be fetched from the controller: the controller sent 13 bytes, but the image has ${String(PNG.length)}`,
+    expect(failure).toContain(IMAGE_A.name);
+    expect(failure).toContain(
+      `the controller sent 13 bytes, but the image has ${String(PNG.length)}`,
     );
     expect(readdirSync(dir)).toEqual([]);
   });
@@ -175,8 +175,9 @@ describe("the attachment cache", () => {
 
     const failure = await Effect.runPromise(Effect.flip(cache.fetch(dir, [IMAGE_A])));
 
-    expect(failure).toBe(
-      `the image "${IMAGE_A.name}" could not be fetched from the controller: the controller sent more than the image's ${String(PNG.length)} bytes`,
+    expect(failure).toContain(IMAGE_A.name);
+    expect(failure).toContain(
+      `the controller sent more than the image's ${String(PNG.length)} bytes`,
     );
     expect(readdirSync(dir)).toEqual([]);
   });
@@ -188,9 +189,8 @@ describe("the attachment cache", () => {
 
     const failure = await Effect.runPromise(Effect.flip(cache.fetch(dir, [IMAGE_A])));
 
-    expect(failure).toBe(
-      `the image "${IMAGE_A.name}" could not be fetched from the controller: the controller responded with HTTP 404`,
-    );
+    expect(failure).toContain(IMAGE_A.name);
+    expect(failure).toContain(`the controller responded with HTTP 404`);
     expect(existsSync(join(dir, IMAGE_A.id))).toBe(false);
   });
 });

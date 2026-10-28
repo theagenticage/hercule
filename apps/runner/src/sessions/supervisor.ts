@@ -27,26 +27,34 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import {
   AdapterFailed,
+  InputNotDelivered,
   MAX_MESSAGE_LENGTH,
+  SessionAlreadyRunning,
   isAsyncQuestion,
   lintOutputSchema,
   type AdapterError,
   type ExitReason,
   type ProviderEvent,
   type RunnerToController,
+  type SendResult,
   type SessionInput,
-  type SessionInputResult,
   type SessionInterrupt,
   type SessionRespondToApprovalRequest,
   type SessionRespondToQuestion,
   type SessionStart,
   type SessionStop,
-  type SteerRefused,
   type SubagentId,
   type WorkspaceStepKey,
 } from "@hercule/protocol";
 import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } from "../providers";
-import { now, describeCause } from "../report";
+import {
+  buildInputStopped,
+  buildSessionAlreadyRunning,
+  buildSessionNotRunning,
+  buildSessionStopping,
+} from "../providers/adapter-error-builders";
+import { truncateMessage } from "../providers/text";
+import { describeCause, endSentence, now } from "../report";
 import {
   buildLoadedSkills,
   describeFolderFailure,
@@ -66,6 +74,7 @@ import {
 import { startEditWatch, type EditWatch } from "./edit-watch";
 import { convertEditedFiles, readDetailPaths, type SessionCheckout } from "./edited-files";
 import { fitEventToFrame } from "./fit-event";
+import { appendSetupInstructions } from "./setup-instructions";
 import { buildAgentStepOutcome, type StepTurnEnding } from "./step-outcome";
 
 /**
@@ -100,7 +109,20 @@ interface RunningStep {
  * comment, so the input never reaches the harness.
  */
 const SETTLED_STEP_REFUSAL =
-  "the step ended before its prompt reached the harness, so the prompt was not run";
+  "The step ended before its prompt was delivered, so the prompt was not run.";
+
+/**
+ * Builds the `AdapterFailed` error for a failure whose text this runner does
+ * not control, such as a message from the file system or the controller. The
+ * text is cut to the protocol's limit, because an `AdapterFailed` with a
+ * longer message cannot be built.
+ */
+const buildAdapterFailed = (message: string): AdapterFailed =>
+  new AdapterFailed({ message: truncateMessage(message) });
+
+/** Builds the error for a start that the runner refuses because it is shutting down. */
+const buildShuttingDown = (): AdapterFailed =>
+  buildAdapterFailed("The runner is shutting down, so the session was not started.");
 
 /** Checks whether a turn that ended is the step's turn. */
 const isStepTurn = (step: RunningStep, turnId: string): boolean =>
@@ -332,6 +354,11 @@ export interface Connection {
   readonly scope: Scope.Scope;
   readonly machine: Machine;
   /**
+   * This runner's id at the controller. The supervisor writes it into the
+   * command that fixes a harness this runner cannot start.
+   */
+  readonly runnerId: string;
+  /**
    * The GitHub tokens this runner holds for its sessions. A session with a
    * GitHub Connection holds its Connection's token from the moment its start
    * begins until its entry is removed, or until the start ends without one.
@@ -462,16 +489,23 @@ const STOP_WAIT_BOUND: Duration.Duration = Duration.seconds(30);
  */
 interface UndeliveredStart {
   /** The reason the input is refused with. */
-  readonly message: string;
+  readonly error: AdapterError;
   /** The exit to report, or undefined to leave the session as it was. */
   readonly exitReason: "crash" | "runner_restart" | "stopped" | undefined;
 }
 
 /** Builds the `UndeliveredStart` of a session that failed to start for the given reason. */
-const buildCrashedStart = (message: string): UndeliveredStart => ({
-  message,
+const buildCrashedStart = (error: AdapterError): UndeliveredStart => ({
+  error,
   exitReason: "crash",
 });
+
+/**
+ * Builds the `UndeliveredStart` of a session that failed to start for a
+ * reason that has no tag of its own, described by a text.
+ */
+const buildCrashedStartFromText = (message: string): UndeliveredStart =>
+  buildCrashedStart(buildAdapterFailed(message));
 
 /**
  * Stages the repository skills a workspace offers in `sessionSkillsFolder`.
@@ -970,17 +1004,18 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     );
   };
 
-  /** Sends a `runtime.error` on the session's own stream, where the user reading the thread sees it. */
-  const reportFailure = (sessionId: string, message: string): Effect.Effect<void> =>
+  /**
+   * Sends a `runtime.error` on the session's own stream, where the user
+   * reading the thread sees it. Its class is the error's tag.
+   */
+  const reportFailure = (sessionId: string, error: AdapterError): Effect.Effect<void> =>
     forwardEvent({
       _tag: "runtime.error",
       eventId: crypto.randomUUID(),
       sessionId,
       at: now(),
-      class: "unknown",
-      // Truncate to the protocol's limit: a longer message would fail to
-      // encode, and the event would be dropped.
-      message: message.slice(0, MAX_MESSAGE_LENGTH),
+      class: error._tag,
+      message: error.message,
     });
 
   /** Sends a `session.exited` for a session that ended without the adapter reporting it. */
@@ -1011,16 +1046,6 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     const reply = (frame: RunnerToController): Effect.Effect<void> =>
       Effect.ignoreCause(Effect.suspend(() => connection.send(frame)));
 
-    /** Sends the answer to one input: the `sessionInputResult` the controller waits for under `requestId`. */
-    const sendInputResult = (
-      requestId: string,
-      result: SessionInputResult extends infer Result
-        ? Result extends unknown
-          ? Omit<Result, "_tag" | "requestId">
-          : never
-        : never,
-    ): Effect.Effect<void> => reply({ _tag: "sessionInputResult", requestId, ...result });
-
     /**
      * Answers an input as refused, with the reason the controller waiting on
      * the result needs. Reports nothing on the session's stream.
@@ -1028,36 +1053,37 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     const answerInputRefused = (
       frame: SessionInput | SessionStart,
       error: AdapterError,
-    ): Effect.Effect<void> => sendInputResult(frame.requestId, { ok: false, error });
+    ): Effect.Effect<void> =>
+      reply({ _tag: "sessionInputResult", requestId: frame.requestId, ok: false, error });
 
     /**
      * Answers an input as refused, and reports the reason on the session's
      * stream too. The controller waiting on the result needs the reason, and
      * the user reading the thread sees the session's stream.
+     *
+     * A `SteerRefused` is only answered: the input is deferred to the end of
+     * the running turn, so the thread has nothing to report.
      */
     const refuseInput = (
       frame: SessionInput | SessionStart,
-      message: string,
+      error: AdapterError,
     ): Effect.Effect<void> =>
-      Effect.andThen(
-        reportFailure(frame.sessionId, message),
-        answerInputRefused(
-          frame,
-          new AdapterFailed({ message: message.slice(0, MAX_MESSAGE_LENGTH) }),
-        ),
-      );
+      error._tag === "SteerRefused"
+        ? answerInputRefused(frame, error)
+        : Effect.andThen(reportFailure(frame.sessionId, error), answerInputRefused(frame, error));
 
     /**
      * Returns the input an adapter delivers: the frame's input, with each
      * image reference replaced by the session's cached copy of the image, and
      * the Skill References of its text that name a skill the session loaded.
-     * Fetches the images that are not cached yet. Fails with a message naming
-     * the image when one cannot be fetched or does not match its checksum.
+     * Fetches the images that are not cached yet. Fails with an
+     * `AdapterFailed` naming the image when one cannot be fetched or does not
+     * match its checksum.
      */
     const buildAdapterInput = (
       held: Live,
       frame: SessionInput | SessionStart,
-    ): Effect.Effect<AdapterTurnInput, string> => {
+    ): Effect.Effect<AdapterTurnInput, AdapterFailed> => {
       const { attachments, ...rest } = frame.input;
       const skillReferences = resolveSkillReferences(rest.text, held.loadedSkills);
       const withSkills: AdapterTurnInput =
@@ -1065,9 +1091,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       if (attachments === undefined || attachments.length === 0) {
         return Effect.succeed(withSkills);
       }
-      return Effect.map(
-        connection.machine.attachments.fetch(held.attachmentsDir, attachments),
-        (local) => ({ ...withSkills, attachments: local }),
+      return connection.machine.attachments.fetch(held.attachmentsDir, attachments).pipe(
+        Effect.map((local) => ({ ...withSkills, attachments: local })),
+        Effect.mapError(buildAdapterFailed),
       );
     };
 
@@ -1132,18 +1158,22 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                 }),
             );
       // Input the harness refused opens no turn, so a session that was idle
-      // before it is still idle and gets its wait back. A `SteerRefused` is
-      // answered without a `runtime.error`: the input is only deferred to the
-      // end of the running turn, and the thread has nothing to report.
-      const refuseHeldInput = (refusal: string | SteerRefused): Effect.Effect<void> =>
+      // before it is still idle and gets its wait back. A
+      // `HarnessProtocolError` is the exception: the conversation with the
+      // harness broke down, so the harness is stopped as a crash instead,
+      // after the answer. The adapter does nothing when it no longer holds
+      // the session. The stop sets `pendingStop`, which keeps the idle wait
+      // from being armed.
+      const refuseHeldInput = (error: AdapterError): Effect.Effect<void> =>
         Effect.andThen(
-          typeof refusal === "string"
-            ? refuseInput(frame, refusal)
-            : answerInputRefused(frame, refusal),
+          refuseInput(frame, error),
           Effect.suspend(() => {
             if (step !== undefined && held.step === step) {
               held.step = undefined;
               connection.workspaceSteps.forgetAgentStep(step.key);
+            }
+            if (error._tag === "HarnessProtocolError") {
+              return requestStop(frame.sessionId, held, "crash");
             }
             return isIdle(held) ? armIdleUnload(held, frame.sessionId) : Effect.void;
           }),
@@ -1154,15 +1184,13 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       // without the images the user attached. The fetch can take a while, so
       // an interrupt or a stop of the session that arrives during it is
       // checked for again after it.
-      const deliverInput = Effect.suspend(() =>
-        isCancelled()
-          ? Effect.fail("the input was stopped before delivery")
-          : buildAdapterInput(held, frame),
+      const deliverInput = Effect.suspend((): Effect.Effect<AdapterTurnInput, AdapterError> =>
+        isCancelled() ? Effect.fail(buildInputStopped()) : buildAdapterInput(held, frame),
       ).pipe(
-        Effect.flatMap((input) => {
-          if (isCancelled()) return Effect.fail("the input was stopped before delivery");
+        Effect.flatMap((input): Effect.Effect<SendResult, AdapterError> => {
+          if (isCancelled()) return Effect.fail(buildInputStopped());
           if (held.pendingStop !== undefined) {
-            return Effect.fail(`session ${frame.sessionId} is stopping on this runner`);
+            return Effect.fail(buildSessionStopping());
           }
           return held.adapter.sendInput(frame.sessionId, input);
         }),
@@ -1173,15 +1201,28 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           }),
         ),
         Effect.flatMap((sent) =>
-          sendInputResult(frame.requestId, { ok: true, delivery: sent.delivery }),
+          reply({
+            _tag: "sessionInputResult",
+            requestId: frame.requestId,
+            ok: true,
+            delivery: sent.delivery,
+          }),
         ),
         Effect.catch(refuseHeldInput),
-        Effect.catchCause((cause) => refuseHeldInput(describeCause(cause, MAX_MESSAGE_LENGTH))),
+        Effect.catchCause((cause) =>
+          refuseHeldInput(
+            buildAdapterFailed(
+              `The runner hit an unexpected error: ${endSentence(describeCause(cause, MAX_MESSAGE_LENGTH))}`,
+            ),
+          ),
+        ),
       );
       return Effect.andThen(
         controlsReady === undefined ? Effect.void : Deferred.await(controlsReady),
         Effect.flatMap(beginStep, (recorded) =>
-          recorded ? deliverInput : refuseHeldInput(SETTLED_STEP_REFUSAL),
+          recorded
+            ? deliverInput
+            : refuseHeldInput(new InputNotDelivered({ message: SETTLED_STEP_REFUSAL })),
         ),
       );
     };
@@ -1201,15 +1242,12 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       undelivered: UndeliveredStart,
     ): Effect.Effect<void> =>
       Effect.andThen(
-        sendInputResult(frame.requestId, {
-          ok: false,
-          error: new AdapterFailed({ message: undelivered.message.slice(0, MAX_MESSAGE_LENGTH) }),
-        }),
+        answerInputRefused(frame, undelivered.error),
         Effect.suspend(() => {
           switch (undelivered.exitReason) {
             case "crash":
               return Effect.andThen(
-                reportFailure(frame.sessionId, undelivered.message),
+                reportFailure(frame.sessionId, undelivered.error),
                 reportExit(frame.sessionId, "crash"),
               );
             case "runner_restart":
@@ -1259,13 +1297,15 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         // shutdown. A harness spawned now would never be stopped.
         if (stopped) {
           return yield* Effect.fail<UndeliveredStart>({
-            message: "the runner is shutting down",
+            error: buildShuttingDown(),
             exitReason: undefined,
           });
         }
         const adapter = adapters.find((one) => one.providerId === frame.providerId);
         if (adapter === undefined) {
-          return yield* Effect.fail(buildCrashedStart(describeMissingAdapter(frame.providerId)));
+          return yield* Effect.fail(
+            buildCrashedStartFromText(describeMissingAdapter(frame.providerId)),
+          );
         }
         // Ask the adapter, not the `live` table. In practice the controller
         // never sends a second start for a session that has started, but a
@@ -1289,7 +1329,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         const held = yield* isHeldBy(adapter, frame.sessionId);
         if (held && earlier?.pendingStop === undefined) {
           return yield* Effect.fail<UndeliveredStart>({
-            message: `session ${frame.sessionId} is already running on this runner`,
+            error: buildSessionAlreadyRunning(),
             exitReason: undefined,
           });
         }
@@ -1300,7 +1340,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               "A start waited for the earlier harness of its session to stop, and it is still running",
             ).pipe(Effect.annotateLogs({ sessionId: frame.sessionId }));
             return yield* Effect.fail<UndeliveredStart>({
-              message: `session ${frame.sessionId} is still stopping on this runner`,
+              error: new SessionAlreadyRunning({
+                message: "This session is still stopping on this runner. Try again in a moment.",
+              }),
               exitReason: undefined,
             });
           }
@@ -1346,8 +1388,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           frame.spec.outputSchema === undefined ? [] : lintOutputSchema(frame.spec.outputSchema);
         if (issues.length > 0) {
           return yield* Effect.fail(
-            buildCrashedStart(
-              `the output schema is outside the subset every harness accepts: ${issues.join("; ")}`,
+            buildCrashedStartFromText(
+              `The session did not start because its output schema is not supported by every harness: ${issues.join("; ")}`,
             ),
           );
         }
@@ -1363,7 +1405,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         // during it.
         if (arrived.pendingStop !== undefined) {
           return yield* Effect.fail<UndeliveredStart>({
-            message: `session ${frame.sessionId} was stopped before its input was handed over`,
+            error: buildInputStopped(),
             exitReason: "stopped",
           });
         }
@@ -1375,12 +1417,12 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               librarySkillsFolder,
               arrived.librarySkills,
             ),
-            buildCrashedStart,
+            buildCrashedStartFromText,
           );
         }
         const resolved = yield* Effect.mapError(
           resolveSessionContext(frame, connection.machine, adapter.binaryName, githubToken),
-          buildCrashedStart,
+          buildCrashedStartFromText,
         );
         arrived.directories = resolved;
         // Staged after the context, so a workspace this runner does not hold
@@ -1395,7 +1437,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                   resolved.repositorySkills,
                   sessionSkillsFolder,
                 ),
-                buildCrashedStart,
+                buildCrashedStartFromText,
               );
         const editWatch = yield* joinEditWatch(frame, resolved, arrived);
         return { adapter, resolved, repositorySkillsFolders, editWatch };
@@ -1483,6 +1525,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         const { adapter, resolved, repositorySkillsFolders, editWatch } = prepared;
         const { sessionSkillsFolder } = arrived;
         const librarySkillsFolder = findLibrarySkillsFolder(arrived);
+        const setupTarget = {
+          runnerId: connection.runnerId,
+          providerId: frame.providerId,
+          instanceId: frame.spec.instanceId,
+        };
         const held: Live = {
           inputCancellation: arrived.inputCancellation,
           harnessReady: arrived.harnessReady,
@@ -1542,7 +1589,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           live.delete(frame.sessionId);
           yield* tearDownSession(frame.sessionId, held);
           return yield* Effect.fail<UndeliveredStart>({
-            message: "the runner is shutting down",
+            error: buildShuttingDown(),
             exitReason: "runner_restart",
           });
         }
@@ -1556,7 +1603,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           live.delete(frame.sessionId);
           yield* tearDownSession(frame.sessionId, held);
           return yield* Effect.fail<UndeliveredStart>({
-            message: `session ${frame.sessionId} was stopped before its input was handed over`,
+            error: buildInputStopped(),
             exitReason: "stopped",
           });
         }
@@ -1598,7 +1645,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                         editWatch.recordRequestOnRunningItem(frame.sessionId, requestId),
                     },
             }),
-            buildCrashedStart,
+            (error) => buildCrashedStart(appendSetupInstructions(error, setupTarget)),
           ),
           () =>
             Effect.gen(function* () {
@@ -1644,7 +1691,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           // its own pending stop to it, or hand its harness this input.
           if (live.get(frame.sessionId) !== held) {
             return Effect.fail<UndeliveredStart>({
-              message: `session ${frame.sessionId} was started again before its input was handed over`,
+              error: new InputNotDelivered({
+                message: "The session was started again before its input was delivered.",
+              }),
               exitReason: undefined,
             });
           }
@@ -1657,7 +1706,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             return Effect.andThen(
               requestStop(frame.sessionId, held, stopReason),
               Effect.fail<UndeliveredStart>({
-                message: `session ${frame.sessionId} was stopped before its input was handed over`,
+                error: buildInputStopped(),
                 exitReason: undefined,
               }),
             );
@@ -1762,7 +1811,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                 ? Effect.failCause(cause)
                 : answerUndeliveredStart(
                     frame,
-                    buildCrashedStart(describeCause(cause, MAX_MESSAGE_LENGTH)),
+                    buildCrashedStartFromText(
+                      `The session did not start because the runner hit an unexpected error: ${endSentence(describeCause(cause, MAX_MESSAGE_LENGTH))}`,
+                    ),
                   ),
             ),
           ),
@@ -1800,12 +1851,12 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         return Effect.suspend(() => {
           const held = live.get(frame.sessionId);
           if (held === undefined) {
-            return refuseInput(frame, `session ${frame.sessionId} is not running on this runner`);
+            return refuseInput(frame, buildSessionNotRunning());
           }
           // The session is on its way out, so the input would open a turn
           // nothing finishes.
           if (held.pendingStop !== undefined) {
-            return refuseInput(frame, `session ${frame.sessionId} is stopping on this runner`);
+            return refuseInput(frame, buildSessionStopping());
           }
           // Cancel the idle wait before the input reaches the harness. The
           // turn this input opens may start only after the wait would have

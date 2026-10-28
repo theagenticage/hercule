@@ -169,11 +169,15 @@ const fetchCatalog = (
     (child) => {
       const rpc = makeRpc(child, () => undefined);
       Effect.runFork(rpc.pump);
-      return Effect.map(rpc.send({ type: "get_available_models" }), (answer) => {
-        const models = (answer["data"] as { readonly models?: ReadonlyArray<PiModel> } | undefined)
-          ?.models;
-        return buildCatalog(models ?? []);
-      });
+      return rpc.send({ type: "get_available_models" }).pipe(
+        Effect.mapError((failure) => failure.message),
+        Effect.map((answer) => {
+          const models = (
+            answer["data"] as { readonly models?: ReadonlyArray<PiModel> } | undefined
+          )?.models;
+          return buildCatalog(models ?? []);
+        }),
+      );
     },
     (child) => Effect.sync(() => child.kill()),
   );

@@ -29,11 +29,14 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
 import {
+  AdapterFailed,
   AnswerNotDelivered,
   MAX_FACT_ITEMS,
   MAX_MESSAGE_LENGTH,
+  SessionNotRunning,
   SteerRefused,
   type AccessMode,
+  type AdapterError,
   type ApprovalDecision,
   type DisallowedTool,
   type ExitReason,
@@ -73,6 +76,15 @@ import {
 import type { AttachmentUploader } from "../attachments";
 import type { ResolvedSkillReference } from "../skills";
 import { buildSkillSteerRefusedMessage } from "./steer-refused-message";
+import {
+  buildHarnessNotInstalled,
+  buildHarnessStartFailed,
+  buildInputStopped,
+  buildModelChangeRefused,
+  buildSessionAlreadyRunning,
+  buildSessionNotRunning,
+  buildSessionStopping,
+} from "./adapter-error-builders";
 import { readAttachmentBase64 } from "./attachments";
 import { replaceToolResultImages } from "./claude-code-tool-result-images";
 import {
@@ -106,6 +118,9 @@ import { endSentence, now } from "../report";
 import { listNativeClaudeSkills, runBoundedListing } from "../skills";
 
 export const CLAUDE_CODE = "claude-code";
+
+/** The name the user knows this harness by, as it appears in the messages shown to them. */
+const CLAUDE_CODE_NAME = "Claude Code";
 
 const CLAUDE_BINARY = "claude";
 
@@ -676,14 +691,18 @@ const buildPlugins = (ctx: ProviderRunnerContext): NonNullable<Options["plugins"
 const buildNativeSkillOverrides = (
   directories: ReadonlyArray<string>,
   loadsProject: boolean,
-): Effect.Effect<Settings, string> => {
+): Effect.Effect<Settings, AdapterFailed> => {
   if (!loadsProject) return Effect.succeed({});
   return runBoundedListing(listNativeClaudeSkills(directories)).pipe(
-    Effect.mapError((reason) =>
-      `The runner could not turn off the skills Claude would load natively from \`.claude/skills\`: ${endSentence(reason)} The Thread did not start.`.slice(
-        0,
-        MAX_MESSAGE_LENGTH,
-      ),
+    Effect.mapError(
+      (reason) =>
+        new AdapterFailed({
+          message:
+            `The runner could not turn off the skills Claude Code would load natively from \`.claude/skills\`: ${endSentence(reason)} The Thread did not start.`.slice(
+              0,
+              MAX_MESSAGE_LENGTH,
+            ),
+        }),
     ),
     Effect.map((names): Settings =>
       names.length === 0
@@ -719,7 +738,7 @@ const SESSION_SETTINGS_FILE = "claude-settings.json";
 const buildSessionSettings = (
   ctx: ProviderRunnerContext,
   loadsProject: boolean,
-): Effect.Effect<string | Settings, string> =>
+): Effect.Effect<string | Settings, AdapterFailed> =>
   Effect.flatMap(
     buildNativeSkillOverrides(
       [...(ctx.cwd === null ? [] : [ctx.cwd]), ...(ctx.checkoutPaths ?? [])],
@@ -739,7 +758,14 @@ const buildSessionSettings = (
           await writeFile(path, JSON.stringify(settings));
           return path;
         },
-        catch: (error) => `could not write the Claude settings file: ${describeError(error)}`,
+        catch: (error) =>
+          new AdapterFailed({
+            message: truncateMessage(
+              endSentence(
+                `The runner could not write the settings file for ${CLAUDE_CODE_NAME}: ${describeError(error)}`,
+              ),
+            ),
+          }),
       }),
   );
 
@@ -817,7 +843,7 @@ export const buildClaudePromptParts = (turn: AdapterTurnInput): ClaudePromptPart
  */
 const buildUserContent = (
   turn: AdapterTurnInput,
-): Effect.Effect<SDKUserMessage["message"]["content"], string> => {
+): Effect.Effect<SDKUserMessage["message"]["content"], AdapterFailed> => {
   const attachments = turn.attachments ?? [];
   const { leading, command } = buildClaudePromptParts(turn);
   const buildTextBlock = (text: string) => ({ type: "text" as const, text });
@@ -827,7 +853,10 @@ const buildUserContent = (
       leading === "" ? command : [buildTextBlock(leading), buildTextBlock(command)],
     );
   }
-  return Effect.map(Effect.forEach(attachments, readAttachmentBase64), (images) => [
+  const readImages = Effect.forEach(attachments, readAttachmentBase64).pipe(
+    Effect.mapError((message) => new AdapterFailed({ message })),
+  );
+  return Effect.map(readImages, (images) => [
     ...(leading === "" ? [] : [buildTextBlock(leading)]),
     ...images.map((data, at) => ({
       type: "image" as const,
@@ -1374,12 +1403,13 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   };
 
   /** Returns the hosted session. Fails when there is none, or when it is stopping. */
-  const getHostedSession = (sessionId: string): Effect.Effect<Live, string> =>
+  const getHostedSession = (sessionId: string): Effect.Effect<Live, SessionNotRunning> =>
     Effect.suspend(() => {
       const held = live.get(sessionId);
-      return held === undefined || held.stopping !== undefined
-        ? Effect.fail(`session ${sessionId} is not running here`)
-        : Effect.succeed(held);
+      if (held === undefined) return Effect.fail(buildSessionNotRunning());
+      return held.stopping === undefined
+        ? Effect.succeed(held)
+        : Effect.fail(buildSessionStopping());
     });
 
   /**
@@ -1472,11 +1502,11 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       sessionId: string,
       spec: SessionSpec,
       ctx: ProviderRunnerContext,
-    ): Effect.Effect<SessionBinding, string> =>
-      Effect.suspend(() => {
+    ): Effect.Effect<SessionBinding, AdapterError> =>
+      Effect.suspend((): Effect.Effect<SessionBinding, AdapterError> => {
         const binary = ctx.binary;
         if (binary === undefined) {
-          return Effect.fail(`no ${CLAUDE_BINARY} on this machine`);
+          return Effect.fail(buildHarnessNotInstalled(CLAUDE_CODE_NAME));
         }
         const native = resolveNativeSession(spec);
         const binding: SessionBinding = {
@@ -1487,14 +1517,14 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         const input = createPushable<SDKUserMessage>();
         return Effect.map(
           Effect.flatMap(buildSessionSettings(ctx, spec.workspaceId !== null), (settings) =>
-            Effect.suspend(() => {
+            Effect.suspend((): Effect.Effect<ClaudeStream, AdapterError> => {
               // Checked after the settings file is written, which waits: the
               // check and `live.set` below must follow each other with no
               // wait between them. Two harnesses under one Hercule session id
               // would mix up their events and their exits, so the second
               // start fails.
               if (live.has(sessionId)) {
-                return Effect.fail(`session ${sessionId} is already running here`);
+                return Effect.fail(buildSessionAlreadyRunning());
               }
               return Effect.try({
                 try: () =>
@@ -1510,7 +1540,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
                     ),
                     input,
                   }),
-                catch: describeError,
+                catch: (error) => buildHarnessStartFailed(CLAUDE_CODE_NAME, describeError(error)),
               });
             }),
           ),
@@ -1555,7 +1585,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     sendInput: (
       sessionId: string,
       turn: AdapterTurnInput,
-    ): Effect.Effect<SendResult, string | SteerRefused> =>
+    ): Effect.Effect<SendResult, AdapterError> =>
       Effect.gen(function* () {
         // Read before anything changes: an image that cannot be read refuses
         // the input before a turn opens.
@@ -1572,7 +1602,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         if (model !== undefined && model !== before.model && before.state.turnId === undefined) {
           const refused = yield* sendControlRequest(before.stream.setModel(model));
           if (refused !== undefined) {
-            return yield* Effect.fail(`the model was not changed to ${model}: ${refused}`);
+            return yield* Effect.fail(
+              buildModelChangeRefused(CLAUDE_CODE_NAME, `switch to the model ${model}`, refused),
+            );
           }
           before.model = model;
         }
@@ -1581,7 +1613,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         // stopped.
         const held = yield* getHostedSession(sessionId);
         if (held !== before || held.inputGeneration !== generation)
-          return yield* Effect.fail("the input was stopped before delivery");
+          return yield* Effect.fail(buildInputStopped());
         // Claude does not run a slash command pushed into a running turn: it
         // holds the message and runs it as the next turn, so the skill would
         // start late and the user would see a steer that did not steer.

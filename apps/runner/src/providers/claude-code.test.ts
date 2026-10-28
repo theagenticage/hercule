@@ -27,8 +27,14 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
 import {
+  AdapterFailed,
   AnswerNotDelivered,
+  HarnessNotInstalled,
+  InputNotDelivered,
   MAX_MESSAGE_LENGTH,
+  ModelChangeRefused,
+  SessionAlreadyRunning,
+  SessionNotRunning,
   SteerRefused,
   type ApprovalDecision,
   type OpenRequest,
@@ -926,8 +932,9 @@ describe("a Claude Code session", () => {
       );
 
       // A session that started with only the names read so far would load the others natively.
-      expect(reason).toBe(
-        "The runner could not turn off the skills Claude would load natively from `.claude/skills`: the workspace's `.claude/skills` folders hold more than 10000 entries in all, plain files included. Keep them to 10000 entries or fewer. The Thread did not start.",
+      expect(reason).toBeInstanceOf(AdapterFailed);
+      expect(reason.message).toBe(
+        "The runner could not turn off the skills Claude Code would load natively from `.claude/skills`: the workspace's `.claude/skills` folders hold more than 10000 entries in all, plain files included. Keep them to 10000 entries or fewer. The Thread did not start.",
       );
       expect(run.options).toEqual([]);
     } finally {
@@ -1383,7 +1390,7 @@ describe("a Claude Code session", () => {
 
     // The session is gone. Reporting the input as delivered would make the
     // user believe a message was sent when it was not.
-    expect(await sending).toBe(`session ${SESSION} is not running here`);
+    expect(await sending).toMatchObject({ _tag: "SessionNotRunning" });
     expect(run.sent).toEqual([]);
   });
 
@@ -1405,7 +1412,9 @@ describe("a Claude Code session", () => {
       await waitUntil("asked the harness for the model", () => run.models.length === 1);
       await Effect.runPromise(run.adapter.interrupt(SESSION));
       run.releaseModel();
-      expect(await sending).toContain("stopped");
+      const refusal = await sending;
+      expect(refusal).toBeInstanceOf(InputNotDelivered);
+      expect(refusal.message).toContain("stopped");
       expect(run.sent).toEqual([]);
       expect(run.interrupted()).toBe(subagentWorking ? 1 : 0);
       expect(
@@ -1511,7 +1520,8 @@ describe("a Claude Code session", () => {
     const said = await Effect.runPromise(
       Effect.flip(run.adapter.sendInput(SESSION, { text: "hello" })),
     );
-    expect(said).toBe(`session ${SESSION} is not running here`);
+    expect(said).toBeInstanceOf(SessionNotRunning);
+    expect(said.message).toContain("not running");
   });
 
   it("fails input as soon as a stop was requested, instead of dropping it", async () => {
@@ -1523,7 +1533,7 @@ describe("a Claude Code session", () => {
       Effect.flip(run.adapter.sendInput(SESSION, { text: "hello" })),
     );
 
-    expect(said).toBe(`session ${SESSION} is not running here`);
+    expect(said).toBeInstanceOf(SessionNotRunning);
   });
 
   it("fails to start a second harness under a session id it already hosts", async () => {
@@ -1534,7 +1544,8 @@ describe("a Claude Code session", () => {
       Effect.flip(run.adapter.startSession(SESSION, SPEC, WORKING)),
     );
 
-    expect(said).toBe(`session ${SESSION} is already running here`);
+    expect(said).toBeInstanceOf(SessionAlreadyRunning);
+    expect(said.message).toContain("already running");
     // The session that was already running is untouched: one harness, one stream.
     expect(run.options.length).toBe(1);
     expect(run.closed()).toBe(0);
@@ -1545,7 +1556,40 @@ describe("a Claude Code session", () => {
     const said = await Effect.runPromise(
       Effect.flip(run.adapter.startSession(SESSION, SPEC, { ...WORKING, binary: undefined })),
     );
-    expect(said).toBe("no claude on this machine");
+    expect(said).toBeInstanceOf(HarnessNotInstalled);
+    expect(said.message).toContain("not installed");
+  });
+
+  it("fails to start with AdapterFailed when launching the harness throws anything else", async () => {
+    const adapter = makeClaudeCodeAdapter({
+      query: () => {
+        throw new Error("a session must not probe");
+      },
+      stream: () => {
+        throw new Error("the options were refused");
+      },
+      run: () => Effect.succeed({ code: 0, stdout: "", stderr: "" }),
+    });
+    const said = await Effect.runPromise(Effect.flip(adapter.startSession(SESSION, SPEC, WORKING)));
+    expect(said).toBeInstanceOf(AdapterFailed);
+    expect(said.message).toContain("the options were refused");
+  });
+
+  it("fails the input with AdapterFailed, naming the image, when a cached image cannot be read", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, WORKING));
+    const image = testing.writeTestImage();
+    const said = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.sendInput(SESSION, {
+          text: "what is this?",
+          attachments: [{ ...image, name: "gone.png", path: `${image.path}.missing` }],
+        }),
+      ),
+    );
+    expect(said).toBeInstanceOf(AdapterFailed);
+    expect(said.message).toContain("gone.png");
+    expect(run.sent).toEqual([]);
   });
 });
 
@@ -1659,7 +1703,9 @@ describe("changing the model", () => {
       ),
     );
 
-    expect(said).toContain("claude-opus-4-8");
+    expect(said).toBeInstanceOf(ModelChangeRefused);
+    expect(said.message).toContain("claude-opus-4-8");
+    expect(said.message).toContain("input was not sent");
     expect(run.sent).toEqual([]);
     // Sending it under the old model would run a turn nobody asked for, and
     // the caller would never learn that the model change failed.

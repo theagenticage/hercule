@@ -44,8 +44,14 @@ import type {
 import {
   AdapterFailed,
   AnswerNotDelivered,
+  HarnessNotInstalled,
+  HarnessProtocolError,
+  InputNotDelivered,
   MAX_FRAME_BYTES,
+  SessionAlreadyRunning,
+  SessionNotRunning,
   SteerRefused,
+  type AdapterError,
   type GithubTokenAnswer,
 } from "@hercule/protocol";
 import { FIXTURE_SCHEMA } from "@hercule/protocol/testing";
@@ -89,6 +95,7 @@ afterAll(async () => {
 
 const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
+const RUNNER_ID = "0199e0e7-0000-7000-8000-0000000000aa";
 const NATIVE = "0199e0e7-0000-7000-8000-0000000000fe";
 const TURN = "0199e0e7-0000-7000-8000-0000000000fd";
 /** The id of the Queued Input row an input frame and its result are sent under. */
@@ -166,7 +173,7 @@ interface Fake {
   readonly stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }>;
   readonly emit: (event: ProviderEvent) => void;
   /** The error every later start and input fails with, when set. */
-  fails: string | undefined;
+  fails: AdapterError | undefined;
   /** The message every `respondToQuestion` call fails with, when set. */
   answerFails: string | undefined;
   /** A harness that throws where nothing declared it could. */
@@ -236,14 +243,16 @@ const createFake = (): Fake => {
           fake.emit({ _tag: "session.started", eventId: "e-started", sessionId, at });
           return Effect.succeed(binding);
         }),
-      sendInput: (sessionId, input): Effect.Effect<SendResult, string> =>
+      sendInput: (sessionId, input): Effect.Effect<SendResult, AdapterError> =>
         Effect.suspend(() => {
           inputsBegun += 1;
           return fake.inputGate === undefined ? Effect.void : Deferred.await(fake.inputGate);
         }).pipe(
           Effect.andThen(() => {
             if (!held.has(sessionId)) {
-              return Effect.fail(`session ${sessionId} is not running here`);
+              return Effect.fail(
+                new SessionNotRunning({ message: `session ${sessionId} is not running here` }),
+              );
             }
             if (fake.fails !== undefined) return Effect.fail(fake.fails);
             inputs.push(input);
@@ -387,6 +396,7 @@ const buildConnection = (
   const githubTokenCopies = makeGithubTokenCopies({ ask: askController });
   const supervisor = runner.forConnection({
     scope,
+    runnerId: RUNNER_ID,
     machine,
     githubTokenCopies,
     send,
@@ -518,14 +528,25 @@ const listInputResults = (
 const readRefusalMessage = (result: SessionInputResult | undefined): string =>
   result !== undefined && !result.ok ? result.error.message : "";
 
+/** Returns the tag of a refused input result's error, or undefined when it was not refused. */
+const readRefusalTag = (
+  result: SessionInputResult | undefined,
+): AdapterError["_tag"] | undefined =>
+  result !== undefined && !result.ok ? result.error._tag : undefined;
+
 /**
  * Checks that the input a start carried was answered once, as refused, with
- * a reason that contains `reason`.
+ * an error of the given tag and a reason that contains `reason`.
  */
-const expectStartInputRefused = (sent: ReadonlyArray<RunnerToController>, reason: string): void => {
+const expectStartInputRefused = (
+  sent: ReadonlyArray<RunnerToController>,
+  reason: string,
+  tag: AdapterError["_tag"] = "AdapterFailed",
+): void => {
   const results = listInputResults(sent);
   expect(results).toHaveLength(1);
   expect(results[0]).toMatchObject({ requestId: START_REQUEST, ok: false });
+  expect(readRefusalTag(results[0])).toBe(tag);
   expect(readRefusalMessage(results[0])).toContain(reason);
 };
 
@@ -681,7 +702,8 @@ describe("the input a start carries", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
     Object.assign(fake.adapter, {
-      sendInput: () => Effect.fail("the harness is not ready for input"),
+      sendInput: () =>
+        Effect.fail(new AdapterFailed({ message: "the harness is not ready for input" })),
     });
 
     await runConnected(
@@ -744,6 +766,56 @@ describe("an input the harness cannot steer into the running turn", () => {
       error: new SteerRefused({ message }),
     });
     expect(listSessionEvents(sent).map((frame) => frame.event._tag)).toEqual(["session.started"]);
+  });
+});
+
+describe("an input the harness fails on mid-session, with the conversation broken", () => {
+  it("is answered as refused and reported in the thread, then the harness is stopped as a crash", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    const message = "The Codex process went away before it answered.";
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("sent session.started", () => listSessionEvents(sent).length === 1);
+        Object.assign(fake.adapter, {
+          sendInput: () => Effect.fail(new HarnessProtocolError({ message })),
+        });
+        yield* supervisor.input({
+          _tag: "sessionInput",
+          requestId: REQUEST,
+          sessionId: SESSION,
+          input: { text: "go on" },
+        });
+        yield* waitUntil("sent the exit", () => listExitReasons(sent).length === 1);
+      }),
+    );
+
+    expect(listInputResults(sent)[1]).toEqual({
+      _tag: "sessionInputResult",
+      requestId: REQUEST,
+      ok: false,
+      error: new HarnessProtocolError({ message }),
+    });
+    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "crash" }]);
+    const events = listSessionEvents(sent).map((frame) => frame.event);
+    expect(events.find((event) => event._tag === "runtime.error")).toMatchObject({
+      class: "HarnessProtocolError",
+      message,
+    });
+    expect(listExitReasons(sent)).toEqual(["crash"]);
+    // The answer comes before the exit, so the controller has it before the
+    // exit closes the session.
+    expect(
+      sent.findIndex((frame) => frame._tag === "sessionInputResult" && frame.requestId === REQUEST),
+    ).toBeLessThan(
+      sent.findIndex(
+        (frame) => frame._tag === "sessionEvent" && frame.event._tag === "session.exited",
+      ),
+    );
   });
 });
 
@@ -951,10 +1023,15 @@ describe("a start the controller sends twice", () => {
       Effect.gen(function* () {
         yield* supervisor.start(START);
         yield* supervisor.start(START);
+        // Wait for the watch to read past the duplicate before counting.
+        yield* awaitMarker(fake);
       }),
     );
 
     expect(fake.inputs).toEqual([START_INPUT]);
+    // A duplicate writes no runtime error and ends nothing: the session it
+    // duplicates is still running.
+    expect(listSessionEvents(sent).map((frame) => frame.event._tag)).toEqual(["session.started"]);
     // Both frames carry the same row, and each is answered once.
     expect(listInputResults(sent)).toEqual([
       { _tag: "sessionInputResult", requestId: START_REQUEST, ok: true, delivery: "opened" },
@@ -962,7 +1039,7 @@ describe("a start the controller sends twice", () => {
         _tag: "sessionInputResult",
         requestId: START_REQUEST,
         ok: false,
-        error: new AdapterFailed({
+        error: new SessionAlreadyRunning({
           message: `session ${SESSION} is already running on this runner`,
         }),
       },
@@ -1220,7 +1297,7 @@ describe("the GitHub token a start carries", () => {
 
   it("is released when the adapter fails to start the session", async () => {
     const fake = createFake();
-    fake.fails = "no fake-harness on this machine";
+    fake.fails = new AdapterFailed({ message: "no fake-harness on this machine" });
     const { supervisor, githubTokenCopies } = buildConnection(fake);
 
     await runConnected(fake, supervisor, supervisor.start(WITH_TOKEN));
@@ -1397,9 +1474,11 @@ describe("the GH_TOKEN a session starts with", () => {
 });
 
 describe("a session that cannot run here", () => {
-  it("ends a session whose adapter failed to start it, instead of leaving it starting forever", async () => {
+  it("ends a session whose harness is not installed, telling the user how to install it", async () => {
     const fake = createFake();
-    fake.fails = "no fake-harness on this machine";
+    fake.fails = new HarnessNotInstalled({
+      message: "Fake Harness is not installed on this runner.",
+    });
     const { supervisor, sent, machine } = buildConnection(fake);
 
     await runConnected(fake, supervisor, supervisor.start(START));
@@ -1407,16 +1486,22 @@ describe("a session that cannot run here", () => {
     const events = listSessionEvents(sent).map((frame) => frame.event);
     expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
     expect(events[0]).toMatchObject({
-      class: "unknown",
-      message: "no fake-harness on this machine",
+      class: "HarnessNotInstalled",
+      message: expect.stringContaining(
+        `hercule runner install-harness ${RUNNER_ID} --provider fake`,
+      ) as string,
     });
     // Not `stopped`: nobody asked for this, and there is nothing to resume.
     expect(events[1]).toMatchObject({ reason: "crash" });
     // And nothing of it is left on disk.
     expect(existsSync(join(machine.scratchDir, SESSION))).toBe(false);
-    // The input never reached a harness, and the controller is told so.
+    // The input never reached a harness, and the controller is told so, with the same fix.
     expect(fake.inputs).toEqual([]);
-    expectStartInputRefused(sent, "no fake-harness on this machine");
+    expectStartInputRefused(
+      sent,
+      `hercule runner install-harness ${RUNNER_ID} --provider fake`,
+      "HarnessNotInstalled",
+    );
     // The answer comes before the exit, so the controller has it before the
     // exit closes the session.
     expect(sent.findIndex((frame) => frame._tag === "sessionInputResult")).toBeLessThan(
@@ -1424,6 +1509,23 @@ describe("a session that cannot run here", () => {
         (frame) => frame._tag === "sessionEvent" && frame.event._tag === "session.exited",
       ),
     );
+  });
+
+  it("ends a session whose adapter failed to start it for another reason, naming the error in the thread", async () => {
+    const fake = createFake();
+    fake.fails = new AdapterFailed({ message: "could not write the settings file" });
+    const { supervisor, sent } = buildConnection(fake);
+
+    await runConnected(fake, supervisor, supervisor.start(START));
+
+    const events = listSessionEvents(sent).map((frame) => frame.event);
+    expect(events.map((event) => event._tag)).toEqual(["runtime.error", "session.exited"]);
+    expect(events[0]).toMatchObject({
+      class: "AdapterFailed",
+      message: "could not write the settings file",
+    });
+    expect(events[1]).toMatchObject({ reason: "crash" });
+    expectStartInputRefused(sent, "could not write the settings file");
   });
 
   it("ends a start whose output schema is outside the subset, before any harness is asked", async () => {
@@ -1462,9 +1564,11 @@ describe("a session that cannot run here", () => {
     await runConnected(fake, supervisor, supervisor.start({ ...START, providerId: "codex" }));
 
     const events = listSessionEvents(sent).map((frame) => frame.event);
-    expect(events[0]).toMatchObject({ message: "no adapter for codex in this runner build" });
+    expect(events[0]).toMatchObject({
+      message: expect.stringContaining("does not support the provider"),
+    });
     expect(events[1]).toMatchObject({ _tag: "session.exited", reason: "crash" });
-    expectStartInputRefused(sent, "no adapter for codex in this runner build");
+    expectStartInputRefused(sent, "does not support the provider");
   });
 
   it("reports a defect on the session instead of letting it end the connection", async () => {
@@ -1531,7 +1635,8 @@ describe("a session that cannot run here", () => {
     // can show is better than a bare flag.
     expect(listInputResults(sent)).toHaveLength(1);
     expect(listInputResults(sent)[0]).toMatchObject({ requestId: REQUEST, ok: false });
-    expect(readRefusalMessage(listInputResults(sent)[0])).toContain(SESSION);
+    expect(readRefusalTag(listInputResults(sent)[0])).toBe("SessionNotRunning");
+    expect(readRefusalMessage(listInputResults(sent)[0])).toContain("not running");
   });
 });
 
@@ -2453,7 +2558,8 @@ describe("a session that sits idle between turns", () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
     Object.assign(fake.adapter, {
-      sendInput: () => Effect.fail("the harness is not ready for input"),
+      sendInput: () =>
+        Effect.fail(new AdapterFailed({ message: "the harness is not ready for input" })),
     });
 
     await runConnectedOnTestClock(
@@ -2545,7 +2651,7 @@ describe("a session that sits idle between turns", () => {
         // The input frame cancels the wait, and the refused input opens no
         // turn, so the session is idle again from the refusal on.
         yield* TestClock.adjust(IDLE_MS / 2);
-        fake.fails = "the harness is busy";
+        fake.fails = new AdapterFailed({ message: "the harness is busy" });
         yield* supervisor.input({
           _tag: "sessionInput",
           requestId: REQUEST,
@@ -2598,6 +2704,7 @@ describe("a session that sits idle between turns", () => {
 
     expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
     expect(listInputResults(sent).at(-1)).toMatchObject({ requestId: REQUEST, ok: false });
+    expect(readRefusalTag(listInputResults(sent).at(-1))).toBe("SessionNotRunning");
     expect(readRefusalMessage(listInputResults(sent).at(-1))).toContain("is stopping");
     // The harness was never handed the input.
     expect(fake.inputs).toEqual([START_INPUT]);
@@ -2936,15 +3043,17 @@ describe("an announced shutdown", () => {
     expect(sortStopsBySession(fake)).toEqual([{ sessionId: SESSION, reason: "runner_restart" }]);
     // The second start's input is answered all the same, so the controller
     // does not wait for it.
-    expect(listInputResults(sent)).toEqual([
-      { _tag: "sessionInputResult", requestId: START_REQUEST, ok: true, delivery: "opened" },
-      {
-        _tag: "sessionInputResult",
-        requestId: START_REQUEST,
-        ok: false,
-        error: new AdapterFailed({ message: "the runner is shutting down" }),
-      },
-    ]);
+    const results = listInputResults(sent);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({
+      _tag: "sessionInputResult",
+      requestId: START_REQUEST,
+      ok: true,
+      delivery: "opened",
+    });
+    expect(results[1]).toMatchObject({ requestId: START_REQUEST, ok: false });
+    expect(readRefusalTag(results[1])).toBe("AdapterFailed");
+    expect(readRefusalMessage(results[1])).toContain("shutting down");
   });
 });
 
@@ -2990,7 +3099,7 @@ describe("a stop that arrives while a session is still starting", () => {
     expect(sortStopsBySession(fake)).toEqual([{ sessionId: SESSION, reason: "stopped" }]);
     // A session on its way out gets no turn.
     expect(fake.inputs).toEqual([]);
-    expectStartInputRefused(sent, "was stopped before its input was handed over");
+    expectStartInputRefused(sent, "stopped before the input was delivered", "InputNotDelivered");
   });
 
   it("spawns no harness when it arrives while the start switches the workspace's branch", async () => {
@@ -3017,6 +3126,7 @@ describe("a stop that arrives while a session is still starting", () => {
     const sent: Array<RunnerToController> = [];
     const supervisor = runner.forConnection({
       scope,
+      runnerId: RUNNER_ID,
       githubTokenCopies,
       machine: {
         ...machine,
@@ -3069,7 +3179,7 @@ describe("a stop that arrives while a session is still starting", () => {
     expect(fake.stops).toEqual([]);
     expect(listSessionEvents(sent).map((frame) => frame.event._tag)).toEqual(["session.exited"]);
     expect(listExitReasons(sent)).toEqual(["stopped"]);
-    expectStartInputRefused(sent, "was stopped before its input was handed over");
+    expectStartInputRefused(sent, "stopped before the input was delivered", "InputNotDelivered");
   });
 });
 
@@ -3114,6 +3224,7 @@ describe("a start that follows a stop of the same id", () => {
     );
 
     expect(listInputResults(sent)[1]).toMatchObject({ requestId: REQUEST, ok: false });
+    expect(readRefusalTag(listInputResults(sent)[1])).toBe("SessionAlreadyRunning");
     expect(readRefusalMessage(listInputResults(sent)[1])).toContain("is still stopping");
     // No second harness was asked for, and the old one was not stopped twice.
     expect(fake.contexts).toHaveLength(1);
@@ -3133,6 +3244,7 @@ describe("a start that follows a stop of the same id", () => {
     const sent: Array<RunnerToController> = [];
     const supervisor = runner.forConnection({
       scope,
+      runnerId: RUNNER_ID,
       machine,
       githubTokenCopies,
       workspaceSteps: steps,
@@ -3274,7 +3386,7 @@ describe("a shutdown that happens before a start has added its entry", () => {
     expect(fake.contexts).toHaveLength(0);
     expect(listSessionEvents(sent).map((frame) => frame.event._tag)).toEqual(["session.exited"]);
     expect(listExitReasons(sent)).toEqual(["runner_restart"]);
-    expectStartInputRefused(sent, "the runner is shutting down");
+    expectStartInputRefused(sent, "The runner is shutting down");
   });
 });
 
@@ -3703,7 +3815,7 @@ describe("an agent step's turn", () => {
       Effect.gen(function* () {
         yield* supervisor.start(START);
         yield* waitUntil("sent the start", () => listSessionEvents(sent).length === 1);
-        fake.fails = "the harness is busy";
+        fake.fails = new AdapterFailed({ message: "the harness is busy" });
         yield* supervisor.input(STEP_INPUT);
         expect(steps.listInFlight()).toEqual([]);
         // A turn that ends now is not the step's: the step's turn never opened.
@@ -3807,7 +3919,7 @@ describe("an agent step's turn", () => {
         _tag: "sessionInputResult",
         requestId: REQUEST,
         ok: false,
-        error: new AdapterFailed({
+        error: new InputNotDelivered({
           message:
             "the step ended before its prompt reached the harness, so the prompt was not run",
         }),
@@ -3877,7 +3989,7 @@ describe("an agent step's turn", () => {
         _tag: "sessionInputResult",
         requestId: START_REQUEST,
         ok: false,
-        error: new AdapterFailed({
+        error: new InputNotDelivered({
           message:
             "the step ended before its prompt reached the harness, so the prompt was not run",
         }),
@@ -3892,7 +4004,8 @@ describe("an agent step's turn", () => {
     const fake = createFake();
     const { supervisor, sent, steps } = buildConnection(fake);
     Object.assign(fake.adapter, {
-      sendInput: () => Effect.fail("the harness is not ready for input"),
+      sendInput: () =>
+        Effect.fail(new AdapterFailed({ message: "the harness is not ready for input" })),
     });
 
     await runConnected(
@@ -4574,6 +4687,7 @@ describe("the files an edit changed", () => {
       const nextSent: Array<RunnerToController> = [];
       const next = runner.forConnection({
         scope: nextScope,
+        runnerId: RUNNER_ID,
         machine,
         githubTokenCopies,
         workspaceSteps: steps,
