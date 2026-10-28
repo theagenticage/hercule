@@ -14,7 +14,7 @@ import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
-import { SET_MODEL_RPC_DEADLINE } from "./rpc";
+import { RPC_DEADLINE } from "./rpc";
 import {
   AGENT_FILE_VARIABLE,
   NO_AUTO_COMPACTION_VARIABLE,
@@ -599,7 +599,7 @@ describe("sending an input to a pi session", () => {
           yield* Effect.promise(() =>
             waitUntil("sent set_model", () => listSentCommands(run.sent, "set_model").length === 1),
           );
-          yield* TestClock.adjust(SET_MODEL_RPC_DEADLINE);
+          yield* TestClock.adjust(RPC_DEADLINE);
           return yield* Fiber.join(sending);
         }),
         TestClock.layer(),

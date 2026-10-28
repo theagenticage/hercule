@@ -1,12 +1,12 @@
 /**
- * Tests for how long `send` waits for pi's response to each command, on an
+ * Tests for how long `send` waits for pi's response to a command, on an
  * in-memory pi whose responses the test controls and a clock the test moves.
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { createLines } from "./testing";
-import { PROMPT_RPC_DEADLINE, RPC_DEADLINE, makeRpc } from "./rpc";
+import { RPC_DEADLINE, makeRpc } from "./rpc";
 
 /** Builds an rpc over a pi that records its commands and responds only when the test says so. */
 const createPeer = () => {
@@ -50,27 +50,7 @@ describe("the time pi gets to respond to a command", () => {
     expect(failure._tag).toBe("PiTimedOut");
   });
 
-  it("delivers a prompt that pi acknowledges after compacting for a minute", async () => {
-    const { rpc, respondToLast } = createPeer();
-    const response = await Effect.runPromise(
-      Effect.provide(
-        Effect.gen(function* () {
-          const pumping = yield* Effect.forkChild(rpc.pump);
-          const sent = yield* Effect.forkChild(rpc.send({ type: "prompt", message: "x" }));
-          yield* TestClock.adjust(Duration.zero);
-          yield* TestClock.adjust(Duration.minutes(1));
-          respondToLast();
-          const answered = yield* Fiber.join(sent);
-          yield* Fiber.interrupt(pumping);
-          return answered;
-        }),
-        TestClock.layer(),
-      ),
-    );
-    expect(response["success"]).toBe(true);
-  });
-
-  it("fails a prompt that pi never acknowledges once its longer wait is over", async () => {
+  it("fails a prompt that pi does not acknowledge within 5 seconds", async () => {
     const { rpc } = createPeer();
     const failure = await Effect.runPromise(
       Effect.provide(
@@ -80,7 +60,7 @@ describe("the time pi gets to respond to a command", () => {
             Effect.flip(rpc.send({ type: "prompt", message: "x" })),
           );
           yield* TestClock.adjust(Duration.zero);
-          yield* TestClock.adjust(PROMPT_RPC_DEADLINE);
+          yield* TestClock.adjust(RPC_DEADLINE);
           const error = yield* Fiber.join(sent);
           yield* Fiber.interrupt(pumping);
           return error;

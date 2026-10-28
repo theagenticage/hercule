@@ -84,53 +84,27 @@ export interface PiRpc {
 }
 
 /**
- * How long `send` waits for pi's response to a command that pi answers from
- * its own state: a write to a process on this machine and a response on the
- * same pipe, never a request to a model. The runner handles a session's frames
- * one at a time, in order, so a pi that stops responding would otherwise block
- * every later frame of its session.
+ * How long `send` waits for pi's response to any command. The runner handles
+ * a session's frames one at a time, in order, so a pi that stops responding
+ * would otherwise block every later frame of its session.
+ *
+ * Most commands only change pi's own state: a write to a process on this
+ * machine and a response on the same pipe. `prompt` is the exception. pi
+ * (0.85.1, `AgentSession.prompt`) acknowledges it only after its preflight,
+ * and the preflight can wait on a model: when the context is nearly full it
+ * first compacts it, which asks the model for a summary. `set_model` can wait
+ * on the network too, to refresh an expired login. When that takes longer
+ * than this deadline, the input fails with `HarnessProtocolError` and the
+ * session keeps running.
+ *
+ * The deadline must stay inside the controller's `SESSION_INPUT_DEADLINE`
+ * (10 seconds). The controller stops waiting for an input after that, puts it
+ * back in the queue, and ignores a later answer. A runner that waited longer
+ * would report a failure the controller has dropped, and the requeued input
+ * would run again. A longer wait for a slow preflight needs a way to settle
+ * an input whose delivery is unknown, which a follow-up has to add.
  */
 export const RPC_DEADLINE: Duration.Duration = Duration.seconds(5);
-
-/**
- * How long `send` waits for the response to `prompt`. pi (0.85.1, `AgentSession.prompt`)
- * sends this response only after its preflight, and the preflight can wait
- * on a model: when the context is nearly full it first compacts it, which asks
- * the model for a summary, and it can also run a slash command of an
- * extension or refresh an expired login before it answers. pi sets no limit
- * on any of these. Two minutes covers an ordinary compaction. It is also
- * as long as this wait may be: when the controller connection drops,
- * tearing it down waits for the `prompt` in flight, and that holds up the
- * runner's reconnect. Two minutes keeps that in line with Codex (30 seconds
- * per request, with retries) and with the two-minute image download. A
- * `prompt` that takes longer fails the input with `HarnessProtocolError`,
- * and the session ends.
- */
-export const PROMPT_RPC_DEADLINE: Duration.Duration = Duration.minutes(2);
-
-/**
- * How long `send` waits for the response to `set_model`. pi checks that the
- * new model's provider has a login first, and refreshing an expired login is
- * a request over the network.
- */
-export const SET_MODEL_RPC_DEADLINE: Duration.Duration = Duration.seconds(30);
-
-/**
- * Returns how long `send` waits for the response to a command of type
- * `commandType`. `steer` and `set_thinking_level` only change pi's own state
- * and use `RPC_DEADLINE`, like `abort`: the callers of `abort` ignore its
- * failure, so waiting longer for the idle pi it ends with buys nothing.
- */
-const getResponseDeadline = (commandType: unknown): Duration.Duration => {
-  switch (commandType) {
-    case "prompt":
-      return PROMPT_RPC_DEADLINE;
-    case "set_model":
-      return SET_MODEL_RPC_DEADLINE;
-    default:
-      return RPC_DEADLINE;
-  }
-};
 
 /** The message of the `PiExited` failure: pi exited, or closed its output, before it responded. */
 const PI_GONE = "pi exited or closed its output";
@@ -214,14 +188,13 @@ export const makeRpc = (
           pending.delete(id);
           return Effect.fail(new PiUnreachable({ message: describeError(error) }));
         }
-        const deadline = getResponseDeadline(command["type"]);
         return Deferred.await(settled).pipe(
           Effect.timeoutOrElse({
-            duration: deadline,
+            duration: RPC_DEADLINE,
             orElse: () =>
               Effect.fail(
                 new PiTimedOut({
-                  message: `pi did not answer ${String(command["type"])} within ${Duration.format(deadline)}`,
+                  message: `pi did not answer ${String(command["type"])} within ${Duration.format(RPC_DEADLINE)}`,
                 }),
               ),
           }),

@@ -1762,11 +1762,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       //   makes two (the handshake and opening the thread). Its input makes
       //   one or two more (a steer, then a new turn), and each of those is
       //   retried up to three times while Codex reports it is overloaded.
-      // - pi: `PROMPT_RPC_DEADLINE`, 2 minutes, for the `prompt` command that
-      //   opens a turn, because pi answers it only after its preflight, which
-      //   can ask a model to compact the context. `SET_MODEL_RPC_DEADLINE`,
-      //   30 seconds, for the model change before it. `RPC_DEADLINE`, 5
-      //   seconds, for every other command.
+      // - pi: `RPC_DEADLINE`, 5 seconds per command.
       // - Claude Code: `CONTROL_DEADLINE`, 5 seconds, for a change of model
       //   before the input. Its start and the input itself do not wait on
       //   the harness.
