@@ -183,11 +183,6 @@ interface Fake {
    * ignoring the signal. Its session is only ever abandoned, never seen out.
    */
   stopsSilently: boolean;
-  /**
-   * When set, `stopSession` waits for it to complete before it records the
-   * stop, like a harness that is slow to take a stop.
-   */
-  stopGate: Deferred.Deferred<void> | undefined;
 }
 
 const createFake = (): Fake => {
@@ -213,7 +208,6 @@ const createFake = (): Fake => {
     answerFails: undefined,
     dies: false,
     stopsSilently: false,
-    stopGate: undefined,
     emit: (event) => {
       PubSub.publishUnsafe(events, event);
     },
@@ -290,24 +284,18 @@ const createFake = (): Fake => {
        * only place that reason can enter the stream.
        */
       stopSession: (sessionId, reason) =>
-        Effect.suspend(() =>
-          fake.stopGate === undefined ? Effect.void : Deferred.await(fake.stopGate),
-        ).pipe(
-          Effect.andThen(() =>
-            Effect.sync(() => {
-              stops.push({ sessionId, reason });
-              if (fake.stopsSilently) return;
-              held.delete(sessionId);
-              fake.emit({
-                _tag: "session.exited",
-                eventId: `e-exited-${String(stops.length)}`,
-                sessionId,
-                at,
-                reason,
-              });
-            }),
-          ),
-        ),
+        Effect.sync(() => {
+          stops.push({ sessionId, reason });
+          if (fake.stopsSilently) return;
+          held.delete(sessionId);
+          fake.emit({
+            _tag: "session.exited",
+            eventId: `e-exited-${String(stops.length)}`,
+            sessionId,
+            at,
+            reason,
+          });
+        }),
     },
   };
   return fake;
@@ -810,7 +798,7 @@ describe("an input the harness cannot steer into the running turn", () => {
 });
 
 describe("an input the harness fails on mid-session, with the conversation broken", () => {
-  it("is answered as refused and reported in the thread, then the harness is stopped as a crash", async () => {
+  it("is answered as refused and reported in the thread, and the session keeps running", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
     const message = "The Codex process went away before it answered.";
@@ -830,7 +818,10 @@ describe("an input the harness fails on mid-session, with the conversation broke
           sessionId: SESSION,
           input: { text: "go on" },
         });
-        yield* waitUntil("sent the exit", () => listExitReasons(sent).length === 1);
+        yield* waitUntil("sent the runtime error", () =>
+          listSessionEvents(sent).some((frame) => frame.event._tag === "runtime.error"),
+        );
+        yield* supervisor.report;
       }),
     );
 
@@ -840,71 +831,15 @@ describe("an input the harness fails on mid-session, with the conversation broke
       ok: false,
       error: new HarnessProtocolError({ message }),
     });
-    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "crash" }]);
     const events = listSessionEvents(sent).map((frame) => frame.event);
     expect(events.find((event) => event._tag === "runtime.error")).toMatchObject({
       class: "HarnessProtocolError",
       message,
     });
-    expect(listExitReasons(sent)).toEqual(["crash"]);
-    // The answer comes before the exit, so the controller has it before the
-    // exit closes the session.
-    expect(
-      sent.findIndex((frame) => frame._tag === "sessionInputResult" && frame.requestId === REQUEST),
-    ).toBeLessThan(
-      sent.findIndex(
-        (frame) => frame._tag === "sessionEvent" && frame.event._tag === "session.exited",
-      ),
-    );
-  });
-});
-
-describe("the stop after an input the harness fails on with the conversation broken", () => {
-  it("does not hold up the session's later inputs, which are refused as not running", async () => {
-    const fake = createFake();
-    const { supervisor, sent } = buildConnection(fake);
-    const message = "The Codex process went away before it answered.";
-    const LATER_REQUEST = "0199e0e7-0000-7000-8000-0000000000f9";
-    let reached = 0;
-
-    await runConnected(
-      fake,
-      supervisor,
-      Effect.gen(function* () {
-        yield* supervisor.start(START);
-        yield* waitUntil("sent session.started", () => listSessionEvents(sent).length === 1);
-        fake.stopGate = yield* Deferred.make<void>();
-        Object.assign(fake.adapter, {
-          sendInput: () => {
-            reached += 1;
-            return Effect.fail(new HarnessProtocolError({ message }));
-          },
-        });
-        yield* supervisor.input({
-          _tag: "sessionInput",
-          requestId: REQUEST,
-          sessionId: SESSION,
-          input: { text: "go on" },
-        });
-        yield* supervisor.input({
-          _tag: "sessionInput",
-          requestId: LATER_REQUEST,
-          sessionId: SESSION,
-          input: { text: "and this" },
-        });
-        // The stop is still waiting on the harness, and the later input is answered anyway.
-        yield* waitUntil("answered all three inputs", () => listInputResults(sent).length === 3);
-        expect(fake.stops).toEqual([]);
-        yield* Deferred.succeed(fake.stopGate, undefined);
-        yield* waitUntil("sent the exit", () => listExitReasons(sent).length === 1);
-      }),
-    );
-
-    const later = listInputResults(sent).find((result) => result.requestId === LATER_REQUEST);
-    expect(readRefusalTag(later)).toBe("SessionNotRunning");
-    // The adapter was asked for the first input only.
-    expect(reached).toBe(1);
-    expect(fake.stops).toEqual([{ sessionId: SESSION, reason: "crash" }]);
+    // The controller has usually queued the input again by the time this
+    // error arrives, so ending the session would make a resume run it twice.
+    expect(fake.stops).toEqual([]);
+    expect(listExitReasons(sent)).toEqual([]);
   });
 });
 

@@ -1149,17 +1149,11 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                 }),
             );
       // Input the harness refused opens no turn, so a session that was idle
-      // before it is still idle and gets its wait back. A
-      // `HarnessProtocolError` is the exception: the conversation with the
-      // harness broke down, so the harness is stopped as a crash instead,
-      // after the answer. The adapter does nothing when it no longer holds
-      // the session. `requestStop` sets `pendingStop` as soon as it is
-      // called, which keeps the idle wait from being armed and makes the
-      // session's later inputs fail with `SessionNotRunning`. The stop itself
-      // runs in the connection's scope, because a harness that just stopped
-      // answering may make the stop wait (Codex asks its app-server to
-      // interrupt the turn), and the session's later frames must not queue
-      // behind that wait.
+      // before it is still idle and gets its wait back. This holds for a
+      // `HarnessProtocolError` too: the harness keeps running, and the session
+      // is not stopped. By the time that error arrives, the controller has
+      // usually stopped waiting for the input and queued it again, and ending
+      // the session as a crash would make a resume run the input a second time.
       const refuseHeldInput = (error: AdapterError): Effect.Effect<void> =>
         Effect.andThen(
           refuseInput(frame, error),
@@ -1167,11 +1161,6 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             if (step !== undefined && held.step === step) {
               held.step = undefined;
               connection.workspaceSteps.forgetAgentStep(step.key);
-            }
-            if (error._tag === "HarnessProtocolError") {
-              return Effect.asVoid(
-                Effect.forkIn(requestStop(frame.sessionId, held, "crash"), connection.scope),
-              );
             }
             return isIdle(held) ? armIdleUnload(held, frame.sessionId) : Effect.void;
           }),
