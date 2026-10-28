@@ -198,11 +198,7 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
         yield* appendNotice({
           conversationId: answered.value.conversationId,
           name: answered.value.name,
-          text: buildUnreachableText(
-            answered.value.name,
-            `its session could not be resumed (${refusal}); ` +
-              "send the message again to start a new session",
-          ),
+          text: buildUnreachableText(answered.value.name, refusal),
           sessionId: session.id,
         });
       }),

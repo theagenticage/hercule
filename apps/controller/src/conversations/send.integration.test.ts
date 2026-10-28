@@ -475,9 +475,9 @@ describe("conversation.send when the current session cannot be resumed", () => {
         expect(notice).toMatchObject({
           senderLabel: "Hercule",
           text:
-            "Hercule can't be reached: its session could not be resumed " +
-            "(that runner is draining and takes no new sessions); " +
-            "send the message again to start a new session",
+            "Hercule can't be reached: the session could not be resumed: " +
+            "that runner is draining and takes no new sessions. " +
+            "Send the message again to start a new session.",
           sessionId: session.id,
           actor: "system",
         });

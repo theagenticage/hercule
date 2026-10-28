@@ -225,9 +225,15 @@ const make = Effect.gen(function* () {
    * `SessionService.recordInputAnswer`.
    *
    * - If the runner reports a delivery, it is recorded and returned.
+   * - If the runner could not fold the input into the running turn
+   *   (`SteerRefused`), the input is waiting again for the turn's end, and
+   *   the result is `queued`: the refusal is not a failure.
    * - If the runner refused the input, its runner was not connected, or an
-   *   ordinary input got no answer, the input goes back to waiting, and this
-   *   fails with an invalid state error with the reason.
+   *   ordinary input got no answer, this fails with an invalid state error
+   *   with the reason. The input goes back to waiting, unless the runner's
+   *   failure is one that sending the input again would not mend: then the
+   *   input is cancelled with the reason
+   *   (`SessionService.recordInputAnswer`).
    * - If an agent step's prompt got no answer, the prompt is marked `sent`
    *   and never sent again, the runner is asked for the step's result, and
    *   this fails with an invalid state error. The runner's answer to that
@@ -275,6 +281,8 @@ const make = Effect.gen(function* () {
           return { inputId: row.id, result: recorded.delivery };
         case "notDelivered":
           return yield* Effect.fail(createInvalidStateError(recorded.reason));
+        case "steerDeferred":
+          return { inputId: row.id, result: "queued" };
         case "unconfirmed":
           yield* connections.tell(session.runnerId, recorded.resultRequest);
           return yield* Effect.fail(createInvalidStateError(STEP_PROMPT_NOT_CONFIRMED));
@@ -385,8 +393,10 @@ const make = Effect.gen(function* () {
    *
    * If the runner rejects the input or does not reply, `deliverClaimed` puts
    * the row back to waiting, and the next change to idle or delivery pass
-   * sends it. An agent step's prompt the runner did not reply to is the
-   * exception: it is never sent again (see `deliverClaimed`).
+   * sends it. Two kinds of input are the exception: an agent step's prompt
+   * the runner did not reply to is never sent again, and an input the runner
+   * failed for a reason that sending it again would not mend is cancelled
+   * (see `deliverClaimed`).
    *
    * Waits while a promotion freezes the controller, and never sends once it
    * is sealed. The new machine's copy of the data holds the row as claimed
@@ -681,8 +691,10 @@ const make = Effect.gen(function* () {
    *
    * Returns `none` when another caller sent the input first, such as the
    * flush at the end of the turn, so each caller decides what that means for
-   * it. Fails with `InvalidState` when the runner refused the input or is not
-   * connected.
+   * it. When the runner cannot fold the input into the running turn, the
+   * input waits for the turn's end and the result is `queued`, as for a
+   * provider that does not steer natively. Fails with `InvalidState` when the
+   * runner failed the input in any other way or is not connected.
    *
    * A native steer cannot race the flush: the claim is one conditional write,
    * so only one of them sends the input. The interrupt can: it is sent only

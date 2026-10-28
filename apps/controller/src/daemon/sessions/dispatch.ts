@@ -63,12 +63,17 @@ const make = Effect.gen(function* () {
    * does, so a runner that stops answering pings ends it, and the answer is
    * then recorded as missing, as for any input on the wire. A refused or
    * missing answer puts the input back to waiting with the reason, for the
-   * next send of the session's input. The one exception is an agent step's
-   * prompt with a missing answer: the runner may have run it, so it is
-   * marked `sent` and never sent again (`SessionService.recordInputAnswer`),
-   * and the runner is asked for the step's result instead. The wait ended
-   * with the connection, so the request is sent only when the runner has
-   * connected again by then. Otherwise the runner is asked when it connects.
+   * next send of the session's input. There are two exceptions:
+   *
+   * - A start the runner failed for a reason that sending the input again
+   *   would not mend, such as a harness that is not installed, cancels the
+   *   input with the runner's message.
+   * - An agent step's prompt with a missing answer: the runner may have run
+   *   it, so it is marked `sent` and never sent again
+   *   (`SessionService.recordInputAnswer`), and the runner is asked for the
+   *   step's result instead. The wait ended with the connection, so the
+   *   request is sent only when the runner has connected again by then.
+   *   Otherwise the runner is asked when it connects.
    *
    * The wait for the answer is not counted by the promotion gate, because a
    * freeze must not wait for a slow start. Recording the answer is counted:

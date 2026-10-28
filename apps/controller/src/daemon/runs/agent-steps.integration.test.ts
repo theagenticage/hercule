@@ -14,6 +14,7 @@ import type { Input, Run, Session } from "@hercule/contract";
 import {
   AdapterFailed,
   buildWorkspaceActionCapability,
+  HarnessProtocolError,
   type ActionStepStart,
   type ControllerToRunner,
   type FrameCarryingInput,
@@ -1618,6 +1619,53 @@ describe("agent steps over the runner socket", () => {
               "The step's prompt could not be sent to its session: that session is not running",
           },
         });
+      });
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "fails the step, and cancels its prompt, when the runner reports a protocol error for the prompt",
+    async () => {
+      await withAgentStepFleet(async (arranged) => {
+        const { wire } = arranged;
+        const player = createSessionPlayer();
+        // The runner holds the prompt without answering, then reports that
+        // its talk with the harness broke down. The harness may have taken
+        // the prompt, so it must not be sent again.
+        wire.answering(() => undefined);
+        const agentId = await createAgent(arranged.harness.base, arranged.token);
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildImplementDefinition(agentId),
+        });
+        const key = buildStepKey(runId);
+        const sessionId = await waitForStepSessionId(arranged, key);
+        await waitForSessionStart(wire, sessionId);
+        player.reportStarted(wire, sessionId);
+        const sent = await waitForStepInput(wire, key);
+
+        wire.send({
+          _tag: "sessionInputResult",
+          requestId: sent.requestId,
+          ok: false,
+          error: new HarnessProtocolError({ message: "The harness did not answer in time." }),
+        });
+
+        const ended = await waitForRunEnded(arranged, runId, "failed");
+        expect(ended).toMatchObject({ failureReason: "session-failed", failedStepId: IMPLEMENT });
+        expect(findStepRecords(ended, IMPLEMENT)[0]).toMatchObject({
+          status: "failed",
+          error: {
+            code: "session_failed",
+            message:
+              "The step's prompt could not be sent to its session: The harness did not answer in time.",
+          },
+        });
+        expect((await listInputs(arranged, sessionId))[0]).toMatchObject({
+          status: "cancelled",
+          reason: "The harness did not answer in time.",
+        });
+        expect(countStepInputs([wire], key)).toBe(1);
       });
     },
     WAIT_DEADLINE_MS * 2,
