@@ -17,7 +17,7 @@ import { NIGHT_THEMES } from "../src/ipc/appearance.ts";
 import { pollUntil } from "./poll.ts";
 
 // The themes the sheets are captured in: the two the book is compared in, and
-// all five for a check by eye. The sheets check their theme against the same
+// all six for a check by eye. The sheets check their theme against the same
 // file.
 export { ALL_THEMES, THEMES } from "../src/renderer/specimens/sheet-themes.ts";
 

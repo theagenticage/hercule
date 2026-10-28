@@ -198,7 +198,7 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
 ];
 
 /**
- * Returns every variant of `screens`: each screen in all five themes, at
+ * Returns every variant of `screens`: each screen in all six themes, at
  * every scale, with every glass level. Ordered by theme, then screen, then
  * scale, then glass, so the order is the same on every run.
  */

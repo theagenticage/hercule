@@ -20,7 +20,7 @@ import { ALL_THEMES } from "./sheet-themes";
 
 /**
  * Returns the theme the page's `?theme=` names, Whitehaven when the URL
- * names none. Fails on a name that is not one of the five themes, because the
+ * names none. Fails on a name that is not one of the six themes, because the
  * page would otherwise be drawn in no theme at all.
  */
 function readSheetTheme(): Theme {
@@ -82,7 +82,7 @@ function readSheetTextSize(): TextSizeStep | undefined {
  * whole number from 0 to 100 (the 40 of base.css when the URL names none),
  * and the Text size step of `?text-size=`, from 1 to 4 (the default 2, which
  * changes nothing, when the URL names none). Fails on a theme that is not one
- * of the five, a glass that is not a whole number from 0 to 100, or a text
+ * of the six, a glass that is not a whole number from 0 to 100, or a text
  * size that is not 1, 2, 3 or 4.
  *
  * `?broken=` (`max-contrast`, `cramped` or `noisy`) also overrides tokens, for

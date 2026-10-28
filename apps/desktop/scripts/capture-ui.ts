@@ -1,7 +1,7 @@
 /**
  * Captures the desktop screens from the specimen pages, with no controller
  * and no Electron: `pnpm --filter @hercule/desktop capture:ui`. The screens,
- * and their variants (five themes, 1x and 2x, glass 40 % and 0 %), are listed
+ * and their variants (six themes, 1x and 2x, glass 40 % and 0 %), are listed
  * in scripts/ui-screens.ts. The pages load in parallel in one Playwright
  * Chromium (see scripts/ui-capture.ts).
  *

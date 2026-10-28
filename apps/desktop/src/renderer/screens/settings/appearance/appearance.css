@@ -7,7 +7,7 @@
    theme, because its `data-theme` sets that theme's tokens on it. */
 .themes {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
 }
 /* Not in the book, which draws no failed save. A row ends in 10px of
@@ -20,6 +20,11 @@
   display: grid;
   gap: 8px;
   text-align: left;
+  /* The preview sets its own data-theme, which gives `--focus` inside it the
+     preview theme's value. The focus ring is drawn on the preview but sits on
+     the page, so it takes the page's colour, read here before the theme
+     changes. A dark preview's light ring was invisible on a light page. */
+  --page-focus: var(--focus);
 }
 .tp-art {
   position: relative;
@@ -50,7 +55,7 @@
   outline: 0;
 }
 .tp:focus-visible .tp-art {
-  outline: 2px solid var(--focus);
+  outline: 2px solid var(--page-focus);
   outline-offset: 6px;
 }
 .tp-side {
