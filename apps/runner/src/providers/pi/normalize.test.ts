@@ -1341,23 +1341,21 @@ describe("an event in pi that the runner has no decision for", () => {
     expect(filterByTag(events, "item.started")[0]?.detail).toEqual({ label });
   });
 
-  it("shows JSON that is not an object as an unknown item", () => {
-    const events = normalizeEvents(buildTestState(), []).concat(
-      normalize(buildTestState(), "null"),
-      normalize(buildTestState(), "5"),
-    );
+  it.each([
+    ["null", "pi: event with no type"],
+    ["5", "pi: event with no type"],
+  ])("shows the JSON line %s as an unknown item", (line, label) => {
+    const events = normalize(buildTestState(), line);
 
-    expect(filterByTag(events, "item.started")).toHaveLength(2);
+    expect(filterByTag(events, "item.started")[0]?.detail).toEqual({ label });
   });
 
   it("writes a type's control characters as escapes in the label", () => {
     const events = normalizeAndEncode(buildTestState(), [{ type: "a\nb\u202ec" }]);
 
-    const label = Schema.decodeUnknownSync(UnknownItemDetail)(
-      filterByTag(events, "item.started")[0]?.detail,
-    ).label;
-    expect(label).toContain("pi: a");
-    expect(label).not.toMatch(/[\n\u202e]/u);
+    expect(filterByTag(events, "item.started")[0]?.detail).toEqual({
+      label: "pi: a\\u{a}b\\u{202e}c",
+    });
   });
 
   it("attributes a subagent's unknown event to the subagent", () => {

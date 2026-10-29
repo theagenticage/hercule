@@ -658,6 +658,147 @@ describe("sending an input to a pi session", () => {
   });
 });
 
+describe("a prompt whose preflight compaction pi announces before it answers", () => {
+  const COMPACTION_END = {
+    type: "compaction_end",
+    reason: "threshold",
+    result: {
+      summary: "s",
+      firstKeptEntryId: "e1",
+      tokensBefore: 90_000,
+      estimatedTokensAfter: 20_000,
+    },
+    aborted: false,
+    willRetry: false,
+  };
+
+  /** Sends an input pi does not answer, and lets pi announce a compaction first. Returns the pending send. */
+  const sendDuringCompaction = async (run: Awaited<ReturnType<typeof startTestSession>>) => {
+    const sending = Effect.runPromise(Effect.flip(run.adapter.sendInput(SESSION, { text: "hi" })));
+    await waitUntil("received the prompt", () => listSentCommands(run.sent, "prompt").length === 1);
+    run.child.push({ type: "compaction_start", reason: "threshold" });
+    await waitUntil("announced the turn", () => filterByTag(run.seen, "turn.started").length === 1);
+    return { sending };
+  };
+
+  it("keeps the announced turn when the 5 second deadline passes, so the run that follows finds it", async () => {
+    const run = await startTestSession({ answers: { prompt: () => undefined } });
+
+    const failed = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sending = yield* Effect.forkChild(
+            Effect.flip(run.adapter.sendInput(SESSION, { text: "hi" })),
+          );
+          yield* Effect.promise(() =>
+            waitUntil(
+              "received the prompt",
+              () => listSentCommands(run.sent, "prompt").length === 1,
+            ),
+          );
+          run.child.push({ type: "compaction_start", reason: "threshold" });
+          yield* Effect.promise(() =>
+            waitUntil(
+              "announced the turn",
+              () => filterByTag(run.seen, "turn.started").length === 1,
+            ),
+          );
+          yield* TestClock.adjust(RPC_DEADLINE);
+          return yield* Fiber.join(sending);
+        }),
+        TestClock.layer(),
+      ),
+    );
+    run.child.push(COMPACTION_END);
+    run.child.push({ type: "agent_start" });
+    run.child.push({ type: "agent_end", messages: [{ role: "assistant", stopReason: "stop" }] });
+    run.child.push({ type: "agent_settled" });
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+
+    expect(failed._tag).toBe("HarnessProtocolError");
+    const started = filterByTag(run.seen, "turn.started");
+    const completed = filterByTag(run.seen, "turn.completed");
+    expect(started).toHaveLength(1);
+    expect(completed.map((event) => [event.turnId, event.state])).toEqual([
+      [started[0]!.turnId, "completed"],
+    ]);
+    for (const event of run.seen) {
+      if ("turnId" in event) expect(event.turnId).toBe(started[0]!.turnId);
+    }
+  });
+
+  it("ends the announced turn as failed when pi then refuses the prompt", async () => {
+    const run = await startTestSession({ answers: { prompt: () => undefined } });
+    const { sending } = await sendDuringCompaction(run);
+
+    run.child.push({
+      type: "response",
+      id: listSentCommands(run.sent, "prompt")[0]!["id"],
+      success: false,
+      error: "No model selected",
+    });
+
+    expect(await sending).toMatchObject({ _tag: "InputNotDelivered" });
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    expect(filterByTag(run.seen, "turn.completed")[0]).toMatchObject({
+      state: "failed",
+      error: expect.stringContaining("No model selected") as unknown,
+    });
+  });
+});
+
+describe("an input while pi compacts between turns", () => {
+  it("is sent as a prompt, because no run is going that a steer could reach", async () => {
+    const run = await startTestSession();
+    run.child.push({ type: "compaction_start", reason: "manual" });
+    await waitUntil(
+      "opened the synthetic turn",
+      () => filterByTag(run.seen, "turn.started").length === 1,
+    );
+
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "and now this" }));
+
+    expect(listSentCommands(run.sent, "prompt")).toHaveLength(1);
+    expect(listSentCommands(run.sent, "steer")).toEqual([]);
+  });
+});
+
+describe("the automatic compactions Hercule's extension cancels", () => {
+  it("shows nothing for them in a session with auto-compaction off, and still shows a manual one", async () => {
+    const run = await startBusySession({}, { ...SPEC, autoCompaction: false });
+    const aborted = (reason: string) => ({
+      type: "compaction_end",
+      reason,
+      result: undefined,
+      aborted: true,
+      willRetry: false,
+    });
+
+    run.child.push({ type: "compaction_start", reason: "threshold" });
+    run.child.push(aborted("threshold"));
+    run.child.push({ type: "compaction_start", reason: "manual" });
+    run.child.push(aborted("manual"));
+    await waitUntil("showed the manual compaction", () =>
+      filterByTag(run.seen, "item.completed").some((event) => event.kind === "context_compaction"),
+    );
+
+    expect(
+      filterByTag(run.seen, "item.started")
+        .map((event) => event.kind)
+        .filter((kind) => kind !== "user_message"),
+    ).toEqual(["context_compaction"]);
+  });
+
+  it("shows an automatic compaction when auto-compaction is on", async () => {
+    const run = await startBusySession();
+
+    run.child.push({ type: "compaction_start", reason: "threshold" });
+    await waitUntil("showed the compaction", () =>
+      filterByTag(run.seen, "item.started").some((event) => event.kind === "context_compaction"),
+    );
+  });
+});
+
 /** Pushes pi's `agent_end` with the given last message, then `agent_settled`. */
 const pushAgentEnd = (child: Spawn, message: Record<string, unknown>): void => {
   child.push({ type: "agent_end", messages: [{ role: "assistant", ...message }] });

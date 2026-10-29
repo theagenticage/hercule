@@ -270,6 +270,15 @@ class SpawnFailed extends Error {
 }
 
 /**
+ * Checks whether Hercule's extension cancels the automatic compactions of an
+ * agent at this subagent depth. It does for the session's own pi (depth 0)
+ * when the spec turns auto-compaction off. The controller rotates the session
+ * and not its subagents, so a subagent keeps its own compaction.
+ */
+const cancelsAutomaticCompaction = (spec: SessionSpec, depth: number): boolean =>
+  spec.autoCompaction === false && depth === 0;
+
+/**
  * Builds the failure of `sendInput` for a `prompt` or `steer` command that
  * did not get a response. When pi refused the command, it did not take the
  * input. In every other case the runner cannot tell whether pi took it.
@@ -1551,7 +1560,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         spec.outputSchema === undefined || depth > 0
           ? undefined
           : JSON.stringify(spec.outputSchema),
-      [NO_AUTO_COMPACTION_VARIABLE]: spec.autoCompaction === false && depth === 0 ? "1" : undefined,
+      [NO_AUTO_COMPACTION_VARIABLE]: cancelsAutomaticCompaction(spec, depth) ? "1" : undefined,
     });
 
   const probe = makeProbe(seam.spawn, seam.run);
@@ -1673,7 +1682,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
             }
           })();
           const id = crypto.randomUUID();
-          const reportUnknownEvent = yield* captureUnknownItemReporter("Pi", id);
+          const reportUnknownMessage = yield* captureUnknownItemReporter("Pi", id);
           const agent: RunningAgent = {
             child,
             rpc: makeRpc(child, (line, frame) => {
@@ -1704,7 +1713,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
               id,
               spec.outputSchema,
               readPiHome(ctx.env),
-              reportUnknownEvent,
+              reportUnknownMessage,
             ),
             depth: 0,
           };
@@ -1849,9 +1858,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           yield* captureUnknownItemReporter("Pi", sessionId),
         );
         state.model = spec.modelSelection.model;
-        // The same condition that turns on the cancelling handler in the
-        // extension (see `buildAgentEnv`): the session's own pi only.
-        state.automaticCompactionCancelled = spec.autoCompaction === false;
+        state.automaticCompactionCancelled = cancelsAutomaticCompaction(spec, 0);
         const binding: SessionBinding = { sessionId, nativeSessionId, instanceId: spec.instanceId };
         const root: RunningAgent = {
           child,
@@ -1903,9 +1910,13 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           return yield* Effect.fail(buildInputStopped());
         // A turn is in flight exactly while the state holds its id. An input
         // during a turn steers it, instead of opening a second turn and
-        // leaving the first one with nothing to end it.
+        // leaving the first one with nothing to end it. A synthetic turn is
+        // the exception: it only holds a compaction, pi is idle, and a steer
+        // would queue with no run to answer it. The input is sent as a prompt,
+        // which pi accepts or refuses in the user's sight.
         const root = held.root;
-        const steered = root.state.turnId !== undefined;
+        const synthetic = root.state.synthetic;
+        const steered = root.state.turnId !== undefined && !synthetic;
         // Create the id before sending, not after: pi's `agent_start` can
         // arrive before its response to the prompt, and the normalizer uses
         // whatever turn id the state holds at that moment.
@@ -1916,11 +1927,32 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
             message: buildPiPrompt(input, listSkillFolders(held.ctx)),
             ...(images.length === 0 ? {} : { images }),
           }),
-          () =>
-            // A prompt pi rejected opened no turn. Leaving its id would make
-            // the next input steer a turn that never started.
+          (failure) =>
             Effect.sync(() => {
-              if (!steered) root.state.turnId = undefined;
+              // A steer, or a prompt sent while a synthetic turn runs, leaves
+              // the turn it found as it is.
+              if (steered || synthetic) return;
+              // pi announced the turn before it answered the prompt, because
+              // it compacts first. What happens to the turn depends on whether
+              // pi took the prompt:
+              // - pi refused it: the turn is over, and ends like any turn.
+              // - pi may still take it (a slow compaction, a lost reply): the
+              //   run goes on in this turn, and its events must find it.
+              if (root.state.announced) {
+                if (failure._tag === "PiRefusedCommand") {
+                  for (const event of endTurn(root.state, {
+                    state: "failed",
+                    error: failure.message,
+                  })) {
+                    emit(event);
+                  }
+                }
+                return;
+              }
+              // Nothing was announced. A prompt pi rejected opened no turn,
+              // and leaving its id would make the next input steer a turn
+              // that never started.
+              root.state.turnId = undefined;
             }),
         ).pipe(Effect.mapError(buildInputFailure));
         // A successful prompt reply acknowledges delivery even when Stop

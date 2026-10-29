@@ -158,7 +158,7 @@ export interface Normalizing {
    * arguments are the item's label and, when the message's fields could not be
    * read, what failed. The session's subagents share the session's function.
    */
-  readonly reportUnknownEvent: (label: string, error?: unknown) => void;
+  readonly reportUnknownMessage: (label: string, error?: unknown) => void;
   /** The native session id, put on every event so a surface can link the two sessions. */
   readonly nativeSessionId: string;
   /**
@@ -268,12 +268,12 @@ export const buildNormalizingState = (
   nativeSessionId: string,
   outputSchema: OutputSchema | undefined,
   home: string,
-  reportUnknownEvent: Normalizing["reportUnknownEvent"],
+  reportUnknownMessage: Normalizing["reportUnknownMessage"],
 ): Normalizing => ({
   sessionId,
   subagentId: undefined,
   home,
-  reportUnknownEvent,
+  reportUnknownMessage,
   nativeSessionId,
   model: undefined,
   turnId: undefined,
@@ -309,7 +309,7 @@ export const buildSubagentState = (session: Normalizing, subagentId: SubagentId)
     session.nativeSessionId,
     undefined,
     session.home,
-    session.reportUnknownEvent,
+    session.reportUnknownMessage,
   ),
   subagentId,
   model: session.model,
@@ -706,9 +706,8 @@ const buildCompletedDetail = (item: Running & { readonly subagentId?: SubagentId
 /**
  * Completes, as failed, every item still running when the turn ends: a block
  * pi stopped mid-stream, a tool whose result never came, or a compaction that
- * never ended. Returns the
- * `item.completed` events. An item nobody completes would show a spinner for
- * the rest of the session.
+ * never ended. Returns the `item.completed` events. An item nobody completes
+ * would show a spinner for the rest of the session.
  */
 const failOpenItems = (state: Normalizing, turnId: string): ReadonlyArray<ProviderEvent> => {
   const open = [
@@ -890,7 +889,7 @@ const buildUnknownItem = (
   label: string,
   error?: unknown,
 ): ReadonlyArray<ProviderEvent> => {
-  state.reportUnknownEvent(label, error);
+  state.reportUnknownMessage(label, error);
   const turn = ensureAnnouncedTurn(state);
   const itemId = crypto.randomUUID();
   const detail: UnknownItemDetail = { label };
@@ -1280,20 +1279,20 @@ export const normalize = (
   // Only the table's own keys count: a type named like an object method, such
   // as `constructor`, must not find one.
   const type = typeof event?.type === "string" ? event.type : undefined;
-  const label = buildUnknownItemLabel("pi", type ?? "event with no type");
+  const buildLabel = (): string => buildUnknownItemLabel("pi", type ?? "event with no type");
   const decision =
     type !== undefined && Object.hasOwn(DECISIONS_BY_TYPE, type)
       ? DECISIONS_BY_TYPE[type]
       : undefined;
   // New pi releases add event types, and a live session must survive one
   // this build does not know.
-  if (decision === undefined) return buildUnknownItem(state, event, label);
+  if (decision === undefined) return buildUnknownItem(state, event, buildLabel());
   if (typeof decision === "string") return [];
   try {
     return decision(state, event);
   } catch (error) {
     // A known type whose fields are not what pi 1.3 sends. The handlers that
     // check their fields do so before they change the state.
-    return buildUnknownItem(state, event, label, error);
+    return buildUnknownItem(state, event, buildLabel(), error);
   }
 };
