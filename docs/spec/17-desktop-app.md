@@ -2518,7 +2518,7 @@ The cost of a rebuild was timed on Bun on Linux, with 1,000 compaction items (ea
 
 `pnpm --filter @hercule/desktop ui:metrics` on Linux: the ratchet passed and all 72 goldens equal their screenshots pixel for pixel. No golden moved, because none of the 12 captured screens shows a runtime notice, a compaction or an unknown step.
 
-**Not measured:** process count, memory, idle wakeups and the time of a streamed row on the desktop itself. The perf script needs macOS, and the Mac runner was not reachable, so it was not run. The design adds no process, timer or subscription, but that is the design and not a measurement, and no exception for #893 is recorded. These remain to be measured on a Mac before the merge, or excepted by Rogier as for #851.
+**Not measured:** process count, memory, idle wakeups and the time of a streamed row on the desktop itself. The perf script needs macOS, and the Mac runner was not reachable, so it was not run. The design adds no process, timer or subscription, but that is the design and not a measurement. On 2026-10-29 Rogier excepted #893 from these measurements, as for #851: it merges without them.
 
 **The budgets guide the first milestone; they do not gate it.** *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* Slices 1 to 4 were each measured against the budgets before they merged, and a slice that missed one did not merge. From slice 5 on, the milestone's functionality comes first, and performance passes follow it:
 
