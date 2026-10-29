@@ -133,6 +133,7 @@ import {
   type NewMatchedInput,
   type StoredInput,
 } from "./inputs";
+import { dedupKeyRepository } from "./dedup-keys";
 import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver, type SessionEndReason } from "./observer";
 import { sessionRecordComposer } from "./records";
@@ -741,6 +742,7 @@ const make = Effect.gen(function* () {
   const requestSubscriptions = yield* permissionRequestSubscriptions;
   const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
+  const dedupKeys = yield* dedupKeyRepository;
   const subagents = yield* subagentRepository;
   const readSession = readSessionOrFail(sessions);
   const tokens = yield* SessionTokens;
@@ -1614,6 +1616,9 @@ const make = Effect.gen(function* () {
     });
 
   return {
+    claimDedupKey: dedupKeys.claimDedupKey,
+    returnExistingOrCreate: dedupKeys.returnExistingOrCreate,
+
     query: (input: QueryInput): Effect.Effect<SessionPage, ReadError> =>
       Effect.gen(function* () {
         yield* requireGrant("session.query");

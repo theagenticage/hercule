@@ -100,6 +100,7 @@ import runStepSessions from "./0089-run-step-sessions";
 import handoffRun from "./0090-handoff-run";
 import sessionRole from "./0091-session-role";
 import sessionKind from "./0092-session-kind";
+import sessionDedupKeys from "./0093-session-dedup-keys";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -194,6 +195,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [90, "handoff-run", Effect.succeed(handoffRun)],
   [91, "session-role", Effect.succeed(sessionRole)],
   [92, "session-kind", Effect.succeed(sessionKind)],
+  [93, "session-dedup-keys", Effect.succeed(sessionDedupKeys)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */
