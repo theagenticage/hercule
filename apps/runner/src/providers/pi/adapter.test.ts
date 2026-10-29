@@ -748,7 +748,7 @@ describe("a prompt whose preflight compaction pi announces before it answers", (
 });
 
 describe("an input while pi compacts between turns", () => {
-  it("is sent as a prompt, because no run is going that a steer could reach", async () => {
+  it("is refused before anything is sent to pi, and runs once the compaction ends", async () => {
     const run = await startTestSession();
     run.child.push({ type: "compaction_start", reason: "manual" });
     await waitUntil(
@@ -756,10 +756,35 @@ describe("an input while pi compacts between turns", () => {
       () => filterByTag(run.seen, "turn.started").length === 1,
     );
 
-    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "and now this" }));
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.sendInput(SESSION, {
+          text: "and now this",
+          modelSelection: { model: "glm-5.3-flash", options: {} },
+        }),
+      ),
+    );
 
+    // The input is not lost: SteerRefused keeps it queued with this note.
+    expect(refused._tag).toBe("SteerRefused");
+    expect(refused.message).toContain("compacting");
+    expect(run.sent.map((one) => one.type)).not.toContain("prompt");
+    expect(run.sent.map((one) => one.type)).not.toContain("steer");
+    expect(run.sent.map((one) => one.type)).not.toContain("set_model");
+    expect(filterByTag(run.seen, "item.started").map((event) => event.kind)).toEqual([
+      "context_compaction",
+    ]);
+
+    run.child.push({
+      type: "compaction_end",
+      reason: "manual",
+      result: { summary: "s", tokensBefore: 10, estimatedTokensAfter: 5 },
+      aborted: false,
+      willRetry: false,
+    });
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "and now this" }));
     expect(listSentCommands(run.sent, "prompt")).toHaveLength(1);
-    expect(listSentCommands(run.sent, "steer")).toEqual([]);
   });
 });
 

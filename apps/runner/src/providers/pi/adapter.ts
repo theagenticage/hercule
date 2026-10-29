@@ -43,6 +43,7 @@ import {
   ModelChangeRefused,
   ResumeTranscriptMissing,
   SessionNotRunning,
+  SteerRefused,
   type AdapterError,
 } from "@hercule/protocol";
 import type {
@@ -268,6 +269,13 @@ class SpawnFailed extends Error {
     super(describeError(cause), { cause });
   }
 }
+
+/**
+ * The message of the `SteerRefused` for an input that arrives while pi
+ * compacts the conversation between turns. The user sees it as written.
+ */
+const COMPACTING_MESSAGE =
+  "Not sent yet: pi is compacting the conversation. The input stays queued and runs when pi finishes.";
 
 /**
  * Checks whether Hercule's extension cancels the automatic compactions of an
@@ -1902,21 +1910,27 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     ): Effect.Effect<SendResult, AdapterError> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
+        if (held.root.state.synthetic) {
+          return yield* Effect.fail(new SteerRefused({ message: COMPACTING_MESSAGE }));
+        }
         const images = yield* readPiImages(input.attachments ?? []);
         const generation = held.inputGeneration;
         if (input.modelSelection !== undefined)
           yield* selectModel(held, input.modelSelection, generation);
         if (held.inputGeneration !== generation || held.stopping)
           return yield* Effect.fail(buildInputStopped());
+        const root = held.root;
+        // pi is idle while it compacts between turns: a steer would queue with
+        // no run to answer it, and a prompt could start a run in a turn that
+        // is about to close. Nothing is written to pi. The input stays queued
+        // and runs when the compaction's turn ends.
+        if (root.state.synthetic) {
+          return yield* Effect.fail(new SteerRefused({ message: COMPACTING_MESSAGE }));
+        }
         // A turn is in flight exactly while the state holds its id. An input
         // during a turn steers it, instead of opening a second turn and
-        // leaving the first one with nothing to end it. A synthetic turn is
-        // the exception: it only holds a compaction, pi is idle, and a steer
-        // would queue with no run to answer it. The input is sent as a prompt,
-        // which pi accepts or refuses in the user's sight.
-        const root = held.root;
-        const synthetic = root.state.synthetic;
-        const steered = root.state.turnId !== undefined && !synthetic;
+        // leaving the first one with nothing to end it.
+        const steered = root.state.turnId !== undefined;
         // Create the id before sending, not after: pi's `agent_start` can
         // arrive before its response to the prompt, and the normalizer uses
         // whatever turn id the state holds at that moment.
@@ -1929,9 +1943,8 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           }),
           (failure) =>
             Effect.sync(() => {
-              // A steer, or a prompt sent while a synthetic turn runs, leaves
-              // the turn it found as it is.
-              if (steered || synthetic) return;
+              // A steer leaves the turn it found as it is.
+              if (steered) return;
               // pi announced the turn before it answered the prompt, because
               // it compacts first. What happens to the turn depends on whether
               // pi took the prompt:
