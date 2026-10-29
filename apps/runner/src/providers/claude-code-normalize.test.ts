@@ -3177,6 +3177,16 @@ describe("server tool, MCP tool and result blocks", () => {
         "text_editor_code_execution_tool_result",
         { type: "text_editor_code_execution_view_result" },
       ],
+      [
+        "a text editor create without the file update flag",
+        "text_editor_code_execution_tool_result",
+        { type: "text_editor_code_execution_create_result" },
+      ],
+      [
+        "a text editor create whose file update flag is a string",
+        "text_editor_code_execution_tool_result",
+        { type: "text_editor_code_execution_create_result", is_file_update: "false" },
+      ],
       ["a search hit with no title or URL", "web_search_tool_result", [{}]],
       [
         "a code execution result of an unknown type",
@@ -3686,6 +3696,34 @@ describe("the todo list", () => {
     ]);
     expect(lines[0]?.split(" ")[1]).not.toBe(lines[2]?.split(" ")[1]);
     expect(lines[2]?.split(" ")[2]).toBe("a=completed,b=pending");
+  });
+
+  it("shows nothing in the next turn for a TaskUpdate that changes no step", () => {
+    const running = buildStateInTurn();
+    const events = [
+      ...run(
+        [
+          buildCall(lastId(1), "TaskList", {}),
+          buildAnswer(lastId(1), {
+            tasks: [{ id: "1", subject: "a", status: "pending", blockedBy: [] }],
+          }),
+          RESULT,
+        ],
+        running,
+      ),
+      ...openTurn(running).events,
+      ...run(
+        [
+          buildCall(lastId(2), "TaskUpdate", { taskId: "1", owner: "me" }),
+          buildAnswer(lastId(2), { success: true, taskId: "1", updatedFields: ["owner"] }),
+        ],
+        running,
+      ),
+    ];
+    expect(listTodoEvents(events).map((line) => line.split(" ")[0])).toEqual([
+      "item.started",
+      "item.completed",
+    ]);
   });
 
   it("shows nothing for a TodoWrite that leaves the list as it is", () => {

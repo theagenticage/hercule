@@ -287,13 +287,19 @@ describe("TaskUpdate", () => {
     });
   });
 
-  it("reports an update of owner, metadata or dependencies as changed with the same list", () => {
+  it("reports an update of owner, metadata or dependencies as unchanged", () => {
     const list = listWithTwoTasks();
 
     expect(taskUpdate(list, { taskId: "1", owner: "me", addBlocks: ["2"] })).toEqual({
-      kind: "changed",
-      turnId: "turn-1",
-      steps: [step("first"), step("second")],
+      kind: "unchanged",
+    });
+  });
+
+  it("reports an update that repeats the current subject and status as unchanged", () => {
+    const list = listWithTwoTasks();
+
+    expect(taskUpdate(list, { taskId: "1", subject: "first", status: "pending" })).toEqual({
+      kind: "unchanged",
     });
   });
 

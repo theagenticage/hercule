@@ -64,10 +64,12 @@ export interface TodoList {
  * - `not_todo`: no todo call with that id is pending. The caller treats the
  *   result as that of an ordinary tool.
  * - `unchanged`: the call succeeded and there is nothing to show: the list is
- *   unknown, the update names a task the list never saw, or the update only
- *   changed the owner or dependencies.
+ *   unknown, the update names a task the list never saw, or the update changes
+ *   no step's text or status (it sets the owner, the metadata or the
+ *   dependencies, or repeats the current subject and status).
  * - `changed`: the call succeeded on a known list and `steps` is the whole list
- *   it produced. The list may equal what a client shows already.
+ *   it produced. A `TodoWrite` or `TaskList` is a whole list, so its `steps` may
+ *   equal what a client shows already; a client in a new turn shows it anyway.
  * - `failed`: the call failed or its result was unusable. The caller draws a
  *   failed tool row from `name`, `input` and `reason`.
  */
@@ -233,17 +235,20 @@ const computeChange = (list: TodoList, call: PendingCall, result: unknown): Chan
       // list never invents a task for it.
       if (list.entries === undefined) return NONE;
       const { taskId, subject, status } = input.value;
-      if (!list.entries.some((entry) => entry.id === taskId)) return NONE;
+      const tracked = list.entries.find((entry) => entry.id === taskId);
+      if (tracked === undefined) return NONE;
+      if (status === "deleted") {
+        return { kind: "replacement", entries: list.entries.filter((entry) => entry !== tracked) };
+      }
+      const text = subject ?? tracked.text;
+      const nextStatus = status ?? tracked.status;
+      // Nothing the row shows changed, so a new turn must not open a row for it.
+      if (text === tracked.text && nextStatus === tracked.status) return NONE;
       return {
         kind: "replacement",
-        entries:
-          status === "deleted"
-            ? list.entries.filter((entry) => entry.id !== taskId)
-            : list.entries.map((entry) =>
-                entry.id === taskId
-                  ? { ...entry, text: subject ?? entry.text, status: status ?? entry.status }
-                  : entry,
-              ),
+        entries: list.entries.map((entry) =>
+          entry === tracked ? { ...entry, text, status: nextStatus } : entry,
+        ),
       };
     }
     default:

@@ -189,6 +189,9 @@ export const convertTextEditorResult = (
     case "text_editor_code_execution_view_result":
       return buildSucceededResult(requireText(edit.content, "viewed text"));
     case "text_editor_code_execution_create_result":
+      if (typeof edit.is_file_update !== "boolean") {
+        throw new Error("the file update flag is not a boolean");
+      }
       return buildSucceededResult(
         edit.is_file_update ? "The file was updated." : "The file was created.",
       );

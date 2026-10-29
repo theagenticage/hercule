@@ -421,6 +421,8 @@ export const buildStartedItem = (event: ItemStarted): StartedItem => {
 /** What `buildUpdatedItem` returns: the item with its new verb, target and steps, and the detail decoded on the way. */
 export interface UpdatedItem<Item extends ThreadItem> {
   readonly item: Item;
+  /** The label of an `unknown` item that has one in its new detail, otherwise "". */
+  readonly unknownLabel: string;
   /** The decoded detail of a `todo_list` item, or `undefined` for any other kind. */
   readonly todoList: TodoListDetail | undefined;
   /**
@@ -449,10 +451,11 @@ export const buildUpdatedItem = <Item extends ThreadItem>(
   event: ItemUpdated | ItemCompleted,
 ): UpdatedItem<Item> | undefined => {
   if (event.detail === undefined) return undefined;
-  const { verb, target, todoList, compaction } = readItemDetail(event);
+  const { verb, target, unknownLabel, todoList, compaction } = readItemDetail(event);
   if (event.kind === "todo_list" && todoList === undefined) return undefined;
   return {
     item: { ...item, verb, target, todoSteps: readTodoSteps(todoList) },
+    unknownLabel,
     todoList,
     compaction,
   };

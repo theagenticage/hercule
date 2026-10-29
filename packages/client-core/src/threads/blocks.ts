@@ -581,6 +581,7 @@ export const buildThreadBlocks = (
         work.stretch.items[work.index] = {
           ...updated.item,
           ...readWorkItemDetail(event, updated.item, updated.todoList),
+          fallbackLabel: updated.unknownLabel,
         };
         if (updated.compaction !== undefined) work.latestCompaction = updated.compaction;
         break;

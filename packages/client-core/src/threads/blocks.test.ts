@@ -1514,6 +1514,16 @@ describe("buildThreadBlocks: compaction and unknown steps, drawn as work rows", 
       ["more", "Step", ""],
     ]);
   });
+
+  it("draws an unknown step by the label of its latest update", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "x1", "unknown", 1, { label: "claude: system/first" }),
+      buildItemUpdated("t1", "x1", "unknown", 2, { label: "claude: system/second" }),
+      buildItemCompleted("t1", "x1", "unknown", 3),
+    ]);
+
+    expect(rows.map((row) => row.label)).toEqual(["claude: system/second"]);
+  });
 });
 
 describe("appendSendingMessages", () => {
