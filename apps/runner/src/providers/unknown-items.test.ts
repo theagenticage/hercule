@@ -6,7 +6,11 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Logger from "effect/Logger";
 import { MAX_FACT_LENGTH } from "@hercule/protocol";
-import { buildUnknownItemLabel, captureUnknownItemReporter } from "./unknown-items";
+import {
+  buildUnknownItemLabel,
+  captureIgnoredMessageReporter,
+  captureUnknownItemReporter,
+} from "./unknown-items";
 
 describe("buildUnknownItemLabel", () => {
   it("joins the harness prefix and the type text", () => {
@@ -77,5 +81,26 @@ describe("captureUnknownItemReporter", () => {
     expect(warnings[100]).toBe(
       "Pi sent more than 100 different unknown message types in this session. Further ones are not logged.",
     );
+  });
+});
+
+describe("captureIgnoredMessageReporter", () => {
+  it("writes one line per key and stops after the same bound as the other reporter", async () => {
+    const warnings: Array<string> = [];
+    const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (logLevel === "Warn") warnings.push(String(message));
+    });
+    const report = await Effect.runPromise(
+      Effect.provide(captureIgnoredMessageReporter("session-1"), Logger.layer([collecting])),
+    );
+
+    report("late item/started", "first");
+    report("late item/started", "again");
+    for (let count = 0; count < 150; count += 1) report(`key ${count}`, `line ${count}`);
+    await Promise.resolve();
+
+    expect(warnings[0]).toBe("first");
+    expect(warnings.filter((line) => line === "again")).toEqual([]);
+    expect(warnings).toHaveLength(100);
   });
 });

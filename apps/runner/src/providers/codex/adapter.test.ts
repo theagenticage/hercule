@@ -3601,7 +3601,7 @@ describe("durable Codex Stop ownership", () => {
         method: "item/started",
         params: {
           threadId: CHILD,
-          turnId: "parent-turn",
+          turnId: continued ? "continued-parent-turn" : "parent-turn",
           item: {
             type: "subAgentActivity",
             id: "late-spawn",
@@ -4038,7 +4038,7 @@ describe("notifications that name no thread", () => {
     ]);
   });
 
-  it("becomes one labelled unknown item and one log line, however often a new method comes", async () => {
+  it("becomes a labelled unknown item each time, and one log line however often a new method comes", async () => {
     const run = createDriving();
     const logged = await startLogged(run);
     const future = { method: "future/thing", params: { value: 1 } };
@@ -4068,7 +4068,10 @@ describe("notifications that name no thread", () => {
     expect(run.seen).toEqual([]);
   });
 
-  it("keeps the first 100 sent during start-up, drops the rest, and logs it once", async () => {
+  // The scripted app-server sends one more notification with no thread id
+  // right after it replies to `initialize`, so a test that fills the list
+  // counts it as one more frame.
+  it("keeps the first 100 sent during start-up, drops the rest, and logs the exact count once", async () => {
     const run: ReturnType<typeof createDriving> = createDriving({
       initialize: () => {
         for (let count = 0; count < 105; count += 1) {
@@ -4087,8 +4090,55 @@ describe("notifications that name no thread", () => {
     expect(shown).toHaveLength(100);
     expect(shown[0]).toBe("Warning 0");
     expect(shown[99]).toBe("Warning 99");
-    // The scripted app-server also sends one unrelated notification after
-    // `initialize`, which is dropped too, hence "at least".
-    expect(logged.filter((line) => /Dropped \d+ of them/.test(line))).toHaveLength(1);
+    expect(logged.filter((line) => line.includes("Dropped 6 of them"))).toHaveLength(1);
+  });
+
+  it("keeps no more than a megabyte of them, and drops the one that does not fit", async () => {
+    const run: ReturnType<typeof createDriving> = createDriving({
+      initialize: () => {
+        run.spawns[0]!.push({
+          method: "configWarning",
+          params: { summary: "x".repeat(2 * 1024 * 1024), details: null },
+        });
+        run.spawns[0]!.push(CONFIG_WARNING);
+        return INITIALIZE;
+      },
+    });
+
+    const logged = await startLogged(run);
+
+    expect(listWarningMessages(run.seen)).toEqual(["Bad key in config.toml"]);
+    expect(logged.filter((line) => line.includes("Dropped 1 of them"))).toHaveLength(1);
+  });
+
+  it("drops a turn or usage frame with no thread, and starts the session all the same", async () => {
+    const run: ReturnType<typeof createDriving> = createDriving({
+      initialize: () => {
+        run.spawns[0]!.push({ method: "turn/completed", params: {} });
+        run.spawns[0]!.push({ method: "thread/tokenUsage/updated", params: {} });
+        return INITIALIZE;
+      },
+    });
+
+    const logged = await startLogged(run);
+
+    expect(run.spawns).toHaveLength(1);
+    expect(run.seen.map((event) => event._tag)).toEqual(["session.started"]);
+    expect(logged.filter((line) => line.includes("with no thread id"))).toHaveLength(2);
+  });
+
+  it("does not draw a row for an unknown frame while a turn is asked for but not started", async () => {
+    const run = createDriving();
+    const logged = await startLogged(run);
+    // `turn/start` is answered, and Codex has not sent `turn/started` yet.
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
+    const before = run.seen.length;
+
+    run.spawns[0]!.push({ method: "future/thing", params: {} });
+    await waitUntil("logged the frame", () =>
+      logged.some((line) => line.includes("codex: future/thing")),
+    );
+
+    expect(run.seen.slice(before)).toEqual([]);
   });
 });

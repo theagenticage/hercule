@@ -70,3 +70,26 @@ export const captureUnknownItemReporter = (
       );
     };
   });
+
+/**
+ * Returns the function that writes a line to the runner's log about a message
+ * the adapter understood but deliberately did not show, such as a frame that
+ * arrived for a turn that was over. `key` names the kind of message, so one
+ * line is written per key per session, up to `MAX_REPORTED_UNKNOWN_LABELS`
+ * keys; `text` is the line. Like `captureUnknownItemReporter`, it captures the
+ * services of the fiber that runs this effect, so a line written from outside
+ * any fiber still reaches `runner.log`.
+ */
+export const captureIgnoredMessageReporter = (
+  sessionId: string,
+): Effect.Effect<(key: string, text: string) => void> =>
+  Effect.map(Effect.context<never>(), (services) => {
+    const reported = new Set<string>();
+    return (key, text) => {
+      if (reported.has(key) || reported.size >= MAX_REPORTED_UNKNOWN_LABELS) return;
+      reported.add(key);
+      void Effect.runForkWith(services)(
+        Effect.logWarning(text).pipe(Effect.annotateLogs({ sessionId })),
+      );
+    };
+  });

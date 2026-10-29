@@ -19,6 +19,7 @@ import {
   markUsageIncomplete,
   requireUsageBaseline,
   restoreUsageReport,
+  type MessageReports,
   type Normalizing,
 } from "./normalize";
 import { INTERNAL_ERROR, type NotificationFrame, type Rpc, type ServerRequestFrame } from "./rpc";
@@ -127,8 +128,8 @@ export const makeCodexThreads = (options: {
   readonly cancelRequests: (thread: CodexThreadState) => void;
   readonly completeTurn: (thread: CodexThreadState) => void;
   readonly failSession: () => void;
-  /** Tells the runner's log about a notification the normalizer has no decision for. */
-  readonly reportUnknownMessage: (label: string, error?: unknown) => void;
+  /** Tells the runner's log about the notifications the normalizer does not show. */
+  readonly reports: MessageReports;
 }) => {
   const threads = new Map<string, CodexThreadState>();
   const discoveries = new Map<string, Discovery>();
@@ -159,7 +160,7 @@ export const makeCodexThreads = (options: {
         options.sessionId,
         threadId,
         root ? options.spec.outputSchema : undefined,
-        options.reportUnknownMessage,
+        options.reports,
         root ? undefined : { subagentId: threadId, rootThreadId: options.rootThreadId },
       ),
       parentThreadId: resumedSubagents.get(threadId)?.parentSubagentId,
@@ -171,6 +172,10 @@ export const makeCodexThreads = (options: {
       usage: undefined,
     };
     if (root) thread.state.model = options.spec.modelSelection.model;
+    // A turn is on its way from the moment Codex is asked for it, before its
+    // `turn/started` arrives. Only the root takes inputs.
+    thread.state.isTurnPending = () =>
+      turns.has(thread) || (root && [...inputs].some((ticket) => ticket.submission !== undefined));
     threads.set(threadId, thread);
     return thread;
   };
@@ -684,7 +689,18 @@ export const makeCodexThreads = (options: {
     receive: (frame: CodexThreadFrame): void => {
       if (phase === "exited") return;
       const id = readCodexThreadId(frame);
-      if (id === undefined) return dispatchFrame(root, frame);
+      if (id === undefined) {
+        // A turn or usage frame with no thread cannot be placed: giving it to
+        // the root would end or start the root's turn on a guess.
+        if (isControlFrame(frame)) {
+          options.reports.ignored(
+            `threadless ${frame.method}`,
+            `Codex sent ${frame.method} with no thread id, so the runner cannot tell which thread it is for. It was dropped.`,
+          );
+          return;
+        }
+        return dispatchFrame(root, frame);
+      }
       if (id === options.rootThreadId) return dispatchFrame(root, frame);
       const discovery = discoverCodexThread(id);
       if (discovery === undefined) {

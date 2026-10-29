@@ -26,6 +26,7 @@ import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import {
   MAX_TODO_STEPS,
+  type ImageGenerationDetail,
   type ItemKind,
   type ItemStatus,
   type OutputSchema,
@@ -68,6 +69,34 @@ const CODEX_NOTIFICATION = "codex.app-server.notification";
 type Channel = "summary" | "raw";
 
 /**
+ * How the normalizer tells the runner's log about messages it does not show.
+ * Both write at most one line per kind of message per session.
+ */
+export interface MessageReports {
+  /**
+   * A message with no decision, or one whose fields could not be read, by its
+   * label. `error` is what failed when the fields could not be read.
+   */
+  readonly unknown: (label: string, error?: unknown) => void;
+  /**
+   * A message the normalizer understood but deliberately did not show, such as
+   * a frame for a turn that is over. `key` names the kind of message and `text`
+   * is the line.
+   */
+  readonly ignored: (key: string, text: string) => void;
+}
+
+/**
+ * What the structured answer needs from the last item a turn completed: its
+ * type, and its text when it is an assistant message. The whole item is not
+ * kept, because it can hold large payloads.
+ */
+export interface LastCompletedItem {
+  readonly type: ThreadItem["type"];
+  readonly text: string | undefined;
+}
+
+/**
  * The todo list item an agent shows for its running turn: the item's id, the
  * turn it belongs to, and the steps its last event carried.
  */
@@ -98,11 +127,18 @@ export interface Normalizing {
   openTurnId: string | undefined;
   /** The todo list item of the running turn, or `undefined` before the plan's first update. */
   todoList: ShownTodoList | undefined;
+  /** Tells the runner's log about the messages this state does not show. */
+  readonly reports: MessageReports;
   /**
-   * Tells the runner's log about a message with no decision, or one whose
-   * fields could not be read, by its label. It logs each label once.
+   * Returns whether the thread has a turn that has been asked for but whose
+   * `turn/started` has not arrived yet. The thread's owner sets it, because
+   * only the owner knows which inputs are on their way. Until then no turn is
+   * known, and an item drawn now would open a turn that ends while the real
+   * one is about to start.
    */
-  readonly reportUnknownMessage: (label: string, error?: unknown) => void;
+  isTurnPending: () => boolean;
+  /** The turn whose oversized plan was already warned about, so a plan that stays too long warns once. */
+  oversizedPlanTurnId: string | undefined;
   readonly reasoning: Map<string, Channel>;
   /**
    * The assistant messages of the running turn whose text has reached the
@@ -118,7 +154,7 @@ export interface Normalizing {
    * from this item: Codex constrains the turn's final assistant message, so
    * the answer is that message, and only if the turn ended on it.
    */
-  lastCompletedItem: ThreadItem | undefined;
+  lastCompletedItem: LastCompletedItem | undefined;
   /**
    * Whether a turn has started in this process. On a resume or a fork, Codex
    * reports the thread's restored usage before any turn starts. An earlier
@@ -141,7 +177,7 @@ export const buildNormalizingState = (
   sessionId: string,
   threadId: string,
   outputSchema: OutputSchema | undefined,
-  reportUnknownMessage: (label: string, error?: unknown) => void,
+  reports: MessageReports,
   subagent?: { readonly subagentId: SubagentId; readonly rootThreadId: string },
 ): Normalizing => ({
   sessionId,
@@ -151,7 +187,9 @@ export const buildNormalizingState = (
   model: undefined,
   openTurnId: undefined,
   todoList: undefined,
-  reportUnknownMessage,
+  reports,
+  isTurnPending: () => false,
+  oversizedPlanTurnId: undefined,
   reasoning: new Map(),
   streamedMessages: new Set(),
   outputSchema: subagent === undefined ? outputSchema : undefined,
@@ -170,9 +208,63 @@ const buildCodexThreadEnvelope = (
   ...(state.subagentId === undefined ? {} : { subagentId: state.subagentId }),
 });
 
-/** Builds the `raw` field: the notification the event came from, under this adapter's channel. */
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null;
+
+/** Checks whether `item` is an `imageGeneration` item that still holds its image. */
+const hasImageBytes = (item: unknown): item is Readonly<Record<string, unknown>> =>
+  isRecord(item) && item.type === "imageGeneration" && "result" in item;
+
+/** Returns a copy of an `imageGeneration` item without `result`, which holds the image. */
+const dropImageBytes = (item: Readonly<Record<string, unknown>>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(item).filter(([key]) => key !== "result"));
+
+/**
+ * Returns `params` without the bytes of any generated image, or `params`
+ * itself when it holds none. It copies only the objects on the path to an item
+ * that has bytes, so the usual frame is not copied at all.
+ */
+const stripImageBytesFromParams = (params: unknown): unknown => {
+  if (!isRecord(params)) return params;
+  let stripped = params;
+  if (hasImageBytes(params.item)) stripped = { ...stripped, item: dropImageBytes(params.item) };
+  const turn = params.turn;
+  if (isRecord(turn) && Array.isArray(turn.items) && turn.items.some(hasImageBytes)) {
+    const items: ReadonlyArray<unknown> = turn.items.map((item: unknown) =>
+      hasImageBytes(item) ? dropImageBytes(item) : item,
+    );
+    stripped = { ...stripped, turn: { ...turn, items } };
+  }
+  return stripped;
+};
+
+/**
+ * Leaves out `result` of an `imageGeneration` item. The field holds the
+ * generated image, base64 encoded, and would make an event megabytes long; the
+ * image reaches nobody through the stream.
+ *
+ * A `ThreadItem` sits in the params of only these notifications, and all four
+ * are covered: `item/started` and `item/completed` (`params.item`), and
+ * `turn/started` and `turn/completed` (`params.turn.items`). `thread/started`
+ * holds whole threads with their turns, but it is dropped and never attached.
+ * A frame the adapter has no decision for, or could not read, is attached whole
+ * as `{ method, params }`, and its `params` is checked in the same two places.
+ */
+const stripImageBytes = (payload: unknown): unknown => {
+  if (isRecord(payload) && "method" in payload && "params" in payload) {
+    const params = stripImageBytesFromParams(payload.params);
+    return params === payload.params ? payload : { ...payload, params };
+  }
+  return stripImageBytesFromParams(payload);
+};
+
+/**
+ * Builds the `raw` field: the notification the event came from, under this
+ * adapter's channel, without the bytes of any generated image. Every `raw` this
+ * adapter attaches is built here.
+ */
 const buildNotificationRaw = (payload: unknown): ReturnType<typeof buildRaw> =>
-  buildRaw(CODEX_NOTIFICATION, payload);
+  buildRaw(CODEX_NOTIFICATION, stripImageBytes(payload));
 
 /**
  * The decision for every item type of the pinned release: the kind of item it
@@ -294,7 +386,9 @@ const buildDetail = (
     }
     case "imageGeneration": {
       const saved = item.savedPath;
-      return saved === undefined || saved === "" ? {} : { detail: { path: truncateFact(saved) } };
+      if (saved === undefined || requireText(saved, "savedPath") === "") return {};
+      const detail: ImageGenerationDetail = { path: truncateFact(saved) };
+      return { detail };
     }
     case "collabAgentToolCall": {
       const subagentIds = item.receiverThreadIds.filter((id) => id !== state.rootThreadId);
@@ -344,20 +438,49 @@ const TURN_STATES: Readonly<Record<string, TurnState>> = {
   interrupted: "interrupted",
 };
 
+/**
+ * Checks that a delta notification has the text and the ids the protocol needs,
+ * and returns them. Throws when one is not text, so a malformed delta is
+ * reported as an `unknown` item before it changes any state.
+ */
+const readDelta = (
+  params: AgentMessageDeltaNotification,
+): { readonly turnId: string; readonly itemId: string; readonly delta: string } => ({
+  turnId: requireText(params.turnId, "turnId"),
+  itemId: requireText(params.itemId, "itemId"),
+  delta: requireText(params.delta, "delta"),
+});
+
 const buildContentDelta = (
   state: Normalizing,
-  params: AgentMessageDeltaNotification,
+  delta: ReturnType<typeof readDelta>,
   streamKind: StreamKind,
 ): ReadonlyArray<ProviderEvent> => [
   {
     _tag: "content.delta",
     ...buildCodexThreadEnvelope(state),
-    turnId: ensureId(params.turnId),
-    itemId: ensureId(params.itemId),
+    turnId: ensureId(delta.turnId),
+    itemId: ensureId(delta.itemId),
     streamKind,
-    delta: params.delta,
+    delta: delta.delta,
   },
 ];
+
+/**
+ * Returns whether a frame names a turn other than the thread's running one.
+ * Such a frame is late: its turn is over, and it must not start an item in
+ * that turn, or change the running turn's state. A thread with no running turn
+ * has no turn to be late for.
+ */
+const isLateTurn = (state: Normalizing, turnId: string): boolean =>
+  state.openTurnId !== undefined && state.openTurnId !== turnId;
+
+/** Tells the runner's log that a frame for a finished turn was not shown. */
+const reportLateFrame = (state: Normalizing, method: string, turnId: string): void =>
+  state.reports.ignored(
+    `late ${method}`,
+    `Codex sent ${method} for turn ${truncateFact(turnId)}, which is not the thread's running turn. It was not shown.`,
+  );
 
 /**
  * Returns the whole text of a completed assistant message as one delta when
@@ -377,7 +500,12 @@ const buildMissingMessageText = (
   state.streamedMessages.add(item.id);
   return buildContentDelta(
     state,
-    { threadId: params.threadId, turnId: params.turnId, itemId: item.id, delta: item.text },
+    readDelta({
+      threadId: params.threadId,
+      turnId: params.turnId,
+      itemId: item.id,
+      delta: item.text,
+    }),
     "assistant_text",
   );
 };
@@ -394,9 +522,14 @@ const buildReasoningDelta = (
   params: AgentMessageDeltaNotification,
   channel: Channel,
 ): ReadonlyArray<ProviderEvent> => {
-  if (state.reasoning.get(params.itemId) === "raw" && channel === "summary") return [];
-  state.reasoning.set(params.itemId, channel);
-  return buildContentDelta(state, params, "reasoning_text");
+  const delta = readDelta(params);
+  if (isLateTurn(state, delta.turnId)) {
+    reportLateFrame(state, "a reasoning delta", delta.turnId);
+    return [];
+  }
+  if (state.reasoning.get(delta.itemId) === "raw" && channel === "summary") return [];
+  state.reasoning.set(delta.itemId, channel);
+  return buildContentDelta(state, delta, "reasoning_text");
 };
 
 /** Codex's usage report for a thread: its whole total and its last model call. */
@@ -603,8 +736,10 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
  * in prose or a code fence is not the constrained output, and extracting JSON
  * from it would be guessing at an answer the model never gave.
  */
-export const readHarnessAnswer = (last: ThreadItem | undefined): HarnessAnswer => {
-  if (last?.type !== "agentMessage") {
+export const readHarnessAnswer = (
+  last: { readonly type: string; readonly text?: string | undefined } | undefined,
+): HarnessAnswer => {
+  if (last?.type !== "agentMessage" || last.text === undefined) {
     return { missing: "the turn ended without a final agent message" };
   }
   try {
@@ -748,18 +883,6 @@ const buildRuntimeMessage = (
 const readRunningTurnId = (state: Normalizing, turnId: string): string | undefined =>
   turnId === state.openTurnId ? turnId : undefined;
 
-/** Builds the `raw` field of an item frame, without the bytes of a generated image. */
-const buildItemRaw = (
-  params: ItemStartedNotification | ItemCompletedNotification,
-): ReturnType<typeof buildRaw> => {
-  const { item } = params;
-  if (item.type !== "imageGeneration") return buildNotificationRaw(params);
-  // `result` holds the image itself, base64 encoded. It would make the event
-  // megabytes long, and the image reaches nobody through the stream.
-  const withoutImage = Object.fromEntries(Object.entries(item).filter(([key]) => key !== "result"));
-  return buildNotificationRaw({ ...params, item: withoutImage });
-};
-
 /** What an item frame reports: the kind of the item, and its detail when it has one. */
 interface ItemFields {
   readonly kind: ItemKind;
@@ -777,11 +900,13 @@ const describeItem = (
   item: ThreadItem,
   phase: "started" | "completed",
 ): ItemFields | null => {
+  // Every item needs an id the protocol accepts, also the ones not reported.
+  requireText(item.id, "item id");
   const kind = classifyItem(state, item);
   if (kind === null) return null;
   if (kind !== "unknown") return { kind, ...buildDetail(state, item, phase) };
   const label = buildUnknownItemLabel("codex", `item/${String(item.type)}`);
-  state.reportUnknownMessage(label);
+  state.reports.unknown(label);
   return { kind, detail: { label } satisfies UnknownItemDetail };
 };
 
@@ -789,13 +914,20 @@ const onItemStarted = (
   state: Normalizing,
   params: ItemStartedNotification,
 ): ReadonlyArray<ProviderEvent> => {
+  // An item that starts in a turn other than the running one would show as
+  // work that never ends, because that turn's end has already been reported.
+  const turnId = requireText(params.turnId, "turnId");
+  if (isLateTurn(state, turnId)) {
+    reportLateFrame(state, "item/started", turnId);
+    return [];
+  }
   const fields = describeItem(state, params.item, "started");
   if (fields === null) return [];
   return [
     {
       _tag: "item.started",
       ...buildCodexThreadEnvelope(state),
-      ...buildItemRaw(params),
+      ...buildNotificationRaw(params),
       turnId: ensureId(params.turnId),
       itemId: ensureId(params.item.id),
       ...fields,
@@ -806,10 +938,13 @@ const onItemStarted = (
 /**
  * Returns the notice for a review mode item: "Codex started a review: <what
  * is reviewed>" when it is entered, and "Codex finished the review" when it is
- * left. Returns nothing for any other item. `review` holds the text of the
- * review request on entry and the rendered review on exit, which can be long
- * and which the agent's own answer repeats, so the notice leaves it out. The
- * item stays in `raw`.
+ * left. Returns nothing for any other item.
+ *
+ * `review` holds a short description of what is reviewed, such as "current
+ * changes", on entry, and the whole rendered review on exit. The entry notice
+ * quotes the description, cut to a fact. The exit notice leaves the review out:
+ * it can be long, and the agent's own answer repeats it. The item stays in
+ * `raw`. Throws when `review` is not text.
  */
 const buildReviewNotice = (
   state: Normalizing,
@@ -818,8 +953,8 @@ const buildReviewNotice = (
   const { item } = params;
   const turnId = readRunningTurnId(state, params.turnId);
   if (item.type === "enteredReviewMode") {
-    const message =
-      item.review === "" ? "Codex started a review" : `Codex started a review: ${item.review}`;
+    const review = truncateFact(requireText(item.review, "review"));
+    const message = review === "" ? "Codex started a review" : `Codex started a review: ${review}`;
     return [buildRuntimeMessage(state, "runtime.notice", message, params, turnId)];
   }
   if (item.type === "exitedReviewMode") {
@@ -834,17 +969,26 @@ const onItemCompleted = (
   state: Normalizing,
   params: ItemCompletedNotification,
 ): ReadonlyArray<ProviderEvent> => {
-  // Recorded before the item is classified, because the echo of the user's
-  // message also counts: a turn that ends on that echo has no answer.
-  state.lastCompletedItem = params.item;
+  // A completion for a turn other than the running one still completes its
+  // item, which started earlier. It changes nothing else: its turn is over, so
+  // it is not the running turn's answer, and its text cannot stream any more.
+  const late = isLateTurn(state, requireText(params.turnId, "turnId"));
+  if (!late) {
+    // Recorded before the item is classified, because the echo of the user's
+    // message also counts: a turn that ends on that echo has no answer.
+    state.lastCompletedItem = {
+      type: params.item.type,
+      text: params.item.type === "agentMessage" ? params.item.text : undefined,
+    };
+  }
   const fields = describeItem(state, params.item, "completed");
   if (fields === null) return buildReviewNotice(state, params);
   return [
-    ...buildMissingMessageText(state, params),
+    ...(late ? [] : buildMissingMessageText(state, params)),
     {
       _tag: "item.completed",
       ...buildCodexThreadEnvelope(state),
-      ...buildItemRaw(params),
+      ...buildNotificationRaw(params),
       turnId: ensureId(params.turnId),
       itemId: ensureId(params.item.id),
       status: readItemStatus(params.item),
@@ -968,6 +1112,10 @@ const onPlanUpdated = (state: Normalizing, params: PlanUpdate): ReadonlyArray<Pr
   if (!Array.isArray(params.plan)) throw new Error("plan is not a list");
   if (params.turnId !== state.openTurnId) return [];
   if (params.plan.length > MAX_TODO_STEPS) {
+    // Codex sends the whole plan with every update, so a plan that stays too
+    // long would repeat the warning on each one.
+    if (state.oversizedPlanTurnId === params.turnId) return [];
+    state.oversizedPlanTurnId = params.turnId;
     return [
       buildRuntimeMessage(
         state,
@@ -1068,11 +1216,22 @@ const NOTIFICATION_DECISIONS = {
   },
   error: onError,
   "item/agentMessage/delta": (state, params) => {
-    if (params.delta !== "") state.streamedMessages.add(params.itemId);
-    return buildContentDelta(state, params, "assistant_text");
+    const delta = readDelta(params);
+    if (isLateTurn(state, delta.turnId)) {
+      reportLateFrame(state, "item/agentMessage/delta", delta.turnId);
+      return [];
+    }
+    if (delta.delta !== "") state.streamedMessages.add(delta.itemId);
+    return buildContentDelta(state, delta, "assistant_text");
   },
-  "item/commandExecution/outputDelta": (state, params) =>
-    buildContentDelta(state, params, "command_output"),
+  "item/commandExecution/outputDelta": (state, params) => {
+    const delta = readDelta(params);
+    if (isLateTurn(state, delta.turnId)) {
+      reportLateFrame(state, "item/commandExecution/outputDelta", delta.turnId);
+      return [];
+    }
+    return buildContentDelta(state, delta, "command_output");
+  },
   "item/reasoning/textDelta": (state, params) => buildReasoningDelta(state, params, "raw"),
   "item/reasoning/summaryTextDelta": (state, params) =>
     buildReasoningDelta(state, params, "summary"),
@@ -1193,56 +1352,99 @@ const DECISIONS_BY_METHOD = NOTIFICATION_DECISIONS as Readonly<
 >;
 
 /**
- * Returns the turn a frame's params name, or `undefined` when they name none.
- * The params come from the wire and can be anything.
+ * What a fallback `unknown` item needs to know about the frame it stands for.
+ * `label` names the frame. `itemId` is the id of the item the frame carries
+ * when it can be read, so the `item/started` and the `item/completed` of one
+ * bad item make one row. `phase` is `started` or `completed` when the frame
+ * covers only that half of an item's life, and `whole` when the frame is
+ * complete in itself.
  */
-const readNamedTurnId = (params: unknown): string | undefined => {
-  if (typeof params !== "object" || params === null || !("turnId" in params)) return undefined;
-  return typeof params.turnId === "string" && params.turnId !== "" ? params.turnId : undefined;
+interface UnknownFrame {
+  readonly label: string;
+  readonly itemId: string | undefined;
+  readonly phase: "whole" | "started" | "completed";
+}
+
+/**
+ * Describes the frame of an `item/started` or `item/completed` notification
+ * whose item could not be read: it is labelled by the item's type and keeps the
+ * item's id, whenever those two can be read. Any other frame is labelled by its
+ * method. The params come from the wire and can be anything.
+ */
+const describeUnreadableFrame = (frame: NotificationFrame): UnknownFrame => {
+  const whole: UnknownFrame = {
+    label: buildUnknownItemLabel("codex", frame.method),
+    itemId: undefined,
+    phase: "whole",
+  };
+  if (frame.method !== "item/started" && frame.method !== "item/completed") return whole;
+  const params = frame.params;
+  if (typeof params !== "object" || params === null || !("item" in params)) return whole;
+  const item = params.item;
+  if (typeof item !== "object" || item === null) return whole;
+  const type = "type" in item && typeof item.type === "string" && item.type !== "" ? item.type : "";
+  const id = "id" in item && typeof item.id === "string" && item.id !== "" ? item.id : undefined;
+  return {
+    label: type === "" ? whole.label : buildUnknownItemLabel("codex", `item/${type}`),
+    itemId: id === undefined ? undefined : truncateFact(id),
+    phase: id === undefined ? "whole" : frame.method === "item/started" ? "started" : "completed",
+  };
 };
 
 /**
- * Returns the events of an `unknown` item for a notification this adapter
- * cannot show: its method has no entry in `NOTIFICATION_DECISIONS`, or its
- * params could not be read (`error` is what failed). The item carries `label`,
- * and the whole frame goes in `raw`. The runner's log hears of it once.
+ * Returns the events of a fallback `unknown` item for a notification this
+ * adapter cannot show: its method has no entry in `NOTIFICATION_DECISIONS`, or
+ * its params could not be read (`error` is what failed). The item carries the
+ * frame's label, and the whole frame goes in `raw` of the first event only. The
+ * runner's log hears of it once.
  *
- * The item goes in the thread's running turn, unless the frame names another
- * turn: a late frame must not add to a turn that is over, or to the one that is
- * running now. With no running turn, or for a late frame, the item opens a
- * turn of its own that holds only this item and ends `completed` right after
- * it (spec 06 section 6.2).
+ * One agent never has two turns at once, so where the item goes depends on the
+ * thread alone, and never on the turn the frame names:
+ *
+ * - With a running turn, the item goes in that turn, also when the frame
+ *   names another one.
+ * - With no running turn, and none asked for whose `turn/started` has not
+ *   arrived, the item opens a turn that holds only this item and ends
+ *   `completed` right after it (spec 06 section 6.2).
+ * - With a turn asked for but not started, the item is not drawn: a turn
+ *   opened now would end while the real one is about to start, and the
+ *   controller would take the session for idle. The runner's log has the label.
  */
 const buildUnknownFrameEvents = (
   state: Normalizing,
   frame: NotificationFrame,
-  label: string,
   error?: unknown,
 ): ReadonlyArray<ProviderEvent> => {
-  state.reportUnknownMessage(label, error);
-  const named = readNamedTurnId(frame.params);
+  const { label, itemId: readId, phase } = describeUnreadableFrame(frame);
+  state.reports.unknown(label, error);
   const running = state.openTurnId;
-  const inRunningTurn = running !== undefined && (named === undefined || named === running);
-  const turnId = inRunningTurn ? ensureId(running) : crypto.randomUUID();
-  const itemId = crypto.randomUUID();
-  const detail = { label } satisfies UnknownItemDetail;
-  const item = {
+  if (running === undefined && state.isTurnPending()) return [];
+  const itemId = readId ?? crypto.randomUUID();
+  const common = {
     ...buildCodexThreadEnvelope(state),
-    ...buildNotificationRaw(frame),
-    turnId,
+    turnId: running === undefined ? crypto.randomUUID() : ensureId(running),
     itemId,
     kind: "unknown",
-    detail,
+    detail: { label } satisfies UnknownItemDetail,
   } as const;
-  const events: Array<ProviderEvent> = [
-    { _tag: "item.started", ...item },
-    { _tag: "item.completed", ...item, status: "completed" },
-  ];
-  if (inRunningTurn) return events;
+  const raw = buildNotificationRaw(frame);
+  const started = { _tag: "item.started", ...common, ...raw } as const;
+  const completed = { _tag: "item.completed", ...common, status: "completed" } as const;
+  if (running !== undefined) {
+    if (phase === "started") return [started];
+    if (phase === "completed") return [{ ...completed, ...raw }];
+    return [started, completed];
+  }
   return [
-    { _tag: "turn.started", ...buildCodexThreadEnvelope(state), turnId },
-    ...events,
-    { _tag: "turn.completed", ...buildCodexThreadEnvelope(state), turnId, state: "completed" },
+    { _tag: "turn.started", ...buildCodexThreadEnvelope(state), turnId: common.turnId },
+    started,
+    completed,
+    {
+      _tag: "turn.completed",
+      ...buildCodexThreadEnvelope(state),
+      turnId: common.turnId,
+      state: "completed",
+    },
   ];
 };
 
@@ -1264,13 +1466,12 @@ export const normalize = (
   const decision = Object.hasOwn(DECISIONS_BY_METHOD, frame.method)
     ? DECISIONS_BY_METHOD[frame.method]
     : undefined;
-  const label = buildUnknownItemLabel("codex", frame.method);
-  if (decision === undefined) return buildUnknownFrameEvents(state, frame, label);
+  if (decision === undefined) return buildUnknownFrameEvents(state, frame);
   if (typeof decision === "string") return [];
   try {
     return decision(state, frame.params as NotificationParams<NotificationMethod>);
   } catch (error) {
     if (frame.method === "thread/tokenUsage/updated") throw error;
-    return buildUnknownFrameEvents(state, frame, label, error);
+    return buildUnknownFrameEvents(state, frame, error);
   }
 };
