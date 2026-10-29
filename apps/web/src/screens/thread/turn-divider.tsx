@@ -33,16 +33,18 @@ const chooseResultHue = (result: ThreadItem["result"]): string | undefined =>
 
 /**
  * The mark and the accessible name of each todo step status, and its text
- * colour class. The marks follow the design language's outcome and currency
- * encodings: a muted check for done, a dot in the live colour for the step
- * the agent is on, a hollow circle for one still waiting.
+ * colour class. The marks are three circles that the mono face draws at the
+ * same size and weight, filling up as the step does: a full circle for done,
+ * a half circle in the live colour for the step the agent is on, an empty
+ * circle for one still waiting. A check or a dot beside them draws larger or
+ * smaller, so no check is used.
  */
 const STEP_MARKS: Record<
   TodoStep["status"],
   { readonly mark: string; readonly name: string; readonly hue: string | undefined }
 > = {
-  completed: { mark: "✓", name: "Completed", hue: undefined },
-  in_progress: { mark: "●", name: "In progress", hue: "text-live" },
+  completed: { mark: "●", name: "Completed", hue: undefined },
+  in_progress: { mark: "◐", name: "In progress", hue: "text-live" },
   pending: { mark: "○", name: "Pending", hue: undefined },
 };
 

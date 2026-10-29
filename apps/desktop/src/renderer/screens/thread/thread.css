@@ -247,13 +247,14 @@ button.work-row:hover > .ic {
   overflow-wrap: break-word;
 }
 /* The steps of an open todo list (work-rows.tsx), one line each, starting at
-   the label column like the output. A line is a 16px slot for the mark and
-   the text, 8px apart as in a row, and as tall as a row: 4px of air above and
-   below one line of text. A long step wraps and keeps its mark on the first
-   line, and the lines grow by the same amount as the rows when the Text
-   size changes. */
+   the label column like a group's steps. A line is a 16px slot for the mark
+   and the text, 8px apart as in a row, and as tall as a row: 4px of air above
+   and below one line of text. The list has no margin above or below, so its
+   lines sit on the rows' own pitch, as a group's steps do. A long step wraps
+   and keeps its mark on the first line, and the lines grow by the same amount
+   as the rows when the Text size changes. */
 .work-todo {
-  margin: 2px 0 6px 24px;
+  margin: 0 0 0 24px;
   padding: 0;
   list-style: none;
 }
@@ -286,9 +287,8 @@ button.work-row:hover > .ic {
 .work-todo-step.is-in_progress .mark {
   color: var(--live);
 }
-/* Steps hold no steps, so an output or a list is at most two lists deep. */
+/* Steps hold no steps, so an output is at most two lists deep. */
 .worked + .work-rows > li:last-child > .work-output,
-.worked + .work-rows > li:last-child > .work-todo,
 .worked + .work-rows > li:last-child > .work-rows > li:last-child > .work-output {
   margin-bottom: 0;
 }

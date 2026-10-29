@@ -572,8 +572,8 @@ describe("Thread: transcript", () => {
         item.textContent,
       ]),
     ).toEqual([
-      ["Completed", "✓Find the cause"],
-      ["In progress", "●Write the test"],
+      ["Completed", "●Find the cause"],
+      ["In progress", "◐Write the test"],
       ["Pending", "○Fix the bug"],
     ]);
   });
