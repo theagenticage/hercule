@@ -12,7 +12,11 @@ import { describePending, describeWorkStretch, summarizeWork } from "./work-summ
 let itemSeq = 0;
 
 /** Builds a completed item of `kind` that names `paths`, as a file change or a file read does. */
-const buildItem = (kind: WorkItem["kind"], paths: readonly string[] = []): WorkItem => ({
+const buildItem = (
+  kind: WorkItem["kind"],
+  paths: readonly string[] = [],
+  fields: Partial<WorkItem> = {},
+): WorkItem => ({
   itemId: `i${itemSeq++}`,
   kind,
   paths,
@@ -22,8 +26,11 @@ const buildItem = (kind: WorkItem["kind"], paths: readonly string[] = []): WorkI
   result: "completed",
   startedAt: "2026-09-30T09:00:00.000Z",
   toolName: "",
+  isPageFetch: false,
+  todoSteps: [],
   fallbackLabel: "",
   resultContent: undefined,
+  ...fields,
 });
 
 /** Builds `count` items of `kind`. */
@@ -56,6 +63,25 @@ describe("summarizeWork", () => {
     ["unknown", 2, "did 2 other steps"],
   ] as const)("counts %s items %i time(s) as %s", (kind, count, phrase) => {
     expect(summarizeWork(buildItems(kind, count))).toEqual([phrase]);
+  });
+
+  it("counts page fetches as fetched pages, apart from web searches", () => {
+    const fetches = (count: number) =>
+      Array.from({ length: count }, () => buildItem("web_search", [], { isPageFetch: true }));
+
+    expect(summarizeWork(fetches(1))).toEqual(["fetched 1 page"]);
+    expect(summarizeWork(fetches(2))).toEqual(["fetched 2 pages"]);
+    expect(summarizeWork([...fetches(2), buildItem("web_search")])).toEqual([
+      "fetched 2 pages",
+      "searched the web",
+    ]);
+  });
+
+  it("leaves a todo list out of the summary", () => {
+    expect(summarizeWork([buildItem("todo_list"), buildItem("command_execution")])).toEqual([
+      "ran 1 command",
+    ]);
+    expect(summarizeWork([buildItem("todo_list")])).toEqual([]);
   });
 
   it("lists the kinds in the order each first appears", () => {

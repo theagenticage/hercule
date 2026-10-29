@@ -21,15 +21,25 @@ import {
   Attachment,
   type ContextCompactionDetail,
   type SessionStatus,
+  type TodoListDetail,
   type TranscriptRow,
 } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
 import type { AgentState } from "./agent-state";
-import { describeCompactionTarget, readCompactionDetail, readUnknownLabel } from "./item-detail";
+import {
+  describeCompactionTarget,
+  readCompactionDetail,
+  readFetchedUrl,
+  readToolCallName,
+  readTodoListDetail,
+  readUnknownLabel,
+  summarizeTodoList,
+} from "./item-detail";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
 type ItemKind = ItemStarted["kind"];
+type ItemUpdated = Extract<ProviderEvent, { _tag: "item.updated" }>;
 type ItemCompleted = Extract<ProviderEvent, { _tag: "item.completed" }>;
 type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
 
@@ -195,11 +205,18 @@ const VERBS: Partial<Record<ItemKind, string>> = {
   web_search: "search",
   subagent: "subagent",
   plan: "plan",
+  todo_list: "tasks",
   context_compaction: "compaction",
   error: "error",
 };
 
-const readItemVerb = (kind: ItemKind): string => VERBS[kind] ?? "unknown";
+/**
+ * Returns the verb of an item, one word. A `web_search` item that fetched a
+ * page (`readFetchedUrl`) reads "fetch", and one that searched reads
+ * "search".
+ */
+const readItemVerb = (kind: ItemKind, detail: unknown): string =>
+  kind === "web_search" && readFetchedUrl(detail) !== "" ? "fetch" : (VERBS[kind] ?? "unknown");
 
 /** Long enough for a useful summary, short enough that a whole file never ends up in a row. */
 const MAX_TARGET_LENGTH = 200;
@@ -217,8 +234,8 @@ interface DetailField {
 /**
  * Returns the field of an item's `detail` that is worth showing in a row: the
  * command a shell item ran, the path a file item changed or read, the pattern
- * a file search looked for, what a web search searched for, or a tool call's
- * description. The first of these that is present wins, even when it is not a
+ * a file search looked for, the URL a page fetch loaded, what a web search
+ * searched for, or a tool call's description. The first of these that is present wins, even when it is not a
  * string. Returns `undefined` when none is present. Each provider adapter
  * shapes `detail` its own way, so every field is optional (spec 06 §6.3).
  */
@@ -232,9 +249,10 @@ const findDetailField = (detail: Record<string, unknown>): DetailField | undefin
     input?.file_path ??
     detail.pattern ??
     detail.path ??
-    firstPath;
+    firstPath ??
+    detail.url;
   if (code !== undefined && code !== null) return { value: code, isCode: true };
-  const words = input?.query ?? input?.description ?? detail.description;
+  const words = input?.query ?? detail.query ?? input?.description ?? detail.description;
   return words === undefined || words === null ? undefined : { value: words, isCode: false };
 };
 
@@ -254,7 +272,8 @@ const summarizeDetail = (detail: unknown): string => {
   if (detail === undefined || detail === null) return "";
   if (typeof detail === "string") return cutToTargetLine(detail);
   const object = readJsonObject(detail) ?? {};
-  const value = findDetailField(object)?.value ?? object.name;
+  const name = readToolCallName(object);
+  const value = findDetailField(object)?.value ?? (name === "" ? undefined : name);
   return cutToTargetLine(typeof value === "string" ? value : JSON.stringify(detail));
 };
 
@@ -297,42 +316,110 @@ export interface StartedItem {
    * with the detail of the row that completes the item (`buildCompletedItem`).
    */
   readonly compaction: ContextCompactionDetail | undefined;
+  /**
+   * The decoded detail of a `todo_list` item, or `undefined` for any other
+   * kind and when the detail does not decode.
+   */
+  readonly todoList: TodoListDetail | undefined;
 }
 
 /**
- * Returns the row the transcript shows for an item that has just started,
- * with the detail parts read on the way (`StartedItem`). The row has the
- * item's verb and `running` as its result until its `item.completed` row
- * lands. Its target is:
+ * Returns the one-line target of a todo list: its progress, then the step in
+ * progress, such as "2/5 · Run the tests". Just the progress when no step is
+ * in progress.
+ */
+const describeTodoListTarget = (list: TodoListDetail): string => {
+  const { progress, current } = summarizeTodoList(list.steps);
+  return current === "" ? progress : `${progress} · ${current}`;
+};
+
+/**
+ * Returns the parts of an `item.started` or `item.updated` row's detail that
+ * the projections draw from: the target and what was decoded on the way
+ * (`StartedItem`). The target is:
  *
  * - for a compaction, its token counts (`describeCompactionTarget`), or "" when
  *   its detail does not decode;
+ * - for a todo list, its progress and current step (`describeTodoListTarget`),
+ *   or "" when its detail does not decode;
  * - for an `unknown` item that has one, the label the adapter wrote;
  * - for any other item, a one-line summary of its detail.
  */
-export const buildStartedItem = (event: ItemStarted): StartedItem => {
+const readItemDetail = (
+  event: ItemStarted | ItemUpdated | ItemCompleted,
+): Pick<StartedItem, "unknownLabel" | "compaction" | "todoList"> & { readonly target: string } => {
   const unknownLabel = event.kind === "unknown" ? readUnknownLabel(event.detail) : "";
   const compaction =
     event.kind === "context_compaction" ? readCompactionDetail(event.detail) : undefined;
+  const todoList = event.kind === "todo_list" ? readTodoListDetail(event.detail) : undefined;
   const target =
     event.kind === "context_compaction"
       ? compaction === undefined
         ? ""
         : describeCompactionTarget(compaction)
-      : unknownLabel !== ""
-        ? unknownLabel
-        : summarizeDetail(event.detail);
+      : event.kind === "todo_list"
+        ? todoList === undefined
+          ? ""
+          : describeTodoListTarget(todoList)
+        : unknownLabel !== ""
+          ? unknownLabel
+          : summarizeDetail(event.detail);
+  return { target, unknownLabel, compaction, todoList };
+};
+
+/**
+ * Returns the row the transcript shows for an item that has just started,
+ * with the detail parts read on the way (`StartedItem`). The row has the
+ * item's verb and `running` as its result until its `item.completed` row
+ * lands. Its target is described in `readItemDetail`.
+ *
+ * A todo list is the exception to `running`: it is a snapshot of the agent's
+ * steps, not a step that runs, and it stays open for the whole turn. It
+ * starts `completed`, and a failed `item.completed` row still makes it
+ * `failed`.
+ */
+export const buildStartedItem = (event: ItemStarted): StartedItem => {
+  const { target, ...detail } = readItemDetail(event);
   return {
     item: {
       itemId: event.itemId,
       kind: event.kind,
-      verb: readItemVerb(event.kind),
+      verb: readItemVerb(event.kind, event.detail),
       target,
-      result: "running",
+      result: event.kind === "todo_list" ? "completed" : "running",
     },
-    unknownLabel,
-    compaction,
+    ...detail,
   };
+};
+
+/** What `buildUpdatedItem` returns: the item with its new target, and the detail decoded on the way. */
+export interface UpdatedItem<Item extends ThreadItem> {
+  readonly item: Item;
+  /** The decoded detail of a `todo_list` item, or `undefined` for any other kind. */
+  readonly todoList: TodoListDetail | undefined;
+}
+
+/**
+ * Returns `item` once an `item.updated` row `event` has replaced its detail,
+ * with the target read from the new detail. A todo list's `item.completed` row
+ * carries its final list and is applied the same way: the latest detail wins,
+ * which also recovers a list whose last update lost its detail to the frame
+ * limit. The result, and every field that
+ * does not come from the detail, stay as they were. Returns `undefined` when
+ * the row cannot be applied, and the caller then keeps the item as it is:
+ *
+ * - the row has no `detail`: the runner leaves it off an event that is too
+ *   big for one frame, and a missing detail must never empty a list;
+ * - the item is a todo list and the detail does not decode.
+ */
+export const buildUpdatedItem = <Item extends ThreadItem>(
+  item: Item,
+  event: ItemUpdated | ItemCompleted,
+): UpdatedItem<Item> | undefined => {
+  if (event.detail === undefined) return undefined;
+  const { target, todoList } = readItemDetail(event);
+  if (event.kind === "todo_list" && todoList === undefined) return undefined;
+  return { item: { ...item, target }, todoList };
 };
 
 /**
@@ -510,13 +597,26 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
         }
         break;
       }
+      case "item.updated": {
+        // The row only changes an item that started; there is nothing to
+        // start from otherwise, and a message's text never comes from it.
+        const turn = turns.get(event.turnId);
+        const index = turn?.itemIndex.get(event.itemId);
+        if (turn === undefined || index === undefined) break;
+        const updated = buildUpdatedItem(turn.items[index]!, event);
+        if (updated !== undefined) turn.items[index] = updated.item;
+        break;
+      }
       case "item.completed": {
         const turn = findOrStartTurn(event.turnId, event.at);
         if (event.kind === "user_message" || event.kind === "assistant_message") break;
         const index = turn.itemIndex.get(event.itemId);
         if (index === undefined) break;
+        const current = turn.items[index]!;
         turn.items[index] = buildCompletedItem(
-          turn.items[index]!,
+          event.kind === "todo_list"
+            ? (buildUpdatedItem(current, event)?.item ?? current)
+            : current,
           turn.startedCompactions.get(event.itemId),
           event,
         ).item;

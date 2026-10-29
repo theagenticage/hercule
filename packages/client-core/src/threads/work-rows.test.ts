@@ -20,6 +20,8 @@ const buildItem = (kind: WorkItem["kind"], fields: Partial<WorkItem> = {}): Work
   paths: [],
   startedAt: "2026-09-30T09:00:00.000Z",
   toolName: "",
+  isPageFetch: false,
+  todoSteps: [],
   fallbackLabel: "",
   resultContent: undefined,
   ...fields,
@@ -82,6 +84,7 @@ describe("buildWorkRows", () => {
         outputIsCode: true,
         images: [],
         steps: [],
+        todoSteps: [],
         canOpen: true,
       },
     ]);

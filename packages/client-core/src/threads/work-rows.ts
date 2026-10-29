@@ -7,9 +7,10 @@
  * The web app keeps spec 14's rows (`ThreadItem.verb`); these rows are the
  * desktop's own (spec 17 §The thread).
  */
-import type { ToolResultImage } from "@hercule/contract";
+import type { TodoStep, ToolResultImage } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
 import type { WorkItem } from "./blocks";
+import { summarizeTodoList } from "./item-detail";
 import { readToolResultImages } from "./tool-result-images";
 import { countDistinctFiles, formatCount } from "./work-summary";
 
@@ -26,6 +27,7 @@ export type WorkRowIcon =
   | "puzzle"
   | "crew"
   | "list"
+  | "tasks"
   | "sparkle"
   | "close"
   | "question"
@@ -75,8 +77,13 @@ export interface WorkRow {
   /** A group's steps, in order. Empty for a single step. */
   readonly steps: readonly WorkRow[];
   /**
-   * Whether the row has something to open: it is a group, or a step that
-   * returned text or images.
+   * The steps of a todo list row, in the agent's order. Empty for every
+   * other row. A group's tool calls are `steps`, not these.
+   */
+  readonly todoSteps: readonly TodoStep[];
+  /**
+   * Whether the row has something to open: it is a group, a todo list with
+   * steps, or a step that returned text or images.
    */
   readonly canOpen: boolean;
 }
@@ -117,6 +124,7 @@ const STEP_WORDS: Record<ItemKind, StepWords> = {
     verb: "Searched",
     describeGroup: (steps) => `Searched ${formatCount(steps.length, "time")}`,
   },
+  // A page fetch is a `web_search` item too; `chooseStepWords` picks `PAGE_FETCH_WORDS` for it.
   web_search: {
     icon: "globe",
     verb: "Searched the web",
@@ -134,12 +142,23 @@ const STEP_WORDS: Record<ItemKind, StepWords> = {
   context_compaction: { icon: "compress", verb: "Compacted the context" },
   error: { icon: "close", verb: "Error" },
   unknown: UNKNOWN_STEP,
-  // #894 slice 2: draw the todo list row ("Tasks 2/5 · <step>", icon `tasks`).
-  todo_list: UNKNOWN_STEP,
+  // The label of a todo list carries its progress, set in `buildStepRow`. It never folds.
+  todo_list: { icon: "tasks", verb: "Tasks" },
   // Messages never sit in a work stretch.
   user_message: UNKNOWN_STEP,
   assistant_message: UNKNOWN_STEP,
 };
+
+/** How a page fetch is drawn. It is a `web_search` item with a URL, and it folds only with other fetches. */
+const PAGE_FETCH_WORDS: StepWords = {
+  icon: "globe",
+  verb: "Fetched",
+  describeGroup: (steps) => `Fetched ${formatCount(steps.length, "page")}`,
+};
+
+/** Returns the words that draw `item`: its kind's, or a page fetch's. */
+const chooseStepWords = (item: WorkItem): StepWords =>
+  item.isPageFetch ? PAGE_FETCH_WORDS : STEP_WORDS[item.kind];
 
 /** The results a group can take from its steps, in the order the first one present wins. */
 const GROUP_RESULTS = ["awaiting approval", "running", "failed", "declined"] as const;
@@ -194,24 +213,30 @@ const readResultText = (content: unknown): string => {
  * Checks whether `next` folds into the run of steps that starts with `first`:
  * both are of one kind that folds, and two tool calls also share their tool.
  * Only tool calls compare names: a file change's tool may be `Edit` or
- * `Write`, and both are edits.
+ * `Write`, and both are edits. A tool call's name holds its MCP server
+ * (`WorkItem.toolName`), so two calls fold only when the tool and the server
+ * both match. A search and a page fetch are both `web_search` items and do
+ * not fold together.
  */
 const foldsWith = (first: WorkItem, next: WorkItem): boolean =>
   first.kind === next.kind &&
-  STEP_WORDS[first.kind].describeGroup !== undefined &&
+  first.isPageFetch === next.isPageFetch &&
+  chooseStepWords(first).describeGroup !== undefined &&
   (first.kind !== "tool_call" || first.toolName === next.toolName);
 
 /**
  * Returns the row of a single step, under `key`:
  *
  * - a tool call's label is its tool's name;
+ * - a todo list's label is "Tasks" and its progress, such as "Tasks 2/5", its
+ *   target the step in progress, and its steps are the row's `todoSteps`;
  * - an `unknown` step that has a label is drawn with the question icon, the
  *   label as its words and no target, so a message nobody mapped is named
  *   rather than shown as "Step";
  * - reasoning names no target: its detail is the thought itself.
  */
 const buildStepRow = (item: WorkItem, key: string): WorkRow => {
-  const words = STEP_WORDS[item.kind];
+  const words = chooseStepWords(item);
   const output = readResultText(item.resultContent);
   const images = readToolResultImages(item.resultContent);
   const isLabelled = item.kind === "unknown" && item.fallbackLabel !== "";
@@ -222,7 +247,9 @@ const buildStepRow = (item: WorkItem, key: string): WorkRow => {
       ? item.fallbackLabel
       : item.kind === "tool_call" && item.toolName !== ""
         ? item.toolName
-        : words.verb,
+        : item.kind === "todo_list"
+          ? `${words.verb} ${summarizeTodoList(item.todoSteps).progress}`
+          : words.verb,
     target: item.kind === "reasoning" || isLabelled ? "" : item.target,
     targetIsCode: item.targetIsCode,
     startedAt: item.startedAt,
@@ -231,7 +258,8 @@ const buildStepRow = (item: WorkItem, key: string): WorkRow => {
     outputIsCode: item.kind !== "context_compaction",
     images,
     steps: [],
-    canOpen: output !== "" || images.length > 0,
+    todoSteps: item.todoSteps,
+    canOpen: output !== "" || images.length > 0 || item.todoSteps.length > 0,
   };
 };
 
@@ -240,7 +268,7 @@ const buildRunRow = (run: readonly WorkItem[]): WorkRow => {
   const first = run[0]!;
   const key = `row:${first.itemId}`;
   if (run.length === 1) return buildStepRow(first, key);
-  const words = STEP_WORDS[first.kind];
+  const words = chooseStepWords(first);
   return {
     key,
     icon: words.icon,
@@ -254,6 +282,7 @@ const buildRunRow = (run: readonly WorkItem[]): WorkRow => {
     outputIsCode: false,
     images: [],
     steps: run.map((item) => buildStepRow(item, `step:${item.itemId}`)),
+    todoSteps: [],
     canOpen: true,
   };
 };
@@ -261,9 +290,9 @@ const buildRunRow = (run: readonly WorkItem[]): WorkRow => {
 /**
  * Returns the rows of a stretch's items, in order. Consecutive items of a kind
  * that folds become one group row when there are two or more of them:
- * commands, file changes, file reads, file searches, web searches, and tool
- * calls of the same tool. Reasoning, subagents, plans, compactions, errors and
- * unknown steps never fold.
+ * commands, file changes, file reads, file searches, web searches, page
+ * fetches, and tool calls of the same tool and server. Reasoning, subagents,
+ * plans, todo lists, compactions, errors and unknown steps never fold.
  *
  * Each step's result text and images are read here, so the desktop calls
  * this only while a stretch is open.

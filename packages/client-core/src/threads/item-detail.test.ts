@@ -1,10 +1,19 @@
 /**
- * Tests `readCompactionDetail`, `describeCompactionTarget` and
- * `readUnknownLabel`, which read the details every adapter shares for a
- * compaction and an unknown item.
+ * Tests `readCompactionDetail`, `describeCompactionTarget`,
+ * `readUnknownLabel`, `readTodoListDetail`, `summarizeTodoList`,
+ * `readToolCallName` and `readFetchedUrl`, which read the details every
+ * adapter shares.
  */
 import { describe, expect, it } from "vitest";
-import { describeCompactionTarget, readCompactionDetail, readUnknownLabel } from "./item-detail";
+import {
+  describeCompactionTarget,
+  readCompactionDetail,
+  readFetchedUrl,
+  readTodoListDetail,
+  readToolCallName,
+  readUnknownLabel,
+  summarizeTodoList,
+} from "./item-detail";
 
 describe("describeCompactionTarget", () => {
   it.each([
@@ -63,5 +72,71 @@ describe("readUnknownLabel", () => {
 
   it.each([undefined, {}, { label: 7 }, { note: "review mode" }])("returns '' for %j", (detail) => {
     expect(readUnknownLabel(detail)).toBe("");
+  });
+});
+
+describe("readTodoListDetail", () => {
+  it("returns the list it decodes", () => {
+    const detail = { steps: [{ text: "Run the tests", status: "in_progress" }] };
+
+    expect(readTodoListDetail(detail)).toEqual(detail);
+  });
+
+  it.each([
+    ["no detail", undefined],
+    ["a detail with no steps", {}],
+    ["a step with no text", { steps: [{ text: "", status: "pending" }] }],
+    ["an unknown status", { steps: [{ text: "Run", status: "blocked" }] }],
+  ])("returns nothing for %s", (_name, detail) => {
+    expect(readTodoListDetail(detail)).toBeUndefined();
+  });
+});
+
+describe("summarizeTodoList", () => {
+  it("counts the completed steps and names the first step in progress", () => {
+    expect(
+      summarizeTodoList([
+        { text: "Read", status: "completed" },
+        { text: "Edit", status: "in_progress" },
+        { text: "Test", status: "in_progress" },
+        { text: "Ship", status: "pending" },
+      ]),
+    ).toEqual({ completed: 1, total: 4, progress: "1/4", current: "Edit" });
+  });
+
+  it("names no step when none is in progress, and handles an empty list", () => {
+    expect(summarizeTodoList([{ text: "Read", status: "pending" }]).current).toBe("");
+    expect(summarizeTodoList([])).toEqual({ completed: 0, total: 0, progress: "0/0", current: "" });
+  });
+});
+
+describe("readToolCallName", () => {
+  it.each([
+    ["a local tool", { name: "Bash" }, "Bash"],
+    [
+      "a local MCP tool",
+      { name: "mcp__github__create_issue", kind: "mcp" },
+      "mcp__github__create_issue",
+    ],
+    [
+      "an API connector tool",
+      { name: "create_issue", kind: "mcp", server: "github" },
+      "github/create_issue",
+    ],
+    ["an empty server", { name: "create_issue", server: "" }, "create_issue"],
+    ["no name", { server: "github" }, ""],
+    ["no detail", undefined, ""],
+  ])("reads %s", (_name, detail, expected) => {
+    expect(readToolCallName(detail)).toBe(expected);
+  });
+});
+
+describe("readFetchedUrl", () => {
+  it("returns the URL of a fetch, and nothing for a search or no detail", () => {
+    expect(readFetchedUrl({ name: "WebFetch", url: "https://example.com" })).toBe(
+      "https://example.com",
+    );
+    expect(readFetchedUrl({ name: "WebSearch", query: "effect" })).toBe("");
+    expect(readFetchedUrl(undefined)).toBe("");
   });
 });
