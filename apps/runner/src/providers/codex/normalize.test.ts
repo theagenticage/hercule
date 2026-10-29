@@ -1717,10 +1717,34 @@ describe("what Codex sends that this build has no decision for", () => {
       buildItemCompleted({ type: "sleep", id: "s_0", durationMs: "soon" }),
     ]);
 
-    expect(filterByTag(events, "item.completed")[0]).toMatchObject({
-      kind: "unknown",
-      detail: { label: "codex: item/sleep" },
+    expect(
+      filterByTag(events, "item.completed").find((event) => event.kind === "unknown"),
+    ).toMatchObject({ detail: { label: "codex: item/sleep" } });
+  });
+
+  it("closes the row of an item that started fine and then completed unreadable, as failed", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildNote("item/started", {
+        item: { type: "sleep", id: "w", durationMs: 5 },
+        threadId: THREAD,
+        turnId: TURN,
+        startedAtMs: 1,
+      }),
+      buildItemCompleted({ type: "sleep", id: "w", durationMs: "bad" }),
+      buildTurnCompleted("completed"),
+    ]);
+
+    const completed = filterByTag(events, "item.completed");
+    expect(completed[0]).toMatchObject({
+      itemId: "w",
+      kind: "wait",
+      status: "failed",
+      turnId: TURN,
     });
+    expect(completed.filter((event) => event.kind === "unknown")).toHaveLength(1);
+    expect(listEventTags(events).at(-1)).toBe("turn.completed");
+    encodeAll(events);
   });
 
   it("is what an item type added by a newer Codex becomes", () => {
@@ -1872,7 +1896,10 @@ describe("a completed message whose text cannot be read", () => {
       ITEM_COMPLETED,
     ]);
 
+    // The unreadable completion closes its row as failed, then shows as a
+    // fallback item; the good repeat completes normally and gives its text.
     expect(filterByTag(events, "item.completed").map((event) => event.kind)).toEqual([
+      "assistant_message",
       "unknown",
       "assistant_message",
     ]);

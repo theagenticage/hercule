@@ -1399,6 +1399,37 @@ const buildUnknownFrameEvents = (
 };
 
 /**
+ * Returns the events that close the row of an item whose `item/completed`
+ * could not be read, as a failed item of its kind. Without them the row of an
+ * item that started fine would stay running for ever, because the fallback item
+ * has an id of its own. Returns nothing when the item's id, type or turn cannot
+ * be read, or when its type is not reported as an item.
+ */
+const failUnreadableCompletion = (
+  state: Normalizing,
+  frame: NotificationFrame,
+): ReadonlyArray<ProviderEvent> => {
+  const params = frame.params;
+  if (!isRecord(params) || !isRecord(params.item)) return [];
+  const { id, type } = params.item;
+  const turnId = params.turnId;
+  if (typeof id !== "string" || id === "" || typeof turnId !== "string" || turnId === "") return [];
+  if (typeof type !== "string" || !Object.hasOwn(ITEM_KINDS, type)) return [];
+  const kind = ITEM_KINDS[type as ThreadItem["type"]];
+  if (kind === null) return [];
+  return [
+    {
+      _tag: "item.completed",
+      ...buildCodexThreadEnvelope(state),
+      turnId: ensureId(turnId),
+      itemId: ensureId(id),
+      kind,
+      status: "failed",
+    },
+  ];
+};
+
+/**
  * Converts one decoded notification to normalized events by its entry in
  * `NOTIFICATION_DECISIONS`. A method with no entry, such as one a newer Codex
  * added, becomes a labelled `unknown` item. So does a known method whose params
@@ -1422,6 +1453,9 @@ export const normalize = (
     return decision(state, frame.params as NotificationParams<NotificationMethod>);
   } catch (error) {
     if (frame.method === "thread/tokenUsage/updated") throw error;
-    return buildUnknownFrameEvents(state, frame, error);
+    return [
+      ...(frame.method === "item/completed" ? failUnreadableCompletion(state, frame) : []),
+      ...buildUnknownFrameEvents(state, frame, error),
+    ];
   }
 };
