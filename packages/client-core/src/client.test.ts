@@ -146,12 +146,24 @@ describe("createClient", () => {
     });
   });
 
-  it("turns a failed connection into a ConnectionError", async () => {
-    const refused = new Error("connect ECONNREFUSED 127.0.0.1:7717");
-    const client = createClient({
-      baseUrl: BASE,
-      fetch: () => Promise.reject(refused),
-    });
+  it.each([
+    [
+      "the transport's reason, where it gives one",
+      new TypeError("ECONNREFUSED: Unable to connect. Is the computer able to access the url?"),
+      `setup.read: cannot connect to ${BASE}: ECONNREFUSED: Unable to connect. Is the computer able to access the url?`,
+    ],
+    [
+      "no reason for Chromium's failure, which gives none",
+      new TypeError("Failed to fetch"),
+      `setup.read: cannot connect to ${BASE}`,
+    ],
+    [
+      "the time limit's own message when the headers do not arrive in time",
+      new DOMException("the controller did not answer within 5 s", "TimeoutError"),
+      "setup.read: the controller did not answer within 5 s",
+    ],
+  ])("turns a failed request into a ConnectionError with %s", async (_, cause, message) => {
+    const client = createClient({ baseUrl: BASE, fetch: () => Promise.reject(cause) });
 
     const error = await client.setup.read().then(
       () => undefined,
@@ -159,15 +171,28 @@ describe("createClient", () => {
     );
 
     assert.instanceOf(error, ConnectionError);
-    assert.strictEqual(error.message, `cannot reach ${BASE}`);
+    assert.strictEqual(error.message, message);
     assert.strictEqual(error.url, BASE);
+    assert.strictEqual(error.operation, "setup.read");
   });
 
   it.each([
-    ["a time limit aborts the request", new DOMException("too slow", "TimeoutError")],
-    ["the request is aborted", new DOMException("aborted", "AbortError")],
-    ["the network fails", new TypeError("terminated")],
-  ])("turns a body cut off because %s into a ConnectionError", async (_, cause) => {
+    [
+      "a time limit aborts the request",
+      new DOMException("the controller stopped sending its answer for 5 s", "TimeoutError"),
+      "setup.read: the controller stopped sending its answer for 5 s",
+    ],
+    [
+      "the request is aborted",
+      new DOMException("aborted", "AbortError"),
+      `setup.read: the connection to ${BASE} was lost while the answer arrived`,
+    ],
+    [
+      "the network fails",
+      new TypeError("terminated"),
+      `setup.read: the connection to ${BASE} was lost while the answer arrived`,
+    ],
+  ])("turns a body cut off because %s into a ConnectionError", async (_, cause, message) => {
     // The status and headers arrive, then reading the body fails with
     // `cause`, which is how fetch fails a body read in each of these cases.
     const body = new ReadableStream({
@@ -184,6 +209,7 @@ describe("createClient", () => {
     );
 
     assert.instanceOf(error, ConnectionError);
+    assert.strictEqual(error.message, message);
     assert.strictEqual(error.url, BASE);
   });
 

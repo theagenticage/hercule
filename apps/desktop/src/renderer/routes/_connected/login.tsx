@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
-import { ApiError, ConnectionError, isMutationRunning } from "@hercule/client-core";
+import { ApiError, isMutationRunning } from "@hercule/client-core";
 import { CONNECT_PATH } from "../../app/entry-guard";
 import { openLaunchScreen } from "../../app/last-screen";
 import { CenteredFooter, CenteredScreen } from "../../screens/centered-screen";
@@ -19,17 +19,16 @@ export const Route = createFileRoute("/_connected/login")({
 const SIGN_IN_KEY = ["auth.login"];
 
 /**
- * Returns the line that explains why signing in to the controller at `url`
- * failed. A wrong username and a wrong password get one message, so the form
- * never reveals which one was right.
+ * Returns the line that explains why signing in failed. A wrong username and
+ * a wrong password get one message, so the form never reveals which one was
+ * right. Any other failure shows its own message, which for a
+ * `ConnectionError` says whether the app could not connect to the controller
+ * or the controller did not answer in time.
  */
-const describeSignInFailure = (error: Error, url: string): string => {
-  if (error instanceof ApiError && error.code === "unauthenticated") {
-    return "Wrong username or password.";
-  }
-  if (error instanceof ConnectionError) return `Could not reach ${url}.`;
-  return error.message;
-};
+const describeSignInFailure = (error: Error): string =>
+  error instanceof ApiError && error.code === "unauthenticated"
+    ? "Wrong username or password."
+    : error.message;
 
 function SignIn(): JSX.Element {
   const { controller, queryClient, appearance } = Route.useRouteContext();
@@ -87,7 +86,7 @@ function SignIn(): JSX.Element {
         />
         {signIn.isError ? (
           <p className="centered-error" role="alert">
-            {describeSignInFailure(signIn.error, controller.url)}
+            {describeSignInFailure(signIn.error)}
           </p>
         ) : null}
         <button
