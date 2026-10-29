@@ -2574,7 +2574,7 @@ Measured on Linux on 2026-10-29 with `vite build --config vite.renderer.config.t
 
 `pnpm --filter @hercule/desktop ui:metrics` on Linux (Bun 1.4.4, Chromium 153) at `e7c77a62`: the ratchet passed and all 72 goldens equal their screenshots pixel for pixel, so no golden was re-recorded and no metric got worse than the baseline. No captured screen shows a wait, a generated image or a plan's text, or a stretch summary that counts them, so no golden was expected to move. The ✗ marks in the tables are absolute targets that the baseline already misses, not regressions.
 
-**Not measured:** process count, memory, idle wakeups and the time of a streamed row on the desktop itself. The perf script needs macOS, and this was run on Linux. The design adds no process, timer or listener, but that is the design and not a measurement. No exception from the macOS readings is recorded for #895.
+**Not measured:** process count, memory, idle wakeups and the time of a streamed row on the desktop itself. The perf script needs macOS, and this was run on Linux. The design adds no process, timer or listener, but that is the design and not a measurement. On 2026-10-29 Rogier excepted #895 from the macOS readings and from `pnpm test:desktop`, as for #893, #894 and #897: it merges without them.
 
 **The budgets guide the first milestone; they do not gate it.** *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* Slices 1 to 4 were each measured against the budgets before they merged, and a slice that missed one did not merge. From slice 5 on, the milestone's functionality comes first, and performance passes follow it:
 

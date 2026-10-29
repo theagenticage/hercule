@@ -72,7 +72,8 @@ export const countDistinctFiles = (items: readonly WorkItem[]): number => {
  * "ran 2 commands", in the order each kind first appears. Reasoning and todo
  * lists are left out (`PHRASES`). Page fetches count apart from web searches. File
  * changes and file reads count distinct files (`countDistinctFiles`), so two
- * edits to one file read "edited 1 file".
+ * edits to one file read "edited 1 file". An image generation counts only
+ * when it completed, so the summary never claims an image that was not made.
  */
 export const summarizeWork = (items: readonly WorkItem[]): readonly string[] => {
   // A Map keeps its keys in insertion order, which is the order of first appearance.
@@ -80,6 +81,7 @@ export const summarizeWork = (items: readonly WorkItem[]): readonly string[] => 
   for (const item of items) {
     const key: SummaryKey = item.isPageFetch ? "page_fetch" : item.kind;
     if (PHRASES[key] === null) continue;
+    if (key === "image_generation" && item.result !== "completed") continue;
     const ofKind = itemsByKind.get(key);
     if (ofKind === undefined) itemsByKind.set(key, [item]);
     else ofKind.push(item);

@@ -81,6 +81,21 @@ describe("summarizeWork", () => {
     ]);
   });
 
+  it("counts an image generation only once it completed", () => {
+    const image = (result: WorkItem["result"]) => buildItem("image_generation", [], { result });
+
+    expect(summarizeWork([image("running")])).toEqual([]);
+    expect(summarizeWork([image("awaiting approval"), image("failed"), image("declined")])).toEqual(
+      [],
+    );
+    expect(summarizeWork([image("completed"), image("running"), image("failed")])).toEqual([
+      "generated an image",
+    ]);
+    expect(summarizeWork([image("completed"), image("completed"), image("failed")])).toEqual([
+      "generated 2 images",
+    ]);
+  });
+
   it("leaves a todo list out of the summary", () => {
     expect(summarizeWork([buildItem("todo_list"), buildItem("command_execution")])).toEqual([
       "ran 1 command",
