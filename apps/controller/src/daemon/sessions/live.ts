@@ -32,6 +32,7 @@ import {
 import {
   createDecodeValidationError,
   createInvalidStateError,
+  DedupKey,
   findNearestSupportedAccessMode,
   Id,
   InvalidState,
@@ -61,6 +62,7 @@ import { RunnerConnections } from "../../runners";
 import {
   buildContinuingSpec,
   findAttachmentRefusal,
+  inputRepository,
   isResumeHeld,
   readSessionOrFail,
   sessionRecordComposer,
@@ -98,6 +100,7 @@ const RespondToQuestionInput = Schema.Struct({ id: Id, ...SESSION_RESPOND_TO_QUE
 type RespondToQuestionInput = Schema.Schema.Type<typeof RespondToQuestionInput>;
 
 const decodeInput = Schema.decodeUnknownEffect(InputInput);
+const decodeDedupKey = Schema.decodeUnknownEffect(Schema.Struct({ dedupKey: DedupKey }));
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeRespondToApprovalRequest = Schema.decodeUnknownEffect(RespondToApprovalRequestInput);
 const decodeRespondToQuestion = Schema.decodeUnknownEffect(RespondToQuestionInput);
@@ -177,6 +180,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* SessionService;
   const readSession = readSessionOrFail(yield* sessionRepository);
   const recordComposer = yield* sessionRecordComposer;
+  const inputs = yield* inputRepository;
   const instances = yield* providerRepository;
   const resolved = yield* resolvedInstance;
   const resumableNativeSession = yield* resumable;
@@ -517,6 +521,48 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Returns what `session.input` answers for a repeat of a keyed call: the id
+   * of the input the first call stored, and what has happened to it since.
+   *
+   * - A delivered input answers how the runner took it, `opened` or `steered`.
+   * - An input that waits or is on its way to the runner answers `queued`.
+   * - A cancelled input fails with `InvalidState`: it will never be sent, and
+   *   the caller sends the message again under a new key.
+   *
+   * The input is read by its id alone. A dedup key belongs to the actor, not to
+   * a session, so the stored input may belong to another session than the one
+   * the repeat names. Dies if the input does not exist, which would mean its
+   * dedup key outlived it; no input is ever deleted.
+   */
+  const readInputOutcome = (
+    inputId: string,
+  ): Effect.Effect<SessionInputOutcome, InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* inputs.read(inputId);
+      if (Option.isNone(found)) {
+        return yield* Effect.die(`a dedup key points at an input that does not exist: ${inputId}`);
+      }
+      const row = found.value;
+      switch (row.status) {
+        case "queued":
+        case "sent":
+          return { inputId, result: "queued" as const };
+        case "delivered":
+          if (row.delivery === null) {
+            return yield* Effect.die(`input ${inputId} is delivered and records no delivery`);
+          }
+          return { inputId, result: row.delivery };
+        case "cancelled":
+          return yield* Effect.fail(
+            createInvalidStateError(
+              `an input with this dedupKey was already sent, as ${inputId}, and was cancelled; ` +
+                "send it again under a new key",
+            ),
+          );
+      }
+    });
+
+  /**
    * Checks the `session.input` grant, decodes the input, and stores it as the
    * next input of its session, in the caller's transaction or in one of its
    * own. Returns the session as it was read and the stored row. Sends
@@ -538,10 +584,20 @@ const make = Effect.gen(function* () {
    * instead of merging their options over the same stale row, and an option
    * the model does not offer rolls everything back, leaving neither a changed
    * selection nor an input row.
+   *
+   * `claimResult` claims a dedup key for the new input, given the input's id,
+   * in that same transaction. When it fails, the whole transaction rolls
+   * back, so a repeat of a keyed call leaves no input row, attachment claim
+   * or model selection change behind. A caller with no key leaves it out, and
+   * then `E` is `never`.
    */
-  const storeInput = (
+  const storeInput = <E = never>(
     input: InputInput,
-  ): Effect.Effect<{ readonly session: StoredSession; readonly row: StoredInput }, InputError> =>
+    claimResult?: (inputId: string) => Effect.Effect<void, E>,
+  ): Effect.Effect<
+    { readonly session: StoredSession; readonly row: StoredInput },
+    InputError | E
+  > =>
     Effect.gen(function* () {
       yield* requireGrant("session.input");
       const { id, text, attachments, ...picks } = yield* Effect.mapError(
@@ -574,6 +630,7 @@ const make = Effect.gen(function* () {
             at,
             claimWhenIdle: true,
           });
+          if (claimResult !== undefined) yield* claimResult(row.id);
           return { session, row };
         }),
       );
@@ -1085,11 +1142,18 @@ const make = Effect.gen(function* () {
      * A delivered result always comes from the runner, never from the status
      * the controller read: only the adapter knows whether the input started a
      * turn or was folded into a turn already running.
+     *
+     * With a `dedupKey`, a repeat of the call by the same actor returns the
+     * first call's input id and what has happened to that input since, and
+     * does nothing else. Both grants are checked before the repeat is looked
+     * up. A repeat of an input that was cancelled fails with `InvalidState`.
+     * Spec 11, "Retrying a call", has the full rules.
      */
     input: ({
       steer,
+      dedupKey,
       ...input
-    }: InputInput & Pick<SessionInputPayload, "steer">): Effect.Effect<
+    }: InputInput & Pick<SessionInputPayload, "steer" | "dedupKey">): Effect.Effect<
       SessionInputOutcome,
       InputError
     > =>
@@ -1097,38 +1161,57 @@ const make = Effect.gen(function* () {
         const actor = yield* CurrentActor;
         const steered = steer ?? (actor._tag === "session" && actor.sessionId !== input.id);
         if (steered) yield* requireGrant("input.steer");
-        const { session, row } = yield* storeInput(input);
-        // Outside the transaction: dispatch may send a frame to the runner,
-        // and a transaction never waits on anything outside the database.
-        if (session.status === "exited") yield* dispatch(session.runnerId);
-        if (row.sentAt !== null) return yield* deliverClaimed(row);
-        // Only a busy session has a running turn to steer the input into; on
-        // any other status the input is handled as if it were not steered.
-        // `steerInto` claims the input before it sends it, so the flush at
-        // the turn's end can never send it a second time.
-        if (steered && session.status === "busy") {
-          const outcome = yield* steerInto(session, row).pipe(
-            Effect.catch((error) =>
-              sessions.queuedInput(session.id, row.id).pipe(
-                Effect.matchEffect({
-                  onSuccess: () =>
-                    Effect.as(
-                      Effect.logInfo("A message was not steered; it waits for the turn's end", {
-                        sessionId: session.id,
-                        reason: "error" in error ? error.error.message : error.message,
-                      }),
-                      Option.none(),
-                    ),
-                  // `queued` would claim the input still waits, which is no
-                  // longer true, so the steer's own error is the answer.
-                  onFailure: () => Effect.fail(error),
-                }),
-              ),
-            ),
-          );
-          if (Option.isSome(outcome)) return outcome.value;
+        // Checked here as well as in `storeInput`, so a repeat of a keyed call
+        // is refused without the grant just as the first call was.
+        yield* requireGrant("session.input");
+        if (dedupKey !== undefined) {
+          yield* Effect.mapError(decodeDedupKey({ dedupKey }), createDecodeValidationError);
         }
-        return { inputId: row.id, result: "queued" };
+        const sendNew = Effect.gen(function* () {
+          const { session, row } = yield* storeInput(
+            input,
+            dedupKey === undefined
+              ? undefined
+              : (inputId) => sessions.claimDedupKey("session.input", dedupKey, inputId),
+          );
+          // Outside the transaction: dispatch may send a frame to the runner,
+          // and a transaction never waits on anything outside the database.
+          if (session.status === "exited") yield* dispatch(session.runnerId);
+          if (row.sentAt !== null) return yield* deliverClaimed(row);
+          // Only a busy session has a running turn to steer the input into; on
+          // any other status the input is handled as if it were not steered.
+          // `steerInto` claims the input before it sends it, so the flush at
+          // the turn's end can never send it a second time.
+          if (steered && session.status === "busy") {
+            const outcome = yield* steerInto(session, row).pipe(
+              Effect.catch((error) =>
+                sessions.queuedInput(session.id, row.id).pipe(
+                  Effect.matchEffect({
+                    onSuccess: () =>
+                      Effect.as(
+                        Effect.logInfo("A message was not steered; it waits for the turn's end", {
+                          sessionId: session.id,
+                          reason: "error" in error ? error.error.message : error.message,
+                        }),
+                        Option.none(),
+                      ),
+                    // `queued` would claim the input still waits, which is no
+                    // longer true, so the steer's own error is the answer.
+                    onFailure: () => Effect.fail(error),
+                  }),
+                ),
+              ),
+            );
+            if (Option.isSome(outcome)) return outcome.value;
+          }
+          return { inputId: row.id, result: "queued" as const };
+        });
+        return yield* sessions.returnExistingOrCreate(
+          "session.input",
+          dedupKey,
+          readInputOutcome,
+          sendNew,
+        );
       }),
 
     /**

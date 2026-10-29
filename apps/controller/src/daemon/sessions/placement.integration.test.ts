@@ -14,6 +14,7 @@ import {
   MAX_OUTPUT_SCHEMA_LENGTH,
   type ModelDescriptor,
   type RunnerFacts,
+  type SessionStart,
   type TextGenerationOutcome,
   type TextGenerationRequest,
 } from "@hercule/protocol";
@@ -935,6 +936,48 @@ describe("placeSession for a session's spawn: where it runs", () => {
   });
 });
 
+/** Spawns a session, lets it start, then ends it with a native id, so it can be forked. */
+const spawnAndEnd = async (arranged: Arranged, body: unknown): Promise<Session> => {
+  const session = await spawnSessionOrFail(arranged, body);
+  await waitForStartFrames(arranged, session.id, 1);
+  reportEvent(arranged.wire, 1, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at,
+    _tag: "session.started",
+  });
+  await waitForSession(arranged, session.id, (one) => one.status === "busy");
+  arranged.wire.send({
+    _tag: "sessionsReport",
+    sessions: [
+      { sessionId: session.id, nativeSessionId: "native-1", instanceId: session.instanceId },
+    ],
+  });
+  await waitForSession(arranged, session.id, (one) => one.nativeSessionId !== null);
+  reportEvent(arranged.wire, 2, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at,
+    _tag: "session.exited",
+    reason: "stopped",
+  });
+  return await waitForSession(arranged, session.id, (one) => one.status === "exited");
+};
+
+/** Forks a session, with a `dedupKey` when given. */
+const fork = (
+  arranged: Arranged,
+  parentId: string,
+  prompt: string,
+  dedupKey?: string,
+): Promise<Response> =>
+  post(
+    arranged.harness.base,
+    `/api/v1/sessions/${parentId}/continue`,
+    { mode: "fork", prompt, ...(dedupKey === undefined ? {} : { dedupKey }) },
+    arranged.token,
+  );
+
 /** Reads the stored `needs_refinement` of a session: null when no title was generated. */
 const readNeedsRefinement = async (
   arranged: Arranged,
@@ -1105,42 +1148,6 @@ describe("placeSession generates a Thread title", () => {
     );
   });
 
-  /** Spawns a session, lets it start, then ends it with a native id, so it can be forked. */
-  const spawnAndEnd = async (arranged: Arranged, body: unknown): Promise<Session> => {
-    const session = await spawnSessionOrFail(arranged, body);
-    await waitForStartFrames(arranged, session.id, 1);
-    reportEvent(arranged.wire, 1, {
-      eventId: crypto.randomUUID(),
-      sessionId: session.id,
-      at,
-      _tag: "session.started",
-    });
-    await waitForSession(arranged, session.id, (one) => one.status === "busy");
-    arranged.wire.send({
-      _tag: "sessionsReport",
-      sessions: [
-        { sessionId: session.id, nativeSessionId: "native-1", instanceId: session.instanceId },
-      ],
-    });
-    await waitForSession(arranged, session.id, (one) => one.nativeSessionId !== null);
-    reportEvent(arranged.wire, 2, {
-      eventId: crypto.randomUUID(),
-      sessionId: session.id,
-      at,
-      _tag: "session.exited",
-      reason: "stopped",
-    });
-    return await waitForSession(arranged, session.id, (one) => one.status === "exited");
-  };
-
-  const fork = (arranged: Arranged, parentId: string, prompt: string): Promise<Response> =>
-    post(
-      arranged.harness.base,
-      `/api/v1/sessions/${parentId}/continue`,
-      { mode: "fork", prompt },
-      arranged.token,
-    );
-
   it("generates a title and a role for a fork of a Thread, and takes no role from its parent", async () => {
     await withTitles(answers, async (arranged, requests) => {
       const parent = await spawnAndEnd(arranged, { prompt: "start the work", role: "review" });
@@ -1184,6 +1191,162 @@ describe("placeSession generates a Thread title", () => {
       await spawnSessionOrFail(arranged, { prompt: "a real message" });
       await waitUntil("asked for a title", () => (requests().length > 0 ? true : undefined));
       expect(requests().map((request) => request.spec.input)).toEqual(["a real message"]);
+    });
+  });
+});
+
+describe("placeSession and continueSession with a dedupKey", () => {
+  /** Counts the rows of a table, to prove a repeat wrote nothing. */
+  const countRows = async (arranged: Arranged, table: "sessions" | "workspaces") => {
+    const [row] = await Effect.runPromise(
+      Effect.orDie(
+        arranged.harness.sql<{
+          readonly n: number;
+        }>`SELECT COUNT(*) AS n FROM ${arranged.harness.sql(table)}`,
+      ),
+    );
+    return row!.n;
+  };
+
+  /**
+   * Starts a workspace-less session with no key and waits for its start
+   * frame. The controller sends frames to a runner in order, so once this
+   * one has arrived, a frame an earlier repeat wrongly sent would have too.
+   */
+  const waitForOrderedFrames = async (arranged: Arranged): Promise<void> => {
+    const sentinel = await spawnSessionOrFail(arranged, { prompt: "sentinel" });
+    await waitForStartFrames(arranged, sentinel.id, 1);
+  };
+
+  /** The ids of the sessions the runner was told to start, in order. */
+  const listStartedSessionIds = (arranged: Arranged): ReadonlyArray<string> =>
+    listFrames<SessionStart>(arranged.wire, "sessionStart").map((frame) => frame.sessionId);
+
+  it("returns the first session of a repeated spawn and starts nothing", async () => {
+    await withFleet(async (arranged) => {
+      const web = await createRepo(arranged, "https://github.com/acme/web");
+      const first = await spawnSessionOrFail(arranged, {
+        prompt: "build it",
+        workspace: buildEphemeralWorkspace(web),
+        dedupKey: "build-1",
+      });
+      await waitForProvisionFrame(arranged);
+      const sessionsBefore = await countRows(arranged, "sessions");
+      const workspacesBefore = await countRows(arranged, "workspaces");
+
+      // Nothing but the key is compared: another prompt and no workspace.
+      const repeat = await spawnSessionOrFail(arranged, {
+        prompt: "something else",
+        dedupKey: "build-1",
+      });
+      await waitForOrderedFrames(arranged);
+
+      expect(repeat.id).toBe(first.id);
+      expect(await countRows(arranged, "sessions")).toBe(sessionsBefore + 1);
+      expect(await countRows(arranged, "workspaces")).toBe(workspacesBefore);
+      expect(listFramesTagged(arranged.wire, "workspaceProvision")).toHaveLength(1);
+      expect(listStartedSessionIds(arranged)).not.toContain(repeat.id);
+      expect(await arranged.harness.audit("session.spawned")).toHaveLength(2);
+    });
+  });
+
+  it("does real work for the same key from another actor, and keeps each actor's repeat apart", async () => {
+    await withFleet(async (arranged) => {
+      const caller = await spawnThreadUnder(
+        arranged,
+        await createProfile(arranged, "thread-starter", ["session.spawn", "thread.start"]),
+      );
+      const fromUser = await spawnSessionOrFail(arranged, { prompt: "a", dedupKey: "k" });
+
+      const fromSession = await post(
+        arranged.harness.base,
+        "/api/v1/sessions",
+        { prompt: "a", dedupKey: "k" },
+        caller.token,
+      );
+      expect(fromSession.status, await fromSession.clone().text()).toBe(200);
+      const second = (await fromSession.json()) as Session;
+      const repeated = await post(
+        arranged.harness.base,
+        "/api/v1/sessions",
+        { prompt: "a", dedupKey: "k" },
+        caller.token,
+      );
+      expect(((await repeated.json()) as Session).id).toBe(second.id);
+
+      expect(second.id).not.toBe(fromUser.id);
+      expect(second.id).not.toBe(caller.session.id);
+      expect((await spawnSessionOrFail(arranged, { prompt: "a", dedupKey: "k" })).id).toBe(
+        fromUser.id,
+      );
+    });
+  });
+
+  it("returns an exited session as it is now, without resuming it", async () => {
+    await withFleet(async (arranged) => {
+      const first = await spawnAndEnd(arranged, { prompt: "work", dedupKey: "once" });
+
+      const repeat = await spawnSessionOrFail(arranged, { prompt: "work", dedupKey: "once" });
+      await waitForOrderedFrames(arranged);
+
+      expect(repeat.id).toBe(first.id);
+      expect(repeat.status).toBe("exited");
+      expect(listStartedSessionIds(arranged).filter((id) => id === first.id)).toHaveLength(1);
+      expect((await readSession(arranged, first.id)).status).toBe("exited");
+    });
+  });
+
+  it("returns the first session of a repeat even when the call could no longer be placed", async () => {
+    await withFleet(async (arranged) => {
+      const profile = await readProfileNamed(arranged, "worker");
+      const agent = await createAgent(arranged, {
+        name: "short-lived",
+        systemPrompt: "You assess tasks.",
+        instanceId: findInstanceId(arranged, "alpha-provider"),
+        permissionProfileId: profile.id,
+      });
+      const first = await spawnAndEnd(arranged, {
+        agentId: agent.id,
+        prompt: "assess",
+        dedupKey: "assess-1",
+      });
+      const deleted = await del(
+        arranged.harness.base,
+        `/api/v1/agents/${agent.id}`,
+        arranged.token,
+      );
+      expect(deleted.status, await deleted.clone().text()).toBe(200);
+      const withoutKey = await spawnSession(arranged, { agentId: agent.id, prompt: "assess" });
+      expect(withoutKey.status).toBe(404);
+
+      const repeat = await spawnSessionOrFail(arranged, {
+        agentId: agent.id,
+        prompt: "assess",
+        dedupKey: "assess-1",
+      });
+
+      expect(repeat.id).toBe(first.id);
+    });
+  });
+
+  it("returns the first fork of a repeated continue, and keeps spawn and continue keys apart", async () => {
+    await withFleet(async (arranged) => {
+      // The parent used the key "shared" for its spawn.
+      const parent = await spawnAndEnd(arranged, { prompt: "start", dedupKey: "shared" });
+
+      const response = await fork(arranged, parent.id, "go on", "shared");
+      expect(response.status, await response.clone().text()).toBe(200);
+      const child = (await response.json()) as Session;
+      const sessionsBefore = await countRows(arranged, "sessions");
+      const repeat = await fork(arranged, parent.id, "go on differently", "shared");
+      const repeated = (await repeat.json()) as Session;
+      await waitForOrderedFrames(arranged);
+
+      expect(child.id).not.toBe(parent.id);
+      expect(child.parentSessionId).toBe(parent.id);
+      expect(repeated.id).toBe(child.id);
+      expect(await countRows(arranged, "sessions")).toBe(sessionsBefore + 1);
+      expect(listStartedSessionIds(arranged).filter((id) => id === child.id)).toHaveLength(1);
     });
   });
 });
