@@ -5,23 +5,23 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import type { ThreadNotice } from "@hercule/client-core";
-import { RuntimeNote } from "./runtime-note";
+import type { RuntimeNote } from "@hercule/client-core";
+import { RuntimeNoteLine } from "./runtime-note-line";
 
 afterEach(cleanup);
 
-const noticeOf = (message: string): ThreadNotice => ({
+const buildRuntimeNote = (message: string): RuntimeNote => ({
   key: "runtime.error:0",
   severity: "error",
   message,
   at: "2026-09-08T10:00:00.000Z",
 });
 
-describe("RuntimeNote", () => {
+describe("RuntimeNoteLine", () => {
   it("keeps the words of a command whole, except a word too long to always fit a line", () => {
     const path = `/home/${"very-long-directory-name-".repeat(7)}file.ts`;
     const { container } = render(
-      <RuntimeNote notice={noticeOf(`Could not read \`cat ${path}\`.`)} />,
+      <RuntimeNoteLine note={buildRuntimeNote(`Could not read \`cat ${path}\`.`)} />,
     );
 
     const code = container.querySelector("code")!;

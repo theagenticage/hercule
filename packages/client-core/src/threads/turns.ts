@@ -13,7 +13,7 @@
  *   `detail.senderSessionId`;
  * - the assistant's text is the turn's `assistant_text` deltas joined in
  *   transcript order;
- * - a `runtime.error` or `runtime.warning` row becomes a notice, in the turn
+ * - a `runtime.error` or `runtime.warning` row becomes a runtime note, in the turn
  *   it belongs to or, when it belongs to none, between the turns around it.
  */
 import { Schema } from "effect";
@@ -144,7 +144,7 @@ export const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
  * work, such as a harness that is not installed. The message is shown as the
  * runner wrote it, and may hold a command between backticks.
  */
-export interface ThreadNotice {
+export interface RuntimeNote {
   /** Unique within one transcript: the row's position, with its severity. */
   readonly key: string;
   readonly severity: "error" | "warning";
@@ -153,11 +153,11 @@ export interface ThreadNotice {
 }
 
 /**
- * A notice that belongs to no turn, such as the error of a session that
+ * A runtime note that belongs to no turn, such as the error of a session that
  * failed to start: no turn ever began, so there is nothing to put it in.
  */
-export interface OutsideNotice extends ThreadNotice {
-  /** How many turns began before the notice, so a screen places it between turns. */
+export interface OutsideRuntimeNote extends RuntimeNote {
+  /** How many turns began before the runtime note, so a screen places it between turns. */
   readonly turnsBefore: number;
 }
 
@@ -174,8 +174,8 @@ export interface ThreadTurn {
    * stopped. `null` while no `turn.completed` has arrived, like `duration`.
    */
   readonly endState: TurnEndState | null;
-  /** The notices that fell inside this turn, in transcript order. */
-  readonly notices: readonly ThreadNotice[];
+  /** The runtime notes that fell inside this turn, in transcript order. */
+  readonly runtimeNotes: readonly RuntimeNote[];
 }
 
 /** The verb shown for each item kind. It is one word per kind, never more detailed. */
@@ -294,7 +294,7 @@ interface Building {
   items: ThreadItem[];
   itemIndex: Map<string, number>;
   assistantText: string;
-  notices: ThreadNotice[];
+  runtimeNotes: RuntimeNote[];
   /**
    * The item of the last `assistant_text` delta, used to insert a paragraph
    * break when a new item starts.
@@ -318,34 +318,34 @@ export const mayBeRunningTurn = (status: SessionStatus): boolean =>
   status !== "exited" && status !== "queued";
 
 /**
- * Returns a `runtime.error` or `runtime.warning` row as a notice. A row with
+ * Returns a `runtime.error` or `runtime.warning` row as a runtime note. A row with
  * no message gets its error class as the message.
  */
-const buildNotice = (
+const buildRuntimeNote = (
   row: TranscriptRow,
   event: Extract<ProviderEvent, { _tag: "runtime.error" | "runtime.warning" }>,
-): ThreadNotice => ({
+): RuntimeNote => ({
   key: `${event._tag}:${String(row.position)}`,
   severity: event._tag === "runtime.error" ? "error" : "warning",
   message: event._tag === "runtime.error" ? (event.message ?? event.class) : event.message,
   at: event.at,
 });
 
-/** What `buildTurns` returns: the turns, and the notices that fell outside all of them. */
+/** What `buildTurns` returns: the turns, and the runtime notes that fell outside all of them. */
 export interface ThreadTurns {
   readonly turns: readonly ThreadTurn[];
-  readonly outsideNotices: readonly OutsideNotice[];
+  readonly outsideRuntimeNotes: readonly OutsideRuntimeNote[];
 }
 
 /**
  * Returns the turns of one agent's transcript, in the order they first
- * appear, and the notices that belong to no turn. `agent` is that agent's
+ * appear, and the runtime notes that belong to no turn. `agent` is that agent's
  * state: an item one of its open Requests is about shows `awaiting approval`.
  *
- * A notice belongs to the turn its row names. A notice with no turn id
+ * A runtime note belongs to the turn its row names. A runtime note with no turn id
  * belongs to the turn that is open where its row sits: begun, and not yet
  * completed, nor cut off by the session starting or exiting. With no such
- * turn, it is an outside notice.
+ * turn, it is an outside runtime note.
  */
 export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): ThreadTurns => {
   const awaitingItemIds = new Set(agent.openRequests.map((request) => request.itemId));
@@ -363,14 +363,14 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
       items: [],
       itemIndex: new Map(),
       assistantText: "",
-      notices: [],
+      runtimeNotes: [],
       lastAssistantItemId: null,
     };
     turns.set(turnId, made);
     return made;
   };
 
-  const outsideNotices: OutsideNotice[] = [];
+  const outsideRuntimeNotes: OutsideRuntimeNote[] = [];
   let openTurnId: string | null = null;
 
   for (const row of rows) {
@@ -395,12 +395,12 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
       }
       case "runtime.error":
       case "runtime.warning": {
-        const notice = buildNotice(row, event);
+        const note = buildRuntimeNote(row, event);
         const turnId = event.turnId ?? openTurnId;
         if (turnId === null) {
-          outsideNotices.push({ ...notice, turnsBefore: turns.size });
+          outsideRuntimeNotes.push({ ...note, turnsBefore: turns.size });
         } else {
-          findOrStartTurn(turnId, event.at).notices.push(notice);
+          findOrStartTurn(turnId, event.at).runtimeNotes.push(note);
         }
         break;
       }
@@ -457,7 +457,7 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
     duration:
       turn.completedAt === null ? null : Date.parse(turn.completedAt) - Date.parse(turn.startedAt),
     endState: turn.endState,
-    notices: turn.notices,
+    runtimeNotes: turn.runtimeNotes,
   }));
-  return { turns: builtTurns, outsideNotices };
+  return { turns: builtTurns, outsideRuntimeNotes };
 };

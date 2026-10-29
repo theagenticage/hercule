@@ -931,11 +931,9 @@ export {
 export {
   buildTurns,
   mayBeRunningTurn,
-  type OutsideNotice,
+  type RuntimeNote,
   type ThreadItem,
-  type ThreadNotice,
   type ThreadTurn,
-  type ThreadTurns,
   type ThreadUserMessage,
 } from "./threads/turns";
 export {

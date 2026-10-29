@@ -38,7 +38,7 @@ import { ConversationSessionNotice } from "./conversation-session-notice";
 import { QueuedInputs } from "./queued-inputs";
 import { SendingMessages } from "./sending-messages";
 import { RequestDock } from "./request-dock";
-import { RuntimeNote } from "./runtime-note";
+import { RuntimeNoteLine } from "./runtime-note-line";
 import { AgentChrome } from "./thread-chrome";
 import { Turn } from "./turn";
 import { useAgentLive } from "./use-agent-live";
@@ -76,19 +76,19 @@ export function AgentPage({
     subagent === undefined
       ? buildSessionAgentState(session)
       : buildSubagentAgentState(subagent, session);
-  const { turns, outsideNotices } = buildTurns(rows, agent);
+  const { turns, outsideRuntimeNotes } = buildTurns(rows, agent);
   // A subagent's page shows its brief in the brief card, so the turn that
   // opens with the brief leaves that opening message out.
   const brief = subagent === undefined ? undefined : findSubagentBrief(turns);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
   const tailRef = useAgentLive(live, queryClient, sessionId, subagentId, rows, followIfAtBottom);
   const lastIndex = turns.length - 1;
-  // A notice outside every turn, such as a start failure, sits between the
+  // A runtime note outside every turn, such as a start failure, sits between the
   // turns around it: `turnsBefore` of them lie above it.
-  const drawNoticesAfter = (turnCount: number): JSX.Element[] =>
-    outsideNotices
-      .filter((notice) => notice.turnsBefore === turnCount)
-      .map((notice) => <RuntimeNote key={notice.key} notice={notice} />);
+  const drawRuntimeNotesAfter = (turnCount: number): JSX.Element[] =>
+    outsideRuntimeNotes
+      .filter((note) => note.turnsBefore === turnCount)
+      .map((note) => <RuntimeNoteLine key={note.key} note={note} />);
   // Turns started in the same minute share one time separator.
   const stamps = chooseStamps(
     turns.map((turn) => turn.startedAt),
@@ -148,7 +148,7 @@ export function AgentPage({
             const isLive = agent.mayBeRunningTurn && index === lastIndex && turn.duration === null;
             return (
               <Fragment key={turn.turnId}>
-                {drawNoticesAfter(index)}
+                {drawRuntimeNotesAfter(index)}
                 <Turn
                   turn={turn}
                   spawnLines={
@@ -169,7 +169,7 @@ export function AgentPage({
               </Fragment>
             );
           })}
-          {drawNoticesAfter(turns.length)}
+          {drawRuntimeNotesAfter(turns.length)}
           {subagent === undefined ? (
             <SendingMessages client={client} sessionId={sessionId} />
           ) : null}

@@ -1087,7 +1087,7 @@ describe("buildTurns: the skills of a message", () => {
   });
 });
 
-describe("buildTurns notices", () => {
+describe("buildTurns runtime notes", () => {
   const INSTALL_COMMAND = "hercule runner install-harness r1 --provider claude-code";
   const base = (position: number, at: string) => ({
     eventId: `n${position}`,
@@ -1112,7 +1112,7 @@ describe("buildTurns notices", () => {
     });
 
   it("puts an error that names its turn in that turn, with the message as the runner wrote it", () => {
-    const { turns, outsideNotices } = buildTurns(
+    const { turns, outsideRuntimeNotes } = buildTurns(
       [
         turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
         errorRow(2, "2026-09-08T10:00:01.000Z", { turnId: "t1", message: "Context window full." }),
@@ -1121,8 +1121,8 @@ describe("buildTurns notices", () => {
       AGENT_ASKING_NOTHING,
     );
 
-    expect(outsideNotices).toEqual([]);
-    expect(turns[0]?.notices).toEqual([
+    expect(outsideRuntimeNotes).toEqual([]);
+    expect(turns[0]?.runtimeNotes).toEqual([
       {
         key: "runtime.error:2",
         severity: "error",
@@ -1133,7 +1133,7 @@ describe("buildTurns notices", () => {
   });
 
   it("puts an error with no turn id in the turn that is open where its row sits", () => {
-    const { turns, outsideNotices } = buildTurns(
+    const { turns, outsideRuntimeNotes } = buildTurns(
       [
         turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
         errorRow(2, "2026-09-08T10:00:01.000Z", { message: "Rate limited." }),
@@ -1141,12 +1141,12 @@ describe("buildTurns notices", () => {
       AGENT_ASKING_NOTHING,
     );
 
-    expect(outsideNotices).toEqual([]);
-    expect(turns[0]?.notices.map((notice) => notice.message)).toEqual(["Rate limited."]);
+    expect(outsideRuntimeNotes).toEqual([]);
+    expect(turns[0]?.runtimeNotes.map((note) => note.message)).toEqual(["Rate limited."]);
   });
 
   it("keeps an error outside every turn when no turn ever began, as when a session fails to start", () => {
-    const { turns, outsideNotices } = buildTurns(
+    const { turns, outsideRuntimeNotes } = buildTurns(
       [
         errorRow(1, "2026-09-08T10:00:00.000Z", {
           message: `Claude Code is not installed on this runner. Install it with: \`${INSTALL_COMMAND}\``,
@@ -1156,7 +1156,7 @@ describe("buildTurns notices", () => {
     );
 
     expect(turns).toEqual([]);
-    expect(outsideNotices).toEqual([
+    expect(outsideRuntimeNotes).toEqual([
       {
         key: "runtime.error:1",
         severity: "error",
@@ -1167,8 +1167,8 @@ describe("buildTurns notices", () => {
     ]);
   });
 
-  it("counts the turns before an outside notice, and treats a completed or a restarted session's turn as closed", () => {
-    const { turns, outsideNotices } = buildTurns(
+  it("counts the turns before an outside runtime note, and treats a completed or a restarted session's turn as closed", () => {
+    const { turns, outsideRuntimeNotes } = buildTurns(
       [
         turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
         turnCompleted(2, "t1", "2026-09-08T10:00:01.000Z"),
@@ -1184,8 +1184,8 @@ describe("buildTurns notices", () => {
       AGENT_ASKING_NOTHING,
     );
 
-    expect(turns.map((turn) => turn.notices)).toEqual([[], []]);
-    expect(outsideNotices.map((notice) => [notice.message, notice.turnsBefore])).toEqual([
+    expect(turns.map((turn) => turn.runtimeNotes)).toEqual([[], []]);
+    expect(outsideRuntimeNotes.map((note) => [note.message, note.turnsBefore])).toEqual([
       ["after a completed turn", 1],
       ["after an abandoned turn", 2],
     ]);
@@ -1205,7 +1205,7 @@ describe("buildTurns notices", () => {
       AGENT_ASKING_NOTHING,
     );
 
-    expect(turns[0]?.notices.map((notice) => [notice.severity, notice.message])).toEqual([
+    expect(turns[0]?.runtimeNotes.map((note) => [note.severity, note.message])).toEqual([
       ["warning", "Retrying the request."],
       ["error", "HarnessNotInstalled"],
     ]);

@@ -31,6 +31,7 @@ import { get, post, send } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
   at,
+  listFrames,
   listInputs,
   reportEvent,
   spawnSessionOrFail,
@@ -623,6 +624,11 @@ describe("a conversation's start that the runner failed for good", () => {
         status: "cancelled",
         reason: message,
       });
+
+      // The crash exit that follows does not resume the session for the
+      // message: the message was failed, not kept, so a resume has nothing to carry.
+      await reportExit(arranged, session!.id, 1, "crash");
+      expect(listFrames(arranged.wire, "sessionStart")).toHaveLength(1);
     });
   });
 });

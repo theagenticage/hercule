@@ -3773,34 +3773,6 @@ describe("an input the runner refused with a typed failure", () => {
     });
   });
 
-  it("fails the owner's message a conversation's start carried when the harness is not installed, instead of resuming for it", async () => {
-    await withAgentFleet(async (arranged) => {
-      arranged.wire.answering(() => ({
-        error: new HarnessNotInstalled({ message: INSTALL_MESSAGE }),
-      }));
-      const { conversation } = await readDefaultConversation(arranged);
-      await sendMessage(arranged, conversation.id, "hi");
-      const [session] = await waitForConversationSessions(arranged, conversation.id, 1);
-      await waitForStartFrames(arranged, session!.id, 1);
-
-      const failed = await waitUntil("cancelled the start input", async () => {
-        const [row] = await listInputs(arranged, session!.id);
-        return row?.status === "cancelled" ? row : undefined;
-      });
-      expect(failed.reason).toBe(INSTALL_MESSAGE);
-      reportEvent(arranged.wire, 1, {
-        eventId: crypto.randomUUID(),
-        sessionId: session!.id,
-        at,
-        _tag: "session.exited",
-        reason: "crash",
-      });
-      await waitForSession(arranged, session!.id, (one) => one.exitedAt !== null);
-      // The message was failed, not kept, so no resume has anything to carry.
-      expect(listFrames(arranged.wire, "sessionStart")).toHaveLength(1);
-    });
-  });
-
   it("leaves a steered input waiting, with no failure, when the runner refuses the steer with SteerRefused", async () => {
     await withFleet(async (arranged) => {
       const session = await startSession(arranged, "hello");

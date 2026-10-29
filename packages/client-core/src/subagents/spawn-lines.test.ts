@@ -33,7 +33,7 @@ const TURN: ThreadTurn = {
   startedAt: "2026-10-05T09:00:00.000Z",
   duration: null,
   endState: null,
-  notices: [],
+  runtimeNotes: [],
 };
 
 const A = buildSubagent({ id: "a", itemId: "spawn-a", description: "Check the redirect" });

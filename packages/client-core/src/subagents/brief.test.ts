@@ -18,7 +18,7 @@ const buildTurn = (turnId: string, text: string): ThreadTurn => ({
   startedAt: "2026-10-05T09:00:00.000Z",
   duration: null,
   endState: null,
-  notices: [],
+  runtimeNotes: [],
 });
 
 describe("findSubagentBrief", () => {
