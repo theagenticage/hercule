@@ -296,6 +296,7 @@ describe("the text of an assistant message", () => {
     const state = buildTestState();
 
     const events = normalizeNotes(state, [
+      TURN_STARTED,
       buildItemCompleted(ASYNC_MESSAGE),
       buildItemCompleted(ASYNC_MESSAGE),
     ]);
@@ -388,6 +389,7 @@ const listStreamedDeltas = (
 describe("which reasoning channel a session streams", () => {
   it("streams the summary when the summary is all Codex sends", () => {
     const events = normalizeFromStart([
+      TURN_STARTED,
       buildSummaryDelta("Weighing "),
       buildSummaryDelta("the options"),
     ]);
@@ -400,6 +402,7 @@ describe("which reasoning channel a session streams", () => {
 
   it("streams only raw reasoning when raw arrives first", () => {
     const running = buildTestState();
+    normalizeNotes(running, [TURN_STARTED]);
 
     const first = normalizeNotes(running, [buildRawDelta("Because ")]);
     const second = normalizeNotes(running, [buildSummaryDelta("Weighing the options")]);
@@ -412,6 +415,7 @@ describe("which reasoning channel a session streams", () => {
 
   it("switches to raw when raw follows a summary, and drops the summary after it", () => {
     const running = buildTestState();
+    normalizeNotes(running, [TURN_STARTED]);
 
     const opened = normalizeNotes(running, [buildSummaryDelta("Weighing ")]);
     const switched = normalizeNotes(running, [buildRawDelta("Because ")]);
@@ -427,9 +431,11 @@ describe("which reasoning channel a session streams", () => {
 
   it("streams an assistant message as assistant text and a command's output as command output", () => {
     const message = normalizeFromStart([
+      TURN_STARTED,
       buildDeltaNote("item/agentMessage/delta", { delta: "Hello" }),
     ]);
     const output = normalizeFromStart([
+      TURN_STARTED,
       buildDeltaNote("item/commandExecution/outputDelta", { delta: "hi\n" }),
     ]);
 
@@ -778,6 +784,7 @@ describe("the detail a surface shows for an item without opening it", () => {
 
   it("includes the same detail on item.started as on item.completed", () => {
     const opened = normalizeFromStart([
+      TURN_STARTED,
       buildNote("item/started", {
         item: {
           type: "commandExecution",
@@ -858,9 +865,13 @@ describe("a subagent's native thread", () => {
       buildNote("item/started", input.params as Record<string, unknown>),
       CHILD,
     );
-    const events = normalizeNotes(child, [started, assignThread(input, CHILD)]);
-    expect(listEventTags(events)).toEqual(["item.started", "item.completed"]);
-    for (const event of events) {
+    const events = normalizeNotes(child, [
+      assignThread(TURN_STARTED, CHILD),
+      started,
+      assignThread(input, CHILD),
+    ]);
+    expect(listEventTags(events)).toEqual(["turn.started", "item.started", "item.completed"]);
+    for (const event of events.slice(1)) {
       expect(event).toMatchObject({
         subagentId: CHILD,
         itemId: "brief",
@@ -1823,6 +1834,52 @@ describe("a frame of a turn that is over", () => {
     expect(filterByTag(events, "turn.completed")[0]).toMatchObject({
       structuredResult: { outcome: "ok", value: { result: "right" } },
     });
+  });
+});
+
+describe("a frame of a turn that has already ended", () => {
+  const SLEEP = { type: "sleep", id: "s_0", durationMs: 5 };
+
+  it("starts no item and streams no delta, and still completes an item started before", () => {
+    const ignored: Array<string> = [];
+    const state = buildReportingState([], ignored);
+    normalizeNotes(state, [
+      TURN_STARTED,
+      buildNote("item/started", { item: SLEEP, threadId: THREAD, turnId: TURN, startedAtMs: 1 }),
+      buildTurnCompleted("completed"),
+    ]);
+
+    const late = normalizeNotes(state, [
+      buildNote("item/started", {
+        item: { ...SLEEP, id: "s_1" },
+        threadId: THREAD,
+        turnId: TURN,
+        startedAtMs: 2,
+      }),
+      buildDeltaNote("item/agentMessage/delta", { delta: "late" }),
+      buildItemCompleted(SLEEP),
+    ]);
+
+    expect(listEventTags(late)).toEqual(["item.completed"]);
+    expect(filterByTag(late, "item.completed")[0]).toMatchObject({ itemId: "s_0", kind: "wait" });
+    expect(ignored).toEqual(["late item/started", "late item/agentMessage/delta"]);
+  });
+});
+
+describe("a completed message whose text cannot be read", () => {
+  it("leaves no trace, so the same message completed again still gives its text", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildItemCompleted({ ...MESSAGE, text: 42 }),
+      ITEM_COMPLETED,
+    ]);
+
+    expect(filterByTag(events, "item.completed").map((event) => event.kind)).toEqual([
+      "unknown",
+      "assistant_message",
+    ]);
+    expect(listStreamedDeltas(events)).toEqual([["assistant_text", "Hello"]]);
+    encodeAll(events);
   });
 });
 

@@ -2151,6 +2151,13 @@ const completeTurn = (
   status: "completed" | "failed" | "interrupted" = "completed",
 ): void => {
   const server = run.spawns[0]!;
+  server.push({
+    method: "turn/started",
+    params: {
+      threadId: THREAD,
+      turn: { id: TURN, items: [], itemsView: "full", status: "inProgress" },
+    },
+  });
   for (const item of items) {
     server.push({
       method: "item/completed",
@@ -2640,6 +2647,9 @@ describe("stopping a Codex session's subagents", () => {
 describe("bounded Codex subagent discovery", () => {
   it("keeps turn and usage frames by dropping queued transcript deltas first", async () => {
     const run = await createDelayedMetadataSession();
+    // The turn's start comes first, as Codex sends it: deltas of a turn that
+    // has not started are not shown.
+    pushNativeTurn(run.server, SIBLING, "chatty-turn");
     for (let index = 0; index < MAX_PENDING_FRAMES; index += 1)
       run.server.push({
         method: "item/agentMessage/delta",
@@ -2654,7 +2664,9 @@ describe("bounded Codex subagent discovery", () => {
       "reported retained child usage",
       () => filterByTag(run.seen, "session.usage.updated").length === 2,
     );
-    expect(filterByTag(run.seen, "content.delta")).toHaveLength(MAX_PENDING_FRAMES - 2);
+    // Three control frames (the sibling's turn, the child's turn and its usage
+    // report) each push one delta out of the full queue.
+    expect(filterByTag(run.seen, "content.delta")).toHaveLength(MAX_PENDING_FRAMES - 3);
     const reports = filterByTag(run.seen, "session.usage.updated");
     expect(reports.at(-1)?.usage).toEqual({
       inputTokens: 900,
@@ -2664,7 +2676,7 @@ describe("bounded Codex subagent discovery", () => {
     });
     expect(reports.at(-1)?.raw).toBeUndefined();
     expect(reports.at(-1)?.providerRefs).toBeUndefined();
-    expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("Dropped 2 frames");
+    expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("Dropped 3 frames");
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
   });
 
@@ -2765,7 +2777,8 @@ describe("bounded Codex subagent discovery", () => {
 
   it("rejects overflowing Requests explicitly and reports the dropped count", async () => {
     const run = await createDelayedMetadataSession();
-    for (let index = 0; index < MAX_PENDING_FRAMES; index += 1)
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    for (let index = 0; index < MAX_PENDING_FRAMES - 1; index += 1)
       run.server.push({
         method: "item/agentMessage/delta",
         params: { threadId: CHILD, turnId: "child-turn", itemId: "item", delta: "text" },
@@ -2784,7 +2797,7 @@ describe("bounded Codex subagent discovery", () => {
       "reported dropped frame count",
       () => filterByTag(run.seen, "runtime.warning").length === 1,
     );
-    expect(filterByTag(run.seen, "content.delta")).toHaveLength(MAX_PENDING_FRAMES);
+    expect(filterByTag(run.seen, "content.delta")).toHaveLength(MAX_PENDING_FRAMES - 1);
     expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("Dropped 1 frames");
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
   });
@@ -3218,6 +3231,7 @@ describe("subagent introductions under a full metadata queue", () => {
     for (let index = 0; index < MAX_PENDING_THREADS; index += 1)
       pushNativeTurn(run.server, `pending-${index}`, `turn-${index}`);
     await waitUntil("filled metadata lookups", () => run.metadataIds.size === MAX_PENDING_THREADS);
+    pushNativeTurn(run.server, THREAD, TURN);
     run.server.push({
       method: "item/started",
       params: {

@@ -469,11 +469,12 @@ const buildContentDelta = (
 /**
  * Returns whether a frame names a turn other than the thread's running one.
  * Such a frame is late: its turn is over, and it must not start an item in
- * that turn, or change the running turn's state. A thread with no running turn
- * has no turn to be late for.
+ * that turn, stream into it, or change the running turn's state. A thread with
+ * no running turn has every turn over. Codex always sends `turn/started` before
+ * the first item of a turn, also for a subagent thread, whose queued frames are
+ * replayed in order.
  */
-const isLateTurn = (state: Normalizing, turnId: string): boolean =>
-  state.openTurnId !== undefined && state.openTurnId !== turnId;
+const isLateTurn = (state: Normalizing, turnId: string): boolean => state.openTurnId !== turnId;
 
 /** Tells the runner's log that a frame for a finished turn was not shown. */
 const reportLateFrame = (state: Normalizing, method: string, turnId: string): void =>
@@ -973,6 +974,10 @@ const onItemCompleted = (
   // item, which started earlier. It changes nothing else: its turn is over, so
   // it is not the running turn's answer, and its text cannot stream any more.
   const late = isLateTurn(state, requireText(params.turnId, "turnId"));
+  // Everything the frame must hold is checked before any state changes, so a
+  // malformed completion leaves nothing behind that would hide a good repeat.
+  requireText(params.item.id, "item id");
+  if (params.item.type === "agentMessage") requireText(params.item.text, "message text");
   if (!late) {
     // Recorded before the item is classified, because the echo of the user's
     // message also counts: a turn that ends on that echo has no answer.
