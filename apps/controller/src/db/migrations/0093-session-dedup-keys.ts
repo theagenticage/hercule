@@ -1,8 +1,9 @@
 /**
  * Adds `session_dedup_keys`: the keys an actor sent with `session.spawn`,
  * `session.continue` and `session.input`, each with the id the first call
- * returned (a session or an input). A repeat finds its key here and gets that
- * id back.
+ * returned (a session or an input). A call looks its key up and records it in
+ * the transaction that writes its result, so a repeat finds the key here and
+ * gets that id back without writing anything.
  *
  * The keys have a table of their own, not a column on `sessions` or
  * `session_inputs`:

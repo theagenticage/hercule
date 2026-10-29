@@ -18,12 +18,7 @@ export {
   type SessionExit,
 } from "./observer";
 export { SessionEditObserver } from "./edit-observer";
-export {
-  DedupKeyTaken,
-  dedupKeyRepository,
-  type DedupClaim,
-  type DedupOperation,
-} from "./dedup-keys";
+export { dedupKeyRepository, type DedupOperation } from "./dedup-keys";
 export { findAttachmentRefusal } from "./attachment-refusal";
 export { inputRepository, type LostWakeUp, type StoredInput } from "./inputs";
 export {
