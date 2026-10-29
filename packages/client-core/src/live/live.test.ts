@@ -654,6 +654,35 @@ describe("createLive", () => {
     );
   });
 
+  it("starts a subscription's wait again from the shortest delay after it stayed up", async () => {
+    const { fetch } = stubTicketServer();
+    const { live: started, socket } = await startConnectedSupervisor(fetch);
+    started.subscribe("task", () => {});
+    await settleTimers();
+
+    // Five quick failures raise the wait to its longest, 30 s.
+    for (const [index, delay] of [1000, 2000, 4000, 8000, 16000].entries()) {
+      socket.fail(socket.calls("subscribe")[index]?.id, capFailure);
+      await vi.advanceTimersByTimeAsync(delay);
+      await settleTimers();
+      assert.strictEqual(socket.calls("subscribe").length, index + 2, `no retry after ${delay} ms`);
+    }
+
+    // A subscription that stays up longer than the longest wait shows the
+    // controller can serve it, so the failure after it starts the schedule over.
+    await vi.advanceTimersByTimeAsync(31_000);
+    await settleTimers();
+    const before = socket.calls("subscribe").length;
+
+    socket.fail(socket.calls("subscribe")[before - 1]?.id, capFailure);
+    await settleTimers();
+    assert.strictEqual(socket.calls("subscribe").length, before);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+    assert.strictEqual(socket.calls("subscribe").length, before + 1);
+  });
+
   it("marks the first delta of each subscription made with a cursor as the replay", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
