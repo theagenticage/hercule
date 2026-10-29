@@ -3478,7 +3478,7 @@ describe("the todo list", () => {
     const running = buildStateInTurn();
     const events = [
       ...run([...writeTodos(lastId(1), [todo("a"), todo("b")]), RESULT], running),
-      ...(openTurn(running).events as ReadonlyArray<Event>),
+      ...openTurn(running).events,
       ...run(writeTodos(lastId(2), [todo("a", "completed"), todo("b")]), running),
     ];
     const lines = listTodoEvents(events);
