@@ -2559,18 +2559,22 @@ Measured on Linux on 2026-10-29 with `pnpm --filter @hercule/desktop build` and 
 - **Work per streamed token:** none added for text. Each projection of the transcript decodes the detail of a wait or an image generation row once per event of that row (`readWaitDetail`, `readImageGenerationDetail`), a struct with one field, so the work is constant per row. A plan row costs nothing more than before: its text was already `detail.content`, and only the way it is drawn changed.
 - **Work per row drawn:** the same as another work row. No component is added. The clock and palette icons were already in the tree and gain an import in the work rows.
 - **Memory:** a wait holds one integer and an image generation one path, at most the fact bound.
-- **Bundle bytes:** a few hundred bytes of client-core (the two decoders, the duration label and two table entries) and the two icon imports.
+- **Bundle bytes:** about 1.3 kB raw of client-core and icons: the two decoders, the duration label, the summary words for waits and images, two table entries and the two icon imports. Measured below.
 
-Measured on Linux on 2026-10-29 with `vite build --config vite.renderer.config.ts` of the renderer, in temporary worktrees of `5598d6c2`, the commit before the protocol and client change, and of `af1eb59b`, the commit with it. Gzipped figures use `node:zlib` at its default level, and a kB is 1,024 bytes.
+Measured on Linux on 2026-10-29 with `vite build --config vite.renderer.config.ts` of the renderer, in a clean worktree of `107b418d` (main, before #895) and in the tree at `e7c77a62`, the head of the #895 work (the uncommitted changes there are in `apps/runner` and the spec, which the renderer does not import). Gzipped figures use `node:zlib` at its default level, and a kB is 1,000 bytes as `check-bundle-budget.ts` counts it.
 
-| Measure | `5598d6c2` | `af1eb59b` | Change |
+| Measure | `107b418d` | `e7c77a62` | Change |
 |---|---|---|---|
-| Every JavaScript and CSS file in `out/renderer`, raw | 3,402,271 bytes (146 files) | 3,403,124 bytes (147 files) | +853 bytes. The new file is the palette icon, which the thread's rows and the lazy screens that already used it now share |
-| The same files, each gzipped and summed | 1,096,871 bytes | 1,097,532 bytes | +661 bytes |
-| The entry chunk (`first-screen-*.js`), gzipped | 413,855 bytes | 414,119 bytes | +264 bytes |
-| The thread's chunk (`agent-page-*.js`), gzipped | 18,004 bytes | 18,109 bytes | +105 bytes |
+| The first screen's total, as `check-bundle-budget.ts` counts it | 466.6 kB (25 chunks) | 467.6 kB (26 chunks) | +1.0 kB. Over the 250 kB guide as before, and the check passes because the budget is a guide |
+| Every JavaScript and CSS file in `out/renderer`, raw | 3,402,271 bytes (146 files) | 3,403,603 bytes (147 files) | +1,332 bytes. The new file is the palette icon, which the thread's rows and the lazy screens that already used it now share |
+| The same files, each gzipped and summed | 1,086,130 bytes | 1,088,106 bytes | +1,976 bytes |
+| The entry chunk (`first-screen-*.js`), gzipped | 409,495 bytes | 409,704 bytes | +209 bytes |
+| The thread's chunk (`agent-page-*.js`), gzipped | 17,771 bytes | 17,956 bytes | +185 bytes |
+| The thread's stylesheet and the entry stylesheet, gzipped | 1,966 and 14,994 bytes | 1,966 and 14,994 bytes | unchanged |
 
-**Not run for this change:** `check-bundle-budget.ts` and `pnpm --filter @hercule/desktop ui:metrics`, so the first screen's total against its guide and the 72 goldens are not recorded here. **Not measured:** process count, memory, idle wakeups and the time of a streamed row on the desktop itself. The perf script needs macOS. The design adds no process, timer or listener, but that is the design and not a measurement. No exception from the macOS readings is recorded for #895.
+`pnpm --filter @hercule/desktop ui:metrics` on Linux (Bun 1.4.4, Chromium 153) at `e7c77a62`: the ratchet passed and all 72 goldens equal their screenshots pixel for pixel, so no golden was re-recorded and no metric got worse than the baseline. No captured screen shows a wait, a generated image or a plan's text, or a stretch summary that counts them, so no golden was expected to move. The ✗ marks in the tables are absolute targets that the baseline already misses, not regressions.
+
+**Not measured:** process count, memory, idle wakeups and the time of a streamed row on the desktop itself. The perf script needs macOS, and this was run on Linux. The design adds no process, timer or listener, but that is the design and not a measurement. No exception from the macOS readings is recorded for #895.
 
 **The budgets guide the first milestone; they do not gate it.** *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* Slices 1 to 4 were each measured against the budgets before they merged, and a slice that missed one did not merge. From slice 5 on, the milestone's functionality comes first, and performance passes follow it:
 
