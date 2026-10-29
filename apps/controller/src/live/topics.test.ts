@@ -12,11 +12,20 @@
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Layer, Queue } from "effect";
 import type * as Scope from "effect/Scope";
+import * as SqlClient from "effect/sql/SqlClient";
 import { TestClock } from "effect/testing";
-import type { LiveMessage } from "@hercule/contract";
-import { TestDatabase } from "../db/testing";
+import type { Delta, LiveMessage, TranscriptRow } from "@hercule/contract";
+import { mintUuid, uuidToString } from "../db";
+import { inTransaction, TestDatabase } from "../db/testing";
+import { sessionRepository } from "../sessions";
 import { subscribeSkippingFirstPush } from "./testing";
-import { COALESCE_WINDOW_MS, LiveTopics, LiveTopicsLayer, SLOW_COALESCE_WINDOW_MS } from "./topics";
+import {
+  COALESCE_WINDOW_MS,
+  LiveTopics,
+  LiveTopicsLayer,
+  SLOW_COALESCE_WINDOW_MS,
+  type LiveFailure,
+} from "./topics";
 
 const SESSION = "0199e0e7-0000-7000-8000-000000000001";
 
@@ -24,6 +33,20 @@ const run = <A, E>(effect: Effect.Effect<A, E, LiveTopics | Scope.Scope>): Promi
   Effect.runPromise(
     Effect.scoped(effect).pipe(
       Effect.provide(LiveTopicsLayer.pipe(Layer.provide(TestDatabase))),
+      Effect.provide(TestClock.layer()),
+    ),
+  );
+
+/**
+ * Like `run`, but the test can also write to the database the Live Topics
+ * read, which is how it adds log entries for a subscription to follow.
+ */
+const runWithDatabase = <A, E>(
+  effect: Effect.Effect<A, E, LiveTopics | SqlClient.SqlClient | Scope.Scope>,
+): Promise<A> =>
+  Effect.runPromise(
+    Effect.scoped(effect).pipe(
+      Effect.provide(Layer.provideMerge(LiveTopicsLayer, TestDatabase)),
       Effect.provide(TestClock.layer()),
     ),
   );
@@ -159,5 +182,253 @@ describe("the first message of a mutable subscription", () => {
       { _tag: "invalidate", ids: [], kind: "updated", conversationIds: {} },
     ]);
     expect(afterWindow).toEqual([{ _tag: "invalidate", ids: ["t1"], kind: "created" }]);
+  });
+});
+
+const MIB = 1024 * 1024;
+
+const AT = "2026-10-29T10:00:00.000Z";
+
+/** Writes a session with an empty transcript and returns its id. */
+const insertSession = Effect.gen(function* () {
+  const sessions = yield* sessionRepository;
+  const sessionId = uuidToString(mintUuid());
+  yield* inTransaction(
+    sessions.insert({
+      id: sessionId,
+      title: "a session",
+      role: undefined,
+      permissionProfileId: uuidToString(mintUuid()),
+      agentId: undefined,
+      conversationId: undefined,
+      step: undefined,
+      instanceId: uuidToString(mintUuid()),
+      runnerId: uuidToString(mintUuid()),
+      requestedAccessMode: "approval-required",
+      accessMode: "approval-required",
+      workspaceId: null,
+      projectId: undefined,
+      checkoutBranch: undefined,
+      githubConnectionId: undefined,
+      spec: "{}",
+      modelSelection: { model: "clever", options: {} },
+      parentSessionId: undefined,
+      createdBy: "user",
+      at: AT,
+    }),
+  );
+  return sessionId;
+});
+
+/**
+ * Appends a transcript row whose stored JSON is a little over `size` bytes
+ * long. `seq` is the runner's sequence number and must be new in the session.
+ * The row is written without telling the subscribers.
+ */
+const insertTranscriptRow = (sessionId: string, seq: number, size: number) =>
+  Effect.gen(function* () {
+    const sessions = yield* sessionRepository;
+    yield* inTransaction(
+      sessions.append(sessionId, {
+        seq,
+        at: AT,
+        event: {
+          eventId: uuidToString(mintUuid()),
+          sessionId,
+          at: AT,
+          _tag: "content.delta",
+          turnId: "t1",
+          itemId: "i1",
+          streamKind: "assistant_text",
+          delta: "x".repeat(size),
+        },
+      }),
+    );
+  });
+
+/** Tells the subscribers to a session's transcript that it grew. */
+const announceTranscript = (sessionId: string) =>
+  Effect.gen(function* () {
+    const topics = yield* LiveTopics;
+    yield* topics.publish([{ _tag: "transcript", sessionId }]);
+  });
+
+/** Appends a transcript row and tells the subscribers, as the controller does on a commit. */
+const appendTranscriptRow = (sessionId: string, seq: number, size: number) =>
+  Effect.andThen(insertTranscriptRow(sessionId, seq, size), announceTranscript(sessionId));
+
+/**
+ * Waits up to five seconds until at least `count` messages wait in the queue,
+ * and returns whether they do. A subscription fills its queue from a fiber of
+ * its own, so a test cannot know when a message arrives except by waiting.
+ */
+const untilWaiting = (queue: Queue.Dequeue<LiveMessage, unknown>, count: number) =>
+  Effect.promise(async () => {
+    const deadline = Date.now() + 5000;
+    while (Queue.sizeUnsafe(queue) < count && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    return Queue.sizeUnsafe(queue) >= count;
+  });
+
+/** Takes every waiting message, as a client that has read its stream does. */
+const readAll = (queue: Queue.Dequeue<LiveMessage, LiveFailure>) => Queue.takeAll(queue);
+
+/** Reads the queue until the subscription ends, and returns the error it ended with. */
+const readUntilEnd = (queue: Queue.Dequeue<LiveMessage, LiveFailure>) =>
+  Effect.flip(Effect.forever(Queue.take(queue)));
+
+const asDelta = (message: LiveMessage | undefined): Delta => {
+  if (message?._tag !== "delta") throw new Error("expected a delta");
+  return message;
+};
+
+const positionsOf = (delta: Delta): ReadonlyArray<number> =>
+  delta.items.map((item) => (item as TranscriptRow).position);
+
+describe("the memory a log subscription may hold for a client that does not read", () => {
+  it("ends the subscription when the waiting messages add up to more than 8 MiB, and not before", async () => {
+    const [waitingAtSixMiB, stillSubscribed, failure] = await runWithDatabase(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const sessionId = yield* insertSession;
+        const queue = yield* topics.followSession(sessionId, undefined, undefined);
+        yield* untilWaiting(queue, 1);
+
+        yield* appendTranscriptRow(sessionId, 1, 3 * MIB);
+        yield* appendTranscriptRow(sessionId, 2, 3 * MIB);
+        const waitingAtSixMiB = yield* untilWaiting(queue, 3);
+        const stillSubscribed = yield* topics.subscriberCount(`session:${sessionId}:stream`);
+
+        yield* appendTranscriptRow(sessionId, 3, 3 * MIB);
+        return [waitingAtSixMiB, stillSubscribed, yield* readUntilEnd(queue)] as const;
+      }),
+    );
+
+    expect(waitingAtSixMiB).toBe(true);
+    expect(stillSubscribed).toBe(1);
+    expect(failure).toMatchObject({ error: { code: "cap_exceeded", details: { cap: 8 * MIB } } });
+    const count = (failure as { error: { details: { count: number } } }).error.details.count;
+    expect(count).toBeGreaterThan(8 * MIB);
+    expect(count).toBeLessThan(9 * MIB + 1024);
+  });
+
+  it("weighs an event by its stored payload and raw text", async () => {
+    const failure = await runWithDatabase(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const sql = yield* SqlClient.SqlClient;
+        const queue = yield* topics.follow(undefined);
+        yield* untilWaiting(queue, 1);
+
+        const insertEvent = (key: string) =>
+          Effect.andThen(
+            inTransaction(
+              sql`INSERT INTO events (source, system, kind, occurred_at, received_at, dedup_key,
+                                      payload, raw)
+                  VALUES ('acme', 'acme', 'acme.thing.opened', ${AT}, ${AT}, ${key}, '{}',
+                          ${JSON.stringify({ pad: "x".repeat(5 * MIB) })})`,
+            ),
+            topics.publish([{ _tag: "event" }]),
+          );
+        yield* insertEvent("first");
+        yield* untilWaiting(queue, 2);
+        yield* insertEvent("second");
+        return yield* readUntilEnd(queue);
+      }),
+    );
+
+    expect(failure).toMatchObject({ error: { code: "cap_exceeded", details: { cap: 8 * MIB } } });
+  });
+
+  it("accepts one message bigger than 8 MiB into an empty queue, and the next one after it is read", async () => {
+    const [huge, stillSubscribed, next] = await runWithDatabase(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const sessionId = yield* insertSession;
+        const queue = yield* topics.followSession(sessionId, undefined, undefined);
+        yield* untilWaiting(queue, 1);
+        yield* readAll(queue);
+
+        yield* appendTranscriptRow(sessionId, 1, 9 * MIB);
+        yield* untilWaiting(queue, 1);
+        const stillSubscribed = yield* topics.subscriberCount(`session:${sessionId}:stream`);
+        const huge = yield* readAll(queue);
+
+        yield* appendTranscriptRow(sessionId, 2, 10);
+        yield* untilWaiting(queue, 1);
+        return [huge, stillSubscribed, yield* readAll(queue)] as const;
+      }),
+    );
+
+    expect(stillSubscribed).toBe(1);
+    expect(huge.map(asDelta).map(positionsOf)).toEqual([[1]]);
+    expect(next.map(asDelta).map(positionsOf)).toEqual([[2]]);
+  });
+
+  it("frees the bytes of the messages the client has read", async () => {
+    const [afterRead, subscribers] = await runWithDatabase(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const sessionId = yield* insertSession;
+        const queue = yield* topics.followSession(sessionId, undefined, undefined);
+        yield* untilWaiting(queue, 1);
+
+        // Six MiB wait, which is under the limit. The client reads them. Six
+        // more must wait without ending the subscription: counting the first
+        // six again would make twelve.
+        yield* appendTranscriptRow(sessionId, 1, 3 * MIB);
+        yield* appendTranscriptRow(sessionId, 2, 3 * MIB);
+        yield* untilWaiting(queue, 3);
+        yield* readAll(queue);
+
+        yield* appendTranscriptRow(sessionId, 3, 3 * MIB);
+        yield* untilWaiting(queue, 1);
+        yield* appendTranscriptRow(sessionId, 4, 3 * MIB);
+        const arrived = yield* untilWaiting(queue, 2);
+        return [arrived, yield* topics.subscriberCount(`session:${sessionId}:stream`)] as const;
+      }),
+    );
+
+    expect(afterRead).toBe(true);
+    expect(subscribers).toBe(1);
+  });
+});
+
+describe("the first message of a log subscription", () => {
+  it("stops at about 1 MiB, and the rows left over follow without another write", async () => {
+    const messages = await runWithDatabase(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const sessionId = yield* insertSession;
+        for (let seq = 1; seq <= 5; seq++) {
+          yield* insertTranscriptRow(sessionId, seq, 400 * 1024);
+        }
+        // No announcement follows: the rest must come without a doorbell.
+        const queue = yield* topics.followSession(sessionId, undefined, 0);
+        yield* untilWaiting(queue, 4);
+        return yield* readAll(queue);
+      }),
+    );
+
+    const deltas = messages.map(asDelta);
+    expect(deltas.map(positionsOf)).toEqual([[1, 2], [3], [4], [5]]);
+    expect(deltas.map((delta) => delta.cursor)).toEqual(["2", "3", "4", "5"]);
+  });
+
+  it("carries a first row bigger than 1 MiB alone", async () => {
+    const messages = await runWithDatabase(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const sessionId = yield* insertSession;
+        yield* insertTranscriptRow(sessionId, 1, 2 * MIB);
+        yield* insertTranscriptRow(sessionId, 2, 10);
+        const queue = yield* topics.followSession(sessionId, undefined, 0);
+        yield* untilWaiting(queue, 2);
+        return yield* readAll(queue);
+      }),
+    );
+
+    expect(messages.map(asDelta).map(positionsOf)).toEqual([[1], [2]]);
   });
 });

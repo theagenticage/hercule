@@ -87,18 +87,28 @@ export const readLogHead = (sql: SqlClient.SqlClient): Effect.Effect<number, Sql
     (rows) => rows[0]?.head ?? 0,
   );
 
-/** Returns at most `limit` entries after a position, oldest first. */
+/**
+ * Returns at most `limit` entries after a position, oldest first. Each comes
+ * with `bytes`, its size in the database: the length of its stored JSON text
+ * (`refs`, `payload` and `raw`). A live subscription uses it to limit the
+ * memory it holds for a client that reads slowly, without encoding the event
+ * again.
+ */
 export const readEventsAfter = (
   sql: SqlClient.SqlClient,
   after: number,
   limit: number,
-): Effect.Effect<ReadonlyArray<Event>, SqlError> =>
+): Effect.Effect<ReadonlyArray<{ readonly row: Event; readonly bytes: number }>, SqlError> =>
   Effect.map(
     sql<EventRow>`
       SELECT ${sql.literal(EVENT_COLUMNS)} FROM events
       WHERE id > ${after} ORDER BY id LIMIT ${limit}
     `,
-    (rows) => rows.map(parseEventRow),
+    (rows) =>
+      rows.map((row) => ({
+        row: parseEventRow(row),
+        bytes: row.refs.length + row.payload.length + (row.raw?.length ?? 0),
+      })),
   );
 
 /**

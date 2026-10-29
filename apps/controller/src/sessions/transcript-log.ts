@@ -69,14 +69,22 @@ export const readTranscriptHead = (
     (rows) => rows[0]?.head ?? 0,
   );
 
-/** Returns up to `limit` rows of an agent's transcript after a position, oldest first. */
+/**
+ * Returns up to `limit` rows of an agent's transcript after a position, oldest
+ * first. Each comes with `bytes`, the length of its stored JSON text. A live
+ * subscription uses it to limit the memory it holds for a client that reads
+ * slowly, without encoding the row again.
+ */
 export const readTranscriptRowsAfter = (
   sql: SqlClient.SqlClient,
   sessionId: string,
   subagentId: SubagentId | undefined,
   after: number,
   limit: number,
-): Effect.Effect<ReadonlyArray<TranscriptRow>, SqlError> =>
+): Effect.Effect<
+  ReadonlyArray<{ readonly row: TranscriptRow; readonly bytes: number }>,
+  SqlError
+> =>
   Effect.map(
     sql<{ readonly position: number; readonly at: string; readonly event: string }>`
       SELECT position, at, event FROM session_stream
@@ -86,9 +94,12 @@ export const readTranscriptRowsAfter = (
     `,
     (rows) =>
       rows.map((row) => ({
-        position: row.position,
-        at: row.at,
-        event: JSON.parse(row.event) as ProviderEvent,
+        row: {
+          position: row.position,
+          at: row.at,
+          event: JSON.parse(row.event) as ProviderEvent,
+        },
+        bytes: row.event.length,
       })),
   );
 
