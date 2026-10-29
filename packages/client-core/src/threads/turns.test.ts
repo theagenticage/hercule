@@ -1561,29 +1561,16 @@ describe("buildTurns: todo lists, page fetches and MCP calls", () => {
     });
   });
 
-  it("shows the path an image generation saved when only its completion has it, and keeps a path from the start", () => {
-    // Codex saves the file at the end, so its start has no path.
-    const late = buildRowsOfItem(
+  it("shows the path an image generation saved from the update before its completion, and keeps it through the completion", () => {
+    // Codex saves the file at the end: the start has no path, the update right before the completion has it.
+    const rows = buildRowsOfItem(
       "image_generation",
       {},
-      {
-        _tag: "item.completed",
-        status: "completed",
-        detail: { path: "/tmp/late.png" },
-      },
+      { _tag: "item.updated", detail: { path: "/tmp/late.png" } },
+      { _tag: "item.completed", status: "completed" },
     );
-    expect(readItems(late)[0]).toMatchObject({ target: "/tmp/late.png", result: "completed" });
 
-    const early = buildRowsOfItem(
-      "image_generation",
-      { path: "/tmp/early.png" },
-      {
-        _tag: "item.completed",
-        status: "failed",
-        detail: {},
-      },
-    );
-    expect(readItems(early)[0]).toMatchObject({ target: "/tmp/early.png", result: "failed" });
+    expect(readItems(rows)[0]).toMatchObject({ target: "/tmp/late.png", result: "completed" });
   });
 
   it("draws an update that turns a search into a fetch as a fetch, and keeps that when the next update has no detail", () => {

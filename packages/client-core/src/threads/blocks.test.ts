@@ -1640,15 +1640,14 @@ describe("buildThreadBlocks: todo lists, page fetches and MCP calls, drawn as wo
     return buildWorkRows(blocks.flatMap((block) => (block.kind === "work" ? block.items : [])));
   };
 
-  it("draws a wait with its duration as the target, and an image generation with the path that arrives when it completes", () => {
+  it("draws a wait with its duration as the target, and an image generation with the path that arrives in the update before it completes", () => {
     const rows = buildRowsOf([
       buildItemStarted("t1", "w1", "wait", 1, { durationMs: 30_000 }),
       buildItemCompleted("t1", "w1", "wait", 31, "completed"),
-      // Codex saves the file at the end: the start has no path, the completion has it.
+      // Codex saves the file at the end: the start has no path, the update right before the completion has it.
       buildItemStarted("t1", "g1", "image_generation", 32, {}),
-      buildItemCompleted("t1", "g1", "image_generation", 40, "completed", {
-        path: "/tmp/logo.png",
-      }),
+      buildItemUpdated("t1", "g1", "image_generation", 39, { path: "/tmp/logo.png" }),
+      buildItemCompleted("t1", "g1", "image_generation", 40, "completed"),
     ]);
 
     expect(rows).toEqual([

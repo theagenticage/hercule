@@ -378,18 +378,6 @@ const describeDetailTarget = (event: ItemStarted | ItemUpdated | ItemCompleted):
 };
 
 /**
- * Checks whether the `item.completed` row of an item of `kind` can carry a
- * detail the item did not have before, so the projections apply it to the
- * item (`buildUpdatedItem`):
- *
- * - a todo list's completion carries its final list;
- * - an image generation's completion carries the path of the saved file,
- *   which Codex only knows at the end.
- */
-export const completionCarriesDetail = (kind: ItemKind): boolean =>
-  kind === "todo_list" || kind === "image_generation";
-
-/**
  * Returns the parts of an `item.started`, `item.updated` or `item.completed`
  * row's detail that the projections draw from: the verb, the target and what
  * was decoded on the way (`StartedItem`). The verb is "fetch" for a
@@ -479,19 +467,14 @@ export interface UpdatedItem<Item extends ThreadItem> {
 
 /**
  * Returns `item` once an `item.updated` row `event` has replaced its detail,
- * with the verb, target and todo steps read from the new detail. A todo list's
- * `item.completed` row carries its final list and is applied the same way
- * (`completionCarriesDetail`): the latest detail wins, which also recovers a
- * list whose last update lost its detail to the frame limit. The result, and
- * every field that does not come from the detail, stay as they were. Returns
- * `undefined` when the row cannot be applied, and the caller then keeps the
- * item as it is:
+ * with the verb, target and todo steps read from the new detail. The result,
+ * and every field that does not come from the detail, stay as they were.
+ * Returns `undefined` when the row cannot be applied, and the caller then keeps
+ * the item as it is:
  *
  * - the row has no `detail`: the runner leaves it off an event that is too
  *   big for one frame, and a missing detail must never empty a list;
- * - the item is a todo list and the detail does not decode;
- * - the item is an image generation and the detail holds no path, so a path
- *   the start gave is never erased.
+ * - the item is a todo list and the detail does not decode.
  */
 export const buildUpdatedItem = <Item extends ThreadItem>(
   item: Item,
@@ -500,7 +483,6 @@ export const buildUpdatedItem = <Item extends ThreadItem>(
   if (event.detail === undefined) return undefined;
   const { verb, target, unknownLabel, todoList, compaction } = readItemDetail(event);
   if (event.kind === "todo_list" && todoList === undefined) return undefined;
-  if (event.kind === "image_generation" && target === "") return undefined;
   return {
     item: { ...item, verb, target, todoSteps: readTodoSteps(todoList) },
     unknownLabel,
@@ -509,21 +491,40 @@ export const buildUpdatedItem = <Item extends ThreadItem>(
   };
 };
 
+/** What `buildCompletedItem` returns. */
+export interface CompletedItem<Item extends ThreadItem> {
+  readonly item: Item;
+  /**
+   * The decoded detail of the completion when the item took it over (only a
+   * todo list does), otherwise `undefined`. The desktop's blocks read their
+   * own fields from the same row when this is set.
+   */
+  readonly update: UpdatedItem<Item> | undefined;
+  /**
+   * The detail of a compaction item with the start and the completion merged,
+   * or `undefined` for any other kind and when neither decodes.
+   */
+  readonly compaction: ContextCompactionDetail | undefined;
+}
+
 /**
  * Returns `item` once its `item.completed` row `event` has landed: its result
- * is the row's status, and `compaction` is the detail of a compaction item
- * with the start and the completion merged, or `undefined` for any other kind
- * and when neither decodes.
+ * is the row's status. Two kinds also take something from the row:
  *
- * A compaction reports its token counts and summary when it completes, and
- * may have reported some of them (the trigger, the count before) when it
- * started or was updated. `latestCompaction` is the detail the latest of those
- * rows decoded to. The merge lets a field of the completion win over the same
- * field of that detail, so a summary given earlier survives a completion that
- * has none. When the row holds a compaction detail, the target is read from
- * the merged detail.
- * Without one, such as on a failed compaction, the target the start gave
- * stays.
+ * - A todo list takes the final list the completion carries. The latest
+ *   detail wins, which also recovers a list whose last update lost its detail
+ *   to the frame limit. A completion without a usable detail (`buildUpdatedItem`)
+ *   leaves the list as it is.
+ * - A compaction reports its token counts and summary when it completes, and
+ *   may have reported some of them (the trigger, the count before) when it
+ *   started or was updated. `latestCompaction` is the detail the latest of those
+ *   rows decoded to. The merge lets a field of the completion win over the same
+ *   field of that detail, so a summary given earlier survives a completion that
+ *   has none. When the row holds a compaction detail, the target is read from
+ *   the merged detail. Without one, such as on a failed compaction, the target
+ *   the start gave stays.
+ *
+ * Any other kind keeps its target whatever the completion carries.
  *
  * The desktop's blocks build their items on this too, so both screens end up
  * with the same words.
@@ -532,7 +533,8 @@ export const buildCompletedItem = <Item extends ThreadItem>(
   item: Item,
   latestCompaction: ContextCompactionDetail | undefined,
   event: ItemCompleted,
-): { readonly item: Item; readonly compaction: ContextCompactionDetail | undefined } => {
+): CompletedItem<Item> => {
+  const update = event.kind === "todo_list" ? buildUpdatedItem(item, event) : undefined;
   const completion =
     item.kind === "context_compaction" ? readCompactionDetail(event.detail) : undefined;
   const compaction =
@@ -541,12 +543,13 @@ export const buildCompletedItem = <Item extends ThreadItem>(
       : { ...latestCompaction, ...completion };
   return {
     item: {
-      ...item,
+      ...(update?.item ?? item),
       result: event.status,
       ...(completion === undefined || compaction === undefined
         ? {}
         : { target: describeCompactionTarget(compaction) }),
     },
+    update,
     compaction,
   };
 };
@@ -734,11 +737,8 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
         if (event.kind === "user_message" || event.kind === "assistant_message") break;
         const index = turn.itemIndex.get(event.itemId);
         if (index === undefined) break;
-        const current = turn.items[index]!;
         turn.items[index] = buildCompletedItem(
-          completionCarriesDetail(event.kind)
-            ? (buildUpdatedItem(current, event)?.item ?? current)
-            : current,
+          turn.items[index]!,
           turn.latestCompactions.get(event.itemId),
           event,
         ).item;
