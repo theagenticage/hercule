@@ -102,6 +102,12 @@ export const attributeEvent = (event: ProviderEvent): SubagentId | undefined => 
  * the subagent that reported it, when a subagent did. Handing work to a
  * subagent, the `subagent` kind, counts as a call too.
  *
+ * The count follows what a user sees as a step. A `todo_list` item is not in
+ * this list: it is the agent's list, one per agent per turn, not a call. A
+ * successful todo tool call (TodoWrite, TaskCreate, TaskUpdate, TaskList)
+ * draws no item of its own, so it is not counted. A failed one is drawn as a
+ * failed `tool_call` row, so it is counted like any other tool call.
+ *
  * Migration 0067 copies this list to count the tool calls stored before it.
  * A kind added here counts only the calls stored after the change, unless a
  * new migration counts the earlier ones.
