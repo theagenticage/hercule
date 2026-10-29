@@ -22,7 +22,7 @@ import {
   MAX_EVENT_URL_LENGTH,
 } from "@hercule/plugin-host";
 import { ExternalRef, Id, NullableActor, Timestamp } from "../ids";
-import { bounded } from "../strings";
+import { DedupKey, bounded } from "../strings";
 
 /**
  * The longest event kind. The part of a kind before its first dot is a
@@ -98,7 +98,7 @@ export const EventEmitInput = Schema.Struct({
   payload: JsonObject,
   connectionId: Schema.optionalKey(Id),
   refs: Schema.optionalKey(Schema.Array(ExternalRef)),
-  dedupKey: Schema.optionalKey(bounded(1, MAX_DEDUP_KEY_LENGTH)),
+  dedupKey: Schema.optionalKey(DedupKey),
 });
 
 export type EventEmitInput = Schema.Schema.Type<typeof EventEmitInput>;

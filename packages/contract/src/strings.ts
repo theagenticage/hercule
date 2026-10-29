@@ -9,10 +9,19 @@
  * `validation` error before any handler runs, the same for every client.
  */
 import { Schema } from "effect";
+import { MAX_DEDUP_KEY_LENGTH } from "@hercule/plugin-host";
 
 /** A string of at least `minimum` and at most `maximum` characters. */
 export const bounded = (minimum: number, maximum: number) =>
   Schema.String.check(Schema.isBetweenLength(minimum, maximum));
+
+/**
+ * A caller's idempotency key on an operation that creates something: a repeat
+ * of the call with the same key does nothing and returns the first call's
+ * result. How a repeat is matched (by actor, by Connection, by operation) is
+ * stated on each operation that takes a key.
+ */
+export const DedupKey = bounded(1, MAX_DEDUP_KEY_LENGTH);
 
 /**
  * Counts the characters of a text as a person counts them: one per Unicode

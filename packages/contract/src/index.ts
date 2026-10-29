@@ -126,6 +126,7 @@ export {
   PresentedPassword,
   Timezone,
   Username,
+  DedupKey,
   atMost,
   bounded,
   countCharacters,

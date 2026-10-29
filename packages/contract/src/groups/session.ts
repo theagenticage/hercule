@@ -43,7 +43,7 @@ import { SessionSkillList } from "./session-skill";
 import { Branch } from "./workspace";
 import { MAX_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { atMost, bounded, nonBlankLine } from "../strings";
+import { DedupKey, atMost, bounded, nonBlankLine } from "../strings";
 
 /**
  * The request, subagent and usage vocabulary comes from the runner protocol;
@@ -568,6 +568,13 @@ export const SessionSpawnInput = closedStruct({
    * runner joins the caller's workspace; any other spawn has no checkout.
    */
   workspace: Schema.optionalKey(SpawnWorkspace),
+  /**
+   * Makes the call safe to retry. A repeat of this call by the same actor with
+   * the same key starts nothing and returns the first call's session, as it is
+   * now. The rest of the repeated call is not compared. Keys are separate per
+   * actor and per operation.
+   */
+  dedupKey: Schema.optionalKey(DedupKey),
 }).check(refuseEmptyPrompt);
 
 export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
@@ -613,9 +620,10 @@ export type SessionUpdateInput = Schema.Schema.Type<typeof SessionUpdateInput>;
 /**
  * The body of `session.input`: one turn's input, and whether to steer it.
  *
- * `steer` is only on this payload, not in `SESSION_INPUT_FIELDS`, because two
- * other callers only ever queue: a notification's answer that runs
- * `session.input` when the user picks it, and an in-process caller.
+ * `steer` and `dedupKey` are only on this payload, not in
+ * `SESSION_INPUT_FIELDS`, because two other callers only ever queue and never
+ * retry: a notification's answer that runs `session.input` when the user picks
+ * it, and an in-process caller.
  *
  * With `steer: true`, a busy session gets the input in its running turn, as
  * `input.steer` would do for a queued input. A session in any other status
@@ -630,6 +638,13 @@ export type SessionUpdateInput = Schema.Schema.Type<typeof SessionUpdateInput>;
 export const SessionInputPayload = closedStruct({
   ...SESSION_INPUT_FIELDS,
   steer: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Makes the call safe to retry. A repeat of this call by the same actor with
+   * the same key sends nothing and returns the first call's input: its id and
+   * what has happened to it so far. The rest of the repeated call, such as
+   * `steer`, is not compared. Keys are separate per actor and per operation.
+   */
+  dedupKey: Schema.optionalKey(DedupKey),
 }).check(refuseEmptyPrompt);
 
 export type SessionInputPayload = Schema.Schema.Type<typeof SessionInputPayload>;
@@ -737,6 +752,13 @@ export const SESSION_CONTINUE_FIELDS = {
   prompt: PromptText,
   /** Ids from `attachment.create`; the prompt's images. */
   attachments: PromptAttachments,
+  /**
+   * Makes the call safe to retry. A repeat of this call by the same actor with
+   * the same key forks nothing and returns the first call's session, as it is
+   * now. The rest of the repeated call is not compared. Keys are separate per
+   * actor and per operation.
+   */
+  dedupKey: Schema.optionalKey(DedupKey),
 } as const;
 
 export const SessionContinueInput = closedStruct(SESSION_CONTINUE_FIELDS).check(refuseEmptyPrompt);
