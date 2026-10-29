@@ -38,6 +38,7 @@ import {
   NotFound,
   refuseEmptyPrompt,
   SESSION_INPUT_FIELDS,
+  SESSION_INPUT_PAYLOAD_FIELDS,
   SESSION_RESPOND_TO_APPROVAL_REQUEST_FIELDS,
   SESSION_RESPOND_TO_QUESTION_FIELDS,
   SESSION_UPDATE_FIELDS,
@@ -45,7 +46,6 @@ import {
   type Forbidden,
   type Session,
   type SessionInputOutcome,
-  type SessionInputPayload,
   type SessionSelection,
   type Unauthenticated,
   type Validation,
@@ -61,12 +61,14 @@ import { RunnerConnections } from "../../runners";
 import {
   buildContinuingSpec,
   findAttachmentRefusal,
+  inputRepository,
   isResumeHeld,
   readSessionOrFail,
   sessionRecordComposer,
   SessionService,
   sessionRepository,
   validateOptions,
+  dedupKeyRepository,
   validateAnswers,
   validateDecision,
   type StoredInput,
@@ -81,6 +83,18 @@ import { resumable } from "./resuming";
 const InputInput = Schema.Struct({ id: Id, ...SESSION_INPUT_FIELDS }).check(refuseEmptyPrompt);
 
 type InputInput = Schema.Schema.Type<typeof InputInput>;
+
+/**
+ * One call of `session.input` made in the controller: the input, whether to
+ * steer it, and the key that makes a repeat of the call safe. It is decoded
+ * before a dedup key is looked up, so a repeat is refused for the same
+ * reasons the first call would be.
+ */
+const InputCall = Schema.Struct({ id: Id, ...SESSION_INPUT_PAYLOAD_FIELDS }).check(
+  refuseEmptyPrompt,
+);
+
+type InputCall = Schema.Schema.Type<typeof InputCall>;
 
 const UpdateInput = Schema.Struct({ id: Id, ...SESSION_UPDATE_FIELDS });
 
@@ -98,6 +112,7 @@ const RespondToQuestionInput = Schema.Struct({ id: Id, ...SESSION_RESPOND_TO_QUE
 type RespondToQuestionInput = Schema.Schema.Type<typeof RespondToQuestionInput>;
 
 const decodeInput = Schema.decodeUnknownEffect(InputInput);
+const decodeInputCall = Schema.decodeUnknownEffect(InputCall);
 const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
 const decodeRespondToApprovalRequest = Schema.decodeUnknownEffect(RespondToApprovalRequestInput);
 const decodeRespondToQuestion = Schema.decodeUnknownEffect(RespondToQuestionInput);
@@ -177,6 +192,8 @@ const make = Effect.gen(function* () {
   const sessions = yield* SessionService;
   const readSession = readSessionOrFail(yield* sessionRepository);
   const recordComposer = yield* sessionRecordComposer;
+  const inputs = yield* inputRepository;
+  const dedupKeys = yield* dedupKeyRepository;
   const instances = yield* providerRepository;
   const resolved = yield* resolvedInstance;
   const resumableNativeSession = yield* resumable;
@@ -517,10 +534,54 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Checks the `session.input` grant, decodes the input, and stores it as the
-   * next input of its session, in the caller's transaction or in one of its
-   * own. Returns the session as it was read and the stored row. Sends
-   * nothing: the caller delivers the row once the write has committed.
+   * Returns what `session.input` answers for a repeat of a keyed call: the id
+   * of the input the first call stored, and what has happened to it since.
+   *
+   * - A delivered input answers how the runner took it, `opened` or `steered`.
+   * - An input that waits or is on its way to the runner answers `queued`.
+   * - A cancelled input fails with `InvalidState`: it will never be sent, and
+   *   the caller sends the message again under a new key.
+   *
+   * The input is read by its id alone. A dedup key belongs to the actor, not to
+   * a session, so the stored input may belong to another session than the one
+   * the repeat names. Dies if the input does not exist, which would mean its
+   * dedup key outlived it; no input is ever deleted.
+   */
+  const readInputOutcome = (
+    inputId: string,
+  ): Effect.Effect<SessionInputOutcome, InvalidState | SqlError> =>
+    Effect.gen(function* () {
+      const found = yield* inputs.read(inputId);
+      if (Option.isNone(found)) {
+        return yield* Effect.die(`a dedup key points at an input that does not exist: ${inputId}`);
+      }
+      const row = found.value;
+      switch (row.status) {
+        case "queued":
+        case "sent":
+          return { inputId, result: "queued" as const };
+        case "delivered":
+          if (row.delivery === null) {
+            return yield* Effect.die(`input ${inputId} is delivered and records no delivery`);
+          }
+          return { inputId, result: row.delivery };
+        case "cancelled":
+          return yield* Effect.fail(
+            createInvalidStateError(
+              `input ${inputId} was stored under this dedup key and then cancelled` +
+                (row.reason ? `: ${row.reason}` : "") +
+                "; send the message again with a new key",
+            ),
+          );
+      }
+    });
+
+  /**
+   * Stores a decoded input as the next input of its session, in the caller's
+   * transaction or in one of its own. Returns the session as it was read and
+   * the stored row. Sends nothing: the caller delivers the row once the write
+   * has committed. The caller has checked the `session.input` grant and
+   * decoded the input.
    *
    * - An idle session will not change to idle again, so no flush would send
    *   its input. The row is stored already claimed, so a cancel or a flush
@@ -543,11 +604,7 @@ const make = Effect.gen(function* () {
     input: InputInput,
   ): Effect.Effect<{ readonly session: StoredSession; readonly row: StoredInput }, InputError> =>
     Effect.gen(function* () {
-      yield* requireGrant("session.input");
-      const { id, text, attachments, ...picks } = yield* Effect.mapError(
-        decodeInput(input),
-        createDecodeValidationError,
-      );
+      const { id, text, attachments, ...picks } = input;
       return yield* withTransaction(
         sql,
         Effect.gen(function* () {
@@ -1085,19 +1142,46 @@ const make = Effect.gen(function* () {
      * A delivered result always comes from the runner, never from the status
      * the controller read: only the adapter knows whether the input started a
      * turn or was folded into a turn already running.
+     *
+     * With a `dedupKey`, a repeat of the call by the same actor returns the
+     * first input's id and what has happened to it since, and does nothing
+     * else. The key is looked up in the transaction that stores the input,
+     * after the grant checks and the decode. A repeat of an input that was
+     * cancelled fails with `InvalidState`. Spec 11, "Retrying a call", has the
+     * full rules.
      */
-    input: ({
-      steer,
-      ...input
-    }: InputInput & Pick<SessionInputPayload, "steer">): Effect.Effect<
-      SessionInputOutcome,
-      InputError
-    > =>
+    input: (call: InputCall): Effect.Effect<SessionInputOutcome, InputError> =>
       Effect.gen(function* () {
+        // Both grants are checked, and the whole call is decoded, before a
+        // dedup key is looked up: a repeat of a keyed call is refused for the
+        // same reasons the first call was.
+        yield* requireGrant("session.input");
+        const { steer, dedupKey, ...input } = yield* Effect.mapError(
+          decodeInputCall(call),
+          createDecodeValidationError,
+        );
         const actor = yield* CurrentActor;
         const steered = steer ?? (actor._tag === "session" && actor.sessionId !== input.id);
         if (steered) yield* requireGrant("input.steer");
-        const { session, row } = yield* storeInput(input);
+        // The key is looked up, the input stored and the key recorded in one
+        // transaction. The controller has one writer, so two overlapping calls
+        // with one key run one after the other, and the second finds the key.
+        const stored = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            if (dedupKey !== undefined) {
+              const inputId = yield* dedupKeys.findResultId("session.input", dedupKey);
+              if (inputId !== undefined) return { _tag: "existing" as const, inputId };
+            }
+            const { session, row } = yield* storeInput(input);
+            if (dedupKey !== undefined) {
+              yield* dedupKeys.recordDedupKey("session.input", dedupKey, row.id);
+            }
+            return { _tag: "created" as const, session, row };
+          }),
+        );
+        if (stored._tag === "existing") return yield* readInputOutcome(stored.inputId);
+        const { session, row } = stored;
         // Outside the transaction: dispatch may send a frame to the runner,
         // and a transaction never waits on anything outside the database.
         if (session.status === "exited") yield* dispatch(session.runnerId);
@@ -1128,7 +1212,7 @@ const make = Effect.gen(function* () {
           );
           if (Option.isSome(outcome)) return outcome.value;
         }
-        return { inputId: row.id, result: "queued" };
+        return { inputId: row.id, result: "queued" as const };
       }),
 
     /**
@@ -1154,7 +1238,9 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          const { session, row } = yield* storeInput(input);
+          yield* requireGrant("session.input");
+          const decoded = yield* Effect.mapError(decodeInput(input), createDecodeValidationError);
+          const { session, row } = yield* storeInput(decoded);
           if (session.status === "exited") {
             yield* forkAfterCommit(
               "Could not dispatch a session resumed for its input",

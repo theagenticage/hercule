@@ -3652,6 +3652,10 @@ export const CLI = {
         stdin: "Bring the changelog up to date in the repo I work in.",
       },
       {
+        args: ["--role", "review", "--dedup-key", "review-pr-87"],
+        stdin: "Review pull request 87 and report what you would change.",
+      },
+      {
         args: [
           "--workspace",
           '{"kind":"ephemeral","checkouts":[{"resourceId":"7b41d0a5-0000-7000-8000-000000000001","baseBranch":"main"},{"resourceId":"7b41d0a5-0000-7000-8000-000000000002"}]}',
@@ -3726,6 +3730,10 @@ export const CLI = {
         flag: "workspace",
         help: 'Where it works, as JSON: {"kind":"primary","resourceId":"<id>"} to share the repo\'s main workspace without switching its branch, {"kind":"ephemeral","checkouts":[{"resourceId":"<id>","baseBranch":"<branch>"}]} for an ephemeral workspace with a checkout of its own (an empty list is a scratch workspace), or {"kind":"existing","workspaceId":"<id>"} to join one that already exists. Leave it off for no checkout, or, when a session spawns on its own Runner, to join the calling session\'s workspace. A primary branch may be specified only when spawning from an Agent.',
       },
+      dedupKey: {
+        flag: "dedup-key",
+        help: "Your idempotency key: a second spawn with the same key from the same actor (you, whichever credential you use, or the same session) returns the first session instead of starting another. Use it when you may retry after a timeout. The rest of the second call is not compared, and a key is not shared with another session or with another command.",
+      },
     },
     errors: {
       forbidden:
@@ -3763,6 +3771,10 @@ export const CLI = {
         args: ["1f3a9c2e", "--image", "before.png", "--image", "after.png"],
         stdin: "The second screenshot shows the regression. Fix it.",
       },
+      {
+        args: ["1f3a9c2e", "--dedup-key", "reply-to-review-14"],
+        stdin: "The review is done, merge it when the checks pass.",
+      },
     ],
     fields: {
       id: {
@@ -3789,10 +3801,14 @@ export const CLI = {
         flag: "steer",
         help: "With true, a busy session gets the input in the turn it is running now, as `hercule input steer` does. With false, the input waits for that turn to end. Left out, an agent's message to another session is steered, and a message to your own session, or from the user, waits. Use false when the other agent should finish what it is doing first. A provider that cannot steer has its running turn interrupted, and the input is sent as the next turn, reported as `queued`. A session that is not busy takes the input as without the flag: an idle one starts a turn with it. If the steer cannot be delivered, because the runner refused it, is not connected, or did not answer in time, the input is still stored and waits for the turn to end, and the answer is `queued`. `hercule input list` shows the reason.",
       },
+      dedupKey: {
+        flag: "dedup-key",
+        help: "Your idempotency key: a second input with the same key from the same actor (you, whichever credential you use, or the same session) returns the first input's id and what has happened to it so far, instead of sending the text again. Use it when you may retry after a timeout. The rest of the second call is not compared, and a key is not shared with another session or with another command.",
+      },
     },
     errors: {
       invalid_state:
-        "the session cannot take it: it left no provider-native session to resume, or its runner is retired, draining or no longer connected",
+        "the session cannot take it: it left no provider-native session to resume, or its runner is retired, draining or no longer connected, or an earlier input with this --dedup-key was cancelled",
     },
   },
   "session.interrupt": {
@@ -3916,6 +3932,10 @@ export const CLI = {
         upload: true,
         flag: "image",
         help: "An image file to send with the prompt (PNG, JPEG, GIF or WebP, at most 10 MiB); repeat it for up to 10 images, in the order the agent should see them.",
+      },
+      dedupKey: {
+        flag: "dedup-key",
+        help: "Your idempotency key: a second fork with the same key from the same actor (you, whichever credential you use, or the same session) returns the first forked session instead of starting another. Use it when you may retry after a timeout. The rest of the second call is not compared, and a key is not shared with another session or with another command.",
       },
     },
     errors: {
