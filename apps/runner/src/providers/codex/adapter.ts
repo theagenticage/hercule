@@ -190,6 +190,24 @@ const readTurnSteeredReply = readReply(decodeTurnSteeredReply, "turn/steer");
  */
 const MAX_COMPLAINT_LINES = 5;
 
+/**
+ * How many notifications with no thread id a session's host keeps while the
+ * session is still being registered. Codex sends a few at start-up, such as a
+ * config warning, so the bound is far above what a real start sends and only
+ * stops a host that floods.
+ */
+const MAX_FRAMES_BEFORE_REGISTRATION = 100;
+
+/**
+ * The notifications with no thread id that arrived on a session's host before
+ * the session was registered, and how many more were dropped because the list
+ * was full.
+ */
+interface FramesBeforeRegistration {
+  readonly frames: Array<NotificationFrame>;
+  dropped: number;
+}
+
 export interface CodexSeam {
   readonly appServer: AppServerSpawn;
   readonly run: Run;
@@ -203,6 +221,16 @@ interface Host extends AppServer {
   readonly textGeneration: TextGenerationWatch | undefined;
   /** Stops the app-server and completes only once its process has exited (see `stopChild`). */
   readonly stop: Effect.Effect<void>;
+  /**
+   * Keeps the notifications with no thread id that arrive before the session
+   * is registered, so `startSession` can hand them to the session once it is.
+   * A notification that names a thread is not kept: before registration, the
+   * session has no thread to give it to, and `startSession` opens the root
+   * thread itself. Absent for a host that serves no session, such as a
+   * probe's or a text generation's, and set to `undefined` by `startSession`
+   * once the session is registered.
+   */
+  framesBeforeRegistration: FramesBeforeRegistration | undefined;
 }
 
 /** One session and every Codex thread its app-server runs. */
@@ -793,6 +821,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       complaint: () => complaints.join("\n"),
       sessionId,
       textGeneration,
+      framesBeforeRegistration: sessionId === undefined ? undefined : { frames: [], dropped: 0 },
     };
     void child.exited.then(
       () => onHostGone(host),
@@ -1096,8 +1125,36 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   const onNotification = (host: Host, frame: NotificationFrame): void => {
-    findHostSession(host)?.threads.receive(frame);
+    const held = findHostSession(host);
+    if (held !== undefined) held.threads.receive(frame);
+    else keepUntilRegistered(host, frame);
     host.textGeneration?.receive(frame);
+  };
+
+  /**
+   * Keeps a notification with no thread id on a host whose session is not
+   * registered yet, up to `MAX_FRAMES_BEFORE_REGISTRATION`. Keeps nothing for a
+   * host with no session, and nothing once the session has been registered.
+   */
+  const keepUntilRegistered = (host: Host, frame: NotificationFrame): void => {
+    const kept = host.framesBeforeRegistration;
+    if (kept === undefined || readCodexThreadId(frame) !== undefined) return;
+    if (kept.frames.length < MAX_FRAMES_BEFORE_REGISTRATION) kept.frames.push(frame);
+    else kept.dropped += 1;
+  };
+
+  /**
+   * Hands the session the notifications its host kept before it was
+   * registered, in the order they arrived, and stops keeping. Returns how many
+   * were dropped because the list was full. It does not wait, so no later
+   * notification can reach the session before the kept ones.
+   */
+  const deliverFramesBeforeRegistration = (held: Held): number => {
+    const kept = held.host.framesBeforeRegistration;
+    held.host.framesBeforeRegistration = undefined;
+    if (kept === undefined) return 0;
+    for (const frame of kept.frames) held.threads.receive(frame);
+    return kept.dropped;
   };
 
   /** Resolves one Request under its asking thread and native RPC id. */
@@ -1703,6 +1760,17 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           at: now(),
           providerRefs: { nativeSessionId: opened },
         });
+        // After `session.started`, so a warning sent during start-up reads as
+        // coming after the session began. Nothing can arrive in between: the
+        // registration above and this call run without waiting.
+        const dropped = deliverFramesBeforeRegistration(held);
+        // The dropped ones belong to no thread, so the session is not told;
+        // the runner's log is.
+        if (dropped > 0) {
+          yield* Effect.logWarning(
+            `Codex sent more than ${MAX_FRAMES_BEFORE_REGISTRATION} notifications before session ${sessionId} started. Dropped ${dropped} of them.`,
+          );
+        }
         return binding;
       }),
 

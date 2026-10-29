@@ -674,11 +674,17 @@ export const makeCodexThreads = (options: {
   return {
     root,
     prepareUsage,
-    /** Routes frames after introducing their thread, preserving arrival order. */
+    /**
+     * Routes frames after introducing their thread, preserving arrival order.
+     * A notification that names no thread, such as a config warning, belongs
+     * to the session's one app-server and so to the session: it goes to the
+     * root thread, whose normalizer decides what to show. (A server request
+     * with no thread is refused by the adapter before it gets here.)
+     */
     receive: (frame: CodexThreadFrame): void => {
       if (phase === "exited") return;
       const id = readCodexThreadId(frame);
-      if (id === undefined) return;
+      if (id === undefined) return dispatchFrame(root, frame);
       if (id === options.rootThreadId) return dispatchFrame(root, frame);
       const discovery = discoverCodexThread(id);
       if (discovery === undefined) {

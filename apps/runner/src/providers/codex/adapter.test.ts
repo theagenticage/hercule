@@ -3963,3 +3963,132 @@ describe("descendants first discovered after a subtree Stop", () => {
     expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
   });
 });
+
+describe("notifications that name no thread", () => {
+  const CONFIG_WARNING = {
+    method: "configWarning",
+    params: { summary: "Bad key in config.toml", details: null },
+  };
+
+  /** Starts a session, collecting the runner's own warning lines in `logged`. */
+  const startLogged = async (run: ReturnType<typeof createDriving>, sessionId = SESSION) => {
+    const logged: Array<string> = [];
+    const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (logLevel === "Warn") logged.push(String(message));
+    });
+    await Effect.runPromise(
+      Effect.provide(
+        run.adapter.startSession(sessionId, SPEC, run.ctx),
+        Logger.layer([collecting]),
+      ),
+    );
+    return logged;
+  };
+
+  const listWarningMessages = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
+    filterByTag(seen, "runtime.warning").map((event) => event.message);
+
+  it("reaches the session when Codex sends it during start-up, after session.started", async () => {
+    const run: ReturnType<typeof createDriving> = createDriving({
+      initialize: () => {
+        run.spawns[0]!.push(CONFIG_WARNING);
+        return INITIALIZE;
+      },
+    });
+
+    await startLogged(run);
+
+    expect(run.seen.map((event) => event._tag)).toEqual(["session.started", "runtime.warning"]);
+    expect(listWarningMessages(run.seen)).toEqual(["Bad key in config.toml"]);
+  });
+
+  it("reaches the session when Codex sends it in the middle of the session", async () => {
+    const run = await startTestSession();
+
+    run.server.push({
+      method: "deprecationNotice",
+      params: { summary: "Flag x is old", details: "Use y" },
+    });
+
+    await waitUntil("showed the notice", () => listWarningMessages(run.seen).length === 1);
+    expect(listWarningMessages(run.seen)).toEqual(["Flag x is old\nUse y"]);
+  });
+
+  it("reaches the root thread when it is a warning for no thread", async () => {
+    const run = await startTestSession();
+
+    run.server.push({ method: "warning", params: { threadId: null, message: "Disk is full" } });
+
+    await waitUntil("showed the warning", () => listWarningMessages(run.seen).length === 1);
+    expect(filterByTag(run.seen, "runtime.warning")[0]).toMatchObject({
+      sessionId: SESSION,
+      message: "Disk is full",
+    });
+  });
+
+  it("goes only to the session whose app-server sent it", async () => {
+    const run = await startSessionPair();
+
+    run.spawns[1]!.push(CONFIG_WARNING);
+
+    await waitUntil("showed the warning", () => listWarningMessages(run.seen).length === 1);
+    await settle();
+    expect(filterByTag(run.seen, "runtime.warning").map((event) => event.sessionId)).toEqual([
+      OTHER_SESSION,
+    ]);
+  });
+
+  it("becomes one labelled unknown item and one log line, however often a new method comes", async () => {
+    const run = createDriving();
+    const logged = await startLogged(run);
+    const future = { method: "future/thing", params: { value: 1 } };
+
+    run.spawns[0]!.push(future);
+    run.spawns[0]!.push(future);
+
+    await waitUntil("showed both", () => filterByTag(run.seen, "item.completed").length === 2);
+    expect(filterByTag(run.seen, "item.completed").map((event) => event.detail)).toEqual([
+      { label: "codex: future/thing" },
+      { label: "codex: future/thing" },
+    ]);
+    expect(logged.filter((line) => line.includes("codex: future/thing"))).toHaveLength(1);
+  });
+
+  it("is dropped, and shown to nobody, on a probe's app-server", async () => {
+    const run: ReturnType<typeof createDriving> = createDriving({
+      initialize: () => {
+        run.spawns[0]!.push(CONFIG_WARNING);
+        return INITIALIZE;
+      },
+    });
+
+    await Effect.runPromise(run.adapter.probe(run.ctx, {}));
+    await settle();
+
+    expect(run.seen).toEqual([]);
+  });
+
+  it("keeps the first 100 sent during start-up, drops the rest, and logs it once", async () => {
+    const run: ReturnType<typeof createDriving> = createDriving({
+      initialize: () => {
+        for (let count = 0; count < 105; count += 1) {
+          run.spawns[0]!.push({
+            method: "configWarning",
+            params: { summary: `Warning ${count}`, details: null },
+          });
+        }
+        return INITIALIZE;
+      },
+    });
+
+    const logged = await startLogged(run);
+
+    const shown = listWarningMessages(run.seen);
+    expect(shown).toHaveLength(100);
+    expect(shown[0]).toBe("Warning 0");
+    expect(shown[99]).toBe("Warning 99");
+    // The scripted app-server also sends one unrelated notification after
+    // `initialize`, which is dropped too, hence "at least".
+    expect(logged.filter((line) => /Dropped \d+ of them/.test(line))).toHaveLength(1);
+  });
+});

@@ -609,15 +609,13 @@ const waitForEvent = async (
 };
 
 /**
- * Lists the warnings seen so far, except Codex's own complaint that it has no
- * metadata for the mock model these tests name. Codex sends that warning to
- * every client, and the adapter shows it; these tests are about the warnings
- * the runner itself adds.
+ * Lists the warnings the runner itself adds, which is what these tests are
+ * about. A warning Codex sent has its notification in `raw` and is left out:
+ * the adapter shows those, and what Codex complains about depends on the
+ * machine (a mock model it has no metadata for, a sandbox it cannot set up).
  */
 const listWarnings = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<ProviderEvent> =>
-  seen.filter(
-    (event) => event._tag === "runtime.warning" && !event.message.startsWith("Model metadata for"),
-  );
+  seen.filter((event) => event._tag === "runtime.warning" && event.raw === undefined);
 
 /**
  * Lists the tags of the events seen so far, with the text of each warning, the
