@@ -273,6 +273,16 @@ describe("buildSubagentActivity", () => {
     );
   });
 
+  it("names a web search by its query and a page fetch by its url", () => {
+    expect(buildSubagentActivity("web_search", { query: "effect 4 schema" })).toBe(
+      "Searching effect 4 schema",
+    );
+    expect(buildSubagentActivity("web_search", { url: "https://example.com/a" })).toBe(
+      "Fetching https://example.com/a",
+    );
+    expect(buildSubagentActivity("web_search", {})).toBe("Searching");
+  });
+
   it("names a file read by its path and a file search by its pattern, else its path", () => {
     expect(
       buildSubagentActivity("file_read", { name: "Read", input: {}, path: "src/app.ts" }),

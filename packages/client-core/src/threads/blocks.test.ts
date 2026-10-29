@@ -117,6 +117,23 @@ const buildItemCompleted = (
     ...(detail === undefined ? {} : { detail: detail as never }),
   });
 
+/** Returns an `item.updated` row, which replaces the detail of an item that started. */
+const buildItemUpdated = (
+  turnId: string,
+  itemId: string,
+  kind: ItemKind,
+  seconds: number,
+  detail?: unknown,
+): TranscriptRow =>
+  buildRow({
+    _tag: "item.updated",
+    ...buildEnvelope(seconds),
+    turnId,
+    itemId,
+    kind,
+    ...(detail === undefined ? {} : { detail: detail as never }),
+  });
+
 const buildText = (turnId: string, itemId: string, seconds: number, delta: string): TranscriptRow =>
   buildRow({
     _tag: "content.delta",
@@ -1447,6 +1464,29 @@ describe("buildThreadBlocks: compaction and unknown steps, drawn as work rows", 
     });
   });
 
+  it("merges a compaction's completion over its latest update, not over its start", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "k1", "context_compaction", 1, {
+        trigger: "auto",
+        tokensBefore: 100_000,
+        summary: "from the start",
+      }),
+      buildItemUpdated("t1", "k1", "context_compaction", 2, {
+        trigger: "auto",
+        tokensBefore: 182_000,
+        summary: "from the update",
+      }),
+      buildItemCompleted("t1", "k1", "context_compaction", 5, "completed", {
+        tokensAfter: 31_000,
+      }),
+    ]);
+
+    expect(rows[0]).toMatchObject({
+      target: "182k → 31k tokens (auto)",
+      output: "from the update",
+    });
+  });
+
   it("opens a compaction to the summary it started with when the completion has none", () => {
     const rows = buildRowsOf([
       buildItemStarted("t1", "k1", "context_compaction", 1, {
@@ -1505,6 +1545,16 @@ describe("buildThreadBlocks: compaction and unknown steps, drawn as work rows", 
       ["question", "claude: system/foo_bar", ""],
       ["more", "Step", ""],
     ]);
+  });
+
+  it("draws an unknown step by the label of its latest update", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "x1", "unknown", 1, { label: "claude: system/first" }),
+      buildItemUpdated("t1", "x1", "unknown", 2, { label: "claude: system/second" }),
+      buildItemCompleted("t1", "x1", "unknown", 3),
+    ]);
+
+    expect(rows.map((row) => row.label)).toEqual(["claude: system/second"]);
   });
 });
 
@@ -1570,5 +1620,315 @@ describe("appendSendingMessages", () => {
   it("returns the same list when nothing is sending", () => {
     const blocks = [EARLIER];
     expect(appendSendingMessages(blocks, [])).toBe(blocks);
+  });
+});
+
+describe("buildThreadBlocks: todo lists, page fetches and MCP calls, drawn as work rows", () => {
+  type Status = "pending" | "in_progress" | "completed";
+
+  /** Returns the detail of a todo list whose steps are named "step 1", "step 2" and so on, with `statuses`. */
+  const buildTodoDetail = (...statuses: readonly Status[]) => ({
+    steps: statuses.map((status, index) => ({ text: `step ${index + 1}`, status })),
+  });
+
+  /** Builds the work rows of the stretches of a turn holding the item rows `itemRows`. */
+  const buildRowsOf = (itemRows: readonly TranscriptRow[]) => {
+    const blocks = buildThreadBlocks(
+      [buildTurnStarted("t1", 0), ...buildUserMessage("t1", "u1", 0, "Hi"), ...itemRows],
+      buildSessionAgentState(BUSY),
+    );
+    return buildWorkRows(blocks.flatMap((block) => (block.kind === "work" ? block.items : [])));
+  };
+
+  it("draws a list started and updated twice as one row whose count changes, and which is never running", () => {
+    const started = buildItemStarted(
+      "t1",
+      "todo",
+      "todo_list",
+      1,
+      buildTodoDetail("in_progress", "pending", "pending"),
+    );
+    const afterFirst = buildItemUpdated(
+      "t1",
+      "todo",
+      "todo_list",
+      2,
+      buildTodoDetail("completed", "in_progress", "pending"),
+    );
+    const afterSecond = buildItemUpdated(
+      "t1",
+      "todo",
+      "todo_list",
+      3,
+      buildTodoDetail("completed", "completed", "completed"),
+    );
+
+    const drawn = [started, afterFirst, afterSecond].map((_, index, all) =>
+      buildRowsOf(all.slice(0, index + 1)),
+    );
+
+    expect(drawn.map((rows) => rows.map((row) => [row.icon, row.label, row.target]))).toEqual([
+      [["tasks", "Tasks 0/3", "step 1"]],
+      [["tasks", "Tasks 1/3", "step 2"]],
+      [["tasks", "Tasks 3/3", ""]],
+    ]);
+    const [row] = drawn[1]!;
+    expect(row).toMatchObject({
+      key: "row:todo",
+      targetIsCode: false,
+      result: "completed",
+      canOpen: true,
+      todoSteps: [
+        { text: "step 1", status: "completed" },
+        { text: "step 2", status: "in_progress" },
+        { text: "step 3", status: "pending" },
+      ],
+      steps: [],
+    });
+  });
+
+  it("draws an update that turns a search into a fetch as a fetch", () => {
+    const search = buildItemStarted("t1", "w1", "web_search", 1, { query: "effect schema" });
+    const toFetch = buildItemUpdated("t1", "w1", "web_search", 2, {
+      url: "https://example.com/a",
+    });
+
+    expect(
+      [[search], [search, toFetch]].map((itemRows) =>
+        buildRowsOf(itemRows).map((row) => [row.label, row.target, row.targetIsCode]),
+      ),
+    ).toEqual([
+      [["Searched the web", "effect schema", false]],
+      [["Fetched", "https://example.com/a", true]],
+    ]);
+  });
+
+  it("gives the same steps to every projection of the same rows", () => {
+    // The transcript is projected again from all its rows each time one
+    // arrives; the steps must stay the same array so a memoized list does not redraw.
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Hi"),
+      buildItemStarted("t1", "todo", "todo_list", 1, buildTodoDetail("in_progress", "pending")),
+      buildItemUpdated("t1", "todo", "todo_list", 2, buildTodoDetail("completed", "in_progress")),
+    ];
+    const readSteps = () =>
+      findBlock(buildThreadBlocks(rows, buildSessionAgentState(BUSY)), "work", "work:todo")
+        .items[0]!.todoSteps;
+
+    expect(readSteps()).toBe(readSteps());
+  });
+
+  it("ends a stretch that starts after its turn ended, so its divider stops counting", () => {
+    const blocks = buildThreadBlocks(
+      [
+        buildTurnStarted("t1", 0),
+        ...buildUserMessage("t1", "u1", 0, "Hi"),
+        buildTurnCompleted("t1", 5),
+        buildItemStarted("t1", "late", "command_execution", 8, {
+          name: "Bash",
+          input: { command: "ls" },
+        }),
+      ],
+      buildSessionAgentState(IDLE),
+    );
+
+    expect(findBlock(blocks, "work", "work:late").endedAt).toBe(buildInstant(8));
+  });
+
+  it("keeps the list when an update has no detail or one that does not decode", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "todo", "todo_list", 1, buildTodoDetail("in_progress", "pending")),
+      buildItemUpdated("t1", "todo", "todo_list", 2),
+      buildItemUpdated("t1", "todo", "todo_list", 3, { steps: "everything" }),
+    ]);
+
+    expect(rows).toEqual([
+      expect.objectContaining({ label: "Tasks 0/2", target: "step 1", canOpen: true }),
+    ]);
+    expect(rows[0]!.todoSteps).toHaveLength(2);
+  });
+
+  it("ignores an update for an item that never started, or that is a message", () => {
+    const blocks = buildThreadBlocks(
+      [
+        buildTurnStarted("t1", 0),
+        ...buildUserMessage("t1", "u1", 0, "Hi"),
+        buildItemUpdated("t1", "ghost", "todo_list", 1, buildTodoDetail("pending")),
+        buildItemUpdated("t1", "u1", "user_message", 1, { text: "changed" }),
+        ...buildAgentMessage("t1", "a1", 2, "Done."),
+        buildItemUpdated("t1", "a1", "assistant_message", 4, { text: "changed" }),
+      ],
+      buildSessionAgentState(BUSY),
+    );
+
+    expect(blocks.map((block) => block.kind)).toEqual(["user", "agent"]);
+    expect(blocks.map((block) => (block.kind === "agent" ? block.text : ""))).toEqual([
+      "",
+      "Done.",
+    ]);
+  });
+
+  it("keeps a todo list's own result: a failed list stays failed, and a finished one is completed", () => {
+    const failed = buildRowsOf([
+      buildItemStarted("t1", "todo", "todo_list", 1, buildTodoDetail("pending")),
+      buildItemCompleted("t1", "todo", "todo_list", 2, "failed", buildTodoDetail("pending")),
+    ]);
+
+    expect(failed[0]!.result).toBe("failed");
+  });
+
+  it("reads the final list from a todo list's completion, and keeps the list when it has none", () => {
+    const started = buildItemStarted(
+      "t1",
+      "todo",
+      "todo_list",
+      1,
+      buildTodoDetail("in_progress", "pending"),
+    );
+    const lostUpdate = buildItemUpdated("t1", "todo", "todo_list", 2);
+
+    const recovered = buildRowsOf([
+      started,
+      lostUpdate,
+      buildItemCompleted(
+        "t1",
+        "todo",
+        "todo_list",
+        3,
+        "completed",
+        buildTodoDetail("completed", "completed"),
+      ),
+    ]);
+    const kept = buildRowsOf([
+      started,
+      buildItemCompleted("t1", "todo", "todo_list", 3, "completed", { steps: "bad" }),
+    ]);
+
+    expect(recovered[0]).toMatchObject({ label: "Tasks 2/2", result: "completed" });
+    expect(recovered[0]!.todoSteps).toHaveLength(2);
+    expect(kept[0]).toMatchObject({ label: "Tasks 0/2", target: "step 1" });
+  });
+
+  it("never folds two todo lists", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "todo1", "todo_list", 1, buildTodoDetail("pending")),
+      buildItemStarted("t1", "todo2", "todo_list", 2, buildTodoDetail("pending")),
+    ]);
+
+    expect(rows.map((row) => row.key)).toEqual(["row:todo1", "row:todo2"]);
+  });
+
+  it("draws a fetch as Fetched and its URL, in the mono face, and a search as Searched the web", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "fetch", "web_search", 1, {
+        name: "WebFetch",
+        input: { url: "https://example.com/a", prompt: "Summarise" },
+        url: "https://example.com/a",
+      }),
+      buildItemStarted("t1", "search", "web_search", 2, {
+        name: "WebSearch",
+        input: { query: "effect schema" },
+        query: "effect schema",
+      }),
+    ]);
+
+    expect(
+      rows.map((row) => [row.icon, row.label, row.target, row.targetIsCode, row.steps.length]),
+    ).toEqual([
+      ["globe", "Fetched", "https://example.com/a", true, 0],
+      ["globe", "Searched the web", "effect schema", false, 0],
+    ]);
+  });
+
+  it("folds fetches into 'Fetched 3 pages' and never folds them with searches", () => {
+    const fetch = (id: string, seconds: number) =>
+      buildItemStarted("t1", id, "web_search", seconds, {
+        name: "WebFetch",
+        url: `https://x/${id}`,
+      });
+    const search = (id: string, seconds: number) =>
+      buildItemStarted("t1", id, "web_search", seconds, { name: "WebSearch", query: id });
+
+    const rows = buildRowsOf([
+      fetch("f1", 1),
+      fetch("f2", 2),
+      fetch("f3", 3),
+      search("s1", 4),
+      search("s2", 5),
+      fetch("f4", 6),
+    ]);
+
+    expect(rows.map((row) => [row.label, row.steps.length])).toEqual([
+      ["Fetched 3 pages", 3],
+      ["Searched the web 2 times", 2],
+      ["Fetched", 0],
+    ]);
+  });
+
+  it("names a call an MCP server made through the API connector <server>/<tool>, and folds calls only when tool and server match", () => {
+    const call = (id: string, seconds: number, name: string, server?: string) =>
+      buildItemStarted("t1", id, "tool_call", seconds, {
+        name,
+        input: {},
+        kind: "mcp",
+        ...(server === undefined ? {} : { server }),
+      });
+
+    const rows = buildRowsOf([
+      call("c1", 1, "create_issue", "github"),
+      call("c2", 2, "create_issue", "github"),
+      call("c3", 3, "create_issue", "linear"),
+      call("c4", 4, "mcp__github__create_issue"),
+    ]);
+
+    expect(rows.map((row) => [row.label, row.steps.length])).toEqual([
+      ["Used github/create_issue 2 times", 2],
+      ["linear/create_issue", 0],
+      ["mcp__github__create_issue", 0],
+    ]);
+  });
+
+  it("shows the updated list on the work item, with the step in progress as its target", () => {
+    const blocks = buildThreadBlocks(
+      [
+        buildTurnStarted("t1", 0),
+        ...buildUserMessage("t1", "u1", 0, "Hi"),
+        buildItemStarted("t1", "todo", "todo_list", 1, buildTodoDetail("in_progress")),
+        buildItemUpdated("t1", "todo", "todo_list", 2, buildTodoDetail("completed", "in_progress")),
+      ],
+      buildSessionAgentState(BUSY),
+    );
+
+    const work = findBlock(blocks, "work", "work:todo");
+
+    expect(work.items).toEqual([
+      expect.objectContaining({
+        verb: "tasks",
+        target: "step 2",
+        todoSteps: buildTodoDetail("completed", "in_progress").steps,
+      }),
+    ]);
+  });
+
+  it("keeps the message being written as the open item while a todo list is open", () => {
+    const writing = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Hi"),
+      buildItemStarted("t1", "todo", "todo_list", 1, buildTodoDetail("in_progress")),
+      buildItemStarted("t1", "a1", "assistant_message", 2),
+    ];
+
+    const open = buildThreadBlocks(writing, buildSessionAgentState(BUSY)).filter(
+      (block) => block.kind === "agent",
+    );
+    expect(open).toEqual([expect.objectContaining({ itemId: "a1", open: true, live: true })]);
+
+    // The turn ended while the message never completed and wrote nothing: no agent row comes back.
+    const ended = buildThreadBlocks(
+      [...writing, buildTurnCompleted("t1", 5, "interrupted")],
+      buildSessionAgentState(IDLE),
+    );
+    expect(ended.some((block) => block.kind === "agent")).toBe(false);
   });
 });

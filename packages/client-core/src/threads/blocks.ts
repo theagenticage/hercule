@@ -15,15 +15,18 @@ import {
   isAsyncQuestion,
   type ContextCompactionDetail,
   type Input,
+  type TodoListDetail,
   type TranscriptRow,
 } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
 import type { AgentState } from "./agent-state";
+import { readFetchedUrl, readToolCallName, summarizeTodoList } from "./item-detail";
 import { findOpenItem } from "./open-item";
 import { readInputSender } from "./sender";
 import {
   buildCompletedItem,
   buildStartedItem,
+  buildUpdatedItem,
   buildUnknownEventMessage,
   buildUserMessage,
   describeToolCallTarget,
@@ -33,6 +36,8 @@ import {
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
+type ItemUpdated = Extract<ProviderEvent, { _tag: "item.updated" }>;
+type ItemCompleted = Extract<ProviderEvent, { _tag: "item.completed" }>;
 type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
 
 /** A tool item in a work stretch, with what its summary and its row show. */
@@ -44,13 +49,16 @@ export interface WorkItem extends ThreadItem {
    *   from the fixed fields of their detail;
    * - a tool call's command, path, query or description, never its tool's
    *   name, which the row shows as its label (`describeToolCallTarget`);
+   * - a page fetch's URL, and a todo list's step in progress, without its
+   *   progress count, which the row shows in its label;
    * - for any other kind, the target the web's row shows.
    */
   readonly target: string;
   /**
    * Whether `target` is code, such as a command, a path or a search pattern,
-   * which the desktop draws in the mono face. A web search's query, a
-   * subagent's or a tool's description, and an error's message are words.
+   * which the desktop draws in the mono face. A fetched URL is code, like a
+   * path. A web search's query, a todo list's step, a subagent's or a tool's
+   * description, and an error's message are words.
    */
   readonly targetIsCode: boolean;
   /**
@@ -61,11 +69,18 @@ export interface WorkItem extends ThreadItem {
   /** The time of the item's `item.started` row. */
   readonly startedAt: string;
   /**
-   * The name of the tool a tool call used, such as `WebFetch` or
-   * `github/create_issue`, as its detail names it. Empty when the detail names
-   * none, and for any item that is not a tool call.
+   * The name of the tool a tool call used, such as `Bash` or
+   * `github/create_issue`, as its detail names it (`readToolCallName`): a call
+   * to an MCP server through Anthropic's API connector has the server's name
+   * before the tool's. Empty when the detail names none, and for any item that
+   * is not a tool call.
    */
   readonly toolName: string;
+  /**
+   * Whether a `web_search` item fetched a page rather than searched: its
+   * detail names a URL (`readFetchedUrl`). False for every other item.
+   */
+  readonly isPageFetch: boolean;
   /**
    * The label of an `unknown` item, such as `claude: system/foo_bar`: it names
    * a message no decision covers, or a known message that could not be read.
@@ -281,7 +296,7 @@ type Slot =
  *   Code's `input.file_path`, Codex's `paths`, pi's `path`), and any of them
  *   may be absent.
  */
-const readItemPaths = (event: ItemStarted): readonly string[] => {
+const readItemPaths = (event: ItemStarted | ItemUpdated | ItemCompleted): readonly string[] => {
   const detail = readJsonObject(event.detail);
   if (event.kind === "file_read") return typeof detail?.path === "string" ? [detail.path] : [];
   if (event.kind !== "file_change") return [];
@@ -305,8 +320,10 @@ const CODE_TARGET_KINDS: ReadonlySet<ItemStarted["kind"]> = new Set([
  * differs from one harness to the next.
  */
 const readWorkItemTarget = (
-  event: ItemStarted,
+  event: ItemStarted | ItemUpdated | ItemCompleted,
   threadItem: ThreadItem,
+  todoList: TodoListDetail | undefined,
+  isPageFetch: boolean,
 ): { readonly target: string; readonly targetIsCode: boolean } => {
   switch (event.kind) {
     case "file_read":
@@ -323,9 +340,33 @@ const readWorkItemTarget = (
       const { text, isCode } = describeToolCallTarget(event.detail);
       return { target: text, targetIsCode: isCode };
     }
+    case "todo_list":
+      return { target: summarizeTodoList(todoList?.steps ?? []).current, targetIsCode: false };
+    case "web_search":
+      return { target: threadItem.target, targetIsCode: isPageFetch };
     default:
       return { target: threadItem.target, targetIsCode: CODE_TARGET_KINDS.has(event.kind) };
   }
+};
+
+/**
+ * Returns the fields of a work item that come from the detail of an
+ * `item.started`, `item.updated` or `item.completed` row, with `threadItem` as
+ * the projection the web's row shows. Every row that carries a detail builds
+ * them here, so an update redraws exactly what a start draws.
+ */
+const readWorkItemDetail = (
+  event: ItemStarted | ItemUpdated | ItemCompleted,
+  threadItem: ThreadItem,
+  todoList: TodoListDetail | undefined,
+): Pick<WorkItem, "target" | "targetIsCode" | "paths" | "toolName" | "isPageFetch"> => {
+  const isPageFetch = event.kind === "web_search" && readFetchedUrl(event.detail) !== "";
+  return {
+    ...readWorkItemTarget(event, threadItem, todoList, isPageFetch),
+    paths: readItemPaths(event),
+    toolName: event.kind === "tool_call" ? readToolCallName(event.detail) : "",
+    isPageFetch,
+  };
 };
 
 /**
@@ -391,8 +432,8 @@ export const buildThreadBlocks = (
     {
       readonly stretch: BuildingStretch;
       readonly index: number;
-      /** The decoded start detail of a compaction (`StartedItem.compaction`). */
-      readonly startedCompaction: ContextCompactionDetail | undefined;
+      /** The latest decoded detail of a compaction (`StartedItem.compaction`, `UpdatedItem.compaction`). */
+      latestCompaction: ContextCompactionDetail | undefined;
     }
   >();
   // An object rather than a `let`, because the helpers below reassign it and
@@ -510,24 +551,41 @@ export const buildThreadBlocks = (
             slots.push(turn.stretch);
           }
           const stretch = turn.stretch;
+          // The turn already ended, so nothing closes this stretch later. It
+          // ends with the item that opened it, or its divider would count
+          // "Working for" forever.
+          if (turn.finished) stretch.endedAt = event.at;
           const started = buildStartedItem(event);
           workItems.set(event.itemId, {
             stretch,
             index: stretch.items.length,
-            startedCompaction: started.compaction,
+            latestCompaction: started.compaction,
           });
           const threadItem = started.item;
-          const name = event.kind === "tool_call" ? readJsonObject(event.detail)?.name : undefined;
           stretch.items.push({
             ...threadItem,
-            ...readWorkItemTarget(event, threadItem),
-            paths: readItemPaths(event),
+            ...readWorkItemDetail(event, threadItem, started.todoList),
             startedAt: event.at,
-            toolName: typeof name === "string" ? name : "",
             fallbackLabel: started.unknownLabel,
             resultContent: undefined,
           });
         }
+        break;
+      }
+      case "item.updated": {
+        // Only a work item that started can change. A message's text never
+        // comes from an update, and a row for an item never seen is dropped.
+        const work = workItems.get(event.itemId);
+        if (work === undefined) break;
+        const item = work.stretch.items[work.index]!;
+        const updated = buildUpdatedItem(item, event);
+        if (updated === undefined) break;
+        work.stretch.items[work.index] = {
+          ...updated.item,
+          ...readWorkItemDetail(event, updated.item, updated.todoList),
+          fallbackLabel: updated.unknownLabel,
+        };
+        if (updated.compaction !== undefined) work.latestCompaction = updated.compaction;
         break;
       }
       case "item.completed": {
@@ -541,8 +599,14 @@ export const buildThreadBlocks = (
         }
         const work = workItems.get(event.itemId);
         if (work !== undefined) {
-          const item = work.stretch.items[work.index]!;
-          const completed = buildCompletedItem(item, work.startedCompaction, event);
+          const current = work.stretch.items[work.index]!;
+          // A todo list's completion carries its final list: the latest detail wins.
+          const updated = event.kind === "todo_list" ? buildUpdatedItem(current, event) : undefined;
+          const item =
+            updated === undefined
+              ? current
+              : { ...updated.item, ...readWorkItemDetail(event, updated.item, updated.todoList) };
+          const completed = buildCompletedItem(item, work.latestCompaction, event);
           work.stretch.items[work.index] = {
             ...completed.item,
             resultContent:

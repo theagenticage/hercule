@@ -16,6 +16,7 @@ const buildItem = (itemId: string, kind: ThreadItem["kind"]): ThreadItem => ({
   verb: kind,
   target: "",
   result: "completed",
+  todoSteps: [],
 });
 
 const TURN: ThreadTurn = {

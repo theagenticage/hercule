@@ -530,6 +530,54 @@ describe("Thread: transcript", () => {
     expect(screen.queryAllByRole("button", { name: /worked for/i })).toHaveLength(1);
   });
 
+  it("lists a todo list's steps under its line when the divider opens, each with the mark of its status", async () => {
+    const user = userEvent.setup();
+    const steps = (done: number) =>
+      ["Find the cause", "Write the test", "Fix the bug"].map((text, index) => ({
+        text,
+        status: index < done ? "completed" : index === done ? "in_progress" : "pending",
+      }));
+    const todo = (_tag: "item.started" | "item.updated", at: string, done: number): TurnEvent[] => [
+      {
+        _tag,
+        eventId: "",
+        sessionId: SESSION_ID,
+        at,
+        turnId: "t1",
+        itemId: "todo",
+        kind: "todo_list",
+        detail: { steps: steps(done) },
+      },
+    ];
+    await openApp(
+      buildSession({ status: "idle", title: "Thread s1" }),
+      buildTranscript(
+        buildTurnStart("t1", "2026-09-08T10:00:00.000Z"),
+        buildUserMessage("t1", "2026-09-08T10:00:00.100Z", "u1", "Fix the login bug"),
+        todo("item.started", "2026-09-08T10:00:01.000Z", 0),
+        todo("item.updated", "2026-09-08T10:00:02.000Z", 1),
+        buildTurnCompletion("t1", "2026-09-08T10:00:05.000Z"),
+      ),
+    );
+
+    await user.click(await screen.findByRole("button", { name: /worked for/i }));
+
+    const line = await screen.findByText("tasks · 1/3 · Write the test", {
+      exact: false,
+    });
+    const items = within(line.closest("li")!).getAllByRole("listitem");
+    expect(
+      items.map((item) => [
+        within(item).getByRole("img").getAttribute("aria-label"),
+        item.textContent,
+      ]),
+    ).toEqual([
+      ["Completed", "●Find the cause"],
+      ["In progress", "◐Write the test"],
+      ["Pending", "○Fix the bug"],
+    ]);
+  });
+
   it("shows an earlier turn with no turn.completed as cut short, never as 0s or as still running", async () => {
     // Turn 1 starts a tool call and is cut off (no item.completed, no
     // turn.completed). Then turn 2 starts and finishes normally.

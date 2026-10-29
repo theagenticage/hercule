@@ -36,3 +36,14 @@ export const truncateFact = (value: string): string => truncateWithMarker(value,
  */
 export const truncateMessage = (value: string): string =>
   truncateWithMarker(value, MAX_MESSAGE_LENGTH);
+
+/**
+ * Returns a field Claude sent as text. Throws when it is anything else, so
+ * the caller shows the message or block as an `unknown` item instead of passing
+ * a list or an object on as the text of an event. `what` names the field for the
+ * log line that reports the failure.
+ */
+export const requireText = (value: unknown, what: string): string => {
+  if (typeof value !== "string") throw new Error(`${what} is not text`);
+  return value;
+};

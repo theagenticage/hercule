@@ -24,6 +24,7 @@ const ITEM: ThreadItem = {
   verb: "command",
   target: "ls -la",
   result: "completed",
+  todoSteps: [],
 };
 
 /** Builds a turn that completed after five seconds with no tool items. */
@@ -106,5 +107,28 @@ describe("describeThreadItem", () => {
 
   it("leaves out a target the item did not report, so no separator is doubled", () => {
     expect(describeThreadItem({ ...ITEM, target: "" })).toBe("command · completed");
+  });
+
+  it("leaves the result off a todo list, which is a snapshot that starts completed", () => {
+    const todoList: ThreadItem = {
+      ...ITEM,
+      kind: "todo_list",
+      verb: "tasks",
+      target: "2/4 · Fix it",
+    };
+
+    expect(describeThreadItem(todoList)).toBe("tasks · 2/4 · Fix it");
+  });
+
+  it("keeps the result of a todo list that failed", () => {
+    const todoList: ThreadItem = {
+      ...ITEM,
+      kind: "todo_list",
+      verb: "tasks",
+      target: "2/4 · Fix it",
+      result: "failed",
+    };
+
+    expect(describeThreadItem(todoList)).toBe("tasks · 2/4 · Fix it · failed");
   });
 });

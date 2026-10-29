@@ -2,7 +2,8 @@
  * The divider under a turn that shows how long the agent worked, or how the
  * turn ended; `describeTurnDivider` in client-core picks the words. A turn
  * with tool items can open the divider into a quiet mono list with one
- * `verb · target · result` line per item. A turn with none has nothing to
+ * `verb · target · result` line per item, and under a todo list's line one
+ * indented line per step. A turn with none has nothing to
  * list, so its divider is plain text with no chevron. Spec 14 §The thread
  * surface owns the divider.
  *
@@ -20,6 +21,7 @@ import {
   type ThreadItem,
   type ThreadTurn,
 } from "@hercule/client-core";
+import type { TodoStep } from "@hercule/contract";
 
 /**
  * Returns the text colour class for a tool item's result: the live colour
@@ -28,6 +30,43 @@ import {
  */
 const chooseResultHue = (result: ThreadItem["result"]): string | undefined =>
   result === "running" ? "text-live" : result === "awaiting approval" ? "text-attn" : undefined;
+
+/**
+ * The mark and the accessible name of each todo step status, and its text
+ * colour class. The marks are three circles that the mono face draws at the
+ * same size and weight, filling up as the step does: a full circle for done,
+ * a half circle in the live colour for the step the agent is on, an empty
+ * circle for one still waiting. A check or a dot beside them draws larger or
+ * smaller, so no check is used.
+ */
+const STEP_MARKS: Record<
+  TodoStep["status"],
+  { readonly mark: string; readonly name: string; readonly hue: string | undefined }
+> = {
+  completed: { mark: "●", name: "Completed", hue: undefined },
+  in_progress: { mark: "◐", name: "In progress", hue: "text-live" },
+  pending: { mark: "○", name: "Pending", hue: undefined },
+};
+
+/** Draws the steps of a todo list, one indented line per step, under the list's own line. */
+function TodoSteps({ steps }: { readonly steps: readonly TodoStep[] }): JSX.Element {
+  return (
+    <ul className="mt-0.5 flex flex-col gap-0.5 pl-4">
+      {steps.map((step, index) => {
+        const { mark, name, hue } = STEP_MARKS[step.status];
+        return (
+          // A step has no id and its text can repeat; the list keeps its order, so the position names it.
+          <li key={index} className={cn("flex gap-1.5", hue)}>
+            <span role="img" aria-label={name}>
+              {mark}
+            </span>
+            <span>{step.text}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 export function TurnDivider({
   turn,
@@ -69,6 +108,7 @@ export function TurnDivider({
           {turn.items.map((item) => (
             <li key={item.itemId} className={chooseResultHue(item.result)}>
               {describeThreadItem(item)}
+              {item.todoSteps.length > 0 ? <TodoSteps steps={item.todoSteps} /> : null}
             </li>
           ))}
         </ul>

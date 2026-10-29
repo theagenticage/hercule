@@ -11,8 +11,9 @@
  * `?state=runtime-notices`, it shows runtime notices, a step the runner could not map
  * and a finished compaction among its work, and `?state=compacting` shows a
  * compaction that is still running. With
- * `?state=steps`, the first stretch holds a web search, a read that returned
- * text and a command that failed, for what an open stretch draws. With
+ * `?state=steps`, the first stretch holds a web search, a page fetch, the
+ * agent's todo list ("Tasks 2/5"), a read that returned text and a command
+ * that failed, for what an open stretch draws. With
  * `?state=senders`, other agents' messages are in its transcript and its
  * queue: a thread's, an assistant's and one from a session the user cannot
  * read, beside the user's own steered message. With

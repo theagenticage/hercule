@@ -1,10 +1,16 @@
 /**
- * Tests `readCompactionDetail`, `describeCompactionTarget` and
- * `readUnknownLabel`, which read the details every adapter shares for a
- * compaction and an unknown item.
+ * Tests `readCompactionDetail`, `describeCompactionTarget`,
+ * `readUnknownLabel` and `readToolCallName`, which read the details every
+ * adapter shares. The todo list and page fetch readers are tested through the
+ * projections that use them (`buildTurns`, `buildThreadBlocks`).
  */
 import { describe, expect, it } from "vitest";
-import { describeCompactionTarget, readCompactionDetail, readUnknownLabel } from "./item-detail";
+import {
+  describeCompactionTarget,
+  readCompactionDetail,
+  readToolCallName,
+  readUnknownLabel,
+} from "./item-detail";
 
 describe("describeCompactionTarget", () => {
   it.each([
@@ -63,5 +69,26 @@ describe("readUnknownLabel", () => {
 
   it.each([undefined, {}, { label: 7 }, { note: "review mode" }])("returns '' for %j", (detail) => {
     expect(readUnknownLabel(detail)).toBe("");
+  });
+});
+
+describe("readToolCallName", () => {
+  it.each([
+    ["a local tool", { name: "Bash" }, "Bash"],
+    [
+      "a local MCP tool",
+      { name: "mcp__github__create_issue", kind: "mcp" },
+      "mcp__github__create_issue",
+    ],
+    [
+      "an API connector tool",
+      { name: "create_issue", kind: "mcp", server: "github" },
+      "github/create_issue",
+    ],
+    ["an empty server", { name: "create_issue", server: "" }, "create_issue"],
+    ["no name", { server: "github" }, ""],
+    ["no detail", undefined, ""],
+  ])("reads %s", (_name, detail, expected) => {
+    expect(readToolCallName(detail)).toBe(expected);
   });
 });

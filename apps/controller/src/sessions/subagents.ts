@@ -74,6 +74,7 @@ const ACTIVITY_VERBS: Readonly<Record<ItemKind, string>> = {
   context_compaction: "Compacting its context",
   error: "Reporting an error",
   unknown: "Working",
+  todo_list: "Updating its task list",
 };
 
 /**
@@ -99,11 +100,11 @@ const readDetail = (detail: unknown): Readonly<Record<string, unknown>> =>
 
 /**
  * Returns the part of an item's `detail` worth naming in `activity`: the
- * command, the path, the search pattern, the search, the tool's name or its
- * description. Each adapter shapes `detail` its own way, so each field is
- * optional. The Claude adapter keeps the tool's arguments under
- * `detail.input`, so a field there comes before the same field at the top
- * level. A file search names its `pattern` before its `path`, because what it
+ * command, the path, the search pattern, the search, the page address, the
+ * tool's name or its description. Each adapter shapes `detail` its own way,
+ * so each field is optional. The Claude adapter keeps the tool's arguments
+ * under `detail.input`, so a field there comes before the same field at the
+ * top level. A file search names its `pattern` before its `path`, because what it
  * looks for says more than where.
  *
  * A `subagent` item is named only by the task it hands over, its
@@ -122,7 +123,9 @@ const findDetailTarget = (kind: ItemKind, detail: unknown): string | undefined =
           input.file_path,
           fields.pattern,
           fields.path,
+          fields.query,
           input.query,
+          fields.url,
           input.description,
           fields.description,
           fields.name,
@@ -133,11 +136,16 @@ const findDetailTarget = (kind: ItemKind, detail: unknown): string | undefined =
 /**
  * Builds the one line that says what a subagent is doing now, from the item it
  * just started, such as "Running npm test" or "Delegating: Chase the flaky
- * test". Returns the bare verb when the item names nothing.
+ * test" or "Fetching https://example.com". Returns the bare verb when the
+ * item names nothing.
  */
 export const buildSubagentActivity = (kind: ItemKind, detail: unknown): string => {
-  const verb = ACTIVITY_VERBS[kind];
   const target = findDetailTarget(kind, detail);
+  // A web search item is a page fetch when it carries a `url` and no `query`.
+  const fields = readDetail(detail);
+  const isPageFetch =
+    kind === "web_search" && typeof fields.url === "string" && typeof fields.query !== "string";
+  const verb = isPageFetch ? "Fetching" : ACTIVITY_VERBS[kind];
   // The colon keeps a delegated task, which is a phrase of its own, apart
   // from the verb.
   const separator = kind === "subagent" ? ": " : " ";

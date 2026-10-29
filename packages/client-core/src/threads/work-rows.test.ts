@@ -20,6 +20,8 @@ const buildItem = (kind: WorkItem["kind"], fields: Partial<WorkItem> = {}): Work
   paths: [],
   startedAt: "2026-09-30T09:00:00.000Z",
   toolName: "",
+  isPageFetch: false,
+  todoSteps: [],
   fallbackLabel: "",
   resultContent: undefined,
   ...fields,
@@ -82,6 +84,7 @@ describe("buildWorkRows", () => {
         outputIsCode: true,
         images: [],
         steps: [],
+        todoSteps: null,
         canOpen: true,
       },
     ]);
@@ -112,6 +115,21 @@ describe("buildWorkRows", () => {
     ]);
 
     expect(rows.map((row) => row.targetIsCode)).toEqual([true, false]);
+  });
+
+  it("gives only a todo list row todo steps, and none to a group or any other step", () => {
+    const rows = buildWorkRows([
+      buildItem("command_execution"),
+      buildItem("command_execution"),
+      buildItem("todo_list", { todoSteps: [{ text: "Read", status: "pending" }] }),
+      buildItem("todo_list"),
+    ]);
+
+    expect(rows.map((row) => row.todoSteps)).toEqual([
+      null,
+      [{ text: "Read", status: "pending" }],
+      [],
+    ]);
   });
 
   it("lets a step be opened only when it returned text or a well-formed image", () => {

@@ -1343,6 +1343,7 @@ describe("buildTurns: compaction and unknown items", () => {
         verb: "compaction",
         target: "182k → 31k tokens (auto)",
         result: "completed",
+        todoSteps: [],
       },
     ]);
   });
@@ -1410,5 +1411,236 @@ describe("buildTurns: compaction and unknown items", () => {
       .items;
 
     expect(items[0]).toMatchObject({ verb: "unknown", target: "" });
+  });
+});
+
+describe("buildTurns: todo lists, page fetches and MCP calls", () => {
+  const AT = "2026-10-29T09:00:00.000Z";
+  type Status = "pending" | "in_progress" | "completed";
+
+  const todo = (...statuses: readonly Status[]) => ({
+    steps: statuses.map((status, index) => ({ text: `step ${index + 1}`, status })),
+  });
+
+  /** Returns the rows of a turn that starts an item of `kind`, then runs `events` on it. */
+  const buildRowsOfItem = (
+    kind: ItemKindType,
+    startDetail: unknown,
+    ...events: readonly (
+      | { readonly _tag: "item.updated"; readonly detail?: unknown }
+      | {
+          readonly _tag: "item.completed";
+          readonly status: "completed" | "failed";
+          readonly detail?: unknown;
+        }
+    )[]
+  ): TranscriptRow[] => [
+    buildRow({
+      _tag: "turn.started",
+      eventId: nextId(),
+      sessionId: SESSION_ID,
+      at: AT,
+      turnId: "t1",
+    }),
+    buildRow({
+      _tag: "item.started",
+      eventId: nextId(),
+      sessionId: SESSION_ID,
+      at: AT,
+      turnId: "t1",
+      itemId: "i1",
+      kind,
+      detail: startDetail as never,
+    }),
+    ...events.map((event) =>
+      event._tag === "item.updated"
+        ? buildRow({
+            _tag: "item.updated",
+            eventId: nextId(),
+            sessionId: SESSION_ID,
+            at: AT,
+            turnId: "t1",
+            itemId: "i1",
+            kind,
+            ...(event.detail === undefined ? {} : { detail: event.detail as never }),
+          })
+        : buildRow({
+            _tag: "item.completed",
+            eventId: nextId(),
+            sessionId: SESSION_ID,
+            at: AT,
+            turnId: "t1",
+            itemId: "i1",
+            kind,
+            status: event.status,
+            ...(event.detail === undefined ? {} : { detail: event.detail as never }),
+          }),
+    ),
+  ];
+
+  const readItems = (rows: readonly TranscriptRow[]) =>
+    buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]!.items;
+
+  it("draws a todo list as one item, tasks with its progress and current step, that updates in place", () => {
+    const rows = buildRowsOfItem(
+      "todo_list",
+      todo("in_progress", "pending"),
+      { _tag: "item.updated", detail: todo("completed", "in_progress") },
+      { _tag: "item.updated", detail: todo("completed", "completed") },
+    );
+
+    expect(readItems(rows)).toEqual([
+      {
+        itemId: "i1",
+        kind: "todo_list",
+        verb: "tasks",
+        target: "2/2",
+        result: "completed",
+        todoSteps: todo("completed", "completed").steps,
+      },
+    ]);
+    expect(readItems(rows.slice(0, 3))[0]!.target).toBe("1/2 · step 2");
+    expect(readItems(rows.slice(0, 2))[0]!.target).toBe("0/2 · step 1");
+  });
+
+  it("keeps the list when an update has no detail or one that does not decode", () => {
+    const rows = buildRowsOfItem(
+      "todo_list",
+      todo("in_progress", "pending"),
+      { _tag: "item.updated" },
+      { _tag: "item.updated", detail: { steps: 3 } },
+      { _tag: "item.updated", detail: { steps: [{ text: "step 9", status: "blocked" }] } },
+      { _tag: "item.updated", detail: { steps: [{ text: "", status: "pending" }] } },
+    );
+
+    expect(readItems(rows)[0]).toMatchObject({
+      target: "0/2 · step 1",
+      todoSteps: todo("in_progress", "pending").steps,
+    });
+  });
+
+  it("names the first step in progress, and just the progress when none is or the list is empty", () => {
+    const targetOf = (detail: unknown) => readItems(buildRowsOfItem("todo_list", detail))[0]!;
+
+    expect(targetOf(todo("completed", "in_progress", "in_progress", "pending")).target).toBe(
+      "1/4 · step 2",
+    );
+    expect(targetOf(todo("completed", "pending")).target).toBe("1/2");
+    expect(targetOf({ steps: [] })).toMatchObject({ target: "0/0", todoSteps: [] });
+  });
+
+  it("shows only the first line of a step, cut like any other target", () => {
+    const tall = { steps: [{ text: "First line\nsecond line", status: "in_progress" }] };
+    const wide = { steps: [{ text: "x".repeat(512), status: "in_progress" }] };
+
+    expect(readItems(buildRowsOfItem("todo_list", tall))[0]!.target).toBe("0/1 · First line");
+    const target = readItems(buildRowsOfItem("todo_list", wide))[0]!.target;
+    expect(target).toBe(`0/1 · ${"x".repeat(194)}…`);
+    // The steps themselves are not cut: the divider lists them whole.
+    expect(readItems(buildRowsOfItem("todo_list", wide))[0]!.todoSteps[0]!.text).toHaveLength(512);
+  });
+
+  it("draws an update that turns a search into a fetch as a fetch, and keeps that when the next update has no detail", () => {
+    const rows = buildRowsOfItem(
+      "web_search",
+      { query: "effect schema" },
+      { _tag: "item.updated", detail: { url: "https://example.com/a" } },
+      { _tag: "item.updated" },
+    );
+
+    expect(readItems(rows.slice(0, 2))[0]).toMatchObject({
+      verb: "search",
+      target: "effect schema",
+    });
+    expect(readItems(rows)[0]).toMatchObject({ verb: "fetch", target: "https://example.com/a" });
+  });
+
+  it("merges a compaction's completion over its latest update, not over its start", () => {
+    const rows = buildRowsOfItem(
+      "context_compaction",
+      { trigger: "auto", tokensBefore: 100_000 },
+      { _tag: "item.updated", detail: { trigger: "auto", tokensBefore: 182_000 } },
+      // A detail that does not decode leaves the latest one in place.
+      { _tag: "item.updated", detail: { tokensBefore: "lots" } },
+      { _tag: "item.completed", status: "completed", detail: { tokensAfter: 31_000 } },
+    );
+
+    expect(readItems(rows)[0]!.target).toBe("182k → 31k tokens (auto)");
+  });
+
+  it("ignores an update for an item that never started", () => {
+    const rows = buildRowsOfItem("todo_list", todo("pending"));
+    const update = buildRow({
+      _tag: "item.updated",
+      eventId: nextId(),
+      sessionId: SESSION_ID,
+      at: AT,
+      turnId: "t1",
+      itemId: "ghost",
+      kind: "todo_list",
+      detail: todo("completed") as never,
+    });
+
+    expect(readItems([...rows, update])).toHaveLength(1);
+  });
+
+  it("reads the final list from a todo list's completion, and keeps the list when it has none", () => {
+    const completion = (detail?: unknown) =>
+      buildRow({
+        _tag: "item.completed",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: AT,
+        turnId: "t1",
+        itemId: "i1",
+        kind: "todo_list",
+        status: "completed",
+        ...(detail === undefined ? {} : { detail: detail as never }),
+      });
+    const started = buildRowsOfItem("todo_list", todo("in_progress", "pending"));
+
+    expect(readItems([...started, completion(todo("completed", "completed"))])[0]!.target).toBe(
+      "2/2",
+    );
+    expect(readItems([...started, completion()])[0]!.target).toBe("0/2 · step 1");
+    expect(readItems([...started, completion({ steps: 1 })])[0]!.target).toBe("0/2 · step 1");
+  });
+
+  it("draws a todo list as completed while it is open, and failed when it fails", () => {
+    const failed = buildRowsOfItem("todo_list", todo("pending"), {
+      _tag: "item.completed",
+      status: "failed",
+    });
+
+    expect(readItems(failed)[0]!.result).toBe("failed");
+  });
+
+  it("draws a fetch as fetch with its URL, and a search as search with its query", () => {
+    const fetched = buildRowsOfItem("web_search", {
+      name: "WebFetch",
+      input: { url: "https://example.com/a" },
+      url: "https://example.com/a",
+    });
+    const searched = buildRowsOfItem("web_search", {
+      name: "WebSearch",
+      input: { query: "effect schema" },
+      query: "effect schema",
+    });
+    const searchedByInputOnly = buildRowsOfItem("web_search", { input: { query: "codex" } });
+
+    expect(readItems(fetched)[0]).toMatchObject({ verb: "fetch", target: "https://example.com/a" });
+    expect(readItems(searched)[0]).toMatchObject({ verb: "search", target: "effect schema" });
+    expect(readItems(searchedByInputOnly)[0]).toMatchObject({ verb: "search", target: "codex" });
+  });
+
+  it("names a call an MCP server made through the API connector <server>/<tool>", () => {
+    const rows = buildRowsOfItem("tool_call", {
+      name: "create_issue",
+      input: {},
+      kind: "mcp",
+      server: "github",
+    });
+
+    expect(readItems(rows)[0]).toMatchObject({ verb: "tool", target: "github/create_issue" });
   });
 });

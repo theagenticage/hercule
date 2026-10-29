@@ -8,21 +8,29 @@ import { formatDuration } from "./duration";
 
 type ItemKind = WorkItem["kind"];
 
+/**
+ * What the summary counts: an item kind, or `page_fetch` for a `web_search`
+ * item that fetched a page, which reads differently from a search.
+ */
+type SummaryKey = ItemKind | "page_fetch";
+
 /** Returns `count` followed by `noun`, with an "s" when the count is not one. */
 export const formatCount = (count: number, noun: string): string =>
   `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 /**
- * The summary phrase for each item kind, given how many of that kind the
- * stretch holds. A kind that is missing here is not counted: reasoning is the
- * agent thinking rather than doing, and messages never sit in a stretch.
+ * The summary phrase for each key, given how many items of that key the
+ * stretch holds. A key that is missing here is not counted: reasoning is the
+ * agent thinking rather than doing, a todo list is a note the agent keeps
+ * (its row already shows its progress), and messages never sit in a stretch.
  */
-const PHRASES: Partial<Record<ItemKind, (count: number) => string>> = {
+const PHRASES: Partial<Record<SummaryKey, (count: number) => string>> = {
   command_execution: (count) => `ran ${formatCount(count, "command")}`,
   file_change: (count) => `edited ${formatCount(count, "file")}`,
   file_read: (count) => `read ${formatCount(count, "file")}`,
   file_search: (count) => (count === 1 ? "searched once" : `searched ${count} times`),
   web_search: (count) => (count === 1 ? "searched the web" : `searched the web ${count} times`),
+  page_fetch: (count) => `fetched ${formatCount(count, "page")}`,
   tool_call: (count) => `used ${formatCount(count, "tool")}`,
   subagent: (count) => `ran ${formatCount(count, "subagent")}`,
   plan: (count) => (count === 1 ? "made a plan" : `made ${count} plans`),
@@ -33,7 +41,7 @@ const PHRASES: Partial<Record<ItemKind, (count: number) => string>> = {
 };
 
 /** The kinds whose summary counts distinct files rather than items (`countDistinctFiles`). */
-const FILE_KINDS: ReadonlySet<ItemKind> = new Set(["file_change", "file_read"]);
+const FILE_KINDS: ReadonlySet<SummaryKey> = new Set(["file_change", "file_read"]);
 
 /**
  * Returns how many files `items` name: the distinct paths their details name,
@@ -53,17 +61,19 @@ export const countDistinctFiles = (items: readonly WorkItem[]): number => {
 
 /**
  * Returns the summary of a stretch's items: one phrase per item kind, such as
- * "ran 2 commands", in the order each kind first appears. Reasoning is left
- * out. File changes and file reads count distinct files
- * (`countDistinctFiles`), so two edits to one file read "edited 1 file".
+ * "ran 2 commands", in the order each kind first appears. Reasoning and todo
+ * lists are left out. Page fetches count apart from web searches. File
+ * changes and file reads count distinct files (`countDistinctFiles`), so two
+ * edits to one file read "edited 1 file".
  */
 export const summarizeWork = (items: readonly WorkItem[]): readonly string[] => {
   // A Map keeps its keys in insertion order, which is the order of first appearance.
-  const itemsByKind = new Map<ItemKind, WorkItem[]>();
+  const itemsByKind = new Map<SummaryKey, WorkItem[]>();
   for (const item of items) {
-    if (PHRASES[item.kind] === undefined) continue;
-    const ofKind = itemsByKind.get(item.kind);
-    if (ofKind === undefined) itemsByKind.set(item.kind, [item]);
+    const key: SummaryKey = item.isPageFetch ? "page_fetch" : item.kind;
+    if (PHRASES[key] === undefined) continue;
+    const ofKind = itemsByKind.get(key);
+    if (ofKind === undefined) itemsByKind.set(key, [item]);
     else ofKind.push(item);
   }
   return [...itemsByKind].map(([kind, ofKind]) =>

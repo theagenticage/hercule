@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useState, type JSX } from "react";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { TodoStep } from "@hercule/contract";
 import type { WorkRow } from "@hercule/client-core";
 import { WorkRowList } from "./work-rows";
 
@@ -25,6 +26,7 @@ const buildRow = (fields: Partial<WorkRow> & Pick<WorkRow, "key">): WorkRow => (
   outputIsCode: true,
   images: [],
   steps: [],
+  todoSteps: null,
   canOpen: false,
   ...fields,
 });
@@ -60,6 +62,21 @@ const WEB_SEARCH = buildRow({
   label: "Searched the web",
   target: "stripe 3ds requires_action",
   targetIsCode: false,
+});
+
+const TODO_STEPS: readonly TodoStep[] = [
+  { text: "Find the cause", status: "completed" },
+  { text: "Write the failing test", status: "in_progress" },
+  { text: "Fix handlePaymentResult", status: "pending" },
+];
+const TODO_LIST = buildRow({
+  key: "row:t",
+  icon: "tasks",
+  label: "Tasks 1/3",
+  target: "Write the failing test",
+  targetIsCode: false,
+  todoSteps: TODO_STEPS,
+  canOpen: true,
 });
 
 /** Renders `rows` with their open keys kept in state, as the transcript keeps them. */
@@ -224,5 +241,50 @@ describe("WorkRowList", () => {
     ).toBeTruthy();
     expect(within(findStaticRow("Ran bun test")).getByText("declined")).toBeTruthy();
     expect(within(findStaticRow("Ran git status")).queryByRole("img")).toBeNull();
+  });
+
+  it("draws a todo list as its progress, a middle dot and the step in progress", () => {
+    render(<RowsWithOpenKeys rows={[TODO_LIST]} />);
+    const row = screen.getByRole("button", { name: "Tasks 1/3, Write the failing test" });
+    expect(row.querySelector(".work-label")?.textContent).toBe(
+      "Tasks 1/3 · Write the failing test",
+    );
+    expect(within(row).getByText("Write the failing test").tagName).toBe("SPAN");
+  });
+
+  it("draws a todo list with no step in progress without the middle dot", () => {
+    const allDone = buildRow({
+      ...TODO_LIST,
+      label: "Tasks 3/3",
+      target: "",
+      todoSteps: TODO_STEPS.map((step) => ({ ...step, status: "completed" })),
+    });
+    render(<RowsWithOpenKeys rows={[allDone]} />);
+    const row = screen.getByRole("button", { name: "Tasks 3/3" });
+    expect(row.querySelector(".work-label")?.textContent).toBe("Tasks 3/3");
+  });
+
+  it("lists the steps of an open todo list in order, each named by its status", async () => {
+    render(<RowsWithOpenKeys rows={[TODO_LIST]} />);
+    const row = screen.getByRole("button", { name: "Tasks 1/3, Write the failing test" });
+    expect(document.querySelector(".work-todo")).toBeNull();
+
+    await userEvent.click(row);
+    const steps = within(document.querySelector<HTMLElement>(".work-todo")!).getAllByRole(
+      "listitem",
+    );
+    expect(
+      steps.map((step) => [
+        within(step).getByRole("img").getAttribute("aria-label"),
+        step.textContent,
+      ]),
+    ).toEqual([
+      ["Completed", "Find the cause"],
+      ["In progress", "Write the failing test"],
+      ["Pending", "Fix handlePaymentResult"],
+    ]);
+
+    await userEvent.click(row);
+    expect(document.querySelector(".work-todo")).toBeNull();
   });
 });

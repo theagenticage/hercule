@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import { AdapterError } from "./adapter-errors";
-import { MAX_MESSAGE_LENGTH } from "./primitives";
+import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH } from "./primitives";
 import {
   EditedFile,
   GithubTokenAnswer,
   GithubTokenRequest,
+  MAX_TODO_STEPS,
   MAX_ANSWERS_LENGTH,
   isAsyncQuestion,
   ContextCompactionDetail,
@@ -19,6 +20,7 @@ import {
   SessionSpec,
   SessionStart,
   SessionStop,
+  TodoListDetail,
   TurnInput,
   UnknownItemDetail,
   type ProviderEvent as Event,
@@ -100,6 +102,14 @@ const events: ReadonlyArray<Event> = [
     error: "the user pressed stop",
   },
   { _tag: "item.started", ...baseFields, turnId: "t1", itemId: "i1", kind: "command_execution" },
+  {
+    _tag: "item.updated",
+    ...baseFields,
+    turnId: "t1",
+    itemId: "i1",
+    kind: "command_execution",
+    detail: { command: "pnpm test" },
+  },
   {
     _tag: "item.completed",
     ...baseFields,
@@ -1013,6 +1023,70 @@ describe("the detail of an unknown item", () => {
 
   it("refuses a label that is not text", () => {
     expect(decodeDetail({ label: 7 })).toBe("Failure");
+  });
+});
+
+describe("an item update", () => {
+  const update = {
+    _tag: "item.updated",
+    ...baseFields,
+    turnId: "t1",
+    itemId: "i1",
+    kind: "todo_list",
+    detail: { steps: [{ text: "Run the tests", status: "in_progress" }] },
+  };
+
+  it("decodes and keeps the whole detail it carries", () => {
+    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(update))).toEqual(update);
+  });
+
+  it("is refused without an item id or with a kind outside the vocabulary", () => {
+    expect(decode(ProviderEvent, { ...update, itemId: undefined })._tag).toBe("Failure");
+    expect(decode(ProviderEvent, { ...update, kind: "checklist" })._tag).toBe("Failure");
+  });
+});
+
+describe("the detail of a todo list", () => {
+  const decodeDetail = (input: unknown) =>
+    Effect.runSyncExit(Schema.decodeUnknownEffect(TodoListDetail)(input))._tag;
+  const step = { text: "Run the tests", status: "pending" };
+
+  it("accepts steps in each status, and an empty list", () => {
+    expect(
+      decodeDetail({
+        steps: [
+          step,
+          { text: "Fix the failure", status: "in_progress" },
+          { text: "Commit", status: "completed" },
+        ],
+      }),
+    ).toBe("Success");
+    expect(decodeDetail({ steps: [] })).toBe("Success");
+  });
+
+  it("refuses a status outside the three, a step with no text, and a list that is missing", () => {
+    expect(decodeDetail({ steps: [{ ...step, status: "blocked" }] })).toBe("Failure");
+    expect(decodeDetail({ steps: [{ ...step, text: "" }] })).toBe("Failure");
+    expect(decodeDetail({ steps: [{ status: "pending" }] })).toBe("Failure");
+    expect(decodeDetail({})).toBe("Failure");
+  });
+
+  it("refuses a step longer than a fact", () => {
+    expect(decodeDetail({ steps: [{ ...step, text: "x".repeat(MAX_FACT_LENGTH) }] })).toBe(
+      "Success",
+    );
+    expect(decodeDetail({ steps: [{ ...step, text: "x".repeat(MAX_FACT_LENGTH + 1) }] })).toBe(
+      "Failure",
+    );
+  });
+
+  it("refuses more steps than the limit", () => {
+    expect(decodeDetail({ steps: Array.from({ length: MAX_TODO_STEPS }, () => step) })).toBe(
+      "Success",
+    );
+    expect(decodeDetail({ steps: Array.from({ length: MAX_TODO_STEPS + 1 }, () => step) })).toBe(
+      "Failure",
+    );
   });
 });
 

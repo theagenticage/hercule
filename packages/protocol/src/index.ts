@@ -123,8 +123,13 @@ export {
  *   tag without a version bump, and a controller on 11 or later stores the new
  *   event as `unknown`. A controller on 10 would close the socket on it, so the
  *   two refuse each other at hello.
+ * - Version 12 added the `todo_list` item kind, which changes the shape of the
+ *   item events: an 11 peer cannot decode an item of that kind. It also brought
+ *   back the `item.updated` event, which on its own would need no bump since 11.
+ *   A controller on 11 would not store the item and would close the socket on
+ *   it, again after every reconnect, so the two refuse each other at hello.
  */
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 12;
 
 /**
  * The close code and reason the controller uses to end the connection of a

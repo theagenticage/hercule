@@ -5,8 +5,14 @@
  * is already in the transcript, so the open item is the only one that live
  * token deltas can still add to.
  *
- * A `user_message` is never open: it is complete the moment it is sent, and
- * its `item.started` and `item.completed` have the same text.
+ * Two kinds of item are never open:
+ *
+ * - a `user_message` is complete the moment it is sent, and its `item.started`
+ *   and `item.completed` have the same text;
+ * - a `todo_list` stays open for the whole turn, from the agent's first list
+ *   until the turn ends, while the agent keeps writing messages. It never
+ *   has streaming text, so taking it as the open item would hide the message
+ *   that is really being written.
  */
 import type { TranscriptRow } from "@hercule/contract";
 
@@ -16,7 +22,11 @@ export const findOpenItem = (rows: readonly TranscriptRow[]): string | null => {
 
   for (const row of rows) {
     const event = row.event;
-    if (event._tag === "item.started" && event.kind !== "user_message") {
+    if (
+      event._tag === "item.started" &&
+      event.kind !== "user_message" &&
+      event.kind !== "todo_list"
+    ) {
       started.push(event.itemId);
     } else if (event._tag === "item.completed" && event.kind !== "user_message") {
       completed.add(event.itemId);

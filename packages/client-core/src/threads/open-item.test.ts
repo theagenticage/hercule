@@ -71,4 +71,10 @@ describe("findOpenItem", () => {
     ];
     expect(findOpenItem(rows)).toBe("i1");
   });
+
+  it("ignores a todo_list: it stays open for the whole turn and has no text to stream", () => {
+    const rows = [buildStartedRow("a1", "assistant_message"), buildStartedRow("todo", "todo_list")];
+    expect(findOpenItem(rows)).toBe("a1");
+    expect(findOpenItem([buildStartedRow("todo", "todo_list")])).toBeNull();
+  });
 });

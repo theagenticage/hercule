@@ -1046,6 +1046,9 @@ describe("a start the controller sends twice", () => {
       supervisor,
       Effect.gen(function* () {
         yield* supervisor.start(START);
+        // The marker below only proves the watch has read past `session.started`,
+        // not that the frame has been sent, so wait for the frame itself.
+        yield* waitUntil("sent session.started", () => listSessionEvents(sent).length === 1);
         yield* supervisor.start(START);
         // Wait for the watch to read past the duplicate before counting.
         yield* awaitMarker(fake);

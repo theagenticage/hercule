@@ -18,6 +18,8 @@ export {
   isSkillNameCharacter,
   isSkillReferencePrefix,
   readSkillReferenceName,
+  TodoListDetail,
+  TodoStep,
   UnknownItemDetail,
   type SkillReference,
 } from "@hercule/protocol";
