@@ -39,7 +39,15 @@ import type {
   SessionRespondToApprovalRequest,
   SessionRespondToQuestion,
 } from "@hercule/protocol";
-import { SKILLS_CAPABILITY } from "@hercule/protocol";
+import {
+  AdapterFailed,
+  HarnessNotInstalled,
+  HarnessProtocolError,
+  InputNotDelivered,
+  ModelChangeRefused,
+  SKILLS_CAPABILITY,
+  SteerRefused,
+} from "@hercule/protocol";
 import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
 import type { Profile, Runner, Session } from "@hercule/contract";
 import {
@@ -1779,7 +1787,9 @@ describe("input.steer", () => {
   it("puts an input the runner rejected back to queued, with sentAt cleared and the runner's message as the reason", async () => {
     await withFleet(async (arranged) => {
       const { session, inputId } = await makeBusyWithQueuedInput(arranged);
-      arranged.wire.answering(() => ({ message: "no such model here" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "no such model here" }),
+      }));
 
       const response = await steerInput(arranged, session.id, inputId);
 
@@ -1825,7 +1835,9 @@ describe("session.input with steer", () => {
   it("answers queued with the input's id when the runner refuses the steer, and keeps the input waiting", async () => {
     await withFleet(async (arranged) => {
       const session = await startBusySession(arranged, "hello");
-      arranged.wire.answering(() => ({ message: "the harness is not ready" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "the harness is not ready" }),
+      }));
 
       const response = await sendInput(arranged, session.id, { text: "steer me", steer: true });
 
@@ -1848,7 +1860,7 @@ describe("session.input with steer", () => {
       await waitForFrames(arranged.wire, "sessionInput", 1);
       reportExited(arranged.wire, session.id, 3);
       await waitForSession(arranged, session.id, (one) => one.status === "exited");
-      arranged.wire.release({ message: "the harness exited" });
+      arranged.wire.release({ error: new AdapterFailed({ message: "the harness exited" }) });
       const response = await pending;
 
       expect(response.status, await response.clone().text()).toBe(409);
@@ -2843,7 +2855,9 @@ describe("session.stop", () => {
       // A runner that receives the stop before it spawned the harness spawns
       // none: it refuses the start's input and reports the exit itself.
       arranged.wire.release({
-        message: "the session was stopped before its input was handed over",
+        error: new AdapterFailed({
+          message: "the session was stopped before its input was handed over",
+        }),
       });
       reportExited(arranged.wire, session.id, 1);
 
@@ -3509,7 +3523,9 @@ describe("a start that carries the session's first input", () => {
   it("puts a refused start input back to waiting with the runner's reason, and sends it once the session is idle", async () => {
     await withFleet(
       async (arranged) => {
-        arranged.wire.answering(() => ({ message: "the harness is not ready" }));
+        arranged.wire.answering(() => ({
+          error: new AdapterFailed({ message: "the harness is not ready" }),
+        }));
         const session = await spawnSessionOrFail(arranged, { prompt: "one" });
         const start = (await waitForStartFrames(arranged, session.id, 1))[0]!;
         const refused = await waitUntil("recorded the refusal", async () => {
@@ -3610,7 +3626,9 @@ describe("a start that carries the session's first input", () => {
 
   it("cancels a starting session's start input once the runner refused it", async () => {
     await withFleet(async (arranged) => {
-      arranged.wire.answering(() => ({ message: "the harness is not ready" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "the harness is not ready" }),
+      }));
       const session = await spawnSessionOrFail(arranged, { prompt: "one" });
       const start = (await waitForStartFrames(arranged, session.id, 1))[0]!;
       await waitUntil("recorded the refusal", async () => {
@@ -3693,7 +3711,7 @@ const reportFailedStart = async (
   order: "refusal first" | "exit first",
 ): Promise<void> => {
   if (order === "refusal first") {
-    arranged.wire.release({ message: "the harness crashed" });
+    arranged.wire.release({ error: new AdapterFailed({ message: "the harness crashed" }) });
     await waitUntil("recorded the refusal", async () => {
       const [row] = await listInputs(arranged, sessionId);
       return row?.reason === "the harness crashed" ? true : undefined;
@@ -3711,9 +3729,142 @@ const reportFailedStart = async (
   await waitForSession(arranged, sessionId, (one) => one.exitedAt !== null);
   if (order === "exit first") {
     // The withheld start is answered now, after the exit was applied.
-    arranged.wire.release({ message: "the harness crashed" });
+    arranged.wire.release({ error: new AdapterFailed({ message: "the harness crashed" }) });
   }
 };
+
+/**
+ * What happens to an input by the kind of failure the runner refused it with.
+ * Most failures put the input back to waiting. A refused steer does that too,
+ * but is no failure. A failure that sending the input again would not mend
+ * cancels the input.
+ */
+describe("an input the runner refused with a typed failure", () => {
+  const INSTALL_MESSAGE =
+    "Claude Code is not installed on this runner. Install it with: `hercule runner install-harness r1 --provider claude-code`";
+
+  it("fails a Thread's start input with the install command when the harness is not installed, and the crash exit follows", async () => {
+    await withFleet(async (arranged) => {
+      arranged.wire.answering(() => ({
+        error: new HarnessNotInstalled({ message: INSTALL_MESSAGE }),
+      }));
+      const session = await spawnSessionOrFail(arranged, { prompt: "one" });
+      await waitForStartFrames(arranged, session.id, 1);
+
+      // The refusal cancels the input at once, without waiting for the exit.
+      const cancelled = await waitUntil("cancelled the start input", async () => {
+        const [row] = await listInputs(arranged, session.id);
+        return row?.status === "cancelled" ? row : undefined;
+      });
+      expect(cancelled).toMatchObject({ sentAt: null, reason: INSTALL_MESSAGE });
+
+      reportEvent(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "session.exited",
+        reason: "crash",
+      });
+      await waitForSession(arranged, session.id, (one) => one.status === "exited");
+      expect((await listInputs(arranged, session.id))[0]).toMatchObject({
+        status: "cancelled",
+        reason: INSTALL_MESSAGE,
+      });
+    });
+  });
+
+  it("leaves a steered input waiting, with no failure, when the runner refuses the steer with SteerRefused", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+      const queued = await sendInput(arranged, session.id, { text: "steer me" });
+      const { inputId } = (await queued.json()) as { inputId: string };
+      arranged.wire.answering(() => ({
+        error: new SteerRefused({
+          message: "The harness cannot take this mid-turn; it runs next.",
+        }),
+      }));
+
+      const response = await steerInput(arranged, session.id, inputId);
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toEqual({ inputId, result: "queued" });
+      expect(
+        (await listInputs(arranged, session.id)).find((one) => one.id === inputId),
+      ).toMatchObject({
+        status: "queued",
+        sentAt: null,
+        reason: "The harness cannot take this mid-turn; it runs next.",
+      });
+
+      // The turn ends, and the flush sends the waiting input as the next turn.
+      arranged.wire.answering(() => "opened");
+      reportEvent(arranged.wire, ...buildTranscript(session.id)[1]!);
+      reportTurnCompleted(arranged, session.id, 3);
+      await waitUntil("delivered the waiting input", async () => {
+        const row = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
+        return row?.status === "delivered" ? row : undefined;
+      });
+    });
+  });
+
+  it("cancels an input with the runner's message when the harness refused its model change, and leaves the session idle", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+      arranged.wire.answering(() => ({
+        error: new ModelChangeRefused({ message: "The harness refused to switch to model slow." }),
+      }));
+
+      const response = await sendInput(arranged, session.id, { text: "again" });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).toContain("refused to switch to model slow");
+      expect((await listInputs(arranged, session.id)).at(-1)).toMatchObject({
+        text: "again",
+        status: "cancelled",
+        sentAt: null,
+        reason: "The harness refused to switch to model slow.",
+      });
+      expect((await readSession(arranged, session.id)).status).toBe("idle");
+    });
+  });
+
+  it("cancels an input whose delivery is unknown after a protocol error, so it is never sent twice", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+      arranged.wire.answering(() => ({
+        error: new HarnessProtocolError({ message: "The harness did not answer in time." }),
+      }));
+
+      const response = await sendInput(arranged, session.id, { text: "again" });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect((await listInputs(arranged, session.id)).at(-1)).toMatchObject({
+        status: "cancelled",
+        reason: "The harness did not answer in time.",
+      });
+    });
+  });
+
+  it("puts an input the harness certainly did not take back to waiting, and fails the call with the message", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+      arranged.wire.answering(() => ({
+        error: new InputNotDelivered({ message: "The session stopped before it took the input." }),
+      }));
+
+      const response = await sendInput(arranged, session.id, { text: "again" });
+
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(await response.text()).toContain("stopped before it took the input");
+      expect((await listInputs(arranged, session.id)).at(-1)).toMatchObject({
+        text: "again",
+        status: "queued",
+        sentAt: null,
+        reason: "The session stopped before it took the input.",
+      });
+    });
+  });
+});
 
 /**
  * A controller restart over a database that already has session inputs.
@@ -4664,7 +4815,9 @@ describe("session.input into an exited session", () => {
       const session = await startAndEndSession(arranged, "hello");
       // A runner whose start fails refuses the input the start carries, and
       // then reports the exit.
-      arranged.wire.answering(() => ({ message: "the harness would not start" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "the harness would not start" }),
+      }));
       const first = await sendInput(arranged, session.id, { text: "are you there" });
       expect(first.status, await first.clone().text()).toBe(200);
       const { inputId } = (await first.json()) as { inputId: string };

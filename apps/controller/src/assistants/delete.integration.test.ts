@@ -48,8 +48,8 @@ const CONVERSATION_DELETED =
 
 /** Why the queued-input sweep gives up on input that waits for such a session. */
 const NEVER_RESUMED =
-  "the session could not be resumed: that session answered an assistant's conversation " +
-  "that was deleted, so it is kept as history and is never resumed";
+  "the session could not be resumed (that session answered an assistant's conversation " +
+  "that was deleted, so it is kept as history and is never resumed)";
 
 /** The id of a workspace a test writes straight into the database. */
 const KEPT_WORKSPACE = "0199e0e7-0000-7000-8000-0000000000c1";

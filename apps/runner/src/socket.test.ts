@@ -978,8 +978,8 @@ describe("a controller asking a runner to probe a provider it has no adapter for
     expect(report?.requestId).toBe(REQUEST.requestId);
     expect(report?.instanceId).toBe(REQUEST.instanceId);
     expect(report?.result.auth.status).toBe("error");
-    expect(report?.result.auth.message).toBe(
-      "no adapter for a-provider-nobody-wrote-an-adapter-for in this runner build",
+    expect(report?.result.auth.message).toContain(
+      'does not support the provider "a-provider-nobody-wrote-an-adapter-for"',
     );
     expect(report?.result.harnessVersion).toBeNull();
     expect(report?.result.models).toEqual([]);
@@ -1172,6 +1172,10 @@ describe("session frames on one connection", () => {
     stub.received.filter(
       (frame): frame is SessionInputResult => frame._tag === "sessionInputResult",
     );
+
+  /** Returns the message of a refused input result, or an empty string when it was not refused. */
+  const readRefusalMessage = (result: SessionInputResult | undefined): string =>
+    result !== undefined && !result.ok ? result.error.message : "";
 
   const listStepResults = (stub: Stub): ReadonlyArray<WorkspaceStepResult> =>
     stub.received.filter(
@@ -1554,8 +1558,8 @@ describe("session frames on one connection", () => {
         requestId: buildStart(SESSION_A).requestId,
         ok: false,
       });
-      expect(listInputResults(stub)[0]?.message).toContain(
-        "was stopped before its input was handed over",
+      expect(readRefusalMessage(listInputResults(stub)[0])).toContain(
+        "stopped before the input was delivered",
       );
       expect(fake.inputs).toEqual([]);
       expect(fake.stops).toEqual(spawned ? [[SESSION_A, "stopped"]] : []);
@@ -1659,8 +1663,8 @@ describe("session frames on one connection", () => {
 
     await waitUntil(() => listInputResults(stub).length === 2);
     expect(listInputResults(stub)[1]).toMatchObject({ requestId: again.requestId, ok: false });
-    expect(listInputResults(stub)[1]?.message).toContain(
-      "was stopped before its input was handed over",
+    expect(readRefusalMessage(listInputResults(stub)[1])).toContain(
+      "stopped before the input was delivered",
     );
     expect(fake.inputs).toEqual([[SESSION_A, `start ${SESSION_A}`]]);
     // The second stop reached the old harness too. The second start spawned

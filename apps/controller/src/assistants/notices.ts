@@ -3,14 +3,19 @@
  * conversation a session answers, shared by the two writers of notices: the
  * session observer and the responder.
  *
- * There are exactly two notices, and no caller writes the wording itself:
+ * There are exactly three notices, and no caller writes the wording itself:
  *
  * - "<name> was interrupted: <why>", when a reply was cut off: the session
  *   exited while a turn was running, or the turn failed or was stopped;
  * - "<name> can't be reached: <why>", when a message could not be delivered:
- *   no session could take it, the session that held it ended and cannot be
- *   resumed, or the session exited before it could start a turn and is held
- *   back from resuming.
+ *   no session could take it, or the session exited before it could start a
+ *   turn and is held back from resuming;
+ * - "There was a problem delivering your message to <name>: <why>", when a
+ *   message was given up on for good: the session cannot be resumed, the
+ *   runner failed it in a way that sending it again would not mend, or it
+ *   asked for something the harness refused. The wording claims neither that
+ *   the assistant is unreachable (it may be fine) nor that the message never
+ *   arrived (after a protocol error the harness may have taken it).
  *
  * A notice is stamped with the system.
  */
@@ -70,6 +75,10 @@ export const buildTurnStoppedText = (name: string): string =>
 /** Builds the notice text for a message that could not be delivered, for the reason `why`. */
 export const buildUnreachableText = (name: string, why: string): string =>
   `${name} can't be reached: ${why}`;
+
+/** Builds the notice text for a message that was given up on for good, for the reason `why`. */
+export const buildDeliveryProblemText = (name: string, why: string): string =>
+  `There was a problem delivering your message to ${name}: ${why}`;
 
 /** The conversation a session answers, and its assistant's name and reply mode. */
 export interface AnsweredConversation {

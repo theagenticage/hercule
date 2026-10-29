@@ -461,7 +461,12 @@ export async function enlistScriptedRunner(
   /** The code and reason of the last close, so a send on a closed connection can say why. */
   let lastClose: string | undefined;
 
-  const send = (frame: RunnerToController): void => {
+  /**
+   * Sends a frame as JSON. The frame is typed as the JSON that crosses the
+   * wire, not as the decoded value, because a refused input carries an error
+   * object and this script cannot load the error classes into plain Node.
+   */
+  const send = (frame: (typeof RunnerToController)["Encoded"]): void => {
     if (socket.readyState !== WebSocket.OPEN) {
       const why = lastClose === undefined ? "it is closing" : `it closed with ${lastClose}`;
       throw new Error(`runner ${runnerId} is not connected; ${why}`);
@@ -1100,7 +1105,7 @@ export async function enlistScriptedRunner(
         _tag: "sessionInputResult",
         requestId: frame.requestId,
         ok: false,
-        message: skills.refuseSkillSteer,
+        error: { _tag: "SteerRefused", message: skills.refuseSkillSteer },
       });
     }
     send({
@@ -1202,7 +1207,10 @@ export async function enlistScriptedRunner(
             _tag: "sessionInputResult",
             requestId: frame.requestId,
             ok: false,
-            message: `runner ${runnerId} holds no session ${frame.sessionId}`,
+            error: {
+              _tag: "SessionNotRunning",
+              message: `runner ${runnerId} holds no session ${frame.sessionId}`,
+            },
           });
         }
         return deliverInput(session, frame);
@@ -1282,7 +1290,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 9 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 10 satisfies typeof PROTOCOL_VERSION,
             capabilities: [
               "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,

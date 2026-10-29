@@ -21,7 +21,7 @@
  * current day, so every block draws again when the day changes and "09:04"
  * becomes "4 Sep 09:04".
  */
-import { memo, type JSX } from "react";
+import { Fragment, memo, type JSX } from "react";
 import {
   buildWorkRows,
   describeMessageMeta,
@@ -29,6 +29,8 @@ import {
   describeTurnEnding,
   describeWaitingNote,
   describeWorkStretch,
+  MAX_UNBROKEN_CODE_WORD,
+  splitCodeSpans,
   summarizeWork,
   type EndingBlock,
   type Pose,
@@ -313,6 +315,12 @@ const RUNTIME_NOTE_CLASS: Record<RuntimeNoteKind, string> = {
  *   failure ink, and the time in the muted ink. The dot is named "Error".
  *
  * The marker is named so a screen reader says what kind of note this is.
+ *
+ * A command the runner wrote between backticks, such as the one that installs a missing
+ * harness, is drawn as inline code in a note of any kind. A word of the command stays
+ * whole, so the command wraps only at its spaces, never inside a flag or an id. A word
+ * too long to always fit a line, such as a path, is left as plain text in the code, so it
+ * breaks anywhere and the chip covers every line of it.
  */
 export const RuntimeNote = memo(function RuntimeNote({
   kind,
@@ -338,7 +346,24 @@ export const RuntimeNote = memo(function RuntimeNote({
         <i className="dot" role="img" aria-label={kind === "warning" ? "Warning" : "Error"} />
       )}
       <p>
-        {message}
+        {splitCodeSpans(message).map((part, index) =>
+          part.kind === "code" ? (
+            <code key={index}>
+              {part.text.split(" ").map((word, wordIndex) => (
+                <Fragment key={wordIndex}>
+                  {wordIndex === 0 ? null : " "}
+                  {word.length <= MAX_UNBROKEN_CODE_WORD ? (
+                    <span className="code-word">{word}</span>
+                  ) : (
+                    word
+                  )}
+                </Fragment>
+              ))}
+            </code>
+          ) : (
+            part.text
+          ),
+        )}
         {time === undefined ? null : <span className="time">{time}</span>}
       </p>
     </div>

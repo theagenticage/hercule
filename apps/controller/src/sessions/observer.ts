@@ -14,10 +14,11 @@
  * - `sessionExited` by the one cleanup step every path to `exited` goes
  *   through, so an exit path added later reaches the port without anyone
  *   remembering to call it;
- * - `inputsDropped` by the steps that give up on waiting input: the one
- *   that drops the input of a session that cannot be resumed, and the one
- *   that cancels an input the runner refused after its session exited for
- *   good.
+ * - `inputsDropped` by the steps that give up on an input: the one that
+ *   drops the input of a session that cannot be resumed, the one that
+ *   cancels an input the runner refused after its session exited for good,
+ *   and the one that cancels an input the runner failed for a reason that
+ *   sending it again would not mend.
  *
  * `sessionExited` and `inputsDropped` both name the agent step prompts that
  * were cancelled before any runner took them (`droppedStepIterations`). A
@@ -66,14 +67,18 @@ export interface SessionExit {
 }
 
 /**
- * Input that waited for an exited session and was cancelled: the session
- * cannot be resumed, or the runner refused the input after the session
- * exited for good.
+ * Input that was cancelled for good: it waited for an exited session that
+ * cannot be resumed, the runner refused it after the session exited for good,
+ * or the runner failed it for a reason that sending it again would not mend.
  */
 export interface DroppedInputs {
-  /** The exited session the input waited for. */
+  /** The session the input was for. It has exited, except when the runner failed the input. */
   readonly session: StoredSession;
-  /** The reason the input could not be delivered. */
+  /**
+   * The reason the input could not be delivered. It is a sentence for the
+   * user, and observers show it as written: in a conversation's notice, and
+   * in the error of a failed step.
+   */
   readonly refusal: string;
   /**
    * The iterations of the session's agent step whose prompts were among the

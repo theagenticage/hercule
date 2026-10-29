@@ -13,7 +13,9 @@
  *   was retired or was lost;
  * - "<name> can't be reached: <why>", when a message waits for a session that
  *   exited and cannot be resumed, such as one that exited before it ever
- *   started, or for a resumed session that exited before it started a turn.
+ *   started, or for a resumed session that exited before it started a turn,
+ *   or when the runner failed the message for good, such as a start on a
+ *   runner without the harness.
  *
  * A stopped turn writes the reply text it produced, then its notice. An exit
  * while idle writes none, a message still waiting
@@ -22,13 +24,14 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration, Effect } from "effect";
-import type { ExitReason } from "@hercule/protocol";
+import { AdapterFailed, HarnessNotInstalled, type ExitReason } from "@hercule/protocol";
 import type { Conversation, ConversationMessage, Session } from "@hercule/contract";
 import { withTransaction } from "../db";
 import { get, post, send } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
   at,
+  listFrames,
   listInputs,
   reportEvent,
   spawnSessionOrFail,
@@ -55,9 +58,9 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
  * has no transcript to resume, so the queued-input sweep gives up on it.
  */
 const NEVER_STARTED =
-  "Ada can't be reached: its session could not be resumed (that session left no " +
-  "provider-native session, so its transcript is gone and there is nothing to resume); " +
-  "send the message again to start a new session";
+  "There was a problem delivering your message to Ada: the session could not be resumed (that session left no " +
+  "provider-native session, so its transcript is gone and there is nothing to resume). " +
+  "Send the message again to start a new session.";
 
 /** The conversation of these tests: the default assistant's, renamed to Ada, and its session, busy with the turn "hi" opened. */
 interface AdaConversation {
@@ -523,7 +526,9 @@ describe("a session that exits while idle with a message still waiting", () => {
     await withAgentFleet(async (arranged) => {
       const { conversation, session } = await startAda(arranged);
       const next = await runTurn(arranged, session.id, 2, "t1", []);
-      arranged.wire.answering(() => ({ message: "the harness is not ready" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "the harness is not ready" }),
+      }));
       await sendMessage(arranged, conversation.id, "are you there?");
       await waitUntil("stored the refusal on the input", async () =>
         (await listInputs(arranged, session.id)).find(
@@ -560,7 +565,9 @@ describe("a resumed session that exits before it starts a turn", () => {
       await reportExit(arranged, session.id, next, "idle_unload");
       // A runner whose start fails refuses the input the start carries, and
       // then reports the exit.
-      arranged.wire.answering(() => ({ message: "the harness crashed" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "the harness crashed" }),
+      }));
       await sendMessage(arranged, conversation.id, "are you there?");
       await waitForStartFrames(arranged, session.id, 2);
       await waitUntil("recorded the refusal", async () => {
@@ -591,6 +598,37 @@ describe("a resumed session that exits before it starts a turn", () => {
       await sendMessage(arranged, conversation.id, "and now?");
 
       await waitForStartFrames(arranged, session.id, 3);
+    });
+  });
+});
+
+describe("a conversation's start that the runner failed for good", () => {
+  it("writes the runner's message as a notice, so the owner's message does not vanish", async () => {
+    await withAgentFleet(async (arranged) => {
+      const conversation = await renameToAda(arranged);
+      const message =
+        "Claude Code is not installed on this runner. " +
+        "Install it with: `hercule runner install-harness r1 --provider claude-code`";
+      arranged.wire.answering(() => ({ error: new HarnessNotInstalled({ message }) }));
+
+      await sendMessage(arranged, conversation.id, "hi");
+
+      const [session] = await waitForConversationSessions(arranged, conversation.id, 1);
+      await expectSessionNotice(
+        arranged,
+        conversation.id,
+        session!.id,
+        `There was a problem delivering your message to Ada: ${message}`,
+      );
+      expect((await listInputs(arranged, session!.id))[0]).toMatchObject({
+        status: "cancelled",
+        reason: message,
+      });
+
+      // The crash exit that follows does not resume the session for the
+      // message: the message was failed, not kept, so a resume has nothing to carry.
+      await reportExit(arranged, session!.id, 1, "crash");
+      expect(listFrames(arranged.wire, "sessionStart")).toHaveLength(1);
     });
   });
 });

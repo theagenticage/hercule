@@ -495,16 +495,24 @@ const make = Effect.gen(function* () {
      * only while it still holds that claim: a row that was put back to waiting
      * in the meantime may have been sent again, and that newer send must not
      * be undone.
+     *
+     * Returns whether the row changed. It does not when a concurrent path
+     * already settled the input (marked it delivered, or cancelled it), so a
+     * caller that tells anyone the input is waiting again checks the result.
      */
     requeue: (
       id: string,
       sentAt: string | null,
       reason: string | null,
-    ): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE session_inputs SET sent_at = NULL, reason = ${reason}
-        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
-      `),
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE session_inputs SET sent_at = NULL, reason = ${reason}
+          WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Replaces the text of an input still waiting, and makes it the input of
@@ -536,17 +544,23 @@ const make = Effect.gen(function* () {
      * Nothing waits on a harness that has exited. The reason is stored so a
      * caller reading the input later can see why it was never delivered.
      * `sentAt` works as for `requeue`: the row changes only while it still
-     * holds the failed send's claim.
+     * holds the failed send's claim. Returns whether the row changed, so a
+     * caller that tells anyone the input was dropped knows it was the one that
+     * cancelled it.
      */
     cancelWithReason: (
       id: string,
       sentAt: string | null,
       reason: string,
-    ): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
-        WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
-      `),
+    ): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE session_inputs SET status = 'cancelled', sent_at = NULL, reason = ${reason}
+          WHERE id = ${uuidFromString(id)} AND status = 'queued' AND sent_at IS ${sentAt}
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Marks an agent step's prompt the runner never answered as `sent`, and

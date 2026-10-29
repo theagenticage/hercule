@@ -9,6 +9,8 @@
  *   session's agent sent names its sender under the bubble;
  * - one line per subagent the turn started;
  * - the assistant's prose at full width;
+ * - the turn's runtime errors and warnings, under the prose. A runtime note sits
+ *   there whatever its place in the turn, because the prose is one block;
  * - the divider that shows how long the agent worked, or how the turn ended,
  *   when `showsTurnDivider` returns true.
  *
@@ -23,6 +25,7 @@ import { TimeSeparator } from "../time-separator";
 import { Markdown } from "../markdown";
 import { TurnDivider } from "./turn-divider";
 import { AgentSentMessage } from "./agent-sent-message";
+import { RuntimeNoteLine } from "./runtime-note-line";
 
 export function Turn({
   turn,
@@ -67,6 +70,9 @@ export function Turn({
           {tailRef === undefined ? null : <span ref={tailRef} className="whitespace-pre-wrap" />}
         </div>
       )}
+      {turn.runtimeNotes.map((note) => (
+        <RuntimeNoteLine key={note.key} note={note} />
+      ))}
       {showsTurnDivider(turn, live) ? <TurnDivider turn={turn} live={live} /> : null}
     </div>
   );

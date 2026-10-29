@@ -24,13 +24,22 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber, Logger, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { CODEX_VERSION } from "@hercule/home/version";
+import {
+  HarnessLoginMissing,
+  HarnessNotInstalled,
+  HarnessProtocolError,
+  InputNotDelivered,
+  SessionNotRunning,
+  SteerRefused,
+  AdapterFailed,
+} from "@hercule/protocol";
 import type { OutputSchema, ProbeResult, ProviderEvent, SessionSpec } from "@hercule/protocol";
 import { SESSION_MARKS_DIR_VARIABLE, takeStartMarks } from "../../edit-marks";
 import type { EditMarks, ProviderRunnerContext } from "../index";
 import { INSTALL_DEADLINE } from "../install";
 import { makeCodexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
+import { RPC_DEADLINE } from "./rpc";
 import { PROBE_DEADLINE } from "../probe";
-import { SteerRefused } from "../steer-refused";
 import {
   METADATA_DEADLINE,
   MAX_PENDING_FRAMES,
@@ -54,6 +63,7 @@ import {
   FORKED,
   createCodexHome,
   INITIALIZE,
+  LOGGED_OUT,
   PRIOR,
   RESUMED,
   buildRefusal,
@@ -85,7 +95,11 @@ const runProbe = (
   readonly home: string;
 } => {
   const home = createCodexHome();
-  const { seam, spawns } = buildScriptedSeam(answers, options);
+  // A probe test starts from a machine with no login, unlike a session test.
+  const { seam, spawns } = buildScriptedSeam(
+    { "account/read": () => LOGGED_OUT, ...answers },
+    options,
+  );
   return {
     result: Effect.runPromise(makeCodexAdapter(seam).probe(buildContext(home), {})),
     spawns,
@@ -295,7 +309,8 @@ describe("the process a probe runs on", () => {
 
     const refused = await Effect.runPromise(Effect.flip(adapter.startSession(SESSION, SPEC, ctx)));
 
-    expect(refused).toContain("could not start a session");
+    expect(refused).toBeInstanceOf(HarnessProtocolError);
+    expect(refused.message).toContain("could not start a session");
     expect(spawns).toHaveLength(1);
     expect(spawns[0]?.kills()).toBe(1);
 
@@ -568,9 +583,11 @@ describe("the session's skills from the Skill Library", () => {
     expect(spawns).toHaveLength(2);
     expect(requests.map((request) => request.method)).toEqual([
       "initialize",
+      "account/read",
       "skills/extraRoots/set",
       "thread/start",
       "initialize",
+      "account/read",
       "skills/extraRoots/set",
       "thread/resume",
     ]);
@@ -638,8 +655,10 @@ describe("the session's skills from the Skill Library", () => {
       ),
     );
 
-    expect(refused).toContain("skills folders");
-    expect(refused).toContain("AbsolutePathBuf deserialized without a base path");
+    // The app-server answered and refused, so the failure is not about the connection.
+    expect(refused).toBeInstanceOf(AdapterFailed);
+    expect(refused.message).toContain("skills folders");
+    expect(refused.message).toContain("AbsolutePathBuf deserialized without a base path");
     // A session without its skills would run without saying so.
     expect(listSentParams(requests, "thread/start")).toEqual([]);
     expect(spawns[0]?.kills()).toBe(1);
@@ -663,8 +682,137 @@ describe("the session's skills from the Skill Library", () => {
       ),
     );
 
-    expect(refused).toContain("AbsolutePathBuf deserialized without a base path");
-    expect(refused).not.toContain("an unrelated warning");
+    expect(refused.message).toContain("AbsolutePathBuf deserialized without a base path");
+    expect(refused.message).not.toContain("an unrelated warning");
+  });
+});
+
+describe("a session that cannot start", () => {
+  it("fails with HarnessNotInstalled when the runner has no Codex binary", async () => {
+    const { adapter, ctx, spawns } = createDriving();
+
+    const refused = await Effect.runPromise(
+      Effect.flip(adapter.startSession(SESSION, SPEC, { ...ctx, binary: undefined })),
+    );
+
+    expect(refused).toBeInstanceOf(HarnessNotInstalled);
+    expect(refused.message).toContain("not installed");
+    expect(spawns).toEqual([]);
+  });
+
+  it("fails with HarnessNotInstalled when spawning a binary that does not exist fails with ENOENT", async () => {
+    const seam: CodexSeam = {
+      appServer: () => {
+        throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+      },
+      run: () => Effect.die("a session must not run a command"),
+    };
+    const home = createCodexHome();
+    const ctx = { ...buildContext(home), binary: join(home, "no-such-codex") };
+
+    const refused = await Effect.runPromise(
+      Effect.flip(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx)),
+    );
+
+    expect(refused).toBeInstanceOf(HarnessNotInstalled);
+  });
+
+  it("says Codex is installed but cannot run when ENOENT comes for a binary that exists", async () => {
+    // A launcher script whose interpreter is missing fails like this.
+    const seam: CodexSeam = {
+      appServer: () => {
+        throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+      },
+      run: () => Effect.die("a session must not run a command"),
+    };
+    const ctx = { ...buildContext(createCodexHome()), binary: process.execPath };
+
+    const refused = await Effect.runPromise(
+      Effect.flip(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx)),
+    );
+
+    expect(refused._tag).toBe("AdapterFailed");
+    expect(refused.message).toContain("installed");
+    expect(refused.message).toContain("PATH");
+  });
+
+  it("fails with AdapterFailed when spawning fails for another reason, or the home cannot be prepared", async () => {
+    const seam: CodexSeam = {
+      appServer: () => {
+        throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+      },
+      run: () => Effect.die("a session must not run a command"),
+    };
+    const ctx = buildContext(createCodexHome());
+    // The instance home is a file, so creating the `codex` folder in it fails with ENOTDIR.
+    const file = join(createCodexHome(), "not-a-folder");
+    writeFileSync(file, "");
+
+    const cannotSpawn = await Effect.runPromise(
+      Effect.flip(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx)),
+    );
+    const cannotPrepare = await Effect.runPromise(
+      Effect.flip(makeCodexAdapter(seam).startSession(SESSION, SPEC, { ...ctx, home: file })),
+    );
+
+    expect(cannotSpawn).toBeInstanceOf(AdapterFailed);
+    expect(cannotSpawn.message).toContain("permission denied");
+    expect(cannotPrepare).toBeInstanceOf(AdapterFailed);
+  });
+
+  it("fails with HarnessLoginMissing and stops the app-server when Codex has no account", async () => {
+    const { adapter, ctx, requests, spawns } = createDriving({
+      "account/read": () => LOGGED_OUT,
+    });
+
+    const refused = await Effect.runPromise(Effect.flip(adapter.startSession(SESSION, SPEC, ctx)));
+
+    expect(refused).toBeInstanceOf(HarnessLoginMissing);
+    expect(refused.message).toContain("not logged in");
+    // The app-server must not be left running for a session that never started.
+    expect(spawns).toHaveLength(1);
+    expect(spawns[0]?.kills()).toBe(1);
+    expect(listSentParams(requests, "thread/start")).toEqual([]);
+    expect(await Effect.runPromise(adapter.listSessions)).toEqual([]);
+  });
+
+  it("starts with an API key login, which Codex reports as an account", async () => {
+    const { adapter, ctx } = createDriving({ "account/read": () => API_KEY });
+
+    const binding = await Effect.runPromise(adapter.startSession(SESSION, SPEC, ctx));
+
+    expect(binding.nativeSessionId).toBe(THREAD);
+  });
+
+  it("starts without an account when Codex says its model provider needs no login", async () => {
+    const { adapter, ctx } = createDriving({
+      "account/read": () => ({ account: null, requiresOpenaiAuth: false }),
+    });
+
+    const binding = await Effect.runPromise(adapter.startSession(SESSION, SPEC, ctx));
+
+    expect(binding.nativeSessionId).toBe(THREAD);
+  });
+
+  it("fails with HarnessProtocolError when the app-server never answers account/read", async () => {
+    const { adapter, ctx, spawns } = createDriving({ "account/read": SILENT });
+
+    const refused = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const starting = yield* Effect.forkChild(
+            Effect.flip(adapter.startSession(SESSION, SPEC, ctx)),
+          );
+          yield* Effect.promise(() => settle());
+          yield* TestClock.adjust(RPC_DEADLINE);
+          return yield* Fiber.join(starting);
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    expect(refused).toBeInstanceOf(HarnessProtocolError);
+    expect(spawns[0]?.kills()).toBe(1);
   });
 });
 
@@ -794,7 +942,9 @@ describe("the thread a session gets", () => {
 
     const refused = await Effect.runPromise(Effect.flip(adapter.startSession(SESSION, SPEC, ctx)));
 
-    expect(refused).toContain("no rollout found");
+    // Server text is never matched to find a cause, so a refused open stays a plain failure.
+    expect(refused).toBeInstanceOf(AdapterFailed);
+    expect(refused.message).toContain("no rollout found");
     await settle();
     // No `session.started` for a session that never started: the supervisor
     // treats that event as meaning the session is live.
@@ -1147,6 +1297,39 @@ describe("what an input does to a Codex session", () => {
     expect(listSentParams(run.requests, "turn/start")).toHaveLength(2);
   });
 
+  it("fails with SessionNotRunning for a session this runner does not host", async () => {
+    const { adapter } = createDriving();
+
+    const refused = await Effect.runPromise(
+      Effect.flip(adapter.sendInput(SESSION, { text: "hi" })),
+    );
+
+    expect(refused).toBeInstanceOf(SessionNotRunning);
+  });
+
+  it("fails with HarnessProtocolError when Codex does not reply to turn/start in time", async () => {
+    const { adapter, ctx } = createDriving({ "turn/start": SILENT });
+    await Effect.runPromise(adapter.startSession(SESSION, SPEC, ctx));
+
+    const failure = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sending = yield* Effect.forkChild(
+            Effect.flip(adapter.sendInput(SESSION, { text: "hi" })),
+          );
+          yield* Effect.promise(() => settle());
+          yield* TestClock.adjust(RPC_DEADLINE);
+          return yield* Fiber.join(sending);
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    // Codex may have taken the input before the reply was lost.
+    expect(failure).toBeInstanceOf(HarnessProtocolError);
+    expect(failure.message).toContain("did not reply");
+  });
+
   it("fails and starts no turn when the steer fails with no error code", async () => {
     const run = await startBusySession({
       "turn/steer": () => ({ error: { message: "failed to steer turn: the thread is gone" } }),
@@ -1157,7 +1340,8 @@ describe("what an input does to a Codex session", () => {
     );
 
     // A new turn here could deliver the input a second time.
-    expect(failure).toBe("failed to steer turn: the thread is gone");
+    expect(failure).toBeInstanceOf(HarnessProtocolError);
+    expect(failure.message).toContain("failed to steer turn: the thread is gone");
     expect(listSentParams(run.requests, "turn/start")).toHaveLength(1);
   });
 
@@ -1533,7 +1717,8 @@ describe("a turn the server is too busy to start", () => {
       ),
     );
 
-    expect(refused).toContain("overloaded");
+    expect(refused).toBeInstanceOf(InputNotDelivered);
+    expect(refused.message).toContain("overloaded");
     // One attempt plus three retries, and no more.
     expect(listSentParams(requests, "turn/start")).toHaveLength(4);
   });
@@ -1548,10 +1733,44 @@ describe("a turn the server is too busy to start", () => {
       Effect.flip(adapter.sendInput(SESSION, { text: "hi" })),
     );
 
-    expect(refused).toContain("thread not found");
+    expect(refused).toBeInstanceOf(InputNotDelivered);
+    expect(refused.message).toContain("thread not found");
     // A request the server rejected for its content would just be rejected
     // three more times.
     expect(listSentParams(requests, "turn/start")).toHaveLength(1);
+  });
+
+  it("fails with HarnessProtocolError, not a defect, when turn/start succeeds with a reply that has no turn", async () => {
+    // The prompt may have been accepted, so the failure must say so by its type.
+    const { adapter, ctx } = createDriving({ "turn/start": () => ({}) });
+    await Effect.runPromise(adapter.startSession(SESSION, SPEC, ctx));
+
+    const failure = await Effect.runPromise(
+      Effect.flip(adapter.sendInput(SESSION, { text: "hi" })),
+    );
+
+    expect(failure).toBeInstanceOf(HarnessProtocolError);
+    expect(failure.message).toContain("turn/start");
+  });
+
+  it("fails with HarnessProtocolError, not a defect, when turn/steer succeeds with a reply that has no turn id", async () => {
+    const run = await startBusySession({ "turn/steer": () => ({}) });
+
+    const failure = await Effect.runPromise(
+      Effect.flip(run.adapter.sendInput(SESSION, { text: "carry on" })),
+    );
+
+    expect(failure).toBeInstanceOf(HarnessProtocolError);
+    expect(failure.message).toContain("turn/steer");
+  });
+
+  it("fails the start with HarnessProtocolError when thread/start succeeds with a reply that has no thread", async () => {
+    const { adapter, ctx } = createDriving({ "thread/start": () => ({}) });
+
+    const failure = await Effect.runPromise(Effect.flip(adapter.startSession(SESSION, SPEC, ctx)));
+
+    expect(failure).toBeInstanceOf(HarnessProtocolError);
+    expect(failure.message).toContain("thread/start");
   });
 });
 

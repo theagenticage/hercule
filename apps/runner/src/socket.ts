@@ -455,6 +455,7 @@ export const connect = (
     const supervisor = options.sessions.forConnection({
       scope: connection,
       send: (frame) => write(encodeFrameText(frame)),
+      runnerId: pin.runnerId,
       workspaceSteps: options.workspaceSteps,
       machine: {
         providersDir: options.providersDir,

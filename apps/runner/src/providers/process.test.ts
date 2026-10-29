@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
-import { killProcessesHolding, stopChild, type StopSignal } from "./process";
+import { isExecutableNotFound, killProcessesHolding, stopChild, type StopSignal } from "./process";
 
 const directory = mkdtempSync(join(tmpdir(), "hercule-process-"));
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
@@ -130,5 +130,48 @@ describe("stopping a child", () => {
     };
 
     await Effect.runPromise(stopChild(child, Duration.millis(30)));
+  });
+});
+
+describe("recognising a spawn of a missing executable", () => {
+  /** Returns what spawning `command` in `cwd` throws, and fails when it does not throw. */
+  const catchSpawnError = (command: string, cwd?: string): unknown => {
+    try {
+      Bun.spawn([command], cwd === undefined ? {} : { cwd });
+    } catch (error) {
+      return error;
+    }
+    throw new Error(`spawning ${command} did not fail`);
+  };
+
+  it("is true for the error Bun throws when the executable does not exist", () => {
+    const binary = join(directory, "no-such-harness");
+    const error = catchSpawnError(binary);
+    expect(isExecutableNotFound(error, { binary, cwd: null })).toBe(true);
+    expect(isExecutableNotFound(error, { binary, cwd: directory })).toBe(true);
+  });
+
+  it("is false when the spawn failed because its working directory is missing", () => {
+    // Bun throws the same ENOENT for a missing directory, even for a command that exists.
+    const cwd = join(directory, "no-such-directory");
+    const error = catchSpawnError("/bin/sh", cwd);
+    expect(isExecutableNotFound(error, { binary: "/bin/sh", cwd })).toBe(false);
+  });
+
+  it("is false when the executable exists but its interpreter does not", () => {
+    // A script with `#!/usr/bin/env node` on a PATH without node fails like this.
+    const script = join(directory, "script-without-interpreter");
+    writeFileSync(script, `#!${join(directory, "no-such-interpreter")}\n`, { mode: 0o755 });
+    const error = catchSpawnError(script);
+    expect(isExecutableNotFound(error, { binary: script, cwd: null })).toBe(false);
+  });
+
+  it("is false for an error with another code, and for a value that is not an error", () => {
+    const spawn = { binary: join(directory, "no-such-harness"), cwd: null };
+    expect(
+      isExecutableNotFound(Object.assign(new Error("denied"), { code: "EACCES" }), spawn),
+    ).toBe(false);
+    expect(isExecutableNotFound(new Error("boom"), spawn)).toBe(false);
+    expect(isExecutableNotFound("ENOENT", spawn)).toBe(false);
   });
 });

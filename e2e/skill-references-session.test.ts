@@ -114,7 +114,7 @@ const REMOTE_PREFIX = "https://hercule.test/acme/";
  */
 const STEER_REFUSALS: Partial<Record<string, string>> = {
   "claude-code":
-    "Not steered: Claude can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
+    "Not steered: Claude Code can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
   codex:
     "Not steered: Codex can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
 };

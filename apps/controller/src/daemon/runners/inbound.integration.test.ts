@@ -13,7 +13,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Duration } from "effect";
-import type { ExitReason, FrameCarryingInput } from "@hercule/protocol";
+import { AdapterFailed, type ExitReason, type FrameCarryingInput } from "@hercule/protocol";
 import type { Session } from "@hercule/contract";
 import {
   WAIT_DEADLINE_MS,
@@ -86,7 +86,7 @@ const holdQueuedMessage = async (
   const session = await startSession(arranged);
   reportTurnStarted(arranged, session.id, 2);
   await waitForSession(arranged, session.id, (one) => one.status === "busy");
-  arranged.wire.answering(() => ({ message: "no steering now" }));
+  arranged.wire.answering(() => ({ error: new AdapterFailed({ message: "no steering now" }) }));
   await sendMessage(arranged, session.conversationId!, "again");
   const queued = await waitUntil("put the refused steer back in the queue", async () => {
     const row = (await listInputs(arranged, session.id)).find((one) => one.text === "again");
@@ -254,7 +254,9 @@ describe("the crash-loop guard", () => {
       // The resumed process dies before it has started, so before any turn.
       // A runner whose start fails refuses the input the start carries, and
       // then reports the exit.
-      arranged.wire.answering(() => ({ message: "the harness crashed" }));
+      arranged.wire.answering(() => ({
+        error: new AdapterFailed({ message: "the harness crashed" }),
+      }));
       await reportExit(arranged, session.id, 3, "crash");
       await waitForStartFrames(arranged, session.id, 2);
       await waitUntil("put the refused start input back to waiting", async () => {

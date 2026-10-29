@@ -12,7 +12,9 @@ import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import type { Input, Run, Session } from "@hercule/contract";
 import {
+  AdapterFailed,
   buildWorkspaceActionCapability,
+  HarnessProtocolError,
   type ActionStepStart,
   type ControllerToRunner,
   type FrameCarryingInput,
@@ -435,7 +437,7 @@ const unloadSessionBeforePromptAnswered = async (
     _tag: "sessionInputResult",
     requestId: sent.requestId,
     ok: false,
-    message: "that session is not running",
+    error: new AdapterFailed({ message: "that session is not running" }),
   });
 };
 
@@ -770,7 +772,7 @@ describe("agent steps over the runner socket", () => {
             _tag: "sessionInputResult",
             requestId: sent.requestId,
             ok: false,
-            message: "that session is not running",
+            error: new AdapterFailed({ message: "that session is not running" }),
           });
 
           // The prompt goes back to waiting, and the session is resumed in
@@ -842,7 +844,7 @@ describe("agent steps over the runner socket", () => {
           _tag: "sessionInputResult",
           requestId: resumed.requestId,
           ok: false,
-          message: "that session is not running",
+          error: new AdapterFailed({ message: "that session is not running" }),
         });
         await waitUntil("put the refused prompt back to waiting", async () => {
           const prompt = (await listInputs(arranged, sessionId)).find(
@@ -967,8 +969,10 @@ describe("agent steps over the runner socket", () => {
             _tag: "sessionInputResult",
             requestId: sent.requestId,
             ok: false,
-            message:
-              "the step ended before its prompt reached the harness, so the prompt was not run",
+            error: new AdapterFailed({
+              message:
+                "the step ended before its prompt reached the harness, so the prompt was not run",
+            }),
           });
           await waitUntil("cancelled the refused prompt", async () =>
             (await listInputs(arranged, sessionId)).find((one) => one.status === "cancelled"),
@@ -1470,7 +1474,7 @@ describe("agent steps over the runner socket", () => {
             _tag: "sessionInputResult",
             requestId: sent.requestId,
             ok: false,
-            message: "the harness is not ready for input",
+            error: new AdapterFailed({ message: "the harness is not ready for input" }),
           });
           // The runner handles the request after the prompt it refused, and
           // ran no turn for that prompt, so it answers with `interrupted`.
@@ -1602,7 +1606,7 @@ describe("agent steps over the runner socket", () => {
           _tag: "sessionInputResult",
           requestId: sent.requestId,
           ok: false,
-          message: "that session is not running",
+          error: new AdapterFailed({ message: "that session is not running" }),
         });
 
         const ended = await waitForRunEnded(arranged, runId, "failed");
@@ -1621,6 +1625,53 @@ describe("agent steps over the runner socket", () => {
   );
 
   it(
+    "fails the step, and cancels its prompt, when the runner reports a protocol error for the prompt",
+    async () => {
+      await withAgentStepFleet(async (arranged) => {
+        const { wire } = arranged;
+        const player = createSessionPlayer();
+        // The runner holds the prompt without answering, then reports that
+        // its talk with the harness broke down. The harness may have taken
+        // the prompt, so it must not be sent again.
+        wire.answering(() => undefined);
+        const agentId = await createAgent(arranged.harness.base, arranged.token);
+        const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+          definition: buildImplementDefinition(agentId),
+        });
+        const key = buildStepKey(runId);
+        const sessionId = await waitForStepSessionId(arranged, key);
+        await waitForSessionStart(wire, sessionId);
+        player.reportStarted(wire, sessionId);
+        const sent = await waitForStepInput(wire, key);
+
+        wire.send({
+          _tag: "sessionInputResult",
+          requestId: sent.requestId,
+          ok: false,
+          error: new HarnessProtocolError({ message: "The harness did not answer in time." }),
+        });
+
+        const ended = await waitForRunEnded(arranged, runId, "failed");
+        expect(ended).toMatchObject({ failureReason: "session-failed", failedStepId: IMPLEMENT });
+        expect(findStepRecords(ended, IMPLEMENT)[0]).toMatchObject({
+          status: "failed",
+          error: {
+            code: "session_failed",
+            message:
+              "The step's prompt could not be sent to its session: The harness did not answer in time.",
+          },
+        });
+        expect((await listInputs(arranged, sessionId))[0]).toMatchObject({
+          status: "cancelled",
+          reason: "The harness did not answer in time.",
+        });
+        expect(countStepInputs([wire], key)).toBe(1);
+      });
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
     "sends a step's prompt again after the runner refused it, and runs the step's turn on the second send",
     async () => {
       await withAgentStepFleet(
@@ -1631,7 +1682,7 @@ describe("agent steps over the runner socket", () => {
           wire.answering(() => {
             if (refused) return "opened";
             refused = true;
-            return { message: "the harness is not ready for input" };
+            return { error: new AdapterFailed({ message: "the harness is not ready for input" }) };
           });
           const agentId = await createAgent(arranged.harness.base, arranged.token);
           const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {

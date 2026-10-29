@@ -707,6 +707,7 @@ export {
   type ThreadBlock,
   type WorkBlock,
 } from "./threads/blocks";
+export { MAX_UNBROKEN_CODE_WORD, splitCodeSpans } from "./threads/code-spans";
 export { applyThreadChoice, type ThreadChoice } from "./threads/thread-choice";
 export {
   resolveThreadConfig,
@@ -929,6 +930,7 @@ export {
 export {
   buildTurns,
   mayBeRunningTurn,
+  type RuntimeNote,
   type ThreadItem,
   type ThreadTurn,
   type ThreadUserMessage,

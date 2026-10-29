@@ -15,6 +15,7 @@ import { expect } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
+  type AdapterError,
   AGENT_STEPS_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
@@ -109,8 +110,8 @@ export const waitUntil = async <A>(
   throw new Error(`the controller never ${what}`);
 };
 
-/** A runner's answer to an input: a delivery, or a refusal with its message. */
-type Answer = Delivery | { readonly message: string };
+/** A runner's answer to an input: a delivery, or a refusal with the typed failure to report. */
+type Answer = Delivery | { readonly error: AdapterError };
 
 type Answered = Answer | undefined;
 
@@ -244,7 +245,12 @@ const dial = (
       writeMessage(
         typeof answer === "string"
           ? { _tag: "sessionInputResult", requestId: frame.requestId, ok: true, delivery: answer }
-          : { _tag: "sessionInputResult", requestId: frame.requestId, ok: false, ...answer },
+          : {
+              _tag: "sessionInputResult",
+              requestId: frame.requestId,
+              ok: false,
+              error: answer.error,
+            },
       );
     socket.onmessage = (event) => {
       const frame = decodeFrame(JSON.parse(String(event.data)) as unknown);

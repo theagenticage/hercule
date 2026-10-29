@@ -19,8 +19,8 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect } from "effect";
+import { AnswerNotDelivered } from "@hercule/protocol";
 import type { ApprovalDecision, ProviderEvent, QuestionAnswers } from "@hercule/protocol";
-import { AnswerNotDelivered } from "../answer-not-delivered";
 import {
   type Answered,
   startBusySession,

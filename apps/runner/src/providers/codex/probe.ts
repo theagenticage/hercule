@@ -11,6 +11,7 @@ import { CODEX_VERSION, VERSION } from "@hercule/home/version";
 import {
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
+  type AdapterError,
   type ModelDescriptor,
   type ModelOption,
   type ProbeResult,
@@ -60,6 +61,13 @@ export const initializeAppServer = (host: AppServer): Effect.Effect<InitializeRe
     host.rpc.notify("initialized");
     return answer as InitializeResponse;
   });
+
+/**
+ * Reads the account the app-server is logged in as. Fails with the
+ * app-server's error. Only valid after `initializeAppServer` succeeded.
+ */
+export const readAccount = (host: AppServer): Effect.Effect<GetAccountResponse, RpcError> =>
+  Effect.map(host.rpc.request("account/read", {}), (answer) => answer as GetAccountResponse);
 
 /**
  * Returns a message for a failed request. The app-server's own recent output
@@ -185,7 +193,12 @@ const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescript
  * its app-server differently would test a connection no session runs on.
  */
 export const makeProbe =
-  (openHost: (ctx: ProviderRunnerContext, binary: string) => Effect.Effect<AppServer, string>) =>
+  (
+    openHost: (
+      ctx: ProviderRunnerContext,
+      binary: string,
+    ) => Effect.Effect<AppServer, AdapterError>,
+  ) =>
   (ctx: ProviderRunnerContext, binary: string): Effect.Effect<ProbeResult> => {
     // A probe starts its own process and kills it when done. Sharing a
     // session's connection would keep an app-server alive for a Fleet page
@@ -197,27 +210,21 @@ export const makeProbe =
           onFailure: (error) =>
             Effect.succeed(buildFailedProbe(null, describeRpcError(host, error))),
           onSuccess: (initialized) =>
-            Effect.match(
-              Effect.all([
-                host.rpc.request("account/read", {}),
-                host.rpc.request("model/list", {}),
-              ]),
-              {
-                onFailure: (error) =>
-                  buildFailedProbe(
-                    parseVersion(initialized.userAgent),
-                    describeRpcError(host, error),
-                  ),
-                onSuccess: ([account, models]) => ({
-                  harnessVersion: parseVersion(initialized.userAgent),
-                  auth: buildAuth(account as GetAccountResponse),
-                  models: buildCatalog((models as ModelListResponse).data),
-                }),
-              },
-            ),
+            Effect.match(Effect.all([readAccount(host), host.rpc.request("model/list", {})]), {
+              onFailure: (error) =>
+                buildFailedProbe(
+                  parseVersion(initialized.userAgent),
+                  describeRpcError(host, error),
+                ),
+              onSuccess: ([account, models]) => ({
+                harnessVersion: parseVersion(initialized.userAgent),
+                auth: buildAuth(account),
+                models: buildCatalog((models as ModelListResponse).data),
+              }),
+            }),
         }),
       (host) => Effect.sync(() => host.kill()),
-    ).pipe(Effect.catch((message) => Effect.succeed(buildFailedProbe(null, message))));
+    ).pipe(Effect.catch((error) => Effect.succeed(buildFailedProbe(null, error.message))));
     return Effect.map(
       Effect.timeoutOption(gather, PROBE_DEADLINE),
       Option.getOrElse(() =>

@@ -429,7 +429,11 @@ export interface AppliedReport {
  *
  * - `delivered`: the delivery the runner reported;
  * - `notDelivered`: the reason the input went back to waiting, or was
- *   cancelled because its session exited or its step's run ended;
+ *   cancelled because the runner failed it, its session exited or its step's
+ *   run ended;
+ * - `steerDeferred`: the runner could not fold the input into the running
+ *   turn, and the input is waiting again, to run as the next turn. It is not
+ *   a failure, so the caller tells its own caller the input is queued;
  * - `unconfirmed`: the input is an agent step's prompt that got no answer,
  *   so it is marked `sent` and never sent again. `resultRequest` asks the
  *   runner how the step's turn ended; the caller tells it to the runner.
@@ -437,6 +441,7 @@ export interface AppliedReport {
 export type RecordedInputAnswer =
   | { readonly _tag: "delivered"; readonly delivery: Delivery }
   | { readonly _tag: "notDelivered"; readonly reason: string }
+  | { readonly _tag: "steerDeferred" }
   | { readonly _tag: "unconfirmed"; readonly resultRequest: AgentStepResultRequest };
 
 /** Returns a stored input as the API shows it: each image without the digest only a runner checks. */
@@ -538,9 +543,6 @@ const ALREADY_SENT = "that input has already been sent to the runner";
  */
 const FIRST_INPUT_NOT_CANCELLABLE =
   "this input is what the session starts with, so it cannot be cancelled; stop the session instead";
-
-/** The reason stored on an input the runner refused without giving one. */
-const REFUSED = "that session's runner rejected the input";
 
 /**
  * The reason stored on an input whose frame left the controller but got no
@@ -1447,9 +1449,37 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Cancels an input with `reason` that cannot be sent again, and tells
+   * `SessionObserver`: the step fails when the input is an agent step's
+   * prompt, and the conversation gets a notice when the session answers one.
+   * Part of `returnUndeliveredInput` and `failUndeliveredInput`. The row
+   * changes only while it still holds this send's claim (`row.sentAt`), and
+   * `SessionObserver` is told only when it changed: a concurrent path may
+   * have settled the input already (ordered ingestion marked it delivered, or
+   * the conversation's abandonment cancelled it), and a second notice or step
+   * failure for it would be false.
+   */
+  const cancelUndeliveredInput = (
+    row: StoredInput,
+    session: StoredSession,
+    reason: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      if (!(yield* inputs.cancelWithReason(row.id, row.sentAt, reason))) return;
+      yield* observer.inputsDropped({
+        session,
+        refusal: reason,
+        droppedStepIterations: row.stepIteration === null ? [] : [row.stepIteration],
+      });
+    });
+
+  /**
    * Puts an input the runner did not take back to waiting with `reason`, so
    * the next send of the session's input tries again. Part of
-   * `recordInputAnswer`. The input is cancelled instead in two cases:
+   * `recordInputAnswer`. Returns `true` when this call put the input back to
+   * waiting. Returns `false` when the input was cancelled instead (three
+   * cases below), or when a concurrent path had already settled it (marked it
+   * delivered, or cancelled it), so the row did not change. The three cases:
    *
    * - The input is an agent step's prompt and the step's run has ended. The
    *   run's end cancelled the step's prompts still waiting
@@ -1461,16 +1491,15 @@ const make = Effect.gen(function* () {
    * - The session exited in the meantime and does not keep its input
    *   through that exit. The rule is the same as for the inputs not yet sent
    *   when the session exited (`keepsInputsOnExit`, `keepsStepPromptOnExit`).
-   *   When the input is an agent step's prompt, `SessionObserver` is told,
-   *   and the step fails.
+   *   `SessionObserver` is told (`cancelUndeliveredInput`).
+   * - The input is a Discussion Input. It is always cancelled with `reason`,
+   *   never put back to waiting: the session is told again at the end of its
+   *   next turn.
    *
    * The session and its run are read inside this transaction, so the checks
    * cannot race the write that exits the session or ends the run. A step
    * prompt that goes back to waiting on an exited session resumes it, like
    * any kept input: the next delivery pass does that.
-   *
-   * A Discussion Input is always cancelled with `reason`, never put back to
-   * waiting: the session is told again at the end of its next turn.
    *
    * The caller must know the runner did not run the input: the runner
    * refused it, the frame never left the controller, or the input is an
@@ -1480,7 +1509,7 @@ const make = Effect.gen(function* () {
   const returnUndeliveredInput = (
     row: StoredInput,
     reason: string,
-  ): Effect.Effect<void, SqlError> =>
+  ): Effect.Effect<boolean, SqlError> =>
     withTransaction(
       sql,
       Effect.gen(function* () {
@@ -1490,6 +1519,7 @@ const make = Effect.gen(function* () {
           now.value.status === "exited" &&
           !keepsInputsOnExit(now.value) &&
           !keepsStepPromptOnExit(now.value);
+        let waiting = false;
         if (row.source === "discussion") {
           // Nothing was marked told for a Discussion Input that was not
           // delivered, so the next turn's end writes a new one with whatever
@@ -1502,16 +1532,45 @@ const make = Effect.gen(function* () {
         ) {
           yield* inputs.cancelWithReason(row.id, row.sentAt, STEP_RUN_ENDED);
         } else if (dropped) {
-          yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
-          if (row.stepIteration !== null) {
-            yield* observer.inputsDropped({
-              session: now.value,
-              refusal: reason,
-              droppedStepIterations: [row.stepIteration],
-            });
-          }
+          yield* cancelUndeliveredInput(row, now.value, reason);
         } else {
-          yield* inputs.requeue(row.id, row.sentAt, reason);
+          waiting = yield* inputs.requeue(row.id, row.sentAt, reason);
+        }
+        yield* announceSessionChangeById(row.sessionId);
+        return waiting;
+      }),
+    );
+
+  /**
+   * Cancels an input the runner failed, with `reason`, instead of putting it
+   * back to waiting. Part of `recordInputAnswer`, for a failure that sending
+   * the input again would not mend.
+   * `SessionObserver` is told (`cancelUndeliveredInput`): an agent step's
+   * prompt fails its step, and a conversation gets a notice with `reason`.
+   * Without it, the owner's message would vanish unexplained.
+   *
+   * Only this input is cancelled. The session's other waiting inputs stay, and
+   * the session's end, if the failure brings one, comes from the runner's
+   * exit. As in `returnUndeliveredInput`, `SessionObserver` is not told in two
+   * cases. A Discussion Input is cancelled with `reason`, because the
+   * controller wrote it and nobody sent it. A prompt whose step's run has
+   * ended is cancelled with `STEP_RUN_ENDED`, because the run's end already
+   * settled the step.
+   */
+  const failUndeliveredInput = (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        if (row.source === "discussion") {
+          yield* inputs.cancelWithReason(row.id, row.sentAt, reason);
+        } else if (
+          row.stepIteration !== null &&
+          (yield* sessions.belongsToEndedRun(row.sessionId))
+        ) {
+          yield* inputs.cancelWithReason(row.id, row.sentAt, STEP_RUN_ENDED);
+        } else {
+          const session = Option.getOrThrow(yield* sessions.one(row.sessionId));
+          yield* cancelUndeliveredInput(row, session, reason);
         }
         yield* announceSessionChangeById(row.sessionId);
       }),
@@ -2358,7 +2417,7 @@ const make = Effect.gen(function* () {
      * that the input cannot go to the runner.
      */
     refuseClaimedInput: (row: StoredInput, reason: string): Effect.Effect<void, SqlError> =>
-      returnUndeliveredInput(row, reason),
+      Effect.asVoid(returnUndeliveredInput(row, reason)),
 
     /**
      * Puts a session back on the queue when its start frame could not be
@@ -2678,15 +2737,19 @@ const make = Effect.gen(function* () {
           const session = found.value;
           if (session.status !== "exited") return;
           if (session.conversationId === null && session.runId === null) return;
-          const cancelled = yield* inputs.cancelQueued(
-            sessionId,
-            `the session could not be resumed: ${refusal}`,
-          );
+          const reason = `the session could not be resumed (${refusal})`;
+          const cancelled = yield* inputs.cancelQueued(sessionId, reason);
           if (cancelled.count === 0) return;
           yield* announceSessionChange(session);
           yield* observer.inputsDropped({
             session,
-            refusal,
+            // The hint is for the owner reading the conversation. A step's
+            // error shows the same text, and "send the message again" would
+            // mislead there.
+            refusal:
+              session.conversationId === null
+                ? reason
+                : `${reason}. Send the message again to start a new session.`,
             droppedStepIterations: cancelled.stepIterations,
           });
         }),
@@ -2829,9 +2892,15 @@ const make = Effect.gen(function* () {
      *   (`recordDelivery`), and `delivered` is returned.
      * - The runner refused the input, or the frame never left the controller
      *   because the runner had no connection: the runner cannot have run the
-     *   input. It goes back to waiting (`returnUndeliveredInput`), and
-     *   `notDelivered` is returned with the reason: the runner's own message,
-     *   a generic refusal when it gave none, or `NOT_SENT`.
+     *   input. The reason is the runner's own message, or `NOT_SENT`. What
+     *   happens next depends on the kind of failure the runner reported:
+     *   - Most failures put the input back to waiting
+     *     (`returnUndeliveredInput`), and `notDelivered` is returned.
+     *   - A refused steer also puts it back to waiting, but it is no
+     *     failure: `steerDeferred` is returned, and the input runs as the
+     *     next turn.
+     *   - A failure that sending the input again would not mend cancels the
+     *     input (`failUndeliveredInput`), and `notDelivered` is returned.
      * - The frame left but no answer came, because the connection ended or
      *   the wait ran out: whether the runner took the input is unknown. An
      *   ordinary input is handled as a refused one, with `NOT_DELIVERED`.
@@ -2886,13 +2955,50 @@ const make = Effect.gen(function* () {
           );
         }
         const answer = sent.answer.value;
-        if (answer.ok && answer.delivery !== undefined) {
+        if (answer.ok) {
           yield* recordDelivery(row, answer.delivery, runnerId);
           return { _tag: "delivered", delivery: answer.delivery } as const;
         }
-        const reason = answer.message ?? REFUSED;
-        yield* returnUndeliveredInput(row, reason);
-        return { _tag: "notDelivered", reason } as const;
+        const reason = answer.error.message;
+        // There is no default branch, so a new kind of failure does not
+        // compile until it is given a reaction here: a missing case leaves
+        // the function without a return value on that path.
+        //
+        // An input fails, instead of going back to waiting, in two cases:
+        //
+        // - The failure is about the session's setup (the harness is not
+        //   installed or not logged in, the transcript to resume is
+        //   missing). Sending the input again would fail the same way, and
+        //   the runner ends the session.
+        // - The failure leaves it unknown whether the harness took the input
+        //   (`HarnessProtocolError`), or the input asked for a model change
+        //   the harness refused (`ModelChangeRefused`). Sending the first
+        //   again could run it twice when the conversation resumes, and the
+        //   second would be refused again.
+        switch (answer.error._tag) {
+          case "SessionNotRunning":
+          case "InputNotDelivered":
+          case "SessionAlreadyRunning":
+          case "AdapterFailed":
+            yield* returnUndeliveredInput(row, reason);
+            return { _tag: "notDelivered", reason } as const;
+          case "SteerRefused":
+            // The refusal is no failure: the input runs as the next turn. But
+            // the input may have been cancelled instead of put back to
+            // waiting (a Discussion Input, or a session that has just exited
+            // for good), or settled by a concurrent path. Then it is not
+            // queued, and saying so would be wrong.
+            return (yield* returnUndeliveredInput(row, reason))
+              ? ({ _tag: "steerDeferred" } as const)
+              : ({ _tag: "notDelivered", reason } as const);
+          case "ModelChangeRefused":
+          case "HarnessNotInstalled":
+          case "HarnessLoginMissing":
+          case "ResumeTranscriptMissing":
+          case "HarnessProtocolError":
+            yield* failUndeliveredInput(row, reason);
+            return { _tag: "notDelivered", reason } as const;
+        }
       }),
 
     /**
@@ -2929,7 +3035,7 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
-          if (!result.ok || result.delivery === undefined) return;
+          if (!result.ok) return;
           const found = yield* inputs.read(result.requestId);
           if (Option.isNone(found) || found.value.sentAt === null) return;
           const row = found.value;

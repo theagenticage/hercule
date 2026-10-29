@@ -17,6 +17,7 @@ import {
   InstanceSecrets,
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
+  MAX_MESSAGE_LENGTH,
   Seq,
   Sequenced,
   StorageId,
@@ -60,6 +61,7 @@ import {
   WorkspaceStepSettle,
 } from "./workspace-steps";
 
+export * from "./adapter-errors";
 export * from "./attachments";
 export * from "./image-signatures";
 export * from "./identity-port";
@@ -76,6 +78,7 @@ export {
   InstanceId,
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
+  MAX_MESSAGE_LENGTH,
   Sequenced,
   StorageId,
   Subdirectory,
@@ -111,8 +114,12 @@ export {
  * - Version 9 added the `runtime.notice` event. An older controller could not
  *   decode it and would close the socket on it, again after every reconnect, so
  *   the two refuse each other at hello.
+ * - Version 10 replaced the `message` of a refused `SessionInputResult` with a
+ *   typed `error`. An older controller could not decode the refused result, and
+ *   an older runner sends a refusal the newer controller cannot read, so the
+ *   two refuse each other at hello.
  */
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 /**
  * The close code and reason the controller uses to end the connection of a

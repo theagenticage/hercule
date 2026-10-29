@@ -12,7 +12,9 @@
  *   it was steered from `detail.steered`, and the agent that sent it from
  *   `detail.senderSessionId`;
  * - the assistant's text is the turn's `assistant_text` deltas joined in
- *   transcript order.
+ *   transcript order;
+ * - a `runtime.error` or `runtime.warning` row becomes a runtime note, in the turn
+ *   it belongs to or, when it belongs to none, between the turns around it.
  */
 import { Schema } from "effect";
 import {
@@ -143,6 +145,28 @@ export const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
   };
 };
 
+/**
+ * A `runtime.error` or `runtime.warning` row: something went wrong around the
+ * work, such as a harness that is not installed. The message is shown as the
+ * runner wrote it, and may hold a command between backticks.
+ */
+export interface RuntimeNote {
+  /** Unique within one transcript: the row's position, with its severity. */
+  readonly key: string;
+  readonly severity: "error" | "warning";
+  readonly message: string;
+  readonly at: string;
+}
+
+/**
+ * A runtime note that belongs to no turn, such as the error of a session that
+ * failed to start: no turn ever began, so there is nothing to put it in.
+ */
+export interface OutsideRuntimeNote extends RuntimeNote {
+  /** How many turns began before the runtime note, so a screen places it between turns. */
+  readonly turnsBefore: number;
+}
+
 export interface ThreadTurn {
   readonly turnId: string;
   /** The messages sent into this turn, in transcript order: the one that opened it, then any steered in. */
@@ -156,6 +180,8 @@ export interface ThreadTurn {
    * stopped. `null` while no `turn.completed` has arrived, like `duration`.
    */
   readonly endState: TurnEndState | null;
+  /** The runtime notes that fell inside this turn, in transcript order. */
+  readonly runtimeNotes: readonly RuntimeNote[];
 }
 
 /** The verb shown for each item kind. It is one word per kind, never more detailed. */
@@ -361,6 +387,7 @@ interface Building {
   /** The decoded start detail of each running compaction, by item id (`StartedItem.compaction`). */
   startedCompactions: Map<string, ContextCompactionDetail>;
   assistantText: string;
+  runtimeNotes: RuntimeNote[];
   /**
    * The item of the last `assistant_text` delta, used to insert a paragraph
    * break when a new item starts.
@@ -384,14 +411,36 @@ export const mayBeRunningTurn = (status: SessionStatus): boolean =>
   status !== "exited" && status !== "queued";
 
 /**
- * Returns the turns of one agent's transcript, in the order they first
- * appear. `agent` is that agent's state: an item one of its open Requests is
- * about shows `awaiting approval`.
+ * Returns a `runtime.error` or `runtime.warning` row as a runtime note. A row with
+ * no message gets its error class as the message.
  */
-export const buildTurns = (
-  rows: readonly TranscriptRow[],
-  agent: AgentState,
-): readonly ThreadTurn[] => {
+const buildRuntimeNote = (
+  row: TranscriptRow,
+  event: Extract<ProviderEvent, { _tag: "runtime.error" | "runtime.warning" }>,
+): RuntimeNote => ({
+  key: `${event._tag}:${String(row.position)}`,
+  severity: event._tag === "runtime.error" ? "error" : "warning",
+  message: event._tag === "runtime.error" ? (event.message ?? event.class) : event.message,
+  at: event.at,
+});
+
+/** What `buildTurns` returns: the turns, and the runtime notes that fell outside all of them. */
+export interface ThreadTurns {
+  readonly turns: readonly ThreadTurn[];
+  readonly outsideRuntimeNotes: readonly OutsideRuntimeNote[];
+}
+
+/**
+ * Returns the turns of one agent's transcript, in the order they first
+ * appear, and the runtime notes that belong to no turn. `agent` is that agent's
+ * state: an item one of its open Requests is about shows `awaiting approval`.
+ *
+ * A runtime note belongs to the turn its row names. A runtime note with no turn id
+ * belongs to the turn that is open where its row sits: begun, and not yet
+ * completed, nor cut off by the session starting or exiting. With no such
+ * turn, it is an outside runtime note.
+ */
+export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): ThreadTurns => {
   const awaitingItemIds = new Set(agent.openRequests.map((request) => request.itemId));
   const turns = new Map<string, Building>();
 
@@ -408,23 +457,45 @@ export const buildTurns = (
       itemIndex: new Map(),
       startedCompactions: new Map(),
       assistantText: "",
+      runtimeNotes: [],
       lastAssistantItemId: null,
     };
     turns.set(turnId, made);
     return made;
   };
 
+  const outsideRuntimeNotes: OutsideRuntimeNote[] = [];
+  let openTurnId: string | null = null;
+
   for (const row of rows) {
     const event: ProviderEvent = row.event;
     switch (event._tag) {
       case "turn.started": {
         findOrStartTurn(event.turnId, event.at).startedAt = event.at;
+        openTurnId = event.turnId;
         break;
       }
       case "turn.completed": {
         const turn = findOrStartTurn(event.turnId, event.at);
         turn.completedAt = event.at;
         turn.endState = event.state;
+        openTurnId = null;
+        break;
+      }
+      case "session.started":
+      case "session.exited": {
+        openTurnId = null;
+        break;
+      }
+      case "runtime.error":
+      case "runtime.warning": {
+        const note = buildRuntimeNote(row, event);
+        const turnId = event.turnId ?? openTurnId;
+        if (turnId === null) {
+          outsideRuntimeNotes.push({ ...note, turnsBefore: turns.size });
+        } else {
+          findOrStartTurn(turnId, event.at).runtimeNotes.push(note);
+        }
         break;
       }
       case "item.started": {
@@ -469,7 +540,7 @@ export const buildTurns = (
     }
   }
 
-  return Array.from(turns.values()).map((turn) => ({
+  const builtTurns = Array.from(turns.values()).map((turn) => ({
     turnId: turn.turnId,
     userMessages: turn.userMessages,
     // Only a running item can be waiting for an open Request. An item the
@@ -485,5 +556,7 @@ export const buildTurns = (
     duration:
       turn.completedAt === null ? null : Date.parse(turn.completedAt) - Date.parse(turn.startedAt),
     endState: turn.endState,
+    runtimeNotes: turn.runtimeNotes,
   }));
+  return { turns: builtTurns, outsideRuntimeNotes };
 };

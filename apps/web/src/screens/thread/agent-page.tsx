@@ -13,7 +13,7 @@
  * assistant in its conversation. A step session's crumb links to the run
  * that started it. Spec 14 §The thread surface owns the layout.
  */
-import { useLayoutEffect, type JSX } from "react";
+import { Fragment, useLayoutEffect, type JSX } from "react";
 import { notFound } from "@tanstack/react-router";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
@@ -38,6 +38,7 @@ import { ConversationSessionNotice } from "./conversation-session-notice";
 import { QueuedInputs } from "./queued-inputs";
 import { SendingMessages } from "./sending-messages";
 import { RequestDock } from "./request-dock";
+import { RuntimeNoteLine } from "./runtime-note-line";
 import { AgentChrome } from "./thread-chrome";
 import { Turn } from "./turn";
 import { useAgentLive } from "./use-agent-live";
@@ -75,13 +76,19 @@ export function AgentPage({
     subagent === undefined
       ? buildSessionAgentState(session)
       : buildSubagentAgentState(subagent, session);
-  const turns = buildTurns(rows, agent);
+  const { turns, outsideRuntimeNotes } = buildTurns(rows, agent);
   // A subagent's page shows its brief in the brief card, so the turn that
   // opens with the brief leaves that opening message out.
   const brief = subagent === undefined ? undefined : findSubagentBrief(turns);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
   const tailRef = useAgentLive(live, queryClient, sessionId, subagentId, rows, followIfAtBottom);
   const lastIndex = turns.length - 1;
+  // A runtime note outside every turn, such as a start failure, sits between the
+  // turns around it: `turnsBefore` of them lie above it.
+  const drawRuntimeNotesAfter = (turnCount: number): JSX.Element[] =>
+    outsideRuntimeNotes
+      .filter((note) => note.turnsBefore === turnCount)
+      .map((note) => <RuntimeNoteLine key={note.key} note={note} />);
   // Turns started in the same minute share one time separator.
   const stamps = chooseStamps(
     turns.map((turn) => turn.startedAt),
@@ -140,26 +147,29 @@ export function AgentPage({
             // updated.
             const isLive = agent.mayBeRunningTurn && index === lastIndex && turn.duration === null;
             return (
-              <Turn
-                key={turn.turnId}
-                turn={turn}
-                spawnLines={
-                  <SpawnLines
-                    session={session}
-                    subagents={subagents}
-                    agentSubagentId={subagentId}
-                    turn={turn}
-                  />
-                }
-                live={isLive}
-                // The tap buffer holds one item's text at a time, so only the
-                // live last turn gets the live tail element.
-                tailRef={isLive ? tailRef : undefined}
-                stamp={stamps[index]}
-                hidesOpeningMessage={turn.turnId === brief?.turnId}
-              />
+              <Fragment key={turn.turnId}>
+                {drawRuntimeNotesAfter(index)}
+                <Turn
+                  turn={turn}
+                  spawnLines={
+                    <SpawnLines
+                      session={session}
+                      subagents={subagents}
+                      agentSubagentId={subagentId}
+                      turn={turn}
+                    />
+                  }
+                  live={isLive}
+                  // The tap buffer holds one item's text at a time, so only the
+                  // live last turn gets the live tail element.
+                  tailRef={isLive ? tailRef : undefined}
+                  stamp={stamps[index]}
+                  hidesOpeningMessage={turn.turnId === brief?.turnId}
+                />
+              </Fragment>
             );
           })}
+          {drawRuntimeNotesAfter(turns.length)}
           {subagent === undefined ? (
             <SendingMessages client={client} sessionId={sessionId} />
           ) : null}

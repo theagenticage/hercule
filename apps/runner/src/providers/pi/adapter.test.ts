@@ -7,12 +7,14 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
+import { AnswerNotDelivered } from "@hercule/protocol";
 import type { OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
-import { AnswerNotDelivered } from "../answer-not-delivered";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
+import { RPC_DEADLINE } from "./rpc";
 import {
   AGENT_FILE_VARIABLE,
   NO_AUTO_COMPACTION_VARIABLE,
@@ -185,12 +187,86 @@ describe("launching pi for a session", () => {
       Effect.flip(run.adapter.startSession(SESSION, spec, run.ctx)),
     );
 
-    expect(refused).toContain(PRIOR);
+    expect(refused).toMatchObject({
+      _tag: "ResumeTranscriptMissing",
+      message: expect.stringContaining("new thread") as unknown,
+    });
     expect(run.spawns).toEqual([]);
     // The start failed, and the supervisor reports a failed start. Emitting
     // an exit here too would report the same end twice.
     await settle();
     expect(filterByTag(run.seen, "session.exited")).toEqual([]);
+  });
+
+  it("fails with HarnessNotInstalled when the runner has no pi binary", async () => {
+    const run = createDriving();
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, { ...run.ctx, binary: undefined })),
+    );
+
+    expect(failed).toMatchObject({
+      _tag: "HarnessNotInstalled",
+      message: expect.stringContaining("not installed") as unknown,
+    });
+    expect(run.spawns).toEqual([]);
+  });
+
+  it("fails with HarnessNotInstalled when the system cannot find the pi binary to run", async () => {
+    const { seam } = buildFakePiSeam();
+    const missing = makePiAdapter({
+      ...seam,
+      spawn: () => {
+        throw Object.assign(new Error("ENOENT: no such file or directory, posix_spawn 'pi'"), {
+          code: "ENOENT",
+        });
+      },
+    });
+    const home = createPiHome();
+    const ctx = { ...buildContext(home), binary: join(home, "no-such-pi") };
+
+    const failed = await Effect.runPromise(Effect.flip(missing.startSession(SESSION, SPEC, ctx)));
+
+    expect(failed._tag).toBe("HarnessNotInstalled");
+  });
+
+  it("says pi is installed but cannot run when ENOENT comes for a binary that exists", async () => {
+    // A launcher script whose interpreter (node) is missing fails like this.
+    const { seam } = buildFakePiSeam();
+    const unrunnable = makePiAdapter({
+      ...seam,
+      spawn: () => {
+        throw Object.assign(new Error("ENOENT: no such file or directory, posix_spawn 'pi'"), {
+          code: "ENOENT",
+        });
+      },
+    });
+    const ctx = { ...buildContext(createPiHome()), binary: process.execPath };
+
+    const failed = await Effect.runPromise(
+      Effect.flip(unrunnable.startSession(SESSION, SPEC, ctx)),
+    );
+
+    expect(failed._tag).toBe("AdapterFailed");
+    expect(failed.message).toContain("installed");
+    expect(failed.message).toContain("PATH");
+  });
+
+  it("fails with AdapterFailed, not HarnessNotInstalled, when pi's folder cannot be prepared", async () => {
+    const run = createDriving();
+    // A file where the sessions directory should be makes `mkdir` fail with
+    // a file system error, while the pi binary is fine.
+    writeFileSync(join(run.ctx.home, "sessions"), "not a directory");
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, run.ctx)),
+    );
+
+    expect(failed).toMatchObject({
+      _tag: "AdapterFailed",
+      message: expect.stringContaining("prepare") as unknown,
+    });
+    expect(run.spawns).toEqual([]);
   });
 });
 
@@ -348,7 +424,7 @@ describe("sending an input to a pi session", () => {
       const pending = listSentCommands(run.sent, command)[0]!;
       run.child.push({ type: "response", command, id: pending["id"], success: true });
       if (command === "prompt") expect(await sending).toMatchObject({ delivery: "opened" });
-      else expect(await sending).toContain("stopped");
+      else expect(await sending).toMatchObject({ _tag: "InputNotDelivered" });
       expect(listSentCommands(run.sent, "prompt")).toHaveLength(command === "prompt" ? 1 : 0);
       expect(
         filterByTag(run.seen, "item.started").filter((event) => event.kind === "user_message"),
@@ -498,9 +574,75 @@ describe("sending an input to a pi session", () => {
       ),
     );
 
-    expect(refused).toContain("Model not found");
+    expect(refused).toMatchObject({
+      _tag: "ModelChangeRefused",
+      message: expect.stringContaining("Model not found") as unknown,
+    });
     // No prompt was sent after pi rejected the model change.
     expect(listSentCommands(run.sent, "prompt")).toEqual([]);
+  });
+
+  it("says pi did not acknowledge the model change in time, not that contact was lost", async () => {
+    const run = await startTestSession({ answers: { set_model: () => undefined } });
+
+    const failed = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sending = yield* Effect.forkChild(
+            Effect.flip(
+              run.adapter.sendInput(SESSION, {
+                text: "hello",
+                modelSelection: { model: "glm-9", options: {} },
+              }),
+            ),
+          );
+          yield* Effect.promise(() =>
+            waitUntil("sent set_model", () => listSentCommands(run.sent, "set_model").length === 1),
+          );
+          yield* TestClock.adjust(RPC_DEADLINE);
+          return yield* Fiber.join(sending);
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    expect(failed._tag).toBe("HarnessProtocolError");
+    expect(failed.message).toContain("did not acknowledge the model change");
+    expect(failed.message).not.toContain("lost contact");
+  });
+
+  it("fails with SessionNotRunning for a session this adapter does not host", async () => {
+    const run = createDriving();
+
+    const refused = await Effect.runPromise(
+      Effect.flip(run.adapter.sendInput(SESSION, { text: "hello" })),
+    );
+
+    expect(refused._tag).toBe("SessionNotRunning");
+  });
+
+  it("fails with InputNotDelivered when pi refuses the prompt, because pi did not take it", async () => {
+    const run = await startTestSession({ answers: { prompt: () => buildRefusal("busy") } });
+
+    const refused = await Effect.runPromise(
+      Effect.flip(run.adapter.sendInput(SESSION, { text: "hello" })),
+    );
+
+    expect(refused).toMatchObject({
+      _tag: "InputNotDelivered",
+      message: expect.stringContaining("busy") as unknown,
+    });
+  });
+
+  it("fails with HarnessProtocolError when pi exits before it answers the prompt", async () => {
+    const run = await startTestSession({ answers: { prompt: () => undefined } });
+    const sending = Effect.runPromise(Effect.flip(run.adapter.sendInput(SESSION, { text: "hi" })));
+    await waitUntil("received the prompt", () => listSentCommands(run.sent, "prompt").length === 1);
+
+    run.child.crash("pi: out of memory");
+
+    // The prompt may have reached pi before it died, so it is not "not delivered".
+    expect(await sending).toMatchObject({ _tag: "HarnessProtocolError" });
   });
 
   it("sends a prompt, not a steer, after pi rejected the previous prompt", async () => {
@@ -640,7 +782,7 @@ describe("stopping a session", () => {
     );
     await stopping;
 
-    expect(refused).toContain("still running");
+    expect(refused._tag).toBe("SessionAlreadyRunning");
     // The turn ends with the session: a turn left open would make the thread
     // look busy forever.
     expect(filterByTag(run.seen, "turn.completed")[0]?.state).toBe("interrupted");
@@ -824,7 +966,10 @@ describe("launching pi for a session with an Agent", () => {
       Effect.flip(refusing.startSession(SESSION, STRUCTURED, ctx)),
     );
 
-    expect(failed).toContain("permission denied");
+    expect(failed).toMatchObject({
+      _tag: "AdapterFailed",
+      message: expect.stringContaining("permission denied") as unknown,
+    });
     // No session was opened, so no session end will ever delete the file.
     expect(existsSync(join(ctx.home, `system-prompt-${SESSION}.txt`))).toBe(false);
   });

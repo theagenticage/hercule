@@ -443,7 +443,7 @@ describe("conversation.send when the current session cannot be resumed", () => {
     });
   });
 
-  it("cancels a message held through an idle unload when the session cannot be resumed, and writes that the assistant can't be reached", async () => {
+  it("cancels a message held through an idle unload when the session cannot be resumed, and writes that there was a problem delivering the message", async () => {
     await withAgentFleet(
       async (arranged) => {
         const { conversation } = await readDefaultConversation(arranged);
@@ -475,9 +475,9 @@ describe("conversation.send when the current session cannot be resumed", () => {
         expect(notice).toMatchObject({
           senderLabel: "Hercule",
           text:
-            "Hercule can't be reached: its session could not be resumed " +
-            "(that runner is draining and takes no new sessions); " +
-            "send the message again to start a new session",
+            "There was a problem delivering your message to Hercule: the session could not be resumed " +
+            "(that runner is draining and takes no new sessions). " +
+            "Send the message again to start a new session.",
           sessionId: session.id,
           actor: "system",
         });
@@ -485,7 +485,7 @@ describe("conversation.send when the current session cannot be resumed", () => {
         expect(held).toMatchObject({
           status: "cancelled",
           reason:
-            "the session could not be resumed: that runner is draining and takes no new sessions",
+            "the session could not be resumed (that runner is draining and takes no new sessions)",
         });
         expect((await readSession(arranged, session.id)).status).toBe("exited");
         // The session is only checked for a resume once the send gives up on

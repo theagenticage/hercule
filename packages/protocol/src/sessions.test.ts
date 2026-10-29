@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
+import { AdapterError } from "./adapter-errors";
+import { MAX_MESSAGE_LENGTH } from "./primitives";
 import {
   EditedFile,
   GithubTokenAnswer,
   GithubTokenRequest,
   MAX_ANSWERS_LENGTH,
   isAsyncQuestion,
-  MAX_MESSAGE_LENGTH,
   ContextCompactionDetail,
   ProviderEvent,
   SessionBinding,
+  SessionInputResult,
   SessionInterrupt,
   SessionRespondToQuestion,
   SessionRespondToQuestionResult,
@@ -673,6 +675,41 @@ describe("what the controller sends for a session", () => {
         instanceId: "../../etc",
       })._tag,
     ).toBe("Failure");
+  });
+});
+
+describe("the result of one input", () => {
+  const delivered = { _tag: "sessionInputResult", requestId: "r-1", ok: true, delivery: "opened" };
+  const refused = (tag: string) => ({
+    _tag: "sessionInputResult",
+    requestId: "r-1",
+    ok: false,
+    error: { _tag: tag, message: "Claude Code is not installed on this runner." },
+  });
+  const decodeResult = (frame: unknown) =>
+    Effect.runSyncExit(Schema.decodeUnknownEffect(SessionInputResult)(frame));
+
+  it("round-trips a delivered input with its delivery", () => {
+    const decoded = Effect.runSync(Schema.decodeUnknownEffect(SessionInputResult)(delivered));
+    expect(Effect.runSync(Schema.encodeEffect(SessionInputResult)(decoded))).toEqual(delivered);
+  });
+
+  // Derived from the union, so a new AdapterError class is covered without editing this list.
+  it.each(AdapterError.members.map((member) => member.fields._tag.schema.literal))(
+    "round-trips a refused input whose error is %s",
+    (tag) => {
+      const frame = refused(tag);
+      const decoded = Effect.runSync(Schema.decodeUnknownEffect(SessionInputResult)(frame));
+      expect(Effect.runSync(Schema.encodeEffect(SessionInputResult)(decoded))).toEqual(frame);
+    },
+  );
+
+  it("does not decode a refused input whose error is AnswerNotDelivered", () => {
+    expect(decodeResult(refused("AnswerNotDelivered"))._tag).toBe("Failure");
+  });
+
+  it("does not decode a delivered input without its delivery", () => {
+    expect(decodeResult(omitKey(delivered, "delivery"))._tag).toBe("Failure");
   });
 });
 

@@ -9,6 +9,7 @@
  */
 import { Schema } from "effect";
 
+import { AdapterError } from "./adapter-errors";
 import { AttachmentReference } from "./attachments";
 import { OutputSchema } from "./output-schema";
 import { MAX_SKILLS, LibrarySkillRevision } from "./skills";
@@ -18,6 +19,8 @@ import {
   InstanceSecrets,
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
+  MAX_MESSAGE_LENGTH,
+  Message,
   Sequenced,
   SessionId,
   Timestamp,
@@ -37,15 +40,6 @@ export const AccessMode = Schema.Literals([
 ]);
 
 export type AccessMode = Schema.Schema.Type<typeof AccessMode>;
-
-/**
- * The longest piece of free text a harness may put in an event. A `Fact` is too
- * short: an error body or a stack trace over 512 bytes would make the frame
- * undecodable, which would cost the runner its socket and every session on it.
- */
-export const MAX_MESSAGE_LENGTH = 4096;
-
-const Message = Schema.String.check(Schema.isMaxLength(MAX_MESSAGE_LENGTH));
 
 /**
  * A duration on the wire, in milliseconds. The controller converts
@@ -838,8 +832,11 @@ const RuntimeNotice = defineEvent("runtime.notice", {
 
 /**
  * `class` is the only open vocabulary here. Adapters map into Codex's
- * `codexErrorInfo` enum as the reference set, with `unknown` for the rest. It
- * stays a string, so a class this build does not know still reaches the user.
+ * `codexErrorInfo` enum as the reference set, with `unknown` for the rest. A
+ * refused input or a failed start is reported with `class` set to the
+ * `AdapterError` tag (PascalCase, such as `HarnessNotInstalled`), next to the
+ * vendor classes, which are snake_case. It stays a string, so a class this
+ * build does not know still reaches the user.
  */
 const RuntimeError = defineEvent("runtime.error", {
   ...attribution,
@@ -1138,8 +1135,8 @@ export const SessionRespondToQuestionResult = Schema.Union([
     answerId: Fact,
     ok: Schema.Literal(false),
     /**
-     * Written for the user: says why the answer did not reach the agent, or
-     * that it is not known whether it did.
+     * Written for the user: gives the reason the answer did not reach the agent,
+     * or states that it is not known whether it did.
      */
     message: Message,
   }),
@@ -1154,14 +1151,21 @@ export type SessionRespondToQuestionResult = Schema.Schema.Type<
  * id: the controller learns the turn from `turn.started`, and a field nothing
  * reads would sooner or later be wrong.
  */
-export const SessionInputResult = Schema.Struct({
-  _tag: Schema.Literal("sessionInputResult"),
-  requestId: Fact,
-  ok: Schema.Boolean,
-  delivery: Schema.optionalKey(Delivery),
-  /** Why it was not delivered, so the caller gets a reason rather than only a flag. */
-  message: Schema.optionalKey(Message),
-});
+export const SessionInputResult = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal("sessionInputResult"),
+    requestId: Fact,
+    ok: Schema.Literal(true),
+    delivery: Delivery,
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("sessionInputResult"),
+    requestId: Fact,
+    ok: Schema.Literal(false),
+    /** Why it was not delivered. The controller reads its `_tag` to decide what happens to the input. */
+    error: AdapterError,
+  }),
+]);
 
 export type SessionInputResult = Schema.Schema.Type<typeof SessionInputResult>;
 

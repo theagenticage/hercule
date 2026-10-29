@@ -201,12 +201,12 @@ describe("Transcript", () => {
   });
 
   it("draws a runtime error as a note named Error, with the runner's text", () => {
-    const message = "Could not load skill `review`. The Thread did not start.";
+    const message = "Could not load skill review. The Thread did not start.";
     const rows = [
       ...THREAD.transcript,
       ...buildNextRows(THREAD.session.id, THREAD.transcript, {
         _tag: "runtime.error",
-        class: "unknown",
+        class: "HarnessNotInstalled",
         message,
       }),
     ];
@@ -253,5 +253,82 @@ describe("Transcript", () => {
     const note = container.querySelector(".runtime-notice-note")!;
     expect(within(note as HTMLElement).getByRole("img", { name: "Notice" })).toBeDefined();
     expect(note.querySelector("p")?.firstChild?.textContent).toBe(message);
+  });
+
+  /** Renders the thread with one more runtime error row, and returns what render returns. */
+  const renderWithRuntimeError = (message: string, errorClass: string) => {
+    const rows = [
+      ...THREAD.transcript,
+      ...buildNextRows(THREAD.session.id, THREAD.transcript, {
+        _tag: "runtime.error",
+        class: errorClass,
+        message,
+      }),
+    ];
+    return render(
+      <Transcript
+        sessionId={THREAD.session.id}
+        faceSeed={THREAD.session.id}
+        blocks={buildThreadBlocks(rows, buildSessionAgentState(THREAD.session))}
+        pose="working"
+        describeAgent={() => "Claude Code · Claude Sonnet 5"}
+        attachOpenParagraph={() => undefined}
+        composerStack={null}
+        onBottomChange={() => {}}
+      />,
+    );
+  };
+
+  it("draws a backtick span of a runtime notice as inline code too", () => {
+    const rows = [
+      ...THREAD.transcript,
+      ...buildNextRows(THREAD.session.id, THREAD.transcript, {
+        _tag: "runtime.notice",
+        message: "Run `claude --resume` to continue.",
+      }),
+    ];
+    const { container } = render(
+      <Transcript
+        sessionId={THREAD.session.id}
+        faceSeed={THREAD.session.id}
+        blocks={buildThreadBlocks(rows, buildSessionAgentState(THREAD.session))}
+        pose="working"
+        describeAgent={() => "Claude Code · Claude Sonnet 5"}
+        attachOpenParagraph={() => undefined}
+        composerStack={null}
+        onBottomChange={() => {}}
+      />,
+    );
+
+    const code = container.querySelector(".runtime-notice-note code")!;
+    expect(code.textContent).toBe("claude --resume");
+    expect([...code.querySelectorAll(".code-word")].map((word) => word.textContent)).toEqual([
+      "claude",
+      "--resume",
+    ]);
+  });
+
+  it("draws the command a runtime error ends with as inline code", () => {
+    const command =
+      "hercule runner install-harness 01a1f00d-0000-7000-8000-000000000001 --provider claude-code";
+    const { container } = renderWithRuntimeError(
+      `Claude Code is not installed on this runner. Install it with: \`${command}\``,
+      "HarnessNotInstalled",
+    );
+
+    const code = container.querySelector(".error-note code")!;
+    expect(code.textContent).toBe(command);
+    expect(container.querySelector(".error-note p")?.textContent).not.toContain("`");
+  });
+
+  it("keeps the words of a command whole, except a word too long to always fit a line", () => {
+    const path = `/home/${"very-long-directory-name-".repeat(7)}file.ts`;
+    const { container } = renderWithRuntimeError(`Could not read \`cat ${path}\`.`, "unknown");
+
+    const code = container.querySelector(".error-note code")!;
+    expect(code.textContent).toBe(`cat ${path}`);
+    expect([...code.querySelectorAll(".code-word")].map((word) => word.textContent)).toEqual([
+      "cat",
+    ]);
   });
 });

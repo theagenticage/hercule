@@ -5,6 +5,8 @@ import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
 import type * as Stream from "effect/Stream";
 import type {
+  AdapterError,
+  AnswerNotDelivered,
   ApprovalDecision,
   ExitReason,
   ProbeResult,
@@ -27,8 +29,6 @@ import { CODEX, codex } from "./codex";
 import { PI, pi } from "./pi";
 import { makeLogins, type LoginCommand } from "./login";
 import { spawnLogin } from "./process";
-import type { AnswerNotDelivered } from "./answer-not-delivered";
-import type { SteerRefused } from "./steer-refused";
 
 export interface ProviderRunnerContext {
   /**
@@ -292,12 +292,17 @@ export interface ProviderAdapter {
    * no init message until the first turn, so waiting for the id there would
    * block until somebody sent input. The Claude adapter picks the native
    * session id itself instead.
+   *
+   * Fails with an `AdapterError` whose tag and message give the reason the
+   * session did not start (for example `HarnessNotInstalled` or
+   * `ResumeTranscriptMissing`).
+   * `AdapterFailed` covers every cause that has no tag of its own.
    */
   readonly startSession: (
     sessionId: string,
     spec: SessionSpec,
     ctx: ProviderRunnerContext,
-  ) => Effect.Effect<SessionBinding, string>;
+  ) => Effect.Effect<SessionBinding, AdapterError>;
 
   /**
    * Opens a turn on an idle session or steers the running turn of a busy one,
@@ -307,13 +312,20 @@ export interface ProviderAdapter {
    * An adapter does not turn input away because the session is busy. The one
    * exception is an input its harness cannot take into a running turn but
    * would run as the next one: the adapter then fails with `SteerRefused`
-   * before it changes anything, and the input waits in the queue. Any other
-   * failure is a plain message and means the input failed.
+   * before it changes anything, and the input waits in the queue.
+   *
+   * Every other failure is an `AdapterError` too, and means the input failed.
+   * The tag tells which of three cases it is:
+   *
+   * - the harness certainly did not take the input (`InputNotDelivered`,
+   *   `SessionNotRunning`);
+   * - it is unknown whether the harness took the input (`HarnessProtocolError`);
+   * - neither of those (`AdapterFailed`).
    */
   readonly sendInput: (
     sessionId: string,
     input: AdapterTurnInput,
-  ) => Effect.Effect<SendResult, string | SteerRefused>;
+  ) => Effect.Effect<SendResult, AdapterError>;
 
   /**
    * Stops work in a session. The only report is each stopped turn completing
@@ -396,10 +408,12 @@ export const findAdapter = (providerId: string): ProviderAdapter | undefined =>
 export const providerLogins = makeLogins(spawnLogin);
 
 export { PROBE_DEADLINE, buildFailedProbe } from "./probe";
-export type { AnswerNotDelivered } from "./answer-not-delivered";
-export type { SteerRefused } from "./steer-refused";
 
 export { CLAUDE_CODE, CODEX, PI };
 
+/**
+ * Returns the message for a provider that this runner has no adapter for,
+ * which happens when the controller knows a provider that this runner build does not.
+ */
 export const describeMissingAdapter = (providerId: string): string =>
-  `no adapter for ${providerId} in this runner build`;
+  `This runner does not support the provider "${providerId}". Update the runner, or run the session on another runner.`;

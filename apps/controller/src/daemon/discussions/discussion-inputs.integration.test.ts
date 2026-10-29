@@ -24,7 +24,12 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { SessionInput, SessionInterrupt } from "@hercule/protocol";
+import {
+  AdapterFailed,
+  SteerRefused,
+  type SessionInput,
+  type SessionInterrupt,
+} from "@hercule/protocol";
 import type { DiscussionCreated, Grant, Input, Post, SessionInputOutcome } from "@hercule/contract";
 import { readDefaultConversation, startConversationSession } from "../../conversations/testing";
 import { mintUuid, uuidFromString, withTransaction } from "../../db";
@@ -210,7 +215,7 @@ describe("a Discussion Input at a turn's end", () => {
     await withAgentFleet(async (arranged) => {
       const [first, second] = await spawnPair(arranged);
       await arrangeNewPost(arranged, first, second);
-      arranged.wire.answering(() => ({ message: "not now" }));
+      arranged.wire.answering(() => ({ error: new AdapterFailed({ message: "not now" }) }));
 
       await endTurn(arranged, first.session.id, 2);
       const [refused] = await waitForSettledDiscussionInputs(arranged, first.session.id, 1);
@@ -270,7 +275,7 @@ describe("a Discussion Input at a turn's end", () => {
       await arrangeNewPost(arranged, first, second);
       // A refused input goes back to waiting, and the session stays idle
       // with nothing on the wire. No delivery tick runs to send it again.
-      arranged.wire.answering(() => ({ message: "not now" }));
+      arranged.wire.answering(() => ({ error: new AdapterFailed({ message: "not now" }) }));
       const typed = await post(
         arranged.harness.base,
         `/api/v1/sessions/${first.session.id}/input`,
@@ -315,6 +320,27 @@ describe("an entry", () => {
       await endTurn(arranged, first.session.id, 2);
       await tell(arranged, first.session.id, "turnEnd");
       expect(await listDiscussionInputs(arranged, first.session.id)).toHaveLength(1);
+    });
+  });
+
+  it("is not marked told when the runner refuses the steer, and the turn's end tells the session again", async () => {
+    await withAgentFleet(async (arranged) => {
+      const [first, second] = await spawnPair(arranged);
+      await arrangeEntry(arranged, first.session.id, second.session.id);
+      arranged.wire.answering(() => ({
+        error: new SteerRefused({ message: "The harness cannot take this mid-turn." }),
+      }));
+
+      await tell(arranged, first.session.id, "entry");
+
+      // A refused steer puts an ordinary input back to waiting, but a
+      // Discussion Input is cancelled, so the session was not told.
+      const [refused] = await listDiscussionInputs(arranged, first.session.id);
+      expect(refused).toMatchObject({ status: "cancelled", sentAt: null });
+      arranged.wire.answering(() => "opened");
+      reportTurnCompleted(arranged, first.session.id, 2);
+      const told = await waitForSettledDiscussionInputs(arranged, first.session.id, 2);
+      expect(told[1]).toMatchObject({ status: "delivered", delivery: "opened" });
     });
   });
 
