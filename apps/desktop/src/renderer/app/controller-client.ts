@@ -49,10 +49,8 @@ const BODY_SILENCE_MS = 5000;
  * report a failure for a message that still arrives, and a user who sent it
  * again would send it twice.
  *
- * The limit applies to every message, not only to one with images: telling
- * them apart would mean parsing the request's body here, in the fetch
- * wrapper. A message without images loses nothing by it, because a working
- * controller still answers it within 10 seconds.
+ * The limit applies to every message, not only to one with images, because
+ * telling them apart would mean parsing the request's body here.
  */
 const RUNNER_WAIT_HEADER_WAIT_MS = MAX_INPUT_ANSWER_WAIT_MS + 5000;
 
@@ -148,13 +146,10 @@ const formatSeconds = (ms: number): string => `${String(Math.round(ms / 1000))} 
  * app 5 seconds after every request.
  *
  * The silence is measured where the body passes to the client, so a client
- * that stops reading looks like a controller that stops sending. One answer
- * does that. For a status the contract does not declare, the client fails
- * without reading or cancelling the body, and nothing tells this function
- * that the body is no longer wanted. The timer then fires after
- * BODY_SILENCE_MS and aborts the request, which closes the connection. That
- * costs one wakeup, and the connection stays open for up to 5 seconds after
- * such an answer.
+ * that stops reading looks like a controller that stops sending. The client
+ * does that only for a status the contract does not declare: it fails without
+ * reading the body, and the timer then aborts the request after
+ * BODY_SILENCE_MS, which closes the connection.
  */
 export const fetchWithTimeout: FetchLike = async (url, init) => {
   const timeout = new AbortController();
@@ -203,7 +198,13 @@ export const fetchWithTimeout: FetchLike = async (url, init) => {
       controller.enqueue(chunk);
     },
   });
-  response.body.pipeTo(writable).then(stopTimer, stopTimer);
+  // When the timer aborts the request, Chromium fails the body with a plain
+  // "Failed to fetch", which does not say why. So a failure after the timer
+  // fired is passed on with the timer's reason instead.
+  response.body.pipeTo(writable, { preventAbort: true }).then(stopTimer, (error: unknown) => {
+    stopTimer();
+    writable.abort(timeout.signal.aborted ? timeout.signal.reason : error).catch(() => {});
+  });
   return new Response(readable, {
     status: response.status,
     statusText: response.statusText,
