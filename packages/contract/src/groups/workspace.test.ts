@@ -72,15 +72,13 @@ describe("a checkout as the API returns it", () => {
       form: "clone",
       subdirectory: null,
       branch: null,
-      branches: [],
       defaultBranch: null,
       baseBranch: null,
-      remoteBranches: [],
       headCommit: null,
       baseCommit: null,
       startingRevision: null,
     } as const;
-    expect(Schema.encodeSync(Checkout)(checkout)).toMatchObject({ branch: null, branches: [] });
+    expect(Schema.encodeSync(Checkout)(checkout)).toMatchObject({ branch: null });
   });
 
   /**
@@ -96,10 +94,8 @@ describe("a checkout as the API returns it", () => {
         form: "worktree",
         subdirectory: null,
         branch: ".hidden",
-        branches: [".hidden"],
         defaultBranch: null,
         baseBranch: null,
-        remoteBranches: [],
         headCommit: null,
         baseCommit: null,
         startingRevision: null,

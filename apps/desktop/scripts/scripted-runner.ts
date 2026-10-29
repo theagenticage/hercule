@@ -53,6 +53,7 @@ import { pollUntil } from "./poll.ts";
 import type {
   ATTACHMENTS_CAPABILITY,
   AttachmentReference,
+  BRANCH_LIST_CAPABILITY,
   ControllerToRunner,
   ExitReason,
   ItemKind,
@@ -82,6 +83,9 @@ import type {
 
 /** The most sessions a runner may list in one report, as the protocol allows. */
 const MAX_REPORTED_SESSIONS = 256;
+
+/** The branches every main workspace of this runner lists, newest first. */
+const SCRIPTED_BRANCHES: ReadonlyArray<string> = ["main", "fix/login-redirect", "release/1.4"];
 
 /**
  * A Mac with Claude Code installed. The fleet places threads on the Claude
@@ -1137,7 +1141,6 @@ export async function enlistScriptedRunner(
           checkouts: frame.checkouts.map((checkout) => ({
             checkoutId: checkout.checkoutId,
             branch: checkout.branch ?? "main",
-            branches: checkout.branch === null ? ["main"] : ["main", checkout.branch],
             defaultBranch: "main",
             form: "worktree",
           })),
@@ -1164,6 +1167,24 @@ export async function enlistScriptedRunner(
           requestId: frame.requestId,
           outcome: { status: "listed", skills: skills.repository, skipped: [], truncated: false },
         });
+      case "branchListRequest": {
+        // Filtered and cut the way a real runner does, so a search in the
+        // branch menu behaves the same against this runner.
+        const matching = SCRIPTED_BRANCHES.filter((name) =>
+          name.toLowerCase().includes(frame.text.toLowerCase()),
+        );
+        return send({
+          _tag: "branchListReport",
+          requestId: frame.requestId,
+          workspaceId: frame.workspaceId,
+          outcome: {
+            status: "listed",
+            local: matching.slice(0, frame.maxBranches),
+            remote: matching.slice(0, frame.maxBranches),
+            more: matching.length > frame.maxBranches,
+          },
+        });
+      }
       case "workspaceDispose":
       case "workspaceDetach": {
         const report: WorkspaceReport = {
@@ -1296,6 +1317,7 @@ export async function enlistScriptedRunner(
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,
               "skills" satisfies typeof SKILLS_CAPABILITY,
               "repositorySkills" satisfies typeof REPOSITORY_SKILLS_CAPABILITY,
+              "branchList" satisfies typeof BRANCH_LIST_CAPABILITY,
             ],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),

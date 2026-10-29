@@ -116,19 +116,6 @@ export const readCurrentBranch = (dir: string, env: GitEnv): Effect.Effect<strin
     return shown.stdout;
   });
 
-/** Returns the local branches of a working copy: the branches the user can switch to. */
-export const listLocalBranches = (
-  dir: string,
-  env: GitEnv,
-): Effect.Effect<ReadonlyArray<string>, Error> =>
-  Effect.gen(function* () {
-    const listed = yield* runGit(
-      ["-C", dir, "for-each-ref", "--format=%(refname:short)", "refs/heads"],
-      { env },
-    );
-    return listed.stdout.split("\n").filter((line) => line.length > 0);
-  });
-
 /** Returns the branch `origin/HEAD` points at, or null if it is not set. */
 export const readDefaultBranch = (
   dir: string,

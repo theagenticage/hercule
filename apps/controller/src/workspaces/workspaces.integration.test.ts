@@ -298,7 +298,9 @@ describe("the runner's workspace report", () => {
       await waitForWorkspace(arranged, workspace.id, (one) => one.status === "ready");
 
       // The report the runner sends after a session in the workspace: the
-      // agent created a branch and left the checkout on it.
+      // agent created a branch and left the checkout on it. The branch list
+      // is what a runner older than the live branch list sends; the
+      // controller ignores it.
       arranged.wire.send({
         _tag: "workspaceReport",
         workspaceId: workspace.id,
@@ -319,10 +321,6 @@ describe("the runner's workspace report", () => {
         (one) => one.checkouts[0]?.branch === "feature/what-the-agent-did",
       );
       expect(after.status).toBe("ready");
-      expect([...(after.checkouts[0]?.branches ?? [])].sort()).toEqual([
-        "feature/what-the-agent-did",
-        "main",
-      ]);
     });
   });
 
@@ -382,7 +380,6 @@ describe("the runner's workspace report", () => {
       expect(after.status).toBe("deleted");
       // Still the branch it was opened with, not the one in the stale report.
       expect(after.checkouts[0]?.branch).toBe(opened.branch);
-      expect(after.checkouts[0]?.branches ?? []).toEqual([]);
     });
   });
 
@@ -426,7 +423,7 @@ describe("the runner's workspace report", () => {
     });
   });
 
-  it("moves a provisioning primary to ready and stores each checkout's branches", async () => {
+  it("moves a provisioning primary to ready and stores each checkout's branch facts", async () => {
     await withWorkspaces(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web");
       const workspace = await provisionWorkspaceOrFail(arranged, {
@@ -444,7 +441,7 @@ describe("the runner's workspace report", () => {
           {
             checkoutId,
             branch: "feature/x",
-            branches: ["main", "feature/x"],
+            branches: [],
             defaultBranch: "main",
           },
         ],
@@ -452,11 +449,9 @@ describe("the runner's workspace report", () => {
 
       const ready = await waitForWorkspace(arranged, workspace.id, (one) => one.status === "ready");
       expect(ready.provisionedAt).not.toBeNull();
-      expect(ready.checkouts[0]).toMatchObject({
-        branch: "feature/x",
-        branches: ["main", "feature/x"],
-        defaultBranch: "main",
-      });
+      expect(ready.checkouts[0]).toMatchObject({ branch: "feature/x", defaultBranch: "main" });
+      // Branch lists are read live with resource.listBranches, never stored.
+      expect(ready.checkouts[0]).not.toHaveProperty("branches");
     });
   });
 

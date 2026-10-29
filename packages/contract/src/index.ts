@@ -660,6 +660,7 @@ export {
   ProjectUpdateInput,
 } from "./groups/project";
 export {
+  DEFAULT_MAX_BRANCHES,
   MAX_REMOTE_LENGTH,
   MAX_RESOURCE_LABEL_LENGTH,
   MAX_RESOURCE_PROJECTS,
@@ -668,6 +669,8 @@ export {
   RESOURCE_SORT_FIELDS,
   RESOURCE_UPDATE_FIELDS,
   Resource,
+  ResourceBranches,
+  ResourceBranchFilter,
   ResourceCreateInput,
   ResourceFilter,
   ResourceKind,

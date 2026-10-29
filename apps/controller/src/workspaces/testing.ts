@@ -172,7 +172,6 @@ export interface CheckoutRecord {
   readonly form: string;
   readonly subdirectory: string | null;
   readonly branch: string | null;
-  readonly branches?: ReadonlyArray<string>;
   readonly defaultBranch?: string | null;
 }
 
@@ -232,7 +231,6 @@ export const reportWorkspaceReady = async (arranged: Arranged, id: string): Prom
     checkouts: workspace.checkouts.map((checkout) => ({
       checkoutId: String(checkout.checkoutId),
       branch: "main",
-      branches: ["main"],
       defaultBranch: "main",
     })),
   });

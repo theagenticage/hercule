@@ -46,6 +46,7 @@ import {
   FILES_EDITED_CAPABILITY,
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
+  BRANCH_LIST_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
   buildWorkspaceActionCapability,
@@ -57,6 +58,8 @@ import {
   type LoginStart,
   type ProbeRequest,
   type ProbeResult,
+  type BranchListReport,
+  type BranchListRequest,
   type RepositorySkillsInspection,
   type RunnerFacts,
   type RunnerWatermark,
@@ -113,6 +116,8 @@ const NONCE_BYTES = 16;
  *   gives them to the session.
  * - `REPOSITORY_SKILLS_CAPABILITY`: this runner lists the skills in the
  *   checkouts of a workspace.
+ * - `BRANCH_LIST_CAPABILITY`: this runner lists the branches of a main
+ *   workspace when the controller asks.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
@@ -124,6 +129,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   TEXT_GENERATION_CAPABILITY,
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
+  BRANCH_LIST_CAPABILITY,
 ];
 
 const ED25519 = { name: "Ed25519" } as const;
@@ -540,6 +546,33 @@ export const connect = (
       );
     };
 
+    /**
+     * Lists the branches a request asks for and sends them as the matching
+     * `BranchListReport`. The schema bounds the lists so the largest answer
+     * fits in a frame. A frame that cannot be encoded, which only a bug
+     * causes, is replaced by a `failed` outcome, because a runner that stays
+     * silent makes the controller wait out its deadline.
+     */
+    const answerBranchList = (request: BranchListRequest): Effect.Effect<void> => {
+      const answer = (outcome: BranchListReport["outcome"]) =>
+        write(
+          encodeFrameText({
+            _tag: "branchListReport",
+            requestId: request.requestId,
+            workspaceId: request.workspaceId,
+            outcome,
+          }),
+        );
+      return options.workspaces.listBranches(request).pipe(
+        Effect.flatMap(answer),
+        Effect.catchCause((cause) =>
+          answer({ status: "failed", message: describeCause(cause, MAX_MESSAGE_LENGTH) }),
+        ),
+        // The socket closed or the failure frame cannot be encoded either: nothing is left to send.
+        Effect.catchCause(() => Effect.void),
+      );
+    };
+
     const answerProbe = (request: ProbeRequest) => {
       const sendProbeReport = (result: ProbeResult) =>
         write(
@@ -939,6 +972,8 @@ export const connect = (
                 connection,
               ),
             );
+          case "branchListRequest":
+            return yield* Effect.asVoid(Effect.forkIn(answerBranchList(message), connection));
           case "workspaceDispose":
             return yield* Effect.asVoid(
               Effect.forkIn(

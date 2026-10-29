@@ -34,6 +34,7 @@ import {
   FILES_EDITED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
+  BRANCH_LIST_CAPABILITY,
   SKILLS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
@@ -120,6 +121,8 @@ const RETIRED = "this runner was retired; run `hercule runner join` to join the 
  *   says why.
  * - `REPOSITORY_SKILLS_CAPABILITY`: this controller asks a runner to list the
  *   skills in a workspace's checkouts, and only a runner that negotiated it.
+ * - `BRANCH_LIST_CAPABILITY`: this controller asks a runner to list the
+ *   branches of a main workspace, and only a runner that negotiated it.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
@@ -132,6 +135,7 @@ const CAPABILITIES: ReadonlyArray<string> = [
   GITHUB_TOKEN_CAPABILITY,
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
+  BRANCH_LIST_CAPABILITY,
 ];
 
 const UNREADABLE = "that is not a message this controller can read";
@@ -294,6 +298,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             return yield* connections.reportedWatermark(runnerId, mine, message.watermark);
           case "workspaceInspection":
           case "repositorySkillsInspection":
+          case "branchListReport":
           case "probeReport":
           case "installResult":
           case "loginUrl":

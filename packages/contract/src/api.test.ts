@@ -348,6 +348,12 @@ const NEW_OPERATIONS = [
     method: "GET",
     path: "/api/v1/sessions/preview-skills",
   },
+  {
+    id: "resource.listBranches",
+    requires: "workspace.read",
+    method: "GET",
+    path: "/api/v1/resources/:id/branches",
+  },
 ] as const;
 
 /** The table read by string, so a missing row is a failed assertion, not a type error. */

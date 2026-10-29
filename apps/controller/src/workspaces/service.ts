@@ -296,13 +296,11 @@ const make = Effect.gen(function* () {
     form: checkout.form,
     subdirectory: checkout.subdirectory,
     branch: checkout.branch,
-    branches: checkout.branches,
     defaultBranch: checkout.defaultBranch,
     baseBranch: checkout.baseBranch,
     startingRevision: checkout.startingRevision,
     headCommit: checkout.headCommit,
     baseCommit: checkout.baseCommit,
-    remoteBranches: checkout.remoteBranches,
   });
 
   /**

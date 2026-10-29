@@ -133,6 +133,7 @@ const COMMANDS: Record<string, string> = {
 
   "resource.query": "resource list",
   "resource.read": "resource read",
+  "resource.listBranches": "resource list-branches",
   "resource.create": "resource create",
   "resource.update": "resource update",
   "resource.delete": "resource delete",
@@ -357,6 +358,8 @@ const RESOLVES: Record<string, string> = {
   "project.delete id": "project.query",
 
   "resource.read id": "resource.query",
+  "resource.listBranches id": "resource.query",
+  "resource.listBranches runnerId": "runner.query",
   "resource.update id": "resource.query",
   "resource.delete id": "resource.query",
 

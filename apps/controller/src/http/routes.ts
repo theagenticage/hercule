@@ -73,6 +73,8 @@ import {
   ProfileRemovalLayer,
   Provisioning,
   ProvisioningLayer,
+  RepositoryBranches,
+  RepositoryBranchesLayer,
   TextGenerationLayer,
   Retirement,
   RetirementLayer,
@@ -452,9 +454,14 @@ const projectRoutes = HttpApiBuilder.group(api, "project", (handlers) =>
 const resourceRoutes = HttpApiBuilder.group(api, "resource", (handlers) =>
   Effect.gen(function* () {
     const resources = yield* ResourceService;
+    // Listing branches asks a runner, so it is a controller daemon use case.
+    const branches = yield* RepositoryBranches;
     return handlers
       .handle("query", ({ query }) => withApiErrors(resources.query(query)))
       .handle("read", ({ params }) => withApiErrors(resources.read(params.id)))
+      .handle("listBranches", ({ params, query }) =>
+        withApiErrors(branches.listBranches(params.id, query)),
+      )
       .handle("create", ({ payload }) => withApiErrors(resources.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(resources.update({ id: params.id, ...payload })),
@@ -997,6 +1004,7 @@ const operationServices = Layer.mergeAll(
   ),
   ProvisioningLayer,
   SessionSkillsLayer,
+  RepositoryBranchesLayer,
   // The subscription service checks a run target through its Run Targets
   // port: the controller daemon answers it with RunService.read, which checks
   // that the run exists and that the caller may read it, and then tells

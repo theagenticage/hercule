@@ -1,13 +1,7 @@
 /** Observes current filesystem and Git facts without changing preparation receipts. */
 import * as Effect from "effect/Effect";
-import { MAX_BRANCHES, type CheckoutReport, type WorkspaceReport } from "@hercule/protocol";
-import {
-  readCurrentBranch,
-  readDefaultBranch,
-  listLocalBranches,
-  runGit,
-  type GitEnv,
-} from "./git";
+import type { CheckoutReport, WorkspaceReport } from "@hercule/protocol";
+import { readCurrentBranch, readDefaultBranch, runGit, type GitEnv } from "./git";
 import { hasExpectedCheckoutIdentity } from "./identity";
 import { isStillOnDisk, type RegisteredCheckout, type RegisteredWorkspace } from "./registry";
 
@@ -17,22 +11,11 @@ const inspectCheckout = (
 ): Effect.Effect<CheckoutReport, Error> =>
   Effect.gen(function* () {
     const remoteName = checkout.remoteName ?? "origin";
-    const [branch, branches, defaultBranch, head, remoteRefs, form] = yield* Effect.all(
+    const [branch, defaultBranch, head, form] = yield* Effect.all(
       [
         readCurrentBranch(checkout.path, env),
-        listLocalBranches(checkout.path, env),
         readDefaultBranch(checkout.path, env, remoteName),
         runGit(["-C", checkout.path, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"], { env }),
-        runGit(
-          [
-            "-C",
-            checkout.path,
-            "for-each-ref",
-            "--format=%(refname)",
-            `refs/remotes/${remoteName}`,
-          ],
-          { env },
-        ),
         runGit(
           [
             "-C",
@@ -51,20 +34,13 @@ const inspectCheckout = (
     return {
       checkoutId: checkout.checkoutId,
       branch,
-      branches: branches.slice(0, MAX_BRANCHES),
+      // A controller older than the live branch list requires the field; a
+      // current one ignores it and asks for branches when the menu opens.
+      branches: [],
       defaultBranch,
       headCommit: head.ok ? head.stdout : null,
       baseCommit: checkout.baseCommit ?? null,
       startingRevision: checkout.startingRevision ?? null,
-      remoteBranches: remoteRefs.stdout
-        .split("\n")
-        .filter(
-          (ref) =>
-            ref.startsWith(`refs/remotes/${remoteName}/`) &&
-            ref !== `refs/remotes/${remoteName}/HEAD`,
-        )
-        .map((ref) => ref.slice(`refs/remotes/${remoteName}/`.length))
-        .slice(0, MAX_BRANCHES),
       form: checkout.form ?? (gitDirectory !== commonDirectory ? "worktree" : "clone"),
     };
   });

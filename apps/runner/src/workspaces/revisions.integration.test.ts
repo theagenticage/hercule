@@ -405,7 +405,6 @@ describe("worktrees in the selected repository", () => {
       const observation = await Effect.runPromise(fixture.manager.reportAfterSession(id));
       expect(observation).toBeDefined();
       expect(checkoutReport(observation!)).toMatchObject({ branch: renamed, headCommit });
-      expect(checkoutReport(observation!).branches).toContain(renamed);
       expect(Effect.runSync(fixture.manager.resolve(id))?.cwd).toBe(cwd);
     }
   });
@@ -433,7 +432,6 @@ describe("worktrees in the selected repository", () => {
       const headCommit = runGitOrThrow(cwd, "rev-parse", "HEAD");
       const report = await Effect.runPromise(fixture.manager.inspect(id));
       expect(checkoutReport(report)).toMatchObject({ branch: renamed, headCommit });
-      expect(checkoutReport(report).branches).toContain(renamed);
     }
     expect(readFileSync(fixture.trace, "utf8")).not.toMatch(
       /built-in: git (?:fetch|clone|checkout|switch|reset)/,

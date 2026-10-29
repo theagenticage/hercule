@@ -295,13 +295,15 @@ const withLegacyController = async (
         fixture.before.streams,
       );
       expect(reader.query("SELECT * FROM checkouts ORDER BY id").all()).toEqual(
-        fixture.before.checkouts.map((row) => ({
-          ...(row as object),
-          starting_revision: null,
-          base_commit: null,
-          head_commit: null,
-          remote_branches: "[]",
-        })),
+        // Migration 0094 drops the branch list the old controller stored.
+        (fixture.before.checkouts as ReadonlyArray<Record<string, unknown>>).map(
+          ({ branches: _, ...row }) => ({
+            ...row,
+            starting_revision: null,
+            base_commit: null,
+            head_commit: null,
+          }),
+        ),
       );
       expect(reader.query("PRAGMA foreign_key_check").all()).toEqual([]);
     } finally {

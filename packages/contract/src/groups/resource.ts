@@ -18,6 +18,7 @@
  * - a folder and a mailbox take a label, and none of the other three.
  */
 import { Schema } from "effect";
+import { MAX_FACT_LENGTH, MAX_LISTED_BRANCHES } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -139,6 +140,49 @@ export const ResourceFilter = Schema.Struct({
   projectId: Schema.optionalKey(Id),
 });
 
+/** How many branches of each kind `resource.listBranches` returns without being asked for a number. */
+export const DEFAULT_MAX_BRANCHES = 50;
+
+/**
+ * What `resource.listBranches` lists: the repo's branches on one runner,
+ * filtered by `text`. A repository can have tens of thousands of branches, so
+ * the answer is always cut to `maxBranches` names of each kind.
+ */
+export const ResourceBranchFilter = Schema.Struct({
+  /** The runner whose main workspace of the repo is read. */
+  runnerId: Id,
+  /** Keeps the branches whose name contains this text, ignoring letter case. Empty keeps every branch. */
+  text: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(MAX_FACT_LENGTH))),
+  /** The most branches of each kind to return; `DEFAULT_MAX_BRANCHES` when left out. */
+  maxBranches: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_LISTED_BRANCHES })),
+  ),
+});
+
+export type ResourceBranchFilter = Schema.Schema.Type<typeof ResourceBranchFilter>;
+
+/**
+ * The branches of a repo on one runner, read live from its main workspace.
+ * Each list is sorted by the date of the branch's newest commit, newest
+ * first.
+ */
+export const ResourceBranches = Schema.Struct({
+  /** The local branches. */
+  local: Schema.Array(Schema.String),
+  /** The branches of the checkout's remote, named without the remote. */
+  remote: Schema.Array(Schema.String),
+  /** True when a list was cut to the limit and more branches match the text. */
+  more: Schema.Boolean,
+  /**
+   * Why no branches could be listed: the runner has no ready main workspace
+   * of the repo, it is offline or too old, or git failed. Absent when the
+   * lists are what the runner found.
+   */
+  unavailableReason: Schema.optionalKey(Schema.String),
+});
+
+export type ResourceBranches = Schema.Schema.Type<typeof ResourceBranches>;
+
 export const resource = HttpApiGroup.make("resource")
   .add(
     HttpApiEndpoint.get("query", "/resources", {
@@ -152,6 +196,14 @@ export const resource = HttpApiGroup.make("resource")
     HttpApiEndpoint.get("read", "/resources/:id", {
       params: { id: Id },
       success: Resource,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    // A runner that cannot answer is not an error: the answer carries the
+    // reason, so a menu can show it beside the choices that need no list.
+    HttpApiEndpoint.get("listBranches", "/resources/:id/branches", {
+      params: { id: Id },
+      query: ResourceBranchFilter,
+      success: ResourceBranches,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
     HttpApiEndpoint.post("create", "/resources", {

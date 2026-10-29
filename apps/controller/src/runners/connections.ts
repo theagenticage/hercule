@@ -49,12 +49,15 @@ import {
   supportsWorkspaceLifecycle,
   requiresWorkspaceLifecycle,
   REPOSITORY_SKILLS_CAPABILITY,
+  BRANCH_LIST_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   type TextGenerationReport,
   type TextGenerationRequest,
   type RepositorySkillsInspect,
   type RepositorySkillsPreview,
+  type BranchListReport,
+  type BranchListRequest,
   type RepositorySkillsInspection,
   type WorkspaceInspect,
   type WorkspaceInspection,
@@ -121,6 +124,7 @@ export type Request =
   | WorkspaceInspect
   | RepositorySkillsInspect
   | RepositorySkillsPreview
+  | BranchListRequest
   | TextGenerationRequest
   | SessionRespondToQuestion;
 
@@ -150,6 +154,8 @@ const readRequiredCapability = (request: Request): string | undefined => {
     case "repositorySkillsInspect":
     case "repositorySkillsPreview":
       return REPOSITORY_SKILLS_CAPABILITY;
+    case "branchListRequest":
+      return BRANCH_LIST_CAPABILITY;
     case "textGenerationRequest":
       return TEXT_GENERATION_CAPABILITY;
     default:
@@ -228,6 +234,7 @@ export type Answer =
   | SessionInputResult
   | WorkspaceInspection
   | RepositorySkillsInspection
+  | BranchListReport
   | TextGenerationReport
   | SessionRespondToQuestionResult;
 

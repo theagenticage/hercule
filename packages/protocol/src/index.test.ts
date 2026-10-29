@@ -7,7 +7,9 @@ import {
   LocalAnnouncement,
   LocalEnrolment,
   MAX_CHECKOUTS,
+  MAX_FACT_LENGTH,
   MAX_FRAME_BYTES,
+  MAX_LISTED_BRANCHES,
   MAX_LOGIN_CODE_SECONDS,
   MAX_REPOSITORY_SKILLS,
   MAX_SKILL_DESCRIPTION_LENGTH,
@@ -240,6 +242,12 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
     },
   },
   {
+    _tag: "branchListReport",
+    requestId: REQUEST_ID,
+    workspaceId: WORKSPACE_ID,
+    outcome: { status: "listed", local: ["main"], remote: ["main", "release"], more: true },
+  },
+  {
     _tag: "credentialRequest",
     requestId: REQUEST_ID,
     remote: "github.com/acme/web",
@@ -347,6 +355,13 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
       { remote: "github.com/acme/api", subdirectory: "api", workspaceId: WORKSPACE_ID },
       { remote: "github.com/acme/web", subdirectory: "web", workspaceId: null },
     ],
+  },
+  {
+    _tag: "branchListRequest",
+    requestId: REQUEST_ID,
+    workspaceId: WORKSPACE_ID,
+    text: "fix",
+    maxBranches: 50,
   },
   // The git identity is sent once on `sessionStart`, not with every credential.
   { _tag: "credentialAnswer", requestId: REQUEST_ID, token: "ghp_a-token", username: "octocat" },
@@ -558,6 +573,34 @@ describe("the runner-to-controller catalogue", () => {
     };
     const encoded = JSON.stringify(Schema.encodeUnknownSync(RunnerToController)(inspection));
     expect(Buffer.byteLength(encoded, "utf8")).toBeLessThan(MAX_FRAME_BYTES);
+  });
+
+  it("fits the largest branch list in a frame", () => {
+    // A character of three bytes in UTF-8 is the worst text a branch name holds.
+    const names = Array.from({ length: MAX_LISTED_BRANCHES }, () =>
+      "\u6F22".repeat(MAX_FACT_LENGTH),
+    );
+    const report = {
+      _tag: "branchListReport",
+      requestId: REQUEST_ID,
+      workspaceId: WORKSPACE_ID,
+      outcome: { status: "listed", local: names, remote: names, more: true },
+    };
+    const encoded = JSON.stringify(Schema.encodeUnknownSync(RunnerToController)(report));
+    expect(Buffer.byteLength(encoded, "utf8")).toBeLessThan(MAX_FRAME_BYTES);
+  });
+
+  it("refuses a branch list request whose maxBranches is out of range", () => {
+    const request = (maxBranches: number) => ({
+      _tag: "branchListRequest",
+      requestId: REQUEST_ID,
+      workspaceId: WORKSPACE_ID,
+      text: "",
+      maxBranches,
+    });
+    expect(decodeFromController(request(MAX_LISTED_BRANCHES))._tag).toBe("Success");
+    expect(decodeFromController(request(0))._tag).toBe("Failure");
+    expect(decodeFromController(request(MAX_LISTED_BRANCHES + 1))._tag).toBe("Failure");
   });
 
   it("round-trips a repository skills preview, and refuses one with no checkout or too many", () => {

@@ -71,14 +71,12 @@ export interface StoredCheckout {
   readonly form: CheckoutForm;
   readonly subdirectory: string | null;
   readonly branch: string | null;
-  readonly branches: ReadonlyArray<string>;
   readonly defaultBranch: string | null;
   /** The branch a new branch was asked to start from; `null` means the resource's default. */
   readonly baseBranch: string | null;
   readonly startingRevision: StartingRevision | null;
   readonly baseCommit: string | null;
   readonly headCommit: string | null;
-  readonly remoteBranches: ReadonlyArray<string>;
 }
 
 /** One checkout to insert with a new workspace. */
@@ -206,13 +204,11 @@ interface CheckoutRow {
   readonly form: string;
   readonly subdirectory: string | null;
   readonly branch: string | null;
-  readonly branches: string;
   readonly default_branch: string | null;
   readonly base_branch: string | null;
   readonly starting_revision: string | null;
   readonly base_commit: string | null;
   readonly head_commit: string | null;
-  readonly remote_branches: string;
 }
 
 const COLUMNS =
@@ -225,7 +221,7 @@ const WORKSPACE_COLUMNS = COLUMNS.split(", ")
   .join(", ");
 
 const CHECKOUT_COLUMNS =
-  "id, workspace_id, resource_id, form, subdirectory, branch, branches, default_branch, base_branch, starting_revision, base_commit, head_commit, remote_branches";
+  "id, workspace_id, resource_id, form, subdirectory, branch, default_branch, base_branch, starting_revision, base_commit, head_commit";
 
 const toWorkspace = (row: WorkspaceRow): StoredWorkspace => ({
   id: uuidToString(row.id),
@@ -258,14 +254,12 @@ const toCheckout = (row: CheckoutRow): StoredCheckout => ({
   form: row.form as CheckoutForm,
   subdirectory: row.subdirectory,
   branch: row.branch,
-  branches: JSON.parse(row.branches) as ReadonlyArray<string>,
   defaultBranch: row.default_branch,
   baseBranch: row.base_branch,
   startingRevision:
     row.starting_revision === null ? null : (JSON.parse(row.starting_revision) as StartingRevision),
   baseCommit: row.base_commit,
   headCommit: row.head_commit,
-  remoteBranches: JSON.parse(row.remote_branches) as ReadonlyArray<string>,
 });
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
@@ -586,10 +580,10 @@ const make = Effect.gen(function* () {
           const id = mintUuid();
           yield* sql`
             INSERT INTO checkouts (id, workspace_id, resource_id, form, subdirectory, branch,
-                                   base_branch, branches, default_branch, position, created_at, starting_revision)
+                                   base_branch, default_branch, position, created_at, starting_revision)
             VALUES (${id}, ${uuidFromString(workspaceId)}, ${uuidFromString(checkout.resourceId)},
                     ${checkout.form}, ${checkout.subdirectory}, ${checkout.branch},
-                    ${checkout.baseBranch}, '[]', NULL, ${position}, ${at}, ${checkout.startingRevision === undefined ? null : JSON.stringify(checkout.startingRevision)})
+                    ${checkout.baseBranch}, NULL, ${position}, ${at}, ${checkout.startingRevision === undefined ? null : JSON.stringify(checkout.startingRevision)})
           `;
           yield* announceChange(workspaceId);
           return {
@@ -599,13 +593,11 @@ const make = Effect.gen(function* () {
             form: checkout.form,
             subdirectory: checkout.subdirectory,
             branch: checkout.branch,
-            branches: [],
             defaultBranch: null,
             baseBranch: checkout.baseBranch,
             startingRevision: checkout.startingRevision ?? null,
             baseCommit: null,
             headCommit: null,
-            remoteBranches: [],
           } satisfies StoredCheckout;
         }),
       ),
@@ -660,7 +652,7 @@ const make = Effect.gen(function* () {
      * Records successful preparation once and returns whether preparation settled.
      * A newer observation of missing files keeps the effective status failed.
      * Timestamped facts are written separately through recordObservation; legacy
-     * reports may update branches only before the first timestamped observation.
+     * reports may update the branch facts only before the first timestamped observation.
      */
     markReady: (
       id: string,
@@ -682,7 +674,6 @@ const make = Effect.gen(function* () {
           (checkout) =>
             sql`
               UPDATE checkouts SET branch = ${checkout.branch},
-                                   branches = ${JSON.stringify(checkout.branches)},
                                    default_branch = ${checkout.defaultBranch}
               WHERE id = ${uuidFromString(checkout.checkoutId)}
                 AND workspace_id = ${uuidFromString(id)}
@@ -727,10 +718,9 @@ const make = Effect.gen(function* () {
         if (changed.length === 0) return false;
         for (const checkout of report.checkouts ?? []) {
           yield* sql`UPDATE checkouts SET branch = ${checkout.branch},
-            branches = ${JSON.stringify(checkout.branches)}, default_branch = ${checkout.defaultBranch},
+            default_branch = ${checkout.defaultBranch},
             form = COALESCE(${checkout.form ?? null}, form),
-            head_commit = CASE WHEN ${checkout.headCommit === undefined} THEN head_commit ELSE ${checkout.headCommit ?? null} END,
-            remote_branches = COALESCE(${checkout.remoteBranches === undefined ? null : JSON.stringify(checkout.remoteBranches)}, remote_branches)
+            head_commit = CASE WHEN ${checkout.headCommit === undefined} THEN head_commit ELSE ${checkout.headCommit ?? null} END
             WHERE id = ${uuidFromString(checkout.checkoutId)} AND workspace_id = ${uuidFromString(id)}`;
         }
         yield* announceChange(id);
