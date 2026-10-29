@@ -101,10 +101,10 @@ const readDetail = (detail: unknown): Readonly<Record<string, unknown>> =>
 /**
  * Returns the part of an item's `detail` worth naming in `activity`: the
  * command, the path, the search pattern, the search, the page address, the
- * tool's name or its description. Each adapter shapes `detail` its own way, so each field is
- * optional. The Claude adapter keeps the tool's arguments under
- * `detail.input`, so a field there comes before the same field at the top
- * level. A file search names its `pattern` before its `path`, because what it
+ * tool's name or its description. Each adapter shapes `detail` its own way,
+ * so each field is optional. The Claude adapter keeps the tool's arguments
+ * under `detail.input`, so a field there comes before the same field at the
+ * top level. A file search names its `pattern` before its `path`, because what it
  * looks for says more than where.
  *
  * A `subagent` item is named only by the task it hands over, its
@@ -136,7 +136,8 @@ const findDetailTarget = (kind: ItemKind, detail: unknown): string | undefined =
 /**
  * Builds the one line that says what a subagent is doing now, from the item it
  * just started, such as "Running npm test" or "Delegating: Chase the flaky
- * test" or "Fetching https://example.com". Returns the bare verb when the item names nothing.
+ * test" or "Fetching https://example.com". Returns the bare verb when the
+ * item names nothing.
  */
 export const buildSubagentActivity = (kind: ItemKind, detail: unknown): string => {
   const target = findDetailTarget(kind, detail);

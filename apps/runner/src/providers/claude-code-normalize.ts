@@ -168,7 +168,8 @@ export interface Normalizing {
   readonly heldFrames: Array<SDKMessage>;
   /**
    * Tells the runner's log that Claude sent a message the table does not
-   * decide, or one it could not read. `error` is what failed while reading a
+   * decide, one it could not read, or a late failed todo call the adapter
+   * does not show. `error` is what failed while reading a
    * message of a known type. It is called for every such message, so the
    * caller decides how often the log hears of one label.
    *

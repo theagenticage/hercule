@@ -58,7 +58,11 @@ export const describeTurnEnding = (turn: Pick<ThreadTurn, "endState" | "duration
 /**
  * Returns the line an opened divider lists for one tool item: its verb,
  * target and result joined by " · ". A target the item did not report is
- * left out, so no separator is doubled.
+ * left out, so no separator is doubled. A `todo_list` item shows its result
+ * only when it `failed`: it is a snapshot that starts `completed` and says
+ * nothing about the work while the turn runs.
  */
-export const describeThreadItem = (item: ThreadItem): string =>
-  [item.verb, item.target, item.result].filter((part) => part !== "").join(" · ");
+export const describeThreadItem = (item: ThreadItem): string => {
+  const result = item.kind === "todo_list" && item.result !== "failed" ? "" : item.result;
+  return [item.verb, item.target, result].filter((part) => part !== "").join(" · ");
+};

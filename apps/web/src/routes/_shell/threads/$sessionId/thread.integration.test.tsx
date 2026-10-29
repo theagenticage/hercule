@@ -562,7 +562,7 @@ describe("Thread: transcript", () => {
 
     await user.click(await screen.findByRole("button", { name: /worked for/i }));
 
-    const line = await screen.findByText("tasks · 1/3 · Write the test · completed", {
+    const line = await screen.findByText("tasks · 1/3 · Write the test", {
       exact: false,
     });
     const items = within(line.closest("li")!).getAllByRole("listitem");
