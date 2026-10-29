@@ -702,7 +702,11 @@ export const ContextCompactionDetail = Schema.Struct({
 
 export type ContextCompactionDetail = Schema.Schema.Type<typeof ContextCompactionDetail>;
 
-/** The most steps a todo list holds. The runner cuts a longer list to this. */
+/**
+ * The most steps a todo list holds. The runner does not cut a longer list,
+ * because that would change the count a client shows ("2 of 5"). It shows the
+ * agent's tool call as failed instead.
+ */
 export const MAX_TODO_STEPS = 128;
 
 /** Where one step of a todo list stands. */

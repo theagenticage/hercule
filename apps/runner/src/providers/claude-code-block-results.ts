@@ -40,13 +40,13 @@ export interface ConvertedResult {
  */
 const FETCHED_TEXT_LENGTH = 2_000;
 
-const succeed = (content: string): ConvertedResult => ({
+const buildSucceededResult = (content: string): ConvertedResult => ({
   failed: false,
   content: truncateMessage(content),
 });
 
 /** Returns a failed result that names the tool and the error code the API gave. */
-const fail = (tool: string, errorCode: string): ConvertedResult => ({
+const buildFailedResult = (tool: string, errorCode: string): ConvertedResult => ({
   failed: true,
   content: truncateMessage(`${tool} failed: ${errorCode}`),
 });
@@ -64,9 +64,9 @@ export const convertWebSearchResult = (
   block: AssistantBlockFor<"web_search_tool_result">,
 ): ConvertedResult => {
   const hits = block.content;
-  if (!Array.isArray(hits)) return fail("The web search", hits.error_code);
-  if (hits.length === 0) return succeed("The search found nothing.");
-  return succeed(hits.map((hit) => `${hit.title}\n${hit.url}`).join("\n\n"));
+  if (!Array.isArray(hits)) return buildFailedResult("The web search", hits.error_code);
+  if (hits.length === 0) return buildSucceededResult("The search found nothing.");
+  return buildSucceededResult(hits.map((hit) => `${hit.title}\n${hit.url}`).join("\n\n"));
 };
 
 /**
@@ -77,13 +77,13 @@ export const convertWebFetchResult = (
   block: AssistantBlockFor<"web_fetch_tool_result">,
 ): ConvertedResult => {
   const fetched = block.content;
-  if ("error_code" in fetched) return fail("The web fetch", fetched.error_code);
+  if ("error_code" in fetched) return buildFailedResult("The web fetch", fetched.error_code);
   const document = fetched.content;
   const body =
     document.source.type === "text"
       ? truncateWithMarker(document.source.data, FETCHED_TEXT_LENGTH)
       : "The page is a PDF document.";
-  return succeed([document.title ?? "", fetched.url, "", body].join("\n").trim());
+  return buildSucceededResult([document.title ?? "", fetched.url, "", body].join("\n").trim());
 };
 
 /** Lists a command's return code, its output and its error output. */
@@ -106,8 +106,8 @@ export const convertCodeExecutionResult = (
   block: AssistantBlockFor<"code_execution_tool_result">,
 ): ConvertedResult => {
   const run = block.content;
-  if ("error_code" in run) return fail("The code execution", run.error_code);
-  return succeed(
+  if ("error_code" in run) return buildFailedResult("The code execution", run.error_code);
+  return buildSucceededResult(
     describeRun(
       run,
       run.type === "encrypted_code_execution_result"
@@ -122,8 +122,8 @@ export const convertBashCodeExecutionResult = (
   block: AssistantBlockFor<"bash_code_execution_tool_result">,
 ): ConvertedResult => {
   const run = block.content;
-  if ("error_code" in run) return fail("The bash code execution", run.error_code);
-  return succeed(describeRun(run, describeStdout(run.stdout)));
+  if ("error_code" in run) return buildFailedResult("The bash code execution", run.error_code);
+  return buildSucceededResult(describeRun(run, describeStdout(run.stdout)));
 };
 
 /**
@@ -135,14 +135,18 @@ export const convertTextEditorResult = (
   block: AssistantBlockFor<"text_editor_code_execution_tool_result">,
 ): ConvertedResult => {
   const edit = block.content;
-  if ("error_code" in edit) return fail("The text editor", edit.error_code);
+  if ("error_code" in edit) return buildFailedResult("The text editor", edit.error_code);
   switch (edit.type) {
     case "text_editor_code_execution_view_result":
-      return succeed(edit.content);
+      return buildSucceededResult(edit.content);
     case "text_editor_code_execution_create_result":
-      return succeed(edit.is_file_update ? "The file was updated." : "The file was created.");
+      return buildSucceededResult(
+        edit.is_file_update ? "The file was updated." : "The file was created.",
+      );
     case "text_editor_code_execution_str_replace_result":
-      return succeed(edit.lines === null ? "The text was replaced." : edit.lines.join("\n"));
+      return buildSucceededResult(
+        edit.lines === null ? "The text was replaced." : edit.lines.join("\n"),
+      );
   }
 };
 
@@ -151,9 +155,11 @@ export const convertToolSearchResult = (
   block: AssistantBlockFor<"tool_search_tool_result">,
 ): ConvertedResult => {
   const search = block.content;
-  if ("error_code" in search) return fail("The tool search", search.error_code);
+  if ("error_code" in search) return buildFailedResult("The tool search", search.error_code);
   const names = search.tool_references.map((reference) => reference.tool_name);
-  return succeed(names.length === 0 ? "No tools were found." : `Found tools: ${names.join(", ")}`);
+  return buildSucceededResult(
+    names.length === 0 ? "No tools were found." : `Found tools: ${names.join(", ")}`,
+  );
 };
 
 /** Converts an `advisor_tool_result`: the advice, or a sentence when the advice is encrypted. */
@@ -161,8 +167,8 @@ export const convertAdvisorResult = (
   block: AssistantBlockFor<"advisor_tool_result">,
 ): ConvertedResult => {
   const advice = block.content;
-  if ("error_code" in advice) return fail("The advisor", advice.error_code);
-  return succeed(
+  if ("error_code" in advice) return buildFailedResult("The advisor", advice.error_code);
+  return buildSucceededResult(
     advice.type === "advisor_redacted_result" ? "The advice is encrypted." : advice.text,
   );
 };

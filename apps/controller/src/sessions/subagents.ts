@@ -74,8 +74,7 @@ const ACTIVITY_VERBS: Readonly<Record<ItemKind, string>> = {
   context_compaction: "Compacting its context",
   error: "Reporting an error",
   unknown: "Working",
-  // #894 slice 2: choose the words for a subagent that is updating its todo list.
-  todo_list: "Working",
+  todo_list: "Updating its task list",
 };
 
 /**

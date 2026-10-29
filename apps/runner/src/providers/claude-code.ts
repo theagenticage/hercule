@@ -1616,6 +1616,9 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
             spec.outputSchema,
             reportUnknownMessage,
             spec.continue?.subagents,
+            // A fork carries the parent's conversation, but the runner never
+            // saw the parent's todo list, so a fork is as unknown as a resume.
+            spec.continue !== undefined,
           ),
           attachmentUploader: ctx.attachmentUploader,
           editMarks: ctx.editMarks,

@@ -29,6 +29,8 @@ import type {
   StreamKind,
   StructuredResult,
   TextGenerationOutcome,
+  TodoListDetail,
+  TodoStep,
   TurnState,
   UnknownItemDetail,
   Usage,
@@ -63,6 +65,13 @@ import {
   type AssistantBlockFor,
   type ConvertedResult,
 } from "./claude-code-block-results";
+import {
+  applyTodoResult,
+  buildTodoList,
+  isTodoTool,
+  recordTodoCall,
+  type TodoList,
+} from "./claude-code-todo-list";
 import { escapeControlCharacters } from "../report";
 import { truncateFact, truncateMessage } from "./text";
 
@@ -104,6 +113,16 @@ interface AgentStream {
   readonly streamed: Set<string>;
 }
 
+/**
+ * What one agent has of a todo list: the list the agent's todo tools keep, and
+ * the `todo_list` item that shows it in the agent's open turn. An agent shows
+ * one item per turn, which `closeTurn` completes.
+ */
+interface AgentTodo {
+  readonly list: TodoList;
+  open: { readonly itemId: string; readonly turnId: string } | undefined;
+}
+
 /** The state `normalize` keeps for one session between messages. */
 export interface Normalizing {
   readonly sessionId: string;
@@ -127,6 +146,16 @@ export interface Normalizing {
   readonly tools: Map<string, OpenTool>;
   /** The session's subagents and their turns. */
   readonly subagents: SubagentRegistry;
+  /**
+   * Whether the session continues an earlier one (a resume or a fork). The
+   * runner never saw that session's todo list, so the session's own agent
+   * starts with an unknown list.
+   */
+  readonly resumed: boolean;
+  /** The subagents of an earlier process. Like the session's own agent, they start with an unknown list. */
+  readonly seededSubagentIds: ReadonlySet<string>;
+  /** Each agent's todo list, keyed by `buildStreamKey`. An entry exists once the agent calls a todo tool. */
+  readonly todos: Map<string, AgentTodo>;
   /**
    * Frames from a subagent the registry does not know yet, in the order they
    * arrived: from an agent call no `task_started` has linked, or a denial
@@ -229,6 +258,7 @@ export const buildNormalizingState = (
   outputSchema: OutputSchema | undefined,
   reportUnknownMessage: Normalizing["reportUnknownMessage"],
   seeded?: ReadonlyArray<ContinuedSubagent>,
+  resumed = false,
 ): Normalizing => ({
   sessionId,
   mint,
@@ -238,6 +268,9 @@ export const buildNormalizingState = (
   streams: new Map(),
   tools: new Map(),
   subagents: buildSubagentRegistry(seeded),
+  resumed,
+  seededSubagentIds: new Set(seeded?.map((subagent) => subagent.subagentId)),
+  todos: new Map(),
   heldFrames: [],
   reportUnknownMessage,
   compaction: undefined,
@@ -286,6 +319,22 @@ const ensureAgentStream = (state: Normalizing, agent: TurnOwner): AgentStream =>
   if (found !== undefined) return found;
   const created: AgentStream = { current: undefined, streamed: new Set() };
   state.streams.set(key, created);
+  return created;
+};
+
+/**
+ * Returns the agent's todo state, creating it the first time. The list of a
+ * resumed session's own agent, and of a subagent from an earlier process, is
+ * unknown (see `buildTodoList`).
+ */
+const ensureAgentTodo = (state: Normalizing, agent: TurnOwner): AgentTodo => {
+  const key = buildStreamKey(agent);
+  const found = state.todos.get(key);
+  if (found !== undefined) return found;
+  const resumed =
+    agent === undefined ? state.resumed : state.seededSubagentIds.has(agent.subagentId);
+  const created: AgentTodo = { list: buildTodoList(resumed), open: undefined };
+  state.todos.set(key, created);
   return created;
 };
 
@@ -523,6 +572,7 @@ const closeTurn = (
     readonly structuredResult?: StructuredResult;
   } = {},
 ): void => {
+  completeTodoItem(state, out, agent);
   out.push({
     _tag: "turn.completed",
     eventId: state.mint(),
@@ -562,6 +612,24 @@ const buildItemStarted = (
   itemId,
   kind,
   ...(detail === undefined ? {} : { detail: toJson(detail) }),
+});
+
+const buildItemUpdated = (
+  state: Normalizing,
+  turn: TurnRef,
+  itemId: string,
+  kind: ItemKind,
+  detail: unknown,
+): ProviderEvent => ({
+  _tag: "item.updated",
+  eventId: state.mint(),
+  sessionId: state.sessionId,
+  at: state.now(),
+  ...buildSubagentAttribution(turn.subagentId),
+  turnId: turn.turnId,
+  itemId,
+  kind,
+  detail: toJson(detail),
 });
 
 const buildItemCompleted = (
@@ -938,6 +1006,17 @@ const startLocalTool = (block: AssistantBlockFor<"tool_use">, scope: BlockScope)
   const turn = openBlockTurn(scope);
   const kind = classifyTool(block.name);
   const itemId = cleanItemId(block.id) ?? state.mint();
+  if (isTodoTool(block.name)) {
+    // The todo list is one row that the results update, not a row per call.
+    recordTodoCall(
+      ensureAgentTodo(state, agent).list,
+      itemId,
+      block.name,
+      block.input,
+      turn.turnId,
+    );
+    return;
+  }
   const editedPaths = kind === "file_change" ? readEditedPaths(block.input) : undefined;
   state.tools.set(itemId, { kind, turnId: turn.turnId, subagentId: turn.subagentId, editedPaths });
   if (AGENT_TOOLS.has(block.name)) {
@@ -1009,6 +1088,96 @@ const startMcpTool = (block: AssistantBlockFor<"mcp_tool_use">, scope: BlockScop
       input: block.input,
       kind: "mcp",
       server: truncateFact(block.server_name),
+    }),
+  );
+};
+
+/**
+ * Shows the agent's whole todo list. The first change in a turn starts the
+ * agent's `todo_list` item, and every later one replaces its detail with
+ * `item.updated`. Shows nothing when `turnId` is not the agent's open turn: a
+ * result that arrives after its turn ended must not touch a later turn's item,
+ * and a todo result never opens a turn. The list itself still moves on, so the
+ * next change in an open turn shows the whole current list.
+ */
+const publishTodoList = (
+  state: Normalizing,
+  out: Emit,
+  agent: TurnOwner,
+  turnId: string,
+  steps: ReadonlyArray<TodoStep>,
+): void => {
+  const openTurnId = agent === undefined ? state.turnId : readOpenTurnId(agent);
+  if (openTurnId !== turnId) return;
+  const todo = ensureAgentTodo(state, agent);
+  const turn: TurnRef = { turnId, subagentId: agent?.subagentId };
+  const detail: TodoListDetail = { steps };
+  if (todo.open === undefined) {
+    const itemId = state.mint();
+    todo.open = { itemId, turnId };
+    out.push(buildItemStarted(state, turn, itemId, "todo_list", detail));
+  } else {
+    out.push(buildItemUpdated(state, turn, todo.open.itemId, "todo_list", detail));
+  }
+};
+
+/** Returns the id of the subagent's open turn, or `undefined` when it has none open. */
+const readOpenTurnId = (agent: Subagent): string | undefined =>
+  agent.turn.phase === "open" ? agent.turn.turnId : undefined;
+
+/** Checks whether the session's own agent has a todo call waiting for its result in the given turn. */
+const hasPendingTodoCall = (state: Normalizing, turnId: string): boolean => {
+  const todo = state.todos.get(buildStreamKey(undefined));
+  return (
+    todo !== undefined && [...todo.list.pending.values()].some((call) => call.turnId === turnId)
+  );
+};
+
+/**
+ * Completes the agent's open `todo_list` item with the list as it stands, and
+ * forgets the item. Called when the agent's turn ends, however it ends. Does
+ * nothing for another agent's item or when the agent has none open.
+ */
+const completeTodoItem = (state: Normalizing, out: Emit, agent: TurnOwner): void => {
+  const todo = state.todos.get(buildStreamKey(agent));
+  if (todo?.open === undefined) return;
+  const { itemId, turnId } = todo.open;
+  todo.open = undefined;
+  const detail: TodoListDetail = { steps: todo.list.published };
+  out.push(
+    buildItemCompleted(
+      state,
+      { turnId, subagentId: agent?.subagentId },
+      itemId,
+      "todo_list",
+      "completed",
+      detail,
+    ),
+  );
+};
+
+/**
+ * Shows a todo tool call that failed or whose result could not be used, as a
+ * failed tool row in the call's own turn, so the call never goes unseen.
+ */
+const emitFailedTodoCall = (
+  state: Normalizing,
+  out: Emit,
+  agent: TurnOwner,
+  call: {
+    readonly turnId: string;
+    readonly toolUseId: string;
+    readonly name: string;
+    readonly input: unknown;
+    readonly reason: string;
+  },
+): void => {
+  const turn: TurnRef = { turnId: call.turnId, subagentId: agent?.subagentId };
+  const started = { name: call.name, input: call.input, kind: "native" };
+  out.push(buildItemStarted(state, turn, call.toolUseId, "tool_call", started));
+  out.push(
+    buildItemCompleted(state, turn, call.toolUseId, "tool_call", "failed", {
+      content: call.reason,
     }),
   );
 };
@@ -1126,7 +1295,22 @@ const handleBlock = (block: AssistantBlock, scope: BlockScope): void => {
   } catch (error) {
     const kept = out.splice(start).filter(isTurnOpeningEvent);
     out.push(...kept);
-    emitUnknownBlock(scope, block, error);
+    const label = buildUnknownBlockLabel(block);
+    const toolUseId = cleanItemId(readInputString(block, "tool_use_id"));
+    if (toolUseId !== undefined && scope.state.tools.has(toolUseId)) {
+      // The block is the result of a call that is still running. A failed row
+      // for that call says more than a second, unrelated `unknown` row, and it
+      // stops the call from running for ever.
+      scope.state.reportUnknownMessage(label, error);
+      completeTool(scope.state, out, scope.agent, {
+        toolUseId,
+        failed: true,
+        content: `The result could not be read (${label})`,
+        orphan: ORPHAN_NATIVE_TOOL,
+      });
+    } else {
+      emitUnknownBlock(scope, block, error);
+    }
   }
 };
 
@@ -1169,8 +1353,34 @@ const onUser = (
 ): void => {
   const content = sdk.message.content;
   if (typeof content === "string") return;
+  // `tool_use_result` is the structured result of the whole message, not of one
+  // block. With several results in the message it cannot be told which block it
+  // belongs to, so it is used only when the message holds exactly one.
+  const structuredResult =
+    content.filter((block) => block.type === "tool_result").length === 1
+      ? sdk.tool_use_result
+      : undefined;
   for (const block of content) {
     if (block.type !== "tool_result") continue;
+    const toolUseId = cleanItemId(block.tool_use_id);
+    const todo = state.todos.get(buildStreamKey(agent));
+    if (toolUseId !== undefined && todo !== undefined) {
+      const outcome = applyTodoResult(
+        todo.list,
+        toolUseId,
+        block.is_error === true,
+        structuredResult,
+      );
+      if (outcome.kind === "changed") {
+        publishTodoList(state, out, agent, outcome.turnId, outcome.steps);
+        continue;
+      }
+      if (outcome.kind === "failed") {
+        emitFailedTodoCall(state, out, agent, { ...outcome, toolUseId });
+        continue;
+      }
+      if (outcome.kind === "unchanged") continue;
+    }
     completeTool(state, out, agent, {
       toolUseId: block.tool_use_id,
       failed: block.is_error === true,
@@ -1840,7 +2050,9 @@ const normalizeFrame = (state: Normalizing, sdk: SDKMessage): Emit => {
  * - a turn of the session's own agent that holds a running compaction stays
  *   open: the compaction closes it when it completes;
  * - a turn of the session's own agent in which the message produced nothing
- *   is dropped, as if it was never opened;
+ *   is dropped, as if it was never opened, unless the message called a todo
+ *   tool: that call shows nothing yet, but its result will publish the list
+ *   into this turn;
  * - a turn of a subagent the harness reported stopped is closed as
  *   `interrupted` after any message it still sends, other than a stream
  *   event, which is ignored. After a stop, the stopped call's
@@ -1858,7 +2070,10 @@ const closeUnsolicitedTurn = (
   if (agent === undefined) {
     if (state.turnId === undefined) return;
     if (state.compaction?.turnId === state.turnId) return;
-    if (out.slice(ownOutputStart).every((event) => event._tag === "turn.started")) {
+    const producedNothing = out
+      .slice(ownOutputStart)
+      .every((event) => event._tag === "turn.started");
+    if (producedNothing && !hasPendingTodoCall(state, state.turnId)) {
       out.length = ownOutputStart;
       state.turnId = undefined;
     } else if (endsWithMessage) {

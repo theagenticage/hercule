@@ -51,6 +51,7 @@ const buildTestState = (
   outputSchema?: OutputSchema,
   seeded?: ReadonlyArray<ContinuedSubagent>,
   reportUnknownMessage: Normalizing["reportUnknownMessage"] = () => {},
+  resumed = false,
 ) => {
   let minted = 0;
   return buildNormalizingState(
@@ -62,6 +63,7 @@ const buildTestState = (
     outputSchema,
     reportUnknownMessage,
     seeded,
+    resumed,
   );
 };
 
@@ -3200,6 +3202,28 @@ describe("server tool, MCP tool and result blocks", () => {
     });
   });
 
+  it("fails the running call of a result block that cannot be read, instead of adding an unknown item", () => {
+    const { running, reports } = buildReportingState();
+    const events = run(
+      [
+        buildBlocks([buildServerToolUse("web_search", { query: "q" })]),
+        buildBlocks([{ type: "web_search_tool_result", tool_use_id: SERVER_TOOL, content: null }]),
+      ],
+      running,
+    );
+    expect(listItemEvents(events, "item.started", "unknown")).toEqual([]);
+    expect(readCompleted(events, SERVER_TOOL)).toEqual({
+      status: "failed",
+      detail: {
+        content: "The result could not be read (claude: assistant/web_search_tool_result)",
+      },
+    });
+    expect(reports.map((report) => report.label)).toEqual([
+      "claude: assistant/web_search_tool_result",
+    ]);
+    expect(running.tools.has(SERVER_TOOL)).toBe(false);
+  });
+
   describe("a message whose text and thinking already streamed", () => {
     const streamedStart = (block: unknown) => [
       MESSAGE_START,
@@ -3311,5 +3335,372 @@ describe("server tool, MCP tool and result blocks", () => {
       events.map((event) => event._tag).filter((tag) => tag === "turn.completed"),
     ).toHaveLength(1);
     for (const event of events) expect(() => encode(event)).not.toThrow();
+  });
+});
+
+describe("the todo list", () => {
+  type Status = "pending" | "in_progress" | "completed";
+  /** Builds an assistant message with one tool call. `agentCallId` puts it inside a subagent. */
+  const buildCall = (
+    id: string,
+    name: string,
+    input: unknown,
+    agentCallId: string | null = null,
+    messageId = `msg_${id}`,
+  ) => ({
+    type: "assistant",
+    uuid: "4c6485ca-097a-43f5-8709-6865c49705ca",
+    session_id: NATIVE,
+    parent_tool_use_id: agentCallId,
+    message: {
+      id: messageId,
+      role: "assistant",
+      model: "claude-sonnet-5-5",
+      content: [{ type: "tool_use", id, name, input }],
+    },
+  });
+
+  /** Builds the user message that answers one call, with Claude's structured result. */
+  const buildAnswer = (
+    id: string,
+    structured: unknown,
+    { isError = false, agentCallId = null as string | null } = {},
+  ) => ({
+    type: "user",
+    uuid: "b7aa7458-44c1-4aed-8e9e-bc1f301e8246",
+    session_id: NATIVE,
+    parent_tool_use_id: agentCallId,
+    message: {
+      role: "user",
+      content: [{ tool_use_id: id, type: "tool_result", content: "ok", is_error: isError }],
+    },
+    tool_use_result: structured,
+  });
+
+  const todo = (content: string, status: Status = "pending") => ({
+    content,
+    status,
+    activeForm: `${content}...`,
+  });
+
+  /** A TodoWrite call and its answer. */
+  const writeTodos = (id: string, todos: ReadonlyArray<ReturnType<typeof todo>>) => [
+    buildCall(id, "TodoWrite", { todos }),
+    buildAnswer(id, { oldTodos: [], newTodos: todos }),
+  ];
+
+  const lastId = (n: number) => `toolu_01TodoCall${String(n).padStart(10, "0")}`;
+
+  /** Lists the todo events as `tag a=pending,b=done` lines, with the item id and the subagent. */
+  const listTodoEvents = (events: ReadonlyArray<Event>) =>
+    events.flatMap((event) => {
+      if (
+        (event._tag !== "item.started" &&
+          event._tag !== "item.updated" &&
+          event._tag !== "item.completed") ||
+        event.kind !== "todo_list"
+      ) {
+        return [];
+      }
+      const { steps } = event.detail as {
+        readonly steps: ReadonlyArray<{ text: string; status: Status }>;
+      };
+      return [
+        `${event._tag} ${event.itemId} ${steps.map((step) => `${step.text}=${step.status}`).join(",")}`,
+      ];
+    });
+
+  /**
+   * Builds a state whose turn the user's input already opened. A turn that a
+   * model message opens by itself is dropped when the message shows nothing,
+   * and a todo call shows nothing.
+   */
+  const buildStateInTurn = (resumed = false) => {
+    const running = buildTestState(undefined, undefined, () => {}, resumed);
+    openTurn(running);
+    return running;
+  };
+
+  const run = (
+    messages: ReadonlyArray<unknown>,
+    running = buildStateInTurn(),
+  ): ReadonlyArray<Event> =>
+    messages.flatMap((message) => normalize(running, message as SDKMessage));
+
+  /** Returns the first tool_call item event with the given tag. */
+  const findToolRow = (events: ReadonlyArray<Event>, tag: "item.started" | "item.completed") => {
+    for (const event of events) {
+      if (event._tag === tag && event.kind === "tool_call") return event;
+    }
+    return undefined;
+  };
+
+  const todoEventTags = (events: ReadonlyArray<Event>) =>
+    listTodoEvents(events).map((line) => line.split(" ")[0]);
+
+  it("shows TodoWrite called three times in a turn as one item that updates in place", () => {
+    const first = [todo("a", "in_progress"), todo("b")];
+    const second = [todo("a", "completed"), todo("b", "in_progress")];
+    const third = [todo("a", "completed"), todo("b", "completed")];
+    const events = run([
+      ...writeTodos(lastId(1), first),
+      ...writeTodos(lastId(2), second),
+      ...writeTodos(lastId(3), third),
+      RESULT,
+    ]);
+    const lines = listTodoEvents(events);
+    const id = lines[0]?.split(" ")[1];
+    expect(lines).toEqual([
+      `item.started ${id} a=in_progress,b=pending`,
+      `item.updated ${id} a=completed,b=in_progress`,
+      `item.updated ${id} a=completed,b=completed`,
+      `item.completed ${id} a=completed,b=completed`,
+    ]);
+    // The tool calls draw no rows of their own, and the item ends before its turn.
+    expect(
+      events.some((event) => event._tag === "item.started" && event.kind === "tool_call"),
+    ).toBe(false);
+    const tags = events.map((event) => `${event._tag}`);
+    expect(tags.lastIndexOf("item.completed")).toBeLessThan(tags.indexOf("turn.completed"));
+  });
+
+  it("encodes every todo event with the protocol schema", () => {
+    const encode = Schema.encodeUnknownSync(ProviderEvent);
+    const events = run([
+      ...writeTodos(lastId(1), [todo("a")]),
+      ...writeTodos(lastId(2), [todo("b")]),
+      RESULT,
+    ]);
+    for (const event of events) expect(() => encode(event)).not.toThrow();
+  });
+
+  it("opens a new item with the whole list when the next turn changes it", () => {
+    const running = buildStateInTurn();
+    const events = [
+      ...run([...writeTodos(lastId(1), [todo("a"), todo("b")]), RESULT], running),
+      ...(openTurn(running).events as ReadonlyArray<Event>),
+      ...run(writeTodos(lastId(2), [todo("a", "completed"), todo("b")]), running),
+    ];
+    const lines = listTodoEvents(events);
+    expect(lines.map((line) => line.split(" ")[0])).toEqual([
+      "item.started",
+      "item.completed",
+      "item.started",
+    ]);
+    expect(lines[0]?.split(" ")[1]).not.toBe(lines[2]?.split(" ")[1]);
+    expect(lines[2]?.split(" ")[2]).toBe("a=completed,b=pending");
+  });
+
+  it("shows nothing for a TodoWrite that leaves the list as it is", () => {
+    const events = run([
+      ...writeTodos(lastId(1), [todo("a")]),
+      ...writeTodos(lastId(2), [todo("a")]),
+    ]);
+    expect(todoEventTags(events)).toEqual(["item.started"]);
+  });
+
+  it("shows a TodoWrite that failed as a failed tool row", () => {
+    const events = run([
+      buildCall(lastId(1), "TodoWrite", { todos: [todo("a")] }),
+      buildAnswer(lastId(1), undefined, { isError: true }),
+    ]);
+    const lines = events.map(formatEvent);
+    expect(lines).toContain(`item.started tool_call ${lastId(1)}`);
+    expect(lines).toContain(`item.completed tool_call ${lastId(1)} failed`);
+    const started = findToolRow(events, "item.started");
+    expect(started?.detail).toEqual({
+      name: "TodoWrite",
+      input: { todos: [todo("a")] },
+      kind: "native",
+    });
+    const completed = findToolRow(events, "item.completed");
+    expect(completed?.detail).toEqual({ content: "TodoWrite failed" });
+    expect(listTodoEvents(events)).toEqual([]);
+  });
+
+  it("shows a TaskUpdate that reports success false as a failed tool row, with the reason", () => {
+    const events = run([
+      buildCall(lastId(1), "TaskUpdate", { taskId: "9", status: "completed" }),
+      buildAnswer(lastId(1), { success: false, error: "Task not found" }),
+    ]);
+    expect(events.map(formatEvent)).toContain(`item.completed tool_call ${lastId(1)} failed`);
+    const completed = findToolRow(events, "item.completed");
+    expect(completed?.detail).toEqual({ content: "Task not found" });
+  });
+
+  it("builds the list from TaskCreate, TaskUpdate and TaskList results", () => {
+    const events = run([
+      buildCall(lastId(1), "TaskCreate", { subject: "a", description: "d" }),
+      buildAnswer(lastId(1), { task: { id: "1", subject: "a" } }),
+      buildCall(lastId(2), "TaskCreate", { subject: "b", description: "d" }),
+      buildAnswer(lastId(2), { task: { id: "2", subject: "b" } }),
+      buildCall(lastId(3), "TaskUpdate", { taskId: "1", status: "completed" }),
+      buildAnswer(lastId(3), { success: true, taskId: "1", updatedFields: ["status"] }),
+      buildCall(lastId(4), "TaskList", {}),
+      buildAnswer(lastId(4), {
+        tasks: [
+          { id: "1", subject: "a", status: "completed", blockedBy: [] },
+          { id: "2", subject: "b", status: "pending", blockedBy: [] },
+        ],
+      }),
+    ]);
+    const lines = listTodoEvents(events);
+    const id = lines[0]?.split(" ")[1];
+    // TaskList returns what the list already is, so it adds no event.
+    expect(lines).toEqual([
+      `item.started ${id} a=pending`,
+      `item.updated ${id} a=pending,b=pending`,
+      `item.updated ${id} a=completed,b=pending`,
+    ]);
+  });
+
+  it("uses the structured result only when the message holds one tool result", () => {
+    const answer = {
+      ...buildAnswer(lastId(1), { oldTodos: [], newTodos: [todo("from the result")] }),
+      message: {
+        role: "user",
+        content: [
+          { tool_use_id: lastId(1), type: "tool_result", content: "ok" },
+          { tool_use_id: lastId(2), type: "tool_result", content: "ok" },
+        ],
+      },
+    };
+    const events = run([
+      buildCall(lastId(1), "TodoWrite", { todos: [todo("from the input")] }),
+      answer,
+    ]);
+    expect(listTodoEvents(events)[0]).toContain("from the input=pending");
+  });
+
+  describe("in a resumed session", () => {
+    it("shows nothing for TaskCreate until TaskList hands over the whole list", () => {
+      const running = buildStateInTurn(true);
+      const created = run(
+        [
+          buildCall(lastId(1), "TaskCreate", { subject: "c", description: "d" }),
+          buildAnswer(lastId(1), { task: { id: "3", subject: "c" } }),
+        ],
+        running,
+      );
+      expect(listTodoEvents(created)).toEqual([]);
+      expect(
+        created.some((event) => event._tag === "item.started" && event.kind === "tool_call"),
+      ).toBe(false);
+      const listed = run(
+        [
+          buildCall(lastId(2), "TaskList", {}),
+          buildAnswer(lastId(2), {
+            tasks: [
+              { id: "1", subject: "a", status: "completed", blockedBy: [] },
+              { id: "3", subject: "c", status: "pending", blockedBy: [] },
+            ],
+          }),
+        ],
+        running,
+      );
+      expect(listTodoEvents(listed).map((line) => line.split(" ")[0])).toEqual(["item.started"]);
+      expect(listTodoEvents(listed)[0]).toContain("a=completed,c=pending");
+    });
+  });
+
+  it("keeps a turn that a model message opened with only a todo call, and shows the list in it", () => {
+    // No input opened the turn, as after a background task finished.
+    const running = buildTestState();
+    const events = run(
+      [
+        buildCall(lastId(1), "TodoWrite", { todos: [todo("a")] }),
+        buildAnswer(lastId(1), { oldTodos: [], newTodos: [todo("a")] }),
+      ],
+      running,
+    );
+    const turns = events.filter((event) => event._tag === "turn.started");
+    expect(turns).toHaveLength(1);
+    const started = events.find(
+      (event) => event._tag === "item.started" && event.kind === "todo_list",
+    );
+    expect(started?._tag === "item.started" ? started.turnId : undefined).toBe(running.turnId);
+    expect(listTodoEvents(events)).toHaveLength(1);
+  });
+
+  it("shows nothing for a result that arrives after its turn ended, and opens no turn", () => {
+    const running = buildStateInTurn();
+    const events = run(
+      [
+        buildCall(lastId(1), "TodoWrite", { todos: [todo("a")] }),
+        RESULT,
+        buildAnswer(lastId(1), { oldTodos: [], newTodos: [todo("a")] }),
+      ],
+      running,
+    );
+    expect(listTodoEvents(events)).toEqual([]);
+    expect(events.filter((event) => event._tag === "turn.started")).toHaveLength(0);
+    expect(running.turnId).toBeUndefined();
+  });
+
+  it("keeps a subagent's list apart from its parent's", () => {
+    const running = buildStateInTurn();
+    const events = run(
+      [
+        buildCall(AGENT_CALL, "Agent", { description: "d", prompt: "p", subagent_type: "x" }),
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+        buildCall(lastId(1), "TodoWrite", { todos: [todo("sub")] }, AGENT_CALL),
+        buildAnswer(
+          lastId(1),
+          { oldTodos: [], newTodos: [todo("sub")] },
+          { agentCallId: AGENT_CALL },
+        ),
+        // The same list from the parent is a change for the parent.
+        ...writeTodos(lastId(2), [todo("sub")]),
+        buildTaskNotification(SUBAGENT, AGENT_CALL),
+        RESULT,
+      ],
+      running,
+    );
+    const todoEvents = events.filter(
+      (event) =>
+        (event._tag === "item.started" || event._tag === "item.completed") &&
+        event.kind === "todo_list",
+    );
+    expect(
+      todoEvents.map((event) => `${event._tag} ${"subagentId" in event ? event.subagentId : ""}`),
+    ).toEqual([
+      `item.started ${SUBAGENT}`,
+      "item.started ",
+      `item.completed ${SUBAGENT}`,
+      "item.completed ",
+    ]);
+  });
+
+  it("completes the item before an interrupted turn ends", () => {
+    const events = run([
+      ...writeTodos(lastId(1), [todo("a", "in_progress")]),
+      { ...RESULT, terminal_reason: "aborted_streaming" },
+    ]);
+    const tags = events.map((event) => event._tag);
+    const done = events.findIndex(
+      (event) => event._tag === "item.completed" && event.kind === "todo_list",
+    );
+    expect(done).toBeGreaterThan(-1);
+    expect(done).toBeLessThan(tags.indexOf("turn.completed"));
+  });
+
+  it("leaves other agents' items open when one agent's turn ends", () => {
+    const running = buildStateInTurn();
+    run(
+      [
+        buildCall(AGENT_CALL, "Agent", { description: "d", prompt: "p", subagent_type: "x" }),
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+        buildCall(lastId(1), "TodoWrite", { todos: [todo("sub")] }, AGENT_CALL),
+        buildAnswer(
+          lastId(1),
+          { oldTodos: [], newTodos: [todo("sub")] },
+          { agentCallId: AGENT_CALL },
+        ),
+      ],
+      running,
+    );
+    const ended = run([RESULT], running);
+    expect(listTodoEvents(ended)).toEqual([]);
+    expect(running.todos.get(SUBAGENT)?.open).toBeDefined();
   });
 });
