@@ -3732,7 +3732,7 @@ export const CLI = {
       },
       dedupKey: {
         flag: "dedup-key",
-        help: "Your idempotency key: a second spawn with the same key from the same caller returns the first session instead of starting another. Use it when you may retry after a timeout. The rest of the second call is not compared, and a key is not shared between callers or with other commands.",
+        help: "Your idempotency key: a second spawn with the same key from the same actor (you, whichever credential you use, or the same session) returns the first session instead of starting another. Use it when you may retry after a timeout. The rest of the second call is not compared, and a key is not shared with another session or with another command.",
       },
     },
     errors: {
@@ -3803,7 +3803,7 @@ export const CLI = {
       },
       dedupKey: {
         flag: "dedup-key",
-        help: "Your idempotency key: a second input with the same key from the same caller returns the first input's id and what has happened to it so far, instead of sending the text again. Use it when you may retry after a timeout. The rest of the second call is not compared, and a key is not shared between callers or with other commands.",
+        help: "Your idempotency key: a second input with the same key from the same actor (you, whichever credential you use, or the same session) returns the first input's id and what has happened to it so far, instead of sending the text again. Use it when you may retry after a timeout. The rest of the second call is not compared, and a key is not shared with another session or with another command.",
       },
     },
     errors: {
@@ -3935,7 +3935,7 @@ export const CLI = {
       },
       dedupKey: {
         flag: "dedup-key",
-        help: "Your idempotency key: a second fork with the same key from the same caller returns the first forked session instead of starting another. Use it when you may retry after a timeout. The rest of the second call is not compared, and a key is not shared between callers or with other commands.",
+        help: "Your idempotency key: a second fork with the same key from the same actor (you, whichever credential you use, or the same session) returns the first forked session instead of starting another. Use it when you may retry after a timeout. The rest of the second call is not compared, and a key is not shared with another session or with another command.",
       },
     },
     errors: {

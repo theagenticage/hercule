@@ -1,23 +1,22 @@
 /**
- * Tests the dedup keys of `session.spawn`, `session.continue` and
- * `session.input`:
+ * Tests `returnExistingOrCreate`, which makes a retried `session.spawn`,
+ * `session.continue` or `session.input` return the first call's result:
  *
- * - a key is claimed once per actor and operation, and a second claim fails
- *   with `DedupKeyTaken` and writes nothing;
- * - `returnExistingOrCreate` returns the first call's result for a repeat, and
- *   recovers from nothing but the claim conflict.
- *
- * The case they guard against: a failure after the claim committed (the runner
- * not answering) is turned into the first call's result, and the caller never
- * learns that its call failed.
+ * - a repeat of a recorded key returns the first result and does no work;
+ * - a call that loses the claim to another call with the same key returns that
+ *   call's result, also when it fails before it reaches its own claim;
+ * - a call's own failure after its claim committed (the runner not answering)
+ *   reaches the caller unchanged, because the caller must learn that the call
+ *   failed;
+ * - a key belongs to one actor and one operation.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
-import { mintUuid, uuidToString, withTransaction } from "../db";
+import { mintUuid, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
-import { DedupKeyTaken, dedupKeyRepository, type DedupOperation } from "./dedup-keys";
+import { dedupKeyRepository, type DedupClaim, type DedupOperation } from "./dedup-keys";
 
 const USER: Actor = {
   _tag: "user",
@@ -45,120 +44,57 @@ const runAs = <A, E>(actor: Actor, effect: Effect.Effect<A, E, SqlClient.SqlClie
     effect.pipe(Effect.provideService(CurrentActor, actor), Effect.provide(TestDatabase)),
   );
 
-/** Claims `key` for `operation` in a transaction of its own, as production callers do. */
-const claim = (operation: DedupOperation, key: string, resultId: string) =>
-  Effect.gen(function* () {
-    const dedup = yield* dedupKeyRepository;
-    yield* inTransaction(dedup.claimDedupKey(operation, key, resultId));
-  });
+const readExisting = (resultId: string) => Effect.succeed(`read ${resultId}`);
 
-describe("claimDedupKey", () => {
-  it("fails with DedupKeyTaken on a second claim by the same actor, operation and key", async () => {
-    const exit = await runAs(
-      USER,
-      Effect.gen(function* () {
-        yield* claim("session.spawn", "key-1", mintId());
-        return yield* Effect.exit(claim("session.spawn", "key-1", mintId()));
-      }),
-    );
-    expect(Exit.isFailure(exit)).toBe(true);
-    expect(Exit.isFailure(exit) && JSON.stringify(exit.cause)).toContain("DedupKeyTaken");
-  });
+/** Returns the claim `returnExistingOrCreate` passes when the call has a key. */
+const requireClaim = (claim: DedupClaim | undefined): DedupClaim => {
+  if (claim === undefined) throw new Error("the test call has a key, so it gets a claim");
+  return claim;
+};
 
-  it("lets another operation claim the same key", async () => {
-    const exit = await runAs(
-      USER,
-      Effect.gen(function* () {
-        yield* claim("session.spawn", "key-1", mintId());
-        yield* claim("session.continue", "key-1", mintId());
-        return yield* Effect.exit(claim("session.input", "key-1", mintId()));
-      }),
-    );
-    expect(Exit.isSuccess(exit)).toBe(true);
-  });
-
-  it("lets another actor claim the same key", async () => {
-    const exit = await runAs(
-      USER,
-      Effect.gen(function* () {
-        yield* claim("session.spawn", "key-1", mintId());
-        return yield* Effect.exit(
-          Effect.provideService(claim("session.spawn", "key-1", mintId()), CurrentActor, SESSION),
-        );
-      }),
-    );
-    expect(Exit.isSuccess(exit)).toBe(true);
-  });
-
-  it("rolls back the writes of the transaction it fails in", async () => {
-    const exit = await runAs(
-      USER,
-      Effect.gen(function* () {
-        const dedup = yield* dedupKeyRepository;
-        yield* claim("session.spawn", "taken", mintId());
-        // The repeat claims another key first, then loses the claim of "taken".
-        yield* Effect.exit(
-          inTransaction(
-            Effect.gen(function* () {
-              yield* dedup.claimDedupKey("session.spawn", "written-first", mintId());
-              yield* dedup.claimDedupKey("session.spawn", "taken", mintId());
-            }),
-          ),
-        );
-        return yield* Effect.exit(claim("session.spawn", "written-first", mintId()));
-      }),
-    );
-    expect(Exit.isSuccess(exit)).toBe(true);
-  });
-});
-
-describe("returnExistingOrCreate", () => {
-  /**
-   * Builds a `create` like a service operation's: it claims `key` in a
-   * transaction of its own and returns the new id. `runs` counts how often it ran.
-   */
-  const buildCreate = (key: string | undefined, runs: { count: number }) =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      const dedup = yield* dedupKeyRepository;
-      return withTransaction(
-        sql,
-        Effect.gen(function* () {
-          runs.count += 1;
-          const id = mintId();
-          if (key !== undefined) yield* dedup.claimDedupKey("session.spawn", key, id);
-          return id;
-        }),
-      );
+/**
+ * Builds a `create` like a service operation's: it claims the key in a
+ * transaction of its own and returns the new id. `runs` counts how often it ran.
+ */
+const claimingCreate =
+  (runs: { count: number }, resultId: string = mintId()) =>
+  (claim: DedupClaim | undefined) =>
+    Effect.suspend(() => {
+      runs.count += 1;
+      return Effect.as(inTransaction(requireClaim(claim)(resultId)), `created ${resultId}`);
     });
 
-  const readExisting = (resultId: string) => Effect.succeed(`read ${resultId}`);
+/** Runs a complete call that records `key` for `resultId`, like the call that wins an overlap. */
+const recordKey = (operation: DedupOperation, key: string, resultId: string) =>
+  Effect.gen(function* () {
+    const dedup = yield* dedupKeyRepository;
+    yield* dedup.returnExistingOrCreate(
+      operation,
+      key,
+      readExisting,
+      claimingCreate({ count: 0 }, resultId),
+    );
+  });
 
-  it("runs create when no key is sent", async () => {
+/** Returns the typed failure of `exit`, or `undefined` when it did not fail with one. */
+const failureOf = (exit: Exit.Exit<unknown, unknown>): unknown =>
+  Exit.isFailure(exit)
+    ? exit.cause.reasons.find((reason) => reason._tag === "Fail")?.error
+    : undefined;
+
+describe("returnExistingOrCreate", () => {
+  it("runs create on every call when no key is sent", async () => {
     const runs = { count: 0 };
-    const result = await runAs(
+    await runAs(
       USER,
       Effect.gen(function* () {
         const dedup = yield* dedupKeyRepository;
-        const create = yield* buildCreate(undefined, runs);
-        const first = yield* dedup.returnExistingOrCreate(
-          "session.spawn",
-          undefined,
-          readExisting,
-          Effect.map(create, (id) => `created ${id}`),
-        );
-        const second = yield* dedup.returnExistingOrCreate(
-          "session.spawn",
-          undefined,
-          readExisting,
-          Effect.map(create, (id) => `created ${id}`),
-        );
-        return [first, second];
+        const create = () => Effect.sync(() => `created ${(runs.count += 1)}`);
+        yield* dedup.returnExistingOrCreate("session.spawn", undefined, readExisting, create);
+        yield* dedup.returnExistingOrCreate("session.spawn", undefined, readExisting, create);
       }),
     );
     expect(runs.count).toBe(2);
-    expect(result[0]).not.toBe(result[1]);
-    expect(result.every((value) => value?.startsWith("created "))).toBe(true);
   });
 
   it("returns the first result of a repeat and does not run create again", async () => {
@@ -167,61 +103,68 @@ describe("returnExistingOrCreate", () => {
       USER,
       Effect.gen(function* () {
         const dedup = yield* dedupKeyRepository;
-        const create = yield* buildCreate("key-1", runs);
+        const create = claimingCreate(runs);
         const call = () =>
           dedup.returnExistingOrCreate("session.spawn", "key-1", readExisting, create);
-        return { first: yield* Effect.map(call(), String), second: yield* call() };
+        return { first: yield* call(), second: yield* call() };
       }),
     );
     expect(runs.count).toBe(1);
-    // The first call created and returned the new id. The repeat read it back.
-    expect(second).toBe(`read ${first}`);
+    expect(second).toBe(`read ${first.replace("created ", "")}`);
   });
 
-  it("returns the first result when create loses the claim to another call", async () => {
-    const firstId = mintId();
+  it("returns the first result when create loses its claim to a call that recorded the key first", async () => {
+    const winnerId = mintId();
     const result = await runAs(
       USER,
       Effect.gen(function* () {
         const dedup = yield* dedupKeyRepository;
-        const sql = yield* SqlClient.SqlClient;
-        // Another call with the same key commits its claim after this call's
-        // first lookup found nothing and before this call's own claim.
-        const create = Effect.andThen(
-          claim("session.spawn", "key-1", firstId),
-          withTransaction(
-            sql,
-            Effect.as(dedup.claimDedupKey("session.spawn", "key-1", mintId()), "created"),
-          ),
-        );
+        // The other call commits after this call's first lookup found nothing.
+        const create = (claim: DedupClaim | undefined) =>
+          Effect.andThen(
+            recordKey("session.spawn", "key-1", winnerId),
+            inTransaction(Effect.as(requireClaim(claim)(mintId()), "created")),
+          );
         return yield* dedup.returnExistingOrCreate("session.spawn", "key-1", readExisting, create);
       }),
     );
-    expect(result).toBe(`read ${firstId}`);
+    expect(result).toBe(`read ${winnerId}`);
   });
 
-  it("passes every other failure of create through, even after create claimed the key", async () => {
-    const runs = { count: 0 };
-    const exit = await runAs(
+  it("returns the first result when create fails before its claim after another call recorded the key", async () => {
+    const winnerId = mintId();
+    const result = await runAs(
       USER,
       Effect.gen(function* () {
         const dedup = yield* dedupKeyRepository;
-        const sql = yield* SqlClient.SqlClient;
-        const create = Effect.andThen(
-          withTransaction(
-            sql,
-            Effect.gen(function* () {
-              runs.count += 1;
-              yield* dedup.claimDedupKey("session.spawn", "key-1", mintId());
-            }),
-          ),
-          // The claim committed. Then the runner does not answer.
-          Effect.fail({ _tag: "RunnerSilent" as const }),
-        );
+        // The repeat names another target and fails a check before it claims.
+        const create = () =>
+          Effect.andThen(
+            recordKey("session.spawn", "key-1", winnerId),
+            Effect.fail({ _tag: "NotFound" as const }),
+          );
+        return yield* dedup.returnExistingOrCreate("session.spawn", "key-1", readExisting, create);
+      }),
+    );
+    expect(result).toBe(`read ${winnerId}`);
+  });
+
+  it("passes this call's own failure after its committed claim through, and a repeat returns its id", async () => {
+    const runs = { count: 0 };
+    const claimedId = mintId();
+    const { failed, retried } = await runAs(
+      USER,
+      Effect.gen(function* () {
+        const dedup = yield* dedupKeyRepository;
+        const create = (claim: DedupClaim | undefined) =>
+          Effect.andThen(
+            claimingCreate(runs, claimedId)(claim),
+            // The claim committed. Then the runner does not answer.
+            Effect.fail({ _tag: "RunnerSilent" as const }),
+          );
         const failed = yield* Effect.exit(
           dedup.returnExistingOrCreate("session.spawn", "key-1", readExisting, create),
         );
-        // The key stays claimed, so the retry reads the first result instead of creating.
         const retried = yield* dedup.returnExistingOrCreate(
           "session.spawn",
           "key-1",
@@ -231,29 +174,39 @@ describe("returnExistingOrCreate", () => {
         return { failed, retried };
       }),
     );
-    expect(Exit.isFailure(exit.failed)).toBe(true);
-    expect(JSON.stringify(exit.failed)).toContain("RunnerSilent");
+    expect(failureOf(failed)).toEqual({ _tag: "RunnerSilent" });
     expect(runs.count).toBe(1);
-    expect(exit.retried).toMatch(/^read /);
+    expect(retried).toBe(`read ${claimedId}`);
   });
 
-  it("dies when create loses a claim it was not asked to make", async () => {
+  it("passes a failure before any claim through when no other call recorded the key", async () => {
     const exit = await runAs(
       USER,
       Effect.gen(function* () {
         const dedup = yield* dedupKeyRepository;
         return yield* Effect.exit(
-          dedup.returnExistingOrCreate(
-            "session.spawn",
-            undefined,
-            readExisting,
-            Effect.fail(new DedupKeyTaken({ operation: "session.spawn", dedupKey: "key-1" })),
+          dedup.returnExistingOrCreate("session.spawn", "key-1", readExisting, () =>
+            Effect.fail({ _tag: "NotFound" as const }),
           ),
         );
       }),
     );
-    expect(Exit.isFailure(exit) && exit.cause.reasons.some((reason) => reason._tag === "Die")).toBe(
-      true,
+    expect(failureOf(exit)).toEqual({ _tag: "NotFound" });
+  });
+
+  it("does real work for another operation and for another actor with the same key", async () => {
+    const runs = { count: 0 };
+    await runAs(
+      USER,
+      Effect.gen(function* () {
+        const dedup = yield* dedupKeyRepository;
+        const call = (operation: DedupOperation) =>
+          dedup.returnExistingOrCreate(operation, "key-1", readExisting, claimingCreate(runs));
+        yield* call("session.spawn");
+        yield* call("session.continue");
+        yield* Effect.provideService(call("session.spawn"), CurrentActor, SESSION);
+      }),
     );
+    expect(runs.count).toBe(3);
   });
 });

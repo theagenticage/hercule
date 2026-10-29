@@ -5,10 +5,10 @@
  * timeout) finds its key here and gets the first call's id back instead of
  * starting a second session or sending a second message.
  *
- * A key is unique per actor, operation and key text, so two actors may use
- * the same text and `session.spawn` and `session.input` may too. `result_id`
- * is the id of the session (`session.spawn`, `session.continue`) or of the
- * input (`session.input`) the call returned.
+ * A key is unique per actor, operation and key text. Two actors may use the
+ * same text. So may two operations, for example `session.spawn` and
+ * `session.input`. `result_id` is the id of the session (`session.spawn`,
+ * `session.continue`) or of the input (`session.input`) the call returned.
  *
  * The keys have a table of their own, not a column on `sessions` or
  * `session_inputs`, for two reasons:

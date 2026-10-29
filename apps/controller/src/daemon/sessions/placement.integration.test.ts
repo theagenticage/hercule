@@ -1242,6 +1242,7 @@ describe("placeSession and continueSession with a dedupKey", () => {
       await waitForOrderedFrames(arranged);
 
       expect(repeat.id).toBe(first.id);
+      // The +1 is the sentinel session of `waitForOrderedFrames`.
       expect(await countRows(arranged, "sessions")).toBe(sessionsBefore + 1);
       expect(await countRows(arranged, "workspaces")).toBe(workspacesBefore);
       expect(listFramesTagged(arranged.wire, "workspaceProvision")).toHaveLength(1);
@@ -1345,6 +1346,7 @@ describe("placeSession and continueSession with a dedupKey", () => {
       expect(child.id).not.toBe(parent.id);
       expect(child.parentSessionId).toBe(parent.id);
       expect(repeated.id).toBe(child.id);
+      // The +1 is the sentinel session of `waitForOrderedFrames`.
       expect(await countRows(arranged, "sessions")).toBe(sessionsBefore + 1);
       expect(listStartedSessionIds(arranged).filter((id) => id === child.id)).toHaveLength(1);
     });

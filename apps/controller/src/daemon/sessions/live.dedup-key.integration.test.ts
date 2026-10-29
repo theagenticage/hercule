@@ -127,7 +127,9 @@ describe("session.input with a dedupKey", () => {
       expect(repeat.status).toBe(409);
       const refused = await readErrorBody(repeat);
       expect(refused.code).toBe("invalid_state");
-      expect(refused.message).toContain(first.inputId);
+      expect(refused.message).toBe(
+        `input ${first.inputId} was stored under this dedup key and then cancelled; send the message again with a new key`,
+      );
       expect(await listInputs(arranged, target.id)).toHaveLength(2);
     });
   });
