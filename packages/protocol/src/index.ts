@@ -111,12 +111,15 @@ export {
  *   decode an async question or the result frame, and an older runner never
  *   sends the result that a newer controller waits for, so the two refuse each
  *   other at hello.
- * - Version 9 replaced the `message` of a refused `SessionInputResult` with a
+ * - Version 9 added the `runtime.notice` event. An older controller could not
+ *   decode it and would close the socket on it, again after every reconnect, so
+ *   the two refuse each other at hello.
+ * - Version 10 replaced the `message` of a refused `SessionInputResult` with a
  *   typed `error`. An older controller could not decode the refused result, and
  *   an older runner sends a refusal the newer controller cannot read, so the
  *   two refuse each other at hello.
  */
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 /**
  * The close code and reason the controller uses to end the connection of a

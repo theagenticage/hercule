@@ -13,21 +13,25 @@
  * - a subagent's frames name it only by the `Agent` call that started it, and
  *   its turns are the adapter's own (spec 06 section 13.6).
  *
- * Nothing throws. A message this build does not recognise becomes an `unknown`
- * item that carries the raw payload (spec 06 section 6.7).
+ * Nothing throws. Every message type and `system` subtype of the pinned SDK has
+ * an entry in `CLAUDE_MESSAGE_DECISIONS`: an item, a notice, a warning, or a
+ * drop with its reason. A message with no entry, and a message of a known type
+ * whose fields could not be read, becomes an `unknown` item that carries a
+ * label and the raw payload (spec 06 section 6.7).
  */
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import {
-  MAX_MESSAGE_LENGTH,
-  type ContinuedSubagent,
-  type ItemKind,
-  type OutputSchema,
-  type ProviderEvent,
-  type StreamKind,
-  type StructuredResult,
-  type TextGenerationOutcome,
-  type TurnState,
-  type Usage,
+import type {
+  ContextCompactionDetail,
+  ContinuedSubagent,
+  ItemKind,
+  OutputSchema,
+  ProviderEvent,
+  StreamKind,
+  StructuredResult,
+  TextGenerationOutcome,
+  TurnState,
+  UnknownItemDetail,
+  Usage,
 } from "@hercule/protocol";
 import {
   buildSubagentRegistry,
@@ -45,7 +49,8 @@ import {
 import { clampCount, toJson } from "./normalize";
 import { judgeAnswer, type HarnessAnswer } from "./structured-result";
 import { buildEditedPathFields, type EditedPathFields } from "./edited-paths";
-import { truncateFact } from "./text";
+import { escapeControlCharacters } from "../report";
+import { truncateFact, truncateMessage } from "./text";
 
 /** The `source` name on every raw payload from this adapter. */
 export const CLAUDE_SDK_MESSAGE = "claude.sdk.message";
@@ -115,6 +120,64 @@ export interface Normalizing {
    * it, and at most `MAX_HELD_FRAMES` of them are kept.
    */
   readonly heldFrames: Array<SDKMessage>;
+  /**
+   * Tells the runner's log that Claude sent a message the table does not
+   * decide, or one it could not read. `error` is what failed while reading a
+   * message of a known type. It is called for every such message, so the
+   * caller decides how often the log hears of one label.
+   *
+   * It must never throw: `normalize` promises never to throw, and it calls
+   * this from inside its fallback for a message it cannot read. The adapter's
+   * reporter forks the log effect, so it cannot throw.
+   */
+  readonly reportUnknownMessage: (label: string, error?: unknown) => void;
+  /** The compaction in progress, or `undefined` when none is. */
+  compaction: RunningCompaction | undefined;
+  /**
+   * Whether the last `rate_limit_event` said the usage limit blocks the
+   * session. Claude repeats a blocked limit in every event, and the user is
+   * warned only when the limit becomes blocked.
+   */
+  usageLimitBlocked: boolean;
+}
+
+/**
+ * A `context_compaction` item that has started and not yet completed. Claude
+ * reports a compaction in several messages (spec 06 section 6.3). What each
+ * one does to the item, and who closes the turn:
+ *
+ * - `status` `compacting`: starts the item, in a synthetic turn if none is
+ *   open (`openedTurn`). A second one while the item runs is ignored.
+ * - `status` `null` with `compact_result: "failed"`: fails the item.
+ * - `status` `null` with no `compact_result` and no `permissionMode`, before
+ *   the boundary: fails the item. Claude reports success as `null` with
+ *   `compact_result: "success"`, so a bare `null` means the compaction ended
+ *   without a result.
+ * - `compact_boundary`: records `boundary`, and starts the item first if no
+ *   `compacting` status did. The item keeps running.
+ * - The next conversation message of the session's own agent after the
+ *   boundary: completes the item, with the summary if the message holds it.
+ * - `result`, or the session exiting: completes the item with `boundary` if
+ *   there is one and fails it if not.
+ *
+ * Only a failure or a completion by a conversation message closes the turn,
+ * and only when `openedTurn`. A turn that was already open is closed by its own
+ * `result`, and a session that exits leaves its turns open.
+ */
+interface RunningCompaction {
+  readonly itemId: string;
+  readonly turnId: string;
+  /**
+   * True when the compaction opened its turn because none was open. Such a
+   * synthetic turn stays open until the compaction completes, and closes with
+   * it.
+   */
+  readonly openedTurn: boolean;
+  /**
+   * What `compact_boundary` reported. `undefined` until that message arrives.
+   * The item completes with it, plus the summary when the summary follows.
+   */
+  boundary: ContextCompactionDetail | undefined;
 }
 
 /** A tool item that has started and not yet completed. */
@@ -148,6 +211,7 @@ export const buildNormalizingState = (
   mint: () => string,
   now: () => string,
   outputSchema: OutputSchema | undefined,
+  reportUnknownMessage: Normalizing["reportUnknownMessage"],
   seeded?: ReadonlyArray<ContinuedSubagent>,
 ): Normalizing => ({
   sessionId,
@@ -159,6 +223,9 @@ export const buildNormalizingState = (
   tools: new Map(),
   subagents: buildSubagentRegistry(seeded),
   heldFrames: [],
+  reportUnknownMessage,
+  compaction: undefined,
+  usageLimitBlocked: false,
 });
 
 /**
@@ -312,42 +379,6 @@ const buildFileFields = (kind: ItemKind, input: unknown): Record<string, string>
   }
   return {};
 };
-
-/**
- * Informational messages from Claude that are dropped on purpose. Rate-limit
- * and auth updates belong in the capability snapshot, not in session events,
- * and progress messages hold nothing a transcript reader wants. A message type
- * that is neither in this list nor handled below still becomes an `unknown`
- * item rather than disappearing. Spec 06 section 6.7 lists what is trimmed.
- */
-const TRIMMED: ReadonlySet<string> = new Set([
-  // Top-level message types.
-  "rate_limit_event",
-  "auth_status",
-  "tool_use_summary",
-  "prompt_suggestion",
-  "tool_progress",
-  // `system` subtypes, with the `system:` prefix that `onSystem` looks them up with.
-  "system:status",
-  "system:session_state_changed",
-  "system:thinking_tokens",
-  "system:background_tasks_changed",
-  "system:commands_changed",
-  "system:hook_started",
-  "system:hook_progress",
-  "system:hook_response",
-  "system:files_persisted",
-  // The lifecycle of a task. None of these is model work: a task's command
-  // already shows as its tool item, and when a background task finishes, the
-  // model's answer to it arrives as ordinary `assistant` messages and a
-  // `result`, which open and close a real turn. Kept, each one became an empty
-  // synthetic turn.
-  "system:task_progress",
-  "system:task_updated",
-]);
-
-/** Truncates text to the longest message the protocol accepts. */
-const cutToMessageLength = (value: string): string => value.slice(0, MAX_MESSAGE_LENGTH);
 
 type Emit = Array<ProviderEvent>;
 
@@ -543,14 +574,93 @@ const buildWholeItem = (
 ];
 
 /**
- * Emits an `unknown` item, in the agent's turn, for a vendor message this
- * adapter does not map. `normalize` attaches the raw payload.
+ * Builds the `{ type }` or `{ type }/{ subtype }` name of a Claude message, the
+ * key of its entry in `CLAUDE_MESSAGE_DECISIONS` and the end of its label.
+ * Only a `system` message has a subtype in the key. Returns a placeholder for
+ * a message with no usable `type`. Never throws, whatever the message holds.
  */
-const emitUnknownItem = (state: Normalizing, agent: TurnOwner, out: Emit): void => {
+const buildClaudeMessageKey = (message: unknown): string => {
+  const type = readInputString(message, "type");
+  if (type === undefined || type === "") return "message with no type";
+  const subtype = type === "system" ? readInputString(message, "subtype") : undefined;
+  return subtype === undefined || subtype === "" ? type : `${type}/${subtype}`;
+};
+
+/**
+ * Builds the label of an `unknown` item for a message, such as
+ * `claude: system/foo_bar`. The type and subtype are text from Claude, so
+ * control and format characters are written as escapes: a label with a line
+ * break or a direction override would otherwise change how a client draws it.
+ * Never throws, whatever the message holds.
+ */
+const buildUnknownLabel = (message: unknown): string =>
+  truncateFact(`claude: ${escapeControlCharacters(buildClaudeMessageKey(message))}`);
+
+/**
+ * Emits an `unknown` item, in the agent's turn, for a message this adapter
+ * cannot show: its type has no entry in `CLAUDE_MESSAGE_DECISIONS`, or its
+ * fields could not be read (`error` is what failed). The item carries the
+ * message's label, and the runner's log hears of the message through
+ * `reportUnknownMessage`. `normalize` attaches the raw payload.
+ */
+const emitUnknownItem = (
+  state: Normalizing,
+  agent: TurnOwner,
+  out: Emit,
+  sdk: unknown,
+  error?: unknown,
+): void => {
+  const label = buildUnknownLabel(sdk);
+  state.reportUnknownMessage(label, error);
   const turn = ensureAgentTurn(state, agent, out);
   const itemId = state.mint();
-  out.push(buildItemStarted(state, turn, itemId, "unknown"));
-  out.push(buildItemCompleted(state, turn, itemId, "unknown", "completed"));
+  const detail: UnknownItemDetail = { label };
+  out.push(buildItemStarted(state, turn, itemId, "unknown", detail));
+  out.push(buildItemCompleted(state, turn, itemId, "unknown", "completed", detail));
+};
+
+/** The two events that tell the user something without being an item. */
+type RuntimeEventTag = "runtime.warning" | "runtime.notice";
+
+/**
+ * Builds a `runtime.notice` (neutral information) or a `runtime.warning`
+ * (something went wrong, but the session goes on). With a `subagentId` the
+ * event names that subagent and no turn. Without one it names the open turn of
+ * the session's own agent, if there is one, and never opens one: a notice
+ * between turns is drawn without a turn around it (spec 06 section 6.2).
+ */
+export const buildRuntimeEvent = (
+  state: Normalizing,
+  tag: RuntimeEventTag,
+  text: string,
+  subagentId?: string,
+): ProviderEvent => ({
+  _tag: tag,
+  eventId: state.mint(),
+  sessionId: state.sessionId,
+  at: state.now(),
+  ...(subagentId !== undefined
+    ? { subagentId }
+    : state.turnId === undefined
+      ? {}
+      : { turnId: state.turnId }),
+  message: truncateMessage(text),
+});
+
+/** Adds a notice or a warning to `out`. Adds nothing for an empty text. */
+const emitRuntimeEvent = (state: Normalizing, out: Emit, tag: RuntimeEventTag, text: string) => {
+  if (text !== "") out.push(buildRuntimeEvent(state, tag, text));
+};
+
+/**
+ * Returns a field Claude sent as text. Throws when it is anything else, so
+ * `normalizeFrame` shows the message as an `unknown` item instead of passing a
+ * list or an object on as the text of an event. `what` names the field for the
+ * log line that reports the failure.
+ */
+const requireText = (value: unknown, what: string): string => {
+  if (typeof value !== "string") throw new Error(`${what} is not text`);
+  return value;
 };
 
 /**
@@ -583,16 +693,20 @@ const introduceSubagent = (
     ...(subagent.agentCallId === undefined ? {} : { itemId: subagent.agentCallId }),
     ...(description === undefined || description === ""
       ? {}
-      : { description: cutToMessageLength(description) }),
+      : { description: truncateMessage(description) }),
     ...(agentType === undefined || agentType === "" ? {} : { agentType: truncateFact(agentType) }),
   };
   subagent.introduced = true;
   out.push(started);
 };
 
-type Streamed = Extract<SDKMessage, { type: "stream_event" }>["event"];
-
-const onStreamEvent = (state: Normalizing, event: Streamed, agent: TurnOwner, out: Emit): void => {
+const onStreamEvent = (
+  state: Normalizing,
+  sdk: Extract<SDKMessage, { type: "stream_event" }>,
+  out: Emit,
+  agent: TurnOwner,
+): void => {
+  const event = sdk.event;
   const stream = ensureAgentStream(state, agent);
   const open = stream.current;
   switch (event.type) {
@@ -703,8 +817,8 @@ const readEditedPaths = (input: unknown): EditedPathFields | undefined => {
 const onAssistant = (
   state: Normalizing,
   sdk: Extract<SDKMessage, { type: "assistant" }>,
-  agent: TurnOwner,
   out: Emit,
+  agent: TurnOwner,
 ): void => {
   const turn = ensureAgentTurn(state, agent, out, sdk.message.model);
   // Text and reasoning that streamed were already emitted, and this message
@@ -776,8 +890,8 @@ const onAssistant = (
 const onUser = (
   state: Normalizing,
   sdk: Extract<SDKMessage, { type: "user" }>,
-  agent: TurnOwner,
   out: Emit,
+  agent: TurnOwner,
 ): void => {
   const content = sdk.message.content;
   if (typeof content === "string") return;
@@ -806,7 +920,7 @@ const onUser = (
               : {
                   content:
                     typeof block.content === "string"
-                      ? cutToMessageLength(block.content)
+                      ? truncateMessage(block.content)
                       : block.content,
                 }),
           },
@@ -856,8 +970,8 @@ const readUsage = (sdk: Extract<SDKMessage, { type: "result" }>): Usage => {
  */
 const describeFailure = (sdk: Extract<SDKMessage, { type: "result" }>): string => {
   if (sdk.subtype !== "success" && sdk.errors.length > 0)
-    return cutToMessageLength(sdk.errors.join("; "));
-  if (sdk.subtype === "success" && sdk.result !== "") return cutToMessageLength(sdk.result);
+    return truncateMessage(sdk.errors.join("; "));
+  if (sdk.subtype === "success" && sdk.result !== "") return truncateMessage(sdk.result);
   return sdk.subtype;
 };
 
@@ -963,17 +1077,27 @@ const onResult = (
   sdk: Extract<SDKMessage, { type: "result" }>,
   out: Emit,
 ): void => {
-  const { turnId } = ensureAgentTurn(state, undefined, out);
   const usage = readUsage(sdk);
   const turnState = readTurnState(sdk);
-  const structuredResult = judgeTurn(state, sdk, turnState);
-  out.push({
+  const usageUpdate: ProviderEvent = {
     _tag: "session.usage.updated",
     eventId: state.mint(),
     sessionId: state.sessionId,
     at: state.now(),
     usage,
-  });
+  };
+  // A slash command Claude runs itself, such as `/compact`, ends with a
+  // result that counts no model turn. When no turn is open, because the
+  // compaction's own synthetic turn closed with the compaction, the result has
+  // no turn to close, and opening one would leave an empty turn behind.
+  if (state.turnId === undefined && sdk.num_turns === 0 && turnState === "completed") {
+    out.push(usageUpdate);
+    return;
+  }
+  const { turnId } = ensureAgentTurn(state, undefined, out);
+  const structuredResult = judgeTurn(state, sdk, turnState);
+  completeCompactionAtEnd(state, out);
+  out.push(usageUpdate);
   closeTurn(state, out, undefined, turnId, turnState, {
     usage,
     ...(turnState === "failed" ? { error: describeFailure(sdk) } : {}),
@@ -1013,16 +1137,14 @@ const onTaskStarted = (
   });
   // A subagent is registered once, so each changed id is reported once.
   if (isNew && subagentId !== sdk.task_id) {
-    out.push({
-      _tag: "runtime.warning",
-      eventId: state.mint(),
-      sessionId: state.sessionId,
-      at: state.now(),
-      subagentId,
-      message: cutToMessageLength(
+    out.push(
+      buildRuntimeEvent(
+        state,
+        "runtime.warning",
         `the harness named a subagent "${sdk.task_id}", which the protocol does not accept, so it is reported as "${subagentId}"`,
+        subagentId,
       ),
-    });
+    );
   }
   if (subagent.turn.phase === "idle") subagent.turn = { phase: "pending", prompt: sdk.prompt };
 };
@@ -1054,72 +1176,297 @@ const onTaskNotification = (
   else if (subagent.stop === "sent") subagent.stop = "wanted";
 };
 
-const onSystem = (
+/**
+ * Starts the `context_compaction` item in the session's own agent's turn, tracks
+ * it in `state.compaction`, and returns it. `detail` is what is known so far.
+ * Known limit: compaction names no agent, so a subagent's is reported as the
+ * session's own agent's (spec 06 section 13.6).
+ */
+const startCompaction = (
   state: Normalizing,
-  sdk: Extract<SDKMessage, { type: "system" }>,
-  agent: TurnOwner,
   out: Emit,
+  detail: ContextCompactionDetail,
+): RunningCompaction => {
+  const openedTurn = state.turnId === undefined;
+  const turn = ensureAgentTurn(state, undefined, out);
+  const itemId = state.mint();
+  out.push(buildItemStarted(state, turn, itemId, "context_compaction", detail));
+  const compaction: RunningCompaction = {
+    itemId,
+    turnId: turn.turnId,
+    openedTurn,
+    boundary: undefined,
+  };
+  state.compaction = compaction;
+  return compaction;
+};
+
+/**
+ * Completes the tracked compaction item and stops tracking it. Does nothing
+ * when no compaction is tracked. Leaves the turn alone. Returns the compaction
+ * that completed.
+ */
+const completeCompactionItem = (
+  state: Normalizing,
+  out: Emit,
+  status: "completed" | "failed",
+  detail?: ContextCompactionDetail,
+): RunningCompaction | undefined => {
+  const compaction = state.compaction;
+  if (compaction === undefined) return undefined;
+  state.compaction = undefined;
+  out.push(
+    buildItemCompleted(
+      state,
+      { turnId: compaction.turnId, subagentId: undefined },
+      compaction.itemId,
+      "context_compaction",
+      status,
+      detail,
+    ),
+  );
+  return compaction;
+};
+
+/** Completes the tracked compaction item, then closes its turn if the compaction opened it. */
+const completeCompaction = (
+  state: Normalizing,
+  out: Emit,
+  status: "completed" | "failed",
+  detail?: ContextCompactionDetail,
 ): void => {
-  switch (sdk.subtype) {
-    case "init":
-      // The adapter emits `session.started` itself when it starts the session,
-      // so `init` adds nothing.
-      return;
-    // `task_started` and `task_notification` are kept for a subagent, and
-    // trimmed for every other task, as `TRIMMED` explains.
-    case "task_started":
-      onTaskStarted(state, sdk, out);
-      return;
-    case "task_notification":
-      onTaskNotification(state, sdk, out);
-      return;
-    // Known limit: compaction and retries name no agent, so a subagent's are
-    // reported as the session's own agent's (spec 06 section 13.6).
-    case "compact_boundary": {
-      const turn = ensureAgentTurn(state, undefined, out);
-      const itemId = state.mint();
-      const detail = {
-        trigger: sdk.compact_metadata.trigger,
-        preTokens: sdk.compact_metadata.pre_tokens,
-        postTokens: sdk.compact_metadata.post_tokens,
-      };
-      out.push(buildItemStarted(state, turn, itemId, "context_compaction", detail));
-      out.push(buildItemCompleted(state, turn, itemId, "context_compaction", "completed", detail));
-      return;
-    }
-    case "api_retry":
-      out.push({
-        _tag: "runtime.warning",
-        eventId: state.mint(),
-        sessionId: state.sessionId,
-        at: state.now(),
-        ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
-        message: cutToMessageLength(
-          `retrying after ${sdk.error}: attempt ${sdk.attempt} of ${sdk.max_retries}`,
-        ),
-      });
-      return;
-    default:
-      // `permission_denied` lands here too, in the turn of the agent it names:
-      // the taxonomy has no kind for it, and the denied call's item already
-      // ends failed when its `tool_result` arrives.
-      if (!TRIMMED.has(`system:${sdk.subtype}`)) emitUnknownItem(state, agent, out);
-      return;
+  const compaction = completeCompactionItem(state, out, status, detail);
+  if (compaction?.openedTurn === true && state.turnId === compaction.turnId) {
+    closeTurn(state, out, undefined, compaction.turnId, "completed");
   }
 };
 
 /**
- * The message types that can arrive between turns. Claude sends informational
- * messages after the `result` that closed the last turn. A turn opened for one
- * of them would wait for a `result` that never comes, and the session would
- * look busy for good. So a turn opened for one of these messages is closed
- * after that same message (spec 06 section 6.2, synthetic turns). `assistant`
- * and `stream_event` messages are model output, and a `result` ends their turn.
+ * Completes the tracked compaction at a `result` or at the end of the session,
+ * when no later message will. A compaction past its boundary completes without
+ * a summary. One without a boundary fails. Leaves the turn to the caller.
+ */
+export const completeCompactionAtEnd = (state: Normalizing, out: Array<ProviderEvent>): void => {
+  const boundary = state.compaction?.boundary;
+  if (boundary === undefined) completeCompactionItem(state, out, "failed");
+  else completeCompactionItem(state, out, "completed", boundary);
+};
+
+/**
+ * Returns the summary Claude writes after a compaction: the text of a
+ * synthetic user message from the session's own agent (`parent_tool_use_id` is
+ * null) whose content is a plain string. Returns `undefined` for any other
+ * message. Measured on the real CLI (spec 06 section 6.3).
+ */
+const readCompactionSummary = (sdk: SDKMessage): string | undefined => {
+  if (sdk.type !== "user" || sdk.parent_tool_use_id !== null || sdk.isSynthetic !== true) {
+    return undefined;
+  }
+  return readInputString(sdk.message, "content");
+};
+
+/**
+ * Checks whether a message is part of the conversation: a `user`, `assistant`
+ * or `stream_event` message. Every `system` message and every other top-level
+ * type, such as a rate limit event, passes a pending compaction by.
+ */
+const isConversationMessage = (sdk: SDKMessage): boolean =>
+  sdk.type === "user" || sdk.type === "assistant" || sdk.type === "stream_event";
+
+/**
+ * Completes a compaction that has passed its boundary, on the next
+ * conversation message (`isConversationMessage`). The summary is added when
+ * the message is the summary message. Does nothing for any other message,
+ * before the boundary, or when no compaction is tracked.
+ */
+const completeCompactionAfterBoundary = (state: Normalizing, sdk: SDKMessage, out: Emit): void => {
+  const boundary = state.compaction?.boundary;
+  if (boundary === undefined || !isConversationMessage(sdk)) return;
+  const summary = readCompactionSummary(sdk);
+  completeCompaction(
+    state,
+    out,
+    "completed",
+    summary === undefined ? boundary : { ...boundary, summary: truncateMessage(summary) },
+  );
+};
+
+/**
+ * Handles a `status` message: starts or fails the compaction as listed at
+ * `RunningCompaction`. A `null` status that carries a `permissionMode` is a
+ * permission-mode update, not an ending. Every other status is dropped: the
+ * session's status comes from its turns.
+ */
+const trackCompactionStatus = (
+  state: Normalizing,
+  sdk: Extract<SDKMessage, { subtype: "status" }>,
+  out: Emit,
+): void => {
+  if (sdk.status === "compacting") {
+    if (state.compaction === undefined) startCompaction(state, out, {});
+  } else if (sdk.compact_result === "failed") {
+    completeCompaction(state, out, "failed");
+  } else if (
+    sdk.status === null &&
+    sdk.compact_result === undefined &&
+    sdk.permissionMode === undefined &&
+    state.compaction?.boundary === undefined
+  ) {
+    completeCompaction(state, out, "failed");
+  }
+};
+
+/** Returns the count when the harness gave a number, and `undefined` otherwise. */
+const readTokenCount = (value: unknown): number | undefined =>
+  typeof value === "number" ? clampCount(value) : undefined;
+
+/**
+ * Handles `compact_boundary`: records the trigger and the token counts the
+ * item will complete with (see `RunningCompaction`). A message with no
+ * `compact_metadata` fails here, before anything changes, and `normalizeFrame`
+ * reports it as an unknown message.
+ */
+const recordCompactBoundary = (
+  state: Normalizing,
+  sdk: Extract<SDKMessage, { subtype: "compact_boundary" }>,
+  out: Emit,
+): void => {
+  const metadata = sdk.compact_metadata;
+  const trigger =
+    metadata.trigger === "auto" || metadata.trigger === "manual" ? metadata.trigger : undefined;
+  const tokensBefore = readTokenCount(metadata.pre_tokens);
+  const tokensAfter = readTokenCount(metadata.post_tokens);
+  const boundary: ContextCompactionDetail = {
+    ...(trigger === undefined ? {} : { trigger }),
+    ...(tokensBefore === undefined ? {} : { tokensBefore }),
+    ...(tokensAfter === undefined ? {} : { tokensAfter }),
+  };
+  const compaction = state.compaction ?? startCompaction(state, out, boundary);
+  compaction.boundary = boundary;
+};
+
+/**
+ * Returns whether a rate limit stops the session: the limit is `rejected` and
+ * overage does not cover it. Overage covers it when it is allowed or in use.
+ */
+const isUsageLimitBlocked = (
+  info: Extract<SDKMessage, { type: "rate_limit_event" }>["rate_limit_info"],
+): boolean =>
+  info.status === "rejected" &&
+  info.overageStatus !== "allowed" &&
+  info.overageStatus !== "allowed_warning" &&
+  info.isUsingOverage !== true &&
+  info.overageInUse !== true;
+
+/**
+ * Formats a Unix time in seconds as a UTC instant such as `2026-10-28 14:00
+ * UTC`. Returns `undefined` when the value is not a time `Date` can show.
+ */
+const formatResetTime = (seconds: unknown): string | undefined => {
+  if (typeof seconds !== "number") return undefined;
+  const at = new Date(seconds * 1000);
+  return Number.isNaN(at.getTime())
+    ? undefined
+    : `${at.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+};
+
+/**
+ * Handles `rate_limit_event`: warns only when the limit becomes blocked.
+ * Claude repeats a blocked limit in later events, and those add nothing until
+ * an event that is not blocked resets it. Every other rate limit update is
+ * dropped. `resetsAt` is in seconds (measured on the real CLI), and the clause
+ * is left out when the message gives none.
+ */
+const emitUsageLimitWarning = (
+  state: Normalizing,
+  sdk: Extract<SDKMessage, { type: "rate_limit_event" }>,
+  out: Emit,
+): void => {
+  const info = sdk.rate_limit_info;
+  const blocked = isUsageLimitBlocked(info);
+  const becameBlocked = blocked && !state.usageLimitBlocked;
+  state.usageLimitBlocked = blocked;
+  if (!becameBlocked) return;
+  const resetsAt = formatResetTime(info.resetsAt);
+  emitRuntimeEvent(
+    state,
+    out,
+    "runtime.warning",
+    resetsAt === undefined ? "Usage limit reached" : `Usage limit reached, resets at ${resetsAt}`,
+  );
+};
+
+/**
+ * Handles `local_command_output`: the output of a slash command Claude ran
+ * itself, shown as an assistant message in the agent's turn.
+ */
+const emitLocalCommandOutput = (
+  state: Normalizing,
+  sdk: Extract<SDKMessage, { subtype: "local_command_output" }>,
+  out: Emit,
+  agent: TurnOwner,
+): void => {
+  const text = truncateMessage(requireText(sdk.content, "local_command_output content"));
+  if (text === "") return;
+  const turn = ensureAgentTurn(state, agent, out);
+  out.push(
+    ...buildWholeItem(state, turn, state.mint(), "assistant_message", "assistant_text", text),
+  );
+};
+
+/** Handles `memory_recall`: a notice that counts the memories Claude brought into the turn. */
+const emitMemoryRecallNotice = (
+  state: Normalizing,
+  sdk: Extract<SDKMessage, { subtype: "memory_recall" }>,
+  out: Emit,
+): void => {
+  // A string has a length too, and would read as "Recalled 57 memories".
+  if (!Array.isArray(sdk.memories)) throw new Error("memory_recall memories is not a list");
+  const count = sdk.memories.length;
+  if (count === 0) return;
+  emitRuntimeEvent(
+    state,
+    out,
+    "runtime.notice",
+    count === 1 ? "Recalled 1 memory" : `Recalled ${count} memories`,
+  );
+};
+
+/** Handles `api_retry`: a warning that names the error and the attempt. */
+const emitRetryWarning = (
+  state: Normalizing,
+  sdk: Extract<SDKMessage, { subtype: "api_retry" }>,
+  out: Emit,
+): void => {
+  emitRuntimeEvent(
+    state,
+    out,
+    "runtime.warning",
+    `retrying after ${sdk.error}: attempt ${sdk.attempt} of ${sdk.max_retries}`,
+  );
+};
+
+/**
+ * The message types that are model output: a turn opened for one of them stays
+ * open until the `result` that ends it.
+ */
+const MODEL_OUTPUT_TYPES: ReadonlySet<string> = new Set(["assistant", "stream_event", "result"]);
+
+/**
+ * Checks whether a message is self-contained: the turn it opens is closed after
+ * that same message. Claude sends informational messages after the `result`
+ * that closed the last turn, and a turn opened for one of them would wait for
+ * a `result` that never comes, so the session would look busy for good (spec
+ * 06 section 6.2, synthetic turns). Every message that is not model output is
+ * self-contained, including one of a type this build does not know, which
+ * becomes an `unknown` item. A message of model output that could not be read
+ * also becomes an `unknown` item, and `normalizeFrame` closes its turn after
+ * that item as well.
  *
  * The same holds for a subagent that woke by itself: a turn its `user` or
  * `system` message opens is closed after that message.
  */
-const SELF_CONTAINED: ReadonlySet<string> = new Set(["user", "system"]);
+const isSelfContained = (sdk: SDKMessage): boolean => !MODEL_OUTPUT_TYPES.has(sdk.type);
 
 /**
  * Returns the agent call a frame comes from: its `parent_tool_use_id`, or
@@ -1164,8 +1511,8 @@ const isTurnOpeningEvent = (event: ProviderEvent): boolean =>
  * drops them all, itself included, and returns a warning that counts them.
  *
  * Never throws. A message with a known type but changed fields becomes an
- * `unknown` item, because the CLI ships weekly and a `TypeError` here would
- * take a live session down.
+ * `unknown` item with a label, because the CLI ships weekly and a `TypeError`
+ * here would take a live session down.
  */
 export const normalize = (state: Normalizing, sdk: SDKMessage): ReadonlyArray<ProviderEvent> => {
   const out = normalizeFrame(state, sdk);
@@ -1175,14 +1522,6 @@ export const normalize = (state: Normalizing, sdk: SDKMessage): ReadonlyArray<Pr
 
 /** Returns the agent a frame belongs to, or `"unknown"` for a subagent not known yet. */
 const findTurnOwner = (state: Normalizing, sdk: SDKMessage): TurnOwner | "unknown" => {
-  if (sdk.type === "system" && sdk.subtype === "permission_denied") {
-    // A denial names the agent by its SubagentId, and names none for the
-    // session's own agent. An id the registry does not know yet is held like
-    // any other frame of an unknown subagent.
-    const subagentId = cleanSubagentId(sdk.agent_id);
-    if (subagentId === undefined) return undefined;
-    return state.subagents.byId.get(subagentId) ?? "unknown";
-  }
   const agentCallId = readAgentCallId(sdk);
   if (agentCallId === undefined) return undefined;
   return findSubagentByAgentCall(state.subagents, agentCallId) ?? "unknown";
@@ -1199,30 +1538,40 @@ const normalizeFrame = (state: Normalizing, sdk: SDKMessage): Emit => {
   // A subagent from an earlier process may send a frame before any
   // `task_started` in this one, and it must be introduced before its events.
   if (agent !== undefined) introduceSubagent(state, agent, out);
-  // The introduction is not part of the message, so the raw payload never goes on it.
-  const introductionCount = out.length;
+  // Only a conversation message of the session's own agent advances its
+  // compaction: a subagent's frame, or a notice, between the boundary and the
+  // summary must not take the summary's place.
+  if (agent === undefined) completeCompactionAfterBoundary(state, sdk, out);
+  // `out[0, ownOutputStart)` is the preserved prefix: events emitted before this
+  // message is dispatched (the subagent introduction, a compaction it
+  // completes). They are kept when dispatch fails and never get the raw
+  // payload. `out[ownOutputStart..]` is this message's own output.
+  const ownOutputStart = out.length;
   const unsolicited =
     agent === undefined ? state.turnId === undefined : agent.turn.phase === "idle";
+  let fellBack = false;
   try {
     dispatch(state, sdk, agent, out);
-  } catch {
+  } catch (error) {
     // Keep what changed the state of the session or a subagent, so a turn
     // opened before the failure is still reported as started, and drop the
-    // rest of the message's partial output.
-    const kept = out.filter(
-      (event) => event._tag === "subagent.started" || isTurnOpeningEvent(event),
-    );
-    out.length = 0;
+    // rest of this message's partial output.
+    const kept = out
+      .splice(ownOutputStart)
+      .filter((event) => event._tag === "subagent.started" || isTurnOpeningEvent(event));
     out.push(...kept);
-    emitUnknownItem(state, agent, out);
+    emitUnknownItem(state, agent, out, sdk, error);
+    fellBack = true;
   }
-  if (unsolicited) closeUnsolicitedTurn(state, sdk, agent, out);
+  if (unsolicited) {
+    closeUnsolicitedTurn(state, agent, out, ownOutputStart, fellBack || isSelfContained(sdk));
+  }
   // There are thousands of deltas. A copy of the message on each one would
-  // double the stream, and each delta already carries its text.
-  if (sdk.type === "stream_event") return out;
-  const at = out.findIndex(
-    (event, index) => index >= introductionCount && !isTurnOpeningEvent(event),
-  );
+  // double the stream, and each delta already carries its text. A delta that
+  // fell back to an unknown item has no text to carry, so it keeps its raw
+  // payload.
+  if (sdk.type === "stream_event" && !fellBack) return out;
+  const at = out.findIndex((event, index) => index >= ownOutputStart && !isTurnOpeningEvent(event));
   const found = out[at];
   if (found !== undefined) {
     out[at] = { ...found, raw: { source: CLAUDE_SDK_MESSAGE, payload: toJson(sdk) } };
@@ -1232,8 +1581,13 @@ const normalizeFrame = (state: Normalizing, sdk: SDKMessage): Emit => {
 
 /**
  * Ends a turn that a message opened outside any turn, when nothing else will
- * end it (spec 06 section 6.2, synthetic turns):
+ * end it (spec 06 section 6.2, synthetic turns). `out` holds the events of the
+ * message from index `ownOutputStart`, and `endsWithMessage` says the message is
+ * complete in itself: it is not model output (`isSelfContained`), or it became
+ * an `unknown` item whatever its type.
  *
+ * - a turn of the session's own agent that holds a running compaction stays
+ *   open: the compaction closes it when it completes;
  * - a turn of the session's own agent in which the message produced nothing
  *   is dropped, as if it was never opened;
  * - a turn of a subagent the harness reported stopped is closed as
@@ -1241,20 +1595,22 @@ const normalizeFrame = (state: Normalizing, sdk: SDKMessage): Emit => {
  *   event, which is ignored. After a stop, the stopped call's
  *   `tool_result` arrives after the `task_notification` that closed the
  *   subagent's turn, and nothing else would ever close a turn it opened;
- * - a turn opened by a message in `SELF_CONTAINED` is closed after it.
+ * - a turn opened by a message that `endsWithMessage` is closed after it.
  */
 const closeUnsolicitedTurn = (
   state: Normalizing,
-  sdk: SDKMessage,
   agent: TurnOwner,
   out: Emit,
+  ownOutputStart: number,
+  endsWithMessage: boolean,
 ): void => {
   if (agent === undefined) {
     if (state.turnId === undefined) return;
-    if (out.every((event) => event._tag === "turn.started")) {
-      out.length = 0;
+    if (state.compaction?.turnId === state.turnId) return;
+    if (out.slice(ownOutputStart).every((event) => event._tag === "turn.started")) {
+      out.length = ownOutputStart;
       state.turnId = undefined;
-    } else if (SELF_CONTAINED.has(sdk.type)) {
+    } else if (endsWithMessage) {
       closeTurn(state, out, undefined, state.turnId, "completed");
     }
     return;
@@ -1262,7 +1618,7 @@ const closeUnsolicitedTurn = (
   if (agent.turn.phase !== "open") return;
   if (agent.stop === "stopped") {
     closeTurn(state, out, agent, agent.turn.turnId, "interrupted");
-  } else if (SELF_CONTAINED.has(sdk.type)) {
+  } else if (endsWithMessage) {
     closeTurn(state, out, agent, agent.turn.turnId, "completed");
   }
 };
@@ -1286,14 +1642,11 @@ const holdFrame = (state: Normalizing, sdk: SDKMessage): Emit => {
     dropped.flatMap((frame) => readAgentCallId(frame) ?? []),
   );
   return [
-    {
-      _tag: "runtime.warning",
-      eventId: state.mint(),
-      sessionId: state.sessionId,
-      at: state.now(),
-      ...(state.turnId === undefined ? {} : { turnId: state.turnId }),
-      message: `dropped ${dropped.length} messages from a subagent the harness never reported starting`,
-    },
+    buildRuntimeEvent(
+      state,
+      "runtime.warning",
+      `dropped ${dropped.length} messages from a subagent the harness never reported starting`,
+    ),
   ];
 };
 
@@ -1312,25 +1665,131 @@ const releaseHeldFrames = (state: Normalizing): Emit => {
   return out;
 };
 
+/** The `subtype` of every `system` message in the pinned SDK. */
+type ClaudeSystemSubtype = Extract<SDKMessage, { type: "system" }>["subtype"];
+
+/**
+ * The name of every message in the pinned SDK: its `type`, or
+ * `system/<subtype>` for a `system` message. Derived from the SDK's own types,
+ * so an upgrade that adds a type or a subtype changes this type and fails
+ * `CLAUDE_MESSAGE_DECISIONS` until someone decides it.
+ */
+type ClaudeMessageKey = Exclude<SDKMessage["type"], "system"> | `system/${ClaudeSystemSubtype}`;
+
+/** The SDK message a key names. */
+type ClaudeMessageFor<Key extends ClaudeMessageKey> = Key extends `system/${infer Subtype}`
+  ? Extract<SDKMessage, { type: "system"; subtype: Subtype }>
+  : Extract<SDKMessage, { type: Key }>;
+
+/**
+ * What the adapter does with one kind of Claude message: a function that adds
+ * its events to `out`, or a string with the reason nothing is shown (the
+ * message is dropped). `agent` is the agent the message belongs to; most
+ * handlers do not read it.
+ */
+type ClaudeMessageDecision<Key extends ClaudeMessageKey> =
+  | ((state: Normalizing, message: ClaudeMessageFor<Key>, out: Emit, agent: TurnOwner) => void)
+  | string;
+
+/**
+ * The decision for every Claude message (spec 06 section 6.7). Each entry is
+ * checked against the message it names: a handler takes that message's type,
+ * and a key the SDK does not list is an error. A message type this build
+ * does not know is not here, and `dispatch` turns it into a labelled `unknown`
+ * item.
+ */
+const CLAUDE_MESSAGE_DECISIONS = {
+  assistant: onAssistant,
+  user: onUser,
+  stream_event: onStreamEvent,
+  result: onResult,
+  "system/status": trackCompactionStatus,
+  "system/compact_boundary": recordCompactBoundary,
+  "system/informational": (state, message, out) =>
+    emitRuntimeEvent(
+      state,
+      out,
+      "runtime.notice",
+      requireText(message.content, "informational content"),
+    ),
+  "system/model_refusal_fallback": (state, message, out) =>
+    emitRuntimeEvent(
+      state,
+      out,
+      "runtime.notice",
+      requireText(message.content, "model_refusal_fallback content"),
+    ),
+  "system/notification": (state, message, out) =>
+    emitRuntimeEvent(state, out, "runtime.notice", requireText(message.text, "notification text")),
+  "system/memory_recall": emitMemoryRecallNotice,
+  conversation_reset: (state, _message, out) =>
+    emitRuntimeEvent(state, out, "runtime.notice", "Conversation was cleared"),
+  "system/model_refusal_no_fallback": (state, message, out) =>
+    emitRuntimeEvent(
+      state,
+      out,
+      "runtime.warning",
+      requireText(message.content, "model_refusal_no_fallback content"),
+    ),
+  "system/api_retry": emitRetryWarning,
+  rate_limit_event: emitUsageLimitWarning,
+  "system/local_command_output": emitLocalCommandOutput,
+  // `task_started` and `task_notification` are a subagent's turn boundaries.
+  // For every other task they do nothing, because a task's command already
+  // shows as its tool item.
+  "system/task_started": onTaskStarted,
+  "system/task_notification": onTaskNotification,
+  "system/init": "the adapter emits `session.started` itself when it starts the session",
+  "system/permission_denied":
+    "the denied tool item already ends failed when its `tool_result` arrives",
+  "system/mirror_error": "the adapter uses no SessionStore",
+  "system/hook_started": "hooks are not shown",
+  "system/hook_progress": "hooks are not shown",
+  "system/hook_response": "hooks are not shown",
+  // The lifecycle of a task is not model work. When a background task
+  // finishes, the model's answer arrives as ordinary `assistant` messages and
+  // a `result`, which open and close a real turn. Kept, each of these became an
+  // empty synthetic turn.
+  "system/task_progress": "a task's command already shows as its tool item",
+  "system/task_updated": "a task's command already shows as its tool item",
+  "system/background_tasks_changed": "a task's command already shows as its tool item",
+  "system/plugin_install": "plugin installation is not session output",
+  "system/control_request_progress": "progress of a control request is not session output",
+  "system/worker_shutting_down": "`session.exited` reports the shutdown",
+  "system/elicitation_complete": "it only confirms an MCP elicitation that is already over",
+  "system/thinking_tokens": "it holds a token count, not output",
+  "system/session_state_changed": "the session's status comes from its turns",
+  "system/commands_changed": "the slash command list is not session output",
+  "system/files_persisted": "file persistence is not shown",
+  tool_progress: "progress ticks of a running tool hold nothing to read",
+  tool_use_summary: "the tool items already show what the tools did",
+  prompt_suggestion: "a suggested next prompt is not session output",
+  auth_status: "login state belongs in the capability snapshot",
+} satisfies { readonly [Key in ClaudeMessageKey]: ClaudeMessageDecision<Key> };
+
+/**
+ * `CLAUDE_MESSAGE_DECISIONS` read by a key from a message, which can be
+ * anything at runtime. The one cast in the table: TypeScript cannot relate a
+ * key read at runtime to the handler type of that key, so every entry is read
+ * as a handler of any SDK message. `satisfies` has already checked each entry
+ * against its own message type.
+ */
+const DECISIONS_BY_KEY = CLAUDE_MESSAGE_DECISIONS as Readonly<
+  Record<string, ClaudeMessageDecision<ClaudeMessageKey>>
+>;
+
+/**
+ * Runs the decision for a message. A message with no entry in the table, such
+ * as a type a newer `claude` binary added, becomes a labelled `unknown` item.
+ * A handler that throws because a field is not what the SDK promises is turned
+ * into the same item by `normalizeFrame`.
+ */
 const dispatch = (state: Normalizing, sdk: SDKMessage, agent: TurnOwner, out: Emit): void => {
-  switch (sdk.type) {
-    case "system":
-      onSystem(state, sdk, agent, out);
-      return;
-    case "stream_event":
-      onStreamEvent(state, sdk.event, agent, out);
-      return;
-    case "assistant":
-      onAssistant(state, sdk, agent, out);
-      return;
-    case "user":
-      onUser(state, sdk, agent, out);
-      return;
-    case "result":
-      onResult(state, sdk, out);
-      return;
-    default:
-      if (!TRIMMED.has(sdk.type)) emitUnknownItem(state, agent, out);
-      return;
+  const key = buildClaudeMessageKey(sdk);
+  const decision = Object.hasOwn(DECISIONS_BY_KEY, key) ? DECISIONS_BY_KEY[key] : undefined;
+  if (decision === undefined) {
+    emitUnknownItem(state, agent, out, sdk);
+    return;
   }
+  if (typeof decision === "function") decision(state, sdk, out, agent);
 };

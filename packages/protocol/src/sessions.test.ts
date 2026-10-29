@@ -8,6 +8,7 @@ import {
   GithubTokenRequest,
   MAX_ANSWERS_LENGTH,
   isAsyncQuestion,
+  ContextCompactionDetail,
   ProviderEvent,
   SessionBinding,
   SessionInputResult,
@@ -18,6 +19,7 @@ import {
   SessionStart,
   SessionStop,
   TurnInput,
+  UnknownItemDetail,
   type ProviderEvent as Event,
 } from "./sessions";
 
@@ -126,6 +128,7 @@ const events: ReadonlyArray<Event> = [
     usageReport: { status: "incomplete", counts: { inputTokens: 0, outputTokens: 0 } },
   },
   { _tag: "runtime.warning", ...baseFields, message: "retrying after a 529" },
+  { _tag: "runtime.notice", ...baseFields, message: "Conversation was cleared" },
   { _tag: "runtime.error", ...baseFields, class: "ContextWindowExceeded", message: "too long" },
   {
     _tag: "request.opened",
@@ -394,6 +397,13 @@ describe("the normalized event taxonomy", () => {
     // socket, so the limit is well above a fact's.
     expect(decodeWarning("x".repeat(MAX_MESSAGE_LENGTH))).toBe("Success");
     expect(decodeWarning("x".repeat(MAX_MESSAGE_LENGTH + 1))).toBe("Failure");
+  });
+
+  it("accepts a notice inside a turn and between turns, but not without a message", () => {
+    const notice = { _tag: "runtime.notice", ...baseFields, message: "Recalled 2 memories" };
+    expect(decode(ProviderEvent, notice)._tag).toBe("Success");
+    expect(decode(ProviderEvent, { ...notice, turnId: "t1" })._tag).toBe("Success");
+    expect(decode(ProviderEvent, omitKey(notice, "message"))._tag).toBe("Failure");
   });
 
   it("gives a delta no length limit, because the payload is not a fact about a peer", () => {
@@ -879,5 +889,48 @@ describe("an edited file", () => {
     ["a zero-width space", "a\u200bb"],
   ])("rejects a path with %s", (_name, path) => {
     expect(at(path)).toBe(false);
+  });
+});
+
+describe("the detail of an unknown item", () => {
+  const decodeDetail = (input: unknown) =>
+    Effect.runSyncExit(Schema.decodeUnknownEffect(UnknownItemDetail)(input))._tag;
+
+  it("holds the label the adapter gave it, and may hold none", () => {
+    expect(decodeDetail({ label: "claude: system/foo_bar" })).toBe("Success");
+    expect(decodeDetail({})).toBe("Success");
+  });
+
+  it("refuses a label that is not text", () => {
+    expect(decodeDetail({ label: 7 })).toBe("Failure");
+  });
+});
+
+describe("the detail of a context compaction", () => {
+  const decodeDetail = (input: unknown) =>
+    Effect.runSyncExit(Schema.decodeUnknownEffect(ContextCompactionDetail)(input))._tag;
+
+  it("accepts every field, and also none of them", () => {
+    expect(
+      decodeDetail({ trigger: "auto", tokensBefore: 182_000, tokensAfter: 31_000, summary: "..." }),
+    ).toBe("Success");
+    expect(decodeDetail({ trigger: "manual" })).toBe("Success");
+    expect(decodeDetail({})).toBe("Success");
+  });
+
+  it("refuses a negative or fractional token count", () => {
+    expect(decodeDetail({ tokensBefore: 0, tokensAfter: 0 })).toBe("Success");
+    expect(decodeDetail({ tokensBefore: -1 })).toBe("Failure");
+    expect(decodeDetail({ tokensAfter: -1 })).toBe("Failure");
+    expect(decodeDetail({ tokensAfter: 1.5 })).toBe("Failure");
+  });
+
+  it("refuses a trigger other than auto or manual", () => {
+    expect(decodeDetail({ trigger: "scheduled" })).toBe("Failure");
+  });
+
+  it("refuses a summary longer than a message", () => {
+    expect(decodeDetail({ summary: "x".repeat(MAX_MESSAGE_LENGTH) })).toBe("Success");
+    expect(decodeDetail({ summary: "x".repeat(MAX_MESSAGE_LENGTH + 1) })).toBe("Failure");
   });
 });

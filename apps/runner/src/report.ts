@@ -1,4 +1,4 @@
-/** Helpers for the timestamp and the error messages in the runner's own frames. */
+/** Helpers for the timestamp, the error messages and the text in the runner's own frames. */
 import * as Cause from "effect/Cause";
 
 /** Returns the current time on this machine as an ISO-8601 string. */
@@ -19,3 +19,16 @@ export const endSentence = (text: string): string => (text.endsWith(".") ? text 
  */
 export const describeCause = (cause: Cause.Cause<unknown>, limit: number): string =>
   (Cause.pretty(cause).split("\n")[0] ?? "").slice(0, limit) || "the runner could not answer";
+
+/**
+ * Returns `text` with each control character written as `\u{...}`. These are
+ * the control characters, the line and paragraph separators, and the Unicode
+ * format characters such as the bidirectional overrides: the same ones an
+ * `EditedFile` path may not hold. Text that someone else controls would
+ * otherwise carry line breaks or direction marks into a client's screen.
+ */
+export const escapeControlCharacters = (text: string): string =>
+  text.replace(
+    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu,
+    (character) => `\\u{${(character.codePointAt(0) ?? 0).toString(16)}}`,
+  );

@@ -291,6 +291,98 @@ const FIX_STEPS_WITH_WARNINGS: ReadonlyArray<TranscriptStep> = FIX_STEPS.flatMap
   return [step];
 });
 
+/**
+ * What Claude Code keeps of a conversation when it compacts it: the preface
+ * it adds, then the start of its summary. Cut short, as the runner cuts a
+ * summary to the length of a message.
+ */
+const COMPACTION_SUMMARY = [
+  "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier part of the conversation.",
+  "",
+  "Summary:",
+  "1. Primary request: checkout fails for EU cards that need 3\u2011D Secure since deploy #1289. Find the cause, add a test that reproduces it, then fix it.",
+  "2. Key files: src/checkout/payment.ts (handlePaymentResult), src/checkout/stripe.ts, src/checkout/3ds-modal.tsx.",
+  "3. Findings so far: Stripe SDK v14 returns `requires_action`, which handlePaymentResult treats as a failure.",
+].join("\n");
+
+/**
+ * The Fix thread with the runtime notices, the labelled unknown step and the
+ * finished compaction the provider reports, which the book never draws:
+ *
+ * - "Conversation was cleared", before the turn starts, in no turn;
+ * - "Recalled 3 memories", between two reads of the first stretch;
+ * - a step the runner could not map, labelled `claude: system/foo_bar`;
+ * - a long runtime notice that wraps, in the second stretch;
+ * - a compaction that finished, with its token counts and its summary.
+ */
+const FIX_STEPS_WITH_RUNTIME_NOTICES: ReadonlyArray<TranscriptStep> = [
+  [-90, { _tag: "runtime.notice", message: "Conversation was cleared" }],
+  ...FIX_STEPS.flatMap((step): TranscriptStep[] => {
+    const [seconds] = step;
+    if (seconds === 20) {
+      return [
+        [16, { _tag: "runtime.notice", turnId: TURN_ID, message: "Recalled 3 memories" }],
+        ...runItem([18, 19], "it-unknown", "unknown", { label: "claude: system/foo_bar" }),
+        step,
+      ];
+    }
+    if (seconds === 170) {
+      return [
+        [
+          152,
+          {
+            _tag: "runtime.notice",
+            turnId: TURN_ID,
+            message:
+              "Context is 91% full. Claude Code will compact the conversation on its own " +
+              "when it runs out, or you can run /compact now to choose what it keeps.",
+          },
+        ],
+        [
+          155,
+          {
+            _tag: "item.started",
+            turnId: TURN_ID,
+            itemId: "it-compact",
+            kind: "context_compaction",
+          },
+        ],
+        [
+          160,
+          {
+            _tag: "item.completed",
+            turnId: TURN_ID,
+            itemId: "it-compact",
+            kind: "context_compaction",
+            status: "completed",
+            detail: {
+              trigger: "auto",
+              tokensBefore: 182000,
+              tokensAfter: 31000,
+              summary: COMPACTION_SUMMARY,
+            },
+          },
+        ],
+        step,
+      ];
+    }
+    return [step];
+  }),
+];
+
+/**
+ * The Fix thread while Claude Code compacts the conversation, which the book
+ * never draws: the transcript up to the agent's first message, then a
+ * compaction that has started and not finished, and nothing waited on.
+ */
+const FIX_STEPS_COMPACTING: ReadonlyArray<TranscriptStep> = [
+  ...FIX_STEPS.filter(([seconds]) => seconds <= 140),
+  [
+    150,
+    { _tag: "item.started", turnId: TURN_ID, itemId: "it-compact", kind: "context_compaction" },
+  ],
+];
+
 /** What the first read returned: the start of src/checkout/payment.ts, with one line wider than the box. */
 const PAYMENT_SOURCE = [
   'import type { PaymentIntentResult, Stripe, StripeElements } from "@stripe/stripe-js";',
@@ -378,6 +470,19 @@ export const FIX_THREAD: ThreadScreenRecords = {
 export const FIX_THREAD_WITH_WARNINGS: ThreadScreenRecords = {
   ...FIX_THREAD,
   transcript: buildTranscript(FIX_STEPS_WITH_WARNINGS),
+};
+
+/** The Fix thread with runtime notices, a labelled unknown step and a finished compaction, for the thread specimen's `?state=runtime-notices`. */
+export const FIX_THREAD_WITH_RUNTIME_NOTICES: ThreadScreenRecords = {
+  ...FIX_THREAD,
+  transcript: buildTranscript(FIX_STEPS_WITH_RUNTIME_NOTICES),
+};
+
+/** The Fix thread while a compaction runs, for the thread specimen's `?state=compacting`. */
+export const FIX_THREAD_COMPACTING: ThreadScreenRecords = {
+  ...FIX_THREAD,
+  session: { ...FIX_SESSION, openRequests: [] },
+  transcript: buildTranscript(FIX_STEPS_COMPACTING),
 };
 
 /** The Fix thread with results in its first stretch, for the thread specimen's `?state=steps`. */

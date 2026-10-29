@@ -28,6 +28,8 @@ export type WorkRowIcon =
   | "list"
   | "sparkle"
   | "close"
+  | "question"
+  | "compress"
   | "more";
 
 /** One row of an expanded work stretch: a single step, or consecutive steps folded together. */
@@ -59,6 +61,12 @@ export interface WorkRow {
    * while the step runs or when it returned no text.
    */
   readonly output: string;
+  /**
+   * Whether the output is code, drawn in the mono face and kept in whole
+   * lines, as a command's output is. False for a compaction's summary, which
+   * is prose, and for a group, which has no output of its own.
+   */
+  readonly outputIsCode: boolean;
   /**
    * The images the step returned (`readToolResultImages`), in order. Empty
    * for a group, and while the step runs or when it returned none.
@@ -123,7 +131,7 @@ const STEP_WORDS: Record<ItemKind, StepWords> = {
   },
   subagent: { icon: "crew", verb: "Subagent" },
   plan: { icon: "list", verb: "Planned" },
-  context_compaction: { icon: "more", verb: "Compacted the context" },
+  context_compaction: { icon: "compress", verb: "Compacted the context" },
   error: { icon: "close", verb: "Error" },
   unknown: UNKNOWN_STEP,
   // Messages never sit in a work stretch.
@@ -192,22 +200,33 @@ const foldsWith = (first: WorkItem, next: WorkItem): boolean =>
   (first.kind !== "tool_call" || first.toolName === next.toolName);
 
 /**
- * Returns the row of a single step, under `key`. A tool call's label is its
- * tool's name. Reasoning names no target: its detail is the thought itself.
+ * Returns the row of a single step, under `key`:
+ *
+ * - a tool call's label is its tool's name;
+ * - an `unknown` step that has a label is drawn with the question icon, the
+ *   label as its words and no target, so a message nobody mapped is named
+ *   rather than shown as "Step";
+ * - reasoning names no target: its detail is the thought itself.
  */
 const buildStepRow = (item: WorkItem, key: string): WorkRow => {
   const words = STEP_WORDS[item.kind];
   const output = readResultText(item.resultContent);
   const images = readToolResultImages(item.resultContent);
+  const isLabelled = item.kind === "unknown" && item.fallbackLabel !== "";
   return {
     key,
-    icon: words.icon,
-    label: item.kind === "tool_call" && item.toolName !== "" ? item.toolName : words.verb,
-    target: item.kind === "reasoning" ? "" : item.target,
+    icon: isLabelled ? "question" : words.icon,
+    label: isLabelled
+      ? item.fallbackLabel
+      : item.kind === "tool_call" && item.toolName !== ""
+        ? item.toolName
+        : words.verb,
+    target: item.kind === "reasoning" || isLabelled ? "" : item.target,
     targetIsCode: item.targetIsCode,
     startedAt: item.startedAt,
     result: item.result,
     output,
+    outputIsCode: item.kind !== "context_compaction",
     images,
     steps: [],
     canOpen: output !== "" || images.length > 0,
@@ -230,6 +249,7 @@ const buildRunRow = (run: readonly WorkItem[]): WorkRow => {
     result:
       GROUP_RESULTS.find((result) => run.some((item) => item.result === result)) ?? "completed",
     output: "",
+    outputIsCode: false,
     images: [],
     steps: run.map((item) => buildStepRow(item, `step:${item.itemId}`)),
     canOpen: true,

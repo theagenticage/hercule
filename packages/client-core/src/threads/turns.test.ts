@@ -1222,3 +1222,134 @@ describe("readUserSender", () => {
     expect(readUserSender(undefined)).toBeUndefined();
   });
 });
+
+describe("buildTurns: compaction and unknown items", () => {
+  /** Returns a turn with one item of `kind`, started with `startDetail` and, when `completion` is given, completed. */
+  const buildItemRows = (
+    kind: "context_compaction" | "unknown",
+    startDetail: unknown,
+    completion?: { readonly status: "completed" | "failed"; readonly detail?: unknown },
+  ): TranscriptRow[] => [
+    buildRow({
+      _tag: "turn.started",
+      eventId: nextId(),
+      sessionId: SESSION_ID,
+      at: "2026-10-28T09:00:00.000Z",
+      turnId: "t1",
+    }),
+    buildRow({
+      _tag: "item.started",
+      eventId: nextId(),
+      sessionId: SESSION_ID,
+      at: "2026-10-28T09:00:01.000Z",
+      turnId: "t1",
+      itemId: "i1",
+      kind,
+      ...(startDetail === undefined ? {} : { detail: startDetail as never }),
+    }),
+    ...(completion === undefined
+      ? []
+      : [
+          buildRow({
+            _tag: "item.completed",
+            eventId: nextId(),
+            sessionId: SESSION_ID,
+            at: "2026-10-28T09:00:02.000Z",
+            turnId: "t1",
+            itemId: "i1",
+            kind,
+            status: completion.status,
+            ...(completion.detail === undefined ? {} : { detail: completion.detail as never }),
+          }),
+        ]),
+  ];
+
+  const COMPLETED_DETAIL = {
+    trigger: "auto",
+    tokensBefore: 182_000,
+    tokensAfter: 31_000,
+    summary: "The user asked for a login fix.",
+  };
+
+  it("reads a compaction's counts from the row that completes it, not from its start", () => {
+    const rows = buildItemRows("context_compaction", undefined, {
+      status: "completed",
+      detail: COMPLETED_DETAIL,
+    });
+
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]!.items).toEqual([
+      {
+        itemId: "i1",
+        kind: "context_compaction",
+        verb: "compaction",
+        target: "182k → 31k tokens (auto)",
+        result: "completed",
+      },
+    ]);
+  });
+
+  it("shows a running compaction with no words after its verb", () => {
+    const items = buildTurns(buildItemRows("context_compaction", undefined), AGENT_ASKING_NOTHING)
+      .turns[0]!.items;
+
+    expect(items[0]).toMatchObject({ verb: "compaction", target: "", result: "running" });
+  });
+
+  it("reads the counts a compaction started with, and keeps them when it completes with no detail", () => {
+    const rows = buildItemRows(
+      "context_compaction",
+      { trigger: "manual", tokensBefore: 21_326, tokensAfter: 6086 },
+      { status: "failed" },
+    );
+
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]!.items[0]).toMatchObject({
+      target: "21.3k → 6.1k tokens (manual)",
+      result: "failed",
+    });
+  });
+
+  it("merges what a compaction started with and what it completed with, the completion winning", () => {
+    const rows = buildItemRows(
+      "context_compaction",
+      { trigger: "auto", tokensBefore: 182_000, tokensAfter: 40_000 },
+      {
+        status: "completed",
+        detail: { tokensAfter: 31_000, summary: "The user asked for a fix." },
+      },
+    );
+
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]!.items[0]).toMatchObject({
+      target: "182k → 31k tokens (auto)",
+      result: "completed",
+    });
+  });
+
+  it("shows a compaction row written with the old field names without any counts", () => {
+    const rows = buildItemRows("context_compaction", undefined, {
+      status: "completed",
+      detail: { trigger: "auto", preTokens: 182_000, postTokens: 31_000 },
+    });
+
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]!.items[0]).toMatchObject({
+      verb: "compaction",
+      target: "",
+      result: "completed",
+    });
+  });
+
+  it("shows an unknown item's label as its target", () => {
+    const rows = buildItemRows("unknown", { label: "claude: system/foo_bar" });
+
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]!.items[0]).toMatchObject({
+      verb: "unknown",
+      target: "claude: system/foo_bar",
+    });
+  });
+
+  it("shows an unknown item with no detail as an unknown item with no target", () => {
+    const items = buildTurns(buildItemRows("unknown", undefined), AGENT_ASKING_NOTHING).turns[0]!
+      .items;
+
+    expect(items[0]).toMatchObject({ verb: "unknown", target: "" });
+  });
+});

@@ -234,6 +234,18 @@ button.work-row:hover > .ic {
   line-height: 1.6;
   white-space: pre;
 }
+/* An output that is prose, such as a compaction's summary, in the same box:
+   the UI face at the rows' own 12px, with the text's own line breaks and
+   numbered list kept, and long lines wrapped at word breaks, so nothing
+   scrolls sideways. It scrolls down past ten lines, as the code output does,
+   so the box's height follows the 12px text. */
+.work-output-text.is-prose {
+  max-height: calc(16px + 16 * var(--t-12));
+  font-family: inherit;
+  font-size: var(--t-12);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
 /* Steps hold no steps, so an output is at most two lists deep. */
 .worked + .work-rows > li:last-child > .work-output,
 .worked + .work-rows > li:last-child > .work-rows > li:last-child > .work-output {
@@ -269,8 +281,18 @@ button.work-row:hover > .ic {
    in the failure colours, as the book draws a failed Connection's health:
    the tomato dot (`--fail`) and the words in the failure ink (`--fail-ink`),
    the darker tomato the book uses for text. Both notes share every
-   measurement, so they line up when they sit together. */
+   measurement, so they line up when they sit together.
+
+   A runtime notice, such as "Conversation was cleared", is the warning
+   note's neutral sibling: it reports something that happened, and it is
+   neither a problem nor a failure. It is the same note with the info icon
+   where the dot is, so a runtime notice and a warning side by side start their
+   words at one edge. The icon is a 14px box like the dot's column and sits
+   centred on the first line, and the words and the icon are in the muted
+   ink as the warning's are. A long runtime notice wraps, and the icon stays on its
+   first line. */
 .warning-note,
+.runtime-notice-note,
 .error-note {
   display: grid;
   grid-template-columns: 14px 1fr;
@@ -291,7 +313,13 @@ button.work-row:hover > .ic {
 .error-note .dot {
   background: var(--fail);
 }
+.runtime-notice-icon {
+  display: flex;
+  justify-self: center;
+  margin-top: calc((1lh - 14px) / 2);
+}
 .warning-note p,
+.runtime-notice-note p,
 .error-note p {
   margin: 0;
   overflow-wrap: anywhere;
@@ -301,6 +329,8 @@ button.work-row:hover > .ic {
    (markdown.css), in the note's own size. The chip has no vertical padding:
    the note's lines are close, and with it the chips of two wrapped lines
    would touch and read as one slab. */
+.warning-note code,
+.runtime-notice-note code,
 .error-note code {
   padding: 0 5px;
   border-radius: 5px;
@@ -310,10 +340,13 @@ button.work-row:hover > .ic {
    let a flag such as `--runner` split across two lines. The spaces between the
    words stay breakable, so a long command still wraps inside the note. A word
    too long to always fit a line has no such span, so it breaks anywhere. */
+.warning-note .code-word,
+.runtime-notice-note .code-word,
 .error-note .code-word {
   white-space: nowrap;
 }
 .warning-note .time,
+.runtime-notice-note .time,
 .error-note .time {
   margin-left: 6px;
   user-select: none;

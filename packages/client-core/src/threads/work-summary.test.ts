@@ -22,6 +22,7 @@ const buildItem = (kind: WorkItem["kind"], paths: readonly string[] = []): WorkI
   result: "completed",
   startedAt: "2026-09-30T09:00:00.000Z",
   toolName: "",
+  fallbackLabel: "",
   resultContent: undefined,
 });
 

@@ -8,6 +8,9 @@
  * `computeScrolledTop`), and the composer shrinks as it does when the user
  * scrolls there. With `?state=warning`, the thread shows two
  * runtime warnings and a runtime error among its work. With
+ * `?state=runtime-notices`, it shows runtime notices, a step the runner could not map
+ * and a finished compaction among its work, and `?state=compacting` shows a
+ * compaction that is still running. With
  * `?state=steps`, the first stretch holds a web search, a read that returned
  * text and a command that failed, for what an open stretch draws. With
  * `?state=senders`, other agents' messages are in its transcript and its
@@ -33,6 +36,8 @@ import "./fixed-clock";
 import {
   buildFixThreadWithPermissionRequests,
   FIX_THREAD,
+  FIX_THREAD_COMPACTING,
+  FIX_THREAD_WITH_RUNTIME_NOTICES,
   FIX_THREAD_WITH_RESULTS,
   FIX_THREAD_WITH_SENDERS,
   FIX_THREAD_WITH_WARNINGS,
@@ -110,9 +115,13 @@ if (state === "senders") {
     THREAD_PAGE_RECORDS,
     state === "warning"
       ? FIX_THREAD_WITH_WARNINGS
-      : state === "steps"
-        ? FIX_THREAD_WITH_RESULTS
-        : FIX_THREAD,
+      : state === "runtime-notices"
+        ? FIX_THREAD_WITH_RUNTIME_NOTICES
+        : state === "compacting"
+          ? FIX_THREAD_COMPACTING
+          : state === "steps"
+            ? FIX_THREAD_WITH_RESULTS
+            : FIX_THREAD,
   );
 }
 if (state === "scrolled") {

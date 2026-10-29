@@ -2,7 +2,7 @@ import { useState, type JSX } from "react";
 import {
   findTimeOfDayError,
   formatContextFraction,
-  formatTokenLimit,
+  formatTokenCount,
   listContextFractionChoices,
   listContextTokenChoices,
 } from "@hercule/client-core";
@@ -81,7 +81,7 @@ export function RotationSection({
           >
             {listContextTokenChoices(rotation.maxContextTokens).map((tokens) => (
               <option key={tokens} value={tokens}>
-                {formatTokenLimit(tokens)}
+                {formatTokenCount(tokens)}
               </option>
             ))}
           </select>
