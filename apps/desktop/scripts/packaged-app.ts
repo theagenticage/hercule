@@ -181,6 +181,17 @@ export async function signIn(
  */
 export const MOCK_KEYCHAIN_SWITCH = "--use-mock-keychain";
 
+/** What a launch of the test package may add to the usual launch; see `launchTestPackage`. */
+export interface TestPackageOptions {
+  /** Where and at what size Playwright records a video of the window. */
+  readonly recordVideo?: NonNullable<Parameters<typeof _electron.launch>[0]>["recordVideo"];
+  /**
+   * Arguments passed after the usual ones, such as a Chromium switch a test
+   * needs. The test package accepts any argument, because its inspector is open.
+   */
+  readonly extraArgs?: ReadonlyArray<string>;
+}
+
 /**
  * Starts the test package with Playwright's Electron driver, on the given
  * user data directory, and returns Playwright's handle on it. The app runs on
@@ -193,14 +204,16 @@ export const MOCK_KEYCHAIN_SWITCH = "--use-mock-keychain";
  */
 export function launchTestPackage(
   userDataDir: string,
-  recordVideo?: NonNullable<Parameters<typeof _electron.launch>[0]>["recordVideo"],
+  options: TestPackageOptions = {},
 ): Promise<ElectronApplication> {
+  const { recordVideo, extraArgs = [] } = options;
   return _electron.launch({
     executablePath: findExecutable("test"),
     args: [
       ...buildAppArgs(userDataDir),
       MOCK_KEYCHAIN_SWITCH,
       buildBinaryPathArgument(userDataDir),
+      ...extraArgs,
     ],
     env: buildAppEnv(),
     // Playwright otherwise makes every page match `prefers-color-scheme:

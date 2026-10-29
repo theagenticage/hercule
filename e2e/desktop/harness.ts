@@ -50,6 +50,7 @@ import {
   waitForExitOrKill,
   writeSettings,
   type PackageKind,
+  type TestPackageOptions,
 } from "../../apps/desktop/scripts/packaged-app";
 import { pollUntil } from "../../apps/desktop/scripts/poll";
 import { buildAppEnv } from "../../apps/desktop/scripts/processes";
@@ -116,6 +117,9 @@ export interface LaunchedApp {
  * before the wait for its page to load. A test that must act before the
  * window shows does it there; the window can still show while it runs.
  *
+ * `options` records a video or adds arguments to the launch; see
+ * `TestPackageOptions`.
+ *
  * The app shows no notification of a thread or an assistant waiting on the
  * user: main's are only recorded, for `readWaitingNotifications`, so that a test run puts no banner on the
  * developer's screen. The first run on a Mac that signs in still has macOS
@@ -135,9 +139,9 @@ export interface LaunchedApp {
 export async function launchForTest(
   userDataDir = createUserDataDirForTest(),
   prepareFirstWindow?: (app: ElectronApplication, page: Page) => Promise<void>,
-  recordVideo?: Parameters<typeof launchTestPackage>[1],
+  options?: TestPackageOptions,
 ): Promise<LaunchedApp> {
-  const app = await launchTestPackage(userDataDir, recordVideo);
+  const app = await launchTestPackage(userDataDir, options);
   let closing: Promise<void> | undefined;
   const close = () => (closing ??= quitApp(app));
   onTestFinished(close);

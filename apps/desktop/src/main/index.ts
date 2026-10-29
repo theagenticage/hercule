@@ -12,7 +12,7 @@
  * - takes the single-instance lock, and quits when another instance of the
  *   app holds it;
  * - installs the security hooks on every session and every web contents to
- *   come.
+ *   come, and on every session the hook that asks the controller for brotli.
  *
  * The rest runs on one Effect runtime, made here. Each Electron callback is
  * one line that runs an effect on it. The runtime is disposed when the app
@@ -31,7 +31,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import { AppScheme, makeAppSchemeLayer } from "./app-scheme";
-import { makeAppSettingsLayer } from "./app-settings";
+import { AppSettings, makeAppSettingsLayer } from "./app-settings";
+import { askControllerForBrotli } from "./controller-encoding";
 import { makeControllerConnectionLayer } from "./controller-connection";
 import { fetchWithoutRedirects } from "./fetch-without-redirects";
 import { makeThisMacLayer } from "./this-mac";
@@ -110,7 +111,12 @@ const startApp = (): void => {
     ),
   );
 
-  app.on("session-created", secureSession);
+  app.on("session-created", (session) => {
+    secureSession(session);
+    askControllerForBrotli(session, () =>
+      runtime.runPromise(AppSettings.use((settings) => settings.readControllerUrl)),
+    );
+  });
   app.on("web-contents-created", (_event, contents) =>
     secureWebContents(contents, (effect) => runtime.runFork(effect)),
   );
