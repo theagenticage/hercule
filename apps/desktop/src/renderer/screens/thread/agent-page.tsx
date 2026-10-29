@@ -20,6 +20,7 @@ import {
   queryKeys,
   splitQueuedInputs,
   splitSubagentBrief,
+  type ThreadBlock,
 } from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
 import { isOpenedAtLaunch } from "../../app/last-screen";
@@ -37,9 +38,24 @@ import { ThreadHeader } from "./thread-header";
 import { Transcript, type TranscriptHandle } from "./transcript";
 import { SpawnLines } from "../subagents/spawn-lines";
 import { buildAgentFaceSeed } from "../subagents/subagent-face";
+import { UNREADABLE_STREAM_MESSAGE } from "../session/unreadable-stream";
 import { useSessionLive } from "../session/use-session-live";
 import "../session/transcript.css";
 import "./thread.css";
+
+/**
+ * Returns the error that closes a transcript whose stream the app cannot read,
+ * from the moment (an ISO time) the stream became unreadable. `RuntimeNote`
+ * draws that time like the time of any other note.
+ */
+const buildUnreadableStreamBlock = (
+  streamUnreadableAt: string,
+): Extract<ThreadBlock, { readonly kind: "error" }> => ({
+  kind: "error",
+  key: "stream-unreadable",
+  message: UNREADABLE_STREAM_MESSAGE,
+  at: streamUnreadableAt,
+});
 
 /** What a subagent's page draws of its own, from the records the page reads. */
 export interface SubagentParts {
@@ -176,7 +192,7 @@ export function AgentPage({
     ...queuedInputsQuery(client, sessionId),
     enabled: subagentId === undefined,
   }).data;
-  const attachOpenParagraph = useSessionLive({
+  const { attachOpenParagraph, streamUnreadableAt } = useSessionLive({
     live,
     queryClient,
     sessionId,
@@ -213,6 +229,10 @@ export function AgentPage({
           ),
         }
       : splitSubagentBrief(threadBlocks);
+  const shownBlocks =
+    streamUnreadableAt === undefined
+      ? blocks
+      : [...blocks, buildUnreadableStreamBlock(streamUnreadableAt)];
   if (inThreadRoute && isNotFound(transcript.error)) {
     // The transcript read found that the thread no longer exists, which the saved
     // copy could not know. Show what the thread's loader shows for it, see
@@ -239,7 +259,7 @@ export function AgentPage({
       <Transcript
         sessionId={sessionId}
         faceSeed={buildAgentFaceSeed(sessionId, subagentId)}
-        blocks={blocks}
+        blocks={shownBlocks}
         lead={subagentParts?.lead}
         pose={
           subagent === undefined

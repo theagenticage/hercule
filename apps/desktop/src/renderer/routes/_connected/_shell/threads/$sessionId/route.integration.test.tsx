@@ -509,6 +509,7 @@ describe("a thread opened from its saved copy", () => {
         reset: false,
         replay: false,
         gone: true,
+        unreadable: false,
       });
     });
 
@@ -555,7 +556,14 @@ describe("a thread opened from its saved copy", () => {
 
     isGone = true;
     act(() => {
-      handlers.get(stream)!({ cursor: null, items: [], reset: false, replay: false, gone: true });
+      handlers.get(stream)!({
+        cursor: null,
+        items: [],
+        reset: false,
+        replay: false,
+        gone: true,
+        unreadable: false,
+      });
     });
     // The session read is out and has not said the thread is gone yet: the
     // user leaves the page, and closing it saves the copy.

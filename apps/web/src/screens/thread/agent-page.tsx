@@ -25,6 +25,7 @@ import {
   findSubagentBrief,
   type HerculeClient,
   type Live,
+  type RuntimeNote,
 } from "@hercule/client-core";
 import { inputsQuery, sessionQuery, subagentsQuery, transcriptQuery } from "../../app/queries";
 import { Composer } from "../composer/composer";
@@ -42,6 +43,19 @@ import { RuntimeNoteLine } from "./runtime-note-line";
 import { AgentChrome } from "./thread-chrome";
 import { Turn } from "./turn";
 import { useAgentLive } from "./use-agent-live";
+
+/**
+ * Returns the note that closes a transcript whose stream the page cannot read,
+ * from the moment (an ISO time) the stream became unreadable. The web app is
+ * served by the controller, so reloading fetches the page that matches it.
+ */
+const buildUnreadableStreamNote = (streamUnreadableAt: string): RuntimeNote => ({
+  key: "stream-unreadable",
+  severity: "error",
+  message:
+    "The rest of this thread can't be shown because this page is out of date. Reload the page to see it.",
+  at: streamUnreadableAt,
+});
 
 export function AgentPage({
   client,
@@ -81,7 +95,14 @@ export function AgentPage({
   // opens with the brief leaves that opening message out.
   const brief = subagent === undefined ? undefined : findSubagentBrief(turns);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
-  const tailRef = useAgentLive(live, queryClient, sessionId, subagentId, rows, followIfAtBottom);
+  const { tailRef, streamUnreadableAt } = useAgentLive(
+    live,
+    queryClient,
+    sessionId,
+    subagentId,
+    rows,
+    followIfAtBottom,
+  );
   const lastIndex = turns.length - 1;
   // A runtime note outside every turn, such as a start failure, sits between the
   // turns around it: `turnsBefore` of them lie above it.
@@ -107,6 +128,7 @@ export function AgentPage({
 
   const assistantId = findAnsweredAssistantId(session);
   const openRequestIds = session.openRequests.map((request) => request.requestId).join(" ");
+  const isStreamUnreadable = streamUnreadableAt !== undefined;
 
   // Runs after the DOM has updated with whatever just grew. A change in
   // `rows.length` or `queuedCount` triggers it, and `followIfAtBottom` decides
@@ -117,8 +139,9 @@ export function AgentPage({
     followIfAtBottom();
     // A Request docking above the composer takes space from the column just
     // like a queued row, so a change in the open Requests also triggers a
-    // follow.
-  }, [rows.length, queuedCount, openRequestIds, followIfAtBottom]);
+    // follow. So does the reload note that closes the column once the stream
+    // is unreadable: a reader at the bottom would otherwise not see it.
+  }, [rows.length, queuedCount, openRequestIds, isStreamUnreadable, followIfAtBottom]);
 
   return (
     <div className="flex flex-1 flex-col">
@@ -170,6 +193,9 @@ export function AgentPage({
             );
           })}
           {drawRuntimeNotesAfter(turns.length)}
+          {isStreamUnreadable ? (
+            <RuntimeNoteLine note={buildUnreadableStreamNote(streamUnreadableAt)} />
+          ) : null}
           {subagent === undefined ? (
             <SendingMessages client={client} sessionId={sessionId} />
           ) : null}

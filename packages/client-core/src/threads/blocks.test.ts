@@ -179,6 +179,15 @@ const buildRuntimeNotice = (
     message,
   });
 
+/** Returns an `unknown` row: an event of type `originalType` that this client has no arm for. */
+const buildUnknownEvent = (seconds: number, originalType: string): TranscriptRow =>
+  buildRow({
+    _tag: "unknown",
+    ...buildEnvelope(seconds),
+    originalType,
+    payload: { _tag: originalType },
+  });
+
 /** Returns a `runtime.error` row, in turn `turnId` or, when it is undefined, outside any turn. */
 const buildError = (
   seconds: number,
@@ -898,6 +907,29 @@ describe("buildThreadBlocks", () => {
       kind: "runtime-notice",
       at: buildInstant(3),
     });
+  });
+
+  it("draws an unknown event as a runtime notice naming its type without backticks, without splitting the work stretch", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Fix it"),
+      ...buildCommand("t1", "c1", 1, 2),
+      // A type with backticks must reach the notice without them, so it is not drawn as inline code.
+      buildUnknownEvent(3, "turn.`plan`.updated"),
+      ...buildCommand("t1", "c2", 4, 5),
+    ];
+
+    const blocks = buildThreadBlocks(rows, buildSessionAgentState(BUSY));
+
+    expect(blocks.map((block) => block.kind)).toEqual(["user", "work", "runtime-notice"]);
+    expect(blocks.find((block) => block.kind === "runtime-notice")).toMatchObject({
+      message: "Unknown event: turn.plan.updated",
+      at: buildInstant(3),
+    });
+    expect(findBlock(blocks, "work", "work:c1").items.map((item) => item.itemId)).toEqual([
+      "c1",
+      "c2",
+    ]);
   });
 
   it("shows no status line when a runtime notice follows the running work, because the divider above it still shows the work", () => {

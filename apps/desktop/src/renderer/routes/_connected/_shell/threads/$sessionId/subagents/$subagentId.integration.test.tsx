@@ -141,6 +141,28 @@ describe("the subagent's page", () => {
     expect(await screen.findByText("Written while away.")).toBeTruthy();
   });
 
+  it("closes the subagent's transcript with an error when the controller sent a row the app cannot read", async () => {
+    const { live } = await openApp(`/threads/${SESSION_ID}/subagents/${SUBAGENT_ID}`);
+    await screen.findByText(SUBAGENT_BRIEF);
+    await waitFor(() => {
+      expect(readAgentTopics(live.readTopics())).toEqual([SUBAGENT_STREAM, SUBAGENT_TAP]);
+    });
+
+    act(() => {
+      live.pushUnreadableStreamMessage(SESSION_ID, SUBAGENT_ID);
+    });
+
+    const note = await screen.findByText(/can't be shown because this app is out of date/);
+    expect(note.textContent).toMatch(
+      /^The rest of this thread can't be shown because this app is out of date\. Update the app to see it\.\d{2}:\d{2}$/,
+    );
+    // The brief stays, and neither topic is subscribed again.
+    expect(screen.getByText(SUBAGENT_BRIEF)).toBeTruthy();
+    await waitFor(() => {
+      expect(readAgentTopics(live.readTopics())).toEqual([]);
+    });
+  });
+
   it("drops the subagent's tap while the window is hidden, and keeps its stream", async () => {
     const { live } = await openApp(`/threads/${SESSION_ID}/subagents/${SUBAGENT_ID}`);
     await waitFor(() => {

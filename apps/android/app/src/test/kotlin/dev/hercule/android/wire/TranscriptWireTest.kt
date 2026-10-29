@@ -159,7 +159,30 @@ class TranscriptWireTest {
         val unknown = assertIs<ProviderEvent.Unknown>(
             decodeEvent("""{ "_tag": "item.updated", "eventId": "e5", "sessionId": "s", "at": "2026-10-12T08:01:13.100Z", "turnId": "t1", "itemId": "i1" }"""),
         )
-        assertEquals("item.updated", unknown.tag)
+        assertEquals("item.updated", unknown.originalType)
         assertEquals("i1", unknown.json["itemId"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `reads the type of the controller's own unknown event from originalType`() {
+        val unknown = assertIs<ProviderEvent.Unknown>(
+            decodeEvent(
+                """{ "_tag": "unknown", "eventId": "e6", "sessionId": "s", "at": "2026-10-12T08:01:13.100Z", "subagentId": "a1", "originalType": "some.future.event", "payload": { "_tag": "some.future.event", "eventId": "e6" } }""",
+            ),
+        )
+        assertEquals("some.future.event", unknown.originalType)
+        assertEquals("a1", unknown.subagentId)
+    }
+
+    @Test
+    fun `decodes a runtime notice and a runtime error`() {
+        assertEquals(
+            ProviderEvent.RuntimeNotice(turnId = "t1", message = "Conversation was cleared"),
+            decodeEvent("""{ "_tag": "runtime.notice", "eventId": "e7", "sessionId": "s", "at": "2026-10-12T08:01:13.100Z", "turnId": "t1", "message": "Conversation was cleared" }"""),
+        )
+        assertEquals(
+            ProviderEvent.RuntimeError(errorClass = "rate_limit"),
+            decodeEvent("""{ "_tag": "runtime.error", "eventId": "e8", "sessionId": "s", "at": "2026-10-12T08:01:13.100Z", "class": "rate_limit" }"""),
+        )
     }
 }

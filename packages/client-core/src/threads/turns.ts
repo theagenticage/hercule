@@ -13,8 +13,9 @@
  *   `detail.senderSessionId`;
  * - the assistant's text is the turn's `assistant_text` deltas joined in
  *   transcript order;
- * - a `runtime.error` or `runtime.warning` row becomes a runtime note, in the turn
- *   it belongs to or, when it belongs to none, between the turns around it.
+ * - a `runtime.error`, `runtime.warning`, `runtime.notice` or `unknown` row becomes a
+ *   runtime note, in the turn it belongs to or, when it belongs to none, between
+ *   the turns around it.
  */
 import { Schema } from "effect";
 import {
@@ -146,14 +147,16 @@ export const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
 };
 
 /**
- * A `runtime.error` or `runtime.warning` row: something went wrong around the
- * work, such as a harness that is not installed. The message is shown as the
+ * A `runtime.error`, `runtime.warning`, `runtime.notice` or `unknown` row: something
+ * reported around the work. An error or a warning is something that went wrong,
+ * such as a harness that is not installed. A notice is neutral: a note from the
+ * runner, or an event this client has no arm for. The message is shown as the
  * runner wrote it, and may hold a command between backticks.
  */
 export interface RuntimeNote {
   /** Unique within one transcript: the row's position, with its severity. */
   readonly key: string;
-  readonly severity: "error" | "warning";
+  readonly severity: "error" | "warning" | "notice";
   readonly message: string;
   readonly at: string;
 }
@@ -411,18 +414,45 @@ export const mayBeRunningTurn = (status: SessionStatus): boolean =>
   status !== "exited" && status !== "queued";
 
 /**
- * Returns a `runtime.error` or `runtime.warning` row as a runtime note. A row with
- * no message gets its error class as the message.
+ * Returns the text a thread shows for an `unknown` event: `Unknown event: <type>`,
+ * with every backtick removed from the type.
+ *
+ * The type comes from the runner, so it is untrusted text, and a note's message
+ * is drawn with each pair of backticks as inline code. A real event type never
+ * contains a backtick, so removing them costs nothing, and the message can
+ * never hold a code span.
+ */
+export const buildUnknownEventMessage = (originalType: string): string =>
+  `Unknown event: ${originalType.replaceAll("`", "")}`;
+
+/**
+ * Returns a `runtime.error`, `runtime.warning`, `runtime.notice` or `unknown` row as a
+ * runtime note. An error with no message gets its error class as the message.
  */
 const buildRuntimeNote = (
   row: TranscriptRow,
-  event: Extract<ProviderEvent, { _tag: "runtime.error" | "runtime.warning" }>,
-): RuntimeNote => ({
-  key: `${event._tag}:${String(row.position)}`,
-  severity: event._tag === "runtime.error" ? "error" : "warning",
-  message: event._tag === "runtime.error" ? (event.message ?? event.class) : event.message,
-  at: event.at,
-});
+  event: Extract<
+    ProviderEvent,
+    { _tag: "runtime.error" | "runtime.warning" | "runtime.notice" | "unknown" }
+  >,
+): RuntimeNote => {
+  const key = `${event._tag}:${String(row.position)}`;
+  switch (event._tag) {
+    case "runtime.error":
+      return { key, severity: "error", message: event.message ?? event.class, at: event.at };
+    case "runtime.warning":
+      return { key, severity: "warning", message: event.message, at: event.at };
+    case "runtime.notice":
+      return { key, severity: "notice", message: event.message, at: event.at };
+    case "unknown":
+      return {
+        key,
+        severity: "notice",
+        message: buildUnknownEventMessage(event.originalType),
+        at: event.at,
+      };
+  }
+};
 
 /** What `buildTurns` returns: the turns, and the runtime notes that fell outside all of them. */
 export interface ThreadTurns {
@@ -488,9 +518,12 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
         break;
       }
       case "runtime.error":
-      case "runtime.warning": {
+      case "runtime.warning":
+      case "runtime.notice":
+      case "unknown": {
         const note = buildRuntimeNote(row, event);
-        const turnId = event.turnId ?? openTurnId;
+        // An unknown event names no turn we can read, so it sits in the open turn.
+        const turnId = (event._tag === "unknown" ? undefined : event.turnId) ?? openTurnId;
         if (turnId === null) {
           outsideRuntimeNotes.push({ ...note, turnsBefore: turns.size });
         } else {

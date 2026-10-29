@@ -7,7 +7,7 @@
  * reads a session. An `unknown` item kind and a `raw` passthrough keep a vendor
  * message nobody mapped, rather than dropping it.
  */
-import { Schema } from "effect";
+import { Schema, SchemaGetter } from "effect";
 
 import { AdapterError } from "./adapter-errors";
 import { AttachmentReference } from "./attachments";
@@ -904,7 +904,8 @@ export type RequestResolution =
   | { readonly decision: ApprovalDecision }
   | { readonly answers: QuestionAnswers };
 
-export const ProviderEvent = Schema.Union([
+/** Every event this build of the protocol knows, which `ProviderEvent` decodes strictly. */
+const KNOWN_EVENTS = [
   SessionStarted,
   SessionExited,
   SubagentStarted,
@@ -920,9 +921,131 @@ export const ProviderEvent = Schema.Union([
   RequestOpened,
   RequestResolved,
   RequestResolvedWithAnswers,
+] as const;
+
+/**
+ * An event whose `_tag` this build does not know, kept whole. A newer runner
+ * can send a tag the controller has no arm for, and a newer controller can
+ * serve one to an older client. Decoding such an event into this arm, instead
+ * of failing, keeps the connection and the transcript alive.
+ *
+ * - `originalType` is the `_tag` the event arrived with.
+ * - `payload` is the whole event as it arrived, including its own `_tag`.
+ *
+ * The envelope (`eventId`, `sessionId`, `at` and `subagentId`) is lifted out of
+ * the payload, so the event is stored, ordered and attributed to a subagent's
+ * transcript like any other.
+ *
+ * `originalType` is a `Fact`, because the UI draws it. So an unknown tag must
+ * still be a fact (1 to 512 characters): an empty or longer tag fails the event
+ * like any other malformed one, even though the tag is otherwise unknown.
+ */
+const UnknownEvent = defineEvent("unknown", {
+  ...attribution,
+  originalType: Fact,
+  payload: Schema.Unknown,
+});
+
+/** Lists the tags a member of `KNOWN_EVENTS` decodes: one, or one per branch of a union. */
+const readEventTags = (member: (typeof KNOWN_EVENTS)[number]): ReadonlyArray<string> =>
+  "fields" in member
+    ? [member.fields._tag.literal]
+    : member.members.map((branch) => branch.fields._tag.literal);
+
+/**
+ * The tags `ProviderEvent` has an arm for, `unknown` included. Derived from
+ * the arms, so a new event is known the moment it is added to `KNOWN_EVENTS`.
+ */
+const ARM_TAGS: ReadonlySet<string> = new Set([
+  ...KNOWN_EVENTS.flatMap(readEventTags),
+  UnknownEvent.fields._tag.literal,
+]);
+
+/** An event as received or stored, before its tag is checked against the arms. */
+type ReceivedEvent = { readonly _tag: string } & Readonly<Record<string, unknown>>;
+
+/**
+ * Builds the `unknown` event for an event whose tag no arm has: the tag becomes
+ * `originalType`, the whole received object becomes `payload`, and the fields
+ * every event has are copied up. Does not validate anything: a caller that
+ * needs a valid event decodes the result with `UnknownEvent`.
+ */
+const wrapUnknownEvent = (received: ReceivedEvent): typeof UnknownEvent.Encoded =>
+  ({
+    _tag: "unknown",
+    originalType: received._tag,
+    payload: received,
+    eventId: received.eventId,
+    sessionId: received.sessionId,
+    at: received.at,
+    ...("subagentId" in received ? { subagentId: received.subagentId } : {}),
+  }) as typeof UnknownEvent.Encoded;
+
+/**
+ * An event with a `_tag` no arm has, as it arrives. The tag check is what
+ * keeps a malformed event of a known kind a failure: without it, a broken
+ * `session.exited` would decode as an unknown event and its session would
+ * never be seen to end.
+ *
+ * The decoded event must be a valid `UnknownEvent`, so the tag must be a
+ * `Fact` (1 to 512 characters); any other tag fails like a malformed event.
+ */
+const UnrecognisedEvent = Schema.StructWithRest(
+  Schema.Struct({
+    _tag: Schema.String.check(
+      Schema.makeFilter((tag: string) => (ARM_TAGS.has(tag) ? "a tag with an event arm" : true), {
+        title: "a tag no event arm has",
+      }),
+    ),
+  }),
+  [Schema.Record(Schema.String, Schema.Unknown)],
+).pipe(
+  Schema.decodeTo(UnknownEvent, {
+    // The envelope fields are `unknown` here. `UnknownEvent` validates them next,
+    // and a missing or malformed one fails the whole event.
+    decode: SchemaGetter.transform(wrapUnknownEvent),
+    encode: SchemaGetter.passthrough({ strict: false }),
+  }),
+);
+
+/**
+ * A normalized event. An event whose `_tag` is not one of the known ones
+ * decodes as the `unknown` arm; a malformed event of a known tag fails.
+ * Encoding writes the `unknown` arm as it is.
+ *
+ * `UnrecognisedEvent` has no literal `_tag`, and a union with such a member
+ * cannot look an event up by its tag. So the arms that have one are a union of
+ * their own, which keeps the lookup: decoding a known event stays about as
+ * fast as before the `unknown` arm existed.
+ */
+export const ProviderEvent = Schema.Union([
+  Schema.Union([...KNOWN_EVENTS, UnknownEvent]),
+  UnrecognisedEvent,
 ]);
 
 export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
+
+/**
+ * Parses the JSON text of a stored event into a `ProviderEvent`. The text is
+ * trusted: the controller wrote it itself, so it is well-formed JSON of an
+ * object with a string `_tag`, and the function does not check that. Fails
+ * only when the text is not valid JSON.
+ *
+ * - An event whose `_tag` this build has an arm for is returned as parsed,
+ *   without decoding it. Decoding every stored row would cost time on a hot
+ *   path, and could reject a row written in an older shape.
+ * - An event of any other tag becomes the `unknown` event, without validation.
+ *
+ * Needed because a newer build may store an event type this build does not
+ * know, and the operator may roll back to this build on the same database. That
+ * is all it supports: a row of an unfamiliar type that has the envelope every
+ * event has, which protocol 11 guarantees. A row whose envelope this build
+ * cannot encode is not supported.
+ */
+export const parseStoredEvent = (text: string): ProviderEvent => {
+  const stored = JSON.parse(text) as ReceivedEvent;
+  return ARM_TAGS.has(stored._tag) ? (stored as ProviderEvent) : wrapUnknownEvent(stored);
+};
 
 /**
  * The longest a session token may be. Hercule creates 32 random bytes encoded

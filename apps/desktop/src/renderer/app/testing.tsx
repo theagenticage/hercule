@@ -1735,6 +1735,13 @@ export interface LiveStub {
    * subscribes again from the head.
    */
   readonly resetStream: (sessionId: string) => void;
+  /**
+   * Sends the app a message on `session:<sessionId>:stream` that it cannot
+   * decode, as a newer controller sends after it changed a row's shape, on the
+   * subagent `subagentId`'s stream when it is given. Throws when the app has
+   * no socket or no such subscription.
+   */
+  readonly pushUnreadableStreamMessage: (sessionId: string, subagentId?: string) => void;
   /** Closes the app's current socket from the controller's end, as a restart or a sleep does. */
   readonly drop: () => void;
   /**
@@ -1825,6 +1832,11 @@ const buildTestContext = async (
           message: "cursor is past the end of the log",
           details: { issues: [] },
         },
+      });
+    },
+    pushUnreadableStreamMessage: (sessionId, subagentId) => {
+      readSocket().push(buildAgentStreamTopic(sessionId, subagentId), {
+        _tag: "from-the-future",
       });
     },
     drop: () => {

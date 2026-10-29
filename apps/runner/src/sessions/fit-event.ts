@@ -89,6 +89,7 @@ const EVENT_SUBJECTS: Record<
   "request.opened": "A request",
   "request.resolved": "The end of a request",
   "subagent.started": "The start of a subagent",
+  unknown: "An event of a kind this version does not know",
 };
 
 /**

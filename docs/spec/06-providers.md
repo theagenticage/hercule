@@ -381,6 +381,17 @@ interface ProviderEventBase {
 }
 ```
 
+*(Amended 2026-10-29, [#897](https://github.com/theagenticage/hercule/issues/897).)* **An event of a type the receiver does not know is an `unknown` event.** `ProviderEvent` has one more arm, `unknown { originalType, payload }`, with `eventId`, `sessionId`, `at` and an optional `subagentId`. It is not the `unknown` item kind of section 6.3, which is a tool step the runner could not map.
+
+- A received event whose `_tag` no arm has decodes into this arm. `originalType` is that tag, and `payload` is the whole event as it arrived.
+- A malformed event of a known type still fails to decode. Without that, a broken `session.exited` would be stored as an unknown event and its session would never be seen to end.
+- `originalType` is a `Fact`, so the tag must be 1 to 512 characters. An empty or longer tag fails like any malformed event.
+- The arm encodes as itself. The controller stores the `unknown` event and serves it as it is, and does not read the stored event again as a known type after an upgrade. Its projections (the session's status, turns, usage) never applied it, and a later controller does not apply it either.
+- A stored event of a type the controller's build has no arm for is read back as an `unknown` event too, in both transcript reads, without being decoded. So rolling back to an earlier build on the same protocol still serves the rows a newer build stored. This covers an unfamiliar event type with the envelope every event has, which protocol 11 guarantees. A stored row whose envelope the earlier build cannot encode is not supported.
+- The controller stores it like any event, and the runner's socket stays open. Clients draw it as a note, "Unknown event: <type>" (spec 14, 17 and 18).
+
+*(Amended 2026-10-29, [#897](https://github.com/theagenticage/hercule/issues/897).)* **Adding an event type does not raise `PROTOCOL_VERSION`; changing an existing event does** ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). The enums rule above ("unknown kinds render generically, never crash") now holds for the event type too.
+
 *(Amended 2026-10-08, [#476](https://github.com/theagenticage/hercule/issues/476).)* **No event the runner sends is larger than one frame.** The runner's socket carries at most `MAX_FRAME_BYTES` (2 MiB) per message, and the controller closes the socket on a bigger one, which would end the stream of every session on that runner ([./13-security.md](./13-security.md) section 1). Adapters already truncate the fields the protocol bounds (section 6.5), but `raw`, the native ids in `providerRefs`, an item's `detail`, a `content.delta` and a turn's structured result have no bound of their own: a Claude `Read` of a large image puts its bytes in `detail` and again in `raw`. So the runner's supervisor checks every event before it numbers it, and shrinks one that would not fit, in this order, stopping as soon as it fits:
 
 1. It drops `raw`. This overrides "every event may carry `raw`" above for an oversized event: its `raw` is not untouched but gone.

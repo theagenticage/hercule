@@ -129,6 +129,14 @@ sealed interface ProviderEvent {
         val message: String,
     ) : ProviderEvent
 
+    /** Neutral information about the session, such as "Conversation was cleared". Nothing went wrong. */
+    @Serializable
+    data class RuntimeNotice(
+        val subagentId: String? = null,
+        val turnId: String? = null,
+        val message: String,
+    ) : ProviderEvent
+
     /** [errorClass] is an open vocabulary, such as `rate_limit`; show it as it is. */
     @Serializable
     data class RuntimeError(
@@ -160,10 +168,22 @@ sealed interface ProviderEvent {
         val answers: QuestionAnswers? = null,
     ) : ProviderEvent
 
-    /** An event whose `_tag` this build does not know. [json] holds the whole event. */
+    /**
+     * An event this build has no class for. [json] holds the whole event. It arrives in one of two
+     * shapes:
+     *
+     * - the controller's own `unknown` event, which keeps the tag the event arrived with in
+     *   `originalType` and the event itself in `payload`;
+     * - a raw event with a `_tag` this build does not know, from a controller newer than the app.
+     */
     @Serializable(with = UnknownProviderEventSerializer::class)
     data class Unknown(val json: JsonObject) : ProviderEvent {
-        val tag: String? get() = json.readString("_tag")
+        /** The tag the event arrived with, or null when the JSON holds none. */
+        val originalType: String?
+            get() = if (json.readString("_tag") == UNKNOWN_EVENT_TAG) json.readString("originalType") else json.readString("_tag")
+
+        /** The agent the event belongs to, or null for the session's own agent. */
+        val subagentId: String? get() = json.readString("subagentId")
     }
 }
 
@@ -240,6 +260,9 @@ value class StreamKind(val wire: String) {
     }
 }
 
+/** The `_tag` of the controller's own event for a tag it did not know. */
+private const val UNKNOWN_EVENT_TAG = "unknown"
+
 /** Picks the [ProviderEvent] subtype from the event's `_tag`. */
 object ProviderEventSerializer :
     JsonContentPolymorphicSerializer<ProviderEvent>(ProviderEvent::class) {
@@ -255,6 +278,7 @@ object ProviderEventSerializer :
             "content.delta" -> ProviderEvent.ContentDelta.serializer()
             "session.usage.updated" -> ProviderEvent.SessionUsageUpdated.serializer()
             "runtime.warning" -> ProviderEvent.RuntimeWarning.serializer()
+            "runtime.notice" -> ProviderEvent.RuntimeNotice.serializer()
             "runtime.error" -> ProviderEvent.RuntimeError.serializer()
             "request.opened" -> ProviderEvent.RequestOpened.serializer()
             "request.resolved" -> ProviderEvent.RequestResolved.serializer()

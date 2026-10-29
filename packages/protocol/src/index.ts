@@ -118,8 +118,13 @@ export {
  *   typed `error`. An older controller could not decode the refused result, and
  *   an older runner sends a refusal the newer controller cannot read, so the
  *   two refuse each other at hello.
+ * - Version 11 added the `unknown` event, which carries an event whose `_tag`
+ *   the receiver does not know. From this version on, a runner may add an event
+ *   tag without a version bump, and a controller on 11 or later stores the new
+ *   event as `unknown`. A controller on 10 would close the socket on it, so the
+ *   two refuse each other at hello.
  */
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 /**
  * The close code and reason the controller uses to end the connection of a

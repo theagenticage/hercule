@@ -10,6 +10,7 @@ import {
   isAsyncQuestion,
   ContextCompactionDetail,
   ProviderEvent,
+  parseStoredEvent,
   SessionBinding,
   SessionInputResult,
   SessionInterrupt,
@@ -148,6 +149,12 @@ const events: ReadonlyArray<Event> = [
     requestId: "r1",
     answers: { Storage: "localStorage", Features: ["Sync", "Search"] },
   },
+  {
+    _tag: "unknown",
+    ...baseFields,
+    originalType: "turn.paused",
+    payload: { _tag: "turn.paused", ...baseFields, turnId: "t1" },
+  },
 ];
 
 /**
@@ -182,12 +189,17 @@ const requests = [
   },
 ] as const;
 
-const listTags = (union: typeof ProviderEvent) =>
-  union.members.flatMap((member) =>
-    "fields" in member
-      ? [member.fields._tag.literal]
-      : member.members.map((branch) => branch.fields._tag.literal),
-  );
+/**
+ * The tags the arms of `ProviderEvent` decode, the `unknown` arm included. The
+ * member that only decodes an event of a tag no arm has is not counted: it has
+ * no tag of its own.
+ */
+const listTags = (schema: unknown): ReadonlyArray<string> => {
+  if ((typeof schema !== "object" && typeof schema !== "function") || schema === null) return [];
+  if ("fields" in schema) return [(schema.fields as { _tag: { literal: string } })._tag.literal];
+  if ("members" in schema) return (schema.members as ReadonlyArray<unknown>).flatMap(listTags);
+  return [];
+};
 
 describe("the normalized event taxonomy", () => {
   it.each(events)("round-trips $_tag unchanged", (event) => {
@@ -435,6 +447,104 @@ describe("the normalized event taxonomy", () => {
 const AGENT_EVENTS = events.filter(
   (event) => !["session.started", "session.exited", "subagent.started"].includes(event._tag),
 );
+
+describe("an event whose tag this build does not know", () => {
+  const received = {
+    _tag: "turn.paused",
+    ...baseFields,
+    turnId: "t1",
+    reason: { nested: [1, null, "x"] },
+  };
+
+  it("decodes as an unknown event that keeps the received event whole", () => {
+    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(received))).toEqual({
+      _tag: "unknown",
+      originalType: "turn.paused",
+      payload: received,
+      ...baseFields,
+    });
+  });
+
+  it("takes the subagent from the received event", () => {
+    const decoded = Effect.runSync(
+      Schema.decodeUnknownEffect(ProviderEvent)({ ...received, subagentId: "agent-b" }),
+    );
+    expect(decoded).toMatchObject({ _tag: "unknown", subagentId: "agent-b" });
+  });
+
+  it("writes an unknown event as it is, so it reads back the same", () => {
+    const unknown = Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(received));
+    const encoded = Schema.encodeSync(ProviderEvent)(unknown);
+    expect(encoded).toEqual(unknown);
+    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(encoded))).toEqual(unknown);
+  });
+
+  it("fails without the fields every event has", () => {
+    for (const key of ["eventId", "sessionId", "at"]) {
+      expect(decode(ProviderEvent, omitKey(received, key))._tag, key).toBe("Failure");
+    }
+  });
+
+  it("fails for an event with no string tag", () => {
+    expect(decode(ProviderEvent, { ...received, _tag: 7 })._tag).toBe("Failure");
+    expect(decode(ProviderEvent, omitKey(received, "_tag"))._tag).toBe("Failure");
+  });
+
+  it("fails for a tag that is not a fact, because the UI draws the tag", () => {
+    expect(decode(ProviderEvent, { ...received, _tag: "" })._tag).toBe("Failure");
+    expect(decode(ProviderEvent, { ...received, _tag: "x".repeat(513) })._tag).toBe("Failure");
+    expect(decode(ProviderEvent, { ...received, _tag: "x".repeat(512) })._tag).toBe("Success");
+  });
+
+  it("never takes in a malformed event of a tag it knows", () => {
+    const exited = { _tag: "session.exited", ...baseFields, reason: "process_exit" };
+    expect(decode(ProviderEvent, { ...exited, reason: "killed" })._tag).toBe("Failure");
+    expect(decode(ProviderEvent, omitKey(exited, "reason"))._tag).toBe("Failure");
+    const turn = { _tag: "turn.completed", ...baseFields, turnId: "t1", state: "completed" };
+    expect(decode(ProviderEvent, turn)._tag).toBe("Success");
+    expect(decode(ProviderEvent, omitKey(turn, "turnId"))._tag).toBe("Failure");
+  });
+
+  it("does not wrap an unknown event a second time", () => {
+    const unknown = { _tag: "unknown", ...baseFields, originalType: "turn.paused", payload: 1 };
+    expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(unknown))).toEqual(unknown);
+    expect(decode(ProviderEvent, omitKey(unknown, "originalType"))._tag).toBe("Failure");
+  });
+});
+
+describe("parsing an event back from storage", () => {
+  it("turns a stored event of a tag this build does not know into the unknown event", () => {
+    const stored = { _tag: "turn.paused", ...baseFields, turnId: "t1", subagentId: "agent-b" };
+    const read = parseStoredEvent(JSON.stringify(stored));
+    expect(read).toEqual(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(stored)));
+    expect(read).toMatchObject({
+      _tag: "unknown",
+      originalType: "turn.paused",
+      payload: stored,
+      subagentId: "agent-b",
+    });
+    // The row can be served: encoding it for a transcript response succeeds.
+    expect(Schema.encodeSync(ProviderEvent)(read)).toEqual(read);
+  });
+
+  it("returns a stored event of a known tag as parsed, without decoding it", () => {
+    // Not a valid `turn.completed` (its state is outside the vocabulary): a
+    // decode would reject it, so getting it back proves there was none.
+    const stored = {
+      _tag: "turn.completed",
+      ...baseFields,
+      turnId: "t1",
+      state: "from-an-older-build",
+    };
+    expect(parseStoredEvent(JSON.stringify(stored))).toEqual(stored);
+  });
+
+  it("returns a stored unknown event as it was stored", () => {
+    const stored = events.find((event) => event._tag === "unknown");
+    expect(stored).toBeDefined();
+    expect(parseStoredEvent(JSON.stringify(stored))).toEqual(stored);
+  });
+});
 
 describe("an event's subagent", () => {
   it.each(AGENT_EVENTS)("names the subagent a $_tag belongs to", (event) => {
