@@ -146,7 +146,13 @@ export {
   WorkflowSignalsLayer,
   WorkflowValidityObserversLayer,
 } from "./workflows";
-export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./workspaces";
+export {
+  Provisioning,
+  ProvisioningLayer,
+  RepositoryBranches,
+  RepositoryBranchesLayer,
+  WorkspaceSweepInterval,
+} from "./workspaces";
 export {
   forwardTargetChanges,
   TextGenerationDeadline,

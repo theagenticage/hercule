@@ -13,6 +13,7 @@ import { join, relative } from "node:path";
 import { Database } from "bun:sqlite";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Struct from "effect/Struct";
 import { afterAll, describe, expect, it } from "vitest";
 import { ALL_GRANTS, type Session, type Workspace } from "@hercule/contract";
 import type { SessionStart, WorkspaceProvision } from "@hercule/protocol";
@@ -295,12 +296,12 @@ const withLegacyController = async (
         fixture.before.streams,
       );
       expect(reader.query("SELECT * FROM checkouts ORDER BY id").all()).toEqual(
-        fixture.before.checkouts.map((row) => ({
-          ...(row as object),
+        // Migration 0094 drops the branch list the old controller stored.
+        (fixture.before.checkouts as ReadonlyArray<Record<string, unknown>>).map((row) => ({
+          ...Struct.omit(row, ["branches"]),
           starting_revision: null,
           base_commit: null,
           head_commit: null,
-          remote_branches: "[]",
         })),
       );
       expect(reader.query("PRAGMA foreign_key_check").all()).toEqual([]);

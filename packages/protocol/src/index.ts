@@ -42,6 +42,8 @@ import {
 } from "./sessions";
 import { TextGenerationReport, TextGenerationRequest } from "./text-generation";
 import {
+  BranchListReport,
+  BranchListRequest,
   CredentialAnswer,
   CredentialRequest,
   WorkspaceDispose,
@@ -661,6 +663,7 @@ export const RunnerToController = Schema.Union([
   WorkspaceReport,
   WorkspaceInspection,
   RepositorySkillsInspection,
+  BranchListReport,
   CredentialRequest,
   WorkspaceStepResult,
   WorkspaceStepsReport,
@@ -756,6 +759,7 @@ export const ControllerToRunner = Schema.Union([
   WorkspaceInspect,
   RepositorySkillsInspect,
   RepositorySkillsPreview,
+  BranchListRequest,
   CredentialAnswer,
   GithubTokenAnswer,
   WorkspaceStepStart,

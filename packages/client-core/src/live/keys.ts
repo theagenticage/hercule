@@ -21,6 +21,7 @@ import type {
   TaskFilter,
 } from "@hercule/contract";
 import type { HerculeClient } from "../client";
+import type { BranchSearch } from "../threads/branch-menu";
 import { listLoopbackEndpoints } from "../local-runner";
 
 /** A cache key. This package does not read it; the app's query client does. */
@@ -157,6 +158,15 @@ export const queryKeys = {
    */
   previewSkills: (filter?: SkillsPreviewFilter): LiveQueryKey =>
     filter === undefined ? ["preview-skills"] : ["preview-skills", filter],
+  /**
+   * The branches of one repo on one runner whose name contains `text`, which
+   * the starting revision menu reads while it is open. Not a live topic: the
+   * runner reads the branches from its disk, which no push covers, so the
+   * menu reads them again each time it opens. Without a search, the prefix
+   * of every list.
+   */
+  resourceBranches: (search?: BranchSearch & { readonly text: string }): LiveQueryKey =>
+    search === undefined ? ["resource-branches"] : ["resource-branches", search],
   /**
    * The work that ended in the last minute, which the desktop app's Office
    * reads each time it opens, so a colleague still walking out is seen. Not

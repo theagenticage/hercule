@@ -15,7 +15,8 @@ import type { ComposerSkills } from "../session/message-field";
 import { ComposerMenu } from "../thread/composer-menu";
 import { ModelPick, OptionsPick } from "../thread/composer-picks";
 import { AccessModeMenu } from "./access-mode-menu";
-import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
+import { BranchMenu } from "./branch-menu";
+import { MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
 
 /**
  * The id of the draft's message field. The shell focuses the field by this
@@ -238,7 +239,7 @@ export function DraftComposer({
             onOpen={onOpenWorkspaceMenu}
           >
             {(close) => (
-              <BranchMenuContent
+              <BranchMenu
                 field={branch}
                 onPick={(picked) => {
                   onChoose({

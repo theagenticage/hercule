@@ -64,7 +64,6 @@ export const buildCheckout = (
   resourceId: string,
   /** `null` when the runner could not read the checkout's branch. */
   branch: string | null,
-  branches: readonly string[] = branch === null ? [] : [branch],
   defaultBranch: string | null = "main",
 ) => ({
   checkoutId: `co-${resourceId}-${branch ?? "unknown"}`,
@@ -72,9 +71,7 @@ export const buildCheckout = (
   form: "clone" as const,
   subdirectory: null,
   branch,
-  branches,
   defaultBranch,
-  remoteBranches: [],
   headCommit: null,
   baseCommit: null,
   startingRevision: null,
@@ -220,7 +217,7 @@ export const buildThreadsWorld = (ids: Partial<WorldIds> = {}): ThreadsWorld => 
       runnerId: id.moss,
       checkouts: [
         {
-          ...buildCheckout(WEBSHOP.id, "main", ["main", "release/2.4", "hercule/thread-3f1"]),
+          ...buildCheckout(WEBSHOP.id, "main"),
           checkoutId: id.primaryCheckout,
         },
       ],

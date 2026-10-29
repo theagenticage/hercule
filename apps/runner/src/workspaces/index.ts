@@ -13,6 +13,8 @@ import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import {
   MAX_MESSAGE_LENGTH,
+  type BranchListReport,
+  type BranchListRequest,
   type WorkspaceDispose,
   type WorkspaceKind,
   type WorkspaceDetach,
@@ -21,6 +23,7 @@ import {
   type WorkspaceReport,
 } from "@hercule/protocol";
 import { attachWorkspace, reserveManagedRepositories } from "./attachment";
+import { listCheckoutBranches } from "./branches";
 import { hasExpectedCheckoutIdentity } from "./identity";
 import { disposeWorkspace, detachWorkspace, hasSameRemovalIntent } from "./dispose";
 import { observeWorkspace, provisionWorkspace, reprovision } from "./provision";
@@ -72,6 +75,13 @@ export interface Workspaces {
    * recovery report when this runner cannot read a valid workspace record.
    */
   readonly inspect: (workspaceId: string) => Effect.Effect<WorkspaceReport>;
+  /**
+   * Lists the branches of a main workspace's checkout, newest first and
+   * filtered by the request's text (`listCheckoutBranches`). Never fails: a
+   * workspace this runner does not have, or a git error, becomes the
+   * `failed` outcome with the reason.
+   */
+  readonly listBranches: (request: BranchListRequest) => Effect.Effect<BranchListReport["outcome"]>;
   /** Reads checkout facts after a turn or exit; returns undefined for an unknown workspace. */
   readonly reportAfterSession: (
     workspaceId: string,
@@ -435,6 +445,25 @@ export const makeWorkspaces = (options: {
           );
         }).pipe(Effect.catch(() => Effect.succeed(false))),
       inspect,
+      listBranches: (request) =>
+        Effect.gen(function* () {
+          const entry = yield* findStandingWorkspace(request.workspaceId);
+          // A main workspace is one repo: its only checkout holds the branches.
+          const only = entry?.checkouts.length === 1 ? entry.checkouts[0] : undefined;
+          if (only === undefined)
+            return {
+              status: "failed",
+              message: `This runner has no ready main workspace \`${request.workspaceId}\` to list branches from.`,
+            } as const;
+          return yield* listCheckoutBranches(only, request, substrate.gitEnv);
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.succeed({
+              status: "failed",
+              message: error.message.slice(0, MAX_MESSAGE_LENGTH),
+            } as const),
+          ),
+        ),
       reportAfterSession: (workspaceId) =>
         Effect.gen(function* () {
           if (

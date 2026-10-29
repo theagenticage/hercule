@@ -26,7 +26,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Workspace } from "../packages/contract/src/index";
+import type { ResourceBranches, Workspace } from "../packages/contract/src/index";
 import {
   PASSWORD,
   USERNAME,
@@ -262,8 +262,21 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
     expect(only!.resourceId).toBe(resourceId);
     expect(only!.form).toBe("worktree");
     expect(only!.branch).not.toBe("main");
-    expect(only!.branches).toContain(only!.branch);
-    expect(only!.branches).toContain("main");
+    // The branches are read live from the machine, not stored with the
+    // workspace: the main workspace's own branch and the default are there.
+    const listed = expectJsonOutput<ResourceBranches>(
+      await runLoggedInCli([
+        "resource",
+        "list-branches",
+        resourceId,
+        "--runner",
+        runnerId,
+        "--json",
+      ]),
+    );
+    expect(listed.unavailableReason).toBeUndefined();
+    expect(listed.local).toContain(only!.branch);
+    expect(listed.local).toContain("main");
     expect(only!.headCommit).toBe(head);
     expect(only!.baseCommit).toBe(head);
 
@@ -328,9 +341,6 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
       // The thread's branch belongs to the session alone: the end of the
       // session id tells two threads in one repo apart.
       expect(only!.branch).toBe(`hercule/thread-${spawned.id.slice(-8)}`);
-      // It starts where `main` is, so the worktree came from the cache the
-      // clone filled rather than from a repository nobody could reach.
-      expect(only!.branches).toContain(only!.branch!);
       // The workspace records which thread is in it: the sidebar groups by
       // `sessionIds`, and the reaper reads it before disposing anything.
       expect(workspace.sessionIds).toContain(spawned.id);

@@ -1255,6 +1255,34 @@ export const CLI = {
       },
     },
   },
+  "resource.listBranches": {
+    command: "resource list-branches",
+    help: "Lists the branches of a repo on one runner, read live from its main workspace there. The local branches come first, then those of its remote. Each list is sorted by the newest commit, newest first, and holds at most --max names; a line after the lists says when more branches match. Use --text to find a branch in a repository with many.",
+    examples: [
+      { args: ["a1b2c3d4", "--runner", "3c9e12f8"] },
+      { args: ["a1b2c3d4", "--runner", "3c9e12f8", "--text", "release", "--max", "10"] },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        help: "The repo's id, or a tail of eight or more characters.",
+        resolves: "resource.query",
+      },
+      runnerId: {
+        flag: "runner",
+        help: "The runner whose main workspace of the repo is read, by its id or a tail of eight or more characters.",
+        resolves: "runner.query",
+      },
+      text: {
+        flag: "text",
+        help: "Only branches whose name contains this text, ignoring letter case.",
+      },
+      maxBranches: {
+        flag: "max",
+        help: "The most branches of each kind to list, from 1 to 100. 50 when left out.",
+      },
+    },
+  },
   "resource.create": {
     command: "resource create",
     help: "Records a Resource: a git repo Hercule checks out, or a folder or mailbox it works with. A repo is identified by its remote however you spell it, so the same repository is added only once.",

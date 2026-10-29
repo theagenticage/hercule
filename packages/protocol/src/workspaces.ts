@@ -12,14 +12,30 @@
  */
 import { Schema } from "effect";
 
-import { Fact, Message, StorageId, Subdirectory, Timestamp } from "./primitives";
+import { Fact, MAX_FACT_LENGTH, Message, StorageId, Subdirectory, Timestamp } from "./primitives";
 import { MAX_REPOSITORY_SKILLS, MAX_SKIPPED_REASON_LENGTH, RepositorySkill } from "./skills";
 
 /** The most checkouts one workspace holds; a multi-repo workspace is a handful. */
 export const MAX_CHECKOUTS = 32;
 
-/** The most branches a machine reports for one checkout. */
+/**
+ * The most branches a runner older than `BRANCH_LIST_CAPABILITY` reports for
+ * one checkout. A current runner reports none (`CheckoutReport.branches`).
+ */
 export const MAX_BRANCHES = 1024;
+
+/** The most branches of each kind, local and remote, one `BranchListReport` holds. */
+export const MAX_LISTED_BRANCHES = 100;
+
+/**
+ * The capability for `BranchListRequest` and `BranchListReport`. The runner
+ * lists it at hello when it answers the request; the controller sends the
+ * request only to a runner that lists it. The frames are new, so a runner
+ * without the capability would close the socket on a frame it cannot decode.
+ * `PROTOCOL_VERSION` does not change, because a runner without it still works
+ * for everything else.
+ */
+export const BRANCH_LIST_CAPABILITY = "branchList";
 
 /** Negotiates attachment and the safe workspace lifecycle as one coherent feature. */
 export const WORKSPACE_LIFECYCLE_CAPABILITY = "workspaceLifecycle";
@@ -157,10 +173,19 @@ export const CheckoutReport = Schema.Struct({
    * reported.
    */
   branch: Schema.NullOr(Fact),
-  branches: Schema.Array(Fact).check(Schema.isMaxLength(MAX_BRANCHES)),
+  /**
+   * The local branches, as a runner older than `BRANCH_LIST_CAPABILITY`
+   * reports them. The controller ignores them and reads branches live with
+   * `BranchListRequest` instead, because a repository with thousands of
+   * branches made every workspace record too large to read. A current runner
+   * sends an empty list, so a controller that still requires the key can
+   * decode the report.
+   */
+  branches: Schema.optionalKey(Schema.Array(Fact).check(Schema.isMaxLength(MAX_BRANCHES))),
   /** What `origin/HEAD` points to, or null when the machine could not read it. */
   defaultBranch: Schema.NullOr(Fact),
   form: Schema.optionalKey(CheckoutForm),
+  /** The remote branches a runner older than `BRANCH_LIST_CAPABILITY` reports; ignored, as `branches`. */
   remoteBranches: Schema.optionalKey(Schema.Array(Fact).check(Schema.isMaxLength(MAX_BRANCHES))),
   headCommit: Schema.optionalKey(Schema.NullOr(Fact)),
   baseCommit: Schema.optionalKey(Schema.NullOr(Fact)),
@@ -216,6 +241,57 @@ export const WorkspaceInspection = Schema.Struct({
 });
 
 export type WorkspaceInspection = Schema.Schema.Type<typeof WorkspaceInspection>;
+
+/**
+ * Asks the runner for the branches of a main workspace's checkout, newest
+ * commit first, so a client can offer them as starting revisions. It changes
+ * nothing on disk and fetches nothing. The runner answers with a
+ * `BranchListReport` that has the same `requestId` and `workspaceId`. Sent
+ * only to a runner that lists `BRANCH_LIST_CAPABILITY`.
+ */
+export const BranchListRequest = Schema.Struct({
+  _tag: Schema.Literal("branchListRequest"),
+  requestId: Fact,
+  workspaceId: StorageId,
+  /**
+   * Lists only the branches whose name contains this text, ignoring letter
+   * case. The empty text lists every branch.
+   */
+  text: Schema.String.check(Schema.isMaxLength(MAX_FACT_LENGTH)),
+  /** The most branches of each kind to list. */
+  maxBranches: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_LISTED_BRANCHES })),
+});
+
+export type BranchListRequest = Schema.Schema.Type<typeof BranchListRequest>;
+
+/**
+ * Answers a `BranchListRequest`, matched by `requestId`.
+ *
+ * - `local` holds the local branches and `remote` the branches of the
+ *   checkout's remote, without the remote's name and without its `HEAD`. Each
+ *   list is sorted by the date of the branch's newest commit, newest first.
+ * - `more` is true when more branches match the text than either list holds,
+ *   so a client can tell the user to type more of a name to find an older
+ *   branch.
+ * - `failed` carries the reason the runner could not list them, such as a
+ *   workspace it does not have.
+ */
+export const BranchListReport = Schema.Struct({
+  _tag: Schema.Literal("branchListReport"),
+  requestId: Fact,
+  workspaceId: StorageId,
+  outcome: Schema.Union([
+    Schema.Struct({
+      status: Schema.Literal("listed"),
+      local: Schema.Array(Fact).check(Schema.isMaxLength(MAX_LISTED_BRANCHES)),
+      remote: Schema.Array(Fact).check(Schema.isMaxLength(MAX_LISTED_BRANCHES)),
+      more: Schema.Boolean,
+    }),
+    Schema.Struct({ status: Schema.Literal("failed"), message: Message }),
+  ]),
+});
+
+export type BranchListReport = Schema.Schema.Type<typeof BranchListReport>;
 
 /**
  * Asks the runner to read the skills in the checkouts of one workspace: each

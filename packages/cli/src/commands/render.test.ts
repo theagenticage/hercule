@@ -2238,6 +2238,45 @@ describe("hercule skill", () => {
   });
 });
 
+describe("hercule resource list-branches", () => {
+  const command = lookUpCommand("resource", "list-branches");
+
+  it("prints the local branches, then the remote ones, as one table", () => {
+    const lines = renderHuman(
+      { kind: "value", value: { local: ["fix/login", "main"], remote: ["main"], more: false } },
+      command,
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual(["kind    name", "local   fix/login", "local   main", "remote  main"]);
+  });
+
+  it("says after the table why nothing was listed, and that more branches match", () => {
+    expect(
+      renderHuman(
+        {
+          kind: "value",
+          value: {
+            local: [],
+            remote: [],
+            more: false,
+            unavailableReason: "The runner is offline.",
+          },
+        },
+        command,
+        CONTROLLER_URL,
+      ),
+    ).toEqual(["no results", "", "note: no branches listed: The runner is offline."]);
+    expect(
+      renderHuman(
+        { kind: "value", value: { local: ["main"], remote: [], more: true } },
+        command,
+        CONTROLLER_URL,
+      ).slice(-1),
+    ).toEqual(["note: more branches match; narrow the list with --text or raise --max"]);
+  });
+});
+
 describe("hercule session skill list", () => {
   const library = { source: "library", name: "implement", description: "Builds a feature." };
   const repository = {

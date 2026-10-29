@@ -69,6 +69,7 @@ import {
   type Session,
   type SessionRequest,
   type SessionSkillList,
+  type ResourceBranches,
   type Signal,
   type SignalAction,
   type SignalLowerPriorityResult,
@@ -1236,6 +1237,25 @@ const renderSessionSkillList = (answer: SessionSkillList): ReadonlyArray<string>
 };
 
 /**
+ * Returns the branches of a repo as one table, the local branches first, each
+ * kind newest first as the runner sorted them. A note after the table says
+ * why nothing could be listed, or that more branches match than are shown.
+ */
+const renderResourceBranches = (answer: ResourceBranches): ReadonlyArray<string> => {
+  const rows = [
+    ...answer.local.map((name) => ({ kind: "local", name })),
+    ...answer.remote.map((name) => ({ kind: "remote", name })),
+  ];
+  const notes = [
+    ...(answer.unavailableReason === undefined
+      ? []
+      : [`no branches listed: ${answer.unavailableReason}`]),
+    ...(answer.more ? ["more branches match; narrow the list with --text or raise --max"] : []),
+  ].map((note) => `note: ${note}`);
+  return [...renderTable(rows), ...(notes.length === 0 ? [] : ["", ...notes])];
+};
+
+/**
  * Returns one line per Skill Revision, indented under a heading: its full
  * hash, which every operation that names a revision takes, how it arrived,
  * and when and by whom it was last applied.
@@ -1428,6 +1448,7 @@ const VALUE_RENDERERS: Partial<
   "wikiPage.read": (value) => renderWikiPage(value as WikiPageWithRevisions),
   "session.querySkills": (value) => renderSessionSkillList(value as SessionSkillList),
   "session.previewSkills": (value) => renderSessionSkillList(value as SessionSkillList),
+  "resource.listBranches": (value) => renderResourceBranches(value as ResourceBranches),
   "skill.read": (value) => renderSkillDetail(value as SkillDetail),
   "skill.check": () => [
     "update check started; run `hercule skill list` later to see what it found",

@@ -90,8 +90,8 @@ const insertWorkspace = (resourceIds: ReadonlyArray<string>) =>
         resourceIds,
         (resourceId, position) =>
           sql`
-        INSERT INTO checkouts (id, workspace_id, resource_id, form, branches, position, created_at)
-        VALUES (${mintUuid()}, ${workspace}, ${uuidFromString(resourceId)}, 'clone', '[]',
+        INSERT INTO checkouts (id, workspace_id, resource_id, form, position, created_at)
+        VALUES (${mintUuid()}, ${workspace}, ${uuidFromString(resourceId)}, 'clone',
                 ${position}, ${AT})
       `,
       );

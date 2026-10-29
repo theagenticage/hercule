@@ -114,10 +114,12 @@ export const Checkout = Schema.Struct({
    * useless.
    */
   branch: Schema.NullOr(Schema.String),
-  /** Every local branch the machine found, in its order. */
-  branches: Schema.Array(Schema.String),
+  /**
+   * The remote's default branch. The other branches are not stored: a
+   * repository can have tens of thousands, so `resource.listBranches` reads
+   * them from the machine when they are needed.
+   */
   defaultBranch: Schema.NullOr(Schema.String),
-  remoteBranches: Schema.Array(Schema.String),
   headCommit: Schema.NullOr(Schema.String),
   baseCommit: Schema.NullOr(Schema.String),
   startingRevision: Schema.NullOr(StartingRevision),

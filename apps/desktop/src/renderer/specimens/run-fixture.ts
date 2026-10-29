@@ -99,7 +99,7 @@ const RELEASE_WORKSPACE: Workspace = buildWorkspace({
   retentionPolicy: "automatic",
   checkouts: [
     {
-      ...buildCheckout("r-hercule", "release/2.14.0", ["main", "release/2.14.0"]),
+      ...buildCheckout("r-hercule", "release/2.14.0"),
       form: "worktree",
       startingRevision: { kind: "remote", branch: "main" },
     },

@@ -1,5 +1,6 @@
 /** Builds choices for a new workspace's Git source and shows existing files' observed branch. */
-import type { StartingRevision, Workspace } from "@hercule/contract";
+import type { ResourceBranches, StartingRevision, Workspace } from "@hercule/contract";
+import { readErrorMessage } from "../errors";
 import { buildStartingRevisionKey, describeStartingRevision } from "../starting-revision";
 import { findPrimaryWorkspace, type Phrase, type WorkspacePick } from "./workspaces";
 
@@ -21,8 +22,50 @@ export interface BranchField {
   readonly glyph: boolean;
   /** Why the field is shown as text rather than a menu. */
   readonly locked: string | null;
+  /**
+   * The choices that need no branch list: the current working copy and the
+   * remote default. The branches themselves come from `search`.
+   */
   readonly rows: readonly BranchRow[];
+  /**
+   * The repo and runner whose branches the open menu reads with
+   * `resource.listBranches`, or null when the menu offers only `rows`. A
+   * repository can have tens of thousands of branches, so the menu reads
+   * them live, filtered by what the user types, instead of storing them.
+   */
+  readonly search: BranchSearch | null;
   readonly foot: readonly Phrase[] | null;
+}
+
+/**
+ * How many branches of each kind the starting revision menu lists. A longer
+ * list is cut, and the menu asks the user to type more of the name.
+ */
+export const MENU_BRANCHES_PER_KIND = 20;
+
+/**
+ * How long the menu's filter text must stay unchanged before the menu reads
+ * the branches again, so typing a name sends one read, not one per key.
+ */
+export const BRANCH_SEARCH_DELAY_MS = 200;
+
+/** The repo and the runner whose branches the starting revision menu lists. */
+export interface BranchSearch {
+  readonly resourceId: string;
+  readonly runnerId: string;
+}
+
+/** What the menu has of the live branch list: still reading it, the read failed, or the answer. */
+export type BranchListing =
+  | { readonly status: "reading" }
+  | { readonly status: "failed"; readonly message: string }
+  | { readonly status: "read"; readonly branches: ResourceBranches };
+
+/** The branch rows of the starting revision menu, and the line under them. */
+export interface BranchListRows {
+  readonly rows: readonly BranchRow[];
+  /** Why the rows are empty or incomplete, or null when they are the whole answer. */
+  readonly note: string | null;
 }
 
 /** Returns the explicit revision or the selected source's default without using another runner's refs. */
@@ -73,6 +116,7 @@ export const buildBranchField = (
       glyph: branch != null,
       locked: source?.message ?? "Starting a Thread here leaves the branch unchanged",
       rows: [],
+      search: null,
       foot: null,
     };
   }
@@ -91,12 +135,12 @@ export const buildBranchField = (
       glyph: false,
       locked: "Each repository uses the starting revision shown here",
       rows: [],
+      search: null,
       foot: null,
     };
   }
   const only = pick.checkouts[0]!;
   const source = findPrimaryWorkspace(workspaces, only.resourceId, runnerId);
-  const checkout = source?.checkouts.find((each) => each.resourceId === only.resourceId);
   const revision = readStartingRevision(only, source);
   const unavailable =
     source !== undefined && source.status !== "ready"
@@ -108,12 +152,6 @@ export const buildBranchField = (
   const rows = [
     buildRevisionRow({ kind: "current" }, "Current working copy", "current", noLocalSource),
     buildRevisionRow({ kind: "remote" }, "Remote default", "default", unavailable),
-    ...(checkout?.branches ?? []).map((branch) =>
-      buildRevisionRow({ kind: "local", branch }, `Local branch: ${branch}`, null, noLocalSource),
-    ),
-    ...(checkout?.remoteBranches ?? []).map((branch) =>
-      buildRevisionRow({ kind: "remote", branch }, `Remote branch: ${branch}`, null, unavailable),
-    ),
   ];
   return {
     header: "Starting revision",
@@ -123,10 +161,66 @@ export const buildBranchField = (
     glyph: false,
     locked: null,
     rows,
+    // Only a ready main workspace on this runner has branches to list. When
+    // there is none, the rows above already say why nothing can be picked.
+    search:
+      source?.status === "ready"
+        ? { resourceId: only.resourceId, runnerId: source.runnerId }
+        : null,
     foot: [
       {
         text: "Current and local sources use this machine's committed Git state. Remote sources fetch before creating the new branch. Uncommitted edits stay in the original files.",
       },
     ],
   };
+};
+
+/**
+ * Returns what the menu has of the live branch list, from the latest answer
+ * of the read and its error. An answer counts first: while a new filter text
+ * is read, the menu keeps the previous answer instead of going blank.
+ */
+export const buildBranchListing = (
+  answer: ResourceBranches | undefined,
+  error: unknown,
+): BranchListing =>
+  answer !== undefined
+    ? { status: "read", branches: answer }
+    : error !== null && error !== undefined
+      ? { status: "failed", message: readErrorMessage(error) }
+      : { status: "reading" };
+
+/**
+ * Builds the branch rows of the starting revision menu from the live branch
+ * list: the local branches, then the remote ones, each newest first as the
+ * runner sorted them. `text` is what the user typed to filter the list.
+ *
+ * The note under the rows says, in this order:
+ *
+ * - that the list is still being read, or why reading it failed;
+ * - why the runner could not list branches;
+ * - that no branch name contains `text`;
+ * - that more branches match than are shown, so the user should type more.
+ */
+export const buildBranchListRows = (listing: BranchListing, text: string): BranchListRows => {
+  if (listing.status === "reading") return { rows: [], note: "Reading branches…" };
+  if (listing.status === "failed")
+    return { rows: [], note: `Branches could not be read: ${listing.message}` };
+  const { local, remote, more, unavailableReason } = listing.branches;
+  const rows = [
+    ...local.map((branch) =>
+      buildRevisionRow({ kind: "local", branch }, `Local branch: ${branch}`, null, null),
+    ),
+    ...remote.map((branch) =>
+      buildRevisionRow({ kind: "remote", branch }, `Remote branch: ${branch}`, null, null),
+    ),
+  ];
+  const note =
+    unavailableReason ??
+    (rows.length === 0 && text !== ""
+      ? `No branch name contains "${text}".`
+      : more
+        ? "More branches match. Type to narrow the list."
+        : null);
+  return { rows, note };
 };

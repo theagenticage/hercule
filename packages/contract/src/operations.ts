@@ -272,6 +272,13 @@ const TABLE = {
 
   "resource.query": { requires: "resource.read", method: "GET", path: "/api/v1/resources" },
   "resource.read": { requires: "resource.read", method: "GET", path: "/api/v1/resources/:id" },
+  // Reads the main workspace of the repo on the runner, so it needs the same
+  // grant as reading workspaces.
+  "resource.listBranches": {
+    requires: "workspace.read",
+    method: "GET",
+    path: "/api/v1/resources/:id/branches",
+  },
   "resource.create": { requires: "resource.write", method: "POST", path: "/api/v1/resources" },
   "resource.update": {
     requires: "resource.write",

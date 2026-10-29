@@ -301,11 +301,6 @@ describe("reporting a primary after a session ran in it", () => {
     expect(report?.status).toBe("ready");
     expect(report?.workspaceId).toBe(workspaceId);
     expect(report?.checkouts?.[0]?.branch).toBe("feature/what-the-agent-did");
-    expect([...(report?.checkouts?.[0]?.branches ?? [])].sort()).toEqual([
-      "feature/what-the-agent-did",
-      `hercule/main-${workspaceId}`,
-      "main",
-    ]);
   });
 
   it("returns undefined for a workspace the runner does not have", async () => {

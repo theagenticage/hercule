@@ -4,6 +4,8 @@ import {
   describeMachineRow,
   joinPhraseText,
   type BranchField,
+  type BranchListRows,
+  type BranchRow,
   type MachineRow,
   type WorkspaceMenu,
   type WorkspacePick,
@@ -51,36 +53,74 @@ export function WorkspaceMenuContent({
 }
 
 /**
- * Renders the starting revisions a new workspace can use. Each row keeps
- * current, local and remote revisions distinct when their branch names match.
+ * The branch filter of the starting revision menu: the text typed in it, the
+ * branch rows read for that text, and the line under them.
+ */
+export interface BranchMenuSearch {
+  readonly text: string;
+  readonly listed: BranchListRows;
+  readonly onText: (text: string) => void;
+}
+
+/**
+ * Renders the starting revisions a new workspace can use: the current
+ * working copy and the remote default, then, with `search`, a filter and the
+ * branches that match it. Each row keeps current, local and remote revisions
+ * distinct when their branch names match.
  */
 export function BranchMenuContent({
   field,
+  search,
   onPick,
 }: {
   readonly field: BranchField;
+  /** The branch filter and its rows, or null when the menu lists no branches. */
+  readonly search: BranchMenuSearch | null;
   readonly onPick: (revision: StartingRevision) => void;
 }): JSX.Element {
+  const renderRow = (row: BranchRow): JSX.Element => (
+    <MenuLine
+      key={row.key}
+      name={row.label}
+      note={[row.badge, row.dimmed].filter((each) => each !== null).join(" · ") || null}
+      current={row.key === field.value}
+      inert={row.dimmed !== null}
+      onPick={() => {
+        onPick(row.startingRevision);
+      }}
+    />
+  );
   return (
     <>
       <div className="pop-h">
         <b>{field.header}</b>
         <span>{field.note}</span>
       </div>
-      <div className="pop-sec">
-        {field.rows.map((row) => (
-          <MenuLine
-            key={row.key}
-            name={row.label}
-            note={[row.badge, row.dimmed].filter((each) => each !== null).join(" · ") || null}
-            current={row.key === field.value}
-            inert={row.dimmed !== null}
-            onPick={() => {
-              onPick(row.startingRevision);
+      <div className="pop-sec">{field.rows.map(renderRow)}</div>
+      {search === null ? null : (
+        <div className="pop-sec">
+          <input
+            className="field menu-filter"
+            aria-label="Filter branches"
+            placeholder="Filter branches…"
+            // A repository can have more branches than the menu lists, so
+            // the filter is how the user finds one.
+            autoFocus
+            spellCheck={false}
+            autoComplete="off"
+            value={search.text}
+            onChange={(event) => {
+              search.onText(event.target.value);
             }}
           />
-        ))}
-      </div>
+          <div className="branch-list">
+            {search.listed.rows.map(renderRow)}
+            {search.listed.note === null ? null : (
+              <p className="fine branch-list-note">{search.listed.note}</p>
+            )}
+          </div>
+        </div>
+      )}
       {field.foot === null ? null : <p className="pop-foot">{joinPhraseText(field.foot)}</p>}
     </>
   );
