@@ -4512,6 +4512,23 @@ The sidebar was drawn from a specimen with 3,000 and with 200 threads, every sec
 - **Pixels.** None of the 12 captured screens shows an unknown event or an unreadable stream, so no golden moved.
 - **Not measured:** process count, summed and per-process memory, idle wakeups, and the time of a streamed row in the packaged app. The perf script (`apps/desktop/scripts/perf.ts`) needs macOS, and the Mac runner (atlas) was not reachable. On 2026-10-29 Rogier excepted #897 from the macOS readings, as for #893 and #851: it merges without them. The design adds no process, timer or listener, but that is the design and not a measurement. The decode timing ran on Bun and not in the renderer. The packaged app (`electron-builder --mac`) was not built either, and byte counts do not need it.
 
+**The starting revision menu searches branches, issue #918,** measured 2026-10-29 with `pnpm build:desktop`'s size checks, on `main` at `0a5063851` and on the branch. The cost was stated before the change was built: no process, no timer and no work while idle or per streamed token; one read per settled filter text, and only while the menu is open.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| The first screen's JavaScript, gzipped | a guide of 250 kB | 467.6 kB to 468.4 kB: 0.8 kB more, in 26 chunks both times. Over the guide as before |
+| The entry chunk (`first-screen-*.js`) | - | 1,305.82 kB to 1,308.89 kB: 3.07 kB more; gzipped 414.07 kB to 414.97 kB (0.9 kB more) |
+| Every JavaScript and CSS file in `out/renderer`, each gzipped and summed | - | 1,086,001 to 1,086,967 bytes: 966 more. Raw: 3,403,611 to 3,406,783 (3,172 more) |
+| Main's startup file, minified | 170 kB | 166.0 kB both times |
+| Processes | none added | none added |
+| Work while idle | none added | none added: the read is a query mounted only inside the open menu, with no refetch on window focus or reconnect and no retry |
+| Work per streamed token | unchanged | unchanged: nothing in the change runs per token |
+
+- **The bundle grows by 0.8 kB on the first screen.** The draft composer is in the entry chunk, so the filter, the debounce and client-core's `buildBranchListRows` land there.
+- **The workspace list shrinks, which is the point of the change.** On the reference controller, about 400 workspaces read 19.5 MB, mostly branch lists. The shell reads that list at launch, so every launch and every workspace push now sends less. That reading is the issue's, not measured again here.
+- **A read per settled text.** Typing waits 200 ms after the last key before it reads, so a word typed quickly is one read. Each read asks the runner for one `git for-each-ref` and returns at most 20 local and 20 remote names.
+- **Not measured:** process count, memory, launch time and idle wakeups in the packaged app. The change adds no process, timer or listener that runs while the menu is closed.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
