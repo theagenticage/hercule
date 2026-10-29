@@ -65,7 +65,7 @@ const FIX_WORKSPACE: Workspace = buildWorkspace({
   kind: "ephemeral",
   checkouts: [
     {
-      ...buildCheckout("r-webshop", "fix/3ds-eu-cards", ["main", "fix/3ds-eu-cards"]),
+      ...buildCheckout("r-webshop", "fix/3ds-eu-cards"),
       form: "worktree",
       startingRevision: { kind: "remote", branch: "main" },
     },

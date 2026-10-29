@@ -116,7 +116,7 @@ describe("findBaseBranch", () => {
     const elsewhere = buildWorkspace({
       id: "ws-cove",
       runnerId: COVE.id,
-      checkouts: [buildCheckout(WEBSHOP.id, "main", ["main"], "trunk")],
+      checkouts: [buildCheckout(WEBSHOP.id, "main", "trunk")],
     });
 
     expect(findBaseBranch([elsewhere, PRIMARY], WEBSHOP.id, MOSS.id)).toBe("main");

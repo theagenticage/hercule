@@ -879,7 +879,18 @@ export {
 } from "./threads/side-pane";
 export { buildProjectPickerRows, type ProjectPickerRow } from "./threads/projects";
 export { pickProjectHue, type ProjectTone } from "./threads/tone";
-export { buildBranchField, type BranchField } from "./threads/branch-menu";
+export {
+  BRANCH_SEARCH_DELAY_MS,
+  buildBranchField,
+  buildBranchListing,
+  buildBranchListRows,
+  MENU_BRANCHES_PER_KIND,
+  type BranchField,
+  type BranchListing,
+  type BranchListRows,
+  type BranchRow,
+  type BranchSearch,
+} from "./threads/branch-menu";
 export { buildWorkspaceMenu, type WorkspaceMenu } from "./threads/workspace-menu";
 export { buildThreadWorkspaceLabel } from "./threads/thread-workspace";
 export { buildWorkspaceDetails, type WorkspaceDetails } from "./workspace-details";

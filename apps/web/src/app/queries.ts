@@ -12,15 +12,17 @@
  * changed records, and only key builders that both sides share can turn those
  * records into the keys the cache uses.
  */
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query";
 import {
   isNotFound,
+  MENU_BRANCHES_PER_KIND,
   queryKeys,
   readEveryPage,
   readSenderSession,
   RUNNING_STATUSES,
   UNSEEN_COUNT_READ_LIMIT,
   HELD_EVENT_PREVIEW_LIMIT,
+  type BranchSearch,
   type HerculeClient,
 } from "@hercule/client-core";
 import {
@@ -128,6 +130,28 @@ export const workspaceQuery = (client: HerculeClient, id: string) =>
     queryKey: queryKeys.workspace(id),
     queryFn: () => client.workspace.read({ params: { id } }),
     retry: false,
+  });
+
+/**
+ * Reads the branches of `search`'s repo on its runner whose name contains
+ * `text`, for the starting revision menu while it is open. The runner reads
+ * them from its disk and no live topic covers them, so they are read again
+ * each time the menu opens, never on window focus or reconnect. While a new
+ * text is read, the menu keeps the previous answer. A failed read is not
+ * retried: the menu says so at once, and opening it again reads again.
+ */
+export const resourceBranchesQuery = (client: HerculeClient, search: BranchSearch, text: string) =>
+  queryOptions({
+    queryKey: queryKeys.resourceBranches({ ...search, text }),
+    queryFn: () =>
+      client.resource.listBranches({
+        params: { id: search.resourceId },
+        query: { runnerId: search.runnerId, text, maxBranches: MENU_BRANCHES_PER_KIND },
+      }),
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    placeholderData: keepPreviousData,
   });
 
 /**

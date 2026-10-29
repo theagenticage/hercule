@@ -29,6 +29,7 @@ import type {
   Session,
   Workspace,
 } from "@hercule/contract";
+import { MENU_BRANCHES_PER_KIND } from "@hercule/client-core";
 import { buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
   buildErrorBody,
@@ -1374,7 +1375,6 @@ const buildCheckout = (
   resourceId: string,
   form: "clone" | "worktree",
   branch: string,
-  branches: readonly string[],
   defaultBranch: string,
 ) => ({
   checkoutId: id,
@@ -1382,9 +1382,7 @@ const buildCheckout = (
   form,
   subdirectory: null,
   branch,
-  branches,
   defaultBranch,
-  remoteBranches: [],
   headCommit: null,
   baseCommit: null,
   startingRevision: null,
@@ -1437,7 +1435,6 @@ const W_THREAD_8A0 = buildWorkspace(
       R_WEBSHOP.id,
       "worktree",
       "hercule/thread-8a0",
-      ["hercule/thread-8a0"],
       "main",
     ),
   ],
@@ -1448,32 +1445,14 @@ const W_PRIMARY_INFRA = buildWorkspace(
   "01a06d02-7200-7000-8000-000000000004",
   "primary",
   RUNNER.id,
-  [
-    buildCheckout(
-      "01a06d02-7300-7000-8000-000000000004",
-      R_INFRA.id,
-      "clone",
-      "master",
-      ["master", "hetzner-migration"],
-      "master",
-    ),
-  ],
+  [buildCheckout("01a06d02-7300-7000-8000-000000000004", R_INFRA.id, "clone", "master", "master")],
 );
 
 const W_PRIMARY_RUNBOOKS = buildWorkspace(
   "01a06d02-7200-7000-8000-000000000005",
   "primary",
   RUNNER.id,
-  [
-    buildCheckout(
-      "01a06d02-7300-7000-8000-000000000005",
-      R_RUNBOOKS.id,
-      "clone",
-      "main",
-      ["main"],
-      "main",
-    ),
-  ],
+  [buildCheckout("01a06d02-7300-7000-8000-000000000005", R_RUNBOOKS.id, "clone", "main", "main")],
 );
 
 const buildThread = (
@@ -2000,12 +1979,24 @@ describe("Composer: the branch selector", () => {
 
   it("offers explicit starting sources and updates the lead for a local branch", async () => {
     const user = userEvent.setup();
-    await openDraftAt(buildProjectDraftPath(WEBSHOP.id), {});
+    const { api } = await openDraftAt(
+      buildProjectDraftPath(WEBSHOP.id),
+      {},
+      {
+        [`GET /api/v1/resources/${R_WEBSHOP.id}/branches`]: {
+          body: { local: ["release/2.4", "main"], remote: ["main"], more: false },
+        },
+      },
+    );
     const menu = await openBranchMenu(user, /^remote default$/);
     expect(readPageText(menu)).toContain("Starting revision");
     expect(readPageText(menu)).toContain("Current working copy");
     expect(readPageText(menu)).toContain("Remote sources fetch before creating the new branch");
     await pickRow(user, /^Local branch: release\/2\.4/);
+    // The menu asks the main workspace's runner, with no text yet.
+    expect(
+      api.calls.find((call) => call.path === `/api/v1/resources/${R_WEBSHOP.id}/branches`)?.search,
+    ).toBe(`?runnerId=${RUNNER.id}&text=&maxBranches=${MENU_BRANCHES_PER_KIND}`);
     expect(
       await screen.findByRole("button", { name: /^local branch release\/2\.4$/ }),
     ).toBeDefined();

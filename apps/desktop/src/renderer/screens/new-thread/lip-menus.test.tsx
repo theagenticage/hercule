@@ -10,7 +10,12 @@ import userEvent from "@testing-library/user-event";
 import type { BranchField, MachineRow, WorkspaceMenu, WorkspacePick } from "@hercule/client-core";
 import type { StartingRevision } from "@hercule/contract";
 import { readMenuLines } from "../thread/testing";
-import { BranchMenuContent, MachineMenuContent, WorkspaceMenuContent } from "./lip-menus";
+import {
+  BranchMenuContent,
+  MachineMenuContent,
+  WorkspaceMenuContent,
+  type BranchMenuSearch,
+} from "./lip-menus";
 
 describe("the workspace menu", () => {
   const NEW_WORKSPACE: WorkspacePick = {
@@ -67,59 +72,87 @@ describe("the branch menu", () => {
   const FIELD: BranchField = {
     header: "Starting revision",
     note: "the new workspace starts from it",
-    label: "Remote: main",
-    value: "remote:main",
-    glyph: true,
+    label: "local branch fix/cart",
+    value: "local:fix/cart",
+    glyph: false,
     locked: null,
     rows: [
       {
-        key: "remote:main",
-        label: "Remote: main",
-        startingRevision: { kind: "remote", branch: "main" },
+        key: "current",
+        label: "Current working copy",
+        startingRevision: { kind: "current" },
+        badge: "current",
+        dimmed: null,
+      },
+      {
+        key: "remote:",
+        label: "Remote default",
+        startingRevision: { kind: "remote" },
         badge: "default",
-        dimmed: null,
-      },
-      {
-        key: "local:fix/cart",
-        label: "Local: fix/cart",
-        startingRevision: { kind: "local", branch: "fix/cart" },
-        badge: null,
-        dimmed: null,
-      },
-      {
-        key: "remote:feat/coupons",
-        label: "Remote: feat/coupons",
-        startingRevision: { kind: "remote", branch: "feat/coupons" },
-        badge: null,
         dimmed: "Unavailable on this machine",
       },
     ],
+    search: { resourceId: "webshop-repo", runnerId: "moss" },
     foot: [{ text: "Uncommitted changes in " }, { text: "main", mono: true }, { text: " stay." }],
   };
+  const SEARCH: BranchMenuSearch = {
+    text: "fix",
+    listed: {
+      rows: [
+        {
+          key: "local:fix/cart",
+          label: "Local branch: fix/cart",
+          startingRevision: { kind: "local", branch: "fix/cart" },
+          badge: null,
+          dimmed: null,
+        },
+      ],
+      note: "More branches match. Type to narrow the list.",
+    },
+    onText: () => undefined,
+  };
 
-  it("lists the branches, checks the current one, and draws a branch checked out elsewhere as text", () => {
-    render(<BranchMenuContent field={FIELD} onPick={vi.fn()} />);
+  it("lists the fixed choices, then the filter and the branches it found, and checks the current one", () => {
+    render(<BranchMenuContent field={FIELD} search={SEARCH} onPick={vi.fn()} />);
 
     expect(document.querySelector(".pop-h")?.textContent).toBe(
       "Starting revision" + "the new workspace starts from it",
     );
     expect(readMenuLines()).toEqual([
-      ["Remote: main" + "default", true],
-      ["Local: fix/cart", false],
-      ["Remote: feat/coupons" + "Unavailable on this machine", false],
+      ["Current working copy" + "current", false],
+      ["Remote default" + "default · Unavailable on this machine", false],
+      ["Local branch: fix/cart", true],
     ]);
-    expect(screen.queryByRole("button", { name: /feat\/coupons/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Remote default/ })).toBeNull();
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Filter branches" }).value).toBe(
+      "fix",
+    );
+    expect(document.querySelector(".branch-list-note")?.textContent).toBe(
+      "More branches match. Type to narrow the list.",
+    );
     expect(document.querySelector(".pop-foot")?.textContent).toBe(
       "Uncommitted changes in main stay.",
     );
   });
 
-  it("picks the branch that is clicked", async () => {
+  it("draws no filter when the menu lists no branches", () => {
+    render(<BranchMenuContent field={{ ...FIELD, search: null }} search={null} onPick={vi.fn()} />);
+
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(readMenuLines()).toHaveLength(2);
+  });
+
+  it("hands typed text to onText and the clicked branch to onPick", async () => {
     const onPick = vi.fn<(revision: StartingRevision) => void>();
-    render(<BranchMenuContent field={FIELD} onPick={onPick} />);
+    const onText = vi.fn<(text: string) => void>();
+    render(
+      <BranchMenuContent field={FIELD} search={{ ...SEARCH, text: "", onText }} onPick={onPick} />,
+    );
 
-    await userEvent.click(screen.getByRole("button", { name: "Local: fix/cart" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Filter branches" }), "c");
+    await userEvent.click(screen.getByRole("button", { name: "Local branch: fix/cart" }));
 
+    expect(onText.mock.calls).toEqual([["c"]]);
     expect(onPick.mock.calls).toEqual([[{ kind: "local", branch: "fix/cart" }]]);
   });
 });

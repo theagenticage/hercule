@@ -161,6 +161,18 @@ button.line:hover {
 .pop-sec:has(> .menu-filter) {
   padding-top: 8px;
 }
+/* Not in the book. The branches under the starting revision menu's filter
+   scroll on their own, so the filter stays in view while the user scrolls. */
+.branch-list {
+  max-height: 280px;
+  margin-top: 6px;
+  overflow-y: auto;
+}
+/* Set like a menu line's text, so it lines up with the branch names. */
+.branch-list-note {
+  margin: 0;
+  padding: 6px;
+}
 /* Not in the book, which has no model options. Each option is its label
    above a segmented control of its choices. */
 .menu-option {

@@ -147,7 +147,7 @@ const WORKSPACES = [
     id: "ws-webshop-main",
     runnerId: STUDIO_MAC.id,
     kind: "primary",
-    checkouts: [buildCheckout(WEBSHOP_REPO.id, "main", ["main", "hercule/thread-3f1"])],
+    checkouts: [buildCheckout(WEBSHOP_REPO.id, "main")],
     sessionIds: [THREAD_IDS.stripeBump],
   }),
   buildWorkspace({

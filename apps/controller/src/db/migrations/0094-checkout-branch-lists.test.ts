@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Struct from "effect/Struct";
 import { TestDatabaseWriter } from "../testing";
 import { runMigrations } from "../migrate";
 import { migrations } from "./index";
@@ -26,7 +27,6 @@ describe("dropping the stored branch lists", () => {
       }).pipe(Effect.provide(TestDatabaseWriter), Effect.orDie),
     );
 
-    const { branches: _branches, remote_branches: _remote, ...kept } = before[0]!;
-    expect(after).toEqual([kept]);
+    expect(after).toEqual([Struct.omit(before[0]!, ["branches", "remote_branches"])]);
   });
 });
