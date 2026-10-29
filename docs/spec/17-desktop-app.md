@@ -4515,6 +4515,20 @@ The sidebar was drawn from a specimen with 3,000 and with 200 threads, every sec
 - **Pixels.** None of the 12 captured screens shows an unknown event or an unreadable stream, so no golden moved.
 - **Not measured:** process count, summed and per-process memory, idle wakeups, and the time of a streamed row in the packaged app. The perf script (`apps/desktop/scripts/perf.ts`) needs macOS, and the Mac runner (atlas) was not reachable. On 2026-10-29 Rogier excepted #897 from the macOS readings, as for #893 and #851: it merges without them. The design adds no process, timer or listener, but that is the design and not a measurement. The decode timing ran on Bun and not in the renderer. The packaged app (`electron-builder --mac`) was not built either, and byte counts do not need it.
 
+**Two time limits on a request,** measured 2026-10-29 on a Mac with `vite build --config vite.renderer.config.ts` and `check-bundle-budget.ts` called as `build:desktop` calls it, on `0a506385` (main, Before) and on this change (After), for [#919](https://github.com/theagenticage/hercule/issues/919). *(Added 2026-10-29, [#919](https://github.com/theagenticage/hercule/issues/919).)* A request now has a wait for the headers and a limit on the body's silence ([Reaching the controller](#the-controller-url-and-the-connect-screen)), and a `ConnectionError` names its operation. Method: the renderer was built twice in the same worktree, once with this change's renderer and client-core files reset to main's. Gzipped sizes use `Bun.gzipSync`, as the budget checker does.
+
+| Measure | Budget | Measured |
+|---|---|---|
+| The first screen's JavaScript, gzipped | a guide of 250 kB | 467.6 kB to 467.8 kB, in 26 chunks both times. Over the guide as before |
+| The entry chunk (`first-screen-*.js`) | - | 1,305,824 to 1,306,505 bytes: 681 more; gzipped 414,072 to 414,316 (244 more) |
+| Main and the preload | - | not touched by the change |
+| Processes | none added | none added |
+| Work while idle | none added | none added: the one timer a request holds stops when the request ends, as before |
+| Work per streamed token | unchanged | unchanged: a turn streams over the live WebSocket, which no limit here covers |
+
+- **Work per request.** A request's body passes through the same `TransformStream` as before. Each piece of the body Chromium hands over now clears and sets one timer. Nothing else runs per piece.
+- **Not measured:** memory, launch and idle wakeups in the packaged app. The change adds no state that lives past a request, and no work while idle.
+
 ## Slices
 
 Each slice is a reviewable change. The performance budgets guide it and do not gate it ([Performance](#performance)), except the Office's budgets, which gate slices 9 and 10 *(amended 2026-10-03, [#332](https://github.com/theagenticage/hercule/issues/332))*.
