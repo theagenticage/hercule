@@ -552,7 +552,7 @@ describe.skipIf(binary === undefined)(
           seen.some((event) => event._tag === "turn.completed"),
         );
         expect(readFileSync(join(root, "seen.txt"), "utf8")).toBe("done");
-        expect(seen.filter((event) => event._tag === "runtime.warning")).toEqual([]);
+        expect(listWarnings(seen)).toEqual([]);
       } finally {
         await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
         await Effect.runPromise(Fiber.interrupt(subscriber));
@@ -607,6 +607,15 @@ const waitForEvent = async (
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 };
+
+/**
+ * Lists the warnings the runner itself adds, which is what these tests are
+ * about. A warning Codex sent has its notification in `raw` and is left out:
+ * the adapter shows those, and what Codex complains about depends on the
+ * machine (a mock model it has no metadata for, a sandbox it cannot set up).
+ */
+const listWarnings = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<ProviderEvent> =>
+  seen.filter((event) => event._tag === "runtime.warning" && event.raw === undefined);
 
 /**
  * Lists the tags of the events seen so far, with the text of each warning, the
@@ -950,7 +959,7 @@ describe.skipIf(binary === undefined)(
                 event.request.kind === "command_approval",
             ).length === 2,
         );
-        expect(seen.filter((event) => event._tag === "runtime.warning")).toEqual([]);
+        expect(listWarnings(seen)).toEqual([]);
       } finally {
         await Effect.runPromise(adapter.stopSession(sessionId, "stopped"));
         await Effect.runPromise(Fiber.interrupt(subscriber));

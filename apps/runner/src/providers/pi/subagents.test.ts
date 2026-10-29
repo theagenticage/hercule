@@ -276,6 +276,24 @@ describe("how a subagent's pi is started", () => {
     expect(child.env).not.toHaveProperty(NO_AUTO_COMPACTION_VARIABLE);
   });
 
+  it("shows a subagent's automatic compaction when the session's are cancelled, and not the session's own", async () => {
+    const run = await startBusySession({}, { ...SPEC, autoCompaction: false });
+    const subagent = await askForSubagent(run, run.child);
+    await openSubagentTurn(run, subagent);
+
+    run.child.push({ type: "compaction_start", reason: "threshold" });
+    subagent.child.push({ type: "compaction_start", reason: "threshold" });
+    await waitUntil("showed the subagent's compaction", () =>
+      filterByTag(run.seen, "item.started").some((event) => event.kind === "context_compaction"),
+    );
+
+    expect(
+      filterByTag(run.seen, "item.started")
+        .filter((event) => event.kind === "context_compaction")
+        .map((event) => event.subagentId),
+    ).toEqual([subagent.subagentId]);
+  });
+
   it("gives a subagent's subagent no subagent tool, because it runs at the deepest level allowed", async () => {
     const run = await startBusySession();
     const child = await askForSubagent(run, run.child);

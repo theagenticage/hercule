@@ -43,6 +43,7 @@ import {
   ModelChangeRefused,
   ResumeTranscriptMissing,
   SessionNotRunning,
+  SteerRefused,
   type AdapterError,
 } from "@hercule/protocol";
 import type {
@@ -79,6 +80,7 @@ import {
   type Run,
 } from "../process";
 import { truncateFact, truncateMessage } from "../text";
+import { captureUnknownItemReporter } from "../message-reporting";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { now } from "../../report";
 import {
@@ -267,6 +269,22 @@ class SpawnFailed extends Error {
     super(describeError(cause), { cause });
   }
 }
+
+/**
+ * The message of the `SteerRefused` for an input that arrives while pi
+ * compacts the conversation between turns. The user sees it as written.
+ */
+const COMPACTING_MESSAGE =
+  "Not sent yet: pi is compacting the conversation. The input stays queued and runs when pi finishes.";
+
+/**
+ * Checks whether Hercule's extension cancels the automatic compactions of an
+ * agent at this subagent depth. It does for the session's own pi (depth 0)
+ * when the spec turns auto-compaction off. The controller rotates the session
+ * and not its subagents, so a subagent keeps its own compaction.
+ */
+const cancelsAutomaticCompaction = (spec: SessionSpec, depth: number): boolean =>
+  spec.autoCompaction === false && depth === 0;
 
 /**
  * Builds the failure of `sendInput` for a `prompt` or `steer` command that
@@ -1550,7 +1568,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         spec.outputSchema === undefined || depth > 0
           ? undefined
           : JSON.stringify(spec.outputSchema),
-      [NO_AUTO_COMPACTION_VARIABLE]: spec.autoCompaction === false && depth === 0 ? "1" : undefined,
+      [NO_AUTO_COMPACTION_VARIABLE]: cancelsAutomaticCompaction(spec, depth) ? "1" : undefined,
     });
 
   const probe = makeProbe(seam.spawn, seam.run);
@@ -1672,6 +1690,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
             }
           })();
           const id = crypto.randomUUID();
+          const reportUnknownMessage = yield* captureUnknownItemReporter("Pi", id);
           const agent: RunningAgent = {
             child,
             rpc: makeRpc(child, (line, frame) => {
@@ -1697,7 +1716,13 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
                 Effect.runFork(abortTurn(agent, "schema"));
               }
             }),
-            state: buildNormalizingState(id, id, spec.outputSchema, readPiHome(ctx.env)),
+            state: buildNormalizingState(
+              id,
+              id,
+              spec.outputSchema,
+              readPiHome(ctx.env),
+              reportUnknownMessage,
+            ),
             depth: 0,
           };
           // If pi exits before the turn ends, there is no turn to wait for.
@@ -1838,8 +1863,10 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           nativeSessionId,
           spec.outputSchema,
           readPiHome(ctx.env),
+          yield* captureUnknownItemReporter("Pi", sessionId),
         );
         state.model = spec.modelSelection.model;
+        state.automaticCompactionCancelled = cancelsAutomaticCompaction(spec, 0);
         const binding: SessionBinding = { sessionId, nativeSessionId, instanceId: spec.instanceId };
         const root: RunningAgent = {
           child,
@@ -1883,16 +1910,28 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
     ): Effect.Effect<SendResult, AdapterError> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
+        if (held.root.state.synthetic) {
+          return yield* Effect.fail(new SteerRefused({ message: COMPACTING_MESSAGE }));
+        }
         const images = yield* readPiImages(input.attachments ?? []);
         const generation = held.inputGeneration;
         if (input.modelSelection !== undefined)
           yield* selectModel(held, input.modelSelection, generation);
         if (held.inputGeneration !== generation || held.stopping)
           return yield* Effect.fail(buildInputStopped());
+        const root = held.root;
+        // pi is idle while it compacts between turns: a steer would queue with
+        // no run to answer it, and a prompt could start a run in a turn that
+        // is about to close. The prompt or steer is withheld, so the input is
+        // not written to pi. (A `set_model` already in flight may still
+        // complete.) The input stays queued and runs when the compaction's
+        // turn ends.
+        if (root.state.synthetic) {
+          return yield* Effect.fail(new SteerRefused({ message: COMPACTING_MESSAGE }));
+        }
         // A turn is in flight exactly while the state holds its id. An input
         // during a turn steers it, instead of opening a second turn and
         // leaving the first one with nothing to end it.
-        const root = held.root;
         const steered = root.state.turnId !== undefined;
         // Create the id before sending, not after: pi's `agent_start` can
         // arrive before its response to the prompt, and the normalizer uses
@@ -1904,11 +1943,31 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
             message: buildPiPrompt(input, listSkillFolders(held.ctx)),
             ...(images.length === 0 ? {} : { images }),
           }),
-          () =>
-            // A prompt pi rejected opened no turn. Leaving its id would make
-            // the next input steer a turn that never started.
+          (failure) =>
             Effect.sync(() => {
-              if (!steered) root.state.turnId = undefined;
+              // A steer leaves the turn it found as it is.
+              if (steered) return;
+              // pi announced the turn before it answered the prompt, because
+              // it compacts first. What happens to the turn depends on whether
+              // pi took the prompt:
+              // - pi refused it: the turn is over, and ends like any turn.
+              // - pi may still take it (a slow compaction, a lost reply): the
+              //   run goes on in this turn, and its events must find it.
+              if (root.state.announced) {
+                if (failure._tag === "PiRefusedCommand") {
+                  for (const event of endTurn(root.state, {
+                    state: "failed",
+                    error: failure.message,
+                  })) {
+                    emit(event);
+                  }
+                }
+                return;
+              }
+              // Nothing was announced. A prompt pi rejected opened no turn,
+              // and leaving its id would make the next input steer a turn
+              // that never started.
+              root.state.turnId = undefined;
             }),
         ).pipe(Effect.mapError(buildInputFailure));
         // A successful prompt reply acknowledges delivery even when Stop

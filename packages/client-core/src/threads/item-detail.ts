@@ -1,7 +1,8 @@
 /**
  * Reads the item details every adapter shares: an `unknown` item's label, a
- * `context_compaction` item's trigger, token counts and summary, and a
- * `todo_list` item's steps. These shapes are schemas in `@hercule/contract`;
+ * `context_compaction` item's trigger, token counts and summary, a
+ * `todo_list` item's steps, a `wait` item's duration and an `image_generation`
+ * item's path. These shapes are schemas in `@hercule/contract`;
  * this file is the one place a client decodes them, so the desktop's rows and
  * the web's rows can never read one item differently. It also reads the two
  * fields of a tool call's detail that every adapter spells the same way: the
@@ -13,16 +14,21 @@
 import { Option, Schema } from "effect";
 import {
   ContextCompactionDetail,
+  ImageGenerationDetail,
   TodoListDetail,
   type TodoStep,
   UnknownItemDetail,
+  WaitDetail,
 } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
 import { formatTokenCount } from "../subagents/describe";
+import { formatDuration } from "./duration";
 
 const decodeCompactionDetail = Schema.decodeUnknownOption(ContextCompactionDetail);
 const decodeUnknownItemDetail = Schema.decodeUnknownOption(UnknownItemDetail);
 const decodeTodoListDetail = Schema.decodeUnknownOption(TodoListDetail);
+const decodeWaitDetail = Schema.decodeUnknownOption(WaitDetail);
+const decodeImageGenerationDetail = Schema.decodeUnknownOption(ImageGenerationDetail);
 
 /**
  * Returns the compaction detail `detail` holds, or `undefined` when it is
@@ -110,6 +116,28 @@ export const summarizeTodoList = (steps: readonly TodoStep[]): TodoListSummary =
   progress: `${steps.filter((step) => step.status === "completed").length}/${steps.length}`,
   current: steps.find((step) => step.status === "in_progress")?.text ?? "",
 });
+
+/**
+ * Returns the wait `detail` holds, or `undefined` when it is absent or does
+ * not decode.
+ */
+export const readWaitDetail = (detail: unknown): WaitDetail | undefined =>
+  Option.getOrUndefined(decodeWaitDetail(detail));
+
+/**
+ * Returns how long a wait asked to wait, as a row shows it: "500ms" under a
+ * second, else `formatDuration`'s words, such as "30s" or "1m 30s".
+ */
+export const describeWaitDuration = (detail: WaitDetail): string =>
+  detail.durationMs < 1000 ? `${detail.durationMs}ms` : formatDuration(detail.durationMs);
+
+/**
+ * Returns the image generation `detail` holds, or `undefined` when it is
+ * absent or does not decode. A decoded detail may have no path: the harness
+ * saved no file.
+ */
+export const readImageGenerationDetail = (detail: unknown): ImageGenerationDetail | undefined =>
+  Option.getOrUndefined(decodeImageGenerationDetail(detail));
 
 /**
  * Returns the name a tool call's `detail` holds, as the rows show it: the

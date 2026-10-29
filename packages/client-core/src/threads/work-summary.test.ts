@@ -55,6 +55,10 @@ describe("summarizeWork", () => {
     ["subagent", 2, "ran 2 subagents"],
     ["plan", 1, "made a plan"],
     ["plan", 2, "made 2 plans"],
+    ["wait", 1, "waited once"],
+    ["wait", 3, "waited 3 times"],
+    ["image_generation", 1, "generated an image"],
+    ["image_generation", 2, "generated 2 images"],
     ["context_compaction", 1, "compacted the context"],
     ["context_compaction", 2, "compacted the context 2 times"],
     ["error", 1, "hit 1 error"],
@@ -74,6 +78,21 @@ describe("summarizeWork", () => {
     expect(summarizeWork([...fetches(2), buildItem("web_search")])).toEqual([
       "fetched 2 pages",
       "searched the web",
+    ]);
+  });
+
+  it("counts an image generation only once it completed", () => {
+    const image = (result: WorkItem["result"]) => buildItem("image_generation", [], { result });
+
+    expect(summarizeWork([image("running")])).toEqual([]);
+    expect(summarizeWork([image("awaiting approval"), image("failed"), image("declined")])).toEqual(
+      [],
+    );
+    expect(summarizeWork([image("completed"), image("running"), image("failed")])).toEqual([
+      "generated an image",
+    ]);
+    expect(summarizeWork([image("completed"), image("completed"), image("failed")])).toEqual([
+      "generated 2 images",
     ]);
   });
 

@@ -1881,7 +1881,12 @@ describe("the two Codex features this adapter must never use", () => {
   it("calls neither the shell-command method nor the process method", () => {
     // If a harness could start its own processes through the runner, that
     // work would run outside every session boundary Hercule sets.
-    expect(grepSource(["thread/shell", "Command", "\\|process/", "spawn"].join(""))).toBe("");
+    // The notification table in `normalize.ts` names the notifications of those
+    // methods only to drop them, so it is not a call.
+    const calls = grepSource(["thread/shell", "Command", "\\|process/", "spawn"].join(""))
+      .split("\n")
+      .filter((line) => !line.startsWith("apps/runner/src/providers/codex/normalize.ts:"));
+    expect(calls.join("\n")).toBe("");
   });
 
   it("never refers to the user's own Codex home", () => {
@@ -2146,6 +2151,13 @@ const completeTurn = (
   status: "completed" | "failed" | "interrupted" = "completed",
 ): void => {
   const server = run.spawns[0]!;
+  server.push({
+    method: "turn/started",
+    params: {
+      threadId: THREAD,
+      turn: { id: TURN, items: [], itemsView: "full", status: "inProgress" },
+    },
+  });
   for (const item of items) {
     server.push({
       method: "item/completed",
@@ -2635,6 +2647,9 @@ describe("stopping a Codex session's subagents", () => {
 describe("bounded Codex subagent discovery", () => {
   it("keeps turn and usage frames by dropping queued transcript deltas first", async () => {
     const run = await createDelayedMetadataSession();
+    // The turn's start comes first, as Codex sends it: deltas of a turn that
+    // has not started are not shown.
+    pushNativeTurn(run.server, SIBLING, "chatty-turn");
     for (let index = 0; index < MAX_PENDING_FRAMES; index += 1)
       run.server.push({
         method: "item/agentMessage/delta",
@@ -2649,7 +2664,9 @@ describe("bounded Codex subagent discovery", () => {
       "reported retained child usage",
       () => filterByTag(run.seen, "session.usage.updated").length === 2,
     );
-    expect(filterByTag(run.seen, "content.delta")).toHaveLength(MAX_PENDING_FRAMES - 2);
+    // Three control frames (the sibling's turn, the child's turn and its usage
+    // report) each push one delta out of the full queue.
+    expect(filterByTag(run.seen, "content.delta")).toHaveLength(MAX_PENDING_FRAMES - 3);
     const reports = filterByTag(run.seen, "session.usage.updated");
     expect(reports.at(-1)?.usage).toEqual({
       inputTokens: 900,
@@ -2659,7 +2676,7 @@ describe("bounded Codex subagent discovery", () => {
     });
     expect(reports.at(-1)?.raw).toBeUndefined();
     expect(reports.at(-1)?.providerRefs).toBeUndefined();
-    expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("Dropped 2 frames");
+    expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("Dropped 3 frames");
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
   });
 
@@ -2760,7 +2777,8 @@ describe("bounded Codex subagent discovery", () => {
 
   it("rejects overflowing Requests explicitly and reports the dropped count", async () => {
     const run = await createDelayedMetadataSession();
-    for (let index = 0; index < MAX_PENDING_FRAMES; index += 1)
+    pushNativeTurn(run.server, CHILD, "child-turn");
+    for (let index = 0; index < MAX_PENDING_FRAMES - 1; index += 1)
       run.server.push({
         method: "item/agentMessage/delta",
         params: { threadId: CHILD, turnId: "child-turn", itemId: "item", delta: "text" },
@@ -2779,7 +2797,7 @@ describe("bounded Codex subagent discovery", () => {
       "reported dropped frame count",
       () => filterByTag(run.seen, "runtime.warning").length === 1,
     );
-    expect(filterByTag(run.seen, "content.delta")).toHaveLength(MAX_PENDING_FRAMES);
+    expect(filterByTag(run.seen, "content.delta")).toHaveLength(MAX_PENDING_FRAMES - 1);
     expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("Dropped 1 frames");
     await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
   });
@@ -3213,6 +3231,7 @@ describe("subagent introductions under a full metadata queue", () => {
     for (let index = 0; index < MAX_PENDING_THREADS; index += 1)
       pushNativeTurn(run.server, `pending-${index}`, `turn-${index}`);
     await waitUntil("filled metadata lookups", () => run.metadataIds.size === MAX_PENDING_THREADS);
+    pushNativeTurn(run.server, THREAD, TURN);
     run.server.push({
       method: "item/started",
       params: {
@@ -3596,7 +3615,7 @@ describe("durable Codex Stop ownership", () => {
         method: "item/started",
         params: {
           threadId: CHILD,
-          turnId: "parent-turn",
+          turnId: continued ? "continued-parent-turn" : "parent-turn",
           item: {
             type: "subAgentActivity",
             id: "late-spawn",
@@ -3956,5 +3975,245 @@ describe("descendants first discovered after a subtree Stop", () => {
     ]);
     expect(run.answered).toEqual([]);
     expect(filterByTag(run.seen, "request.resolved")).toEqual([]);
+  });
+});
+
+describe("notifications that name no thread", () => {
+  const CONFIG_WARNING = {
+    method: "configWarning",
+    params: { summary: "Bad key in config.toml", details: null },
+  };
+
+  /** Starts a session, collecting the runner's own warning lines in `logged`. */
+  const startLogged = async (run: ReturnType<typeof createDriving>, sessionId = SESSION) => {
+    const logged: Array<string> = [];
+    const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (logLevel === "Warn") logged.push(String(message));
+    });
+    await Effect.runPromise(
+      Effect.provide(
+        run.adapter.startSession(sessionId, SPEC, run.ctx),
+        Logger.layer([collecting]),
+      ),
+    );
+    return logged;
+  };
+
+  const listWarningMessages = (seen: ReadonlyArray<ProviderEvent>): ReadonlyArray<string> =>
+    filterByTag(seen, "runtime.warning").map((event) => event.message);
+
+  it("reaches the session when Codex sends it during start-up, after session.started", async () => {
+    const run: ReturnType<typeof createDriving> = createDriving({
+      initialize: () => {
+        run.spawns[0]!.push(CONFIG_WARNING);
+        return INITIALIZE;
+      },
+    });
+
+    await startLogged(run);
+
+    expect(run.seen.map((event) => event._tag)).toEqual(["session.started", "runtime.warning"]);
+    expect(listWarningMessages(run.seen)).toEqual(["Bad key in config.toml"]);
+  });
+
+  it("reaches the session when Codex sends it in the middle of the session", async () => {
+    const run = await startTestSession();
+
+    run.server.push({
+      method: "deprecationNotice",
+      params: { summary: "Flag x is old", details: "Use y" },
+    });
+
+    await waitUntil("showed the notice", () => listWarningMessages(run.seen).length === 1);
+    expect(listWarningMessages(run.seen)).toEqual(["Flag x is old\nUse y"]);
+  });
+
+  it("reaches the root thread when it is a warning for no thread", async () => {
+    const run = await startTestSession();
+
+    run.server.push({ method: "warning", params: { threadId: null, message: "Disk is full" } });
+
+    await waitUntil("showed the warning", () => listWarningMessages(run.seen).length === 1);
+    expect(filterByTag(run.seen, "runtime.warning")[0]).toMatchObject({
+      sessionId: SESSION,
+      message: "Disk is full",
+    });
+  });
+
+  it("goes only to the session whose app-server sent it", async () => {
+    const run = await startSessionPair();
+
+    run.spawns[1]!.push(CONFIG_WARNING);
+
+    await waitUntil("showed the warning", () => listWarningMessages(run.seen).length === 1);
+    await settle();
+    expect(filterByTag(run.seen, "runtime.warning").map((event) => event.sessionId)).toEqual([
+      OTHER_SESSION,
+    ]);
+  });
+
+  it("becomes a labelled unknown item each time, and one log line however often a new method comes", async () => {
+    const run = createDriving();
+    const logged = await startLogged(run);
+    const future = { method: "future/thing", params: { value: 1 } };
+
+    run.spawns[0]!.push(future);
+    run.spawns[0]!.push(future);
+
+    await waitUntil("showed both", () => filterByTag(run.seen, "item.completed").length === 2);
+    expect(filterByTag(run.seen, "item.completed").map((event) => event.detail)).toEqual([
+      { label: "codex: future/thing" },
+      { label: "codex: future/thing" },
+    ]);
+    expect(logged.filter((line) => line.includes("codex: future/thing"))).toHaveLength(1);
+  });
+
+  it("is dropped, and shown to nobody, on a probe's app-server", async () => {
+    const run: ReturnType<typeof createDriving> = createDriving({
+      initialize: () => {
+        run.spawns[0]!.push(CONFIG_WARNING);
+        return INITIALIZE;
+      },
+    });
+
+    await Effect.runPromise(run.adapter.probe(run.ctx, {}));
+    await settle();
+
+    expect(run.seen).toEqual([]);
+  });
+
+  // The scripted app-server sends one more notification with no thread id
+  // right after it replies to `initialize`, so a test that fills the list
+  // counts it as one more frame.
+  it("keeps the first 100 sent during start-up, drops the rest, and logs the exact count once", async () => {
+    const run: ReturnType<typeof createDriving> = createDriving({
+      initialize: () => {
+        for (let count = 0; count < 105; count += 1) {
+          run.spawns[0]!.push({
+            method: "configWarning",
+            params: { summary: `Warning ${count}`, details: null },
+          });
+        }
+        return INITIALIZE;
+      },
+    });
+
+    const logged = await startLogged(run);
+
+    const shown = listWarningMessages(run.seen);
+    expect(shown).toHaveLength(100);
+    expect(shown[0]).toBe("Warning 0");
+    expect(shown[99]).toBe("Warning 99");
+    expect(logged.filter((line) => line.includes("Dropped 6 of them"))).toHaveLength(1);
+  });
+
+  it("keeps no more than a megabyte of them, and drops the one that does not fit", async () => {
+    const run: ReturnType<typeof createDriving> = createDriving({
+      initialize: () => {
+        run.spawns[0]!.push({
+          method: "configWarning",
+          params: { summary: "x".repeat(2 * 1024 * 1024), details: null },
+        });
+        run.spawns[0]!.push(CONFIG_WARNING);
+        return INITIALIZE;
+      },
+    });
+
+    const logged = await startLogged(run);
+
+    expect(listWarningMessages(run.seen)).toEqual(["Bad key in config.toml"]);
+    expect(logged.filter((line) => line.includes("Dropped 1 of them"))).toHaveLength(1);
+  });
+
+  it("drops a turn or usage frame with no thread, and starts the session all the same", async () => {
+    const run: ReturnType<typeof createDriving> = createDriving({
+      initialize: () => {
+        run.spawns[0]!.push({ method: "turn/completed", params: {} });
+        run.spawns[0]!.push({ method: "thread/tokenUsage/updated", params: {} });
+        return INITIALIZE;
+      },
+    });
+
+    const logged = await startLogged(run);
+
+    expect(run.spawns).toHaveLength(1);
+    expect(run.seen.map((event) => event._tag)).toEqual(["session.started"]);
+    expect(logged.filter((line) => line.includes("with no thread id"))).toHaveLength(2);
+  });
+
+  it("does not draw a row for an unknown frame while a turn is asked for but not started", async () => {
+    const run = createDriving();
+    const logged = await startLogged(run);
+    // `turn/start` is answered, and Codex has not sent `turn/started` yet.
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "look around" }));
+    const before = run.seen.length;
+
+    run.spawns[0]!.push({ method: "future/thing", params: {} });
+    await waitUntil("logged the frame", () =>
+      logged.some((line) => line.includes("codex: future/thing")),
+    );
+
+    expect(run.seen.slice(before)).toEqual([]);
+  });
+});
+
+describe("the bytes of a generated image", () => {
+  const BYTES = "SENTINEL_IMAGE_BYTES";
+  const buildImage = (extra: Record<string, unknown> = {}) => ({
+    type: "imageGeneration",
+    id: "img_0",
+    status: "completed",
+    revisedPrompt: "a cat",
+    failure: null,
+    result: BYTES,
+    ...extra,
+  });
+
+  it("reach no event, whatever frame carries the item", async () => {
+    const run = await startTestSession();
+    const turn = (status: string) => ({
+      id: TURN,
+      items: [buildImage()],
+      itemsView: "full",
+      status,
+    });
+
+    for (const frame of [
+      { method: "turn/started", params: { threadId: THREAD, turn: turn("inProgress") } },
+      {
+        method: "item/started",
+        params: { threadId: THREAD, turnId: TURN, item: buildImage({ status: "inProgress" }) },
+      },
+      {
+        method: "item/completed",
+        params: {
+          threadId: THREAD,
+          turnId: TURN,
+          item: buildImage({ savedPath: "/tmp/cat.png" }),
+          completedAtMs: 1,
+        },
+      },
+      // A malformed item, and an item in a frame this build has no decision for.
+      {
+        method: "item/completed",
+        params: {
+          threadId: THREAD,
+          turnId: TURN,
+          item: buildImage({ id: 42, savedPath: 42 }),
+          completedAtMs: 1,
+        },
+      },
+      { method: "future/thing", params: { threadId: THREAD, turnId: TURN, item: buildImage() } },
+      { method: "turn/completed", params: { threadId: THREAD, turn: turn("completed") } },
+    ]) {
+      run.server.push(frame);
+    }
+    await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+
+    expect(JSON.stringify(run.seen)).not.toContain(BYTES);
+    const completed = filterByTag(run.seen, "item.completed");
+    expect(completed.map((event) => event.kind)).toContain("image_generation");
+    // Everything else in the item stays in `raw`.
+    expect(JSON.stringify(completed[0]?.raw)).toContain("a cat");
   });
 });

@@ -128,8 +128,11 @@ export {
  *   back the `item.updated` event, which on its own would need no bump since 11.
  *   A controller on 11 would not store the item and would close the socket on
  *   it, again after every reconnect, so the two refuse each other at hello.
+ * - Version 13 added the `wait` and `image_generation` item kinds. A controller
+ *   on 12 could not decode an item of either kind and would close the socket
+ *   on it, again after every reconnect, so the two refuse each other at hello.
  */
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 /**
  * The close code and reason the controller uses to end the connection of a

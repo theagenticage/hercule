@@ -13,9 +13,17 @@
  * one raw line, not a parsed one, because a line that is not JSON is one of
  * the cases below. The tests do not check event ids or `at` timestamps.
  */
+import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vitest";
-import { MAX_FACT_LENGTH, type ProviderEvent, type SubagentId } from "@hercule/protocol";
-import { normalize, buildNormalizingState, buildSubagentState } from "./normalize";
+import {
+  ContextCompactionDetail,
+  MAX_FACT_LENGTH,
+  MAX_MESSAGE_LENGTH,
+  ProviderEvent,
+  UnknownItemDetail,
+  type SubagentId,
+} from "@hercule/protocol";
+import { endTurn, normalize, buildNormalizingState, buildSubagentState } from "./normalize";
 import { FILE_WRITING_TOOLS, SUBAGENT_TOOL } from "./extension";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
@@ -61,7 +69,8 @@ const buildLine = (event: Record<string, unknown>): string => JSON.stringify(eve
 
 const HOME = "/home/ada";
 
-const buildTestState = () => buildNormalizingState(SESSION, NATIVE, undefined, HOME);
+const buildTestState = () =>
+  buildNormalizingState(SESSION, NATIVE, undefined, HOME, () => undefined);
 
 const normalizeEvents = (
   running: ReturnType<typeof buildNormalizingState>,
@@ -203,16 +212,15 @@ describe("normalizing a whole pi turn", () => {
     expect(completed?.usage).toMatchObject({ inputTokens: 120, outputTokens: 8 });
   });
 
-  it("warns about a run pi will retry by itself, and ends no turn on it", () => {
+  it("ends no turn on a run pi will retry by itself, and leaves the warning to the retry event", () => {
     const events = normalizeFromStart([
       { type: "agent_start" },
       { type: "agent_end", messages: [], willRetry: true },
     ]);
 
-    expect(filterByTag(events, "runtime.warning")).toHaveLength(1);
-    expect(filterByTag(events, "runtime.warning")[0]?.message ?? "").not.toBe("");
     // The turn is not over: pi is about to run again under it.
     expect(filterByTag(events, "turn.completed")).toEqual([]);
+    expect(filterByTag(events, "runtime.warning")).toEqual([]);
   });
 });
 
@@ -763,5 +771,601 @@ describe("a line from pi that is not a valid event", () => {
     // about the turn.
     expect(listEventTags(stray)).toEqual(["turn.started", "runtime.warning"]);
     expect(listEventTags(after)).toContain("turn.completed");
+  });
+});
+
+/**
+ * The tests below use the event shapes of pi 1.3 (`AgentSessionEvent` in
+ * `core/agent-session.d.ts`, and the RPC frames in `modes/rpc/rpc-mode.js`).
+ * Every event they produce is encoded with the protocol schema, so an event the
+ * controller could not accept fails here.
+ */
+const encodeEvent = Schema.encodeUnknownSync(ProviderEvent);
+
+const normalizeAndEncode = (
+  running: ReturnType<typeof buildNormalizingState>,
+  events: ReadonlyArray<Record<string, unknown>>,
+): ReadonlyArray<ProviderEvent> => {
+  const produced = normalizeEvents(running, events);
+  for (const event of produced) encodeEvent(event);
+  return produced;
+};
+
+/** Builds a state that collects what it reports to the runner's log. */
+const buildReportingState = () => {
+  const reports: Array<{ readonly label: string; readonly error: unknown }> = [];
+  const running = buildNormalizingState(SESSION, NATIVE, undefined, HOME, (label, error) => {
+    reports.push({ label, error });
+  });
+  return { running, reports };
+};
+
+const COMPACTION_RESULT = {
+  summary: "The user asked for a refactor. The auth module is done.",
+  firstKeptEntryId: "e42",
+  tokensBefore: 180_000,
+  estimatedTokensAfter: 42_000,
+};
+
+const COMPACTING = [
+  { type: "compaction_start", reason: "threshold" },
+  {
+    type: "compaction_end",
+    reason: "threshold",
+    result: COMPACTION_RESULT,
+    aborted: false,
+    willRetry: false,
+  },
+];
+
+describe("a pi compaction", () => {
+  it("draws one running item that completes with the token counts and the summary", () => {
+    const events = normalizeAndEncode(buildTestState(), [
+      { type: "agent_start" },
+      ...COMPACTING,
+      { type: "agent_settled" },
+    ]);
+
+    const started = filterByTag(events, "item.started");
+    const completed = filterByTag(events, "item.completed");
+    expect(started.map((event) => event.kind)).toEqual(["context_compaction"]);
+    expect(completed.map((event) => [event.kind, event.status])).toEqual([
+      ["context_compaction", "completed"],
+    ]);
+    expect(started[0]?.itemId).toBe(completed[0]?.itemId);
+    expect(Schema.decodeUnknownSync(ContextCompactionDetail)(started[0]?.detail)).toEqual({
+      trigger: "auto",
+    });
+    expect(Schema.decodeUnknownSync(ContextCompactionDetail)(completed[0]?.detail)).toEqual({
+      trigger: "auto",
+      tokensBefore: 180_000,
+      tokensAfter: 42_000,
+      summary: COMPACTION_RESULT.summary,
+    });
+    // The compaction is inside the user's turn, which it neither opens nor closes.
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.completed",
+      "session.usage.updated",
+      "turn.completed",
+    ]);
+  });
+
+  it.each([
+    ["manual", "manual"],
+    ["threshold", "auto"],
+    ["overflow", "auto"],
+  ])("reads the trigger of a %s compaction as %s", (reason, trigger) => {
+    const events = normalizeAndEncode(buildTestState(), [
+      { type: "agent_start" },
+      { type: "compaction_start", reason },
+    ]);
+
+    expect(filterByTag(events, "item.started")[0]?.detail).toEqual({ trigger });
+  });
+
+  it("cuts a summary to the length of a message", () => {
+    const events = normalizeAndEncode(buildTestState(), [
+      { type: "agent_start" },
+      { type: "compaction_start", reason: "manual" },
+      {
+        type: "compaction_end",
+        reason: "manual",
+        result: { ...COMPACTION_RESULT, summary: "x".repeat(MAX_MESSAGE_LENGTH * 2) },
+        aborted: false,
+        willRetry: false,
+      },
+    ]);
+
+    const detail = Schema.decodeUnknownSync(ContextCompactionDetail)(
+      filterByTag(events, "item.completed")[0]?.detail,
+    );
+    expect(detail.summary?.length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH);
+  });
+
+  it.each([
+    ["was aborted", { result: undefined, aborted: true }, false],
+    ["was aborted after it had a result", { result: COMPACTION_RESULT, aborted: true }, false],
+    ["ended with no result", { result: undefined, aborted: false }, false],
+    [
+      "failed with an error",
+      { result: undefined, aborted: false, errorMessage: "Auto-compaction failed: 529 overloaded" },
+      true,
+    ],
+  ])(
+    "fails the item of a compaction that %s, and never draws it as a success",
+    (_name, end, warns) => {
+      const events = normalizeAndEncode(buildTestState(), [
+        { type: "agent_start" },
+        { type: "compaction_start", reason: "threshold" },
+        { type: "compaction_end", reason: "threshold", willRetry: false, ...end },
+      ]);
+
+      const completed = filterByTag(events, "item.completed");
+      expect(completed.map((event) => event.status)).toEqual(["failed"]);
+      expect(completed[0]?.detail).toEqual({ trigger: "auto" });
+      // pi's own error message reaches the user, because the item has no field for it.
+      expect(filterByTag(events, "runtime.warning").map((event) => event.message)).toEqual(
+        warns ? ["Auto-compaction failed: 529 overloaded"] : [],
+      );
+    },
+  );
+
+  it("shows a failed item for an end that has no start, which pi sends when overflow recovery fails", () => {
+    const events = normalizeAndEncode(buildTestState(), [
+      { type: "agent_start" },
+      {
+        type: "compaction_end",
+        reason: "overflow",
+        result: undefined,
+        aborted: false,
+        willRetry: false,
+        errorMessage: "Context overflow recovery failed after one compact-and-retry attempt.",
+      },
+    ]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.completed",
+      "runtime.warning",
+    ]);
+    expect(filterByTag(events, "item.completed")[0]?.status).toBe("failed");
+  });
+
+  it("draws one item for a second compaction_start while one runs", () => {
+    const events = normalizeAndEncode(buildTestState(), [
+      { type: "agent_start" },
+      { type: "compaction_start", reason: "threshold" },
+      { type: "compaction_start", reason: "threshold" },
+      COMPACTING[1]!,
+    ]);
+
+    expect(filterByTag(events, "item.started")).toHaveLength(1);
+    expect(filterByTag(events, "item.completed")).toHaveLength(1);
+  });
+
+  it("belongs to the turn of an input when pi compacts before it starts the run", () => {
+    // The adapter creates the turn when it sends the input, so pi's compaction
+    // before `agent_start` finds a turn that is not announced yet.
+    const running = buildTestState();
+    running.turnId = "turn-of-the-input";
+
+    const events = normalizeAndEncode(running, [
+      ...COMPACTING,
+      ...ANSWERING.slice(0, 1),
+      ...ANSWERING.slice(1),
+    ]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.completed",
+      "item.started",
+      "content.delta",
+      "content.delta",
+      "item.completed",
+      "session.usage.updated",
+      "turn.completed",
+    ]);
+    expect(filterByTag(events, "turn.started")).toHaveLength(1);
+    expect(filterByTag(events, "turn.completed")).toHaveLength(1);
+    for (const event of events) {
+      if ("turnId" in event) expect(event.turnId).toBe("turn-of-the-input");
+    }
+    expect(filterByTag(events, "turn.completed")[0]?.costUsd).toBe(usage.cost.total);
+  });
+
+  it("opens a synthetic turn for a compaction between turns, and closes it when the compaction ends", () => {
+    const running = buildTestState();
+
+    const events = normalizeAndEncode(running, [
+      { type: "compaction_start", reason: "manual" },
+      { ...COMPACTING[1], reason: "manual" },
+    ]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.completed",
+      "session.usage.updated",
+      "turn.completed",
+    ]);
+    expect(filterByTag(events, "turn.completed")[0]?.state).toBe("completed");
+    expect(running.turnId).toBeUndefined();
+  });
+
+  it("keeps a synthetic turn open while the compaction runs", () => {
+    const events = normalizeAndEncode(buildTestState(), [
+      { type: "compaction_start", reason: "manual" },
+    ]);
+
+    expect(listEventTags(events)).toEqual(["turn.started", "item.started"]);
+  });
+
+  it("gives no structured result to a synthetic turn of a session with an output schema", () => {
+    const running = buildNormalizingState(
+      SESSION,
+      NATIVE,
+      { type: "object", additionalProperties: false, required: [], properties: {} },
+      HOME,
+      () => undefined,
+    );
+
+    const events = normalizeAndEncode(running, [
+      { type: "compaction_start", reason: "manual" },
+      { ...COMPACTING[1], reason: "manual" },
+    ]);
+
+    expect(filterByTag(events, "turn.completed")[0]?.structuredResult).toBeUndefined();
+  });
+
+  it("leaves the turn open when pi starts a run during a compaction, because the turn is now the user's", () => {
+    const running = buildTestState();
+
+    const events = normalizeAndEncode(running, [
+      { type: "compaction_start", reason: "manual" },
+      { type: "agent_start" },
+      { ...COMPACTING[1], reason: "manual" },
+    ]);
+
+    expect(filterByTag(events, "turn.started")).toHaveLength(1);
+    expect(filterByTag(events, "turn.completed")).toEqual([]);
+    expect(running.turnId).toBeDefined();
+    expect(normalizeAndEncode(running, [{ type: "agent_settled" }]).map((e) => e._tag)).toContain(
+      "turn.completed",
+    );
+  });
+
+  it("fails a compaction that is still running when the turn settles", () => {
+    const events = normalizeAndEncode(buildTestState(), [
+      { type: "agent_start" },
+      { type: "compaction_start", reason: "threshold" },
+      { type: "agent_settled" },
+    ]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.completed",
+      "session.usage.updated",
+      "turn.completed",
+    ]);
+    const completed = filterByTag(events, "item.completed")[0];
+    expect(completed?.status).toBe("failed");
+    expect(completed?.detail).toEqual({ trigger: "auto" });
+  });
+
+  it("fails a compaction that is still running when pi exits", () => {
+    const running = buildTestState();
+    normalizeAndEncode(running, [{ type: "compaction_start", reason: "manual" }]);
+
+    const events = endTurn(running, { state: "failed", error: "pi exited" });
+
+    expect(filterByTag(events, "item.completed").map((event) => event.status)).toEqual(["failed"]);
+    expect(filterByTag(events, "turn.completed")[0]?.state).toBe("failed");
+    expect(running.compaction).toBeUndefined();
+  });
+
+  it("shows nothing for the automatic compactions Hercule's extension cancels, and still draws a manual one", () => {
+    const cancelled = () => {
+      const running = buildTestState();
+      running.automaticCompactionCancelled = true;
+      return running;
+    };
+    const aborted = (reason: string) => ({
+      type: "compaction_end",
+      reason,
+      result: undefined,
+      aborted: true,
+      willRetry: false,
+    });
+
+    const automatic = normalizeAndEncode(cancelled(), [
+      { type: "agent_start" },
+      { type: "compaction_start", reason: "threshold" },
+      aborted("threshold"),
+      {
+        type: "compaction_end",
+        reason: "overflow",
+        result: undefined,
+        aborted: false,
+        errorMessage: "Context overflow recovery failed",
+      },
+    ]);
+    const manual = normalizeAndEncode(cancelled(), [
+      { type: "compaction_start", reason: "manual" },
+      aborted("manual"),
+    ]);
+
+    expect(listEventTags(automatic)).toEqual(["turn.started"]);
+    expect(filterByTag(manual, "item.completed").map((event) => event.status)).toEqual(["failed"]);
+  });
+
+  it("attributes a subagent's compaction to the subagent", () => {
+    const child = buildSubagentState(buildTestState(), "pi-child-1");
+    child.turnId = "child-turn";
+
+    const events = normalizeAndEncode(child, COMPACTING);
+
+    const own = events.filter((event) => event._tag !== "session.usage.updated");
+    expect(listEventTags(own)).toEqual(["turn.started", "item.started", "item.completed"]);
+    for (const event of own) {
+      expect("subagentId" in event ? event.subagentId : undefined).toBe("pi-child-1");
+    }
+  });
+});
+
+describe("a pi automatic retry", () => {
+  const RETRY = {
+    type: "auto_retry_start",
+    attempt: 2,
+    maxAttempts: 3,
+    delayMs: 4000,
+    errorMessage: "529 overloaded",
+  };
+
+  it("warns once with the attempt, the wait and pi's error", () => {
+    const events = normalizeAndEncode(buildTestState(), [{ type: "agent_start" }, RETRY]);
+
+    expect(filterByTag(events, "runtime.warning").map((event) => event.message)).toEqual([
+      "pi is retrying after an error (attempt 2 of 3, in 4s): 529 overloaded",
+    ]);
+  });
+
+  it("shows one warning for a retry, whichever of the two events pi sends first", () => {
+    // pi sends `agent_end` with `willRetry` first, then `auto_retry_start`.
+    const events = normalizeAndEncode(buildTestState(), [
+      { type: "agent_start" },
+      { type: "agent_end", messages: [], willRetry: true },
+      RETRY,
+      { type: "agent_start" },
+    ]);
+
+    expect(filterByTag(events, "runtime.warning")).toHaveLength(1);
+    expect(filterByTag(events, "turn.started")).toHaveLength(1);
+    expect(filterByTag(events, "turn.completed")).toEqual([]);
+  });
+
+  it("shows a retry with fields it cannot read as an unknown item", () => {
+    const { running, reports } = buildReportingState();
+
+    const events = normalizeAndEncode(running, [
+      { type: "agent_start" },
+      { type: "auto_retry_start", attempt: "two" },
+    ]);
+
+    expect(filterByTag(events, "runtime.warning")).toEqual([]);
+    expect(filterByTag(events, "item.started").map((event) => event.kind)).toEqual(["unknown"]);
+    expect(reports.map((report) => report.label)).toEqual(["pi: auto_retry_start"]);
+    expect(reports[0]?.error).toBeInstanceOf(Error);
+  });
+});
+
+describe("an extension's UI request in pi", () => {
+  const buildRequest = (method: string, fields: Record<string, unknown>) => ({
+    type: "extension_ui_request",
+    id: "0199e0e7-0000-7000-8000-0000000000a1",
+    method,
+    ...fields,
+  });
+
+  it.each([
+    ["with no level", {}, "runtime.notice"],
+    ["of level info", { notifyType: "info" }, "runtime.notice"],
+    ["of level warning", { notifyType: "warning" }, "runtime.warning"],
+    ["of level error", { notifyType: "error" }, "runtime.warning"],
+  ])("shows a notification %s as a %s", (_name, fields, tag) => {
+    const events = normalizeAndEncode(buildTestState(), [
+      buildRequest("notify", { message: "Skill reloaded", ...fields }),
+    ]);
+
+    expect(events.map((event) => [event._tag, "message" in event ? event.message : ""])).toEqual([
+      [tag, "Skill reloaded"],
+    ]);
+  });
+
+  it("puts a notification in the open turn and opens no turn between turns", () => {
+    const inTurn = normalizeAndEncode(buildTestState(), [
+      { type: "agent_start" },
+      buildRequest("notify", { message: "hello" }),
+    ]);
+    const between = normalizeAndEncode(buildTestState(), [
+      buildRequest("notify", { message: "hello" }),
+    ]);
+
+    expect(filterByTag(inTurn, "runtime.notice")[0]?.turnId).toBeDefined();
+    expect(listEventTags(between)).toEqual(["runtime.notice"]);
+    expect(filterByTag(between, "runtime.notice")[0]?.turnId).toBeUndefined();
+  });
+
+  it.each([
+    buildRequest("setStatus", { statusKey: "k", statusText: "busy" }),
+    buildRequest("setWidget", { widgetKey: "k", widgetLines: ["a"] }),
+    buildRequest("setTitle", { title: "pi" }),
+    buildRequest("set_editor_text", { text: "draft" }),
+    buildRequest("select", { title: "Pick", options: ["a", "b"] }),
+    buildRequest("editor", { title: "Edit", prefill: "x" }),
+    buildRequest("notify", { message: "" }),
+  ])("shows nothing for %j", (request) => {
+    expect(normalizeAndEncode(buildTestState(), [{ type: "agent_start" }, request]).length).toBe(1);
+  });
+
+  it("shows a method this build does not know as an unknown item labelled with it", () => {
+    const { running, reports } = buildReportingState();
+
+    const events = normalizeAndEncode(running, [buildRequest("setFooter", { lines: [] })]);
+
+    const detail = Schema.decodeUnknownSync(UnknownItemDetail)(
+      filterByTag(events, "item.completed")[0]?.detail,
+    );
+    expect(detail.label).toBe("pi: extension_ui_request/setFooter");
+    expect(reports.map((report) => report.label)).toEqual([detail.label]);
+  });
+
+  it("shows a notification whose message is not text as an unknown item", () => {
+    const events = normalizeAndEncode(buildTestState(), [
+      buildRequest("notify", { message: { text: "hi" } }),
+    ]);
+
+    expect(filterByTag(events, "item.started")[0]?.kind).toBe("unknown");
+    expect(filterByTag(events, "runtime.notice")).toEqual([]);
+  });
+});
+
+describe("an event in pi 1.3 that the runner shows nothing for", () => {
+  it.each([
+    { type: "turn_start" },
+    { type: "message_start", message: buildMessage([], ZERO) },
+    { type: "message_end", message: buildMessage(TEXT) },
+    { type: "queue_update", steering: [], followUp: [] },
+    { type: "entry_appended", entry: { id: "e1" } },
+    { type: "session_info_changed", name: "refactor" },
+    { type: "thinking_level_changed", level: "high" },
+    {
+      type: "summarization_retry_scheduled",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 1000,
+      errorMessage: "x",
+    },
+    { type: "summarization_retry_attempt_start", source: "compaction", reason: "threshold" },
+    { type: "summarization_retry_finished" },
+    { type: "bash_execution_update", id: "b1", delta: "out" },
+  ])("drops $type inside a turn without an item or a warning", (event) => {
+    const events = normalizeAndEncode(buildTestState(), [{ type: "agent_start" }, event]);
+
+    expect(listEventTags(events)).toEqual(["turn.started"]);
+  });
+});
+
+describe("an event in pi that the runner has no decision for", () => {
+  it("shows an unknown type as a labelled item in the open turn, and tells the log reporter its label", () => {
+    const { running, reports } = buildReportingState();
+
+    const events = normalizeAndEncode(running, [
+      { type: "agent_start" },
+      { type: "sleep_started", seconds: 30 },
+      { type: "sleep_started", seconds: 60 },
+    ]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.completed",
+      "item.started",
+      "item.completed",
+    ]);
+    const started = filterByTag(events, "item.started");
+    expect(started.map((event) => event.kind)).toEqual(["unknown", "unknown"]);
+    expect(started[0]?.detail).toEqual({ label: "pi: sleep_started" });
+    expect(started[0]?.raw?.payload).toEqual({ type: "sleep_started", seconds: 30 });
+    expect(filterByTag(events, "item.completed")[0]?.detail).toEqual({
+      label: "pi: sleep_started",
+    });
+    // The reporter itself writes each label to the log once.
+    expect(reports.map((report) => report.label)).toEqual([
+      "pi: sleep_started",
+      "pi: sleep_started",
+    ]);
+    expect(reports[0]?.error).toBeUndefined();
+  });
+
+  it("holds an unknown type between turns in a synthetic turn that closes right after it", () => {
+    const running = buildTestState();
+
+    const events = normalizeAndEncode(running, [{ type: "sleep_started" }]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.completed",
+      "session.usage.updated",
+      "turn.completed",
+    ]);
+    expect(filterByTag(events, "turn.completed")[0]?.state).toBe("completed");
+    expect(running.turnId).toBeUndefined();
+  });
+
+  it("keeps an unknown type that arrives during a compaction out of the compaction's synthetic turn closing", () => {
+    const events = normalizeAndEncode(buildTestState(), [
+      { type: "compaction_start", reason: "manual" },
+      { type: "sleep_started" },
+    ]);
+
+    expect(filterByTag(events, "turn.completed")).toEqual([]);
+  });
+
+  it("gives the synthetic turn of a session with an output schema no structured result", () => {
+    const running = buildNormalizingState(
+      SESSION,
+      NATIVE,
+      { type: "object", additionalProperties: false, required: [], properties: {} },
+      HOME,
+      () => undefined,
+    );
+
+    const events = normalizeAndEncode(running, [{ type: "sleep_started" }]);
+
+    expect(filterByTag(events, "turn.completed")[0]?.structuredResult).toBeUndefined();
+  });
+
+  it.each([
+    ["a name of an object method", { type: "constructor" }, "pi: constructor"],
+    ["no type", { id: 1 }, "pi: event with no type"],
+    ["a type that is not text", { type: 7 }, "pi: event with no type"],
+  ])("shows an event with %s as an unknown item", (_name, event, label) => {
+    const events = normalizeAndEncode(buildTestState(), [{ type: "agent_start" }, event]);
+
+    expect(filterByTag(events, "item.started")[0]?.detail).toEqual({ label });
+  });
+
+  it.each([
+    ["null", "pi: event with no type"],
+    ["5", "pi: event with no type"],
+  ])("shows the JSON line %s as an unknown item", (line, label) => {
+    const events = normalize(buildTestState(), line);
+
+    expect(filterByTag(events, "item.started")[0]?.detail).toEqual({ label });
+  });
+
+  it("writes a type's control characters as escapes in the label", () => {
+    const events = normalizeAndEncode(buildTestState(), [{ type: "a\nb\u202ec" }]);
+
+    expect(filterByTag(events, "item.started")[0]?.detail).toEqual({
+      label: "pi: a\\u{a}b\\u{202e}c",
+    });
+  });
+
+  it("attributes a subagent's unknown event to the subagent", () => {
+    const child = buildSubagentState(buildTestState(), "pi-child-1");
+    child.turnId = "child-turn";
+
+    const events = normalizeAndEncode(child, [{ type: "sleep_started" }]);
+
+    for (const event of filterByTag(events, "item.started")) {
+      expect(event.subagentId).toBe("pi-child-1");
+    }
   });
 });

@@ -20,11 +20,17 @@ export const formatCount = (count: number, noun: string): string =>
 
 /**
  * The summary phrase for each key, given how many items of that key the
- * stretch holds. A key that is missing here is not counted: reasoning is the
- * agent thinking rather than doing, a todo list is a note the agent keeps
+ * stretch holds, or `null` for a key the summary does not count: reasoning is
+ * the agent thinking rather than doing, a todo list is a note the agent keeps
  * (its row already shows its progress), and messages never sit in a stretch.
+ * The record covers every key, so a new item kind fails the typecheck until
+ * someone decides whether the summary counts it.
  */
-const PHRASES: Partial<Record<SummaryKey, (count: number) => string>> = {
+const PHRASES: Record<SummaryKey, ((count: number) => string) | null> = {
+  reasoning: null,
+  todo_list: null,
+  user_message: null,
+  assistant_message: null,
   command_execution: (count) => `ran ${formatCount(count, "command")}`,
   file_change: (count) => `edited ${formatCount(count, "file")}`,
   file_read: (count) => `read ${formatCount(count, "file")}`,
@@ -34,6 +40,8 @@ const PHRASES: Partial<Record<SummaryKey, (count: number) => string>> = {
   tool_call: (count) => `used ${formatCount(count, "tool")}`,
   subagent: (count) => `ran ${formatCount(count, "subagent")}`,
   plan: (count) => (count === 1 ? "made a plan" : `made ${count} plans`),
+  wait: (count) => (count === 1 ? "waited once" : `waited ${count} times`),
+  image_generation: (count) => `generated ${count === 1 ? "an image" : `${count} images`}`,
   context_compaction: (count) =>
     count === 1 ? "compacted the context" : `compacted the context ${count} times`,
   error: (count) => `hit ${formatCount(count, "error")}`,
@@ -62,16 +70,18 @@ export const countDistinctFiles = (items: readonly WorkItem[]): number => {
 /**
  * Returns the summary of a stretch's items: one phrase per item kind, such as
  * "ran 2 commands", in the order each kind first appears. Reasoning and todo
- * lists are left out. Page fetches count apart from web searches. File
+ * lists are left out (`PHRASES`). Page fetches count apart from web searches. File
  * changes and file reads count distinct files (`countDistinctFiles`), so two
- * edits to one file read "edited 1 file".
+ * edits to one file read "edited 1 file". An image generation counts only
+ * when it completed, so the summary never claims an image that was not made.
  */
 export const summarizeWork = (items: readonly WorkItem[]): readonly string[] => {
   // A Map keeps its keys in insertion order, which is the order of first appearance.
   const itemsByKind = new Map<SummaryKey, WorkItem[]>();
   for (const item of items) {
     const key: SummaryKey = item.isPageFetch ? "page_fetch" : item.kind;
-    if (PHRASES[key] === undefined) continue;
+    if (PHRASES[key] === null) continue;
+    if (key === "image_generation" && item.result !== "completed") continue;
     const ofKind = itemsByKind.get(key);
     if (ofKind === undefined) itemsByKind.set(key, [item]);
     else ofKind.push(item);

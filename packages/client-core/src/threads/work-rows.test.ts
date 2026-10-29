@@ -53,6 +53,7 @@ describe("buildWorkRows", () => {
     ["subagent", "crew", "Subagent"],
     ["plan", "list", "Planned"],
     ["context_compaction", "compress", "Compacted the context"],
+    ["image_generation", "palette", "Generated an image"],
     ["error", "close", "Error"],
     ["unknown", "more", "Step"],
   ] as const)("draws a single %s step with the %s icon and the label %s", (kind, icon, label) => {
@@ -320,14 +321,20 @@ describe("buildWorkRows", () => {
     ]);
   });
 
-  it.each(["reasoning", "subagent", "plan", "context_compaction", "error", "unknown"] as const)(
-    "never folds consecutive %s steps",
-    (kind) => {
-      const rows = buildWorkRows([buildItem(kind), buildItem(kind)]);
+  it.each([
+    "reasoning",
+    "subagent",
+    "plan",
+    "wait",
+    "image_generation",
+    "context_compaction",
+    "error",
+    "unknown",
+  ] as const)("never folds consecutive %s steps", (kind) => {
+    const rows = buildWorkRows([buildItem(kind), buildItem(kind)]);
 
-      expect(rows.map((row) => row.steps.length)).toEqual([0, 0]);
-    },
-  );
+    expect(rows.map((row) => row.steps.length)).toEqual([0, 0]);
+  });
 
   it("ends a run where a step of another kind starts", () => {
     const rows = buildWorkRows([
@@ -393,6 +400,60 @@ describe("buildWorkRows", () => {
       outputIsCode: false,
       canOpen: true,
     });
+  });
+
+  it("draws a wait as Waited, with how long as its target in words", () => {
+    const [row] = buildWorkRows([buildItem("wait", { target: "30s" })]);
+
+    expect(row).toMatchObject({
+      icon: "clock",
+      label: "Waited",
+      target: "30s",
+      targetIsCode: false,
+    });
+  });
+
+  it("draws a wait whose duration is unknown as a bare Waited", () => {
+    const [row] = buildWorkRows([buildItem("wait")]);
+
+    expect(row).toMatchObject({ icon: "clock", label: "Waited", target: "" });
+  });
+
+  it.each([
+    ["running", "Generating an image"],
+    ["awaiting approval", "Generating an image"],
+    ["completed", "Generated an image"],
+    ["failed", "Could not generate an image"],
+    ["declined", "Could not generate an image"],
+  ] as const)("words an image generation that is %s as %s", (result, label) => {
+    const [row] = buildWorkRows([buildItem("image_generation", { result })]);
+
+    expect(row).toMatchObject({ icon: "palette", label });
+  });
+
+  it("draws an image generation with its saved path as a code target", () => {
+    const [row] = buildWorkRows([
+      buildItem("image_generation", { target: "/tmp/logo.png", targetIsCode: true }),
+    ]);
+
+    expect(row).toMatchObject({
+      icon: "palette",
+      label: "Generated an image",
+      target: "/tmp/logo.png",
+      targetIsCode: true,
+    });
+  });
+
+  it("draws a plan's text as prose, and a command's output as code", () => {
+    const rows = buildWorkRows([
+      buildItem("plan", { resultContent: "1. Fix the test\n2. Push" }),
+      buildItem("command_execution", { resultContent: "ok" }),
+    ]);
+
+    expect(rows.map((row) => [row.output, row.outputIsCode])).toEqual([
+      ["1. Fix the test\n2. Push", false],
+      ["ok", true],
+    ]);
   });
 
   it("draws a running compaction with nothing to open", () => {

@@ -71,6 +71,7 @@ import {
   describeStartFailure,
 } from "../adapter-error-builders";
 import { truncateMessage } from "../text";
+import { captureIgnoredMessageReporter, captureUnknownItemReporter } from "../message-reporting";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { describeError, now } from "../../report";
 import { ASKED } from "./approvals";
@@ -189,6 +190,28 @@ const readTurnSteeredReply = readReply(decodeTurnSteeredReply, "turn/steer");
  */
 const MAX_COMPLAINT_LINES = 5;
 
+/**
+ * How many notifications with no thread id a session's host keeps while the
+ * session is still being registered. Codex sends a few at start-up, such as a
+ * config warning, so the bound is far above what a real start sends and only
+ * stops a host that floods.
+ */
+const MAX_FRAMES_BEFORE_REGISTRATION = 100;
+
+/** The most bytes of those notifications a host keeps, as the frames print as JSON. */
+const MAX_BYTES_BEFORE_REGISTRATION = 1024 * 1024;
+
+/**
+ * The notifications with no thread id that arrived on a session's host before
+ * the session was registered, their size in bytes, and how many more were
+ * dropped because a bound was reached.
+ */
+interface FramesBeforeRegistration {
+  readonly frames: Array<NotificationFrame>;
+  bytes: number;
+  dropped: number;
+}
+
 export interface CodexSeam {
   readonly appServer: AppServerSpawn;
   readonly run: Run;
@@ -202,6 +225,16 @@ interface Host extends AppServer {
   readonly textGeneration: TextGenerationWatch | undefined;
   /** Stops the app-server and completes only once its process has exited (see `stopChild`). */
   readonly stop: Effect.Effect<void>;
+  /**
+   * Keeps the notifications with no thread id that arrive before the session
+   * is registered, so `startSession` can hand them to the session once it is.
+   * A notification that names a thread is not kept: before registration, the
+   * session has no thread to give it to, and `startSession` opens the root
+   * thread itself. Absent for a host that serves no session, such as a
+   * probe's or a text generation's, and set to `undefined` by `startSession`
+   * once the session is registered.
+   */
+  framesBeforeRegistration: FramesBeforeRegistration | undefined;
 }
 
 /** One session and every Codex thread its app-server runs. */
@@ -606,6 +639,40 @@ const buildUserInput = (
 /** Matches the code the device login prints for the user to type: four characters, a dash, five. */
 const USER_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/;
 
+/**
+ * Removes the generated image from a notification frame, in place, before
+ * anything else reads the frame. An `imageGeneration` item holds the image
+ * itself, base64 encoded, in `result`. Left in, it would be copied into the
+ * frames the adapter queues and into every event's `raw`, and make each one
+ * megabytes long, while the image reaches nobody through the stream. The frame
+ * comes straight from the decoder, so nothing else holds it yet.
+ *
+ * A `ThreadItem` sits in the params of only these notifications:
+ * `item/started` and `item/completed` hold it in `params.item`, and
+ * `turn/started` and `turn/completed` hold a turn's items in
+ * `params.turn.items`. `thread/started` holds whole threads, but it is dropped
+ * and never attached to an event. The check goes by the item's `type` alone,
+ * so an item whose other fields are malformed is covered too.
+ */
+const stripImageBytes = (frame: NotificationFrame): void => {
+  const params = frame.params as
+    | { readonly item?: unknown; readonly turn?: { readonly items?: unknown } }
+    | null
+    | undefined;
+  const dropResult = (item: unknown): void => {
+    if (
+      typeof item === "object" &&
+      item !== null &&
+      (item as { type?: unknown }).type === "imageGeneration"
+    ) {
+      Reflect.deleteProperty(item, "result");
+    }
+  };
+  dropResult(params?.item);
+  const items = params?.turn?.items;
+  if (Array.isArray(items)) items.forEach(dropResult);
+};
+
 export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   // Creating an unbounded PubSub allocates and nothing more, so it is safe to
   // run here and keeps `findAdapter` the synchronous lookup every other caller
@@ -777,6 +844,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         // every request in flight on this connection.
         onNotification: (frame) => {
           try {
+            stripImageBytes(frame);
             onNotification(host, frame);
           } catch {
             warn(host, `the app-server sent a ${frame.method} that this build could not read`);
@@ -792,6 +860,8 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
       complaint: () => complaints.join("\n"),
       sessionId,
       textGeneration,
+      framesBeforeRegistration:
+        sessionId === undefined ? undefined : { frames: [], bytes: 0, dropped: 0 },
     };
     void child.exited.then(
       () => onHostGone(host),
@@ -1095,8 +1165,59 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   };
 
   const onNotification = (host: Host, frame: NotificationFrame): void => {
-    findHostSession(host)?.threads.receive(frame);
+    const held = findHostSession(host);
+    if (held !== undefined) receiveGuarded(host, held, frame);
+    else keepFrameUntilRegistered(host, frame);
     host.textGeneration?.receive(frame);
+  };
+
+  /**
+   * Gives a notification to its session. Nothing Codex sends may stop the
+   * reader or the session's start, so a notification that cannot be read
+   * becomes a warning to the session. Both the live notifications and the kept
+   * ones go through here.
+   */
+  const receiveGuarded = (host: Host, held: Held, frame: NotificationFrame): void => {
+    try {
+      held.threads.receive(frame);
+    } catch {
+      warn(host, `the app-server sent a ${frame.method} that this build could not read`);
+    }
+  };
+
+  /**
+   * Keeps a notification with no thread id on a host whose session is not
+   * registered yet, up to `MAX_FRAMES_BEFORE_REGISTRATION` frames and
+   * `MAX_BYTES_BEFORE_REGISTRATION` bytes. Keeps nothing for a host with no
+   * session, and nothing once the session has been registered.
+   */
+  const keepFrameUntilRegistered = (host: Host, frame: NotificationFrame): void => {
+    const kept = host.framesBeforeRegistration;
+    if (kept === undefined || readCodexThreadId(frame) !== undefined) return;
+    const bytes = Buffer.byteLength(JSON.stringify(frame));
+    if (
+      kept.frames.length >= MAX_FRAMES_BEFORE_REGISTRATION ||
+      kept.bytes + bytes > MAX_BYTES_BEFORE_REGISTRATION
+    ) {
+      kept.dropped += 1;
+      return;
+    }
+    kept.frames.push(frame);
+    kept.bytes += bytes;
+  };
+
+  /**
+   * Hands the session the notifications its host kept before it was
+   * registered, in the order they arrived, and stops keeping. Returns how many
+   * were dropped because a bound was reached. It does not wait, so no later
+   * notification can reach the session before the kept ones.
+   */
+  const deliverFramesBeforeRegistration = (held: Held): number => {
+    const kept = held.host.framesBeforeRegistration;
+    held.host.framesBeforeRegistration = undefined;
+    if (kept === undefined) return 0;
+    for (const frame of kept.frames) receiveGuarded(held.host, held, frame);
+    return kept.dropped;
   };
 
   /** Resolves one Request under its asking thread and native RPC id. */
@@ -1664,6 +1785,10 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           nativeSessionId: opened,
           instanceId: spec.instanceId,
         };
+        const reports = {
+          reportUnknownMessage: yield* captureUnknownItemReporter("Codex", sessionId),
+          reportIgnoredMessage: yield* captureIgnoredMessageReporter(sessionId),
+        };
         const held: Held = {
           binding,
           host,
@@ -1687,6 +1812,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
               thread.fileChanges.clear();
             },
             failSession: () => exitSession(held, "crash"),
+            reports,
           }),
         };
         sessions.set(sessionId, held);
@@ -1700,6 +1826,17 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           at: now(),
           providerRefs: { nativeSessionId: opened },
         });
+        // After `session.started`, so a warning sent during start-up reads as
+        // coming after the session began. Nothing can arrive in between: the
+        // registration above and this call run without waiting.
+        const dropped = deliverFramesBeforeRegistration(held);
+        // The dropped ones belong to no thread, so the session is not told;
+        // the runner's log is.
+        if (dropped > 0) {
+          yield* Effect.logWarning(
+            `Codex sent more notifications before session ${sessionId} started than the runner keeps (${MAX_FRAMES_BEFORE_REGISTRATION} frames or ${MAX_BYTES_BEFORE_REGISTRATION} bytes). Dropped ${dropped} of them.`,
+          );
+        }
         return binding;
       }),
 

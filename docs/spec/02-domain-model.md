@@ -261,7 +261,7 @@ Fields, all written at ingest in the transaction that appends the event they com
 | `agentType` | optional; the harness's name for the kind of agent: Claude's `subagent_type`, Codex's role |
 | `model` | optional; the model its latest turn ran on, as the harness reports it |
 | `status` | `running` \| `completed` \| `failed` \| `stopped`, computed from its turns: `running` while one is open, else the ending of its last turn (`interrupted` reads `stopped`). A subagent its parent continues goes back to `running`; one still running when its session's process exits becomes `stopped` |
-| `toolCalls` | how many of its items were tool calls of any kind: commands, file changes, tools, web searches and calls on subagents |
+| `toolCalls` | how many of its items were tool calls of any kind: commands, file changes, tools, web searches and calls on subagents *(amended 2026-10-29, [#895](https://github.com/theagenticage/hercule/issues/895): waits and image generations count too)* |
 | `activity` | optional; one line saying what it is doing now, from its latest item, while it runs; absent once it has ended |
 | `result` | optional; the first line of its last message, once it has ended |
 | `usageReport` | optional; the same report shape as the Session's, covering this subagent alone. A missing historical interval makes the report incomplete for the subagent's remaining lifetime. |

@@ -637,7 +637,7 @@ describe("buildTurns", () => {
   });
 
   it("shows an item kind this build does not know as unknown, rather than crashing", () => {
-    const novelKind = "image_generation" as unknown as ItemKindType;
+    const novelKind = "audio_generation" as unknown as ItemKindType;
 
     const rows: TranscriptRow[] = [
       buildRow({
@@ -1538,6 +1538,39 @@ describe("buildTurns: todo lists, page fetches and MCP calls", () => {
     expect(target).toBe(`0/1 · ${"x".repeat(194)}…`);
     // The steps themselves are not cut: the divider lists them whole.
     expect(readItems(buildRowsOfItem("todo_list", wide))[0]!.todoSteps[0]!.text).toHaveLength(512);
+  });
+
+  it.each([
+    [{ durationMs: 30_000 }, "30s"],
+    [{ durationMs: 90_000 }, "1m 30s"],
+    [{ durationMs: 500 }, "500ms"],
+    // Not the raw JSON: a detail that does not decode has nothing to show.
+    [{ durationMs: "30s" }, ""],
+    [undefined, ""],
+  ])("shows a wait of %j as the word wait and the duration %j", (detail, target) => {
+    expect(readItems(buildRowsOfItem("wait", detail))[0]).toMatchObject({ verb: "wait", target });
+  });
+
+  it("shows an image generation as the word image and the path it saved the image to, or nothing", () => {
+    expect(
+      readItems(buildRowsOfItem("image_generation", { path: "/tmp/logo.png" }))[0],
+    ).toMatchObject({ verb: "image", target: "/tmp/logo.png" });
+    expect(readItems(buildRowsOfItem("image_generation", {}))[0]).toMatchObject({
+      verb: "image",
+      target: "",
+    });
+  });
+
+  it("shows the path an image generation saved from the update before its completion, and keeps it through the completion", () => {
+    // Codex saves the file at the end: the start has no path, the update right before the completion has it.
+    const rows = buildRowsOfItem(
+      "image_generation",
+      {},
+      { _tag: "item.updated", detail: { path: "/tmp/late.png" } },
+      { _tag: "item.completed", status: "completed" },
+    );
+
+    expect(readItems(rows)[0]).toMatchObject({ target: "/tmp/late.png", result: "completed" });
   });
 
   it("draws an update that turns a search into a fetch as a fetch, and keeps that when the next update has no detail", () => {

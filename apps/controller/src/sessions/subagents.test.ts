@@ -294,6 +294,14 @@ describe("buildSubagentActivity", () => {
     expect(buildSubagentActivity("file_search", {})).toBe("Searching");
   });
 
+  it("names a wait and an image generation, with the saved path of the image", () => {
+    expect(buildSubagentActivity("wait", { durationMs: 30_000 })).toBe("Waiting");
+    expect(buildSubagentActivity("image_generation", { path: "/tmp/logo.png" })).toBe(
+      "Generating an image /tmp/logo.png",
+    );
+    expect(buildSubagentActivity("image_generation", {})).toBe("Generating an image");
+  });
+
   it("names a delegation by its task, never by the delegating tool", () => {
     expect(
       buildSubagentActivity("subagent", { name: "Agent", description: "Chase the flaky test" }),

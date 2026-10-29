@@ -141,10 +141,13 @@ export const makeRpc = (
       onLine(line, undefined);
       return;
     }
-    // A bare `null` is valid JSON but not a frame. Reading `type` from it on
-    // the next line would throw and stop the reader, so skip it.
-    if (frame === null) return;
-    if (typeof frame !== "object" || (frame as Record<string, unknown>)["type"] !== "response") {
+    // Only an object can be a response. Any other JSON, `null` included, goes
+    // to `onLine` like an event of an unknown type, so it is shown and not lost.
+    if (
+      typeof frame !== "object" ||
+      frame === null ||
+      (frame as Record<string, unknown>)["type"] !== "response"
+    ) {
       onLine(line, frame);
       return;
     }
