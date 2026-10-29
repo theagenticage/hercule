@@ -60,6 +60,7 @@ import {
   convertToolSearchResult,
   convertWebFetchResult,
   convertWebSearchResult,
+  readFetchedPageUrl,
   truncateResultContent,
   type AssistantBlock,
   type AssistantBlockFor,
@@ -68,12 +69,13 @@ import {
 import {
   applyTodoResult,
   buildTodoList,
+  hasPendingTodoCall,
   isTodoTool,
   recordTodoCall,
   type TodoList,
 } from "./claude-code-todo-list";
 import { escapeControlCharacters } from "../report";
-import { truncateFact, truncateMessage } from "./text";
+import { requireText, truncateFact, truncateMessage } from "./text";
 
 /** The `source` name on every raw payload from this adapter. */
 export const CLAUDE_SDK_MESSAGE = "claude.sdk.message";
@@ -116,11 +118,16 @@ interface AgentStream {
 /**
  * What one agent has of a todo list: the list the agent's todo tools keep, and
  * the `todo_list` item that shows it in the agent's open turn. An agent shows
- * one item per turn, which `closeTurn` completes.
+ * one item per turn, which `closeTurn` completes and clears.
  */
 interface AgentTodo {
   readonly list: TodoList;
-  open: { readonly itemId: string; readonly turnId: string } | undefined;
+  /**
+   * The item the agent shows in its open turn, with the steps it showed last.
+   * Those steps are what the item completes with, and what a new list is
+   * compared with so an unchanged list adds no update.
+   */
+  open: { readonly itemId: string; readonly steps: ReadonlyArray<TodoStep> } | undefined;
 }
 
 /** The state `normalize` keeps for one session between messages. */
@@ -147,14 +154,10 @@ export interface Normalizing {
   /** The session's subagents and their turns. */
   readonly subagents: SubagentRegistry;
   /**
-   * Whether the session continues an earlier one (a resume or a fork). The
-   * runner never saw that session's todo list, so the session's own agent
-   * starts with an unknown list.
+   * Each agent's todo list, keyed by `buildStreamKey`. An agent has an entry
+   * once it calls a todo tool, and from the start when the runner never saw its
+   * list (see `buildNormalizingState`).
    */
-  readonly resumed: boolean;
-  /** The subagents of an earlier process. Like the session's own agent, they start with an unknown list. */
-  readonly seededSubagentIds: ReadonlySet<string>;
-  /** Each agent's todo list, keyed by `buildStreamKey`. An entry exists once the agent calls a todo tool. */
   readonly todos: Map<string, AgentTodo>;
   /**
    * Frames from a subagent the registry does not know yet, in the order they
@@ -250,6 +253,10 @@ const MAX_HELD_FRAMES = 1000;
  * Returns the state for a new session. `seeded` lists the subagents a resumed
  * session already has records of, so a subagent the harness continues lands
  * on its record (spec 06 section 13.2).
+ *
+ * `resumed` says the session continues an earlier one (a resume or a fork). The
+ * runner never saw that session's todo list, so the session's own agent and
+ * every seeded subagent start with an unknown list.
  */
 export const buildNormalizingState = (
   sessionId: string,
@@ -259,23 +266,31 @@ export const buildNormalizingState = (
   reportUnknownMessage: Normalizing["reportUnknownMessage"],
   seeded?: ReadonlyArray<ContinuedSubagent>,
   resumed = false,
-): Normalizing => ({
-  sessionId,
-  mint,
-  now,
-  outputSchema,
-  turnId: undefined,
-  streams: new Map(),
-  tools: new Map(),
-  subagents: buildSubagentRegistry(seeded),
-  resumed,
-  seededSubagentIds: new Set(seeded?.map((subagent) => subagent.subagentId)),
-  todos: new Map(),
-  heldFrames: [],
-  reportUnknownMessage,
-  compaction: undefined,
-  usageLimitBlocked: false,
-});
+): Normalizing => {
+  const todos = new Map<string, AgentTodo>();
+  const keysOfUnknownLists = [
+    ...(resumed ? [buildStreamKey(undefined)] : []),
+    ...(seeded ?? []).map((subagent) => subagent.subagentId),
+  ];
+  for (const key of keysOfUnknownLists) {
+    todos.set(key, { list: buildTodoList(true), open: undefined });
+  }
+  return {
+    sessionId,
+    mint,
+    now,
+    outputSchema,
+    turnId: undefined,
+    streams: new Map(),
+    tools: new Map(),
+    subagents: buildSubagentRegistry(seeded),
+    todos,
+    heldFrames: [],
+    reportUnknownMessage,
+    compaction: undefined,
+    usageLimitBlocked: false,
+  };
+};
 
 /**
  * Checks whether any agent of the session is working: the session's own
@@ -323,17 +338,15 @@ const ensureAgentStream = (state: Normalizing, agent: TurnOwner): AgentStream =>
 };
 
 /**
- * Returns the agent's todo state, creating it the first time. The list of a
- * resumed session's own agent, and of a subagent from an earlier process, is
- * unknown (see `buildTodoList`).
+ * Returns the agent's todo state, creating it the first time with a known,
+ * empty list. An agent whose list the runner never saw already has its entry,
+ * with an unknown list (see `buildNormalizingState`).
  */
 const ensureAgentTodo = (state: Normalizing, agent: TurnOwner): AgentTodo => {
   const key = buildStreamKey(agent);
   const found = state.todos.get(key);
   if (found !== undefined) return found;
-  const resumed =
-    agent === undefined ? state.resumed : state.seededSubagentIds.has(agent.subagentId);
-  const created: AgentTodo = { list: buildTodoList(resumed), open: undefined };
+  const created: AgentTodo = { list: buildTodoList(false), open: undefined };
   state.todos.set(key, created);
   return created;
 };
@@ -572,7 +585,7 @@ const closeTurn = (
     readonly structuredResult?: StructuredResult;
   } = {},
 ): void => {
-  completeTodoItem(state, out, agent);
+  completeTodoItem(state, out, agent, turnId);
   out.push({
     _tag: "turn.completed",
     eventId: state.mint(),
@@ -774,17 +787,6 @@ export const buildRuntimeEvent = (
 /** Adds a notice or a warning to `out`. Adds nothing for an empty text. */
 const emitRuntimeEvent = (state: Normalizing, out: Emit, tag: RuntimeEventTag, text: string) => {
   if (text !== "") out.push(buildRuntimeEvent(state, tag, text));
-};
-
-/**
- * Returns a field Claude sent as text. Throws when it is anything else, so
- * `normalizeFrame` shows the message as an `unknown` item instead of passing a
- * list or an object on as the text of an event. `what` names the field for the
- * log line that reports the failure.
- */
-const requireText = (value: unknown, what: string): string => {
-  if (typeof value !== "string") throw new Error(`${what} is not text`);
-  return value;
 };
 
 /**
@@ -1018,6 +1020,18 @@ const startLocalTool = (block: AssistantBlockFor<"tool_use">, scope: BlockScope)
     return;
   }
   const editedPaths = kind === "file_change" ? readEditedPaths(block.input) : undefined;
+  const subagentIds = listMessagedSubagents(state, block.name, block.input);
+  // Built before the tool is recorded: a read above that throws must not leave
+  // an open tool whose item never started.
+  const started = buildItemStarted(state, turn, itemId, kind, {
+    name: block.name,
+    input: block.input,
+    ...buildFileFields(kind, block.input),
+    ...buildWebFields(block.name, block.input),
+    ...editedPaths,
+    ...(kind === "tool_call" ? { kind: isMcp(block.name) ? "mcp" : "native" } : {}),
+    ...(subagentIds.length === 0 ? {} : { subagentIds }),
+  });
   state.tools.set(itemId, { kind, turnId: turn.turnId, subagentId: turn.subagentId, editedPaths });
   if (AGENT_TOOLS.has(block.name)) {
     recordAgentCall(
@@ -1027,18 +1041,7 @@ const startLocalTool = (block: AssistantBlockFor<"tool_use">, scope: BlockScope)
       readInputString(block.input, "name"),
     );
   }
-  const subagentIds = listMessagedSubagents(state, block.name, block.input);
-  out.push(
-    buildItemStarted(state, turn, itemId, kind, {
-      name: block.name,
-      input: block.input,
-      ...buildFileFields(kind, block.input),
-      ...buildWebFields(block.name, block.input),
-      ...editedPaths,
-      ...(kind === "tool_call" ? { kind: isMcp(block.name) ? "mcp" : "native" } : {}),
-      ...(subagentIds.length === 0 ? {} : { subagentIds }),
-    }),
-  );
+  out.push(started);
 };
 
 /** The server tools that are a web search item. Every other server tool is a plain `tool_call`. */
@@ -1055,20 +1058,20 @@ const startServerTool = (block: AssistantBlockFor<"server_tool_use">, scope: Blo
   const turn = openBlockTurn(scope);
   const kind: ItemKind = SERVER_WEB_TOOLS.has(block.name) ? "web_search" : "tool_call";
   const itemId = cleanItemId(block.id) ?? state.mint();
+  // Built before the tool is recorded, like in `startLocalTool`.
+  const started = buildItemStarted(state, turn, itemId, kind, {
+    name: block.name,
+    input: block.input,
+    ...buildWebFields(block.name, block.input),
+    ...(kind === "tool_call" ? { kind: "native" } : {}),
+  });
   state.tools.set(itemId, {
     kind,
     turnId: turn.turnId,
     subagentId: turn.subagentId,
     editedPaths: undefined,
   });
-  scope.out.push(
-    buildItemStarted(state, turn, itemId, kind, {
-      name: block.name,
-      input: block.input,
-      ...buildWebFields(block.name, block.input),
-      ...(kind === "tool_call" ? { kind: "native" } : {}),
-    }),
-  );
+  scope.out.push(started);
 };
 
 /** Handles an `mcp_tool_use` block: a call to an MCP server that Anthropic's API makes. */
@@ -1076,29 +1079,47 @@ const startMcpTool = (block: AssistantBlockFor<"mcp_tool_use">, scope: BlockScop
   const { state } = scope;
   const turn = openBlockTurn(scope);
   const itemId = cleanItemId(block.id) ?? state.mint();
+  // Built before the tool is recorded, like in `startLocalTool`:
+  // `truncateFact` throws when the server name is not text.
+  const started = buildItemStarted(state, turn, itemId, "tool_call", {
+    name: block.name,
+    input: block.input,
+    kind: "mcp",
+    server: truncateFact(block.server_name),
+  });
   state.tools.set(itemId, {
     kind: "tool_call",
     turnId: turn.turnId,
     subagentId: turn.subagentId,
     editedPaths: undefined,
   });
-  scope.out.push(
-    buildItemStarted(state, turn, itemId, "tool_call", {
-      name: block.name,
-      input: block.input,
-      kind: "mcp",
-      server: truncateFact(block.server_name),
-    }),
-  );
+  scope.out.push(started);
 };
 
+/** Checks whether two lists of steps hold the same text and status in the same order. */
+const areStepsEqual = (left: ReadonlyArray<TodoStep>, right: ReadonlyArray<TodoStep>): boolean =>
+  left.length === right.length &&
+  left.every(
+    (step, index) => step.text === right[index]?.text && step.status === right[index].status,
+  );
+
+/** Returns the id of the subagent's open turn, or `undefined` when it has none open. */
+const readOpenTurnId = (agent: Subagent): string | undefined =>
+  agent.turn.phase === "open" ? agent.turn.turnId : undefined;
+
+/** Checks whether `turnId` is the open turn of the agent. */
+const isAgentTurnOpen = (state: Normalizing, agent: TurnOwner, turnId: string): boolean =>
+  (agent === undefined ? state.turnId : readOpenTurnId(agent)) === turnId;
+
 /**
- * Shows the agent's whole todo list. The first change in a turn starts the
- * agent's `todo_list` item, and every later one replaces its detail with
- * `item.updated`. Shows nothing when `turnId` is not the agent's open turn: a
- * result that arrives after its turn ended must not touch a later turn's item,
- * and a todo result never opens a turn. The list itself still moves on, so the
- * next change in an open turn shows the whole current list.
+ * Shows the agent's whole todo list. The first list in a turn starts the
+ * agent's `todo_list` item, and every later one that differs from the steps the
+ * item shows replaces its detail with `item.updated`. A list equal to what the
+ * item shows adds nothing.
+ *
+ * Shows nothing when `turnId` is not the agent's open turn: a result that
+ * arrives after its turn ended must not touch a later turn's item, and a todo
+ * result never opens a turn.
  */
 const publishTodoList = (
   state: Normalizing,
@@ -1107,43 +1128,36 @@ const publishTodoList = (
   turnId: string,
   steps: ReadonlyArray<TodoStep>,
 ): void => {
-  const openTurnId = agent === undefined ? state.turnId : readOpenTurnId(agent);
-  if (openTurnId !== turnId) return;
+  if (!isAgentTurnOpen(state, agent, turnId)) return;
   const todo = ensureAgentTodo(state, agent);
   const turn: TurnRef = { turnId, subagentId: agent?.subagentId };
   const detail: TodoListDetail = { steps };
   if (todo.open === undefined) {
     const itemId = state.mint();
-    todo.open = { itemId, turnId };
+    todo.open = { itemId, steps };
     out.push(buildItemStarted(state, turn, itemId, "todo_list", detail));
-  } else {
+  } else if (!areStepsEqual(todo.open.steps, steps)) {
+    todo.open = { itemId: todo.open.itemId, steps };
     out.push(buildItemUpdated(state, turn, todo.open.itemId, "todo_list", detail));
   }
 };
 
-/** Returns the id of the subagent's open turn, or `undefined` when it has none open. */
-const readOpenTurnId = (agent: Subagent): string | undefined =>
-  agent.turn.phase === "open" ? agent.turn.turnId : undefined;
-
-/** Checks whether the session's own agent has a todo call waiting for its result in the given turn. */
-const hasPendingTodoCall = (state: Normalizing, turnId: string): boolean => {
-  const todo = state.todos.get(buildStreamKey(undefined));
-  return (
-    todo !== undefined && [...todo.list.pending.values()].some((call) => call.turnId === turnId)
-  );
-};
-
 /**
- * Completes the agent's open `todo_list` item with the list as it stands, and
- * forgets the item. Called when the agent's turn ends, however it ends. Does
- * nothing for another agent's item or when the agent has none open.
+ * Completes the agent's open `todo_list` item with the steps it last showed,
+ * and forgets the item. Called when the agent's turn `turnId` ends, however it
+ * ends. Does nothing for another agent's item or when the agent has none open.
  */
-const completeTodoItem = (state: Normalizing, out: Emit, agent: TurnOwner): void => {
+const completeTodoItem = (
+  state: Normalizing,
+  out: Emit,
+  agent: TurnOwner,
+  turnId: string,
+): void => {
   const todo = state.todos.get(buildStreamKey(agent));
   if (todo?.open === undefined) return;
-  const { itemId, turnId } = todo.open;
+  const { itemId, steps } = todo.open;
   todo.open = undefined;
-  const detail: TodoListDetail = { steps: todo.list.published };
+  const detail: TodoListDetail = { steps };
   out.push(
     buildItemCompleted(
       state,
@@ -1159,6 +1173,11 @@ const completeTodoItem = (state: Normalizing, out: Emit, agent: TurnOwner): void
 /**
  * Shows a todo tool call that failed or whose result could not be used, as a
  * failed tool row in the call's own turn, so the call never goes unseen.
+ *
+ * When the call's turn is no longer the agent's open turn, the row would start
+ * an item in a finished turn, which a client draws as a stretch of work that
+ * never ends. The failure goes to the runner's log instead, and nothing is
+ * emitted.
  */
 const emitFailedTodoCall = (
   state: Normalizing,
@@ -1172,6 +1191,13 @@ const emitFailedTodoCall = (
     readonly reason: string;
   },
 ): void => {
+  if (!isAgentTurnOpen(state, agent, call.turnId)) {
+    state.reportUnknownMessage(
+      `claude: user/tool_result of a failed ${call.name} after its turn ended`,
+      new Error(call.reason),
+    );
+    return;
+  }
   const turn: TurnRef = { turnId: call.turnId, subagentId: agent?.subagentId };
   const started = { name: call.name, input: call.input, kind: "native" };
   out.push(buildItemStarted(state, turn, call.toolUseId, "tool_call", started));
@@ -1232,20 +1258,37 @@ const ORPHAN_NATIVE_TOOL = { kind: "tool_call", detail: { kind: "native" } } as 
 const ORPHAN_MCP_TOOL = { kind: "tool_call", detail: { kind: "mcp" } } as const;
 
 /**
+ * Builds the item that opens for a `web_fetch_tool_result` whose call was never
+ * seen. A result that holds the fetched URL is a page fetch, which a client
+ * draws as "Fetched <url>". An error result holds no URL, and drawing it as a
+ * web search would be wrong, so it becomes a plain native tool call named
+ * `web_fetch`.
+ */
+const buildOrphanWebFetch = (
+  block: AssistantBlockFor<"web_fetch_tool_result">,
+): ToolOutcome["orphan"] => {
+  const url = readFetchedPageUrl(block);
+  return url === undefined
+    ? { kind: "tool_call", detail: { name: "web_fetch", kind: "native" } }
+    : { kind: "web_search", detail: { name: "web_fetch", url } };
+};
+
+/**
  * Builds the handler of one kind of result block: it converts the block with
  * `convert` and completes the call the block names. `orphan` is the item to
- * show when that call was never seen.
+ * show when that call was never seen: fixed for the kind of block, or built
+ * from the block.
  */
 const buildResultHandler =
   <Block extends { readonly tool_use_id: string }>(
-    orphan: ToolOutcome["orphan"],
+    orphan: ToolOutcome["orphan"] | ((block: Block) => ToolOutcome["orphan"]),
     convert: (block: Block) => ConvertedResult,
   ) =>
   (block: Block, scope: BlockScope): void =>
     completeTool(scope.state, scope.out, scope.agent, {
       ...convert(block),
       toolUseId: block.tool_use_id,
-      orphan,
+      orphan: typeof orphan === "function" ? orphan(block) : orphan,
     });
 
 /**
@@ -1368,7 +1411,7 @@ const onUser = (
       const outcome = applyTodoResult(
         todo.list,
         toolUseId,
-        block.is_error === true,
+        { isError: block.is_error === true, content: block.content },
         structuredResult,
       );
       if (outcome.kind === "changed") {
@@ -2073,7 +2116,8 @@ const closeUnsolicitedTurn = (
     const producedNothing = out
       .slice(ownOutputStart)
       .every((event) => event._tag === "turn.started");
-    if (producedNothing && !hasPendingTodoCall(state, state.turnId)) {
+    const todo = state.todos.get(buildStreamKey(undefined));
+    if (producedNothing && !(todo !== undefined && hasPendingTodoCall(todo.list, state.turnId))) {
       out.length = ownOutputStart;
       state.turnId = undefined;
     } else if (endsWithMessage) {
@@ -2287,7 +2331,7 @@ const CLAUDE_BLOCK_DECISIONS = {
   server_tool_use: startServerTool,
   mcp_tool_use: startMcpTool,
   web_search_tool_result: buildResultHandler(ORPHAN_WEB_SEARCH, convertWebSearchResult),
-  web_fetch_tool_result: buildResultHandler(ORPHAN_WEB_SEARCH, convertWebFetchResult),
+  web_fetch_tool_result: buildResultHandler(buildOrphanWebFetch, convertWebFetchResult),
   mcp_tool_result: buildResultHandler(ORPHAN_MCP_TOOL, convertMcpResult),
   code_execution_tool_result: buildResultHandler(ORPHAN_NATIVE_TOOL, convertCodeExecutionResult),
   bash_code_execution_tool_result: buildResultHandler(

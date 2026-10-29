@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { MAX_FACT_LENGTH, MAX_TODO_STEPS } from "@hercule/protocol";
+import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH, MAX_TODO_STEPS } from "@hercule/protocol";
 import {
   applyTodoResult,
   buildTodoList,
-  isTodoTool,
+  hasPendingTodoCall,
   recordTodoCall,
   type TodoList,
-  type TodoResultOutcome,
 } from "./claude-code-todo-list";
 
 let nextToolUseId = 0;
+
+/** The `tool_result` of a call that succeeded. */
+const ok = { isError: false, content: "ok" };
 
 /** Records a call and applies its result in one go, like a call that answers at once. */
 const run = (
@@ -17,11 +19,19 @@ const run = (
   name: string,
   input: unknown,
   result: unknown,
-  options: { failed?: boolean; turnId?: string } = {},
-): TodoResultOutcome => {
+  options: { failed?: boolean; errorContent?: unknown; turnId?: string } = {},
+): ReturnType<typeof applyTodoResult> => {
   const toolUseId = `tool-${nextToolUseId++}`;
   recordTodoCall(list, toolUseId, name, input, options.turnId ?? "turn-1");
-  return applyTodoResult(list, toolUseId, options.failed ?? false, result);
+  return applyTodoResult(
+    list,
+    toolUseId,
+    {
+      isError: options.failed ?? false,
+      content: "errorContent" in options ? options.errorContent : "ok",
+    },
+    result,
+  );
 };
 
 const todo = (content: string, status: "pending" | "in_progress" | "completed" = "pending") => ({
@@ -54,14 +64,6 @@ const taskUpdate = (list: TodoList, input: Record<string, unknown>, result?: unk
     result ?? { success: true, taskId: input.taskId, updatedFields: Object.keys(input) },
   );
 
-describe("isTodoTool", () => {
-  it("accepts the four tools that change the list and no other", () => {
-    expect(["TodoWrite", "TaskCreate", "TaskUpdate", "TaskList"].every(isTodoTool)).toBe(true);
-    expect(isTodoTool("TaskGet")).toBe(false);
-    expect(isTodoTool("Bash")).toBe(false);
-  });
-});
-
 describe("TodoWrite", () => {
   it("returns the new steps each time the list changes", () => {
     const list = buildTodoList(false);
@@ -81,11 +83,15 @@ describe("TodoWrite", () => {
     });
   });
 
-  it("reports an identical list as unchanged", () => {
+  it("returns an identical list again, because what a client shows is the caller's to compare", () => {
     const list = buildTodoList(false);
     todoWrite(list, [todo("a")]);
 
-    expect(todoWrite(list, [todo("a")])).toEqual({ kind: "unchanged", turnId: "turn-1" });
+    expect(todoWrite(list, [todo("a")])).toEqual({
+      kind: "changed",
+      turnId: "turn-1",
+      steps: [step("a")],
+    });
   });
 
   it("clears the list with an empty one", () => {
@@ -148,7 +154,7 @@ describe("TodoWrite", () => {
     expect(text?.endsWith("…")).toBe(true);
   });
 
-  it("fails on a list longer than a row can show, and leaves what is shown as it is", () => {
+  it("fails on a list longer than a row can show, and the list moves on", () => {
     const list = buildTodoList(false);
     todoWrite(list, [todo("a")]);
     const tooMany = Array.from({ length: MAX_TODO_STEPS + 1 }, (_, index) => todo(`step ${index}`));
@@ -159,21 +165,69 @@ describe("TodoWrite", () => {
       kind: "failed",
       reason: `the list has ${MAX_TODO_STEPS + 1} steps, more than the ${MAX_TODO_STEPS} a row can show`,
     });
-    // Back to the list that was shown: nothing to publish.
-    expect(todoWrite(list, [todo("a")])).toMatchObject({ kind: "unchanged" });
+    // Back under the bound, the list is returned again.
+    expect(todoWrite(list, [todo("a")])).toMatchObject({ kind: "changed", steps: [step("a")] });
   });
 });
 
 describe("a failed call", () => {
   it("returns failed with the name and input, and does not touch the list", () => {
     const list = buildTodoList(false);
-    todoWrite(list, [todo("a")]);
-    const input = { todos: [todo("b")] };
+    taskCreate(list, "1", "a");
+    const input = { subject: "b" };
 
-    const outcome = run(list, "TodoWrite", input, { newTodos: input.todos }, { failed: true });
+    const outcome = run(
+      list,
+      "TaskCreate",
+      input,
+      { task: { id: "2", subject: "b" } },
+      { failed: true },
+    );
 
-    expect(outcome).toMatchObject({ kind: "failed", turnId: "turn-1", name: "TodoWrite", input });
-    expect(todoWrite(list, [todo("a")])).toMatchObject({ kind: "unchanged" });
+    expect(outcome).toMatchObject({ kind: "failed", turnId: "turn-1", name: "TaskCreate", input });
+    expect(taskCreate(list, "3", "c")).toMatchObject({ steps: [step("a"), step("c")] });
+  });
+
+  it("uses Claude's error text as the reason, from a string or from text blocks", () => {
+    const list = buildTodoList(false);
+
+    expect(
+      run(list, "TodoWrite", {}, null, { failed: true, errorContent: "bad input" }),
+    ).toMatchObject({ reason: "bad input" });
+    expect(
+      run(list, "TodoWrite", {}, null, {
+        failed: true,
+        errorContent: [
+          { type: "text", text: "first" },
+          { type: "image", source: {} },
+          { type: "text", text: "second" },
+        ],
+      }),
+    ).toMatchObject({ reason: "first\nsecond" });
+  });
+
+  it("names the tool as the reason when the error has no text", () => {
+    const list = buildTodoList(false);
+
+    for (const errorContent of ["", [], undefined, { type: "text", text: "not a list" }]) {
+      expect(run(list, "TaskList", {}, null, { failed: true, errorContent })).toMatchObject({
+        reason: "TaskList failed",
+      });
+    }
+  });
+
+  it("cuts a reason to the length of a message", () => {
+    const list = buildTodoList(false);
+    const long = "x".repeat(MAX_MESSAGE_LENGTH + 100);
+
+    const fromError = run(list, "TodoWrite", {}, null, { failed: true, errorContent: long });
+    const fromUpdate = run(list, "TaskUpdate", { taskId: "1" }, { success: false, error: long });
+
+    for (const outcome of [fromError, fromUpdate]) {
+      const reason = outcome.kind === "failed" ? outcome.reason : "";
+      expect(reason).toHaveLength(MAX_MESSAGE_LENGTH);
+      expect(reason.endsWith("…")).toBe(true);
+    }
   });
 });
 
@@ -233,12 +287,13 @@ describe("TaskUpdate", () => {
     });
   });
 
-  it("reports an update of owner, metadata or dependencies as unchanged", () => {
+  it("reports an update of owner, metadata or dependencies as changed with the same list", () => {
     const list = listWithTwoTasks();
 
     expect(taskUpdate(list, { taskId: "1", owner: "me", addBlocks: ["2"] })).toEqual({
-      kind: "unchanged",
+      kind: "changed",
       turnId: "turn-1",
+      steps: [step("first"), step("second")],
     });
   });
 
@@ -247,14 +302,10 @@ describe("TaskUpdate", () => {
 
     expect(taskUpdate(list, { taskId: "9", status: "completed", subject: "ghost" })).toEqual({
       kind: "unchanged",
-      turnId: "turn-1",
     });
-    expect(
-      taskList(list, [
-        { id: "1", subject: "first", status: "pending" },
-        { id: "2", subject: "second", status: "pending" },
-      ]),
-    ).toMatchObject({ kind: "unchanged" });
+    expect(taskCreate(list, "3", "third")).toMatchObject({
+      steps: [step("first"), step("second"), step("third")],
+    });
   });
 
   it("forgets task ids when TodoWrite replaces the list", () => {
@@ -297,7 +348,7 @@ describe("a resumed session", () => {
   it("publishes nothing until TaskList hands over the whole list", () => {
     const list = buildTodoList(true);
 
-    expect(taskCreate(list, "3", "new")).toEqual({ kind: "unchanged", turnId: "turn-1" });
+    expect(taskCreate(list, "3", "new")).toEqual({ kind: "unchanged" });
     expect(
       taskList(list, [
         { id: "1", subject: "first", status: "completed" },
@@ -358,7 +409,7 @@ describe("TaskList", () => {
 
 describe("pending calls", () => {
   it("returns not_todo for an id that was never recorded", () => {
-    expect(applyTodoResult(buildTodoList(false), "unknown", false, {})).toEqual({
+    expect(applyTodoResult(buildTodoList(false), "unknown", ok, {})).toEqual({
       kind: "not_todo",
     });
   });
@@ -368,29 +419,39 @@ describe("pending calls", () => {
     recordTodoCall(list, "a", "TodoWrite", { todos: [todo("a")] }, "turn-a");
     recordTodoCall(list, "b", "TodoWrite", { todos: [todo("a")] }, "turn-b");
 
-    expect(applyTodoResult(list, "b", false, null)).toMatchObject({
+    expect(applyTodoResult(list, "b", ok, null)).toMatchObject({
       kind: "changed",
       turnId: "turn-b",
     });
-    expect(applyTodoResult(list, "a", false, null)).toEqual({
-      kind: "unchanged",
+    expect(applyTodoResult(list, "a", ok, null)).toMatchObject({
+      kind: "changed",
       turnId: "turn-a",
     });
+  });
+
+  it("tells whether a call from a turn is waiting for its result", () => {
+    const list = buildTodoList(false);
+    recordTodoCall(list, "a", "TodoWrite", { todos: [] }, "turn-a");
+
+    expect(hasPendingTodoCall(list, "turn-a")).toBe(true);
+    expect(hasPendingTodoCall(list, "turn-b")).toBe(false);
+    applyTodoResult(list, "a", ok, null);
+    expect(hasPendingTodoCall(list, "turn-a")).toBe(false);
   });
 
   it("answers a result once: a second result for the same id is not_todo", () => {
     const list = buildTodoList(false);
     recordTodoCall(list, "a", "TodoWrite", { todos: [] }, "turn-1");
-    applyTodoResult(list, "a", false, null);
+    applyTodoResult(list, "a", ok, null);
 
-    expect(applyTodoResult(list, "a", false, null)).toEqual({ kind: "not_todo" });
+    expect(applyTodoResult(list, "a", ok, null)).toEqual({ kind: "not_todo" });
   });
 
   it("removes a failed call too", () => {
     const list = buildTodoList(false);
     recordTodoCall(list, "a", "TodoWrite", { todos: [] }, "turn-1");
 
-    expect(applyTodoResult(list, "a", true, null).kind).toBe("failed");
-    expect(applyTodoResult(list, "a", false, null)).toEqual({ kind: "not_todo" });
+    expect(applyTodoResult(list, "a", { isError: true, content: "" }, null).kind).toBe("failed");
+    expect(applyTodoResult(list, "a", ok, null)).toEqual({ kind: "not_todo" });
   });
 });

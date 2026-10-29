@@ -2893,10 +2893,10 @@ describe("server tool, MCP tool and result blocks", () => {
           type: "encrypted_code_execution_result",
           encrypted_stdout: "ZW5jcnlwdGVk",
           stderr: "",
-          return_code: 1,
+          return_code: 0,
           content: [],
         },
-        "Return code: 1\nThe output is encrypted.",
+        "Return code: 0\nThe output is encrypted.",
       ],
       [
         "bash code execution",
@@ -2979,6 +2979,59 @@ describe("server tool, MCP tool and result blocks", () => {
       it(`completes a ${name} call with readable text`, () => {
         expect(complete(tool, content, type)).toEqual({
           status: "completed",
+          detail: { content: text },
+        });
+      });
+    }
+
+    const failedRuns: ReadonlyArray<
+      readonly [name: string, tool: string, type: string, content: unknown, text: string]
+    > = [
+      [
+        "code execution",
+        "code_execution",
+        "code_execution_tool_result",
+        {
+          type: "code_execution_result",
+          stdout: "partial",
+          stderr: "boom",
+          return_code: 2,
+          content: [],
+        },
+        "Return code: 2\nOutput:\npartial\nError output:\nboom",
+      ],
+      [
+        "encrypted code execution",
+        "code_execution",
+        "code_execution_tool_result",
+        {
+          type: "encrypted_code_execution_result",
+          encrypted_stdout: "ZW5jcnlwdGVk",
+          stderr: "",
+          return_code: 1,
+          content: [],
+        },
+        "Return code: 1\nThe output is encrypted.",
+      ],
+      [
+        "bash code execution",
+        "bash_code_execution",
+        "bash_code_execution_tool_result",
+        {
+          type: "bash_code_execution_result",
+          stdout: "",
+          stderr: "no such file",
+          return_code: 127,
+          content: [],
+        },
+        "Return code: 127\nError output:\nno such file",
+      ],
+    ];
+
+    for (const [name, tool, type, content, text] of failedRuns) {
+      it(`fails a ${name} call with a non-zero return code and keeps the output readable`, () => {
+        expect(complete(tool, content, type)).toEqual({
+          status: "failed",
           detail: { content: text },
         });
       });
@@ -3067,6 +3120,146 @@ describe("server tool, MCP tool and result blocks", () => {
         `item.completed tool_call ${TOOL} completed`,
         "turn.completed completed",
       ]);
+    });
+  });
+
+  describe("a fetched page whose call was never seen", () => {
+    const pageResult = (content: unknown) =>
+      buildBlocks([{ type: "web_fetch_tool_result", tool_use_id: SERVER_TOOL, content }]);
+
+    it("opens a web_search item with the fetched url, which a client draws as a page fetch", () => {
+      const events = run([
+        pageResult({
+          type: "web_fetch_result",
+          url: "https://example.com/a",
+          retrieved_at: null,
+          content: {
+            type: "document",
+            title: null,
+            citations: null,
+            source: { type: "text", media_type: "text/plain", data: "Hello page" },
+          },
+        }),
+      ]);
+      expect(listItemEvents(events, "item.started", "web_search")[0]?.detail).toEqual({
+        name: "web_fetch",
+        url: "https://example.com/a",
+      });
+      expect(readCompleted(events, SERVER_TOOL)?.status).toBe("completed");
+    });
+
+    it("opens a native tool_call named web_fetch for an error, which holds no url", () => {
+      const events = run([
+        pageResult({ type: "web_fetch_tool_result_error", error_code: "url_not_accessible" }),
+      ]);
+      expect(listItemEvents(events, "item.started", "web_search")).toEqual([]);
+      expect(listItemEvents(events, "item.started", "tool_call")[0]?.detail).toEqual({
+        name: "web_fetch",
+        kind: "native",
+      });
+      expect(readCompleted(events, SERVER_TOOL)).toEqual({
+        status: "failed",
+        detail: { content: "The web fetch failed: url_not_accessible" },
+      });
+    });
+  });
+
+  describe("a result in a shape the SDK does not promise", () => {
+    /** The bodies of results that read as success before: an unknown nested type, or a missing field. */
+    const unreadable: ReadonlyArray<readonly [name: string, type: string, content: unknown]> = [
+      [
+        "a text editor result of an unknown type",
+        "text_editor_code_execution_tool_result",
+        { type: "text_editor_code_execution_delete_result" },
+      ],
+      [
+        "a text editor view without text",
+        "text_editor_code_execution_tool_result",
+        { type: "text_editor_code_execution_view_result" },
+      ],
+      ["a search hit with no title or URL", "web_search_tool_result", [{}]],
+      [
+        "a code execution result of an unknown type",
+        "code_execution_tool_result",
+        { type: "code_execution_tomorrow_result", return_code: 0, stdout: "", stderr: "" },
+      ],
+      [
+        "a code execution result with no return code",
+        "code_execution_tool_result",
+        { type: "code_execution_result", stdout: "", stderr: "" },
+      ],
+      [
+        "a bash result with no output",
+        "bash_code_execution_tool_result",
+        { type: "bash_code_execution_result", return_code: 0, stderr: "" },
+      ],
+      [
+        "a fetched page with an unknown source",
+        "web_fetch_tool_result",
+        {
+          type: "web_fetch_result",
+          url: "https://example.com/a",
+          content: { type: "document", title: null, source: { type: "hologram" } },
+        },
+      ],
+      ["an advisor result of an unknown type", "advisor_tool_result", { type: "advisor_whisper" }],
+      ["a tool search with no references", "tool_search_tool_result", { type: "x" }],
+      [
+        "an error with no error code",
+        "web_search_tool_result",
+        { type: "web_search_tool_result_error" },
+      ],
+    ];
+
+    for (const [name, type, content] of unreadable) {
+      it(`fails the running call for ${name}`, () => {
+        const { running, reports } = buildReportingState();
+        const events = run(
+          [
+            buildBlocks([buildServerToolUse("server_thing", {})]),
+            buildBlocks([{ type, tool_use_id: SERVER_TOOL, content }]),
+          ],
+          running,
+        );
+        expect(readCompleted(events, SERVER_TOOL)?.status).toBe("failed");
+        expect(reports).toHaveLength(1);
+      });
+
+      it(`labels ${name} as an unknown item when the call was never seen`, () => {
+        const { running, reports } = buildReportingState();
+        const events = run([buildBlocks([{ type, tool_use_id: SERVER_TOOL, content }])], running);
+        expect(listItemEvents(events, "item.started", "unknown")).toHaveLength(1);
+        expect(listItemEvents(events, "item.completed", "web_search")).toEqual([]);
+        expect(listItemEvents(events, "item.completed", "tool_call")).toEqual([]);
+        expect(reports).toHaveLength(1);
+      });
+    }
+  });
+
+  it("leaves no open tool behind when a call block cannot be read", () => {
+    // `server_name` is not text, so the call throws while its item is built.
+    const { running } = buildReportingState();
+    const events = run(
+      [
+        buildBlocks([
+          { type: "mcp_tool_use", id: MCP_TOOL, name: "list_issues", server_name: null, input: {} },
+        ]),
+        buildBlocks([
+          { type: "mcp_tool_result", tool_use_id: MCP_TOOL, content: "3 issues", is_error: false },
+        ]),
+      ],
+      running,
+    );
+    expect(running.tools.size).toBe(0);
+    // The call shows as an unknown item. The result becomes an orphan, which
+    // starts before it completes, so no completion lacks its start.
+    expect(listItemEvents(events, "item.started", "unknown")).toHaveLength(1);
+    expect(
+      listItemEvents(events, "item.started", "tool_call").map((event) => event.itemId),
+    ).toEqual([MCP_TOOL]);
+    expect(readCompleted(events, MCP_TOOL)).toEqual({
+      status: "completed",
+      detail: { content: "3 issues" },
     });
   });
 
@@ -3364,7 +3557,11 @@ describe("the todo list", () => {
   const buildAnswer = (
     id: string,
     structured: unknown,
-    { isError = false, agentCallId = null as string | null } = {},
+    {
+      isError = false,
+      agentCallId = null,
+      content = "ok",
+    }: { isError?: boolean; agentCallId?: string | null; content?: unknown } = {},
   ) => ({
     type: "user",
     uuid: "b7aa7458-44c1-4aed-8e9e-bc1f301e8246",
@@ -3372,7 +3569,7 @@ describe("the todo list", () => {
     parent_tool_use_id: agentCallId,
     message: {
       role: "user",
-      content: [{ tool_use_id: id, type: "tool_result", content: "ok", is_error: isError }],
+      content: [{ tool_use_id: id, type: "tool_result", content, is_error: isError }],
     },
     tool_use_result: structured,
   });
@@ -3499,10 +3696,10 @@ describe("the todo list", () => {
     expect(todoEventTags(events)).toEqual(["item.started"]);
   });
 
-  it("shows a TodoWrite that failed as a failed tool row", () => {
+  it("shows a TodoWrite that failed as a failed tool row, with Claude's error text", () => {
     const events = run([
       buildCall(lastId(1), "TodoWrite", { todos: [todo("a")] }),
-      buildAnswer(lastId(1), undefined, { isError: true }),
+      buildAnswer(lastId(1), undefined, { isError: true, content: "todos must be a list" }),
     ]);
     const lines = events.map(formatEvent);
     expect(lines).toContain(`item.started tool_call ${lastId(1)}`);
@@ -3514,18 +3711,70 @@ describe("the todo list", () => {
       kind: "native",
     });
     const completed = findToolRow(events, "item.completed");
-    expect(completed?.detail).toEqual({ content: "TodoWrite failed" });
+    expect(completed?.detail).toEqual({ content: "todos must be a list" });
     expect(listTodoEvents(events)).toEqual([]);
   });
 
-  it("shows a TaskUpdate that reports success false as a failed tool row, with the reason", () => {
+  it("names the tool as the reason when a failed call has no error text", () => {
+    const events = run([
+      buildCall(lastId(1), "TodoWrite", { todos: [todo("a")] }),
+      buildAnswer(lastId(1), undefined, { isError: true, content: "" }),
+    ]);
+    expect(findToolRow(events, "item.completed")?.detail).toEqual({ content: "TodoWrite failed" });
+  });
+
+  it("cuts the error text of a TaskUpdate to the length of a message", () => {
     const events = run([
       buildCall(lastId(1), "TaskUpdate", { taskId: "9", status: "completed" }),
-      buildAnswer(lastId(1), { success: false, error: "Task not found" }),
+      buildAnswer(lastId(1), { success: false, error: "e".repeat(MAX_MESSAGE_LENGTH + 500) }),
     ]);
-    expect(events.map(formatEvent)).toContain(`item.completed tool_call ${lastId(1)} failed`);
-    const completed = findToolRow(events, "item.completed");
-    expect(completed?.detail).toEqual({ content: "Task not found" });
+    const content = (findToolRow(events, "item.completed")?.detail as { content: string }).content;
+    expect(content).toHaveLength(MAX_MESSAGE_LENGTH);
+    expect(content.endsWith("…")).toBe(true);
+  });
+
+  it("reports a failed call that answers after its turn ended to the log, and emits nothing", () => {
+    const { running, reports } = buildReportingState();
+    openTurn(running);
+    const events = run(
+      [
+        buildCall(lastId(1), "TodoWrite", { todos: [todo("a")] }),
+        RESULT,
+        buildAnswer(lastId(1), undefined, { isError: true, content: "interrupted by the user" }),
+      ],
+      running,
+    );
+    expect(events.filter((event) => event._tag.startsWith("item."))).toEqual([]);
+    expect(events.filter((event) => event._tag === "turn.started")).toEqual([]);
+    expect(reports.map((report) => report.label)).toEqual([
+      "claude: user/tool_result of a failed TodoWrite after its turn ended",
+    ]);
+    expect(String(reports[0]?.error)).toContain("interrupted by the user");
+  });
+
+  it("keeps a later turn's final list when an earlier turn's call answers late", () => {
+    const old = [todo("old")];
+    const fresh = [todo("fresh", "in_progress")];
+    const running = buildStateInTurn();
+    const events = [
+      ...run(
+        [
+          buildCall(lastId(1), "TodoWrite", { todos: old }),
+          { ...RESULT, terminal_reason: "aborted_streaming" },
+        ],
+        running,
+      ),
+      ...openTurn(running).events,
+      ...run(writeTodos(lastId(2), fresh), running),
+      // The first turn's call answers while the second turn is open.
+      ...run([buildAnswer(lastId(1), { oldTodos: [], newTodos: old }), RESULT], running),
+    ];
+    const lines = listTodoEvents(events);
+    expect(lines.map((line) => line.split(" ")[0])).toEqual(["item.started", "item.completed"]);
+    expect(lines.map((line) => line.split(" ")[2])).toEqual([
+      "fresh=in_progress",
+      "fresh=in_progress",
+    ]);
   });
 
   it("builds the list from TaskCreate, TaskUpdate and TaskList results", () => {
@@ -3601,6 +3850,42 @@ describe("the todo list", () => {
       expect(listTodoEvents(listed).map((line) => line.split(" ")[0])).toEqual(["item.started"]);
       expect(listTodoEvents(listed)[0]).toContain("a=completed,c=pending");
     });
+  });
+
+  it("shows nothing for a seeded subagent's TaskCreate until its TaskList", () => {
+    const running = buildTestState(undefined, [{ subagentId: SUBAGENT, itemId: AGENT_CALL }]);
+    openTurn(running);
+    const inSubagent = { agentCallId: AGENT_CALL };
+    const created = run(
+      [
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+        buildCall(lastId(1), "TaskCreate", { subject: "c", description: "d" }, AGENT_CALL),
+        buildAnswer(lastId(1), { task: { id: "3", subject: "c" } }, inSubagent),
+      ],
+      running,
+    );
+    expect(listTodoEvents(created)).toEqual([]);
+    const listed = run(
+      [
+        buildCall(lastId(2), "TaskList", {}, AGENT_CALL),
+        buildAnswer(
+          lastId(2),
+          { tasks: [{ id: "3", subject: "c", status: "pending", blockedBy: [] }] },
+          inSubagent,
+        ),
+      ],
+      running,
+    );
+    expect(listTodoEvents(listed).map((line) => line.split(" ")[0])).toEqual(["item.started"]);
+    // The session's own agent was not resumed, so its list is known and empty.
+    const own = run(
+      [
+        buildCall(lastId(3), "TaskCreate", { subject: "own", description: "d" }),
+        buildAnswer(lastId(3), { task: { id: "1", subject: "own" } }),
+      ],
+      running,
+    );
+    expect(listTodoEvents(own)[0]).toContain("own=pending");
   });
 
   it("keeps a turn that a model message opened with only a todo call, and shows the list in it", () => {

@@ -8,9 +8,11 @@
  * - `TaskList` returns the whole list.
  *
  * This module turns those calls into the one thing a client shows: the full
- * list of steps, and whether it changed. It emits no events and knows nothing
- * about turns. It carries the `turnId` it is given from the call to the
- * result, so the caller can stamp the event it builds.
+ * list of steps after a successful call. It keeps only Claude's own list, not
+ * what a client currently shows: the caller decides whether a list is new to
+ * the client. It emits no events and knows nothing about turns. It carries the
+ * `turnId` it is given from the call to the result, so the caller can stamp the
+ * event it builds.
  *
  * A fresh session's list is known and empty. A resumed session's list is
  * unknown: the runner forgot it, and `TaskCreate` and `TaskUpdate` only
@@ -22,7 +24,7 @@
  */
 import { MAX_TODO_STEPS, type TodoStep, TodoStepStatus } from "@hercule/protocol";
 import { Option, Schema } from "effect";
-import { truncateFact } from "./text";
+import { truncateFact, truncateMessage } from "./text";
 
 /** The tools that change the list. `TaskGet` is not one: it only reads one task. */
 const TODO_TOOL_NAMES: ReadonlySet<string> = new Set([
@@ -35,11 +37,11 @@ const TODO_TOOL_NAMES: ReadonlySet<string> = new Set([
 /** Checks whether `name` is a tool that changes the todo list. */
 export const isTodoTool = (name: string): boolean => TODO_TOOL_NAMES.has(name);
 
-/** One step of the list. `TodoWrite` steps have no id, so `id` may be missing. */
-interface Entry {
+/** One step of the list as the module tracks it. `TodoWrite` steps have no id, so `id` may be missing. */
+interface TrackedStep {
   readonly id: string | undefined;
   readonly text: string;
-  readonly status: Schema.Schema.Type<typeof TodoStepStatus>;
+  readonly status: TodoStepStatus;
 }
 
 /** A todo tool call whose result has not arrived yet. */
@@ -52,9 +54,7 @@ interface PendingCall {
 /** The todo list of one agent. Create it with `buildTodoList`. */
 export interface TodoList {
   /** The steps Claude's list holds, or `undefined` while the list is unknown. */
-  entries: ReadonlyArray<Entry> | undefined;
-  /** The steps last returned as `changed`: what a client shows now. */
-  published: ReadonlyArray<TodoStep>;
+  entries: ReadonlyArray<TrackedStep> | undefined;
   readonly pending: Map<string, PendingCall>;
 }
 
@@ -63,14 +63,17 @@ export interface TodoList {
  *
  * - `not_todo`: no todo call with that id is pending. The caller treats the
  *   result as that of an ordinary tool.
- * - `unchanged`: the call succeeded and the list a client shows stays as it is.
- * - `changed`: the list is known and `steps` is the whole new list.
+ * - `unchanged`: the call succeeded and there is nothing to show: the list is
+ *   unknown, the update names a task the list never saw, or the update only
+ *   changed the owner or dependencies.
+ * - `changed`: the call succeeded on a known list and `steps` is the whole list
+ *   it produced. The list may equal what a client shows already.
  * - `failed`: the call failed or its result was unusable. The caller draws a
  *   failed tool row from `name`, `input` and `reason`.
  */
-export type TodoResultOutcome =
+type TodoResultOutcome =
   | { readonly kind: "not_todo" }
-  | { readonly kind: "unchanged"; readonly turnId: string }
+  | { readonly kind: "unchanged" }
   | {
       readonly kind: "changed";
       readonly turnId: string;
@@ -91,9 +94,12 @@ export type TodoResultOutcome =
  */
 export const buildTodoList = (resumed: boolean): TodoList => ({
   entries: resumed ? undefined : [],
-  published: [],
   pending: new Map(),
 });
+
+/** Checks whether the list has a todo call from the given turn that is waiting for its result. */
+export const hasPendingTodoCall = (list: TodoList, turnId: string): boolean =>
+  [...list.pending.values()].some((call) => call.turnId === turnId);
 
 /**
  * Remembers a todo tool call until its result arrives. `input` is whatever
@@ -109,25 +115,22 @@ export const recordTodoCall = (
   list.pending.set(toolUseId, { name, input, turnId });
 };
 
-const Text = Schema.NonEmptyString;
+/** A step as `TodoWrite` sends and returns it. */
+const TodoWriteStep = Schema.Struct({ content: Schema.NonEmptyString, status: TodoStepStatus });
 
-const TodoWriteInput = Schema.Struct({
-  todos: Schema.Array(Schema.Struct({ content: Text, status: TodoStepStatus })),
-});
+const TodoWriteInput = Schema.Struct({ todos: Schema.Array(TodoWriteStep) });
 
-const TodoWriteOutput = Schema.Struct({
-  newTodos: Schema.Array(Schema.Struct({ content: Text, status: TodoStepStatus })),
-});
+const TodoWriteOutput = Schema.Struct({ newTodos: Schema.Array(TodoWriteStep) });
 
-const TaskCreateInput = Schema.Struct({ subject: Schema.optionalKey(Text) });
+const TaskCreateInput = Schema.Struct({ subject: Schema.optionalKey(Schema.NonEmptyString) });
 
 const TaskCreateOutput = Schema.Struct({
-  task: Schema.Struct({ id: Schema.String, subject: Schema.optionalKey(Text) }),
+  task: Schema.Struct({ id: Schema.String, subject: Schema.optionalKey(Schema.NonEmptyString) }),
 });
 
 const TaskUpdateInput = Schema.Struct({
   taskId: Schema.String,
-  subject: Schema.optionalKey(Text),
+  subject: Schema.optionalKey(Schema.NonEmptyString),
   status: Schema.optionalKey(Schema.Union([TodoStepStatus, Schema.Literal("deleted")])),
 });
 
@@ -137,7 +140,9 @@ const TaskUpdateOutput = Schema.Struct({
 });
 
 const TaskListOutput = Schema.Struct({
-  tasks: Schema.Array(Schema.Struct({ id: Schema.String, subject: Text, status: TodoStepStatus })),
+  tasks: Schema.Array(
+    Schema.Struct({ id: Schema.String, subject: Schema.NonEmptyString, status: TodoStepStatus }),
+  ),
 });
 
 const decodeTodoWriteInput = Schema.decodeUnknownOption(TodoWriteInput);
@@ -154,7 +159,7 @@ const decodeTaskListOutput = Schema.decodeUnknownOption(TaskListOutput);
  * call leaves the list as it is.
  */
 type Change =
-  | { readonly kind: "replacement"; readonly entries: ReadonlyArray<Entry> }
+  | { readonly kind: "replacement"; readonly entries: ReadonlyArray<TrackedStep> }
   | { readonly kind: "failure"; readonly reason: string }
   | { readonly kind: "none" };
 
@@ -246,28 +251,48 @@ const computeChange = (list: TodoList, call: PendingCall, result: unknown): Chan
   }
 };
 
-const areStepsEqual = (left: ReadonlyArray<TodoStep>, right: ReadonlyArray<TodoStep>): boolean =>
-  left.length === right.length &&
-  left.every(
-    (step, index) => step.text === right[index]?.text && step.status === right[index].status,
+/**
+ * Returns the text of a tool result's `content`, or `undefined` when it has
+ * none. The content is a string or a list of blocks, of which only the `text`
+ * blocks count.
+ */
+const readResultText = (content: unknown): string | undefined => {
+  if (typeof content === "string") return content === "" ? undefined : content;
+  if (!Array.isArray(content)) return undefined;
+  const texts = content.flatMap((block: unknown) =>
+    typeof block === "object" &&
+    block !== null &&
+    "type" in block &&
+    block.type === "text" &&
+    "text" in block &&
+    typeof block.text === "string"
+      ? [block.text]
+      : [],
   );
+  return texts.length === 0 || texts.every((text) => text === "") ? undefined : texts.join("\n");
+};
 
 /**
  * Applies the result of a todo tool call to the list and returns what changed
  * for a client. The call must have been recorded with `recordTodoCall`. Every
  * outcome except `not_todo` removes the pending call.
  *
+ * `toolResult` is Claude's `tool_result` block: `isError` marks a call that
+ * failed, and its `content` is the error text, used as the reason when there is
+ * one. `structuredResult` is the tool's own structured result.
+ *
  * A call is only applied when it succeeded. `failed` is also returned when a
  * `TaskUpdate` reports `success` as anything but `true`, when a result cannot
  * be decoded, and when the list has more than `MAX_TODO_STEPS` steps: cutting
  * it would change the "2 of 5" count a client shows. In the last case the
  * agent's list still moves on, so a later change that brings it under the
- * bound shows again.
+ * bound is returned as `changed` again. A `failed` reason is cut to the length
+ * of a message, because Claude's error text has no bound.
  */
 export const applyTodoResult = (
   list: TodoList,
   toolUseId: string,
-  failed: boolean,
+  toolResult: { readonly isError: boolean; readonly content: unknown },
   structuredResult: unknown,
 ): TodoResultOutcome => {
   const call = list.pending.get(toolUseId);
@@ -279,13 +304,15 @@ export const applyTodoResult = (
     turnId,
     name,
     input,
-    reason,
+    reason: truncateMessage(reason),
   });
 
-  if (failed) return buildFailure(`${name} failed`);
+  if (toolResult.isError) {
+    return buildFailure(readResultText(toolResult.content) ?? `${name} failed`);
+  }
   const change = computeChange(list, call, structuredResult);
   if (change.kind === "failure") return buildFailure(change.reason);
-  if (change.kind === "none") return { kind: "unchanged", turnId };
+  if (change.kind === "none") return { kind: "unchanged" };
 
   list.entries = change.entries;
   if (change.entries.length > MAX_TODO_STEPS) {
@@ -293,11 +320,9 @@ export const applyTodoResult = (
       `the list has ${change.entries.length} steps, more than the ${MAX_TODO_STEPS} a row can show`,
     );
   }
-  const steps = change.entries.map((entry) => ({
+  const steps: ReadonlyArray<TodoStep> = change.entries.map((entry) => ({
     text: truncateFact(entry.text),
     status: entry.status,
   }));
-  if (areStepsEqual(steps, list.published)) return { kind: "unchanged", turnId };
-  list.published = steps;
   return { kind: "changed", turnId, steps };
 };
