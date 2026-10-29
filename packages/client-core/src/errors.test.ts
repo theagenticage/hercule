@@ -27,7 +27,14 @@ describe("readValidationIssues", () => {
       undefined,
     );
     expect(
-      readValidationIssues(new ConnectionError("http://controller.test", new Error("refused"))),
+      readValidationIssues(
+        new ConnectionError(
+          "setup.read",
+          "http://controller.test",
+          "cannot connect to http://controller.test",
+          new Error("refused"),
+        ),
+      ),
     ).toBe(undefined);
     // A RequestError fails before the request is sent. Its issues are on the
     // error itself, not in a controller response.
@@ -40,9 +47,16 @@ describe("isNotFound", () => {
   it("returns true only for a not_found response from the controller", () => {
     expect(isNotFound(new ApiError("not_found", "No workflow has that id."))).toBe(true);
     expect(isNotFound(new ApiError("forbidden", "No."))).toBe(false);
-    expect(isNotFound(new ConnectionError("http://controller.test", new Error("refused")))).toBe(
-      false,
-    );
+    expect(
+      isNotFound(
+        new ConnectionError(
+          "setup.read",
+          "http://controller.test",
+          "cannot connect to http://controller.test",
+          new Error("refused"),
+        ),
+      ),
+    ).toBe(false);
     expect(isNotFound(null)).toBe(false);
   });
 });

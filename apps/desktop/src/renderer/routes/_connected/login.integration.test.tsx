@@ -100,11 +100,11 @@ describe("the sign-in screen", () => {
     expect(fake.tokenWrites).toEqual([null]);
   });
 
-  it("names the controller it could not reach", async () => {
+  it("names the controller it could not connect to", async () => {
     const { user } = await openSignIn(refuseConnection);
     await signIn(user);
     expect((await screen.findByRole("alert")).textContent).toBe(
-      `Could not reach ${CONTROLLER_URL}.`,
+      `auth.login: cannot connect to ${CONTROLLER_URL}`,
     );
   });
 

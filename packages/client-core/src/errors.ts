@@ -81,14 +81,27 @@ export class RequestError extends Error {
   }
 }
 
-/** The controller could not be reached: there was no response, so there is no envelope. */
+/**
+ * No complete answer arrived from the controller, so there is no envelope.
+ * The request could not connect, timed out, or lost its connection while the
+ * body arrived.
+ *
+ * The message names the operation and says what went wrong, such as
+ * "workspace.query: the controller did not answer within 5 s" or
+ * "setup.read: cannot connect to http://127.0.0.1:4937: ECONNREFUSED". The
+ * original failure is kept as `cause`.
+ */
 export class ConnectionError extends Error {
   override readonly name = "ConnectionError";
+  /** The controller's address. */
   readonly url: string;
+  /** The operation that failed, as `<group>.<name>`, such as `workspace.query`. */
+  readonly operation: string;
 
-  constructor(url: string, cause: unknown) {
-    super(`cannot reach ${url}`, { cause });
+  constructor(operation: string, url: string, reason: string, cause: unknown) {
+    super(`${operation}: ${reason}`, { cause });
     this.url = url;
+    this.operation = operation;
   }
 }
 
@@ -160,6 +173,51 @@ const isConnectionLoss = (error: unknown): boolean => {
 };
 
 /**
+ * Checks whether `error` is the `TimeoutError` a request's time limit aborts
+ * it with. Like `isConnectionLoss`, it recognizes the error by its name.
+ */
+const isTimeout = (error: unknown): error is { readonly message: string } =>
+  typeof error === "object" &&
+  error !== null &&
+  "name" in error &&
+  error.name === "TimeoutError" &&
+  "message" in error &&
+  typeof error.message === "string";
+
+/**
+ * Chromium's message for every request that fails before an answer arrives:
+ * a refused connection, an unknown host, a CORS refusal. It says nothing more
+ * than that the request failed, so it is left out of a `ConnectionError`.
+ */
+const CHROMIUM_FETCH_FAILURE = "Failed to fetch";
+
+/**
+ * Returns what went wrong with a request to the controller at `url` that
+ * failed with `reason`, for the message of a `ConnectionError`.
+ *
+ * A time limit's own message is used as it is: the code that aborts the
+ * request knows the limit, and says it, as in "the controller did not answer
+ * within 5 s". A request that could not connect adds the transport's reason
+ * where it gives one: Bun does ("ECONNREFUSED: Unable to connect..."),
+ * Chromium does not.
+ */
+const describeConnectionFailure = (
+  reason: HttpClientError.HttpClientError["reason"],
+  url: string,
+): string => {
+  const cause: unknown = reason.cause;
+  if (isTimeout(cause)) return cause.message;
+  if (reason._tag === "InvalidUrlError") return `${url} is not a valid address`;
+  if (reason._tag === "DecodeError") {
+    return `the connection to ${url} was lost while the answer arrived`;
+  }
+  const detail = cause instanceof Error ? cause.message : "";
+  return detail === "" || detail === CHROMIUM_FETCH_FAILURE
+    ? `cannot connect to ${url}`
+    : `cannot connect to ${url}: ${detail}`;
+};
+
+/**
  * Converts any failure of the derived client into a `RequestError`, an
  * `ApiError` or a `ConnectionError`.
  *
@@ -170,6 +228,7 @@ const isConnectionLoss = (error: unknown): boolean => {
  *
  * A `ConnectionError` means no complete response arrived: the request could
  * not be sent, or the connection was lost or aborted while the body arrived.
+ * `operation` (`<group>.<name>`) and `url` go into its message.
  *
  * A response that arrived but could not be decoded becomes an `internal`
  * `ApiError`, with the original failure kept as `cause`. That covers:
@@ -182,6 +241,7 @@ const isConnectionLoss = (error: unknown): boolean => {
  */
 export const toClientError = (
   failure: unknown,
+  operation: string,
   url: string,
   sent: boolean,
 ): RequestError | ApiError | ConnectionError => {
@@ -201,7 +261,7 @@ export const toClientError = (
       reason._tag === "InvalidUrlError" ||
       (reason._tag === "DecodeError" && isConnectionLoss(reason.cause))
     ) {
-      return new ConnectionError(url, failure);
+      return new ConnectionError(operation, url, describeConnectionFailure(reason, url), failure);
     }
   }
 

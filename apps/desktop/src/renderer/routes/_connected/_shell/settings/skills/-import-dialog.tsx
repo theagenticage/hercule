@@ -353,8 +353,9 @@ const describeProgress = (progress: ImportProgress | null): string =>
 
 /**
  * Returns the line that replaces the summary when `error` stopped the import:
- * "The import stopped at `teach`: cannot reach http://…", naming the skill
- * `progress` was at. The skill's name is a code span, between backticks.
+ * "The import stopped at `teach`: skill.import: cannot connect to http://…",
+ * naming the skill `progress` was at. The skill's name is a code span,
+ * between backticks.
  */
 const describeImportStop = (progress: ImportProgress | null, error: Error): string =>
   progress === null

@@ -222,9 +222,9 @@ export const createClient = (options: ClientOptions): HerculeClient => {
   };
 
   /**
-   * Runs one call and converts its failure into a client error. When the call
-   * is one of `TOKEN_FROM`'s operations, `tokenFrom` reads the new token from
-   * its result.
+   * Runs one call of `operation` (`<group>.<name>`) and converts its failure
+   * into a client error. When the call is one of `TOKEN_FROM`'s operations,
+   * `tokenFrom` reads the new token from its result.
    *
    * The call sends the token that is current when `run` starts. A result that
    * sets a token (login, setup) always replaces the current one. A result that
@@ -246,6 +246,7 @@ export const createClient = (options: ClientOptions): HerculeClient => {
    * exports no spans.
    */
   const run = (
+    operation: string,
     effect: Effect.Effect<unknown, unknown>,
     tokenFrom: ((result: unknown) => string | null) | undefined,
   ): Promise<unknown> => {
@@ -270,7 +271,7 @@ export const createClient = (options: ClientOptions): HerculeClient => {
       ),
     ).then((result) => {
       if (Result.isFailure(result)) {
-        const error = toClientError(result.failure, options.baseUrl, sent);
+        const error = toClientError(result.failure, operation, options.baseUrl, sent);
         if (error instanceof ApiError && error.code === "unauthenticated") {
           clearTokenIfCurrent(sentToken);
         }
@@ -305,6 +306,7 @@ export const createClient = (options: ClientOptions): HerculeClient => {
     readAttachmentContent: async (id: string) => {
       readContentCall ??= buildCall("attachment", "readContent");
       const [bytes, response] = (await run(
+        "attachment.readContent",
         readContentCall({ params: { id }, responseMode: "decoded-and-response" }),
         undefined,
       )) as [Uint8Array<ArrayBuffer>, { readonly headers: Readonly<Record<string, string>> }];
@@ -315,13 +317,14 @@ export const createClient = (options: ClientOptions): HerculeClient => {
   for (const group of Object.values(api.groups)) {
     client[group.identifier] = Object.fromEntries(
       Object.keys(group.endpoints).map((name) => {
-        const tokenFrom = TOKEN_FROM[`${group.identifier}.${name}`];
+        const operation = `${group.identifier}.${name}`;
+        const tokenFrom = TOKEN_FROM[operation];
         let call: Call | undefined;
         return [
           name,
           (request?: unknown) => {
             call ??= buildCall(group.identifier, name);
-            return run(call(request), tokenFrom);
+            return run(operation, call(request), tokenFrom);
           },
         ];
       }),

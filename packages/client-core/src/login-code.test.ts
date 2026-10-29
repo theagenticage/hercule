@@ -22,7 +22,14 @@ describe("isLoginCodeRejected", () => {
       false,
     );
     expect(
-      isLoginCodeRejected(new ConnectionError("http://controller.test", new Error("refused"))),
+      isLoginCodeRejected(
+        new ConnectionError(
+          "setup.read",
+          "http://controller.test",
+          "cannot connect to http://controller.test",
+          new Error("refused"),
+        ),
+      ),
     ).toBe(false);
     expect(isLoginCodeRejected(new Error("no"))).toBe(false);
   });
