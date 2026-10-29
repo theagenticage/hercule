@@ -79,6 +79,7 @@ import {
   type Run,
 } from "../process";
 import { truncateFact, truncateMessage } from "../text";
+import { captureUnknownItemReporter } from "../unknown-items";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { now } from "../../report";
 import {
@@ -1672,6 +1673,7 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
             }
           })();
           const id = crypto.randomUUID();
+          const reportUnknownEvent = yield* captureUnknownItemReporter("Pi", id);
           const agent: RunningAgent = {
             child,
             rpc: makeRpc(child, (line, frame) => {
@@ -1697,7 +1699,13 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
                 Effect.runFork(abortTurn(agent, "schema"));
               }
             }),
-            state: buildNormalizingState(id, id, spec.outputSchema, readPiHome(ctx.env)),
+            state: buildNormalizingState(
+              id,
+              id,
+              spec.outputSchema,
+              readPiHome(ctx.env),
+              reportUnknownEvent,
+            ),
             depth: 0,
           };
           // If pi exits before the turn ends, there is no turn to wait for.
@@ -1838,8 +1846,12 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
           nativeSessionId,
           spec.outputSchema,
           readPiHome(ctx.env),
+          yield* captureUnknownItemReporter("Pi", sessionId),
         );
         state.model = spec.modelSelection.model;
+        // The same condition that turns on the cancelling handler in the
+        // extension (see `buildAgentEnv`): the session's own pi only.
+        state.automaticCompactionCancelled = spec.autoCompaction === false;
         const binding: SessionBinding = { sessionId, nativeSessionId, instanceId: spec.instanceId };
         const root: RunningAgent = {
           child,
