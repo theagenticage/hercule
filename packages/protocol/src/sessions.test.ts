@@ -21,6 +21,8 @@ import {
   SessionStart,
   SessionStop,
   TodoListDetail,
+  WaitDetail,
+  ImageGenerationDetail,
   TurnInput,
   UnknownItemDetail,
   type ProviderEvent as Event,
@@ -1087,6 +1089,38 @@ describe("the detail of a todo list", () => {
     expect(decodeDetail({ steps: Array.from({ length: MAX_TODO_STEPS + 1 }, () => step) })).toBe(
       "Failure",
     );
+  });
+});
+
+describe("the detail of a wait", () => {
+  const decodeDetail = (input: unknown) =>
+    Effect.runSyncExit(Schema.decodeUnknownEffect(WaitDetail)(input))._tag;
+
+  it("accepts a whole number of milliseconds, zero included", () => {
+    expect(decodeDetail({ durationMs: 30_000 })).toBe("Success");
+    expect(decodeDetail({ durationMs: 0 })).toBe("Success");
+  });
+
+  it("refuses a negative or fractional duration, a duration that is not a number, and none", () => {
+    expect(decodeDetail({ durationMs: -1 })).toBe("Failure");
+    expect(decodeDetail({ durationMs: 1.5 })).toBe("Failure");
+    expect(decodeDetail({ durationMs: "30s" })).toBe("Failure");
+    expect(decodeDetail({})).toBe("Failure");
+  });
+});
+
+describe("the detail of an image generation", () => {
+  const decodeDetail = (input: unknown) =>
+    Effect.runSyncExit(Schema.decodeUnknownEffect(ImageGenerationDetail)(input))._tag;
+
+  it("accepts a path, and also none", () => {
+    expect(decodeDetail({ path: "/tmp/hercule/logo.png" })).toBe("Success");
+    expect(decodeDetail({})).toBe("Success");
+  });
+
+  it("refuses a path that is empty or not text", () => {
+    expect(decodeDetail({ path: "" })).toBe("Failure");
+    expect(decodeDetail({ path: 7 })).toBe("Failure");
   });
 });
 

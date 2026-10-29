@@ -15,12 +15,14 @@ export {
   canonicalizeRemote,
   ContextCompactionDetail,
   findSkillReferences,
+  ImageGenerationDetail,
   isSkillNameCharacter,
   isSkillReferencePrefix,
   readSkillReferenceName,
   TodoListDetail,
   TodoStep,
   UnknownItemDetail,
+  WaitDetail,
   type SkillReference,
 } from "@hercule/protocol";
 

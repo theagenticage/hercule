@@ -1640,6 +1640,25 @@ describe("buildThreadBlocks: todo lists, page fetches and MCP calls, drawn as wo
     return buildWorkRows(blocks.flatMap((block) => (block.kind === "work" ? block.items : [])));
   };
 
+  it("draws a wait with its duration in the label, and an image generation with its saved path", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "w1", "wait", 1, { durationMs: 30_000 }),
+      buildItemCompleted("t1", "w1", "wait", 31, "completed"),
+      buildItemStarted("t1", "g1", "image_generation", 32, { path: "/tmp/logo.png" }),
+      buildItemCompleted("t1", "g1", "image_generation", 40, "completed"),
+    ]);
+
+    expect(rows).toEqual([
+      expect.objectContaining({ icon: "clock", label: "Waited 30s", target: "" }),
+      expect.objectContaining({
+        icon: "palette",
+        label: "Generated an image",
+        target: "/tmp/logo.png",
+        targetIsCode: true,
+      }),
+    ]);
+  });
+
   it("draws a list started and updated twice as one row whose count changes, and which is never running", () => {
     const started = buildItemStarted(
       "t1",

@@ -32,6 +32,8 @@ export type WorkRowIcon =
   | "close"
   | "question"
   | "compress"
+  | "clock"
+  | "palette"
   | "more";
 
 /** One row of an expanded work stretch: a single step, or consecutive steps folded together. */
@@ -65,8 +67,9 @@ export interface WorkRow {
   readonly output: string;
   /**
    * Whether the output is code, drawn in the mono face and kept in whole
-   * lines, as a command's output is. False for a compaction's summary, which
-   * is prose, and for a group, which has no output of its own.
+   * lines, as a command's output is. False for a compaction's summary and a
+   * plan's text, which are prose, and for a group, which has no output of its
+   * own.
    */
   readonly outputIsCode: boolean;
   /**
@@ -145,6 +148,9 @@ const STEP_WORDS: Record<ItemKind, StepWords> = {
   unknown: UNKNOWN_STEP,
   // The label of a todo list carries its progress, set in `buildStepRow`. It never folds.
   todo_list: { icon: "tasks", verb: "Tasks" },
+  // The label of a wait carries how long it waited, set in `buildStepRow`.
+  wait: { icon: "clock", verb: "Waited" },
+  image_generation: { icon: "palette", verb: "Generated an image" },
   // Messages never sit in a work stretch.
   user_message: UNKNOWN_STEP,
   assistant_message: UNKNOWN_STEP,
@@ -234,6 +240,8 @@ const foldsWith = (first: WorkItem, next: WorkItem): boolean =>
  * - an `unknown` step that has a label is drawn with the question icon, the
  *   label as its words and no target, so a message nobody mapped is named
  *   rather than shown as "Step";
+ * - a wait's label carries how long it waited, such as "Waited 30s", and it
+ *   names no target;
  * - reasoning names no target: its detail is the thought itself.
  */
 const buildStepRow = (item: WorkItem, key: string): WorkRow => {
@@ -250,13 +258,15 @@ const buildStepRow = (item: WorkItem, key: string): WorkRow => {
         ? item.toolName
         : item.kind === "todo_list"
           ? `${words.verb} ${summarizeTodoList(item.todoSteps).progress}`
-          : words.verb,
-    target: item.kind === "reasoning" || isLabelled ? "" : item.target,
+          : item.kind === "wait" && item.target !== ""
+            ? `${words.verb} ${item.target}`
+            : words.verb,
+    target: item.kind === "reasoning" || item.kind === "wait" || isLabelled ? "" : item.target,
     targetIsCode: item.targetIsCode,
     startedAt: item.startedAt,
     result: item.result,
     output,
-    outputIsCode: item.kind !== "context_compaction",
+    outputIsCode: item.kind !== "context_compaction" && item.kind !== "plan",
     images,
     steps: [],
     todoSteps: item.kind === "todo_list" ? item.todoSteps : null,
@@ -293,7 +303,8 @@ const buildRunRow = (run: readonly WorkItem[]): WorkRow => {
  * that folds become one group row when there are two or more of them:
  * commands, file changes, file reads, file searches, web searches, page
  * fetches, and tool calls of the same tool and server. Reasoning, subagents,
- * plans, todo lists, compactions, errors and unknown steps never fold.
+ * plans, todo lists, waits, image generations, compactions, errors and unknown
+ * steps never fold.
  *
  * Each step's result text and images are read here, so the desktop calls
  * this only while a stretch is open.

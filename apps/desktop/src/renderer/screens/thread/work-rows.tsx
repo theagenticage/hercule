@@ -14,6 +14,7 @@ import type { JSX } from "react";
 import type { TodoStep } from "@hercule/contract";
 import type { WorkRow, WorkRowIcon } from "@hercule/client-core";
 import { ChevronRightIcon } from "../../icons/chevron-right";
+import { ClockIcon } from "../../icons/clock";
 import { CloseIcon } from "../../icons/close";
 import { CompressIcon } from "../../icons/compress";
 import { CrewIcon } from "../../icons/crew";
@@ -24,6 +25,7 @@ import { IconFrame, type IconProps } from "../../icons/icon-frame";
 import { ListIcon } from "../../icons/list";
 import { Mark } from "../../marks";
 import { MoreIcon } from "../../icons/more";
+import { PaletteIcon } from "../../icons/palette";
 import { PuzzleIcon } from "../../icons/puzzle";
 import { QuestionIcon } from "../../icons/question";
 import { SearchIcon } from "../../icons/search";
@@ -49,6 +51,8 @@ const WORK_ROW_ICONS: Record<WorkRowIcon, (props: IconProps) => JSX.Element> = {
   more: MoreIcon,
   question: QuestionIcon,
   compress: CompressIcon,
+  clock: ClockIcon,
+  palette: PaletteIcon,
 };
 
 /**

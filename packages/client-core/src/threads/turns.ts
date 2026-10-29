@@ -30,11 +30,14 @@ import { readJsonObject } from "../json-shape";
 import type { AgentState } from "./agent-state";
 import {
   describeCompactionTarget,
+  describeWaitDuration,
   readCompactionDetail,
   readFetchedUrl,
+  readImageGenerationDetail,
   readToolCallName,
   readTodoListDetail,
   readUnknownLabel,
+  readWaitDetail,
   summarizeTodoList,
 } from "./item-detail";
 
@@ -222,6 +225,8 @@ const VERBS: Partial<Record<ItemKind, string>> = {
   subagent: "subagent",
   plan: "plan",
   todo_list: "tasks",
+  wait: "wait",
+  image_generation: "image",
   context_compaction: "compaction",
   error: "error",
 };
@@ -353,6 +358,26 @@ const describeTodoListTarget = (list: TodoListDetail): string => {
 };
 
 /**
+ * Returns the one-line target of an item that has no decoded detail of its
+ * own in a `StartedItem`: how long a wait asked to wait
+ * (`describeWaitDuration`), the path an image generation saved the image to,
+ * or a summary of the detail (`summarizeDetail`). The first two are "" when
+ * the detail does not decode or holds no path.
+ */
+const describeOtherTarget = (event: ItemStarted | ItemUpdated | ItemCompleted): string => {
+  switch (event.kind) {
+    case "wait": {
+      const wait = readWaitDetail(event.detail);
+      return wait === undefined ? "" : describeWaitDuration(wait);
+    }
+    case "image_generation":
+      return cutToTargetLine(readImageGenerationDetail(event.detail)?.path ?? "");
+    default:
+      return summarizeDetail(event.detail);
+  }
+};
+
+/**
  * Returns the parts of an `item.started`, `item.updated` or `item.completed`
  * row's detail that the projections draw from: the verb, the target and what
  * was decoded on the way (`StartedItem`). The verb is "fetch" for a
@@ -363,6 +388,10 @@ const describeTodoListTarget = (list: TodoListDetail): string => {
  *   its detail does not decode;
  * - for a todo list, its progress and current step (`describeTodoListTarget`),
  *   or "" when its detail does not decode;
+ * - for a wait, how long it asked to wait (`describeWaitDuration`), or "" when
+ *   its detail does not decode;
+ * - for an image generation, the path it saved the image to, or "" when it
+ *   saved none;
  * - for an `unknown` item that has one, the label the adapter wrote;
  * - for any other item, a one-line summary of its detail.
  */
@@ -385,7 +414,7 @@ const readItemDetail = (
           : describeTodoListTarget(todoList)
         : unknownLabel !== ""
           ? unknownLabel
-          : summarizeDetail(event.detail);
+          : describeOtherTarget(event);
   return {
     verb: readItemVerb(event.kind, event.detail),
     target,

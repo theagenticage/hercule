@@ -311,6 +311,7 @@ const readItemPaths = (event: ItemStarted | ItemUpdated | ItemCompleted): readon
 const CODE_TARGET_KINDS: ReadonlySet<ItemStarted["kind"]> = new Set([
   "command_execution",
   "file_change",
+  "image_generation",
 ]);
 
 /**

@@ -344,6 +344,15 @@ export const ItemKind = Schema.Literals([
    * the agent proposes, and a todo list is live progress.
    */
   "todo_list",
+  /**
+   * The agent paused for a set time, such as Codex's `clock.sleep` tool.
+   * `detail` is a `WaitDetail`.
+   */
+  "wait",
+  /**
+   * The agent generated an image. `detail` is an `ImageGenerationDetail`.
+   */
+  "image_generation",
   "context_compaction",
   "error",
   /** The forward-compatible catch-all: an unmapped vendor item, with its raw. */
@@ -735,6 +744,25 @@ export const TodoListDetail = Schema.Struct({
 export type TodoListDetail = Schema.Schema.Type<typeof TodoListDetail>;
 
 /**
+ * The `detail` of a `wait` item: how long the agent asked to wait, in
+ * milliseconds. The agent may be woken before that time has passed, so this is
+ * the time it asked for and not the time it waited.
+ */
+export const WaitDetail = Schema.Struct({
+  durationMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+
+export type WaitDetail = Schema.Schema.Type<typeof WaitDetail>;
+
+/**
+ * The `detail` of an `image_generation` item: `path` is the file the harness
+ * saved the image to. It is absent when the harness saved none.
+ */
+export const ImageGenerationDetail = Schema.Struct({ path: Schema.optionalKey(Fact) });
+
+export type ImageGenerationDetail = Schema.Schema.Type<typeof ImageGenerationDetail>;
+
+/**
  * `detail` stays Json: each adapter decides its shape per kind, and fixing
  * twelve shapes here would limit what each harness can report in future.
  *
@@ -756,10 +784,11 @@ export type TodoListDetail = Schema.Schema.Type<typeof TodoListDetail>;
  * copied from the input's `senderSessionId`. The field is absent on any other
  * message, the owner's included.
  *
- * Three more shapes are shared by every adapter and exported as schemas:
+ * Five more shapes are shared by every adapter and exported as schemas:
  * `UnknownItemDetail` for an `unknown` item, `ContextCompactionDetail` for a
- * `context_compaction` item and `TodoListDetail` for a `todo_list` item. All
- * are written by the adapter and decoded by clients; the event itself still
+ * `context_compaction` item, `TodoListDetail` for a `todo_list` item,
+ * `WaitDetail` for a `wait` item and `ImageGenerationDetail` for an
+ * `image_generation` item. All are written by the adapter and decoded by clients; the event itself still
  * carries Json.
  */
 const itemFields = {
