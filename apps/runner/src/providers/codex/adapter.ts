@@ -71,6 +71,7 @@ import {
   describeStartFailure,
 } from "../adapter-error-builders";
 import { truncateMessage } from "../text";
+import { captureUnknownItemReporter } from "../unknown-items";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { describeError, now } from "../../report";
 import { ASKED } from "./approvals";
@@ -1664,6 +1665,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           nativeSessionId: opened,
           instanceId: spec.instanceId,
         };
+        const reportUnknownMessage = yield* captureUnknownItemReporter("Codex", sessionId);
         const held: Held = {
           binding,
           host,
@@ -1687,6 +1689,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
               thread.fileChanges.clear();
             },
             failSession: () => exitSession(held, "crash"),
+            reportUnknownMessage,
           }),
         };
         sessions.set(sessionId, held);

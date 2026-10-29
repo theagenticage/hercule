@@ -92,10 +92,16 @@ describe("the session tool calls migration", () => {
     expect(toolCalls).toEqual({ [toHex(BUSY)]: 3, [toHex(QUIET)]: 0 });
   });
 
-  it("counts the kinds the sessions domain counts today", () => {
+  it("counts the kinds the sessions domain counts today, except those added after it", () => {
     // A tripwire: adding a kind to `TOOL_CALL_KINDS` fails this test on
     // purpose. The migration is frozen, so the sessions stored before the new
     // kind need a new migration that counts it; point this test at that one.
-    expect(new Set(MIGRATED_TOOL_CALL_KINDS)).toEqual(TOOL_CALL_KINDS);
+    //
+    // `wait` and `image_generation` are the exception: Codex's sleep and image
+    // generation items were stored as `unknown` before those kinds existed, so
+    // no stored row has either kind and the migration has nothing to count.
+    expect(new Set([...MIGRATED_TOOL_CALL_KINDS, "wait", "image_generation"])).toEqual(
+      TOOL_CALL_KINDS,
+    );
   });
 });

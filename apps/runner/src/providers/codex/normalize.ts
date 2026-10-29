@@ -14,29 +14,39 @@
  *   snapshot counts only what this process spent, so the state holds the
  *   last total Codex reported and the tokens counted so far.
  *
- * A notification this build does not handle produces no events: the
- * app-server adds methods between releases, and a live session must survive
- * one it does not know (spec 06 section 10.2). An item type with no mapping is
- * reported as `unknown`, with the frame in `raw`, so nothing is lost.
+ * Every notification method of the pinned release has a decision in
+ * `NOTIFICATION_DECISIONS`: events built from it, or a reason it is dropped.
+ * Typecheck fails when a Codex upgrade adds a method nobody decided yet. A
+ * method or an item type the pinned release does not list, which a newer Codex
+ * can send, becomes an `unknown` item with a label and the frame in `raw`, so
+ * nothing is lost and a live session survives it (spec 06 sections 6.7 and
+ * 10.2).
  */
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
-import type {
-  ItemKind,
-  ItemStatus,
-  OutputSchema,
-  ProviderEvent,
-  StreamKind,
-  StructuredResult,
-  SubagentId,
-  TurnState,
-  Usage,
+import {
+  MAX_TODO_STEPS,
+  type ItemKind,
+  type ItemStatus,
+  type OutputSchema,
+  type ProviderEvent,
+  type StreamKind,
+  type StructuredResult,
+  type SubagentId,
+  type TodoListDetail,
+  type TodoStep,
+  type TodoStepStatus,
+  type TurnState,
+  type UnknownItemDetail,
+  type Usage,
+  type WaitDetail,
 } from "@hercule/protocol";
-import { clampCount, buildEnvelope, buildRaw, type Envelope } from "../normalize";
+import { clampCount, buildEnvelope, buildRaw, toJson, type Envelope } from "../normalize";
 import { judgeAnswer, type HarnessAnswer } from "../structured-result";
 import { ensureId } from "../events";
 import { buildEditedPathFields } from "../edited-paths";
-import { truncateFact, truncateMessage } from "../text";
+import { requireText, truncateFact, truncateMessage } from "../text";
+import { buildUnknownItemLabel } from "../unknown-items";
 import type { NotificationFrame } from "./rpc";
 import type {
   AgentMessageDeltaNotification,
@@ -44,6 +54,7 @@ import type {
   ErrorNotification,
   ItemCompletedNotification,
   ItemStartedNotification,
+  ServerNotification,
   ThreadItem,
   ThreadTokenUsageUpdatedNotification,
   TurnCompletedNotification,
@@ -55,6 +66,16 @@ const CODEX_NOTIFICATION = "codex.app-server.notification";
 
 /** Which of an item's two reasoning streams is being streamed. */
 type Channel = "summary" | "raw";
+
+/**
+ * The todo list item an agent shows for its running turn: the item's id, the
+ * turn it belongs to, and the steps its last event carried.
+ */
+interface ShownTodoList {
+  readonly itemId: string;
+  readonly turnId: string;
+  readonly steps: ReadonlyArray<TodoStep>;
+}
 
 export interface Normalizing {
   readonly sessionId: string;
@@ -69,6 +90,19 @@ export interface Normalizing {
    * include it, and only the adapter knows which model it asked for.
    */
   model: string | undefined;
+  /**
+   * The id of the thread's running turn: set by `turn/started` and cleared by
+   * the `turn/completed` of that same turn. A frame that names another turn
+   * is late, and must not change the running turn's items or state.
+   */
+  openTurnId: string | undefined;
+  /** The todo list item of the running turn, or `undefined` before the plan's first update. */
+  todoList: ShownTodoList | undefined;
+  /**
+   * Tells the runner's log about a message with no decision, or one whose
+   * fields could not be read, by its label. It logs each label once.
+   */
+  readonly reportUnknownMessage: (label: string, error?: unknown) => void;
   readonly reasoning: Map<string, Channel>;
   /**
    * The assistant messages of the running turn whose text has reached the
@@ -107,6 +141,7 @@ export const buildNormalizingState = (
   sessionId: string,
   threadId: string,
   outputSchema: OutputSchema | undefined,
+  reportUnknownMessage: (label: string, error?: unknown) => void,
   subagent?: { readonly subagentId: SubagentId; readonly rootThreadId: string },
 ): Normalizing => ({
   sessionId,
@@ -114,6 +149,9 @@ export const buildNormalizingState = (
   rootThreadId: subagent?.rootThreadId ?? threadId,
   subagentId: subagent?.subagentId,
   model: undefined,
+  openTurnId: undefined,
+  todoList: undefined,
+  reportUnknownMessage,
   reasoning: new Map(),
   streamedMessages: new Set(),
   outputSchema: subagent === undefined ? outputSchema : undefined,
@@ -137,12 +175,19 @@ const buildNotificationRaw = (payload: unknown): ReturnType<typeof buildRaw> =>
   buildRaw(CODEX_NOTIFICATION, payload);
 
 /**
- * Maps Codex items to normalized kinds, retaining unmapped types as unknown.
- * The root's userMessage echoes input the adapter already reported, so the
- * table suppresses that duplicate. classifyItem reports subagent userMessage
- * items instead: they contain the task input its parent gave the subagent.
+ * The decision for every item type of the pinned release: the kind of item it
+ * is reported as, or `null` for an item that is not reported as an item. A
+ * Codex upgrade that adds a type fails typecheck until it is listed here.
+ *
+ * - The root's `userMessage` echoes input the adapter already reported, so it
+ *   is `null`. `classifyItem` reports a subagent's `userMessage` instead: it
+ *   holds the task input its parent gave the subagent.
+ * - `hookPrompt` is `null` because hooks are trimmed on purpose (spec 06
+ *   section 6.7).
+ * - `enteredReviewMode` and `exitedReviewMode` are `null` because they are
+ *   shown as a notice, not as an item (`buildReviewNotice`).
  */
-const ITEM_KINDS: Readonly<Record<ThreadItem["type"], ItemKind | null>> = {
+const ITEM_KINDS: Readonly<Record<ThreadItem["type"], Exclude<ItemKind, "unknown"> | null>> = {
   userMessage: null,
   agentMessage: "assistant_message",
   reasoning: "reasoning",
@@ -156,19 +201,24 @@ const ITEM_KINDS: Readonly<Record<ThreadItem["type"], ItemKind | null>> = {
   subAgentActivity: "subagent",
   plan: "plan",
   contextCompaction: "context_compaction",
-  hookPrompt: "unknown",
+  hookPrompt: null,
   imageView: "file_read",
-  sleep: "unknown",
-  imageGeneration: "unknown",
-  enteredReviewMode: "unknown",
-  exitedReviewMode: "unknown",
+  sleep: "wait",
+  imageGeneration: "image_generation",
+  enteredReviewMode: null,
+  exitedReviewMode: null,
 };
 
+/**
+ * Returns the kind an item is reported as, or `null` when it is not reported
+ * as an item. A type that `ITEM_KINDS` does not list, such as one a newer
+ * Codex added, is `unknown`.
+ */
 const classifyItem = (state: Normalizing, item: ThreadItem): ItemKind | null => {
   if (item.type === "userMessage" && state.subagentId !== undefined) return "user_message";
-  const known: ItemKind | null | undefined = ITEM_KINDS[item.type];
-  // An item type added after this release is still reported, as `unknown`.
-  return known === undefined ? "unknown" : known;
+  // Only the table's own keys count, so a type named like an object method,
+  // such as `constructor`, finds nothing.
+  return Object.hasOwn(ITEM_KINDS, item.type) ? ITEM_KINDS[item.type] : "unknown";
 };
 
 /**
@@ -202,7 +252,11 @@ const readEditedPaths = (
  * shaped like Codex's own data would make the row look different depending on
  * the harness.
  */
-const buildDetail = (state: Normalizing, item: ThreadItem): { readonly detail?: Schema.Json } => {
+const buildDetail = (
+  state: Normalizing,
+  item: ThreadItem,
+  phase: "started" | "completed",
+): { readonly detail?: Schema.Json } => {
   switch (item.type) {
     case "userMessage":
       return {
@@ -229,6 +283,19 @@ const buildDetail = (state: Normalizing, item: ThreadItem): { readonly detail?: 
     // An empty path is left out for the same reason as in `readApprovalPaths`.
     case "imageView":
       return item.path === "" ? {} : { detail: { path: truncateFact(item.path) } };
+    // The plan's text is known only when the item completes: the deltas before
+    // that need not add up to it (see `NOTIFICATION_DECISIONS`).
+    case "plan":
+      return phase === "started" ? {} : { detail: { content: truncateMessage(item.text) } };
+    case "sleep": {
+      if (typeof item.durationMs !== "number") throw new Error("sleep durationMs is not a number");
+      const detail: WaitDetail = { durationMs: clampCount(item.durationMs) };
+      return { detail };
+    }
+    case "imageGeneration": {
+      const saved = item.savedPath;
+      return saved === undefined || saved === "" ? {} : { detail: { path: truncateFact(saved) } };
+    }
     case "collabAgentToolCall": {
       const subagentIds = item.receiverThreadIds.filter((id) => id !== state.rootThreadId);
       return {
@@ -249,8 +316,8 @@ const buildDetail = (state: Normalizing, item: ThreadItem): { readonly detail?: 
         },
       };
     default:
-      // A plan, a reasoning block, an assistant message, a compaction and an
-      // unmapped item are shown from their own text or their raw payload.
+      // A reasoning block, an assistant message and a compaction are shown
+      // from their own text or their raw payload.
       return {};
   }
 };
@@ -275,16 +342,6 @@ const TURN_STATES: Readonly<Record<string, TurnState>> = {
   completed: "completed",
   failed: "failed",
   interrupted: "interrupted",
-};
-
-const DELTA_STREAMS: Readonly<Record<string, StreamKind>> = {
-  "item/agentMessage/delta": "assistant_text",
-  "item/commandExecution/outputDelta": "command_output",
-};
-
-const REASONING_CHANNELS: Readonly<Record<string, Channel>> = {
-  "item/reasoning/textDelta": "raw",
-  "item/reasoning/summaryTextDelta": "summary",
 };
 
 const buildContentDelta = (
@@ -631,124 +688,589 @@ const judgeTurn = (
   return refused === undefined ? undefined : judgeAnswer(schema, { missing: refused });
 };
 
+/** The method names of every notification the pinned Codex release sends. */
+type NotificationMethod = ServerNotification["method"];
+
+/** The params of the notification a method names. */
+type NotificationParams<Method extends NotificationMethod> = Extract<
+  ServerNotification,
+  { method: Method }
+>["params"];
+
+/**
+ * What the adapter does with one notification method: a function that returns
+ * its events, or a string with the reason nothing is shown (the notification is
+ * dropped). The function receives the params already typed for its method.
+ */
+type NotificationDecision<Method extends NotificationMethod> =
+  | ((state: Normalizing, params: NotificationParams<Method>) => ReadonlyArray<ProviderEvent>)
+  | string;
+
+/** The params of a `turn/plan/updated` notification. */
+type PlanUpdate = NotificationParams<"turn/plan/updated">;
+
+/** Maps the status Codex gives a plan step to the status of a todo step. */
+const TODO_STEP_STATUSES: Readonly<Record<PlanUpdate["plan"][number]["status"], TodoStepStatus>> = {
+  pending: "pending",
+  inProgress: "in_progress",
+  completed: "completed",
+};
+
+/** The two events that tell the user something without being an item. */
+type RuntimeMessageTag = "runtime.warning" | "runtime.notice";
+
+/**
+ * Builds a `runtime.notice` (neutral information) or a `runtime.warning`
+ * (something went wrong, but the session goes on) from a notification.
+ * `payload` is what goes into `raw`. With a `turnId` the event names that turn.
+ * Without one it names no turn, and so opens none: a notice or a warning
+ * between turns is drawn without a turn around it (spec 06 section 6.2).
+ */
+const buildRuntimeMessage = (
+  state: Normalizing,
+  tag: RuntimeMessageTag,
+  message: string,
+  payload: unknown,
+  turnId?: string,
+): ProviderEvent => ({
+  _tag: tag,
+  ...buildCodexThreadEnvelope(state),
+  ...buildNotificationRaw(payload),
+  ...(turnId === undefined ? {} : { turnId: ensureId(turnId) }),
+  message: truncateMessage(message),
+});
+
+/**
+ * Returns `turnId` when it is the thread's running turn, and `undefined`
+ * otherwise. A notice or a warning names a turn only while that turn runs: one
+ * that names a finished turn would be drawn inside it, long after it ended.
+ */
+const readRunningTurnId = (state: Normalizing, turnId: string): string | undefined =>
+  turnId === state.openTurnId ? turnId : undefined;
+
+/** Builds the `raw` field of an item frame, without the bytes of a generated image. */
+const buildItemRaw = (
+  params: ItemStartedNotification | ItemCompletedNotification,
+): ReturnType<typeof buildRaw> => {
+  const { item } = params;
+  if (item.type !== "imageGeneration") return buildNotificationRaw(params);
+  // `result` holds the image itself, base64 encoded. It would make the event
+  // megabytes long, and the image reaches nobody through the stream.
+  const withoutImage = Object.fromEntries(Object.entries(item).filter(([key]) => key !== "result"));
+  return buildNotificationRaw({ ...params, item: withoutImage });
+};
+
+/** What an item frame reports: the kind of the item, and its detail when it has one. */
+interface ItemFields {
+  readonly kind: ItemKind;
+  readonly detail?: Schema.Json;
+}
+
+/**
+ * Returns the kind and the detail an item frame is reported with, or `null`
+ * for an item that is not reported as an item. An item type with no entry in
+ * `ITEM_KINDS` is reported as `unknown` with a label, and the runner's log
+ * hears of it.
+ */
+const describeItem = (
+  state: Normalizing,
+  item: ThreadItem,
+  phase: "started" | "completed",
+): ItemFields | null => {
+  const kind = classifyItem(state, item);
+  if (kind === null) return null;
+  if (kind !== "unknown") return { kind, ...buildDetail(state, item, phase) };
+  const label = buildUnknownItemLabel("codex", `item/${String(item.type)}`);
+  state.reportUnknownMessage(label);
+  return { kind, detail: { label } satisfies UnknownItemDetail };
+};
+
+const onItemStarted = (
+  state: Normalizing,
+  params: ItemStartedNotification,
+): ReadonlyArray<ProviderEvent> => {
+  const fields = describeItem(state, params.item, "started");
+  if (fields === null) return [];
+  return [
+    {
+      _tag: "item.started",
+      ...buildCodexThreadEnvelope(state),
+      ...buildItemRaw(params),
+      turnId: ensureId(params.turnId),
+      itemId: ensureId(params.item.id),
+      ...fields,
+    },
+  ];
+};
+
+/**
+ * Returns the notice for a review mode item: "Codex started a review: <what
+ * is reviewed>" when it is entered, and "Codex finished the review" when it is
+ * left. Returns nothing for any other item. `review` holds the text of the
+ * review request on entry and the rendered review on exit, which can be long
+ * and which the agent's own answer repeats, so the notice leaves it out. The
+ * item stays in `raw`.
+ */
+const buildReviewNotice = (
+  state: Normalizing,
+  params: ItemCompletedNotification,
+): ReadonlyArray<ProviderEvent> => {
+  const { item } = params;
+  const turnId = readRunningTurnId(state, params.turnId);
+  if (item.type === "enteredReviewMode") {
+    const message =
+      item.review === "" ? "Codex started a review" : `Codex started a review: ${item.review}`;
+    return [buildRuntimeMessage(state, "runtime.notice", message, params, turnId)];
+  }
+  if (item.type === "exitedReviewMode") {
+    return [
+      buildRuntimeMessage(state, "runtime.notice", "Codex finished the review", params, turnId),
+    ];
+  }
+  return [];
+};
+
+const onItemCompleted = (
+  state: Normalizing,
+  params: ItemCompletedNotification,
+): ReadonlyArray<ProviderEvent> => {
+  // Recorded before the item is classified, because the echo of the user's
+  // message also counts: a turn that ends on that echo has no answer.
+  state.lastCompletedItem = params.item;
+  const fields = describeItem(state, params.item, "completed");
+  if (fields === null) return buildReviewNotice(state, params);
+  return [
+    ...buildMissingMessageText(state, params),
+    {
+      _tag: "item.completed",
+      ...buildCodexThreadEnvelope(state),
+      ...buildItemRaw(params),
+      turnId: ensureId(params.turnId),
+      itemId: ensureId(params.item.id),
+      status: readItemStatus(params.item),
+      ...fields,
+    },
+  ];
+};
+
+/**
+ * Completes the todo list item of the thread, with the steps it last showed,
+ * and forgets the item. With `endedTurnId` it completes the item only when it
+ * belongs to that turn. Without one it completes whatever item is open.
+ * Returns nothing when there is no such item.
+ */
+const completeTodoList = (
+  state: Normalizing,
+  endedTurnId?: string,
+): ReadonlyArray<ProviderEvent> => {
+  const shown = state.todoList;
+  if (shown === undefined || (endedTurnId !== undefined && shown.turnId !== endedTurnId)) return [];
+  state.todoList = undefined;
+  const detail: TodoListDetail = { steps: shown.steps };
+  return [
+    {
+      _tag: "item.completed",
+      ...buildCodexThreadEnvelope(state),
+      turnId: ensureId(shown.turnId),
+      itemId: shown.itemId,
+      kind: "todo_list",
+      status: "completed",
+      detail: toJson(detail),
+    },
+  ];
+};
+
+const onTurnStarted = (
+  state: Normalizing,
+  params: TurnStartedNotification,
+): ReadonlyArray<ProviderEvent> => {
+  const turnId = ensureId(params.turn.id);
+  // A todo list left open by a turn whose completion never arrived would show
+  // as work that never ends.
+  const unfinished = completeTodoList(state);
+  // Each turn is judged on its own answer. If the previous turn's completion
+  // never arrived or could not be read, its last item must not be used as this
+  // turn's answer.
+  state.lastCompletedItem = undefined;
+  state.turnStarted = true;
+  state.openTurnId = params.turn.id;
+  return [
+    ...unfinished,
+    {
+      _tag: "turn.started",
+      ...buildCodexThreadEnvelope(state),
+      ...buildNotificationRaw(params),
+      turnId,
+      ...(state.model === undefined ? {} : { model: truncateFact(state.model) }),
+    },
+  ];
+};
+
+const onTurnCompleted = (
+  state: Normalizing,
+  params: TurnCompletedNotification,
+): ReadonlyArray<ProviderEvent> => {
+  const ended = Object.hasOwn(TURN_STATES, params.turn.status)
+    ? TURN_STATES[params.turn.status]
+    : undefined;
+  if (ended === undefined) return [];
+  // The completion of another turn than the running one comes late. It ends
+  // its own turn, but it must not judge, or clear the state of, the turn that
+  // is running now.
+  const late = state.openTurnId !== undefined && state.openTurnId !== params.turn.id;
+  const todoCompletion = completeTodoList(state, params.turn.id);
+  let structuredResult: StructuredResult | undefined;
+  if (!late) {
+    structuredResult = judgeTurn(state, params.turn, ended);
+    // The items of an ended turn cannot stream any more, so their reasoning
+    // channels and message records are no longer needed.
+    state.reasoning.clear();
+    state.streamedMessages.clear();
+    state.lastCompletedItem = undefined;
+    state.openTurnId = undefined;
+  }
+  return [
+    ...todoCompletion,
+    {
+      _tag: "turn.completed",
+      ...buildCodexThreadEnvelope(state),
+      ...buildNotificationRaw(params),
+      turnId: ensureId(params.turn.id),
+      state: ended,
+      ...(structuredResult === undefined ? {} : { structuredResult }),
+    },
+  ];
+};
+
+/**
+ * Builds the steps of a todo list from Codex's plan. Throws when a step has no
+ * text or a status this build does not know, so the update is reported as an
+ * `unknown` item and the user does not see a list that is wrong.
+ */
+const buildTodoSteps = (plan: PlanUpdate["plan"]): ReadonlyArray<TodoStep> =>
+  plan.map(({ step, status }) => {
+    if (requireText(step, "plan step text") === "") throw new Error("a plan step has no text");
+    if (!Object.hasOwn(TODO_STEP_STATUSES, status)) {
+      throw new Error(`a plan step has the status ${String(status)}, which is not known`);
+    }
+    return { text: truncateFact(step), status: TODO_STEP_STATUSES[status] };
+  });
+
+/**
+ * Shows Codex's plan of the running turn as the todo list item of that turn:
+ * the first update starts the item, a later one updates it with the whole list,
+ * and an update that changes nothing is dropped. A plan update for any other
+ * turn is dropped: the turn is over, and its list is no longer live. A plan
+ * with more than `MAX_TODO_STEPS` steps leaves the item as it is and returns a
+ * warning, because a cut list would show a count that is wrong.
+ */
+const onPlanUpdated = (state: Normalizing, params: PlanUpdate): ReadonlyArray<ProviderEvent> => {
+  if (!Array.isArray(params.plan)) throw new Error("plan is not a list");
+  if (params.turnId !== state.openTurnId) return [];
+  if (params.plan.length > MAX_TODO_STEPS) {
+    return [
+      buildRuntimeMessage(
+        state,
+        "runtime.warning",
+        `Codex's plan has ${params.plan.length} steps, more than the ${MAX_TODO_STEPS} a todo list can show`,
+        params,
+        params.turnId,
+      ),
+    ];
+  }
+  const steps = buildTodoSteps(params.plan);
+  const shown = state.todoList;
+  if (shown !== undefined && JSON.stringify(shown.steps) === JSON.stringify(steps)) return [];
+  // The id is made from the turn's id, because Codex gives the plan update no
+  // item id. A thread has one list per turn, and turn ids are unique, so the id
+  // is unique too and the same on every update.
+  const itemId = shown?.itemId ?? ensureId(`${params.turnId}:todo`);
+  state.todoList = { itemId, turnId: params.turnId, steps };
+  const detail: TodoListDetail = { steps };
+  const fields = {
+    ...buildCodexThreadEnvelope(state),
+    ...buildNotificationRaw(params),
+    turnId: ensureId(params.turnId),
+    itemId,
+    kind: "todo_list",
+    detail: toJson(detail),
+  } as const;
+  return [
+    shown === undefined ? { _tag: "item.started", ...fields } : { _tag: "item.updated", ...fields },
+  ];
+};
+
+/**
+ * Returns the text of a warning that has a summary and optional details,
+ * with the details on the line after the summary and the path of the config
+ * file, when there is one, on the line after that. Throws when a field is not
+ * text, so the notification is reported as `unknown` and not drawn wrongly.
+ */
+const buildSummaryText = (params: {
+  readonly summary: string;
+  readonly details: string | null;
+  readonly path?: string;
+}): string => {
+  const details = params.details == null ? "" : requireText(params.details, "details");
+  const path = params.path === undefined ? "" : requireText(params.path, "path");
+  return [
+    requireText(params.summary, "summary"),
+    ...(details === "" ? [] : [details]),
+    ...(path === "" ? [] : [`Config file: ${path}`]),
+  ].join("\n");
+};
+
+/**
+ * Builds the warning for a `warning` or `guardianWarning` notification. A
+ * warning for one thread names the thread's running turn, so it is drawn inside
+ * that turn. A warning with no thread concerns the whole session and names no
+ * turn.
+ */
+const buildThreadWarning = (
+  state: Normalizing,
+  params: { readonly threadId: string | null; readonly message: string },
+): ReadonlyArray<ProviderEvent> => [
+  buildRuntimeMessage(
+    state,
+    "runtime.warning",
+    requireText(params.message, "warning message"),
+    params,
+    params.threadId === null ? undefined : state.openTurnId,
+  ),
+];
+
+/**
+ * The decision for every notification method of the pinned Codex release (spec
+ * 06 section 6.7). Each entry is checked against the params of its method: a
+ * handler takes that method's params type, and a method the release does not
+ * list is an error. A Codex upgrade that adds a method fails typecheck until it
+ * is listed here. A method that is not here, which a newer Codex can send,
+ * becomes a labelled `unknown` item in `normalize`.
+ */
+const NOTIFICATION_DECISIONS = {
+  "turn/started": onTurnStarted,
+  "turn/completed": onTurnCompleted,
+  "item/started": onItemStarted,
+  "item/completed": onItemCompleted,
+  "thread/tokenUsage/updated": (state, params) => {
+    const usage = countUsageSinceStart(state, params.tokenUsage);
+    if (usage === undefined) return [];
+    return [
+      {
+        _tag: "session.usage.updated",
+        ...buildCodexThreadEnvelope(state),
+        ...buildNotificationRaw(params),
+        ...(state.usageIncomplete
+          ? { usageReport: { status: "incomplete" as const, counts: usage } }
+          : { usage }),
+      },
+    ];
+  },
+  error: onError,
+  "item/agentMessage/delta": (state, params) => {
+    if (params.delta !== "") state.streamedMessages.add(params.itemId);
+    return buildContentDelta(state, params, "assistant_text");
+  },
+  "item/commandExecution/outputDelta": (state, params) =>
+    buildContentDelta(state, params, "command_output"),
+  "item/reasoning/textDelta": (state, params) => buildReasoningDelta(state, params, "raw"),
+  "item/reasoning/summaryTextDelta": (state, params) =>
+    buildReasoningDelta(state, params, "summary"),
+  "turn/plan/updated": onPlanUpdated,
+  "model/rerouted": (state, params) => [
+    buildRuntimeMessage(
+      state,
+      "runtime.notice",
+      `Codex switched model from ${requireText(params.fromModel, "fromModel")} to ${requireText(params.toModel, "toModel")}`,
+      params,
+      readRunningTurnId(state, params.turnId),
+    ),
+  ],
+  warning: buildThreadWarning,
+  guardianWarning: buildThreadWarning,
+  configWarning: (state, params) => [
+    buildRuntimeMessage(state, "runtime.warning", buildSummaryText(params), params),
+  ],
+  deprecationNotice: (state, params) => [
+    buildRuntimeMessage(
+      state,
+      "runtime.warning",
+      buildSummaryText({ summary: params.summary, details: params.details }),
+      params,
+    ),
+  ],
+  "item/plan/delta":
+    "Codex documents that the deltas need not add up to the final plan, and the completed plan item carries the whole text",
+  "account/rateLimits/updated":
+    "rate limits are not shown yet; a separate piece of work (#625) decides how",
+  "account/updated": "account state belongs in the capability snapshot, not in a session",
+  "account/login/completed":
+    "signing in is done by the runner's login flow, never during a session",
+  "thread/started":
+    "a thread is introduced by the first frame that names it, which the runner then reads with thread/read",
+  "thread/status/changed": "the session's status comes from its turns",
+  "thread/archived": "Hercule never archives a Codex thread",
+  "thread/unarchived": "Hercule never archives a Codex thread",
+  "thread/deleted": "Hercule never deletes a Codex thread",
+  "thread/closed": "the adapter ends the session on it before frames reach this table",
+  "thread/reverted": "Hercule never rolls a Codex thread back",
+  "thread/name/updated": "Hercule names its threads itself",
+  "thread/goal/updated": "Hercule does not use Codex thread goals",
+  "thread/goal/cleared": "Hercule does not use Codex thread goals",
+  "thread/queue/changed": "Hercule queues a session's input itself, not in Codex",
+  "thread/settings/updated": "the settings are the ones Hercule set when it opened the thread",
+  "thread/compacted": "deprecated; the contextCompaction item already shows the compaction",
+  "thread/environment/connected": "Hercule does not use Codex remote environments",
+  "thread/environment/disconnected": "Hercule does not use Codex remote environments",
+  "project/changed": "Hercule does not use Codex projects",
+  "thread/project/updated": "Hercule does not use Codex projects",
+  "skills/changed": "an invalidation signal for a skill list this adapter does not cache",
+  "hook/started": "hooks are not shown (spec 06 section 6.7)",
+  "hook/completed": "hooks are not shown (spec 06 section 6.7)",
+  "turn/diff/updated": "diffs come from the workspace's checkpoints, not from the harness",
+  "turn/moderationMetadata": "moderation metadata is for Codex's own interface, not session output",
+  "item/autoApprovalReview/started":
+    "Codex marks the auto-review payload unstable; the reviewed item ends with its own status",
+  "item/autoApprovalReview/completed":
+    "Codex marks the auto-review payload unstable; the reviewed item ends with its own status",
+  "autoApprovalReview/strictReviewRequired":
+    "Codex marks the auto-review payload unstable; the reviewed item ends with its own status",
+  "rawResponseItem/completed": "internal model API data; the items arrive as item/completed",
+  "rawResponse/completed": "internal model API data; usage arrives as thread/tokenUsage/updated",
+  "command/exec/outputDelta": "answers a command/exec request, which Hercule never makes",
+  "process/outputDelta": "answers a process/spawn request, which Hercule never makes",
+  "process/exited": "answers a process/spawn request, which Hercule never makes",
+  "item/commandExecution/terminalInteraction":
+    "the stdin sent to a running command; the command item shows the command and its output",
+  "item/fileChange/outputDelta": "deprecated; Codex no longer sends it",
+  "item/fileChange/patchUpdated":
+    "the completed fileChange item carries the final patch and its paths",
+  "serverRequest/resolved": "confirms a request the adapter has already answered itself",
+  "item/mcpToolCall/progress":
+    "progress text of a running MCP call; the item shows the call and its result",
+  "mcpServer/oauthLogin/completed": "Hercule starts no MCP sign-ins",
+  "mcpServer/startupStatus/updated": "the start-up state of an MCP server is not session output",
+  "mcpServer/event/stream/notification": "belongs to an MCP subscription Hercule never opens",
+  "app/list/updated": "the list of apps is not session output",
+  "remoteControl/status/changed": "Hercule does not use Codex remote control",
+  "externalAgentConfig/import/progress": "Hercule never imports another agent's configuration",
+  "externalAgentConfig/import/completed": "Hercule never imports another agent's configuration",
+  "fs/changed": "answers an fs/watch subscription, which Hercule never makes",
+  "item/reasoning/summaryPartAdded":
+    "only marks where a new summary part starts; its text arrives as summary deltas",
+  "model/verification": "tells Codex's own interface about a verification it asks of the user",
+  "model/safetyBuffering/updated": "state for Codex's own interface, not session output",
+  "modelProvider/authRecoveryStarted":
+    "a failed recovery arrives as an error notification, which is shown",
+  "modelProvider/authRecoveryCompleted":
+    "a failed recovery arrives as an error notification, which is shown",
+  "fuzzyFileSearch/sessionUpdated": "answers a fuzzy file search, which Hercule never starts",
+  "fuzzyFileSearch/sessionCompleted": "answers a fuzzy file search, which Hercule never starts",
+  "thread/realtime/started": "Hercule does not use Codex realtime voice",
+  "thread/realtime/itemAdded": "Hercule does not use Codex realtime voice",
+  "thread/realtime/item/started": "Hercule does not use Codex realtime voice",
+  "thread/realtime/item/transcript/delta": "Hercule does not use Codex realtime voice",
+  "thread/realtime/item/completed": "Hercule does not use Codex realtime voice",
+  "thread/realtime/transcript/delta": "Hercule does not use Codex realtime voice",
+  "thread/realtime/transcript/done": "Hercule does not use Codex realtime voice",
+  "thread/realtime/outputAudio/delta": "Hercule does not use Codex realtime voice",
+  "thread/realtime/sdp": "Hercule does not use Codex realtime voice",
+  "thread/realtime/error": "Hercule does not use Codex realtime voice",
+  "thread/realtime/closed": "Hercule does not use Codex realtime voice",
+  "windows/worldWritableWarning": "a Windows-only message; runners run on macOS and Linux",
+  "windowsSandbox/setupCompleted": "a Windows-only message; runners run on macOS and Linux",
+} satisfies { readonly [Method in NotificationMethod]: NotificationDecision<Method> };
+
+/**
+ * `NOTIFICATION_DECISIONS` read by a method from a frame, which can be anything
+ * at runtime. The one cast in the table: TypeScript cannot relate a method read
+ * at runtime to the handler type of that method, so every entry is read as a
+ * handler of the params of any method. `satisfies` has already checked each
+ * entry against its own method.
+ */
+const DECISIONS_BY_METHOD = NOTIFICATION_DECISIONS as Readonly<
+  Record<string, NotificationDecision<NotificationMethod>>
+>;
+
+/**
+ * Returns the turn a frame's params name, or `undefined` when they name none.
+ * The params come from the wire and can be anything.
+ */
+const readNamedTurnId = (params: unknown): string | undefined => {
+  if (typeof params !== "object" || params === null || !("turnId" in params)) return undefined;
+  return typeof params.turnId === "string" && params.turnId !== "" ? params.turnId : undefined;
+};
+
+/**
+ * Returns the events of an `unknown` item for a notification this adapter
+ * cannot show: its method has no entry in `NOTIFICATION_DECISIONS`, or its
+ * params could not be read (`error` is what failed). The item carries `label`,
+ * and the whole frame goes in `raw`. The runner's log hears of it once.
+ *
+ * The item goes in the thread's running turn, unless the frame names another
+ * turn: a late frame must not add to a turn that is over, or to the one that is
+ * running now. With no running turn, or for a late frame, the item opens a
+ * turn of its own that holds only this item and ends `completed` right after
+ * it (spec 06 section 6.2).
+ */
+const buildUnknownFrameEvents = (
+  state: Normalizing,
+  frame: NotificationFrame,
+  label: string,
+  error?: unknown,
+): ReadonlyArray<ProviderEvent> => {
+  state.reportUnknownMessage(label, error);
+  const named = readNamedTurnId(frame.params);
+  const running = state.openTurnId;
+  const inRunningTurn = running !== undefined && (named === undefined || named === running);
+  const turnId = inRunningTurn ? ensureId(running) : crypto.randomUUID();
+  const itemId = crypto.randomUUID();
+  const detail = { label } satisfies UnknownItemDetail;
+  const item = {
+    ...buildCodexThreadEnvelope(state),
+    ...buildNotificationRaw(frame),
+    turnId,
+    itemId,
+    kind: "unknown",
+    detail,
+  } as const;
+  const events: Array<ProviderEvent> = [
+    { _tag: "item.started", ...item },
+    { _tag: "item.completed", ...item, status: "completed" },
+  ];
+  if (inRunningTurn) return events;
+  return [
+    { _tag: "turn.started", ...buildCodexThreadEnvelope(state), turnId },
+    ...events,
+    { _tag: "turn.completed", ...buildCodexThreadEnvelope(state), turnId, state: "completed" },
+  ];
+};
+
+/**
+ * Converts one decoded notification to normalized events by its entry in
+ * `NOTIFICATION_DECISIONS`. A method with no entry, such as one a newer Codex
+ * added, becomes a labelled `unknown` item. So does a known method whose params
+ * are not what the pinned release promises, because the app-server ships often
+ * and a live session must survive a changed field. The one exception is
+ * `thread/tokenUsage/updated`: its failure is thrown, because the adapter
+ * recovers the usage counters from it.
+ */
 export const normalize = (
   state: Normalizing,
   frame: NotificationFrame,
 ): ReadonlyArray<ProviderEvent> => {
-  // Only each table's own keys count, so a method or status named like an
-  // object method, such as `constructor`, finds nothing.
-  const reasoning = Object.hasOwn(REASONING_CHANNELS, frame.method)
-    ? REASONING_CHANNELS[frame.method]
+  // Only the table's own keys count, so a method named like an object method,
+  // such as `constructor`, finds nothing.
+  const decision = Object.hasOwn(DECISIONS_BY_METHOD, frame.method)
+    ? DECISIONS_BY_METHOD[frame.method]
     : undefined;
-  if (reasoning !== undefined) {
-    return buildReasoningDelta(state, frame.params as AgentMessageDeltaNotification, reasoning);
-  }
-  const streamKind = Object.hasOwn(DELTA_STREAMS, frame.method)
-    ? DELTA_STREAMS[frame.method]
-    : undefined;
-  if (streamKind !== undefined) {
-    const params = frame.params as AgentMessageDeltaNotification;
-    if (streamKind === "assistant_text" && params.delta !== "") {
-      state.streamedMessages.add(params.itemId);
-    }
-    return buildContentDelta(state, params, streamKind);
-  }
-  switch (frame.method) {
-    case "turn/started": {
-      const params = frame.params as TurnStartedNotification;
-      // Each turn is judged on its own answer. If the previous turn's
-      // completion never arrived or could not be read, its last item must not
-      // be used as this turn's answer.
-      state.lastCompletedItem = undefined;
-      state.turnStarted = true;
-      return [
-        {
-          _tag: "turn.started",
-          ...buildCodexThreadEnvelope(state),
-          ...buildNotificationRaw(params),
-          turnId: ensureId(params.turn.id),
-          ...(state.model === undefined ? {} : { model: truncateFact(state.model) }),
-        },
-      ];
-    }
-    case "turn/completed": {
-      const params = frame.params as TurnCompletedNotification;
-      const ended = Object.hasOwn(TURN_STATES, params.turn.status)
-        ? TURN_STATES[params.turn.status]
-        : undefined;
-      if (ended === undefined) return [];
-      const structuredResult = judgeTurn(state, params.turn, ended);
-      // The items of an ended turn cannot stream any more, so their reasoning
-      // channels and message records are no longer needed.
-      state.reasoning.clear();
-      state.streamedMessages.clear();
-      state.lastCompletedItem = undefined;
-      return [
-        {
-          _tag: "turn.completed",
-          ...buildCodexThreadEnvelope(state),
-          ...buildNotificationRaw(params),
-          turnId: ensureId(params.turn.id),
-          state: ended,
-          ...(structuredResult === undefined ? {} : { structuredResult }),
-        },
-      ];
-    }
-    case "item/started": {
-      const params = frame.params as ItemStartedNotification;
-      const kind = classifyItem(state, params.item);
-      if (kind === null) return [];
-      return [
-        {
-          _tag: "item.started",
-          ...buildCodexThreadEnvelope(state),
-          ...buildNotificationRaw(params),
-          turnId: ensureId(params.turnId),
-          itemId: ensureId(params.item.id),
-          kind,
-          ...buildDetail(state, params.item),
-        },
-      ];
-    }
-    case "item/completed": {
-      const params = frame.params as ItemCompletedNotification;
-      // Recorded before the item is classified, because the echo of the user's
-      // message also counts: a turn that ends on that echo has no answer.
-      state.lastCompletedItem = params.item;
-      const kind = classifyItem(state, params.item);
-      if (kind === null) return [];
-      return [
-        ...buildMissingMessageText(state, params),
-        {
-          _tag: "item.completed",
-          ...buildCodexThreadEnvelope(state),
-          ...buildNotificationRaw(params),
-          turnId: ensureId(params.turnId),
-          itemId: ensureId(params.item.id),
-          kind,
-          status: readItemStatus(params.item),
-          ...buildDetail(state, params.item),
-        },
-      ];
-    }
-    case "thread/tokenUsage/updated": {
-      const params = frame.params as ThreadTokenUsageUpdatedNotification;
-      const usage = countUsageSinceStart(state, params.tokenUsage);
-      if (usage === undefined) return [];
-      return [
-        {
-          _tag: "session.usage.updated",
-          ...buildCodexThreadEnvelope(state),
-          ...buildNotificationRaw(params),
-          ...(state.usageIncomplete
-            ? { usageReport: { status: "incomplete" as const, counts: usage } }
-            : { usage }),
-        },
-      ];
-    }
-    case "error":
-      return onError(state, frame.params as ErrorNotification);
-    default:
-      return [];
+  const label = buildUnknownItemLabel("codex", frame.method);
+  if (decision === undefined) return buildUnknownFrameEvents(state, frame, label);
+  if (typeof decision === "string") return [];
+  try {
+    return decision(state, frame.params as NotificationParams<NotificationMethod>);
+  } catch (error) {
+    if (frame.method === "thread/tokenUsage/updated") throw error;
+    return buildUnknownFrameEvents(state, frame, label, error);
   }
 };

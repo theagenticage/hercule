@@ -127,6 +127,8 @@ export const makeCodexThreads = (options: {
   readonly cancelRequests: (thread: CodexThreadState) => void;
   readonly completeTurn: (thread: CodexThreadState) => void;
   readonly failSession: () => void;
+  /** Tells the runner's log about a notification the normalizer has no decision for. */
+  readonly reportUnknownMessage: (label: string, error?: unknown) => void;
 }) => {
   const threads = new Map<string, CodexThreadState>();
   const discoveries = new Map<string, Discovery>();
@@ -157,6 +159,7 @@ export const makeCodexThreads = (options: {
         options.sessionId,
         threadId,
         root ? options.spec.outputSchema : undefined,
+        options.reportUnknownMessage,
         root ? undefined : { subagentId: threadId, rootThreadId: options.rootThreadId },
       ),
       parentThreadId: resumedSubagents.get(threadId)?.parentSubagentId,

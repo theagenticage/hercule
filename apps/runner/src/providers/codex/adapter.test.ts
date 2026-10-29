@@ -1881,7 +1881,12 @@ describe("the two Codex features this adapter must never use", () => {
   it("calls neither the shell-command method nor the process method", () => {
     // If a harness could start its own processes through the runner, that
     // work would run outside every session boundary Hercule sets.
-    expect(grepSource(["thread/shell", "Command", "\\|process/", "spawn"].join(""))).toBe("");
+    // The notification table in `normalize.ts` names the notifications of those
+    // methods only to drop them, so it is not a call.
+    const calls = grepSource(["thread/shell", "Command", "\\|process/", "spawn"].join(""))
+      .split("\n")
+      .filter((line) => !line.startsWith("apps/runner/src/providers/codex/normalize.ts:"));
+    expect(calls.join("\n")).toBe("");
   });
 
   it("never refers to the user's own Codex home", () => {
