@@ -407,8 +407,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 11, the version that added the todo list item and item.updated", () => {
-    expect(PROTOCOL_VERSION).toBe(11);
+  it("is 12, the version that added the todo list item kind", () => {
+    expect(PROTOCOL_VERSION).toBe(12);
   });
 });
 

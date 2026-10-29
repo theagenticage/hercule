@@ -1,6 +1,7 @@
 /**
  * Subscribes one agent's page to that agent's live topics and returns the ref
- * for the live tail element. The agent is the session's own agent when
+ * for the live tail element, and when the stream became unreadable, if it did.
+ * The agent is the session's own agent when
  * `subagentId` is undefined, else that subagent. A page follows exactly one
  * agent, so a subagent's page holds the subagent's topics in place of the
  * session's.
@@ -38,6 +39,16 @@
  * When the session no longer exists, the delta arrives with `gone` set and the
  * handler unsubscribes, rather than retrying a subscription that will keep
  * failing.
+ *
+ * When the controller sends a row this page cannot decode, usually because the
+ * controller is newer than the page, the delta arrives with `unreadable` set.
+ * The stream cannot go on past that row and will not resume, so the handler
+ * unsubscribes, keeps the rows already in the cache, and the hook returns
+ * `streamUnreadableAt`, the moment the delta arrived, for the page to tell the
+ * user to reload. The tap is unsubscribed too, and the tail it held is
+ * dropped: the buffer forgets an item only when that item's `item.completed`
+ * row arrives on the stream, which now never happens, so the taps would pile
+ * up, and the open item would keep painting text that no row will ever match.
  */
 import {
   useEffect,
@@ -68,8 +79,14 @@ export const useAgentLive = (
   rows: readonly TranscriptRow[],
   /** Called after a paint changes the tail's text: the one way the column grows without a React render. */
   onTapFlush: () => void,
-): RefObject<HTMLSpanElement | null> => {
+): {
+  readonly tailRef: RefObject<HTMLSpanElement | null>;
+  /** When the stream became unreadable, as an ISO time, or undefined while it is readable. */
+  readonly streamUnreadableAt: string | undefined;
+} => {
   const tailRef = useRef<HTMLSpanElement | null>(null);
+  const [streamUnreadableAt, setStreamUnreadableAt] = useState<string | undefined>(undefined);
+  const isStreamUnreadable = streamUnreadableAt !== undefined;
   // One buffer for the life of the page. When the agent changes, the tap is
   // subscribed again, and that drops every tail the buffer still holds.
   const [tail] = useState(createTailBuffer);
@@ -121,6 +138,10 @@ export const useAgentLive = (
         const delivery = decideStreamDelivery(readHeldRows(), delta);
         if (delivery.kind === "gone") {
           unsubscribe();
+        } else if (delivery.kind === "unreadable") {
+          unsubscribe();
+          // Kept if already set, so the time is the first unreadable delta's.
+          setStreamUnreadableAt((at) => at ?? new Date().toISOString());
         } else if (delivery.kind === "reset") {
           // `live.ts` re-subscribes from the head as soon as it reports a
           // reset, while the refetch below is still in progress. So a row
@@ -159,6 +180,9 @@ export const useAgentLive = (
   useEffect(() => {
     let frame: number | null = null;
     skipOpenItems();
+    // With the stream unreadable no row will ever match the tail, so the tap
+    // is not followed. The skip above has dropped the tails of the open items.
+    if (isStreamUnreadable) return;
     const unsubscribe = live.subscribe(buildAgentTapTopic(sessionId, subagentId), (delta) => {
       const delivery = decideTapDelivery(delta);
       if (delivery.kind === "gone") {
@@ -177,7 +201,7 @@ export const useAgentLive = (
       unsubscribe();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [live, sessionId, subagentId, tail]);
+  }, [live, sessionId, subagentId, tail, isStreamUnreadable]);
 
-  return tailRef;
+  return { tailRef, streamUnreadableAt };
 };

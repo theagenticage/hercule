@@ -107,6 +107,9 @@ object BureauIcons {
     /** crew.js `terminal`. */
     val Terminal = buildIcon(strokes = listOf("M4 2.8h8a2 2 0 0 1 2 2v6.4a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2v-6.4a2 2 0 0 1 2 -2z", "M4.8 6.2l2 1.8-2 1.8M8.4 10h2.8"))
 
+    /** The desktop app's `InfoIcon`; the book has no info icon. */
+    val Info = buildIcon(strokes = listOf("M2.2 8a5.8 5.8 0 1 0 11.6 0a5.8 5.8 0 1 0 -11.6 0z", "M8 7.2v4.2"), fills = listOf("M7.6 4.8a0.4 0.4 0 1 0 0.8 0a0.4 0.4 0 1 0 -0.8 0z"))
+
     /** crew.js `question`. */
     val Question = buildIcon(strokes = listOf("M2.2 8a5.8 5.8 0 1 0 11.6 0a5.8 5.8 0 1 0 -11.6 0z", "M6.3 6.4a1.8 1.8 0 0 1 3.5.5c0 1.2-1.8 1.4-1.8 2.6"), fills = listOf("M7.6 11.4a0.4 0.4 0 1 0 0.8 0a0.4 0.4 0 1 0 -0.8 0z"))
 }

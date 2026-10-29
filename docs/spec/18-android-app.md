@@ -99,6 +99,8 @@ Tests sit under `app/src/test/`, beside the same packages. Screenshot goldens ar
 
 Every enum on the wire decodes as an open string with an "unknown" branch, so a new value from a newer controller never fails a read. `item.*.detail` is untyped JSON whose keys differ per provider, so every key is optional, and an item of an unknown kind gets a generic row. The wire itself is described in [the wire research](../research/android/wire.md).
 
+*(Amended 2026-10-29, [#897](https://github.com/theagenticage/hercule/issues/897).)* **An event of an unknown type decodes to `ProviderEvent.Unknown`** and holds the whole event. The controller's own `unknown` event ([./06-providers.md](./06-providers.md) section 6) reads its type from `originalType`; a raw event with a future `_tag` reads it from `_tag`. The Thread screen draws each of these as a muted note, an info icon and "Unknown event: <type>". It also draws `runtime.notice` as a muted note with its message, and `runtime.error` as an error row in the failure ink, with its message or, when there is none, its class. An event of a subagent is left out of the thread, as every subagent row is.
+
 ### Logic ported from `client-core`
 
 The app shares no code with `client-core` ([ADR 0042](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md)). It ports these functions to Kotlin. Every source path is under `packages/client-core/src/`.

@@ -2595,6 +2595,96 @@ describe("transcript.read", () => {
     });
   });
 
+  it("stores an event with a tag this controller does not know as an unknown event, and keeps the runner connected", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      await reportTranscript(arranged, session.id);
+      const at = new Date().toISOString();
+      // What a newer runner sends: a tag from a later protocol, with a body this build cannot read.
+      const received = {
+        _tag: "turn.paused",
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        turnId: "turn-1",
+        reason: { code: 7 },
+      };
+      reportEvent(arranged.wire, 8, received as never);
+      // Sent after the unknown event. A controller that closed the socket on
+      // the unknown event would never apply it.
+      reportEvent(arranged.wire, 9, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "runtime.notice",
+        message: "after the unknown event",
+      });
+
+      const page = await waitUntil("wrote the event after the unknown one", async () => {
+        const found = await readTranscript(arranged, session.id);
+        return found.items.some((row) => row.event._tag === "runtime.notice") ? found : undefined;
+      });
+
+      expect(page.items.slice(-2).map((row) => row.event)).toEqual([
+        {
+          _tag: "unknown",
+          originalType: "turn.paused",
+          payload: received,
+          eventId: received.eventId,
+          sessionId: session.id,
+          at,
+        },
+        expect.objectContaining({ _tag: "runtime.notice" }),
+      ]);
+    });
+  });
+
+  it("reads a stored event of a type this build does not know as an unknown event", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      await reportTranscript(arranged, session.id);
+      await waitUntil("wrote the turn", async () => {
+        const found = await readTranscript(arranged, session.id);
+        return found.items.some((row) => row.event._tag === "turn.completed") ? found : undefined;
+      });
+      // What a later build leaves behind when it stores a native `turn.paused`
+      // event and the operator rolls back to this build on the same database.
+      const stored = {
+        _tag: "turn.paused",
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at: new Date().toISOString(),
+        turnId: "turn-1",
+      };
+      await Effect.runPromise(
+        Effect.orDie(
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
+              INSERT INTO session_stream (session_id, position, runner_seq, at, event)
+              VALUES (unhex(replace(${session.id}, '-', '')), 7, 100, ${stored.at},
+                      ${JSON.stringify(stored)})`,
+          ),
+        ),
+      );
+
+      const page = await readTranscript(arranged, session.id);
+
+      expect(page.items.at(-1)).toEqual({
+        position: 7,
+        at: stored.at,
+        event: {
+          _tag: "unknown",
+          originalType: "turn.paused",
+          payload: stored,
+          eventId: stored.eventId,
+          sessionId: session.id,
+          at: stored.at,
+        },
+      });
+    });
+  });
+
   it("pages with a cursor that continues exactly where the last page stopped", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });

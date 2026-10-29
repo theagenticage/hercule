@@ -1414,6 +1414,27 @@ describe("Thread: token tap", () => {
     expect(answer.textContent).toBe("Hello world, again");
   });
 
+  it("unsubscribes from the tap and clears the tail when the stream becomes unreadable", async () => {
+    const { runFrame } = stubFrames();
+    const { live } = await openApp(buildSession({ status: "busy" }), buildOpenTurnRows());
+    await startAssistantMessage(live);
+    pushAssistantTap(live, "half a paragraph");
+    await settle();
+    runFrame();
+    await screen.findByText("half a paragraph");
+
+    act(() => {
+      live.push(STREAM, { _tag: "from-the-future" });
+    });
+
+    // No row will ever take this text from the tail, so it must not stay painted.
+    await waitFor(() => {
+      expect(screen.queryByText("half a paragraph")).toBeNull();
+    });
+    expect(live.topics()).not.toContain(TAP);
+    expect(live.topics()).not.toContain(STREAM);
+  });
+
   it("refetches the transcript and shows the refetched rows when the live overlay reports reset", async () => {
     const { runFrame } = stubFrames();
     const busy = buildSession({ status: "busy" });
@@ -1721,6 +1742,37 @@ describe("Thread: live subscriptions", () => {
     });
   });
 
+  it("closes the transcript with one error when the controller sent a row the page cannot read, and keeps the rows drawn", async () => {
+    const { live } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
+    await screen.findByText("Added a test too.");
+    const stream = buildSessionStreamTopic(SESSION_ID);
+    await waitFor(() => {
+      expect(live.topics()).toContain(stream);
+    });
+
+    // A message with a tag this page does not know, as a newer controller
+    // sends after it changed a row's shape.
+    act(() => {
+      live.push(stream, { _tag: "from-the-future" });
+    });
+
+    const note = await screen.findByText(
+      "The rest of this thread can't be shown because this page is out of date. Reload the page to see it.",
+    );
+    expect(screen.getByText("Fix the login bug", { selector: "p" })).toBeTruthy();
+    expect(screen.getByText("Added a test too.")).toBeTruthy();
+    // One error note, after the last turn.
+    expect(screen.getAllByText("Error:")).toHaveLength(1);
+    const lastTurn = screen.getByText("Added a test too.");
+    expect(lastTurn.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Neither the stream nor the tap is subscribed again: the stream would
+    // stop at the same row, and no row will ever match what the tap delivers.
+    await waitFor(() => {
+      expect(live.topics()).not.toContain(stream);
+    });
+    expect(live.topics()).not.toContain(buildSessionTapTopic(SESSION_ID));
+  });
+
   it("replays a just-spawned thread's rows when the transcript read returned none", async () => {
     // The loader reads the transcript while the runner is still starting the
     // session, so the transcript is empty, and the cache is never refetched
@@ -1894,6 +1946,39 @@ describe("Thread: a subagent's page", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
+  it("closes the subagent's transcript with an error when the controller sent a row the page cannot read", async () => {
+    const rows = buildTwoCompletedTurns();
+    const { live, router } = await openApp(
+      buildSession({ status: "busy" }),
+      rows,
+      buildSubagentRoutes(rows),
+    );
+    await waitFor(() => {
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
+    });
+    await act(async () => {
+      await router.navigate({
+        to: "/threads/$sessionId/subagents/$subagentId",
+        params: { sessionId: SESSION_ID, subagentId: SUBAGENT_ID },
+      });
+    });
+    await screen.findByText("The auth module has two entry points.");
+    const stream = buildSubagentStreamTopic(SESSION_ID, SUBAGENT_ID);
+    await waitFor(() => {
+      expect(live.topics()).toContain(stream);
+    });
+
+    act(() => {
+      live.push(stream, { _tag: "from-the-future" });
+    });
+
+    await screen.findByText(/can't be shown because this page is out of date/);
+    expect(screen.getByText("The auth module has two entry points.")).toBeTruthy();
+    await waitFor(() => {
+      expect(live.topics()).not.toContain(stream);
+    });
+  });
+
   it("shows the rows the thread wrote while its subagent's page was open after going back", async () => {
     // The thread's transcript stays cached while the subagent's page is open,
     // but nothing appends to it: the session's stream is not subscribed. Going
@@ -2057,6 +2142,29 @@ describe("Thread: auto-scroll follows new content", () => {
 
     await waitFor(() => {
       expect(geometry.readScrollTop()).toBe(1200 - 100);
+    });
+  });
+
+  it("scrolls to the bottom to show the reload note when the reader was at the bottom", async () => {
+    const { live } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
+    const stream = buildSessionStreamTopic(SESSION_ID);
+    await waitFor(() => {
+      expect(live.topics()).toContain(stream);
+    });
+
+    geometry.set({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 });
+    geometry.scroll();
+    await settle();
+
+    // The note adds no row and no queued input, so only the unreadable stream
+    // itself can bring the reader down to it.
+    geometry.set({ scrollTop: 900, scrollHeight: 1100, clientHeight: 100 });
+    act(() => {
+      live.push(stream, { _tag: "from-the-future" });
+    });
+
+    await waitFor(() => {
+      expect(geometry.readScrollTop()).toBe(1100 - 100);
     });
   });
 

@@ -93,8 +93,37 @@ export const SLOW_COALESCE_WINDOW_MS = 1000;
  */
 const SUBSCRIPTION_CAP = 1000;
 
+/**
+ * How many bytes may wait for one subscriber before the controller ends the
+ * subscription, 8 MiB. It bounds the memory a stalled client can hold on a
+ * busy session, which the message count alone does not: a message has no size
+ * limit. The size of a message is a number of bytes, counted like this:
+ *
+ * - a log entry weighs the size of its stored JSON text, which the database
+ *   reports, so the entry is not encoded again;
+ * - a tap weighs the UTF-8 size of its delta text, because the runner splits
+ *   large output into deltas of about 2 MiB and a thousand of them waiting
+ *   would hold gigabytes;
+ * - an invalidate weighs nothing: it is small, and a burst of changes is
+ *   collected into one.
+ *
+ * For scale, the runner's own frame limit is 2 MiB, and t3code uses the same
+ * 8 MiB. A message offered to an empty queue is always accepted, however
+ * large, so one big event can never block a subscription for good.
+ */
+const SUBSCRIPTION_BYTE_CAP = 8 * 1024 * 1024;
+
 /** How many entries one read of the log returns at most. */
 const REPLAY_PAGE = 500;
+
+/**
+ * How many bytes the first message of a log subscription carries, about 1 MiB.
+ * A page of 500 large rows would otherwise be one huge message, sent to a
+ * client that has only just reconnected. The rows left over from that page are
+ * sent right after it, one message per row, like every later row. A page
+ * always carries at least one row, however large.
+ */
+const REPLAY_PAGE_BYTES = 1024 * 1024;
 
 /** The errors a subscription can end with, other than the client closing it. */
 export type LiveFailure = CapExceeded | Unauthenticated | Internal;
@@ -109,6 +138,15 @@ interface Watcher {
   readonly doorbell: Queue.Queue<void> | undefined;
   /** The last log position this subscription has read. Log subscriptions only. */
   cursor: number;
+  /**
+   * The sizes in bytes of the messages offered to the queue and not yet known
+   * to be taken, oldest first: one size per queued message. The consumer takes
+   * messages without telling us, so `offerTo` drops the sizes of the taken
+   * ones the next time it runs. Holds at most `SUBSCRIPTION_CAP` entries.
+   */
+  readonly sizes: Array<number>;
+  /** The sum of `sizes`. */
+  waitingBytes: number;
 }
 
 /** The event log's topic, which carries records rather than news of changes. */
@@ -172,24 +210,52 @@ const make = Effect.gen(function* () {
   };
 
   /**
-   * Offers one message to one subscriber. Returns false when the subscription
-   * has ended. A subscriber whose queue is full is ended instead of queued
-   * for, because otherwise the queue would grow for a client that may never
-   * read it.
+   * Offers one message of `bytes` bytes to one subscriber. Returns false when
+   * the subscription has ended. A subscriber whose queue is full, by count or
+   * by bytes, is ended instead of queued for, because otherwise the queue
+   * would grow for a client that may never read it.
+   *
+   * The caller weighs the message, as `SUBSCRIPTION_BYTE_CAP` describes. An
+   * invalidate passes 0.
+   *
+   * Everything up to the offer runs in one synchronous step. The consumer
+   * takes from the queue between any two effects, and a size read before such
+   * a gap could be stale by the time the message is offered.
    */
-  const offerTo = (watcher: Watcher, message: LiveMessage): Effect.Effect<boolean> =>
-    Effect.gen(function* () {
-      const waiting = yield* Queue.size(watcher.queue);
-      if (waiting >= SUBSCRIPTION_CAP) {
-        dropWatcher(watcher);
-        yield* Queue.fail(
-          watcher.queue,
-          createCapExceededError({ count: waiting, cap: SUBSCRIPTION_CAP }, TOO_SLOW),
-        );
-        return false;
+  const offerTo = (watcher: Watcher, message: LiveMessage, bytes: number): Effect.Effect<boolean> =>
+    Effect.suspend(() => {
+      const waiting = Queue.sizeUnsafe(watcher.queue);
+      // The queue is first in, first out and nothing else removes from it, so
+      // the messages that are gone are the oldest ones.
+      while (watcher.sizes.length > waiting) {
+        watcher.waitingBytes -= watcher.sizes.shift() ?? 0;
       }
-      return yield* Queue.offer(watcher.queue, message);
+      if (waiting >= SUBSCRIPTION_CAP) {
+        return endAsTooSlow(watcher, waiting, SUBSCRIPTION_CAP);
+      }
+      if (waiting > 0 && watcher.waitingBytes + bytes > SUBSCRIPTION_BYTE_CAP) {
+        return endAsTooSlow(watcher, watcher.waitingBytes + bytes, SUBSCRIPTION_BYTE_CAP);
+      }
+      const accepted = Queue.offerUnsafe(watcher.queue, message);
+      if (accepted) {
+        watcher.sizes.push(bytes);
+        watcher.waitingBytes += bytes;
+      }
+      return Effect.succeed(accepted);
     });
+
+  /**
+   * Ends a subscription whose queue is over a limit with cap_exceeded, where
+   * `count` is what was waiting in the unit of the limit and `cap` the limit.
+   * Returns false, like `offerTo`.
+   */
+  const endAsTooSlow = (watcher: Watcher, count: number, cap: number): Effect.Effect<boolean> => {
+    dropWatcher(watcher);
+    return Effect.as(
+      Queue.fail(watcher.queue, createCapExceededError({ count, cap }, TOO_SLOW)),
+      false,
+    );
+  };
 
   /**
    * Starts collecting record changes for a window of `windowMs` and sending
@@ -229,7 +295,7 @@ const make = Effect.gen(function* () {
                     conversationIds: Object.fromEntries(changed),
                   }
                 : { _tag: "invalidate", ids, kind };
-            yield* Effect.forEach(subscribers, (watcher) => offerTo(watcher, message), {
+            yield* Effect.forEach(subscribers, (watcher) => offerTo(watcher, message, 0), {
               discard: true,
             });
           }
@@ -276,8 +342,15 @@ const make = Effect.gen(function* () {
    * reject a cursor past their end the same way.
    */
   interface LogSource<A> {
-    readonly after: (position: number, limit: number) => Effect.Effect<ReadonlyArray<A>, SqlError>;
-    readonly positionOf: (item: A) => number;
+    /**
+     * Reads up to `limit` entries after `position`, each with its size in
+     * bytes in the database.
+     */
+    readonly after: (
+      position: number,
+      limit: number,
+    ) => Effect.Effect<ReadonlyArray<{ readonly row: A; readonly bytes: number }>, SqlError>;
+    readonly readPosition: (row: A) => number;
     readonly head: Effect.Effect<number, SqlError>;
     /** The log's name in the error message for an invalid cursor: "log" or "transcript". */
     readonly noun: string;
@@ -286,9 +359,11 @@ const make = Effect.gen(function* () {
 
   /**
    * Reads a log forward for one follower, for as long as it is subscribed. The
-   * first read is the client's replay, sent as one message. After that, each
-   * entry is sent as its own message with its own position, because that
-   * position is the cursor the client resubscribes from.
+   * first message carries the client's replay: the first rows of the first
+   * read, up to about `REPLAY_PAGE_BYTES`. Every other row is sent as its own
+   * message with its own position, because that position is the cursor the
+   * client resubscribes from. So the queue limit for a client that stops
+   * reading counts rows, not pages.
    */
   const pump = <A extends Delta["items"][number]>(
     source: LogSource<A>,
@@ -296,36 +371,44 @@ const make = Effect.gen(function* () {
     doorbell: Queue.Queue<void>,
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
-      // The first message carries what the client missed, up to one page.
-      // After that each entry is its own message, so the queue limit for a
-      // client that stops reading counts entries, not pages.
       let positioning = true;
       while (true) {
-        let more = true;
-        while (more) {
-          const page = yield* source.after(watcher.cursor, REPLAY_PAGE);
-          const last = page[page.length - 1];
-          if (last !== undefined) watcher.cursor = source.positionOf(last);
+        let page: ReadonlyArray<{ readonly row: A; readonly bytes: number }>;
+        do {
+          page = yield* source.after(watcher.cursor, REPLAY_PAGE);
+          let rest = page;
           if (positioning) {
+            // The prefix of the page that fits in the byte limit, and at least
+            // one row so that a single large row still goes out.
+            let sentBytes = 0;
+            let sent = 0;
+            for (const { bytes } of page) {
+              if (sent > 0 && sentBytes + bytes > REPLAY_PAGE_BYTES) break;
+              sentBytes += bytes;
+              sent += 1;
+            }
+            const items = page.slice(0, sent).map(({ row }) => row);
+            const lastSent = items[items.length - 1];
+            if (lastSent !== undefined) watcher.cursor = source.readPosition(lastSent);
             const positioned: LiveMessage = {
               _tag: "delta",
               cursor: String(watcher.cursor),
-              items: page,
+              items,
             };
-            if (!(yield* offerTo(watcher, positioned))) return;
+            if (!(yield* offerTo(watcher, positioned, sentBytes))) return;
             positioning = false;
-          } else {
-            for (const item of page) {
-              const delta: LiveMessage = {
-                _tag: "delta",
-                cursor: String(source.positionOf(item)),
-                items: [item],
-              };
-              if (!(yield* offerTo(watcher, delta))) return;
-            }
+            rest = page.slice(sent);
           }
-          more = page.length === REPLAY_PAGE;
-        }
+          for (const { row, bytes } of rest) {
+            watcher.cursor = source.readPosition(row);
+            const delta: LiveMessage = {
+              _tag: "delta",
+              cursor: String(watcher.cursor),
+              items: [row],
+            };
+            if (!(yield* offerTo(watcher, delta, bytes))) return;
+          }
+        } while (page.length === REPLAY_PAGE);
         yield* Queue.take(doorbell);
       }
     }).pipe(
@@ -343,7 +426,7 @@ const make = Effect.gen(function* () {
 
   const eventSource: LogSource<Event> = {
     after: (position, limit) => readEventsAfter(sql, position, limit),
-    positionOf: (item) => item.id,
+    readPosition: (row) => row.id,
     head: readLogHead(sql),
     noun: "log",
     unreadable: LOG_UNREADABLE,
@@ -355,7 +438,7 @@ const make = Effect.gen(function* () {
   ): LogSource<TranscriptRow> => ({
     after: (position, limit) =>
       readTranscriptRowsAfter(sql, sessionId, subagentId, position, limit),
-    positionOf: (item) => item.position,
+    readPosition: (row) => row.position,
     head: readTranscriptHead(sql, sessionId, subagentId),
     noun: "transcript",
     unreadable: SESSION_UNREADABLE,
@@ -410,11 +493,15 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<Watcher, never, Scope.Scope> =>
     Effect.acquireRelease(
       Effect.map(Queue.make<LiveMessage, LiveFailure>(), (queue) => {
-        const watcher: Watcher = { topic, queue, doorbell, cursor };
+        const watcher: Watcher = { topic, queue, doorbell, cursor, sizes: [], waitingBytes: 0 };
         const set = watchers.get(topic) ?? new Set<Watcher>();
         watchers.set(topic, set);
         set.add(watcher);
-        if (first !== undefined) Queue.offerUnsafe(queue, first);
+        if (first !== undefined) {
+          Queue.offerUnsafe(queue, first);
+          // Keeps the invariant that `sizes` holds one size per queued message.
+          watcher.sizes.push(0);
+        }
         return watcher;
       }),
       (watcher) =>
@@ -570,9 +657,11 @@ const make = Effect.gen(function* () {
         }
         for (const tap of taps) {
           const message: LiveMessage = { _tag: "delta", items: [tap.item] };
+          // Computed once: every subscriber of the tap shares the message.
+          const bytes = Buffer.byteLength(tap.item.delta, "utf8");
           yield* Effect.forEach(
             listWatchers(buildAgentTapTopic(tap.sessionId, tap.item.subagentId)),
-            (watcher) => offerTo(watcher, message),
+            (watcher) => offerTo(watcher, message, bytes),
             { discard: true },
           );
         }

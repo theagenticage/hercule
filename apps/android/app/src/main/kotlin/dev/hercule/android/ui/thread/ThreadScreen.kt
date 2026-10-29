@@ -317,6 +317,8 @@ private fun TranscriptRow(
             bureauColors.youInk,
         )
         is WarningBlock -> StatusLine(BureauIcons.Alarm, block.message, bureauColors.muted)
+        is NoticeBlock -> StatusLine(BureauIcons.Info, block.message, bureauColors.muted)
+        is ErrorBlock -> StatusLine(BureauIcons.Close, block.message, bureauColors.failInk)
         is EndingBlock -> StatusLine(
             BureauIcons.Stop,
             "${if (block.state == TurnState.Failed) "Failed" else "Stopped"} after ${formatDuration(block.duration)}",

@@ -9,7 +9,7 @@
  * Animation frames are faked, so a test runs each frame when it chooses.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import type { JSX } from "react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { queryKeys, type Live } from "@hercule/client-core";
@@ -44,6 +44,7 @@ interface Delivery {
   readonly reset: boolean;
   readonly replay: boolean;
   readonly gone: boolean;
+  readonly unreadable: boolean;
 }
 
 /**
@@ -78,6 +79,7 @@ const createFakeLive = () => {
         reset: false,
         replay: false,
         gone: false,
+        unreadable: false,
         ...delivery,
       });
     });
@@ -189,7 +191,7 @@ function Page({
     staleTime: Infinity,
   });
   const rows = data ?? [];
-  const attachOpenParagraph = useSessionLive({
+  const { attachOpenParagraph, streamUnreadableAt } = useSessionLive({
     live,
     queryClient,
     sessionId: SESSION_ID,
@@ -201,20 +203,27 @@ function Page({
   const started = rows.some(
     ({ event }) => event._tag === "item.started" && event.itemId === NEW_ITEM_ID,
   );
-  if (!started) return null;
+  const unreadableNote =
+    streamUnreadableAt === undefined ? null : (
+      <p>The stream is unreadable at {streamUnreadableAt}.</p>
+    );
+  if (!started) return unreadableNote;
   return (
-    <AgentMessage
-      look={buildLook(SESSION_ID)}
-      itemId={NEW_ITEM_ID}
-      agent="Sonnet 5"
-      text={readStoredText(rows)}
-      startedAt={rows.at(-1)!.at}
-      timezone="UTC"
-      today={0}
-      pose="idle"
-      open
-      attachOpenParagraph={attachOpenParagraph}
-    />
+    <>
+      {unreadableNote}
+      <AgentMessage
+        look={buildLook(SESSION_ID)}
+        itemId={NEW_ITEM_ID}
+        agent="Sonnet 5"
+        text={readStoredText(rows)}
+        startedAt={rows.at(-1)!.at}
+        timezone="UTC"
+        today={0}
+        pose="idle"
+        open
+        attachOpenParagraph={attachOpenParagraph}
+      />
+    </>
   );
 }
 
@@ -495,7 +504,14 @@ describe("useSessionLive", () => {
       fake.deliver(STREAM_TOPIC, { reset: true });
       await settle();
       act(() =>
-        staleDelivery({ cursor: null, items: rows, reset: false, replay: false, gone: false }),
+        staleDelivery({
+          cursor: null,
+          items: rows,
+          reset: false,
+          replay: false,
+          gone: false,
+          unreadable: false,
+        }),
       );
       await settle();
       // Merged now, the row would be gone again once the read replaces the cache.
@@ -574,7 +590,14 @@ describe("useSessionLive", () => {
     // an older controller's snapshot would.
     readTranscript.mockImplementationOnce(() => {
       const snapshot = readCachedRows(queryClient);
-      deliverToStream({ cursor: null, items: [started], reset: false, replay: false, gone: false });
+      deliverToStream({
+        cursor: null,
+        items: [started],
+        reset: false,
+        replay: false,
+        gone: false,
+        unreadable: false,
+      });
       return Promise.resolve(snapshot);
     });
 
@@ -585,7 +608,14 @@ describe("useSessionLive", () => {
     });
     // The read has ended, but React has not rendered yet: the next row comes
     // through the subscription held from before the read.
-    deliverToStream({ cursor: null, items: [first], reset: false, replay: false, gone: false });
+    deliverToStream({
+      cursor: null,
+      items: [first],
+      reset: false,
+      replay: false,
+      gone: false,
+      unreadable: false,
+    });
     await settle();
     expect(readCachedRows(queryClient)).toEqual(THREAD.transcript);
     // The stream starts again after the rows held, so its replay brings the
@@ -872,6 +902,47 @@ describe("useSessionLive", () => {
     expect(onGone).not.toHaveBeenCalled();
     fake.deliver(STREAM_TOPIC, { gone: true });
     expect(onGone).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports the moment the stream became unreadable, keeps the cached rows, and unsubscribes from the stream and the tap", () => {
+    const { fake, queryClient } = mountHook();
+    const before = Date.now();
+    fake.deliver(STREAM_TOPIC, { unreadable: true });
+    const after = Date.now();
+    const [, reportedAt] = /^The stream is unreadable at (.+)\.$/.exec(
+      screen.getByText(/^The stream is unreadable at /).textContent,
+    )!;
+    expect(new Date(reportedAt!).toISOString()).toBe(reportedAt);
+    expect(Date.parse(reportedAt!)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(reportedAt!)).toBeLessThanOrEqual(after);
+    expect(fake.readSubscriptions()).toEqual([]);
+    expect(readCachedRows(queryClient)).toEqual(THREAD.transcript);
+  });
+
+  it("clears the open paragraph's tail when the stream becomes unreadable, because no row will ever match it", async () => {
+    const { fake, findOpenParagraph } = mountHook();
+    fake.pushRows(buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED));
+    await settle();
+    fake.pushTaps("The fix ");
+    frames.run();
+    expect(findOpenParagraph()?.textContent).toBe("The fix ");
+
+    fake.deliver(STREAM_TOPIC, { unreadable: true });
+    await settle();
+    frames.run();
+
+    expect(findOpenParagraph()?.textContent).toBe("");
+  });
+
+  it("stays unsubscribed from the stream after it is unreadable, even when the transcript is read again", async () => {
+    const { fake, queryClient, readTranscript } = mountHook();
+    fake.deliver(STREAM_TOPIC, { unreadable: true });
+
+    void queryClient.invalidateQueries({ queryKey: queryKeys.transcript(SESSION_ID) });
+    await settle();
+    await settle();
+    expect(readTranscript).toHaveBeenCalledOnce();
+    expect(fake.readSubscriptions()).toEqual([]);
   });
 
   it("stays unsubscribed from the stream after it is gone, even when the transcript is read again", async () => {

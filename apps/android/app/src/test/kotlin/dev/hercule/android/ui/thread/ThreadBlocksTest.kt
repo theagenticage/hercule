@@ -291,6 +291,50 @@ class ThreadBlocksTest {
         assertEquals(listOf("WorkBlock", "WaitingBlock", "WorkBlock"), blocking.map { it::class.simpleName })
     }
 
+    @Test
+    fun `builds a notice for a runtime notice and for an event this build does not know`() {
+        val canonical = buildJsonObject {
+            put("_tag", "unknown")
+            put("originalType", "some.future.event")
+        }
+        val raw = buildJsonObject { put("_tag", "another.future.event") }
+        val ofSubagent = buildJsonObject {
+            put("_tag", "unknown")
+            put("originalType", "some.future.event")
+            put("subagentId", "a1")
+        }
+        val blocks = buildThreadBlocks(
+            toRows(
+                listOf(
+                    ProviderEvent.RuntimeNotice(message = "Conversation was cleared"),
+                    ProviderEvent.Unknown(canonical),
+                    ProviderEvent.Unknown(raw),
+                    ProviderEvent.Unknown(ofSubagent),
+                    ProviderEvent.RuntimeNotice(subagentId = "a1", message = "Of a subagent"),
+                ),
+            ),
+            emptyList(),
+        )
+        assertEquals(
+            listOf("Conversation was cleared", "Unknown event: some.future.event", "Unknown event: another.future.event"),
+            blocks.map { (it as NoticeBlock).message },
+        )
+    }
+
+    @Test
+    fun `builds an error with its message, or with its class when it has none`() {
+        val blocks = buildThreadBlocks(
+            toRows(
+                listOf(
+                    ProviderEvent.RuntimeError(errorClass = "rate_limit", message = "Too many requests"),
+                    ProviderEvent.RuntimeError(errorClass = "rate_limit"),
+                ),
+            ),
+            emptyList(),
+        )
+        assertEquals(listOf("Too many requests", "rate_limit"), blocks.map { (it as ErrorBlock).message })
+    }
+
     /** Returns whether each agent message the transcript of [events] holds is open. */
     private fun readOpen(events: List<ProviderEvent>): List<Boolean> =
         buildThreadBlocks(toRows(events), emptyList()).filterIsInstance<AgentBlock>().map { it.open }

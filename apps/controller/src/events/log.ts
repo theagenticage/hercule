@@ -87,18 +87,31 @@ export const readLogHead = (sql: SqlClient.SqlClient): Effect.Effect<number, Sql
     (rows) => rows[0]?.head ?? 0,
   );
 
-/** Returns at most `limit` entries after a position, oldest first. */
+/**
+ * Returns at most `limit` entries after a position, oldest first. Each comes
+ * with `bytes`, its size in the database: the size in bytes of its stored JSON
+ * text (`refs`, `payload` and `raw`). A live subscription uses it to limit the
+ * memory it holds for a client that reads slowly, without encoding the event
+ * again.
+ *
+ * The size is `length(CAST(x AS BLOB))`, which counts bytes in every SQLite
+ * version. `octet_length` would do the same, but it needs SQLite 3.43, and the
+ * SQLite that Bun links on macOS can be older.
+ */
 export const readEventsAfter = (
   sql: SqlClient.SqlClient,
   after: number,
   limit: number,
-): Effect.Effect<ReadonlyArray<Event>, SqlError> =>
+): Effect.Effect<ReadonlyArray<{ readonly row: Event; readonly bytes: number }>, SqlError> =>
   Effect.map(
-    sql<EventRow>`
-      SELECT ${sql.literal(EVENT_COLUMNS)} FROM events
+    sql<EventRow & { readonly bytes: number }>`
+      SELECT ${sql.literal(EVENT_COLUMNS)},
+        length(CAST(refs AS BLOB)) + length(CAST(payload AS BLOB))
+          + coalesce(length(CAST(raw AS BLOB)), 0) AS bytes
+      FROM events
       WHERE id > ${after} ORDER BY id LIMIT ${limit}
     `,
-    (rows) => rows.map(parseEventRow),
+    (rows) => rows.map((row) => ({ row: parseEventRow(row), bytes: row.bytes })),
   );
 
 /**
