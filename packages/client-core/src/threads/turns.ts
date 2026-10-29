@@ -358,13 +358,13 @@ const describeTodoListTarget = (list: TodoListDetail): string => {
 };
 
 /**
- * Returns the one-line target of an item that has no decoded detail of its
- * own in a `StartedItem`: how long a wait asked to wait
- * (`describeWaitDuration`), the path an image generation saved the image to,
- * or a summary of the detail (`summarizeDetail`). The first two are "" when
- * the detail does not decode or holds no path.
+ * Returns the one-line target of an item whose detail `StartedItem` does not
+ * keep decoded: how long a wait asked to wait (`describeWaitDuration`), the
+ * path an image generation saved the image to, or a summary of the detail
+ * (`summarizeDetail`) for any other kind. The first two are "" when the
+ * detail does not decode or holds no path.
  */
-const describeOtherTarget = (event: ItemStarted | ItemUpdated | ItemCompleted): string => {
+const describeDetailTarget = (event: ItemStarted | ItemUpdated | ItemCompleted): string => {
   switch (event.kind) {
     case "wait": {
       const wait = readWaitDetail(event.detail);
@@ -376,6 +376,18 @@ const describeOtherTarget = (event: ItemStarted | ItemUpdated | ItemCompleted): 
       return summarizeDetail(event.detail);
   }
 };
+
+/**
+ * Checks whether the `item.completed` row of an item of `kind` can carry a
+ * detail the item did not have before, so the projections apply it to the
+ * item (`buildUpdatedItem`):
+ *
+ * - a todo list's completion carries its final list;
+ * - an image generation's completion carries the path of the saved file,
+ *   which Codex only knows at the end.
+ */
+export const completionCarriesDetail = (kind: ItemKind): boolean =>
+  kind === "todo_list" || kind === "image_generation";
 
 /**
  * Returns the parts of an `item.started`, `item.updated` or `item.completed`
@@ -414,7 +426,7 @@ const readItemDetail = (
           : describeTodoListTarget(todoList)
         : unknownLabel !== ""
           ? unknownLabel
-          : describeOtherTarget(event);
+          : describeDetailTarget(event);
   return {
     verb: readItemVerb(event.kind, event.detail),
     target,
@@ -468,15 +480,18 @@ export interface UpdatedItem<Item extends ThreadItem> {
 /**
  * Returns `item` once an `item.updated` row `event` has replaced its detail,
  * with the verb, target and todo steps read from the new detail. A todo list's
- * `item.completed` row carries its final list and is applied the same way:
- * the latest detail wins, which also recovers a list whose last update lost
- * its detail to the frame limit. The result, and every field that does not
- * come from the detail, stay as they were. Returns `undefined` when the row
- * cannot be applied, and the caller then keeps the item as it is:
+ * `item.completed` row carries its final list and is applied the same way
+ * (`completionCarriesDetail`): the latest detail wins, which also recovers a
+ * list whose last update lost its detail to the frame limit. The result, and
+ * every field that does not come from the detail, stay as they were. Returns
+ * `undefined` when the row cannot be applied, and the caller then keeps the
+ * item as it is:
  *
  * - the row has no `detail`: the runner leaves it off an event that is too
  *   big for one frame, and a missing detail must never empty a list;
- * - the item is a todo list and the detail does not decode.
+ * - the item is a todo list and the detail does not decode;
+ * - the item is an image generation and the detail holds no path, so a path
+ *   the start gave is never erased.
  */
 export const buildUpdatedItem = <Item extends ThreadItem>(
   item: Item,
@@ -485,6 +500,7 @@ export const buildUpdatedItem = <Item extends ThreadItem>(
   if (event.detail === undefined) return undefined;
   const { verb, target, unknownLabel, todoList, compaction } = readItemDetail(event);
   if (event.kind === "todo_list" && todoList === undefined) return undefined;
+  if (event.kind === "image_generation" && target === "") return undefined;
   return {
     item: { ...item, verb, target, todoSteps: readTodoSteps(todoList) },
     unknownLabel,
@@ -720,7 +736,7 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
         if (index === undefined) break;
         const current = turn.items[index]!;
         turn.items[index] = buildCompletedItem(
-          event.kind === "todo_list"
+          completionCarriesDetail(event.kind)
             ? (buildUpdatedItem(current, event)?.item ?? current)
             : current,
           turn.latestCompactions.get(event.itemId),

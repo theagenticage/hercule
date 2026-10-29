@@ -148,8 +148,9 @@ const STEP_WORDS: Record<ItemKind, StepWords> = {
   unknown: UNKNOWN_STEP,
   // The label of a todo list carries its progress, set in `buildStepRow`. It never folds.
   todo_list: { icon: "tasks", verb: "Tasks" },
-  // The label of a wait carries how long it waited, set in `buildStepRow`.
+  // The target of a wait is how long it waited, such as "30s".
   wait: { icon: "clock", verb: "Waited" },
+  // The verb of an image generation follows its result, set in `chooseStepWords`.
   image_generation: { icon: "palette", verb: "Generated an image" },
   // Messages never sit in a work stretch.
   user_message: UNKNOWN_STEP,
@@ -163,9 +164,28 @@ const PAGE_FETCH_WORDS: StepWords = {
   describeGroup: (steps) => `Fetched ${formatCount(steps.length, "page")}`,
 };
 
-/** Returns the words that draw `item`: its kind's, or a page fetch's. */
+/**
+ * The verb of an image generation for each result, so a row that is still
+ * running or that failed never reads as an image that exists.
+ */
+const IMAGE_GENERATION_VERBS: Record<WorkItem["result"], string> = {
+  running: "Generating an image",
+  "awaiting approval": "Generating an image",
+  completed: "Generated an image",
+  failed: "Could not generate an image",
+  declined: "Could not generate an image",
+};
+
+/**
+ * Returns the words that draw `item`: its kind's, a page fetch's, or for an
+ * image generation, the verb that fits its result.
+ */
 const chooseStepWords = (item: WorkItem): StepWords =>
-  item.isPageFetch ? PAGE_FETCH_WORDS : STEP_WORDS[item.kind];
+  item.isPageFetch
+    ? PAGE_FETCH_WORDS
+    : item.kind === "image_generation"
+      ? { ...STEP_WORDS.image_generation, verb: IMAGE_GENERATION_VERBS[item.result] }
+      : STEP_WORDS[item.kind];
 
 /** The results a group can take from its steps, in the order the first one present wins. */
 const GROUP_RESULTS = ["awaiting approval", "running", "failed", "declined"] as const;
@@ -240,8 +260,6 @@ const foldsWith = (first: WorkItem, next: WorkItem): boolean =>
  * - an `unknown` step that has a label is drawn with the question icon, the
  *   label as its words and no target, so a message nobody mapped is named
  *   rather than shown as "Step";
- * - a wait's label carries how long it waited, such as "Waited 30s", and it
- *   names no target;
  * - reasoning names no target: its detail is the thought itself.
  */
 const buildStepRow = (item: WorkItem, key: string): WorkRow => {
@@ -258,10 +276,8 @@ const buildStepRow = (item: WorkItem, key: string): WorkRow => {
         ? item.toolName
         : item.kind === "todo_list"
           ? `${words.verb} ${summarizeTodoList(item.todoSteps).progress}`
-          : item.kind === "wait" && item.target !== ""
-            ? `${words.verb} ${item.target}`
-            : words.verb,
-    target: item.kind === "reasoning" || item.kind === "wait" || isLabelled ? "" : item.target,
+          : words.verb,
+    target: item.kind === "reasoning" || isLabelled ? "" : item.target,
     targetIsCode: item.targetIsCode,
     startedAt: item.startedAt,
     result: item.result,

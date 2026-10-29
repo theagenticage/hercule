@@ -402,16 +402,33 @@ describe("buildWorkRows", () => {
     });
   });
 
-  it("draws a wait with its duration in the label and no target", () => {
+  it("draws a wait as Waited, with how long as its target in words", () => {
     const [row] = buildWorkRows([buildItem("wait", { target: "30s" })]);
 
-    expect(row).toMatchObject({ icon: "clock", label: "Waited 30s", target: "" });
+    expect(row).toMatchObject({
+      icon: "clock",
+      label: "Waited",
+      target: "30s",
+      targetIsCode: false,
+    });
   });
 
   it("draws a wait whose duration is unknown as a bare Waited", () => {
     const [row] = buildWorkRows([buildItem("wait")]);
 
     expect(row).toMatchObject({ icon: "clock", label: "Waited", target: "" });
+  });
+
+  it.each([
+    ["running", "Generating an image"],
+    ["awaiting approval", "Generating an image"],
+    ["completed", "Generated an image"],
+    ["failed", "Could not generate an image"],
+    ["declined", "Could not generate an image"],
+  ] as const)("words an image generation that is %s as %s", (result, label) => {
+    const [row] = buildWorkRows([buildItem("image_generation", { result })]);
+
+    expect(row).toMatchObject({ icon: "palette", label });
   });
 
   it("draws an image generation with its saved path as a code target", () => {

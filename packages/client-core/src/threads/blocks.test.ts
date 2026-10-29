@@ -1640,16 +1640,19 @@ describe("buildThreadBlocks: todo lists, page fetches and MCP calls, drawn as wo
     return buildWorkRows(blocks.flatMap((block) => (block.kind === "work" ? block.items : [])));
   };
 
-  it("draws a wait with its duration in the label, and an image generation with its saved path", () => {
+  it("draws a wait with its duration as the target, and an image generation with the path that arrives when it completes", () => {
     const rows = buildRowsOf([
       buildItemStarted("t1", "w1", "wait", 1, { durationMs: 30_000 }),
       buildItemCompleted("t1", "w1", "wait", 31, "completed"),
-      buildItemStarted("t1", "g1", "image_generation", 32, { path: "/tmp/logo.png" }),
-      buildItemCompleted("t1", "g1", "image_generation", 40, "completed"),
+      // Codex saves the file at the end: the start has no path, the completion has it.
+      buildItemStarted("t1", "g1", "image_generation", 32, {}),
+      buildItemCompleted("t1", "g1", "image_generation", 40, "completed", {
+        path: "/tmp/logo.png",
+      }),
     ]);
 
     expect(rows).toEqual([
-      expect.objectContaining({ icon: "clock", label: "Waited 30s", target: "" }),
+      expect.objectContaining({ icon: "clock", label: "Waited", target: "30s" }),
       expect.objectContaining({
         icon: "palette",
         label: "Generated an image",
@@ -1657,6 +1660,18 @@ describe("buildThreadBlocks: todo lists, page fetches and MCP calls, drawn as wo
         targetIsCode: true,
       }),
     ]);
+  });
+
+  it("keeps the path an image generation started with when its completion has none, and words a running one as generating", () => {
+    const started = buildItemStarted("t1", "g1", "image_generation", 1, { path: "/tmp/a.png" });
+
+    expect(buildRowsOf([started])[0]).toMatchObject({
+      label: "Generating an image",
+      target: "/tmp/a.png",
+    });
+    expect(
+      buildRowsOf([started, buildItemCompleted("t1", "g1", "image_generation", 5, "failed")])[0],
+    ).toMatchObject({ label: "Could not generate an image", target: "/tmp/a.png" });
   });
 
   it("draws a list started and updated twice as one row whose count changes, and which is never running", () => {

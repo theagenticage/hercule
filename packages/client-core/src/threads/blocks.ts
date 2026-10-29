@@ -29,6 +29,7 @@ import {
   buildUpdatedItem,
   buildUnknownEventMessage,
   buildUserMessage,
+  completionCarriesDetail,
   describeToolCallTarget,
   type ThreadItem,
   type ThreadUserMessage,
@@ -601,8 +602,11 @@ export const buildThreadBlocks = (
         const work = workItems.get(event.itemId);
         if (work !== undefined) {
           const current = work.stretch.items[work.index]!;
-          // A todo list's completion carries its final list: the latest detail wins.
-          const updated = event.kind === "todo_list" ? buildUpdatedItem(current, event) : undefined;
+          // A todo list's completion carries its final list, an image generation's the
+          // path it saved: the latest detail wins.
+          const updated = completionCarriesDetail(event.kind)
+            ? buildUpdatedItem(current, event)
+            : undefined;
           const item =
             updated === undefined
               ? current
