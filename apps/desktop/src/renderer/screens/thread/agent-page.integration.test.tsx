@@ -423,6 +423,27 @@ describe("the thread screen", () => {
     expect(findOpenParagraph().textContent).toBe("It is a race ");
   });
 
+  it("closes the transcript with one error when the controller sent a row the app cannot read, and keeps the rows drawn", async () => {
+    const thread = THREAD_FIXTURES.finished;
+    const sessionId = thread.session.id;
+    const { live } = await openThread(thread);
+    const drawn = readBlocks();
+
+    act(() => {
+      live.pushUnreadableStreamMessage(sessionId);
+    });
+
+    const copy =
+      "The rest of this thread can't be shown because this app is out of date. Update the app to see it.";
+    await waitFor(() => {
+      expect(readBlocks().at(-1)).toBe(copy);
+    });
+    expect(readBlocks().slice(0, -1)).toEqual(drawn);
+    expect(within(findTranscript()).getAllByRole("img", { name: "Error" })).toHaveLength(1);
+    // The stream is not subscribed again, because it would stop at the same row.
+    expect(live.readTopics()).not.toContain(buildSessionStreamTopic(sessionId));
+  });
+
   it("keeps the blocks it built when a session update changes nothing the agent state holds", async () => {
     const thread = THREAD_FIXTURES.running;
     const sessionId = thread.session.id;

@@ -24,6 +24,7 @@ import { readInputSender } from "./sender";
 import {
   buildCompletedItem,
   buildStartedItem,
+  buildUnknownEventMessage,
   buildUserMessage,
   describeToolCallTarget,
   type ThreadItem,
@@ -351,7 +352,8 @@ const readWorkItemTarget = (
  *   not end the work stretch it falls in: the stretch's divider stays one,
  *   above the warning, and items that start after the warning still join it.
  * - A `runtime-notice` block per `runtime.notice` row, placed and kept in the stretch
- *   in the same way.
+ *   in the same way. An `unknown` row (an event type this client has no arm for) gets one
+ *   too, with the text `Unknown event: <type>`.
  * - An `error` block per `runtime.error` row, where the row sits. Like a
  *   warning, it does not end the work stretch it falls in.
  * - A `pending` block at the end while the agent has no open Request (an
@@ -589,6 +591,17 @@ export const buildThreadBlocks = (
           kind: "runtime-notice",
           key: `runtime-notice:${String(row.position)}`,
           message: event.message,
+          at: event.at,
+        });
+        break;
+      }
+      case "unknown": {
+        // An event type this client does not know, from a newer runner or controller. It is
+        // drawn as a runtime notice, so the gap shows in the thread and the work goes on.
+        slots.push({
+          kind: "runtime-notice",
+          key: `runtime-notice:${String(row.position)}`,
+          message: buildUnknownEventMessage(event.originalType),
           at: event.at,
         });
         break;

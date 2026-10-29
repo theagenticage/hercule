@@ -29,6 +29,11 @@
  * - A session's tap is never stored, so its subscriber holds no cursor, and
  *   the taps sent while it was not subscribed are lost. It is told so each
  *   time it subscribes again.
+ * - A message this client cannot decode ends a subscription that resumes from
+ *   a cursor for good, because the controller would send the same message
+ *   again from the same cursor. The subscriber is told (`unreadable`) and
+ *   decides what the user sees. A subscription with no cursor loses nothing by
+ *   subscribing again, so it is retried like any other failure.
  */
 import {
   isAppendOnlyLiveTopic,
@@ -48,7 +53,7 @@ import {
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { Effect, Fiber, Latch, Layer, Result, Schedule, Stream } from "effect";
+import { Effect, Fiber, Latch, Layer, Result, Schedule, Schema, Stream } from "effect";
 import * as RpcClient from "effect/rpc/RpcClient";
 import type { RpcClientError } from "effect/rpc/RpcClientError";
 import type * as RpcGroup from "effect/rpc/RpcGroup";
@@ -129,6 +134,20 @@ export interface LiveInvalidatePush {
  * is not retried after `unauthenticated`. The problem is with the topic, not
  * the socket, so only this subscription stops. The caller should unsubscribe
  * (with the function `subscribe` returned) once it sees `gone`.
+ *
+ * `unreadable` is true when the controller sent something this client cannot
+ * decode, usually because the controller is newer than the client. It is only
+ * set for a subscription that resumes from a cursor: retrying would fetch the
+ * same message again from the same cursor, and skipping it is impossible,
+ * because the whole chunk is lost and the client cannot tell where the failed
+ * row sits in the log. So the subscription has stopped. It stays stopped, also
+ * after a reconnect, until the caller unsubscribes and subscribes again. The
+ * caller should tell the user to update (or reload) the app. A subscription
+ * with no cursor (every mutable topic, a tap, a log followed from the head
+ * before its first message) is retried instead, because the new subscription's
+ * first push covers what was lost. `unreadable` does not mean `gone` (the
+ * record does not exist) or `reset` (the cursor was discarded and the
+ * subscription restarts at the head).
  */
 export interface LiveDelta {
   readonly cursor: string | null;
@@ -136,6 +155,7 @@ export interface LiveDelta {
   readonly reset: boolean;
   readonly replay: boolean;
   readonly gone: boolean;
+  readonly unreadable: boolean;
 }
 
 export type LiveDeltaHandler = (delta: LiveDelta) => void;
@@ -190,6 +210,13 @@ interface Subscription {
   readonly handler: LiveInvalidateHandler | LiveDeltaHandler;
   /** How far an append-only subscriber has read; `undefined` means from the head. */
   cursor: string | undefined;
+  /**
+   * True once the controller sent something this client cannot decode on a
+   * subscription that resumes from a cursor. The subscription is then neither
+   * followed nor reset again, on this connection or any later one, because the
+   * same thing would arrive from the same cursor.
+   */
+  unreadable: boolean;
 }
 
 /** The errors a subscription's stream can fail with: a controller error, or a transport error. */
@@ -201,6 +228,9 @@ type LiveFailure =
   | CapExceeded
   | Internal
   | RpcClientError;
+
+/** What `follow` sees instead of a stream outcome when a subscription with a cursor got something undecodable. */
+const UNREADABLE = "unreadable";
 
 /** The RPC client for the contract's live group, on one connection. */
 type LiveClient = RpcClient.RpcClient<RpcGroup.Rpcs<typeof liveGroup>, RpcClientError>;
@@ -269,6 +299,7 @@ export const createLive = (options: LiveOptions): Live => {
           reset: true,
           replay: false,
           gone: false,
+          unreadable: false,
         }),
       );
     }
@@ -304,6 +335,7 @@ export const createLive = (options: LiveOptions): Live => {
           reset: false,
           replay,
           gone: false,
+          unreadable: false,
         });
         return;
       }
@@ -331,6 +363,16 @@ export const createLive = (options: LiveOptions): Live => {
    * - `validation` on an append-only topic with a cursor: the log rejected the
    *   cursor, so the cursor is dropped, the subscriber is told to `reset`, and
    *   the subscription starts again from the head.
+   * - A schema decode defect (the controller sent a message this client cannot
+   *   decode, usually because it is newer) on a subscription that resumes from
+   *   a cursor: retrying would fetch the same message again, and skipping it
+   *   is impossible, because the whole chunk is lost and the client cannot
+   *   tell where the failed row sits in the log. So the subscriber is told it
+   *   is `unreadable`, and the subscription stops. It stays stopped, also
+   *   after a reconnect, until the caller unsubscribes and subscribes again.
+   * - A schema decode defect on a subscription with no cursor (every mutable
+   *   topic, a tap, a log followed from the head before its first message):
+   *   handled like the case below, because subscribing again loses nothing.
    * - Anything else (falling behind, a failed read, a stream that ended): the
    *   subscription is retried after a growing wait. Just before that, a tap
    *   subscriber is told to reset (`resetCursorlessSubscriber`), which covers
@@ -339,8 +381,9 @@ export const createLive = (options: LiveOptions): Live => {
    *   error that keeps repeating costs two frames a minute rather than a
    *   flood.
    *
-   * Apart from `not_found`, nothing here ends a subscription for good: only
-   * the caller does that.
+   * Apart from `not_found` and an unreadable message after a cursor, nothing here ends a
+   * subscription for good: only the caller does that. A defect that is not a
+   * decode failure is not handled here and ends this fiber, as before.
    */
   const follow = (rpc: LiveClient, subscription: Subscription, closed: Latch.Latch) =>
     Effect.gen(function* () {
@@ -355,6 +398,12 @@ export const createLive = (options: LiveOptions): Live => {
         // subscription with a push that says every record may have changed
         // (spec 14 §Live model).
         let replay = subscription.cursor !== undefined;
+        // The RPC client turns a pushed chunk it cannot decode into a defect
+        // (a `SchemaError`) of this one request. `Effect.result` only sees
+        // typed failures, so `catchDefect` picks out that defect; any other
+        // defect is raised again unchanged, and interruption is not a defect.
+        // Without a cursor the defect is treated as a stream that ended, which
+        // is retried below.
         const outcome = yield* Effect.result(
           Stream.runForEach(rpc.subscribe(payload), (message: LiveMessage) =>
             Effect.sync(() => {
@@ -362,8 +411,29 @@ export const createLive = (options: LiveOptions): Live => {
               replay = false;
             }),
           ),
+        ).pipe(
+          Effect.catchDefect((defect) => {
+            if (!Schema.isSchemaError(defect)) return Effect.die(defect);
+            return Effect.succeed<typeof UNREADABLE | Result.Result<void>>(
+              subscription.cursor === undefined ? Result.succeed(undefined) : UNREADABLE,
+            );
+          }),
         );
 
+        if (outcome === UNREADABLE) {
+          subscription.unreadable = true;
+          isolate(() =>
+            (subscription.handler as LiveDeltaHandler)({
+              cursor: null,
+              items: [],
+              reset: false,
+              replay: false,
+              gone: false,
+              unreadable: true,
+            }),
+          );
+          return;
+        }
         const code = Result.isFailure(outcome) ? readErrorCode(outcome.failure) : undefined;
         if (code === "unauthenticated") {
           // The connection's credential is gone, so retrying on this connection
@@ -384,6 +454,7 @@ export const createLive = (options: LiveOptions): Live => {
               reset: false,
               replay: false,
               gone: true,
+              unreadable: false,
             }),
           );
           return;
@@ -401,6 +472,7 @@ export const createLive = (options: LiveOptions): Live => {
               reset: true,
               replay: false,
               gone: false,
+              unreadable: false,
             }),
           );
           continue;
@@ -425,7 +497,9 @@ export const createLive = (options: LiveOptions): Live => {
    */
   const runConnection = (rpc: LiveClient, closed: Latch.Latch) =>
     Effect.gen(function* () {
-      for (const subscription of subscriptions) resetCursorlessSubscriber(subscription);
+      for (const subscription of subscriptions) {
+        if (!subscription.unreadable) resetCursorlessSubscriber(subscription);
+      }
 
       yield* Effect.forkChild(
         rpc.ping({}).pipe(
@@ -439,7 +513,7 @@ export const createLive = (options: LiveOptions): Live => {
       for (;;) {
         changed.closeUnsafe();
         for (const subscription of subscriptions) {
-          if (held.has(subscription)) continue;
+          if (held.has(subscription) || subscription.unreadable) continue;
           held.set(subscription, yield* Effect.forkChild(follow(rpc, subscription, closed)));
         }
         for (const [subscription, fiber] of held) {
@@ -551,7 +625,7 @@ export const createLive = (options: LiveOptions): Live => {
       handler: LiveInvalidateHandler | LiveDeltaHandler,
       cursor?: string,
     ) => {
-      const subscription: Subscription = { topic, handler, cursor };
+      const subscription: Subscription = { topic, handler, cursor, unreadable: false };
       subscriptions.add(subscription);
       changed.openUnsafe();
       return () => {

@@ -44,6 +44,7 @@ import {
 import { UserMessage } from "../session/messages";
 import { useStartOfToday } from "../session/start-of-today";
 import type { AttachOpenParagraph } from "../session/use-session-live";
+import { UNREADABLE_STREAM_MESSAGE } from "../session/unreadable-stream";
 import { DayStamp, Notice, OpenReply, StoredReply } from "./conversation-messages";
 
 /**
@@ -84,7 +85,7 @@ const OPEN_REPLY_HEIGHT = 43.9;
  * measured, from the heights above. Only blocks that were never mounted use
  * the estimate.
  */
-const estimateBlockHeight = (block: ConversationBlock): number => {
+const estimateBlockHeight = (block: ListBlock): number => {
   switch (block.kind) {
     case "stamp":
       return STAMP_HEIGHT;
@@ -99,15 +100,37 @@ const estimateBlockHeight = (block: ConversationBlock): number => {
         REPLY_LINE_HEIGHT * Math.max(1, Math.ceil(block.message.text.length / REPLY_CHARS_PER_LINE))
       );
     case "notice":
+    case "unreadable-stream":
       return NOTICE_HEIGHT;
     case "open-reply":
       return OPEN_REPLY_HEIGHT;
   }
 };
 
+/**
+ * What closes the list when the live stream is unreadable (see
+ * `isStreamUnreadable` on `Conversation`). It is drawn as a notice, but it is
+ * no stored message, so it is not a `ConversationBlock`.
+ */
+interface UnreadableStreamBlock {
+  readonly kind: "unreadable-stream";
+  readonly key: string;
+}
+
+const UNREADABLE_STREAM_BLOCK: UnreadableStreamBlock = {
+  kind: "unreadable-stream",
+  key: "stream-unreadable",
+};
+
+/** A block of the list: what `buildConversationBlocks` returns, then the unreadable-stream note when it applies. */
+type ListBlock = ConversationBlock | UnreadableStreamBlock;
+
 /** Returns the key of the first stored message among `blocks`, or `undefined` when there is none. */
-const findFirstMessageKey = (blocks: readonly ConversationBlock[]): string | undefined =>
-  blocks.find((block) => block.kind !== "stamp" && block.kind !== "open-reply")?.key;
+const findFirstMessageKey = (blocks: readonly ListBlock[]): string | undefined =>
+  blocks.find(
+    (block) =>
+      block.kind !== "stamp" && block.kind !== "open-reply" && block.kind !== "unreadable-stream",
+  )?.key;
 
 /** What the assistant screen can ask of the Conversation. */
 export interface ConversationHandle {
@@ -124,6 +147,10 @@ export interface ConversationHandle {
  *   none has started. Its running turn is in `runningTurnRows`, oldest
  *   first, and `attachOpenParagraph` paints the text it is writing.
  * - `pose` is the assistant's pose, which the open reply's face shows.
+ * - `isStreamUnreadable` is true once the session's live stream stopped because
+ *   the controller sent a row this app cannot decode. The Conversation then ends
+ *   with a notice that asks the user to update the app, and keeps every message
+ *   it shows.
  * - `composerStack` and `onBottomChange` are as `useMessageList` takes
  *   them.
  * - `ref` receives a `ConversationHandle`.
@@ -135,6 +162,7 @@ export function Conversation({
   runningTurnRows,
   pose,
   attachOpenParagraph,
+  isStreamUnreadable,
   composerStack,
   onBottomChange,
   ref,
@@ -145,6 +173,7 @@ export function Conversation({
   readonly runningTurnRows: readonly TranscriptRow[];
   readonly pose: Pose;
   readonly attachOpenParagraph: AttachOpenParagraph;
+  readonly isStreamUnreadable: boolean;
   readonly composerStack: HTMLElement | null;
   readonly onBottomChange: (atBottom: boolean) => void;
   readonly ref?: Ref<ConversationHandle>;
@@ -158,7 +187,7 @@ export function Conversation({
   // The start of today, not the time now: the stamps change only when the
   // day does, and `today` changes then, so the blocks are built again.
   const startOfToday = new Date(today);
-  const blocks = buildConversationBlocks({
+  const storedBlocks = buildConversationBlocks({
     messages: flattenMessagePages(messages.data.pages),
     runningTurnRows,
     session,
@@ -167,6 +196,9 @@ export function Conversation({
     timezone,
     now: startOfToday,
   });
+  const blocks: readonly ListBlock[] = isStreamUnreadable
+    ? [...storedBlocks, UNREADABLE_STREAM_BLOCK]
+    : storedBlocks;
 
   if (blocks.length === 0) {
     return (
@@ -222,7 +254,7 @@ function ConversationList({
 }: {
   readonly name: string;
   readonly look: Look;
-  readonly blocks: readonly ConversationBlock[];
+  readonly blocks: readonly ListBlock[];
   readonly timezone: string;
   readonly today: number;
   readonly attachOpenParagraph: AttachOpenParagraph;
@@ -310,7 +342,7 @@ function ConversationList({
   useImperativeHandle(ref, () => ({ scrollToBottom }));
 
   /** Returns the element that draws `block`. */
-  const renderBlock = (block: ConversationBlock): JSX.Element => {
+  const renderBlock = (block: ListBlock): JSX.Element => {
     switch (block.kind) {
       case "stamp":
         return <DayStamp label={block.label} />;
@@ -335,6 +367,8 @@ function ConversationList({
         );
       case "notice":
         return <Notice look={look} text={block.message.text} time={block.time} />;
+      case "unreadable-stream":
+        return <Notice look={look} text={UNREADABLE_STREAM_MESSAGE} time={undefined} />;
       case "open-reply":
         return (
           <OpenReply

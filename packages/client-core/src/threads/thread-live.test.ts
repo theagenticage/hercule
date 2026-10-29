@@ -30,13 +30,14 @@ const TAP: TapItem = {
 /** Returns a delivery of `items` with no flag set, with `flags` applied over it. */
 const buildDelta = (
   items: LiveDelta["items"],
-  flags: Partial<Pick<LiveDelta, "reset" | "replay" | "gone">> = {},
+  flags: Partial<Pick<LiveDelta, "reset" | "replay" | "gone" | "unreadable">> = {},
 ): LiveDelta => ({
   cursor: null,
   items,
   reset: false,
   replay: false,
   gone: false,
+  unreadable: false,
   ...flags,
 });
 
@@ -82,6 +83,12 @@ describe("decideStreamDelivery", () => {
   it("reads again after a reset, and stops when the session is gone", () => {
     expect(decideStreamDelivery(held, buildDelta([], { reset: true }))).toEqual({ kind: "reset" });
     expect(decideStreamDelivery(held, buildDelta([], { gone: true }))).toEqual({ kind: "gone" });
+  });
+
+  it("stops when the controller sent a row this client cannot decode", () => {
+    expect(decideStreamDelivery(held, buildDelta([], { unreadable: true }))).toEqual({
+      kind: "unreadable",
+    });
   });
 });
 

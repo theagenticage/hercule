@@ -34,6 +34,10 @@ export const buildStreamCursor = (held: readonly TranscriptRow[]): string =>
  * What a thread does with one delivery on its stream:
  *
  * - `gone`: the session no longer exists, so the caller unsubscribes.
+ * - `unreadable`: the controller sent a row this client cannot decode, usually
+ *   because the controller is newer. The subscription has stopped and will not
+ *   resume, so the caller unsubscribes, keeps the rows it holds, and tells the
+ *   user to update (or reload) the app.
  * - `reset`: rows may have been missed, so the caller reads the transcript
  *   again and skips the open items, whose tails can no longer be lined up
  *   with their rows.
@@ -46,6 +50,7 @@ export const buildStreamCursor = (held: readonly TranscriptRow[]): string =>
  */
 export type StreamDelivery =
   | { readonly kind: "gone" }
+  | { readonly kind: "unreadable" }
   | { readonly kind: "reset" }
   | { readonly kind: "held" }
   | {
@@ -71,6 +76,7 @@ export const decideStreamDelivery = (
   delta: LiveDelta,
 ): StreamDelivery => {
   if (delta.gone) return { kind: "gone" };
+  if (delta.unreadable) return { kind: "unreadable" };
   if (delta.reset) return { kind: "reset" };
   // The stream topic carries only transcript rows. A delivery's type is
   // shared by every topic, so it lists the other topics' items too.

@@ -1,6 +1,6 @@
 /**
  * Subscribes one agent's page to that agent's live topics and returns the ref
- * for the live tail element. The agent is the session's own agent when
+ * for the live tail element, and whether the stream became unreadable. The agent is the session's own agent when
  * `subagentId` is undefined, else that subagent. A page follows exactly one
  * agent, so a subagent's page holds the subagent's topics in place of the
  * session's.
@@ -38,6 +38,13 @@
  * When the session no longer exists, the delta arrives with `gone` set and the
  * handler unsubscribes, rather than retrying a subscription that will keep
  * failing.
+ *
+ * When the controller sends a row this page cannot decode, usually because the
+ * controller is newer than the page, the delta arrives with `unreadable` set.
+ * The stream cannot go on past that row and will not resume, so the handler
+ * unsubscribes, keeps the rows already in the cache, and the hook returns
+ * `isStreamUnreadable: true` for the page to tell the user to reload. The tap
+ * is a separate topic and is left as it is.
  */
 import {
   useEffect,
@@ -68,8 +75,12 @@ export const useAgentLive = (
   rows: readonly TranscriptRow[],
   /** Called after a paint changes the tail's text: the one way the column grows without a React render. */
   onTapFlush: () => void,
-): RefObject<HTMLSpanElement | null> => {
+): {
+  readonly tailRef: RefObject<HTMLSpanElement | null>;
+  readonly isStreamUnreadable: boolean;
+} => {
   const tailRef = useRef<HTMLSpanElement | null>(null);
+  const [isStreamUnreadable, setStreamUnreadable] = useState(false);
   // One buffer for the life of the page. When the agent changes, the tap is
   // subscribed again, and that drops every tail the buffer still holds.
   const [tail] = useState(createTailBuffer);
@@ -121,6 +132,9 @@ export const useAgentLive = (
         const delivery = decideStreamDelivery(readHeldRows(), delta);
         if (delivery.kind === "gone") {
           unsubscribe();
+        } else if (delivery.kind === "unreadable") {
+          unsubscribe();
+          setStreamUnreadable(true);
         } else if (delivery.kind === "reset") {
           // `live.ts` re-subscribes from the head as soon as it reports a
           // reset, while the refetch below is still in progress. So a row
@@ -179,5 +193,5 @@ export const useAgentLive = (
     };
   }, [live, sessionId, subagentId, tail]);
 
-  return tailRef;
+  return { tailRef, isStreamUnreadable };
 };

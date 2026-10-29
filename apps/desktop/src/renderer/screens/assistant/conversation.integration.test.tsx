@@ -279,6 +279,27 @@ describe("an assistant's Conversation", () => {
     expect(search.get("sort")).toContain("desc");
   });
 
+  it("ends with one notice when the controller sent a row the app cannot read, and keeps the messages drawn", async () => {
+    const { live } = await openConversation({
+      readSession: () => buildAdaSession({ status: "idle" }),
+      messages: [QUESTION],
+    });
+    const drawn = readBlocks();
+
+    act(() => {
+      live.pushUnreadableStreamMessage(SESSION_ID);
+    });
+
+    await waitFor(() => {
+      expect(readBlocks().at(-1)).toBe(
+        "The rest of this thread can't be shown because this app is out of date. Update the app to see it.",
+      );
+    });
+    expect(readBlocks().slice(0, -1)).toEqual(drawn);
+    expect(findConversation().querySelectorAll(".notice")).toHaveLength(1);
+    expect(live.readTopics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
+  });
+
   it("streams the reply being written, then hands it over to the stored reply when the turn ends", async () => {
     let session: Session = buildAdaSession();
     const messages = [QUESTION];

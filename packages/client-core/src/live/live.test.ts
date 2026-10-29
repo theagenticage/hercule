@@ -622,6 +622,108 @@ describe("createLive", () => {
     assert.isTrue(invalidations.length > 0, "the unrelated subscription stopped receiving pushes");
   });
 
+  it("stops a subscription with a cursor whose push cannot be decoded, tells its handler, and does not resubscribe it after a reconnect", async () => {
+    const { fetch } = stubTicketServer();
+    const { live: started, socket } = await startConnectedSupervisor(fetch);
+
+    const deltas: Array<LiveDelta> = [];
+    const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
+    started.subscribe("event", (delta) => deltas.push(delta), "5");
+    started.subscribe("task", (keys) => invalidations.push(keys));
+    await settleTimers();
+
+    // A message with a tag this client does not know, as a newer controller
+    // could send.
+    socket.push("event", { _tag: "from-the-future", cursor: "9" });
+    await settleTimers();
+
+    const told = deltas.filter((delta) => delta.unreadable);
+    assert.strictEqual(told.length, 1, "the handler was not told exactly once");
+    assert.deepStrictEqual(told[0], {
+      cursor: null,
+      items: [],
+      reset: false,
+      replay: false,
+      gone: false,
+      unreadable: true,
+    });
+
+    // Not retried on this connection, however long the wait.
+    const subscribesTo = (candidate: StubSocket, topic: string) =>
+      candidate
+        .calls("subscribe")
+        .filter((call) => (call.payload as { topic: string }).topic === topic);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await settleTimers();
+    assert.strictEqual(subscribesTo(socket, "event").length, 1);
+
+    // The connection and the other subscription on it keep working.
+    assert.strictEqual(socket.readyState, 1);
+    socket.push("task", { _tag: "invalidate", ids: ["t1"], kind: "updated" });
+    await settleTimers();
+    const seenBefore = invalidations.length;
+    assert.isTrue(seenBefore > 0, "the unrelated subscription stopped receiving pushes");
+
+    // Nor on the next connection, which still carries the other subscription.
+    socket.drop();
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+    const reopened = readLastSocket();
+    assert.notStrictEqual(reopened, socket);
+    assert.strictEqual(subscribesTo(reopened, "event").length, 0);
+    assert.strictEqual(subscribesTo(reopened, "task").length, 1);
+    assert.strictEqual(deltas.filter((delta) => delta.unreadable).length, 1);
+    assert.isFalse(
+      deltas.slice(deltas.indexOf(told[0] as LiveDelta) + 1).some((delta) => delta.reset),
+      "the stopped subscription was reset by the reconnect",
+    );
+    assert.isTrue(invalidations.length > seenBefore, "the other subscription was not renewed");
+  });
+
+  it("follows a subscription again after the caller unsubscribes and subscribes again", async () => {
+    const { fetch } = stubTicketServer();
+    const { live: started, socket } = await startConnectedSupervisor(fetch);
+
+    const unsubscribe = started.subscribe("event", () => {}, "5");
+    await settleTimers();
+    socket.push("event", { _tag: "from-the-future" });
+    await settleTimers();
+    unsubscribe();
+
+    const deltas: Array<LiveDelta> = [];
+    started.subscribe("event", (delta) => deltas.push(delta));
+    await settleTimers();
+
+    const calls = socket.calls("subscribe");
+    assert.strictEqual(calls.length, 2);
+    socket.chunk(calls[1]?.id, [{ _tag: "delta", cursor: "3", items: [] }]);
+    await settleTimers();
+    assert.strictEqual(deltas.at(-1)?.cursor, "3");
+    assert.isFalse(deltas.some((delta) => delta.unreadable));
+  });
+
+  it("subscribes again to a mutable topic whose push cannot be decoded, and gets the controller's first push again", async () => {
+    const { fetch } = stubTicketServer();
+    const { live: started, socket } = await startConnectedSupervisor(fetch);
+
+    const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
+    started.subscribe("task", (keys) => invalidations.push(keys));
+    await settleTimers();
+    assert.strictEqual(invalidations.length, 1);
+
+    socket.push("task", { _tag: "invalidate", ids: ["t1"], kind: "turned-into-a-frog" });
+    await settleTimers();
+    assert.strictEqual(socket.calls("subscribe").length, 1, "subscribed again without waiting");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+    assert.strictEqual(socket.calls("subscribe").length, 2);
+    // The stub answers a mutable subscription with the first push, as the
+    // controller does, so the subscriber is told to refetch everything.
+    assert.strictEqual(invalidations.length, 2);
+    assert.deepStrictEqual(sortKeys(invalidations[1] ?? []), sortKeys(buildQueryKeys("task", [])));
+  });
+
   it("waits before resubscribing a subscriber that hit a cap, and then invalidates everything once", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
@@ -688,6 +790,7 @@ describe("createLive", () => {
       reset: false,
       replay: true,
       gone: false,
+      unreadable: false,
     });
   });
 
@@ -723,6 +826,7 @@ describe("createLive", () => {
       reset: false,
       replay: false,
       gone: false,
+      unreadable: false,
     });
 
     // A subscription the controller ended is made again after a wait, and

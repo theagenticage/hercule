@@ -1191,6 +1191,65 @@ describe("buildTurns runtime notes", () => {
     ]);
   });
 
+  it("returns a runtime notice as a notice, in the turn it names or the turn open where its row sits", () => {
+    const { turns, outsideRuntimeNotes } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        row(2, {
+          _tag: "runtime.notice",
+          ...base(2, "2026-09-08T10:00:01.000Z"),
+          turnId: "t1",
+          message: "Recalled 2 memories",
+        }),
+        row(3, {
+          _tag: "runtime.notice",
+          ...base(3, "2026-09-08T10:00:02.000Z"),
+          message: "Conversation was cleared",
+        }),
+        turnCompleted(4, "t1", "2026-09-08T10:00:03.000Z"),
+        row(5, {
+          _tag: "runtime.notice",
+          ...base(5, "2026-09-08T10:00:04.000Z"),
+          message: "Between turns",
+        }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(turns[0]?.runtimeNotes.map((note) => [note.key, note.severity, note.message])).toEqual([
+      ["runtime.notice:2", "notice", "Recalled 2 memories"],
+      ["runtime.notice:3", "notice", "Conversation was cleared"],
+    ]);
+    expect(outsideRuntimeNotes.map((note) => [note.severity, note.message])).toEqual([
+      ["notice", "Between turns"],
+    ]);
+  });
+
+  it("returns an unknown event as a notice naming its type in plain text, placed like a warning", () => {
+    const unknownRow = (position: number, originalType: string) =>
+      row(position, {
+        _tag: "unknown",
+        ...base(position, "2026-09-08T10:00:01.000Z"),
+        originalType,
+        payload: { _tag: originalType },
+      });
+    const { turns, outsideRuntimeNotes } = buildTurns(
+      [
+        unknownRow(1, "before.any.turn"),
+        turnStarted(2, "t1", "2026-09-08T10:00:00.000Z"),
+        unknownRow(3, "turn.`plan`.updated"),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(outsideRuntimeNotes.map((note) => [note.severity, note.message])).toEqual([
+      ["notice", "Unknown event: before.any.turn"],
+    ]);
+    expect(turns[0]?.runtimeNotes.map((note) => [note.key, note.severity, note.message])).toEqual([
+      ["unknown:3", "notice", "Unknown event: turn.`plan`.updated"],
+    ]);
+  });
+
   it("returns a warning as a warning, and an error with no message as its class", () => {
     const { turns } = buildTurns(
       [

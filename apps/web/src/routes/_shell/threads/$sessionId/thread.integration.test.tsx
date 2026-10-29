@@ -1673,6 +1673,35 @@ describe("Thread: live subscriptions", () => {
     });
   });
 
+  it("closes the transcript with one error when the controller sent a row the page cannot read, and keeps the rows drawn", async () => {
+    const { live } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
+    await screen.findByText("Added a test too.");
+    const stream = buildSessionStreamTopic(SESSION_ID);
+    await waitFor(() => {
+      expect(live.topics()).toContain(stream);
+    });
+
+    // A message with a tag this page does not know, as a newer controller
+    // sends after it changed a row's shape.
+    act(() => {
+      live.push(stream, { _tag: "from-the-future" });
+    });
+
+    const note = await screen.findByText(
+      "The rest of this thread can't be shown because this page is out of date. Reload the page to see it.",
+    );
+    expect(screen.getByText("Fix the login bug", { selector: "p" })).toBeTruthy();
+    expect(screen.getByText("Added a test too.")).toBeTruthy();
+    // One error note, after the last turn.
+    expect(screen.getAllByText("Error:")).toHaveLength(1);
+    const lastTurn = screen.getByText("Added a test too.");
+    expect(lastTurn.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The stream is not subscribed again, because it would stop at the same row.
+    await waitFor(() => {
+      expect(live.topics()).not.toContain(stream);
+    });
+  });
+
   it("replays a just-spawned thread's rows when the transcript read returned none", async () => {
     // The loader reads the transcript while the runner is still starting the
     // session, so the transcript is empty, and the cache is never refetched
@@ -1844,6 +1873,39 @@ describe("Thread: a subagent's page", () => {
     expect(live.topics()).toContain("subagent");
     // A subagent takes no messages from the user, so its page has no composer.
     expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("closes the subagent's transcript with an error when the controller sent a row the page cannot read", async () => {
+    const rows = buildTwoCompletedTurns();
+    const { live, router } = await openApp(
+      buildSession({ status: "busy" }),
+      rows,
+      buildSubagentRoutes(rows),
+    );
+    await waitFor(() => {
+      expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
+    });
+    await act(async () => {
+      await router.navigate({
+        to: "/threads/$sessionId/subagents/$subagentId",
+        params: { sessionId: SESSION_ID, subagentId: SUBAGENT_ID },
+      });
+    });
+    await screen.findByText("The auth module has two entry points.");
+    const stream = buildSubagentStreamTopic(SESSION_ID, SUBAGENT_ID);
+    await waitFor(() => {
+      expect(live.topics()).toContain(stream);
+    });
+
+    act(() => {
+      live.push(stream, { _tag: "from-the-future" });
+    });
+
+    await screen.findByText(/can't be shown because this page is out of date/);
+    expect(screen.getByText("The auth module has two entry points.")).toBeTruthy();
+    await waitFor(() => {
+      expect(live.topics()).not.toContain(stream);
+    });
   });
 
   it("shows the rows the thread wrote while its subagent's page was open after going back", async () => {

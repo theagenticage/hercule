@@ -25,6 +25,7 @@ import {
   findSubagentBrief,
   type HerculeClient,
   type Live,
+  type RuntimeNote,
 } from "@hercule/client-core";
 import { inputsQuery, sessionQuery, subagentsQuery, transcriptQuery } from "../../app/queries";
 import { Composer } from "../composer/composer";
@@ -42,6 +43,20 @@ import { RuntimeNoteLine } from "./runtime-note-line";
 import { AgentChrome } from "./thread-chrome";
 import { Turn } from "./turn";
 import { useAgentLive } from "./use-agent-live";
+
+/**
+ * The note that closes a transcript whose stream the page cannot read. The
+ * web app is served by the controller, so reloading fetches the page that
+ * matches it. Its time is empty: the note describes this page, not an event in
+ * the thread, and `RuntimeNoteLine` draws no time anyway.
+ */
+const UNREADABLE_STREAM_NOTE: RuntimeNote = {
+  key: "stream-unreadable",
+  severity: "error",
+  message:
+    "The rest of this thread can't be shown because this page is out of date. Reload the page to see it.",
+  at: "",
+};
 
 export function AgentPage({
   client,
@@ -81,7 +96,14 @@ export function AgentPage({
   // opens with the brief leaves that opening message out.
   const brief = subagent === undefined ? undefined : findSubagentBrief(turns);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
-  const tailRef = useAgentLive(live, queryClient, sessionId, subagentId, rows, followIfAtBottom);
+  const { tailRef, isStreamUnreadable } = useAgentLive(
+    live,
+    queryClient,
+    sessionId,
+    subagentId,
+    rows,
+    followIfAtBottom,
+  );
   const lastIndex = turns.length - 1;
   // A runtime note outside every turn, such as a start failure, sits between the
   // turns around it: `turnsBefore` of them lie above it.
@@ -170,6 +192,7 @@ export function AgentPage({
             );
           })}
           {drawRuntimeNotesAfter(turns.length)}
+          {isStreamUnreadable ? <RuntimeNoteLine note={UNREADABLE_STREAM_NOTE} /> : null}
           {subagent === undefined ? (
             <SendingMessages client={client} sessionId={sessionId} />
           ) : null}

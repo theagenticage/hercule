@@ -86,6 +86,14 @@ data class WaitingBlock(override val key: String, val requestId: String, val ope
 @Immutable
 data class WarningBlock(override val key: String, val message: String, val at: Instant) : ThreadBlock
 
+/** Neutral information about the session, such as "Conversation was cleared", or an event this build does not know. */
+@Immutable
+data class NoticeBlock(override val key: String, val message: String, val at: Instant) : ThreadBlock
+
+/** An error the runner or the harness reported, such as a turn that failed. */
+@Immutable
+data class ErrorBlock(override val key: String, val message: String, val at: Instant) : ThreadBlock
+
 /** The end of a turn that was stopped ([TurnState.Interrupted]) or failed. */
 @Immutable
 data class EndingBlock(override val key: String, val state: TurnState, val duration: Duration) : ThreadBlock
@@ -103,7 +111,9 @@ data class EndingBlock(override val key: String, val state: TurnState, val durat
  * - a [WaitingBlock] where a Request in [openRequests] opened that the agent waits on. An async
  *   question gets none: the agent keeps working, so the note would be false, and the question's
  *   text is already the agent's message above. It does not end the work stretch either;
- * - a [WarningBlock] per `runtime.warning` row;
+ * - a [WarningBlock] per `runtime.warning` row, a [NoticeBlock] per `runtime.notice` row and per
+ *   event this build does not know ("Unknown event: <type>"), and an [ErrorBlock] per
+ *   `runtime.error` row, whose message is the error class when it has none;
  * - an [EndingBlock] after a turn that was stopped or failed.
  *
  * Rows of subagents are left out: the thread shows its own agent's work. [tails] holds, by item
@@ -200,6 +210,16 @@ fun buildThreadBlocks(
             }
             is ProviderEvent.RuntimeWarning -> if (event.subagentId == null) {
                 blocks += WarningBlock("warning-${row.position}", event.message, at)
+            }
+            is ProviderEvent.RuntimeNotice -> if (event.subagentId == null) {
+                blocks += NoticeBlock("notice-${row.position}", event.message, at)
+            }
+            is ProviderEvent.RuntimeError -> if (event.subagentId == null) {
+                blocks += ErrorBlock("error-${row.position}", event.message ?: event.errorClass, at)
+            }
+            is ProviderEvent.Unknown -> {
+                val type = event.originalType
+                if (event.subagentId == null && type != null) blocks += NoticeBlock("notice-${row.position}", "Unknown event: $type", at)
             }
             is ProviderEvent.RequestOpened -> if (event.subagentId == null && event.request.requestId in openIds && !isAsyncQuestion(event.request)) {
                 closeStretch(at)
