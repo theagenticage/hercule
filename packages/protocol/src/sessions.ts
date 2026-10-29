@@ -7,7 +7,7 @@
  * reads a session. An `unknown` item kind and a `raw` passthrough keep a vendor
  * message nobody mapped, rather than dropping it.
  */
-import { Option, Schema, SchemaGetter } from "effect";
+import { Schema, SchemaGetter } from "effect";
 
 import { AdapterError } from "./adapter-errors";
 import { AttachmentReference } from "./attachments";
@@ -961,6 +961,26 @@ const ARM_TAGS: ReadonlySet<string> = new Set([
   UnknownEvent.fields._tag.literal,
 ]);
 
+/** An event as received or stored, before its tag is checked against the arms. */
+type ReceivedEvent = { readonly _tag: string } & Readonly<Record<string, unknown>>;
+
+/**
+ * Builds the `unknown` event for an event whose tag no arm has: the tag becomes
+ * `originalType`, the whole received object becomes `payload`, and the fields
+ * every event has are copied up. Does not validate anything: a caller that
+ * needs a valid event decodes the result with `UnknownEvent`.
+ */
+const wrapUnknownEvent = (received: ReceivedEvent): typeof UnknownEvent.Encoded =>
+  ({
+    _tag: "unknown",
+    originalType: received._tag,
+    payload: received,
+    eventId: received.eventId,
+    sessionId: received.sessionId,
+    at: received.at,
+    ...("subagentId" in received ? { subagentId: received.subagentId } : {}),
+  }) as typeof UnknownEvent.Encoded;
+
 /**
  * An event with a `_tag` no arm has, as it arrives. The tag check is what
  * keeps a malformed event of a known kind a failure: without it, a broken
@@ -983,18 +1003,7 @@ const UnrecognisedEvent = Schema.StructWithRest(
   Schema.decodeTo(UnknownEvent, {
     // The envelope fields are `unknown` here. `UnknownEvent` validates them next,
     // and a missing or malformed one fails the whole event.
-    decode: SchemaGetter.transform(
-      (received): typeof UnknownEvent.Encoded =>
-        ({
-          _tag: "unknown",
-          originalType: received._tag,
-          payload: received,
-          eventId: received.eventId,
-          sessionId: received.sessionId,
-          at: received.at,
-          ...("subagentId" in received ? { subagentId: received.subagentId } : {}),
-        }) as typeof UnknownEvent.Encoded,
-    ),
+    decode: SchemaGetter.transform(wrapUnknownEvent),
     encode: SchemaGetter.passthrough({ strict: false }),
   }),
 );
@@ -1025,33 +1034,17 @@ export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
  * - An event whose `_tag` this build has an arm for is returned as parsed,
  *   without decoding it. Decoding every stored row would cost time on a hot
  *   path, and could reject a row written in an older shape.
- * - An event of any other tag becomes the `unknown` event, the same value
- *   `ProviderEvent` decodes it to.
- * - An event of another tag that does not decode, such as a future row whose tag
- *   is longer than a `Fact` or whose `subagentId` has a newer format, still
- *   becomes an `unknown` event: its `originalType`, `payload`, `eventId`,
- *   `sessionId`, `at` and `subagentId` are copied from the row without
- *   validating them. The controller stored the row, so it already is a
- *   transcript row, and throwing here would make the whole transcript
- *   unreadable after a rollback to this build because of one row.
+ * - An event of any other tag becomes the `unknown` event, without validation.
  *
  * Needed because a newer build may store an event type this build does not
- * know, and the operator may roll back to this build on the same database.
+ * know, and the operator may roll back to this build on the same database. That
+ * is all it supports: a row of an unfamiliar type that has the envelope every
+ * event has, which protocol 11 guarantees. A row whose envelope this build
+ * cannot encode is not supported.
  */
 export const parseStoredEvent = (text: string): ProviderEvent => {
-  const stored = JSON.parse(text) as { readonly _tag: string } & Record<string, unknown>;
-  if (ARM_TAGS.has(stored._tag)) return stored as ProviderEvent;
-  const decoded = Schema.decodeUnknownOption(ProviderEvent)(stored);
-  if (Option.isSome(decoded)) return decoded.value;
-  return {
-    _tag: "unknown",
-    originalType: stored._tag,
-    payload: stored,
-    eventId: stored.eventId,
-    sessionId: stored.sessionId,
-    at: stored.at,
-    ...("subagentId" in stored ? { subagentId: stored.subagentId } : {}),
-  } as ProviderEvent;
+  const stored = JSON.parse(text) as ReceivedEvent;
+  return ARM_TAGS.has(stored._tag) ? (stored as ProviderEvent) : wrapUnknownEvent(stored);
 };
 
 /**

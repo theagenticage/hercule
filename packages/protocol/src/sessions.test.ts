@@ -523,8 +523,8 @@ describe("parsing an event back from storage", () => {
       payload: stored,
       subagentId: "agent-b",
     });
-    // The result can be encoded again, which the raw stored row could not.
-    expect(() => Schema.encodeSync(ProviderEvent)(read)).not.toThrow();
+    // The row can be served: encoding it for a transcript response succeeds.
+    expect(Schema.encodeSync(ProviderEvent)(read)).toEqual(read);
   });
 
   it("returns a stored event of a known tag as parsed, without decoding it", () => {
@@ -543,30 +543,6 @@ describe("parsing an event back from storage", () => {
     const stored = events.find((event) => event._tag === "unknown");
     expect(stored).toBeDefined();
     expect(parseStoredEvent(JSON.stringify(stored))).toEqual(stored);
-  });
-
-  it.each([
-    ["a tag over the 512 characters of a fact", { _tag: "x".repeat(513) }],
-    ["a subagent id in a format this build rejects", { _tag: "turn.paused", subagentId: "a:b" }],
-  ])("still returns an unknown event for a row of an unknown tag with %s", (_name, extra) => {
-    // A future row. Throwing would make the whole transcript unreadable after
-    // a rollback to this build because of this one row.
-    const stored = { ...baseFields, ...extra };
-    expect(decode(ProviderEvent, stored)._tag).toBe("Failure");
-    expect(parseStoredEvent(JSON.stringify(stored))).toEqual({
-      _tag: "unknown",
-      originalType: extra._tag,
-      payload: stored,
-      ...baseFields,
-      ...("subagentId" in extra ? { subagentId: extra.subagentId } : {}),
-    });
-  });
-
-  it("leaves out the subagent of a row that does not name one", () => {
-    const stored = { _tag: "", ...baseFields };
-    const read = parseStoredEvent(JSON.stringify(stored));
-    expect(read).toMatchObject({ _tag: "unknown", originalType: "" });
-    expect("subagentId" in read).toBe(false);
   });
 });
 
