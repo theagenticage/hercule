@@ -1,24 +1,18 @@
 /**
  * Adds `session_dedup_keys`: the keys an actor sent with `session.spawn`,
  * `session.continue` and `session.input`, each with the id the first call
- * with that key returned. A repeat of a call (an agent retrying after a
- * timeout) finds its key here and gets the first call's id back instead of
- * starting a second session or sending a second message.
- *
- * A key is unique per actor, operation and key text. Two actors may use the
- * same text. So may two operations, for example `session.spawn` and
- * `session.input`. `result_id` is the id of the session (`session.spawn`,
- * `session.continue`) or of the input (`session.input`) the call returned.
+ * returned (a session or an input). A repeat finds its key here and gets that
+ * id back.
  *
  * The keys have a table of their own, not a column on `sessions` or
- * `session_inputs`, for two reasons:
+ * `session_inputs`:
  *
  * - `session_inputs.actor` changes when someone edits a waiting input, which
- *   would silently free the key of the call that sent it.
+ *   would free the key of the call that sent it.
  * - `session.spawn` and `session.continue` both write `sessions`, and one
  *   column there could not tell their keys apart.
  *
- * A key is never deleted. The migration only adds a table and rewrites no row.
+ * The migration only adds a table and rewrites no row.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";

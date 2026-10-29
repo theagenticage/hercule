@@ -1,14 +1,10 @@
 /**
- * Tests `returnExistingOrCreate`, which makes a retried `session.spawn`,
- * `session.continue` or `session.input` return the first call's result:
- *
- * - a repeat of a recorded key returns the first result and does no work;
- * - a call that loses the claim to another call with the same key returns that
- *   call's result, also when it fails before it reaches its own claim;
- * - a call's own failure after its claim committed (the runner not answering)
- *   reaches the caller unchanged, because the caller must learn that the call
- *   failed;
- * - a key belongs to one actor and one operation.
+ * Tests the edge cases of `returnExistingOrCreate` that the HTTP integration
+ * tests cannot reach: a claim lost to an overlapping call, a failure before the
+ * call's own claim after another call won, and a call's own failure after its
+ * claim committed. The plain repeat and the separation of actors and operations
+ * are covered through the real services in `placement.integration.test.ts` and
+ * `live.dedup-key.integration.test.ts`.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
@@ -22,17 +18,6 @@ const USER: Actor = {
   _tag: "user",
   userId: "0199e0e7-0000-7000-8000-000000000000",
   credential: { kind: "login", id: "0199e0e7-0001-7000-8000-000000000000", tokenHash: "x" },
-};
-
-/** A session's actor. Only its id matters here, because the stamp is `session:<id>`. */
-const SESSION: Actor = {
-  _tag: "session",
-  sessionId: "0199e0e7-0002-7000-8000-000000000000",
-  profileId: "0199e0e7-0003-7000-8000-000000000000",
-  grants: [],
-  profileGrants: [],
-  assistantId: null,
-  agentId: null,
 };
 
 /** Returns a new canonical v7 id, the only id format the database accepts. */
@@ -95,22 +80,6 @@ describe("returnExistingOrCreate", () => {
       }),
     );
     expect(runs.count).toBe(2);
-  });
-
-  it("returns the first result of a repeat and does not run create again", async () => {
-    const runs = { count: 0 };
-    const { first, second } = await runAs(
-      USER,
-      Effect.gen(function* () {
-        const dedup = yield* dedupKeyRepository;
-        const create = claimingCreate(runs);
-        const call = () =>
-          dedup.returnExistingOrCreate("session.spawn", "key-1", readExisting, create);
-        return { first: yield* call(), second: yield* call() };
-      }),
-    );
-    expect(runs.count).toBe(1);
-    expect(second).toBe(`read ${first.replace("created ", "")}`);
   });
 
   it("returns the first result when create loses its claim to a call that recorded the key first", async () => {
@@ -192,21 +161,5 @@ describe("returnExistingOrCreate", () => {
       }),
     );
     expect(failureOf(exit)).toEqual({ _tag: "NotFound" });
-  });
-
-  it("does real work for another operation and for another actor with the same key", async () => {
-    const runs = { count: 0 };
-    await runAs(
-      USER,
-      Effect.gen(function* () {
-        const dedup = yield* dedupKeyRepository;
-        const call = (operation: DedupOperation) =>
-          dedup.returnExistingOrCreate(operation, "key-1", readExisting, claimingCreate(runs));
-        yield* call("session.spawn");
-        yield* call("session.continue");
-        yield* Effect.provideService(call("session.spawn"), CurrentActor, SESSION);
-      }),
-    );
-    expect(runs.count).toBe(3);
   });
 });

@@ -32,13 +32,13 @@ import {
 import {
   createDecodeValidationError,
   createInvalidStateError,
-  DedupKey,
   findNearestSupportedAccessMode,
   Id,
   InvalidState,
   NotFound,
   refuseEmptyPrompt,
   SESSION_INPUT_FIELDS,
+  SESSION_INPUT_PAYLOAD_FIELDS,
   SESSION_RESPOND_TO_APPROVAL_REQUEST_FIELDS,
   SESSION_RESPOND_TO_QUESTION_FIELDS,
   SESSION_UPDATE_FIELDS,
@@ -91,12 +91,9 @@ type InputInput = Schema.Schema.Type<typeof InputInput>;
  * before a dedup key is looked up, so a repeat is refused for the same
  * reasons the first call would be.
  */
-const InputCall = Schema.Struct({
-  id: Id,
-  ...SESSION_INPUT_FIELDS,
-  steer: Schema.optionalKey(Schema.Boolean),
-  dedupKey: Schema.optionalKey(DedupKey),
-}).check(refuseEmptyPrompt);
+const InputCall = Schema.Struct({ id: Id, ...SESSION_INPUT_PAYLOAD_FIELDS }).check(
+  refuseEmptyPrompt,
+);
 
 type InputCall = Schema.Schema.Type<typeof InputCall>;
 

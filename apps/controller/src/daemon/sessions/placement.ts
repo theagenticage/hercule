@@ -1171,178 +1171,177 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const actor = yield* requireGrant("session.spawn");
         const decoded = yield* Effect.mapError(decodeSpawn(input), createDecodeValidationError);
+        const createSession = (claim: DedupClaim | undefined) =>
+          Effect.gen(function* () {
+            if (decoded.agentId !== undefined) yield* refuseAgentOwnedFields(decoded);
+            // The calling session, when a session spawns: its spawn runs next to
+            // it unless the call says where.
+            const caller = actor._tag === "session" ? yield* one(actor.sessionId) : undefined;
+            const spawnedFrom =
+              decoded.agentId === undefined
+                ? undefined
+                : yield* readAgentWithProfileOrFail(decoded.agentId);
+            const agent = spawnedFrom?.agent;
+            // The Thread's defaults: undefined for a spawn from an Agent, which
+            // takes every default from the Agent.
+            let threadDefaults: ThreadDefaults | undefined;
+            if (spawnedFrom === undefined) {
+              if (actor._tag !== "user" && actor._tag !== "session") {
+                return yield* Effect.fail(
+                  createForbiddenError("session.spawn", THREAD_NEEDS_A_PROFILE),
+                );
+              }
+              if (!mayStartThread(actor)) {
+                return yield* Effect.fail(
+                  createForbiddenError("thread.start", START_THREAD_NEEDS_GRANT),
+                );
+              }
+              if (decoded.workspace?.kind === "primary" && decoded.workspace.branch !== undefined) {
+                return yield* Effect.fail(
+                  createValidationError([
+                    {
+                      path: ["workspace", "branch"],
+                      message:
+                        "Threads leave the existing checkout's branch unchanged. Omit branch to share its files, or choose an ephemeral workspace with startingRevision for separate work.",
+                    },
+                  ]),
+                );
+              }
+              if (decoded.permissionProfileId !== undefined) {
+                const named = yield* readNamedProfileOrFail(decoded.permissionProfileId);
+                if (!mayRunAs(actor, named)) {
+                  return yield* Effect.fail(
+                    createForbiddenError("thread.start", THREAD_PROFILE_NOT_ITS_GRANTS),
+                  );
+                }
+              }
+              // `caller` is the session's row whenever the actor is a session.
+              if (actor._tag === "user")
+                threadDefaults = yield* readUserThreadDefaults(actor.userId);
+              else if (caller !== undefined) {
+                threadDefaults = yield* copyCallerThreadDefaults(caller, decoded);
+              }
+            } else {
+              if (!mayRunAs(actor, spawnedFrom.profile)) {
+                return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_GRANTS));
+              }
+              if (!mayRunOn(actor, decoded.accessMode, spawnedFrom.agent)) {
+                return yield* Effect.fail(
+                  createForbiddenError("session.spawn", NOT_ITS_ACCESS_MODE),
+                );
+              }
+            }
+            const outputSchema = yield* validateOutputSchema(decoded.outputSchema);
+            if (decoded.projectId !== undefined) yield* validateLiveProject(decoded.projectId);
+            const projectId = decoded.projectId ?? threadDefaults?.projectId;
+            // A session's spawn runs on the caller's runner and in the caller's
+            // workspace unless the call names its own. The user's and the
+            // system's spawns name everything they want, and placement chooses
+            // the rest.
+            const workspace =
+              caller === undefined
+                ? decoded.workspace
+                : chooseWorkspaceNextToCaller(caller, decoded);
+            // Read before placement: an existing workspace decides which runner the
+            // session runs on, because that is where its files are.
+            const pinnedTo =
+              workspace?.kind === "existing"
+                ? yield* workspaces.machineFor(workspace.workspaceId, decoded.runnerId)
+                : undefined;
+            // An override applies to this session only and is not written back to
+            // the settings.
+            const instanceId =
+              decoded.instanceId ??
+              agent?.instanceId ??
+              threadDefaults?.instanceId ??
+              (yield* pickLoggedInInstance());
+            const requestedAccessMode =
+              decoded.accessMode ??
+              agent?.accessMode ??
+              threadDefaults?.accessMode ??
+              DEFAULT_ACCESS_MODE;
+            // A model and its options are one selection: options belong to the
+            // model that offers them. So the Agent's or the Thread default's
+            // options apply only when the call names no model of its own. A call
+            // that names its own model uses the options it sent with that model,
+            // or none at all.
+            const defaultOptions =
+              decoded.model === undefined
+                ? (agent?.model?.options ?? threadDefaults?.options)
+                : undefined;
+            const { runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
+              instanceId,
+              runnerId: pinnedTo ?? decoded.runnerId ?? caller?.runnerId,
+              requestedAccessMode,
+              model: decoded.model ?? agent?.model?.model ?? threadDefaults?.model,
+              options: decoded.options ?? defaultOptions ?? {},
+            }).pipe(
+              Effect.mapError((error) =>
+                caller !== undefined &&
+                decoded.runnerId === undefined &&
+                decoded.workspace?.kind !== "existing" &&
+                error instanceof InvalidState
+                  ? createInvalidStateError(`${error.error.message}; ${FOLLOWED_CALLER}`)
+                  : error,
+              ),
+            );
+
+            const profileId =
+              decoded.permissionProfileId ??
+              agent?.permissionProfileId ??
+              threadDefaults?.permissionProfileId ??
+              (yield* readThreadProfileId());
+
+            const spec = {
+              instanceId,
+              workspaceId: null,
+              modelSelection,
+              accessMode,
+              ...(agent === undefined ? {} : { systemPrompt: agent.systemPrompt }),
+              ...(agent === undefined || agent.disallowedTools.length === 0
+                ? {}
+                : { disallowedTools: agent.disallowedTools }),
+              ...(outputSchema === undefined ? {} : { outputSchema }),
+              timeouts: buildTimeouts(yield* settings.all()),
+            } satisfies SessionSpec;
+
+            return yield* place(
+              {
+                permissionProfileId: profileId,
+                agentId: agent?.id,
+                conversationId: undefined,
+                step: undefined,
+                runnerId,
+                requestedAccessMode,
+                parentSessionId: undefined,
+                spec,
+                prompt: decoded.prompt,
+                attachments: decoded.attachments ?? [],
+                title: undefined,
+                role: decoded.role,
+                kind: "session.spawned",
+                projectId,
+                workspace,
+                fallbackGithubConnectionId: threadDefaults?.githubConnectionId,
+                checkoutBranch: undefined,
+                payload: {
+                  instanceId,
+                  runnerId,
+                  requestedAccessMode,
+                  accessMode,
+                  ...(agent === undefined ? {} : { agentId: agent.id }),
+                  ...(projectId === undefined ? {} : { projectId }),
+                },
+              },
+              claim,
+            );
+          });
+
         return yield* dedupKeys.returnExistingOrCreate(
           "session.spawn",
           decoded.dedupKey,
           readSessionRecord,
-          (claim) =>
-            Effect.gen(function* () {
-              if (decoded.agentId !== undefined) yield* refuseAgentOwnedFields(decoded);
-              // The calling session, when a session spawns: its spawn runs next to
-              // it unless the call says where.
-              const caller = actor._tag === "session" ? yield* one(actor.sessionId) : undefined;
-              const spawnedFrom =
-                decoded.agentId === undefined
-                  ? undefined
-                  : yield* readAgentWithProfileOrFail(decoded.agentId);
-              const agent = spawnedFrom?.agent;
-              // The Thread's defaults: undefined for a spawn from an Agent, which
-              // takes every default from the Agent.
-              let threadDefaults: ThreadDefaults | undefined;
-              if (spawnedFrom === undefined) {
-                if (actor._tag !== "user" && actor._tag !== "session") {
-                  return yield* Effect.fail(
-                    createForbiddenError("session.spawn", THREAD_NEEDS_A_PROFILE),
-                  );
-                }
-                if (!mayStartThread(actor)) {
-                  return yield* Effect.fail(
-                    createForbiddenError("thread.start", START_THREAD_NEEDS_GRANT),
-                  );
-                }
-                if (
-                  decoded.workspace?.kind === "primary" &&
-                  decoded.workspace.branch !== undefined
-                ) {
-                  return yield* Effect.fail(
-                    createValidationError([
-                      {
-                        path: ["workspace", "branch"],
-                        message:
-                          "Threads leave the existing checkout's branch unchanged. Omit branch to share its files, or choose an ephemeral workspace with startingRevision for separate work.",
-                      },
-                    ]),
-                  );
-                }
-                if (decoded.permissionProfileId !== undefined) {
-                  const named = yield* readNamedProfileOrFail(decoded.permissionProfileId);
-                  if (!mayRunAs(actor, named)) {
-                    return yield* Effect.fail(
-                      createForbiddenError("thread.start", THREAD_PROFILE_NOT_ITS_GRANTS),
-                    );
-                  }
-                }
-                // `caller` is the session's row whenever the actor is a session.
-                if (actor._tag === "user")
-                  threadDefaults = yield* readUserThreadDefaults(actor.userId);
-                else if (caller !== undefined) {
-                  threadDefaults = yield* copyCallerThreadDefaults(caller, decoded);
-                }
-              } else {
-                if (!mayRunAs(actor, spawnedFrom.profile)) {
-                  return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_GRANTS));
-                }
-                if (!mayRunOn(actor, decoded.accessMode, spawnedFrom.agent)) {
-                  return yield* Effect.fail(
-                    createForbiddenError("session.spawn", NOT_ITS_ACCESS_MODE),
-                  );
-                }
-              }
-              const outputSchema = yield* validateOutputSchema(decoded.outputSchema);
-              if (decoded.projectId !== undefined) yield* validateLiveProject(decoded.projectId);
-              const projectId = decoded.projectId ?? threadDefaults?.projectId;
-              // A session's spawn runs on the caller's runner and in the caller's
-              // workspace unless the call names its own. The user's and the
-              // system's spawns name everything they want, and placement chooses
-              // the rest.
-              const workspace =
-                caller === undefined
-                  ? decoded.workspace
-                  : chooseWorkspaceNextToCaller(caller, decoded);
-              // Read before placement: an existing workspace decides which runner the
-              // session runs on, because that is where its files are.
-              const pinnedTo =
-                workspace?.kind === "existing"
-                  ? yield* workspaces.machineFor(workspace.workspaceId, decoded.runnerId)
-                  : undefined;
-              // An override applies to this session only and is not written back to
-              // the settings.
-              const instanceId =
-                decoded.instanceId ??
-                agent?.instanceId ??
-                threadDefaults?.instanceId ??
-                (yield* pickLoggedInInstance());
-              const requestedAccessMode =
-                decoded.accessMode ??
-                agent?.accessMode ??
-                threadDefaults?.accessMode ??
-                DEFAULT_ACCESS_MODE;
-              // A model and its options are one selection: options belong to the
-              // model that offers them. So the Agent's or the Thread default's
-              // options apply only when the call names no model of its own. A call
-              // that names its own model uses the options it sent with that model,
-              // or none at all.
-              const defaultOptions =
-                decoded.model === undefined
-                  ? (agent?.model?.options ?? threadDefaults?.options)
-                  : undefined;
-              const { runnerId, accessMode, modelSelection } = yield* resolveStartSettings({
-                instanceId,
-                runnerId: pinnedTo ?? decoded.runnerId ?? caller?.runnerId,
-                requestedAccessMode,
-                model: decoded.model ?? agent?.model?.model ?? threadDefaults?.model,
-                options: decoded.options ?? defaultOptions ?? {},
-              }).pipe(
-                Effect.mapError((error) =>
-                  caller !== undefined &&
-                  decoded.runnerId === undefined &&
-                  decoded.workspace?.kind !== "existing" &&
-                  error instanceof InvalidState
-                    ? createInvalidStateError(`${error.error.message}; ${FOLLOWED_CALLER}`)
-                    : error,
-                ),
-              );
-
-              const profileId =
-                decoded.permissionProfileId ??
-                agent?.permissionProfileId ??
-                threadDefaults?.permissionProfileId ??
-                (yield* readThreadProfileId());
-
-              const spec = {
-                instanceId,
-                workspaceId: null,
-                modelSelection,
-                accessMode,
-                ...(agent === undefined ? {} : { systemPrompt: agent.systemPrompt }),
-                ...(agent === undefined || agent.disallowedTools.length === 0
-                  ? {}
-                  : { disallowedTools: agent.disallowedTools }),
-                ...(outputSchema === undefined ? {} : { outputSchema }),
-                timeouts: buildTimeouts(yield* settings.all()),
-              } satisfies SessionSpec;
-
-              return yield* place(
-                {
-                  permissionProfileId: profileId,
-                  agentId: agent?.id,
-                  conversationId: undefined,
-                  step: undefined,
-                  runnerId,
-                  requestedAccessMode,
-                  parentSessionId: undefined,
-                  spec,
-                  prompt: decoded.prompt,
-                  attachments: decoded.attachments ?? [],
-                  title: undefined,
-                  role: decoded.role,
-                  kind: "session.spawned",
-                  projectId,
-                  workspace,
-                  fallbackGithubConnectionId: threadDefaults?.githubConnectionId,
-                  checkoutBranch: undefined,
-                  payload: {
-                    instanceId,
-                    runnerId,
-                    requestedAccessMode,
-                    accessMode,
-                    ...(agent === undefined ? {} : { agentId: agent.id }),
-                    ...(projectId === undefined ? {} : { projectId }),
-                  },
-                },
-                claim,
-              );
-            }),
+          createSession,
         );
       }),
 
@@ -1379,77 +1378,79 @@ const make = Effect.gen(function* () {
           decodeContinue(input),
           createDecodeValidationError,
         );
+        const createSession = (claim: DedupClaim | undefined) =>
+          Effect.gen(function* () {
+            const parent = yield* one(id);
+            if (parent.conversationId !== null) {
+              return yield* Effect.fail(createInvalidStateError(CONVERSATION_FORK_REFUSED));
+            }
+            if (parent.agentId === null) {
+              if (actor._tag !== "user" && actor._tag !== "session") {
+                return yield* Effect.fail(
+                  createForbiddenError("session.spawn", THREAD_NEEDS_A_PROFILE),
+                );
+              }
+              if (!mayStartThread(actor)) {
+                return yield* Effect.fail(
+                  createForbiddenError("thread.start", FORK_THREAD_NEEDS_GRANT),
+                );
+              }
+            }
+            if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
+              return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_PROFILE));
+            }
+            // Called only for its failures: it fails when the instance is gone, or
+            // its provider is no longer registered.
+            yield* resolved(parent.instanceId);
+            const nativeSessionId = yield* resumableNativeSession(parent);
+
+            return yield* place(
+              {
+                permissionProfileId: parent.permissionProfileId,
+                // The fork is the same piece of work under the same configuration,
+                // so it carries the same lineage as its parent.
+                agentId: parent.agentId ?? undefined,
+                conversationId: undefined,
+                step: undefined,
+                runnerId: parent.runnerId,
+                requestedAccessMode: parent.requestedAccessMode,
+                parentSessionId: parent.id,
+                // A fork continues under the parent's spec, in the parent's
+                // workspace and project. It is the same piece of work, branched.
+                spec: buildContinuingSpec(
+                  yield* sessions.readSpec(parent.id),
+                  yield* settings.all(),
+                  parent.modelSelection,
+                  // A continuation is a new session with no subagent records, so
+                  // it names no subagents, whatever its mode.
+                  { nativeSessionId, mode },
+                  // A fork never answers a conversation: `session.continue`
+                  // refuses a conversation's session above. Nor does it run a
+                  // step, even when its parent did: it is placed with no step.
+                  { conversationId: null, runId: null },
+                ),
+                prompt,
+                attachments: attachments ?? [],
+                title: undefined,
+                // A fork takes no role from its parent: a fork of a Thread gets a
+                // generated one, like any Thread.
+                role: undefined,
+                kind: "session.continued",
+                projectId: parent.projectId ?? undefined,
+                workspace: undefined,
+                fallbackGithubConnectionId: parent.githubConnectionId ?? undefined,
+                checkoutBranch: undefined,
+                payload: { parentSessionId: parent.id, mode },
+              },
+              claim,
+            );
+          });
+
         return yield* dedupKeys.returnExistingOrCreate(
           "session.continue",
           dedupKey,
           readSessionRecord,
-          (claim) =>
-            Effect.gen(function* () {
-              const parent = yield* one(id);
-              if (parent.conversationId !== null) {
-                return yield* Effect.fail(createInvalidStateError(CONVERSATION_FORK_REFUSED));
-              }
-              if (parent.agentId === null) {
-                if (actor._tag !== "user" && actor._tag !== "session") {
-                  return yield* Effect.fail(
-                    createForbiddenError("session.spawn", THREAD_NEEDS_A_PROFILE),
-                  );
-                }
-                if (!mayStartThread(actor)) {
-                  return yield* Effect.fail(
-                    createForbiddenError("thread.start", FORK_THREAD_NEEDS_GRANT),
-                  );
-                }
-              }
-              if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
-                return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_PROFILE));
-              }
-              // Called only for its failures: it fails when the instance is gone, or
-              // its provider is no longer registered.
-              yield* resolved(parent.instanceId);
-              const nativeSessionId = yield* resumableNativeSession(parent);
-
-              return yield* place(
-                {
-                  permissionProfileId: parent.permissionProfileId,
-                  // The fork is the same piece of work under the same configuration,
-                  // so it carries the same lineage as its parent.
-                  agentId: parent.agentId ?? undefined,
-                  conversationId: undefined,
-                  step: undefined,
-                  runnerId: parent.runnerId,
-                  requestedAccessMode: parent.requestedAccessMode,
-                  parentSessionId: parent.id,
-                  // A fork continues under the parent's spec, in the parent's
-                  // workspace and project. It is the same piece of work, branched.
-                  spec: buildContinuingSpec(
-                    yield* sessions.readSpec(parent.id),
-                    yield* settings.all(),
-                    parent.modelSelection,
-                    // A continuation is a new session with no subagent records, so
-                    // it names no subagents, whatever its mode.
-                    { nativeSessionId, mode },
-                    // A fork never answers a conversation: `session.continue`
-                    // refuses a conversation's session above. Nor does it run a
-                    // step, even when its parent did: it is placed with no step.
-                    { conversationId: null, runId: null },
-                  ),
-                  prompt,
-                  attachments: attachments ?? [],
-                  title: undefined,
-                  // A fork takes no role from its parent: a fork of a Thread gets a
-                  // generated one, like any Thread.
-                  role: undefined,
-                  kind: "session.continued",
-                  projectId: parent.projectId ?? undefined,
-                  workspace: undefined,
-                  fallbackGithubConnectionId: parent.githubConnectionId ?? undefined,
-                  checkoutBranch: undefined,
-                  payload: { parentSessionId: parent.id, mode },
-                },
-                claim,
-              );
-            }),
+          createSession,
         );
       }),
   };

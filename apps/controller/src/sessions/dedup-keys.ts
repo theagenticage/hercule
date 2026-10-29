@@ -1,15 +1,11 @@
 /**
- * The dedup keys of `session.spawn`, `session.continue` and `session.input`.
- *
- * An agent that retries one of these calls after a timeout sends the same
- * `dedupKey` again. The first call recorded the key together with the id it
- * returned, so the repeat returns that id and does no work. A key belongs to
- * one actor and one operation. Two actors may use the same text. So may two
- * operations.
+ * The dedup keys of `session.spawn`, `session.continue` and `session.input`:
+ * a retried call returns the first call's result instead of doing the work
+ * again.
  *
  * A call claims its key in the transaction that writes the session or the
- * input. The claim is the check: it fails when the key is already taken, and
- * the failure rolls back everything the call wrote in that transaction.
+ * input. The claim fails when the key is taken, and the failure rolls back
+ * everything the call wrote in that transaction.
  */
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -81,42 +77,35 @@ const make = Effect.gen(function* () {
 
   return {
     /**
-     * Returns the result of an earlier call with the same `dedupKey`, or
-     * runs `create` to make a new result. `operation` and the current actor
-     * scope the key. `readExisting` reads the result for the id the earlier
-     * call returned, as it is now. Fails with whatever `readExisting` or
-     * `create` fails with, or with `SqlError` when a lookup fails.
+     * Returns the result of an earlier call with the same `dedupKey` (same
+     * actor and `operation`), or runs `create` to make a new result.
+     * `readExisting` reads the result for the id the earlier call returned, as
+     * it is now. Fails with what `readExisting` or `create` fails with, or
+     * with `SqlError` when a lookup fails.
      *
-     * - With no `dedupKey`, this runs `create(undefined)` and nothing else.
-     *   It cannot fail with `DedupKeyTaken` then, so this dies if it does.
-     * - With a key that is already recorded, this returns `readExisting` for
-     *   the recorded id and never runs `create`.
-     * - With a key that is not recorded, this runs `create` with a `claim`.
-     *   `create` calls `claim(resultId)` inside the transaction that writes
-     *   its result. The claim records the key, or fails with `DedupKeyTaken`
-     *   when another call recorded it first.
+     * - No `dedupKey`: runs `create(undefined)` and nothing else.
+     * - A recorded key: returns `readExisting` for the recorded id and never
+     *   runs `create`.
+     * - An unrecorded key: runs `create` with a `claim`. `create` calls
+     *   `claim(resultId)` inside the transaction that writes its result.
      *
      * When `create` fails with a typed error, this looks the key up again and
-     * compares the recorded id with the id this call claimed itself:
+     * compares the recorded id with the id this call claimed:
      *
-     * - Recorded, and not this call's own id: another call with the key
-     *   committed first. This returns `readExisting` for its id, whatever the
-     *   error was. A call that fails before it claims (it names another
-     *   target, say, or something is not found) still returns the winner,
-     *   because the rest of a repeated call is not compared with the first.
+     * - Recorded by another call: that call committed first, so this returns
+     *   `readExisting` for its id, whatever the error was. This includes a
+     *   failure before the claim, because a repeat is not compared with the
+     *   first call beyond its key.
      * - Nothing recorded, or this call's own id: the failure is this call's
-     *   own, for instance the runner not answering after the claim
-     *   committed. It reaches the caller unchanged, so a failure that did
-     *   happen is never hidden. If that failure is `DedupKeyTaken` with
-     *   nothing recorded, the claim lost to a row that does not exist, so
-     *   this dies.
+     *   own, such as the runner not answering after the claim committed. It
+     *   reaches the caller unchanged, so a failure that happened is never
+     *   hidden.
      *
-     * A failure of the second lookup itself returns the original error.
-     * Defects and interruption pass through untouched.
-     *
-     * Comparing after the fact is safe because the database has one writer
-     * at a time: when the second lookup finds a key, the call that recorded
-     * it has committed.
+     * Comparing after the fact is safe because the database has one writer at
+     * a time: once the second lookup finds a key, the call that recorded it has
+     * committed. A failure of the second lookup returns the original error.
+     * A `DedupKeyTaken` with no key recorded cannot happen and dies, as does
+     * one with no key sent. Defects and interruption pass through.
      */
     returnExistingOrCreate: <A, E, R, E2, R2>(
       operation: DedupOperation,
