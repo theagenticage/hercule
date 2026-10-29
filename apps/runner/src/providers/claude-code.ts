@@ -1525,10 +1525,10 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       spec: SessionSpec,
       ctx: ProviderRunnerContext,
     ): Effect.Effect<SessionBinding, string> =>
-      Effect.suspend(() => {
+      Effect.gen(function* () {
         const binary = ctx.binary;
         if (binary === undefined) {
-          return Effect.fail(`no ${CLAUDE_BINARY} on this machine`);
+          return yield* Effect.fail(`no ${CLAUDE_BINARY} on this machine`);
         }
         const native = resolveNativeSession(spec);
         const binding: SessionBinding = {
@@ -1537,74 +1537,65 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           instanceId: spec.instanceId,
         };
         const input = createPushable<SDKUserMessage>();
-        return Effect.flatMap(captureUnknownMessageReporter(sessionId), (reportUnknownMessage) =>
-          Effect.map(
-            Effect.flatMap(buildSessionSettings(ctx, spec.workspaceId !== null), (settings) =>
-              Effect.suspend(() => {
-                // Checked after the settings file is written, which waits: the
-                // check and `live.set` below must follow each other with no
-                // wait between them. Two harnesses under one Hercule session id
-                // would mix up their events and their exits, so the second
-                // start fails.
-                if (live.has(sessionId)) {
-                  return Effect.fail(`session ${sessionId} is already running here`);
-                }
-                return Effect.try({
-                  try: () =>
-                    seam.stream({
-                      options: buildSessionOptions(
-                        ctx,
-                        spec,
-                        binary,
-                        native.options,
-                        buildCanUseTool(sessionId, spec.accessMode),
-                        buildRefuseMessageToOtherSession(sessionId),
-                        settings,
-                      ),
-                      input,
-                    }),
-                  catch: describeError,
-                });
-              }),
-            ),
-            (stream) => {
-              const held: Live = {
-                binding,
-                input,
-                stream,
-                state: buildNormalizingState(
-                  sessionId,
-                  () => crypto.randomUUID(),
-                  now,
-                  spec.outputSchema,
-                  reportUnknownMessage,
-                  spec.continue?.subagents,
-                ),
-                attachmentUploader: ctx.attachmentUploader,
-                editMarks: ctx.editMarks,
-                shellItems: new Map(),
-                uploads: new AbortController(),
-                parks: new Map(),
-                stopping: undefined,
-                inputGeneration: 0,
-                model: spec.modelSelection.model,
-              };
-              live.set(sessionId, held);
-              void pumpEvents(sessionId, held);
-              // The event carries the native id because the controller has no
-              // other way to learn it: `sessionsReport` is sent only once, at
-              // hello, so it never includes a session started after that.
-              emit({
-                _tag: "session.started",
-                eventId: held.state.mint(),
-                sessionId,
-                at: held.state.now(),
-                providerRefs: { nativeSessionId: binding.nativeSessionId },
-              });
-              return binding;
-            },
+        const reportUnknownMessage = yield* captureUnknownMessageReporter(sessionId);
+        const settings = yield* buildSessionSettings(ctx, spec.workspaceId !== null);
+        // Checked after the settings file is written, which waits. From this
+        // check to `live.set` below nothing may wait, so no other start can
+        // slip in between. Two harnesses under one Hercule session id would
+        // mix up their events and their exits, so the second start fails.
+        if (live.has(sessionId)) {
+          return yield* Effect.fail(`session ${sessionId} is already running here`);
+        }
+        const stream = yield* Effect.try({
+          try: () =>
+            seam.stream({
+              options: buildSessionOptions(
+                ctx,
+                spec,
+                binary,
+                native.options,
+                buildCanUseTool(sessionId, spec.accessMode),
+                buildRefuseMessageToOtherSession(sessionId),
+                settings,
+              ),
+              input,
+            }),
+          catch: describeError,
+        });
+        const held: Live = {
+          binding,
+          input,
+          stream,
+          state: buildNormalizingState(
+            sessionId,
+            () => crypto.randomUUID(),
+            now,
+            spec.outputSchema,
+            reportUnknownMessage,
+            spec.continue?.subagents,
           ),
-        );
+          attachmentUploader: ctx.attachmentUploader,
+          editMarks: ctx.editMarks,
+          shellItems: new Map(),
+          uploads: new AbortController(),
+          parks: new Map(),
+          stopping: undefined,
+          inputGeneration: 0,
+          model: spec.modelSelection.model,
+        };
+        live.set(sessionId, held);
+        void pumpEvents(sessionId, held);
+        // The event carries the native id because the controller has no
+        // other way to learn it: `sessionsReport` is sent only once, at
+        // hello, so it never includes a session started after that.
+        emit({
+          _tag: "session.started",
+          eventId: held.state.mint(),
+          sessionId,
+          at: held.state.now(),
+          providerRefs: { nativeSessionId: binding.nativeSessionId },
+        });
+        return binding;
       }),
 
     sendInput: (

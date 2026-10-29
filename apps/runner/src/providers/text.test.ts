@@ -1,11 +1,11 @@
 /**
  * Tests that the truncation every adapter uses keeps a value within the
  * protocol's bound, marks a cut value as incomplete, and never cuts a
- * character in half, and that control and format characters are escaped.
+ * character in half.
  */
 import { describe, expect, it } from "vitest";
 import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH } from "@hercule/protocol";
-import { escapeControlCharacters, truncateFact, truncateMessage } from "./text";
+import { truncateFact, truncateMessage } from "./text";
 
 describe.each([
   { name: "truncateFact", truncate: truncateFact, maxLength: MAX_FACT_LENGTH },
@@ -29,14 +29,5 @@ describe.each([
     const value = `${"a".repeat(maxLength - 2)}😀${"b".repeat(10)}`;
 
     expect(truncate(value)).toBe(`${"a".repeat(maxLength - 2)}…`);
-  });
-});
-
-describe("escapeControlCharacters", () => {
-  it("writes control, separator and format characters as escapes, and keeps other text", () => {
-    // Line feed, a right-to-left override, and a line separator.
-    expect(escapeControlCharacters("a\nb\u202ec\u2028d é😀")).toBe(
-      "a\\u{a}b\\u{202e}c\\u{2028}d é😀",
-    );
   });
 });

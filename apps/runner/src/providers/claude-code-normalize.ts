@@ -49,7 +49,8 @@ import {
 import { clampCount, toJson } from "./normalize";
 import { judgeAnswer, type HarnessAnswer } from "./structured-result";
 import { buildEditedPathFields, type EditedPathFields } from "./edited-paths";
-import { escapeControlCharacters, truncateFact, truncateMessage } from "./text";
+import { escapeControlCharacters } from "../report";
+import { truncateFact, truncateMessage } from "./text";
 
 /** The `source` name on every raw payload from this adapter. */
 export const CLAUDE_SDK_MESSAGE = "claude.sdk.message";
@@ -142,8 +143,26 @@ export interface Normalizing {
 
 /**
  * A `context_compaction` item that has started and not yet completed. Claude
- * reports a compaction in several messages, so the item is completed by a later
- * one (spec 06 section 6.3).
+ * reports a compaction in several messages (spec 06 section 6.3). What each
+ * one does to the item, and who closes the turn:
+ *
+ * - `status` `compacting`: starts the item, in a synthetic turn if none is
+ *   open (`openedTurn`). A second one while the item runs is ignored.
+ * - `status` `null` with `compact_result: "failed"`: fails the item.
+ * - `status` `null` with no `compact_result` and no `permissionMode`, before
+ *   the boundary: fails the item. Claude reports success as `null` with
+ *   `compact_result: "success"`, so a bare `null` means the compaction ended
+ *   without a result.
+ * - `compact_boundary`: records `boundary`, and starts the item first if no
+ *   `compacting` status did. The item keeps running.
+ * - The next conversation message of the session's own agent after the
+ *   boundary: completes the item, with the summary if the message holds it.
+ * - `result`, or the session exiting: completes the item with `boundary` if
+ *   there is one and fails it if not.
+ *
+ * Only a failure or a completion by a conversation message closes the turn,
+ * and only when `openedTurn`. A turn that was already open is closed by its own
+ * `result`, and a session that exits leaves its turns open.
  */
 interface RunningCompaction {
   readonly itemId: string;
@@ -1160,9 +1179,8 @@ const onTaskNotification = (
 /**
  * Starts the `context_compaction` item in the session's own agent's turn, tracks
  * it in `state.compaction`, and returns it. `detail` is what is known so far.
- * Opens a synthetic turn if none is open, and that turn then stays open until
- * the compaction completes. Known limit: compaction names no agent, so a
- * subagent's is reported as the session's own agent's (spec 06 section 13.6).
+ * Known limit: compaction names no agent, so a subagent's is reported as the
+ * session's own agent's (spec 06 section 13.6).
  */
 const startCompaction = (
   state: Normalizing,
@@ -1185,8 +1203,8 @@ const startCompaction = (
 
 /**
  * Completes the tracked compaction item and stops tracking it. Does nothing
- * when no compaction is tracked. Leaves the turn alone, whoever opened it.
- * Returns the compaction that completed.
+ * when no compaction is tracked. Leaves the turn alone. Returns the compaction
+ * that completed.
  */
 const completeCompactionItem = (
   state: Normalizing,
@@ -1210,11 +1228,7 @@ const completeCompactionItem = (
   return compaction;
 };
 
-/**
- * Completes the tracked compaction item, then closes its turn if the
- * compaction opened that turn. A turn that was already open stays open: its
- * own `result` closes it.
- */
+/** Completes the tracked compaction item, then closes its turn if the compaction opened it. */
 const completeCompaction = (
   state: Normalizing,
   out: Emit,
@@ -1228,11 +1242,9 @@ const completeCompaction = (
 };
 
 /**
- * Completes the tracked compaction at the end of its turn or of the session,
+ * Completes the tracked compaction at a `result` or at the end of the session,
  * when no later message will. A compaction past its boundary completes without
- * a summary. One without a boundary never finished, so it fails. Does nothing
- * when no compaction is tracked. Leaves the turn to the caller: the `result`
- * that ends the turn closes it, and a session that exits leaves its turns open.
+ * a summary. One without a boundary fails. Leaves the turn to the caller.
  */
 export const completeCompactionAtEnd = (state: Normalizing, out: Array<ProviderEvent>): void => {
   const boundary = state.compaction?.boundary;
@@ -1263,12 +1275,9 @@ const isConversationMessage = (sdk: SDKMessage): boolean =>
 
 /**
  * Completes a compaction that has passed its boundary, on the next
- * conversation message (`isConversationMessage`) of the session's own agent.
- * The message completes the compaction with its summary if it is the summary
- * message, and without one if it is any other conversation message. Does
- * nothing for any other message, while the compaction has no boundary yet, or
- * when none is tracked. A `result` is not handled here: it completes the
- * compaction itself (`completeCompactionAtEnd`).
+ * conversation message (`isConversationMessage`). The summary is added when
+ * the message is the summary message. Does nothing for any other message,
+ * before the boundary, or when no compaction is tracked.
  */
 const completeCompactionAfterBoundary = (state: Normalizing, sdk: SDKMessage, out: Emit): void => {
   const boundary = state.compaction?.boundary;
@@ -1283,18 +1292,10 @@ const completeCompactionAfterBoundary = (state: Normalizing, sdk: SDKMessage, ou
 };
 
 /**
- * Handles a `status` message. Only compaction matters here:
- *
- * - `compacting` starts the running item (a second one while it runs is
- *   ignored);
- * - `compact_result: "failed"` fails it;
- * - a `null` status with no `compact_result` and no `permissionMode` before the
- *   boundary fails it too: Claude reports a successful compaction as `null`
- *   with `compact_result: "success"`, so a bare `null` means the compaction
- *   ended without a result. A `null` status that carries a `permissionMode` is
- *   a permission-mode update, not an ending.
- *
- * Every other status is dropped: the session's status comes from its turns.
+ * Handles a `status` message: starts or fails the compaction as listed at
+ * `RunningCompaction`. A `null` status that carries a `permissionMode` is a
+ * permission-mode update, not an ending. Every other status is dropped: the
+ * session's status comes from its turns.
  */
 const trackCompactionStatus = (
   state: Normalizing,
@@ -1321,11 +1322,9 @@ const readTokenCount = (value: unknown): number | undefined =>
 
 /**
  * Handles `compact_boundary`: records the trigger and the token counts the
- * item will complete with, and starts the item first if no `compacting` status
- * did. The item completes at the next message of the session's own agent, which
- * may hold the summary. A
- * message with no `compact_metadata` fails here, before anything changes, and
- * `normalizeFrame` reports it as an unknown message.
+ * item will complete with (see `RunningCompaction`). A message with no
+ * `compact_metadata` fails here, before anything changes, and `normalizeFrame`
+ * reports it as an unknown message.
  */
 const recordCompactBoundary = (
   state: Normalizing,
@@ -1543,11 +1542,11 @@ const normalizeFrame = (state: Normalizing, sdk: SDKMessage): Emit => {
   // compaction: a subagent's frame, or a notice, between the boundary and the
   // summary must not take the summary's place.
   if (agent === undefined) completeCompactionAfterBoundary(state, sdk, out);
-  // The introduction and the completed compaction are not part of this
-  // message, even when the message is the summary the compaction completes
-  // with. A failure of this message keeps them, and the raw payload never goes
-  // on them.
-  const ownStart = out.length;
+  // `out[0, ownOutputStart)` is the preserved prefix: events emitted before this
+  // message is dispatched (the subagent introduction, a compaction it
+  // completes). They are kept when dispatch fails and never get the raw
+  // payload. `out[ownOutputStart..]` is this message's own output.
+  const ownOutputStart = out.length;
   const unsolicited =
     agent === undefined ? state.turnId === undefined : agent.turn.phase === "idle";
   let fellBack = false;
@@ -1558,21 +1557,21 @@ const normalizeFrame = (state: Normalizing, sdk: SDKMessage): Emit => {
     // opened before the failure is still reported as started, and drop the
     // rest of this message's partial output.
     const kept = out
-      .splice(ownStart)
+      .splice(ownOutputStart)
       .filter((event) => event._tag === "subagent.started" || isTurnOpeningEvent(event));
     out.push(...kept);
     emitUnknownItem(state, agent, out, sdk, error);
     fellBack = true;
   }
   if (unsolicited) {
-    closeUnsolicitedTurn(state, agent, out, ownStart, fellBack || isSelfContained(sdk));
+    closeUnsolicitedTurn(state, agent, out, ownOutputStart, fellBack || isSelfContained(sdk));
   }
   // There are thousands of deltas. A copy of the message on each one would
   // double the stream, and each delta already carries its text. A delta that
   // fell back to an unknown item has no text to carry, so it keeps its raw
   // payload.
   if (sdk.type === "stream_event" && !fellBack) return out;
-  const at = out.findIndex((event, index) => index >= ownStart && !isTurnOpeningEvent(event));
+  const at = out.findIndex((event, index) => index >= ownOutputStart && !isTurnOpeningEvent(event));
   const found = out[at];
   if (found !== undefined) {
     out[at] = { ...found, raw: { source: CLAUDE_SDK_MESSAGE, payload: toJson(sdk) } };
@@ -1583,7 +1582,7 @@ const normalizeFrame = (state: Normalizing, sdk: SDKMessage): Emit => {
 /**
  * Ends a turn that a message opened outside any turn, when nothing else will
  * end it (spec 06 section 6.2, synthetic turns). `out` holds the events of the
- * message from index `ownStart`, and `endsWithMessage` says the message is
+ * message from index `ownOutputStart`, and `endsWithMessage` says the message is
  * complete in itself: it is not model output (`isSelfContained`), or it became
  * an `unknown` item whatever its type.
  *
@@ -1602,14 +1601,14 @@ const closeUnsolicitedTurn = (
   state: Normalizing,
   agent: TurnOwner,
   out: Emit,
-  ownStart: number,
+  ownOutputStart: number,
   endsWithMessage: boolean,
 ): void => {
   if (agent === undefined) {
     if (state.turnId === undefined) return;
     if (state.compaction?.turnId === state.turnId) return;
-    if (out.slice(ownStart).every((event) => event._tag === "turn.started")) {
-      out.length = ownStart;
+    if (out.slice(ownOutputStart).every((event) => event._tag === "turn.started")) {
+      out.length = ownOutputStart;
       state.turnId = undefined;
     } else if (endsWithMessage) {
       closeTurn(state, out, undefined, state.turnId, "completed");
@@ -1684,12 +1683,13 @@ type ClaudeMessageFor<Key extends ClaudeMessageKey> = Key extends `system/${infe
 
 /**
  * What the adapter does with one kind of Claude message: a function that adds
- * its events to `out`, or `droppedBecause` with the reason nothing is shown.
- * `agent` is the agent the message belongs to; most handlers do not read it.
+ * its events to `out`, or a string with the reason nothing is shown (the
+ * message is dropped). `agent` is the agent the message belongs to; most
+ * handlers do not read it.
  */
 type ClaudeMessageDecision<Key extends ClaudeMessageKey> =
   | ((state: Normalizing, message: ClaudeMessageFor<Key>, out: Emit, agent: TurnOwner) => void)
-  | { readonly droppedBecause: string };
+  | string;
 
 /**
  * The decision for every Claude message (spec 06 section 6.7). Each entry is
@@ -1739,43 +1739,32 @@ const CLAUDE_MESSAGE_DECISIONS = {
   // shows as its tool item.
   "system/task_started": onTaskStarted,
   "system/task_notification": onTaskNotification,
-  "system/init": {
-    droppedBecause: "the adapter emits `session.started` itself when it starts the session",
-  },
-  "system/permission_denied": {
-    droppedBecause: "the denied tool item already ends failed when its `tool_result` arrives",
-  },
-  "system/mirror_error": { droppedBecause: "the adapter uses no SessionStore" },
-  "system/hook_started": { droppedBecause: "hooks are not shown" },
-  "system/hook_progress": { droppedBecause: "hooks are not shown" },
-  "system/hook_response": { droppedBecause: "hooks are not shown" },
+  "system/init": "the adapter emits `session.started` itself when it starts the session",
+  "system/permission_denied":
+    "the denied tool item already ends failed when its `tool_result` arrives",
+  "system/mirror_error": "the adapter uses no SessionStore",
+  "system/hook_started": "hooks are not shown",
+  "system/hook_progress": "hooks are not shown",
+  "system/hook_response": "hooks are not shown",
   // The lifecycle of a task is not model work. When a background task
   // finishes, the model's answer arrives as ordinary `assistant` messages and
   // a `result`, which open and close a real turn. Kept, each of these became an
   // empty synthetic turn.
-  "system/task_progress": { droppedBecause: "a task's command already shows as its tool item" },
-  "system/task_updated": { droppedBecause: "a task's command already shows as its tool item" },
-  "system/background_tasks_changed": {
-    droppedBecause: "a task's command already shows as its tool item",
-  },
-  "system/plugin_install": { droppedBecause: "plugin installation is not session output" },
-  "system/control_request_progress": {
-    droppedBecause: "progress of a control request is not session output",
-  },
-  "system/worker_shutting_down": { droppedBecause: "`session.exited` reports the shutdown" },
-  "system/elicitation_complete": {
-    droppedBecause: "it only confirms an MCP elicitation that is already over",
-  },
-  "system/thinking_tokens": { droppedBecause: "it holds a token count, not output" },
-  "system/session_state_changed": {
-    droppedBecause: "the session's status comes from its turns",
-  },
-  "system/commands_changed": { droppedBecause: "the slash command list is not session output" },
-  "system/files_persisted": { droppedBecause: "file persistence is not shown" },
-  tool_progress: { droppedBecause: "progress ticks of a running tool hold nothing to read" },
-  tool_use_summary: { droppedBecause: "the tool items already show what the tools did" },
-  prompt_suggestion: { droppedBecause: "a suggested next prompt is not session output" },
-  auth_status: { droppedBecause: "login state belongs in the capability snapshot" },
+  "system/task_progress": "a task's command already shows as its tool item",
+  "system/task_updated": "a task's command already shows as its tool item",
+  "system/background_tasks_changed": "a task's command already shows as its tool item",
+  "system/plugin_install": "plugin installation is not session output",
+  "system/control_request_progress": "progress of a control request is not session output",
+  "system/worker_shutting_down": "`session.exited` reports the shutdown",
+  "system/elicitation_complete": "it only confirms an MCP elicitation that is already over",
+  "system/thinking_tokens": "it holds a token count, not output",
+  "system/session_state_changed": "the session's status comes from its turns",
+  "system/commands_changed": "the slash command list is not session output",
+  "system/files_persisted": "file persistence is not shown",
+  tool_progress: "progress ticks of a running tool hold nothing to read",
+  tool_use_summary: "the tool items already show what the tools did",
+  prompt_suggestion: "a suggested next prompt is not session output",
+  auth_status: "login state belongs in the capability snapshot",
 } satisfies { readonly [Key in ClaudeMessageKey]: ClaudeMessageDecision<Key> };
 
 /**

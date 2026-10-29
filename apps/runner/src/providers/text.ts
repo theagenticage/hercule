@@ -1,7 +1,6 @@
 /**
  * Prepares text from a harness for the protocol: truncates it to the lengths
- * the protocol accepts, and escapes the characters that could disguise it
- * when shown. It lives in one module because two adapters truncating the same
+ * the protocol accepts. It lives in one module because two adapters truncating the same
  * vendor string to different lengths, or one not truncating at all, would
  * produce a frame the runner cannot encode, and the runner drops an event it
  * cannot encode.
@@ -37,16 +36,3 @@ export const truncateFact = (value: string): string => truncateWithMarker(value,
  */
 export const truncateMessage = (value: string): string =>
   truncateWithMarker(value, MAX_MESSAGE_LENGTH);
-
-/**
- * Returns `text` with each control character written as `\u{...}`. These are
- * the control characters, the line and paragraph separators, and the Unicode
- * format characters such as the bidirectional overrides: the same ones an
- * `EditedFile` path may not hold. Text that someone else controls would
- * otherwise carry line breaks or direction marks into a client's screen.
- */
-export const escapeControlCharacters = (text: string): string =>
-  text.replace(
-    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu,
-    (character) => `\\u{${(character.codePointAt(0) ?? 0).toString(16)}}`,
-  );

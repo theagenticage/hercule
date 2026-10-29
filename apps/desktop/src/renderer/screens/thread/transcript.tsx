@@ -50,12 +50,10 @@ import type { AttachOpenParagraph } from "../session/use-session-live";
 import { AgentSentMessage } from "./agent-sent-message";
 import {
   AgentMessage,
-  ErrorNote,
-  RuntimeNoticeNote,
   PendingLine,
+  RuntimeNote,
   TurnEnding,
   WaitingNote,
-  WarningNote,
   WorkDivider,
 } from "./blocks";
 
@@ -328,21 +326,16 @@ export function Transcript({
           />
         );
       case "warning":
-        return (
-          <WarningNote message={block.message} at={block.at} timezone={timezone} today={today} />
-        );
       case "runtime-notice":
+      case "error":
         return (
-          <RuntimeNoticeNote
+          <RuntimeNote
+            kind={block.kind}
             message={block.message}
             at={block.at}
             timezone={timezone}
             today={today}
           />
-        );
-      case "error":
-        return (
-          <ErrorNote message={block.message} at={block.at} timezone={timezone} today={today} />
         );
     }
   };

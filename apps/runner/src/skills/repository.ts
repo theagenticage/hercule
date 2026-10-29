@@ -42,8 +42,7 @@ import {
   type RepositorySkillFolder,
   type SkippedRepositorySkill,
 } from "@hercule/protocol";
-import { escapeControlCharacters } from "../providers/text";
-import { describeError } from "../report";
+import { describeError, escapeControlCharacters } from "../report";
 import type { RegisteredCheckout } from "../workspaces/registry";
 import {
   MAX_LISTING_ENTRIES,
