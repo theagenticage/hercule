@@ -4521,7 +4521,7 @@ The sidebar was drawn from a specimen with 3,000 and with 200 threads, every sec
 |---|---|---|
 | The first screen's JavaScript, gzipped | a guide of 250 kB | 467.6 kB to 467.8 kB, in 26 chunks both times. Over the guide as before |
 | The entry chunk (`first-screen-*.js`) | - | 1,305,824 to 1,306,505 bytes: 681 more; gzipped 414,072 to 414,316 (244 more) |
-| Main and the preload | - | not touched by the change |
+| Main and the preload | - | not built: neither imports a changed file. Main imports only `@hercule/client-core/skill-folder` from client-core, and the preload imports none of it |
 | Processes | none added | none added |
 | Work while idle | none added | none added: the one timer a request holds stops when the request ends, as before |
 | Work per streamed token | unchanged | unchanged: a turn streams over the live WebSocket, which no limit here covers |
