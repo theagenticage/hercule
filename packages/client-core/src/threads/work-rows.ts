@@ -134,6 +134,8 @@ const STEP_WORDS: Record<ItemKind, StepWords> = {
   context_compaction: { icon: "compress", verb: "Compacted the context" },
   error: { icon: "close", verb: "Error" },
   unknown: UNKNOWN_STEP,
+  // #894 slice 2: draw the todo list row ("Tasks 2/5 · <step>", icon `tasks`).
+  todo_list: UNKNOWN_STEP,
   // Messages never sit in a work stretch.
   user_message: UNKNOWN_STEP,
   assistant_message: UNKNOWN_STEP,

@@ -118,8 +118,12 @@ export {
  *   typed `error`. An older controller could not decode the refused result, and
  *   an older runner sends a refusal the newer controller cannot read, so the
  *   two refuse each other at hello.
+ * - Version 11 added the `todo_list` item kind and brought back the
+ *   `item.updated` event. An older controller could not decode either and
+ *   would close the socket on them, again after every reconnect, so the two
+ *   refuse each other at hello.
  */
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 /**
  * The close code and reason the controller uses to end the connection of a

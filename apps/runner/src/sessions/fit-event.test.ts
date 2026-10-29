@@ -137,6 +137,22 @@ describe("fitting an event into one frame", () => {
     );
   });
 
+  it("drops the detail of an oversized item update and calls it an update", () => {
+    const event = buildItemCompleted({
+      _tag: "item.updated",
+      kind: "todo_list",
+      detail: { steps: [{ text: buildText(MAX_FRAME_BYTES), status: "pending" }] },
+    });
+    const [item, warning, ...rest] = fitAndCheck(event);
+
+    expect(rest).toEqual([]);
+    expect(item).toMatchObject({ _tag: "item.updated", kind: "todo_list", itemId: "toolu_01" });
+    expect(item).not.toHaveProperty("detail");
+    expect(expectWarning(warning).message).toMatch(
+      /^A todo list update was 2\.\d\d MiB, .*, so its details were left out\. Item toolu_01\.$/,
+    );
+  });
+
   it("splits a long delta into consecutive deltas with the same text and no warning", () => {
     // Each control character takes six bytes of JSON, the most one code unit
     // can take, so this is the worst case for the size of a piece.

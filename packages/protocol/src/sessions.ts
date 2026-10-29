@@ -336,6 +336,14 @@ export const ItemKind = Schema.Literals([
   "web_search",
   "subagent",
   "plan",
+  /**
+   * A live list of steps the agent keeps while it works: Claude's `TodoWrite`
+   * and Task tools, and later Codex's plan updates. An agent has one per turn.
+   * It is updated in place with `item.updated` and completed when the turn
+   * ends. `detail` is a `TodoListDetail`. It is not a `plan`: a plan is text
+   * the agent proposes, and a todo list is live progress.
+   */
+  "todo_list",
   "context_compaction",
   "error",
   /** The forward-compatible catch-all: an unmapped vendor item, with its raw. */
@@ -694,6 +702,34 @@ export const ContextCompactionDetail = Schema.Struct({
 
 export type ContextCompactionDetail = Schema.Schema.Type<typeof ContextCompactionDetail>;
 
+/** The most steps a todo list holds. The runner cuts a longer list to this. */
+export const MAX_TODO_STEPS = 128;
+
+/** Where one step of a todo list stands. */
+export const TodoStepStatus = Schema.Literals(["pending", "in_progress", "completed"]);
+
+export type TodoStepStatus = Schema.Schema.Type<typeof TodoStepStatus>;
+
+/**
+ * One step of a todo list. Its text is a `Fact` and not a `Message`, because
+ * a step is one line, such as "Run the tests", and a client shows it on a
+ * single row. A step with no text is not a step.
+ */
+export const TodoStep = Schema.Struct({ text: Fact, status: TodoStepStatus });
+
+export type TodoStep = Schema.Schema.Type<typeof TodoStep>;
+
+/**
+ * The `detail` of a `todo_list` item: the agent's steps, in the order it
+ * listed them, at most `MAX_TODO_STEPS`. Every `item.updated` carries the whole
+ * list again.
+ */
+export const TodoListDetail = Schema.Struct({
+  steps: Schema.Array(TodoStep).check(Schema.isMaxLength(MAX_TODO_STEPS)),
+});
+
+export type TodoListDetail = Schema.Schema.Type<typeof TodoListDetail>;
+
 /**
  * `detail` stays Json: each adapter decides its shape per kind, and fixing
  * twelve shapes here would limit what each harness can report in future.
@@ -716,10 +752,11 @@ export type ContextCompactionDetail = Schema.Schema.Type<typeof ContextCompactio
  * copied from the input's `senderSessionId`. The field is absent on any other
  * message, the owner's included.
  *
- * Two more shapes are shared by every adapter and exported as schemas:
- * `UnknownItemDetail` for an `unknown` item and `ContextCompactionDetail` for a
- * `context_compaction` item. Both are written by the adapter and decoded by
- * clients; the event itself still carries Json.
+ * Three more shapes are shared by every adapter and exported as schemas:
+ * `UnknownItemDetail` for an `unknown` item, `ContextCompactionDetail` for a
+ * `context_compaction` item and `TodoListDetail` for a `todo_list` item. All
+ * are written by the adapter and decoded by clients; the event itself still
+ * carries Json.
  */
 const itemFields = {
   ...attribution,
@@ -731,6 +768,13 @@ const itemFields = {
 };
 
 const ItemStarted = defineEvent("item.started", itemFields);
+
+/**
+ * Replaces the `detail` of an item that has already started, as a whole and
+ * not as a patch. It never changes the item's `kind`, and it does not end the
+ * item: `item.completed` still follows.
+ */
+const ItemUpdated = defineEvent("item.updated", itemFields);
 
 /** The most files one `item.completed` reports as edited (spec 19 section 4.1). */
 export const MAX_EDITED_FILES = 256;
@@ -911,6 +955,7 @@ export const ProviderEvent = Schema.Union([
   TurnStarted,
   TurnCompleted,
   ItemStarted,
+  ItemUpdated,
   ItemCompleted,
   ContentDelta,
   SessionUsageUpdated,

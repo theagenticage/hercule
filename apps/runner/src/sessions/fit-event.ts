@@ -74,7 +74,7 @@ const withArticle = (noun: string): string => `${/^[aeiou]/i.test(noun) ? "An" :
 
 /** What each event that is not about an item is, as words a user reads. */
 const EVENT_SUBJECTS: Record<
-  Exclude<ProviderEvent["_tag"], "item.started" | "item.completed">,
+  Exclude<ProviderEvent["_tag"], "item.started" | "item.updated" | "item.completed">,
   string
 > = {
   "session.started": "The session's start",
@@ -92,14 +92,16 @@ const EVENT_SUBJECTS: Record<
 };
 
 /**
- * Names what `event` is, as the start of a sentence a user reads: the input
- * or the result of an item, by its kind written as words ("A tool call
+ * Names what `event` is, as the start of a sentence a user reads: the input,
+ * the update or the result of an item, by its kind written as words ("A tool call
  * result"), or the kind of event.
  */
 const describeEventSubject = (event: ProviderEvent): string => {
   switch (event._tag) {
     case "item.started":
       return withArticle(`${event.kind.replace(/_/g, " ")} input`);
+    case "item.updated":
+      return withArticle(`${event.kind.replace(/_/g, " ")} update`);
     case "item.completed":
       return withArticle(`${event.kind.replace(/_/g, " ")} result`);
     default:
@@ -148,7 +150,7 @@ const joinAsList = (words: ReadonlyArray<string>): string =>
  * 1. Its `raw` is dropped.
  * 2. A `content.delta` is split into consecutive deltas. The stream is
  *    append-only, so the pieces add up to the same text.
- * 3. An `item.started` or `item.completed` loses its `detail`.
+ * 3. An `item.started`, `item.updated` or `item.completed` loses its `detail`.
  * 4. A `turn.completed` has an `ok` structured result replaced by a schema
  *    failure that gives the result's size, so an agent step fails with a
  *    reason instead of a value too large to send.
@@ -193,10 +195,14 @@ export const fitEventToFrame = (event: ProviderEvent): ReadonlyArray<ProviderEve
     if (pieces !== undefined) return leftOut.length > 0 ? [...pieces, buildLossWarning()] : pieces;
   }
 
-  if (shrunk._tag === "item.started" || shrunk._tag === "item.completed") {
+  if (
+    shrunk._tag === "item.started" ||
+    shrunk._tag === "item.updated" ||
+    shrunk._tag === "item.completed"
+  ) {
     const { detail, ...withoutDetail } = shrunk;
     if (detail !== undefined) {
-      // An item's result carries its output; an item's input, its details.
+      // An item's result carries its output; its input and its updates, its details.
       leftOut.unshift(
         shrunk._tag === "item.completed"
           ? { noun: "output", plural: false }
