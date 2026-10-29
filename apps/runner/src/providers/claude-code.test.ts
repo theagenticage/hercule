@@ -680,30 +680,6 @@ describe("a Claude Code session", () => {
         "Claude sent a message type this runner has no decision for: claude: system/foo_bar",
       ]);
     });
-
-    it("stops writing lines after 100 different labels, with one line that says so", async () => {
-      const { run, warnings } = await startLogging();
-
-      const types = Array.from({ length: 103 }, (_, index) => `foo_${index}`);
-      for (const subtype of types) run.say({ type: "system", subtype });
-      // The first label again: already logged, so it adds nothing.
-      run.say({ type: "system", subtype: types[0] });
-      await waitUntil(
-        "showed every message",
-        () => filterItems(run.seen, "unknown").length === 2 * (types.length + 1),
-      );
-
-      expect(warnings).toHaveLength(101);
-      expect(warnings[0]).toBe(
-        "Claude sent a message type this runner has no decision for: claude: system/foo_0",
-      );
-      expect(warnings[99]).toBe(
-        "Claude sent a message type this runner has no decision for: claude: system/foo_99",
-      );
-      expect(warnings[100]).toBe(
-        "Claude sent more than 100 different unknown message types in this session. Further ones are not logged.",
-      );
-    });
   });
 
   it("runs a workspace-less session in its scratch cwd, with the instance's home and no setting source", async () => {

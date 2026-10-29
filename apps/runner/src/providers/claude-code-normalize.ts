@@ -74,8 +74,8 @@ import {
   recordTodoCall,
   type TodoList,
 } from "./claude-code-todo-list";
-import { escapeControlCharacters } from "../report";
 import { requireText, truncateFact, truncateMessage } from "./text";
+import { buildUnknownItemLabel } from "./unknown-items";
 
 /** The `source` name on every raw payload from this adapter. */
 export const CLAUDE_SDK_MESSAGE = "claude.sdk.message";
@@ -713,13 +713,11 @@ const buildClaudeMessageKey = (message: unknown): string => {
 
 /**
  * Builds the label of an `unknown` item for a message, such as
- * `claude: system/foo_bar`. The type and subtype are text from Claude, so
- * control and format characters are written as escapes: a label with a line
- * break or a direction override would otherwise change how a client draws it.
- * Never throws, whatever the message holds.
+ * `claude: system/foo_bar`. The type and subtype are text from Claude, which
+ * `buildUnknownItemLabel` escapes. Never throws, whatever the message holds.
  */
 const buildUnknownLabel = (message: unknown): string =>
-  truncateFact(`claude: ${escapeControlCharacters(buildClaudeMessageKey(message))}`);
+  buildUnknownItemLabel("claude", buildClaudeMessageKey(message));
 
 /**
  * Emits an `unknown` item, in the agent's turn, for a message this adapter
@@ -1300,7 +1298,7 @@ const buildResultHandler =
 const buildUnknownBlockLabel = (block: unknown): string => {
   const type = readInputString(block, "type");
   const name = type === undefined || type === "" ? "block with no type" : type;
-  return truncateFact(`claude: assistant/${escapeControlCharacters(name)}`);
+  return buildUnknownItemLabel("claude", `assistant/${name}`);
 };
 
 /** Emits an `unknown` item for a content block this adapter cannot show. */

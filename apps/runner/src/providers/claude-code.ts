@@ -106,7 +106,8 @@ import { makeInstall } from "./install";
 import { PROBE_DEADLINE, buildFailedProbe } from "./probe";
 import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
-import { truncateFact, truncateMessage } from "./text";
+import { describeErrorAsFact, truncateFact, truncateMessage } from "./text";
+import { captureUnknownItemReporter } from "./unknown-items";
 import { buildUserMessage, ensureId } from "./events";
 import { buildHarnessPrompt, joinInstructions } from "./prompt";
 import {
@@ -211,65 +212,6 @@ const SEMVER = /\d+\.\d+\.\d+\S*/;
 
 /** The effort level the CLI uses when none is chosen. */
 const DEFAULT_EFFORT = "medium";
-
-/**
- * Returns the error's message, truncated to fit a `Fact`. An `Error` can have an
- * empty message, which a `Fact` does not accept, so an empty message is
- * replaced with a fixed one.
- */
-const describeError = (error: unknown): string => {
-  const said = truncateFact(error instanceof Error ? error.message : String(error));
-  return said === "" ? "the harness failed with an empty error message" : said;
-};
-
-/**
- * The most distinct labels one session's log hears of. Labels come from text
- * Claude sends, so a harness that sends a new type with every message would
- * otherwise fill the log and the set that remembers them.
- */
-const MAX_REPORTED_UNKNOWN_LABELS = 100;
-
-/**
- * Returns the function that writes a session's `reportUnknownMessage` lines to
- * the runner's log. It captures the services of the fiber that runs this
- * effect, loggers included, because the harness's messages are read outside
- * any fiber, and a line written there would miss `runner.log`. The line names
- * the message type and never holds the message itself.
- *
- * Each label is logged once per session, up to `MAX_REPORTED_UNKNOWN_LABELS`.
- * One more line then says that further types are not logged, and nothing is
- * logged after it.
- */
-const captureUnknownMessageReporter = (
-  sessionId: string,
-): Effect.Effect<Normalizing["reportUnknownMessage"]> =>
-  Effect.map(Effect.context<never>(), (services) => {
-    const reported = new Set<string>();
-    let capReported = false;
-    const logWarning = (text: string): void => {
-      void Effect.runForkWith(services)(
-        Effect.logWarning(text).pipe(Effect.annotateLogs({ sessionId })),
-      );
-    };
-    return (label, error) => {
-      if (reported.has(label)) return;
-      if (reported.size >= MAX_REPORTED_UNKNOWN_LABELS) {
-        if (!capReported) {
-          capReported = true;
-          logWarning(
-            `Claude sent more than ${MAX_REPORTED_UNKNOWN_LABELS} different unknown message types in this session. Further ones are not logged.`,
-          );
-        }
-        return;
-      }
-      reported.add(label);
-      logWarning(
-        error === undefined
-          ? `Claude sent a message type this runner has no decision for: ${label}`
-          : `Claude sent a message this runner could not read: ${label}. Error: ${describeError(error)}`,
-      );
-    };
-  });
 
 /**
  * Builds the effort option from a list of effort levels. The levels come from
@@ -807,7 +749,7 @@ const buildSessionSettings = (
         },
         catch: (error) =>
           buildAdapterFailed(
-            `The runner could not write the settings file for ${CLAUDE_CODE_NAME}: ${describeError(error)}`,
+            `The runner could not write the settings file for ${CLAUDE_CODE_NAME}: ${describeErrorAsFact(error)}`,
           ),
       }),
   );
@@ -1195,7 +1137,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
   ): Effect.Effect<ControlFailure | undefined> =>
     Effect.map(
       Effect.timeoutOption(
-        Effect.match(Effect.tryPromise({ try: () => request, catch: describeError }), {
+        Effect.match(Effect.tryPromise({ try: () => request, catch: describeErrorAsFact }), {
           onFailure: (reason: string): ControlFailure =>
             held.stopping !== undefined || live.get(held.binding.sessionId) !== held
               ? { _tag: "NoAnswer", reason }
@@ -1501,7 +1443,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           sessionId,
           at: held.state.now(),
           class: "unknown",
-          message: describeError(error),
+          message: describeErrorAsFact(error),
         });
       }
     } finally {
@@ -1546,11 +1488,11 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         Effect.gen(function* () {
           const account = yield* Effect.tryPromise({
             try: () => session.accountInfo(),
-            catch: describeError,
+            catch: describeErrorAsFact,
           });
           const models = yield* Effect.tryPromise({
             try: () => session.supportedModels(),
-            catch: describeError,
+            catch: describeErrorAsFact,
           });
           return { account: account as Account, models: models as ReadonlyArray<Model> };
         }),
@@ -1580,7 +1522,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           instanceId: spec.instanceId,
         };
         const input = createPushable<SDKUserMessage>();
-        const reportUnknownMessage = yield* captureUnknownMessageReporter(sessionId);
+        const reportUnknownMessage = yield* captureUnknownItemReporter("Claude", sessionId);
         const settings = yield* buildSessionSettings(ctx, spec.workspaceId !== null);
         // Checked after the settings file is written, which waits. From this
         // check to `live.set` below nothing may wait, so no other start can
@@ -1603,7 +1545,7 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
               ),
               input,
             }),
-          catch: (error) => buildStartFailure(CLAUDE_CODE_NAME, describeError(error)),
+          catch: (error) => buildStartFailure(CLAUDE_CODE_NAME, describeErrorAsFact(error)),
         });
         const held: Live = {
           binding,
@@ -1810,11 +1752,11 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
               input: buildTextGenerationInput(spec.input),
               closeWaitsForExit: true,
             }),
-          catch: describeError,
+          catch: describeErrorAsFact,
         }),
         (stream) =>
           Effect.map(
-            Effect.tryPromise({ try: () => readQueryResult(stream), catch: describeError }),
+            Effect.tryPromise({ try: () => readQueryResult(stream), catch: describeErrorAsFact }),
             (result): TextGenerationOutcome =>
               result === undefined
                 ? { outcome: "failed", message: "the harness ended without an answer" }
