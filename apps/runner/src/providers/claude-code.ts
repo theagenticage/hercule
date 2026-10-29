@@ -107,7 +107,7 @@ import { PROBE_DEADLINE, buildFailedProbe } from "./probe";
 import type { LoginCommand } from "./login";
 import { runProcess, type Run } from "./process";
 import { describeErrorAsFact, truncateFact, truncateMessage } from "./text";
-import { captureUnknownItemReporter } from "./unknown-items";
+import { captureUnknownItemReporter } from "./message-reporting";
 import { buildUserMessage, ensureId } from "./events";
 import { buildHarnessPrompt, joinInstructions } from "./prompt";
 import {

@@ -71,7 +71,7 @@ import {
   describeStartFailure,
 } from "../adapter-error-builders";
 import { truncateMessage } from "../text";
-import { captureIgnoredMessageReporter, captureUnknownItemReporter } from "../unknown-items";
+import { captureIgnoredMessageReporter, captureUnknownItemReporter } from "../message-reporting";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { describeError, now } from "../../report";
 import { ASKED } from "./approvals";
@@ -639,6 +639,40 @@ const buildUserInput = (
 /** Matches the code the device login prints for the user to type: four characters, a dash, five. */
 const USER_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/;
 
+/**
+ * Removes the generated image from a notification frame, in place, before
+ * anything else reads the frame. An `imageGeneration` item holds the image
+ * itself, base64 encoded, in `result`. Left in, it would be copied into the
+ * frames the adapter queues and into every event's `raw`, and make each one
+ * megabytes long, while the image reaches nobody through the stream. The frame
+ * comes straight from the decoder, so nothing else holds it yet.
+ *
+ * A `ThreadItem` sits in the params of only these notifications:
+ * `item/started` and `item/completed` hold it in `params.item`, and
+ * `turn/started` and `turn/completed` hold a turn's items in
+ * `params.turn.items`. `thread/started` holds whole threads, but it is dropped
+ * and never attached to an event. The check goes by the item's `type` alone,
+ * so an item whose other fields are malformed is covered too.
+ */
+const stripImageBytes = (frame: NotificationFrame): void => {
+  const params = frame.params as
+    | { readonly item?: unknown; readonly turn?: { readonly items?: unknown } }
+    | null
+    | undefined;
+  const dropResult = (item: unknown): void => {
+    if (
+      typeof item === "object" &&
+      item !== null &&
+      (item as { type?: unknown }).type === "imageGeneration"
+    ) {
+      Reflect.deleteProperty(item, "result");
+    }
+  };
+  dropResult(params?.item);
+  const items = params?.turn?.items;
+  if (Array.isArray(items)) items.forEach(dropResult);
+};
+
 export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
   // Creating an unbounded PubSub allocates and nothing more, so it is safe to
   // run here and keeps `findAdapter` the synchronous lookup every other caller
@@ -810,6 +844,7 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
         // every request in flight on this connection.
         onNotification: (frame) => {
           try {
+            stripImageBytes(frame);
             onNotification(host, frame);
           } catch {
             warn(host, `the app-server sent a ${frame.method} that this build could not read`);
@@ -1751,8 +1786,8 @@ export const makeCodexAdapter = (seam: CodexSeam): ProviderAdapter => {
           instanceId: spec.instanceId,
         };
         const reports = {
-          unknown: yield* captureUnknownItemReporter("Codex", sessionId),
-          ignored: yield* captureIgnoredMessageReporter(sessionId),
+          reportUnknownMessage: yield* captureUnknownItemReporter("Codex", sessionId),
+          reportIgnoredMessage: yield* captureIgnoredMessageReporter(sessionId),
         };
         const held: Held = {
           binding,

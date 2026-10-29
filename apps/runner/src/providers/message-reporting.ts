@@ -1,8 +1,10 @@
 /**
- * The parts of showing a message nobody decided how to show that are the same
- * for every harness: the label of the `unknown` item, and the bounded lines
- * that tell the runner's log about it. Building the item's events is not here,
- * because it depends on each adapter's own turn state.
+ * The parts of reporting a harness message the adapter does not show that are
+ * the same for every harness: the label of the `unknown` item for a message
+ * nobody decided how to show, and the bounded lines that tell the runner's log
+ * about it or about a message that was understood and deliberately not shown.
+ * Building the item's events is not here, because it depends on each adapter's
+ * own turn state.
  */
 import * as Effect from "effect/Effect";
 import { escapeControlCharacters } from "../report";
@@ -20,20 +22,30 @@ export const buildUnknownItemLabel = (harnessPrefix: string, typeText: string): 
   truncateFact(`${harnessPrefix}: ${escapeControlCharacters(typeText)}`);
 
 /**
- * The most distinct labels one session's log hears of. Labels come from text
- * the harness sends, so a harness that sends a new type with every message
+ * The most distinct labels or keys one session's log hears of. They come from
+ * text the harness sends, so a harness that sends a new type with every message
  * would otherwise fill the log and the set that remembers them.
  */
 const MAX_REPORTED_UNKNOWN_LABELS = 100;
 
 /**
+ * Returns the function that writes one warning line to the runner's log,
+ * annotated with the session id. It captures the services of the fiber that
+ * runs this effect, loggers included, because the harness's messages are read
+ * outside any fiber, and a line written there would miss `runner.log`.
+ */
+const captureSessionWarningWriter = (sessionId: string): Effect.Effect<(text: string) => void> =>
+  Effect.map(Effect.context<never>(), (services) => (text) => {
+    void Effect.runForkWith(services)(
+      Effect.logWarning(text).pipe(Effect.annotateLogs({ sessionId })),
+    );
+  });
+
+/**
  * Returns the function that writes a session's lines about `unknown` items to
  * the runner's log. `harnessName` is the harness as the log line names it, such
- * as `Claude`. The function captures the services of the fiber that runs this
- * effect, loggers included, because the harness's messages are read outside any
- * fiber, and a line written there would miss `runner.log`. A line names the
- * label and never holds the message itself. `error` is what failed when the
- * message's fields could not be read.
+ * as `Claude`. A line names the label and never holds the message itself.
+ * `error` is what failed when the message's fields could not be read.
  *
  * Each label is logged once per session, up to `MAX_REPORTED_UNKNOWN_LABELS`.
  * One more line then says that further types are not logged, and nothing is
@@ -43,27 +55,22 @@ export const captureUnknownItemReporter = (
   harnessName: string,
   sessionId: string,
 ): Effect.Effect<(label: string, error?: unknown) => void> =>
-  Effect.map(Effect.context<never>(), (services) => {
+  Effect.map(captureSessionWarningWriter(sessionId), (write) => {
     const reported = new Set<string>();
     let capReported = false;
-    const logWarning = (text: string): void => {
-      void Effect.runForkWith(services)(
-        Effect.logWarning(text).pipe(Effect.annotateLogs({ sessionId })),
-      );
-    };
     return (label, error) => {
       if (reported.has(label)) return;
       if (reported.size >= MAX_REPORTED_UNKNOWN_LABELS) {
         if (!capReported) {
           capReported = true;
-          logWarning(
+          write(
             `${harnessName} sent more than ${MAX_REPORTED_UNKNOWN_LABELS} different unknown message types in this session. Further ones are not logged.`,
           );
         }
         return;
       }
       reported.add(label);
-      logWarning(
+      write(
         error === undefined
           ? `${harnessName} sent a message type this runner has no decision for: ${label}`
           : `${harnessName} sent a message this runner could not read: ${label}. Error: ${describeErrorAsFact(error)}`,
@@ -74,22 +81,18 @@ export const captureUnknownItemReporter = (
 /**
  * Returns the function that writes a line to the runner's log about a message
  * the adapter understood but deliberately did not show, such as a frame that
- * arrived for a turn that was over. `key` names the kind of message, so one
- * line is written per key per session, up to `MAX_REPORTED_UNKNOWN_LABELS`
- * keys; `text` is the line. Like `captureUnknownItemReporter`, it captures the
- * services of the fiber that runs this effect, so a line written from outside
- * any fiber still reaches `runner.log`.
+ * arrived for a turn that was over. `key` names the kind of message, and `text`
+ * is the line. One line is written per key per session, up to
+ * `MAX_REPORTED_UNKNOWN_LABELS` keys, and nothing after that.
  */
 export const captureIgnoredMessageReporter = (
   sessionId: string,
 ): Effect.Effect<(key: string, text: string) => void> =>
-  Effect.map(Effect.context<never>(), (services) => {
+  Effect.map(captureSessionWarningWriter(sessionId), (write) => {
     const reported = new Set<string>();
     return (key, text) => {
       if (reported.has(key) || reported.size >= MAX_REPORTED_UNKNOWN_LABELS) return;
       reported.add(key);
-      void Effect.runForkWith(services)(
-        Effect.logWarning(text).pipe(Effect.annotateLogs({ sessionId })),
-      );
+      write(text);
     };
   });

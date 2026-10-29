@@ -1,6 +1,6 @@
 /**
  * Tests the label of an `unknown` item and the bounded log lines that report
- * it, which every adapter shares.
+ * unknown and deliberately unshown messages, which every adapter shares.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
@@ -10,7 +10,7 @@ import {
   buildUnknownItemLabel,
   captureIgnoredMessageReporter,
   captureUnknownItemReporter,
-} from "./unknown-items";
+} from "./message-reporting";
 
 describe("buildUnknownItemLabel", () => {
   it("joins the harness prefix and the type text", () => {

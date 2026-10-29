@@ -4156,3 +4156,64 @@ describe("notifications that name no thread", () => {
     expect(run.seen.slice(before)).toEqual([]);
   });
 });
+
+describe("the bytes of a generated image", () => {
+  const BYTES = "SENTINEL_IMAGE_BYTES";
+  const buildImage = (extra: Record<string, unknown> = {}) => ({
+    type: "imageGeneration",
+    id: "img_0",
+    status: "completed",
+    revisedPrompt: "a cat",
+    failure: null,
+    result: BYTES,
+    ...extra,
+  });
+
+  it("reach no event, whatever frame carries the item", async () => {
+    const run = await startTestSession();
+    const turn = (status: string) => ({
+      id: TURN,
+      items: [buildImage()],
+      itemsView: "full",
+      status,
+    });
+
+    for (const frame of [
+      { method: "turn/started", params: { threadId: THREAD, turn: turn("inProgress") } },
+      {
+        method: "item/started",
+        params: { threadId: THREAD, turnId: TURN, item: buildImage({ status: "inProgress" }) },
+      },
+      {
+        method: "item/completed",
+        params: {
+          threadId: THREAD,
+          turnId: TURN,
+          item: buildImage({ savedPath: "/tmp/cat.png" }),
+          completedAtMs: 1,
+        },
+      },
+      // A malformed item, and an item in a frame this build has no decision for.
+      {
+        method: "item/completed",
+        params: {
+          threadId: THREAD,
+          turnId: TURN,
+          item: buildImage({ id: 42, savedPath: 42 }),
+          completedAtMs: 1,
+        },
+      },
+      { method: "future/thing", params: { threadId: THREAD, turnId: TURN, item: buildImage() } },
+      { method: "turn/completed", params: { threadId: THREAD, turn: turn("completed") } },
+    ]) {
+      run.server.push(frame);
+    }
+    await waitUntil("ended the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+
+    expect(JSON.stringify(run.seen)).not.toContain(BYTES);
+    const completed = filterByTag(run.seen, "item.completed");
+    expect(completed.map((event) => event.kind)).toContain("image_generation");
+    // Everything else in the item stays in `raw`.
+    expect(JSON.stringify(completed[0]?.raw)).toContain("a cat");
+  });
+});

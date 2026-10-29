@@ -39,7 +39,10 @@ interface Note {
 const buildNote = (method: string, params: Record<string, unknown>): Note => ({ method, params });
 
 /** Ignores what the normalizer reports to the runner's log. */
-const IGNORE_REPORT = { unknown: (): void => undefined, ignored: (): void => undefined };
+const IGNORE_REPORT = {
+  reportUnknownMessage: (): void => undefined,
+  reportIgnoredMessage: (): void => undefined,
+};
 
 const buildTestState = () => buildNormalizingState(SESSION, THREAD, undefined, IGNORE_REPORT);
 
@@ -1200,10 +1203,10 @@ const encodeAll = (events: ReadonlyArray<ProviderEvent>): void => {
 /** Builds a state whose reports about unknown messages are collected in `reports`. */
 const buildReportingState = (reports: Array<string>, ignored: Array<string> = []) =>
   buildNormalizingState(SESSION, THREAD, undefined, {
-    unknown: (label) => {
+    reportUnknownMessage: (label) => {
       reports.push(label);
     },
-    ignored: (key) => {
+    reportIgnoredMessage: (key) => {
       ignored.push(key);
     },
   });
@@ -1509,7 +1512,7 @@ describe("the items Codex has no tool kind for", () => {
     id: "img_0",
     status: "completed",
     revisedPrompt: "a cat",
-    result: "BASE64BYTES",
+    result: "",
     failure: null,
     ...extra,
   });
@@ -1526,11 +1529,11 @@ describe("the items Codex has no tool kind for", () => {
     encodeAll(events);
   });
 
-  it("shows an image generation with its saved path, and puts no image bytes in any event", () => {
+  it("shows an image generation, with its saved path as an update right before the completion", () => {
     const events = normalizeFromStart([
       TURN_STARTED,
       buildNote("item/started", {
-        item: buildImage({ status: "inProgress", result: "BASE64BYTES" }),
+        item: buildImage({ status: "inProgress" }),
         threadId: THREAD,
         turnId: TURN,
         startedAtMs: 1,
@@ -1538,13 +1541,23 @@ describe("the items Codex has no tool kind for", () => {
       buildItemCompleted(buildImage({ savedPath: "/tmp/cat.png" })),
     ]);
 
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.updated",
+      "item.completed",
+    ]);
+    expect(filterByTag(events, "item.started")[0]?.detail).toBeUndefined();
+    expect(events.filter((event) => event._tag === "item.updated")[0]).toMatchObject({
+      kind: "image_generation",
+      itemId: "img_0",
+      detail: { path: "/tmp/cat.png" },
+    });
     expect(filterByTag(events, "item.completed")[0]).toMatchObject({
       kind: "image_generation",
       status: "completed",
       detail: { path: "/tmp/cat.png" },
     });
-    expect(JSON.stringify(events)).not.toContain("BASE64BYTES");
-    expect(JSON.stringify(events)).toContain("a cat");
     encodeAll(events);
   });
 
@@ -1558,6 +1571,7 @@ describe("the items Codex has no tool kind for", () => {
     const completed = filterByTag(events, "item.completed")[0];
     expect(completed).toMatchObject({ kind: "image_generation", status: "failed" });
     expect(completed?.detail).toBeUndefined();
+    expect(listEventTags(events)).not.toContain("item.updated");
   });
 
   it("shows entering and leaving review mode as notices, only when the item completes", () => {
@@ -1705,24 +1719,8 @@ describe("what Codex sends that this build has no decision for", () => {
 
     expect(filterByTag(events, "item.completed")[0]).toMatchObject({
       kind: "unknown",
-      itemId: "s_0",
       detail: { label: "codex: item/sleep" },
     });
-  });
-
-  it("is one row for the start and the completion of one unreadable item", () => {
-    const bad = { type: "sleep", id: "s_0", durationMs: "soon" };
-    const events = normalizeFromStart([
-      TURN_STARTED,
-      buildNote("item/started", { item: bad, threadId: THREAD, turnId: TURN, startedAtMs: 1 }),
-      buildItemCompleted(bad),
-    ]);
-
-    expect(listEventTags(events)).toEqual(["turn.started", "item.started", "item.completed"]);
-    expect(new Set(events.map((event) => "itemId" in event && event.itemId))).toEqual(
-      new Set([false, "s_0"]),
-    );
-    encodeAll(events);
   });
 
   it("is what an item type added by a newer Codex becomes", () => {
@@ -1897,71 +1895,6 @@ describe("a delta that cannot be read", () => {
     ]);
     expect(listStreamedDeltas(events)).toEqual([["assistant_text", "Hello"]]);
     encodeAll(events);
-  });
-});
-
-describe("the bytes of a generated image", () => {
-  const BYTES = "SENTINEL_IMAGE_BYTES";
-  const buildImage = (extra: Record<string, unknown> = {}) => ({
-    type: "imageGeneration",
-    id: "img_0",
-    status: "completed",
-    revisedPrompt: null,
-    failure: null,
-    result: BYTES,
-    ...extra,
-  });
-
-  it("reach no event, whatever frame carries the item", () => {
-    const events = normalizeFromStart([
-      buildNote("turn/started", {
-        threadId: THREAD,
-        turn: { ...buildTurn("inProgress"), items: [buildImage()] },
-      }),
-      buildNote("item/started", {
-        item: buildImage({ status: "inProgress" }),
-        threadId: THREAD,
-        turnId: TURN,
-        startedAtMs: 1,
-      }),
-      buildItemCompleted(buildImage()),
-      buildNote("turn/completed", {
-        threadId: THREAD,
-        turn: { ...buildTurn("completed"), items: [buildImage()] },
-      }),
-      buildNote("future/thing", { threadId: THREAD, turnId: TURN, item: buildImage() }),
-    ]);
-
-    expect(JSON.stringify(events)).not.toContain(BYTES);
-    expect(filterByTag(events, "item.completed").map((event) => event.kind)).toContain(
-      "image_generation",
-    );
-    encodeAll(events);
-  });
-
-  it("reach no event when the item's other fields are malformed", () => {
-    const events = normalizeFromStart([
-      TURN_STARTED,
-      buildItemCompleted(buildImage({ id: 42, savedPath: 42 })),
-    ]);
-
-    expect(JSON.stringify(events)).not.toContain(BYTES);
-    expect(filterByTag(events, "item.completed")[0]).toMatchObject({
-      kind: "unknown",
-      detail: { label: "codex: item/imageGeneration" },
-    });
-    encodeAll(events);
-  });
-
-  it("are the only part of the item left out of raw", () => {
-    const events = normalizeFromStart([
-      TURN_STARTED,
-      buildItemCompleted(buildImage({ revisedPrompt: "a cat" })),
-    ]);
-
-    expect(filterByTag(events, "item.completed")[0]?.raw).toMatchObject({
-      payload: { item: { id: "img_0", revisedPrompt: "a cat" } },
-    });
   });
 });
 

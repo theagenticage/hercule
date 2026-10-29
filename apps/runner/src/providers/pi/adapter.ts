@@ -80,7 +80,7 @@ import {
   type Run,
 } from "../process";
 import { truncateFact, truncateMessage } from "../text";
-import { captureUnknownItemReporter } from "../unknown-items";
+import { captureUnknownItemReporter } from "../message-reporting";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
 import { now } from "../../report";
 import {

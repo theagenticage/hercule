@@ -47,7 +47,7 @@ import { judgeAnswer, type HarnessAnswer } from "../structured-result";
 import { ensureId } from "../events";
 import { buildEditedPathFields } from "../edited-paths";
 import { requireText, truncateFact, truncateMessage } from "../text";
-import { buildUnknownItemLabel } from "../unknown-items";
+import { buildUnknownItemLabel } from "../message-reporting";
 import type { NotificationFrame } from "./rpc";
 import type {
   AgentMessageDeltaNotification,
@@ -77,23 +77,13 @@ export interface MessageReports {
    * A message with no decision, or one whose fields could not be read, by its
    * label. `error` is what failed when the fields could not be read.
    */
-  readonly unknown: (label: string, error?: unknown) => void;
+  readonly reportUnknownMessage: (label: string, error?: unknown) => void;
   /**
    * A message the normalizer understood but deliberately did not show, such as
    * a frame for a turn that is over. `key` names the kind of message and `text`
    * is the line.
    */
-  readonly ignored: (key: string, text: string) => void;
-}
-
-/**
- * What the structured answer needs from the last item a turn completed: its
- * type, and its text when it is an assistant message. The whole item is not
- * kept, because it can hold large payloads.
- */
-export interface LastCompletedItem {
-  readonly type: ThreadItem["type"];
-  readonly text: string | undefined;
+  readonly reportIgnoredMessage: (key: string, text: string) => void;
 }
 
 /**
@@ -154,7 +144,7 @@ export interface Normalizing {
    * from this item: Codex constrains the turn's final assistant message, so
    * the answer is that message, and only if the turn ended on it.
    */
-  lastCompletedItem: LastCompletedItem | undefined;
+  lastCompletedItem: ThreadItem | undefined;
   /**
    * Whether a turn has started in this process. On a resume or a fork, Codex
    * reports the thread's restored usage before any turn starts. An earlier
@@ -211,60 +201,9 @@ const buildCodexThreadEnvelope = (
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null;
 
-/** Checks whether `item` is an `imageGeneration` item that still holds its image. */
-const hasImageBytes = (item: unknown): item is Readonly<Record<string, unknown>> =>
-  isRecord(item) && item.type === "imageGeneration" && "result" in item;
-
-/** Returns a copy of an `imageGeneration` item without `result`, which holds the image. */
-const dropImageBytes = (item: Readonly<Record<string, unknown>>): Record<string, unknown> =>
-  Object.fromEntries(Object.entries(item).filter(([key]) => key !== "result"));
-
-/**
- * Returns `params` without the bytes of any generated image, or `params`
- * itself when it holds none. It copies only the objects on the path to an item
- * that has bytes, so the usual frame is not copied at all.
- */
-const stripImageBytesFromParams = (params: unknown): unknown => {
-  if (!isRecord(params)) return params;
-  let stripped = params;
-  if (hasImageBytes(params.item)) stripped = { ...stripped, item: dropImageBytes(params.item) };
-  const turn = params.turn;
-  if (isRecord(turn) && Array.isArray(turn.items) && turn.items.some(hasImageBytes)) {
-    const items: ReadonlyArray<unknown> = turn.items.map((item: unknown) =>
-      hasImageBytes(item) ? dropImageBytes(item) : item,
-    );
-    stripped = { ...stripped, turn: { ...turn, items } };
-  }
-  return stripped;
-};
-
-/**
- * Leaves out `result` of an `imageGeneration` item. The field holds the
- * generated image, base64 encoded, and would make an event megabytes long; the
- * image reaches nobody through the stream.
- *
- * A `ThreadItem` sits in the params of only these notifications, and all four
- * are covered: `item/started` and `item/completed` (`params.item`), and
- * `turn/started` and `turn/completed` (`params.turn.items`). `thread/started`
- * holds whole threads with their turns, but it is dropped and never attached.
- * A frame the adapter has no decision for, or could not read, is attached whole
- * as `{ method, params }`, and its `params` is checked in the same two places.
- */
-const stripImageBytes = (payload: unknown): unknown => {
-  if (isRecord(payload) && "method" in payload && "params" in payload) {
-    const params = stripImageBytesFromParams(payload.params);
-    return params === payload.params ? payload : { ...payload, params };
-  }
-  return stripImageBytesFromParams(payload);
-};
-
-/**
- * Builds the `raw` field: the notification the event came from, under this
- * adapter's channel, without the bytes of any generated image. Every `raw` this
- * adapter attaches is built here.
- */
+/** Builds the `raw` field: the notification the event came from, under this adapter's channel. */
 const buildNotificationRaw = (payload: unknown): ReturnType<typeof buildRaw> =>
-  buildRaw(CODEX_NOTIFICATION, stripImageBytes(payload));
+  buildRaw(CODEX_NOTIFICATION, payload);
 
 /**
  * The decision for every item type of the pinned release: the kind of item it
@@ -478,7 +417,7 @@ const isLateTurn = (state: Normalizing, turnId: string): boolean => state.openTu
 
 /** Tells the runner's log that a frame for a finished turn was not shown. */
 const reportLateFrame = (state: Normalizing, method: string, turnId: string): void =>
-  state.reports.ignored(
+  state.reports.reportIgnoredMessage(
     `late ${method}`,
     `Codex sent ${method} for turn ${truncateFact(turnId)}, which is not the thread's running turn. It was not shown.`,
   );
@@ -737,10 +676,8 @@ const onError = (state: Normalizing, params: ErrorNotification): ReadonlyArray<P
  * in prose or a code fence is not the constrained output, and extracting JSON
  * from it would be guessing at an answer the model never gave.
  */
-export const readHarnessAnswer = (
-  last: { readonly type: string; readonly text?: string | undefined } | undefined,
-): HarnessAnswer => {
-  if (last?.type !== "agentMessage" || last.text === undefined) {
+export const readHarnessAnswer = (last: ThreadItem | undefined): HarnessAnswer => {
+  if (last?.type !== "agentMessage") {
     return { missing: "the turn ended without a final agent message" };
   }
   try {
@@ -907,7 +844,7 @@ const describeItem = (
   if (kind === null) return null;
   if (kind !== "unknown") return { kind, ...buildDetail(state, item, phase) };
   const label = buildUnknownItemLabel("codex", `item/${String(item.type)}`);
-  state.reports.unknown(label);
+  state.reports.reportUnknownMessage(label);
   return { kind, detail: { label } satisfies UnknownItemDetail };
 };
 
@@ -981,21 +918,35 @@ const onItemCompleted = (
   if (!late) {
     // Recorded before the item is classified, because the echo of the user's
     // message also counts: a turn that ends on that echo has no answer.
-    state.lastCompletedItem = {
-      type: params.item.type,
-      text: params.item.type === "agentMessage" ? params.item.text : undefined,
-    };
+    state.lastCompletedItem = params.item;
   }
   const fields = describeItem(state, params.item, "completed");
   if (fields === null) return buildReviewNotice(state, params);
+  const turnId = ensureId(params.turnId);
+  const itemId = ensureId(params.item.id);
   return [
     ...(late ? [] : buildMissingMessageText(state, params)),
+    // Codex saves a generated image when the item completes, so its path is not
+    // known when the item starts. A client reads an item's detail from the
+    // events that update it, so the path goes out as an update first.
+    ...(fields.kind === "image_generation" && fields.detail !== undefined
+      ? [
+          {
+            _tag: "item.updated" as const,
+            ...buildCodexThreadEnvelope(state),
+            turnId,
+            itemId,
+            kind: fields.kind,
+            detail: fields.detail,
+          },
+        ]
+      : []),
     {
       _tag: "item.completed",
       ...buildCodexThreadEnvelope(state),
       ...buildNotificationRaw(params),
-      turnId: ensureId(params.turnId),
-      itemId: ensureId(params.item.id),
+      turnId,
+      itemId,
       status: readItemStatus(params.item),
       ...fields,
     },
@@ -1193,6 +1144,18 @@ const buildThreadWarning = (
 ];
 
 /**
+ * Returns a drop decision with the same `reason` for each of `methods`, to be
+ * spread into `NOTIFICATION_DECISIONS`. The result's keys are exactly the
+ * listed methods, so a method the release does not list is still a type error,
+ * and a method left out of the table is still reported as missing.
+ */
+const dropAll = <const Methods extends ReadonlyArray<NotificationMethod>>(
+  reason: string,
+  methods: Methods,
+): Record<Methods[number], string> =>
+  Object.fromEntries(methods.map((method) => [method, reason])) as Record<Methods[number], string>;
+
+/**
  * The decision for every notification method of the pinned Codex release (spec
  * 06 section 6.7). Each entry is checked against the params of its method: a
  * handler takes that method's params type, and a method the release does not
@@ -1273,37 +1236,18 @@ const NOTIFICATION_DECISIONS = {
   "thread/started":
     "a thread is introduced by the first frame that names it, which the runner then reads with thread/read",
   "thread/status/changed": "the session's status comes from its turns",
-  "thread/archived": "Hercule never archives a Codex thread",
-  "thread/unarchived": "Hercule never archives a Codex thread",
   "thread/deleted": "Hercule never deletes a Codex thread",
   "thread/closed": "the adapter ends the session on it before frames reach this table",
   "thread/reverted": "Hercule never rolls a Codex thread back",
   "thread/name/updated": "Hercule names its threads itself",
-  "thread/goal/updated": "Hercule does not use Codex thread goals",
-  "thread/goal/cleared": "Hercule does not use Codex thread goals",
   "thread/queue/changed": "Hercule queues a session's input itself, not in Codex",
   "thread/settings/updated": "the settings are the ones Hercule set when it opened the thread",
   "thread/compacted": "deprecated; the contextCompaction item already shows the compaction",
-  "thread/environment/connected": "Hercule does not use Codex remote environments",
-  "thread/environment/disconnected": "Hercule does not use Codex remote environments",
-  "project/changed": "Hercule does not use Codex projects",
-  "thread/project/updated": "Hercule does not use Codex projects",
   "skills/changed": "an invalidation signal for a skill list this adapter does not cache",
-  "hook/started": "hooks are not shown (spec 06 section 6.7)",
-  "hook/completed": "hooks are not shown (spec 06 section 6.7)",
   "turn/diff/updated": "diffs come from the workspace's checkpoints, not from the harness",
   "turn/moderationMetadata": "moderation metadata is for Codex's own interface, not session output",
-  "item/autoApprovalReview/started":
-    "Codex marks the auto-review payload unstable; the reviewed item ends with its own status",
-  "item/autoApprovalReview/completed":
-    "Codex marks the auto-review payload unstable; the reviewed item ends with its own status",
-  "autoApprovalReview/strictReviewRequired":
-    "Codex marks the auto-review payload unstable; the reviewed item ends with its own status",
   "rawResponseItem/completed": "internal model API data; the items arrive as item/completed",
   "rawResponse/completed": "internal model API data; usage arrives as thread/tokenUsage/updated",
-  "command/exec/outputDelta": "answers a command/exec request, which Hercule never makes",
-  "process/outputDelta": "answers a process/spawn request, which Hercule never makes",
-  "process/exited": "answers a process/spawn request, which Hercule never makes",
   "item/commandExecution/terminalInteraction":
     "the stdin sent to a running command; the command item shows the command and its output",
   "item/fileChange/outputDelta": "deprecated; Codex no longer sends it",
@@ -1317,32 +1261,64 @@ const NOTIFICATION_DECISIONS = {
   "mcpServer/event/stream/notification": "belongs to an MCP subscription Hercule never opens",
   "app/list/updated": "the list of apps is not session output",
   "remoteControl/status/changed": "Hercule does not use Codex remote control",
-  "externalAgentConfig/import/progress": "Hercule never imports another agent's configuration",
-  "externalAgentConfig/import/completed": "Hercule never imports another agent's configuration",
   "fs/changed": "answers an fs/watch subscription, which Hercule never makes",
   "item/reasoning/summaryPartAdded":
     "only marks where a new summary part starts; its text arrives as summary deltas",
   "model/verification": "tells Codex's own interface about a verification it asks of the user",
   "model/safetyBuffering/updated": "state for Codex's own interface, not session output",
-  "modelProvider/authRecoveryStarted":
-    "a failed recovery arrives as an error notification, which is shown",
-  "modelProvider/authRecoveryCompleted":
-    "a failed recovery arrives as an error notification, which is shown",
-  "fuzzyFileSearch/sessionUpdated": "answers a fuzzy file search, which Hercule never starts",
-  "fuzzyFileSearch/sessionCompleted": "answers a fuzzy file search, which Hercule never starts",
-  "thread/realtime/started": "Hercule does not use Codex realtime voice",
-  "thread/realtime/itemAdded": "Hercule does not use Codex realtime voice",
-  "thread/realtime/item/started": "Hercule does not use Codex realtime voice",
-  "thread/realtime/item/transcript/delta": "Hercule does not use Codex realtime voice",
-  "thread/realtime/item/completed": "Hercule does not use Codex realtime voice",
-  "thread/realtime/transcript/delta": "Hercule does not use Codex realtime voice",
-  "thread/realtime/transcript/done": "Hercule does not use Codex realtime voice",
-  "thread/realtime/outputAudio/delta": "Hercule does not use Codex realtime voice",
-  "thread/realtime/sdp": "Hercule does not use Codex realtime voice",
-  "thread/realtime/error": "Hercule does not use Codex realtime voice",
-  "thread/realtime/closed": "Hercule does not use Codex realtime voice",
-  "windows/worldWritableWarning": "a Windows-only message; runners run on macOS and Linux",
-  "windowsSandbox/setupCompleted": "a Windows-only message; runners run on macOS and Linux",
+  ...dropAll("Hercule never archives a Codex thread", ["thread/archived", "thread/unarchived"]),
+  ...dropAll("Hercule does not use Codex thread goals", [
+    "thread/goal/updated",
+    "thread/goal/cleared",
+  ]),
+  ...dropAll("Hercule does not use Codex remote environments", [
+    "thread/environment/connected",
+    "thread/environment/disconnected",
+  ]),
+  ...dropAll("Hercule does not use Codex projects", ["project/changed", "thread/project/updated"]),
+  ...dropAll("hooks are not shown (spec 06 section 6.7)", ["hook/started", "hook/completed"]),
+  ...dropAll(
+    "Codex marks the auto-review payload unstable; the reviewed item ends with its own status",
+    [
+      "item/autoApprovalReview/started",
+      "item/autoApprovalReview/completed",
+      "autoApprovalReview/strictReviewRequired",
+    ],
+  ),
+  ...dropAll("answers a command/exec or process/spawn request, which Hercule never makes", [
+    "command/exec/outputDelta",
+    "process/outputDelta",
+    "process/exited",
+  ]),
+  ...dropAll("Hercule never imports another agent's configuration", [
+    "externalAgentConfig/import/progress",
+    "externalAgentConfig/import/completed",
+  ]),
+  ...dropAll("a failed recovery arrives as an error notification, which is shown", [
+    "modelProvider/authRecoveryStarted",
+    "modelProvider/authRecoveryCompleted",
+  ]),
+  ...dropAll("answers a fuzzy file search, which Hercule never starts", [
+    "fuzzyFileSearch/sessionUpdated",
+    "fuzzyFileSearch/sessionCompleted",
+  ]),
+  ...dropAll("Hercule does not use Codex realtime voice", [
+    "thread/realtime/started",
+    "thread/realtime/itemAdded",
+    "thread/realtime/item/started",
+    "thread/realtime/item/transcript/delta",
+    "thread/realtime/item/completed",
+    "thread/realtime/transcript/delta",
+    "thread/realtime/transcript/done",
+    "thread/realtime/outputAudio/delta",
+    "thread/realtime/sdp",
+    "thread/realtime/error",
+    "thread/realtime/closed",
+  ]),
+  ...dropAll("a Windows-only message; runners run on macOS and Linux", [
+    "windows/worldWritableWarning",
+    "windowsSandbox/setupCompleted",
+  ]),
 } satisfies { readonly [Method in NotificationMethod]: NotificationDecision<Method> };
 
 /**
@@ -1357,51 +1333,29 @@ const DECISIONS_BY_METHOD = NOTIFICATION_DECISIONS as Readonly<
 >;
 
 /**
- * What a fallback `unknown` item needs to know about the frame it stands for.
- * `label` names the frame. `itemId` is the id of the item the frame carries
- * when it can be read, so the `item/started` and the `item/completed` of one
- * bad item make one row. `phase` is `started` or `completed` when the frame
- * covers only that half of an item's life, and `whole` when the frame is
- * complete in itself.
+ * Returns the label of the fallback item for a frame. An `item/started` or
+ * `item/completed` whose item could not be read is labelled by the item's
+ * type, such as `codex: item/sleep`, whenever the type can be read, and any
+ * other frame by its method. The params come from the wire and can be anything.
  */
-interface UnknownFrame {
-  readonly label: string;
-  readonly itemId: string | undefined;
-  readonly phase: "whole" | "started" | "completed";
-}
-
-/**
- * Describes the frame of an `item/started` or `item/completed` notification
- * whose item could not be read: it is labelled by the item's type and keeps the
- * item's id, whenever those two can be read. Any other frame is labelled by its
- * method. The params come from the wire and can be anything.
- */
-const describeUnreadableFrame = (frame: NotificationFrame): UnknownFrame => {
-  const whole: UnknownFrame = {
-    label: buildUnknownItemLabel("codex", frame.method),
-    itemId: undefined,
-    phase: "whole",
-  };
-  if (frame.method !== "item/started" && frame.method !== "item/completed") return whole;
+const buildFrameLabel = (frame: NotificationFrame): string => {
+  const methodLabel = buildUnknownItemLabel("codex", frame.method);
+  if (frame.method !== "item/started" && frame.method !== "item/completed") return methodLabel;
   const params = frame.params;
-  if (typeof params !== "object" || params === null || !("item" in params)) return whole;
-  const item = params.item;
-  if (typeof item !== "object" || item === null) return whole;
-  const type = "type" in item && typeof item.type === "string" && item.type !== "" ? item.type : "";
-  const id = "id" in item && typeof item.id === "string" && item.id !== "" ? item.id : undefined;
-  return {
-    label: type === "" ? whole.label : buildUnknownItemLabel("codex", `item/${type}`),
-    itemId: id === undefined ? undefined : truncateFact(id),
-    phase: id === undefined ? "whole" : frame.method === "item/started" ? "started" : "completed",
-  };
+  if (!isRecord(params) || !isRecord(params.item)) return methodLabel;
+  const type = params.item.type;
+  return typeof type === "string" && type !== ""
+    ? buildUnknownItemLabel("codex", `item/${type}`)
+    : methodLabel;
 };
 
 /**
  * Returns the events of a fallback `unknown` item for a notification this
  * adapter cannot show: its method has no entry in `NOTIFICATION_DECISIONS`, or
  * its params could not be read (`error` is what failed). The item carries the
- * frame's label, and the whole frame goes in `raw` of the first event only. The
- * runner's log hears of it once.
+ * frame's label, and the whole frame goes in `raw` of its `item.started`. The
+ * runner's log hears of it once. An item that is unreadable at its start and
+ * again at its completion shows as two rows.
  *
  * One agent never has two turns at once, so where the item goes depends on the
  * thread alone, and never on the turn the frame names:
@@ -1420,36 +1374,27 @@ const buildUnknownFrameEvents = (
   frame: NotificationFrame,
   error?: unknown,
 ): ReadonlyArray<ProviderEvent> => {
-  const { label, itemId: readId, phase } = describeUnreadableFrame(frame);
-  state.reports.unknown(label, error);
+  const label = buildFrameLabel(frame);
+  state.reports.reportUnknownMessage(label, error);
   const running = state.openTurnId;
   if (running === undefined && state.isTurnPending()) return [];
-  const itemId = readId ?? crypto.randomUUID();
+  const turnId = running === undefined ? crypto.randomUUID() : ensureId(running);
   const common = {
     ...buildCodexThreadEnvelope(state),
-    turnId: running === undefined ? crypto.randomUUID() : ensureId(running),
-    itemId,
+    turnId,
+    itemId: crypto.randomUUID(),
     kind: "unknown",
     detail: { label } satisfies UnknownItemDetail,
   } as const;
-  const raw = buildNotificationRaw(frame);
-  const started = { _tag: "item.started", ...common, ...raw } as const;
-  const completed = { _tag: "item.completed", ...common, status: "completed" } as const;
-  if (running !== undefined) {
-    if (phase === "started") return [started];
-    if (phase === "completed") return [{ ...completed, ...raw }];
-    return [started, completed];
-  }
+  const items: ReadonlyArray<ProviderEvent> = [
+    { _tag: "item.started", ...common, ...buildNotificationRaw(frame) },
+    { _tag: "item.completed", ...common, status: "completed" },
+  ];
+  if (running !== undefined) return items;
   return [
-    { _tag: "turn.started", ...buildCodexThreadEnvelope(state), turnId: common.turnId },
-    started,
-    completed,
-    {
-      _tag: "turn.completed",
-      ...buildCodexThreadEnvelope(state),
-      turnId: common.turnId,
-      state: "completed",
-    },
+    { _tag: "turn.started", ...buildCodexThreadEnvelope(state), turnId },
+    ...items,
+    { _tag: "turn.completed", ...buildCodexThreadEnvelope(state), turnId, state: "completed" },
   ];
 };
 

@@ -75,7 +75,7 @@ import {
   type TodoList,
 } from "./claude-code-todo-list";
 import { requireText, truncateFact, truncateMessage } from "./text";
-import { buildUnknownItemLabel } from "./unknown-items";
+import { buildUnknownItemLabel } from "./message-reporting";
 
 /** The `source` name on every raw payload from this adapter. */
 export const CLAUDE_SDK_MESSAGE = "claude.sdk.message";

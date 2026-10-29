@@ -31,7 +31,7 @@ import { ensureId } from "../events";
 import { judgeAnswer } from "../structured-result";
 import { buildEditedPathFields } from "../edited-paths";
 import { requireText, truncateFact, truncateMessage } from "../text";
-import { buildUnknownItemLabel } from "../unknown-items";
+import { buildUnknownItemLabel } from "../message-reporting";
 import { resolvePiPath } from "./edited-path";
 import { SUBAGENT_TOOL, SUBMIT_RESULT_TOOL } from "./extension";
 

@@ -693,7 +693,7 @@ export const makeCodexThreads = (options: {
         // A turn or usage frame with no thread cannot be placed: giving it to
         // the root would end or start the root's turn on a guess.
         if (isControlFrame(frame)) {
-          options.reports.ignored(
+          options.reports.reportIgnoredMessage(
             `threadless ${frame.method}`,
             `Codex sent ${frame.method} with no thread id, so the runner cannot tell which thread it is for. It was dropped.`,
           );
