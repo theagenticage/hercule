@@ -4,6 +4,7 @@
  * replied. Long signatures and unused fields were removed; nothing else was
  * changed.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -689,8 +690,8 @@ describe("item details", () => {
       input: {},
       kind: "mcp",
     });
-    expect(readItemDetail([buildToolUse("WebFetch")], TOOL, "item.started")).toEqual({
-      name: "WebFetch",
+    expect(readItemDetail([buildToolUse("Frobnicate")], TOOL, "item.started")).toEqual({
+      name: "Frobnicate",
       input: {},
       kind: "native",
     });
@@ -2011,10 +2012,10 @@ describe("a subagent's turns", () => {
   });
 
   // After a stop, the stopped call's rejected tool_result arrives after the
-  // task_notification that closed the turn. A turn opened for it is closed at
-  // once, or nothing would ever close it and the subagent would look running.
-  // The subagent was stopped, so that turn ends as interrupted too.
-  it("closes the turn a trailing tool result opened for a stopped subagent as interrupted", () => {
+  // task_notification that closed the turn. The result completes its item in
+  // the turn the call started in and opens no turn, so the subagent does not
+  // look running again.
+  it("completes a trailing tool result of a stopped subagent in the turn the call started in", () => {
     const running = buildTestState();
     const lines = [
       buildTaskStarted(SUBAGENT, AGENT_CALL),
@@ -2023,9 +2024,9 @@ describe("a subagent's turns", () => {
       buildSubagentToolResult(AGENT_CALL),
     ].flatMap((message) => normalize(running, message as unknown as SDKMessage).map(formatEvent));
     expect(lines.slice(-3)).toEqual([
-      `turn.started @${SUBAGENT}`,
-      `item.completed command_execution ${SUBAGENT_TOOL} completed @${SUBAGENT}`,
+      `item.started command_execution ${SUBAGENT_TOOL} @${SUBAGENT}`,
       `turn.completed interrupted @${SUBAGENT}`,
+      `item.completed command_execution ${SUBAGENT_TOOL} completed @${SUBAGENT}`,
     ]);
     expect(isAnyAgentWorking(running)).toBe(false);
   });
@@ -2629,5 +2630,686 @@ describe("a tool result too large for one frame", () => {
     // the runner's socket.
     expect(completed).toBeDefined();
     expect(measureEventBytes(completed!)).toBeGreaterThan(MAX_FRAME_BYTES);
+  });
+});
+
+describe("server tool, MCP tool and result blocks", () => {
+  const SERVER_TOOL = "srvtoolu_01WebSearch000000000001";
+  const MCP_TOOL = "mcptoolu_01LinearIssues0000001";
+
+  const encode = Schema.encodeUnknownSync(ProviderEvent);
+
+  /** Builds an assistant message that holds the given content blocks. */
+  const buildBlocks = (content: ReadonlyArray<unknown>, id = MESSAGE) => ({
+    type: "assistant",
+    uuid: "4c6485ca-097a-43f5-8709-6865c49705ca",
+    session_id: NATIVE,
+    parent_tool_use_id: null,
+    message: { id, role: "assistant", model: "claude-sonnet-5-5", content },
+  });
+
+  const buildServerToolUse = (name: string, input: unknown, id = SERVER_TOOL) => ({
+    type: "server_tool_use",
+    id,
+    name,
+    input,
+  });
+
+  const SEARCH_HITS = [
+    {
+      type: "web_search_result",
+      title: "Schema - Effect Documentation",
+      url: "https://effect.website/docs/schema/",
+      page_age: "3 weeks ago",
+      encrypted_content: "EqgfCioIAhgBIiQ4YjZk",
+    },
+    {
+      type: "web_search_result",
+      title: "Union | Effect Schema",
+      url: "https://effect.website/docs/schema/unions/",
+      page_age: null,
+      encrypted_content: "EpYCCioIAhgBIiQ0Y2U1",
+    },
+  ];
+
+  /** Normalizes the messages in order, in one state, and returns every event. */
+  const run = (
+    messages: ReadonlyArray<unknown>,
+    running = buildTestState(),
+  ): ReadonlyArray<Event> =>
+    messages.flatMap((message) => normalize(running, message as SDKMessage));
+
+  /** Returns the events of one kind of item. */
+  const listItemEvents = (
+    events: ReadonlyArray<Event>,
+    tag: "item.started" | "item.completed",
+    kind: string,
+  ) => events.flatMap((event) => (event._tag === tag && event.kind === kind ? [event] : []));
+
+  /** Returns the one `item.completed` for an item id. */
+  const readCompleted = (events: ReadonlyArray<Event>, itemId: string) => {
+    const found = events.filter(
+      (event) => event._tag === "item.completed" && event.itemId === itemId,
+    );
+    expect(found).toHaveLength(1);
+    const [event] = found;
+    return event?._tag === "item.completed"
+      ? { status: event.status, detail: event.detail as Record<string, unknown> }
+      : undefined;
+  };
+
+  describe("a server web search", () => {
+    const events = run([
+      buildBlocks([buildServerToolUse("web_search", { query: "effect schema unions" })]),
+      buildBlocks([
+        { type: "web_search_tool_result", tool_use_id: SERVER_TOOL, content: SEARCH_HITS },
+      ]),
+    ]);
+
+    it("is one web_search item with the query beside the name and the input", () => {
+      expect(listItemEvents(events, "item.started", "web_search")).toHaveLength(1);
+      const started = listItemEvents(events, "item.started", "web_search")[0];
+      expect(started?.detail).toEqual({
+        name: "web_search",
+        input: { query: "effect schema unions" },
+        query: "effect schema unions",
+      });
+    });
+
+    it("completes with a title and URL for each result and no encrypted content", () => {
+      const completed = readCompleted(events, SERVER_TOOL);
+      expect(completed?.status).toBe("completed");
+      expect(completed?.detail["content"]).toBe(
+        [
+          "Schema - Effect Documentation",
+          "https://effect.website/docs/schema/",
+          "",
+          "Union | Effect Schema",
+          "https://effect.website/docs/schema/unions/",
+        ].join("\n"),
+      );
+      expect(JSON.stringify(completed?.detail)).not.toContain("EqgfCioIAhgBIiQ4YjZk");
+    });
+
+    it("keeps the whole vendor message in raw", () => {
+      const raw = events.find((event) => event._tag === "item.completed")?.raw;
+      expect(JSON.stringify(raw)).toContain("EqgfCioIAhgBIiQ4YjZk");
+    });
+
+    it("encodes with the protocol schema", () => {
+      for (const event of events) expect(() => encode(event)).not.toThrow();
+    });
+  });
+
+  it("shows a server web fetch as a web_search item with the url", () => {
+    const events = run([
+      buildBlocks([buildServerToolUse("web_fetch", { url: "https://example.com/a" })]),
+      buildBlocks([
+        {
+          type: "web_fetch_tool_result",
+          tool_use_id: SERVER_TOOL,
+          content: {
+            type: "web_fetch_result",
+            url: "https://example.com/a",
+            retrieved_at: null,
+            content: {
+              type: "document",
+              title: "Example A",
+              citations: null,
+              source: { type: "text", media_type: "text/plain", data: "Hello page" },
+            },
+          },
+        },
+      ]),
+    ]);
+    expect(listItemEvents(events, "item.started", "web_search")[0]?.detail).toEqual({
+      name: "web_fetch",
+      input: { url: "https://example.com/a" },
+      url: "https://example.com/a",
+    });
+    expect(readCompleted(events, SERVER_TOOL)?.detail["content"]).toBe(
+      "Example A\nhttps://example.com/a\n\nHello page",
+    );
+  });
+
+  it("cuts the text of a fetched page and names a PDF instead of showing it", () => {
+    const fetchResult = (source: unknown) =>
+      buildBlocks([
+        {
+          type: "web_fetch_tool_result",
+          tool_use_id: SERVER_TOOL,
+          content: {
+            type: "web_fetch_result",
+            url: "https://example.com/b",
+            retrieved_at: null,
+            content: { type: "document", title: null, citations: null, source },
+          },
+        },
+      ]);
+    const long = readCompleted(
+      run([
+        buildBlocks([buildServerToolUse("web_fetch", { url: "https://example.com/b" })]),
+        fetchResult({ type: "text", media_type: "text/plain", data: "x".repeat(10_000) }),
+      ]),
+      SERVER_TOOL,
+    );
+    expect(String(long?.detail["content"]).length).toBeLessThan(2_100);
+    expect(String(long?.detail["content"])).toContain("…");
+    const pdf = readCompleted(
+      run([
+        buildBlocks([buildServerToolUse("web_fetch", { url: "https://example.com/b" })]),
+        fetchResult({ type: "base64", media_type: "application/pdf", data: "JVBERi0=" }),
+      ]),
+      SERVER_TOOL,
+    );
+    expect(pdf?.detail["content"]).toBe("https://example.com/b\n\nThe page is a PDF document.");
+  });
+
+  it("shows any other server tool as a native tool_call", () => {
+    const events = run([buildBlocks([buildServerToolUse("code_execution", { code: "print(1)" })])]);
+    expect(listItemEvents(events, "item.started", "tool_call")[0]?.detail).toEqual({
+      name: "code_execution",
+      input: { code: "print(1)" },
+      kind: "native",
+    });
+  });
+
+  it("never classifies a server tool by the local tool names", () => {
+    // `Bash` is a local command; a server tool of the same name must not read as one.
+    const events = run([buildBlocks([buildServerToolUse("Bash", { command: "rm -rf /" })])]);
+    expect(listItemEvents(events, "item.started", "command_execution")).toEqual([]);
+    expect(listItemEvents(events, "item.started", "tool_call")).toHaveLength(1);
+  });
+
+  describe("an MCP call", () => {
+    const call = buildBlocks([
+      {
+        type: "mcp_tool_use",
+        id: MCP_TOOL,
+        name: "list_issues",
+        server_name: "linear",
+        input: { n: 3 },
+      },
+    ]);
+    const buildMcpResult = (content: unknown, isError: boolean) =>
+      buildBlocks([{ type: "mcp_tool_result", tool_use_id: MCP_TOOL, content, is_error: isError }]);
+
+    it("is a tool_call with kind mcp and the server's name", () => {
+      const events = run([call]);
+      expect(listItemEvents(events, "item.started", "tool_call")[0]?.detail).toEqual({
+        name: "list_issues",
+        input: { n: 3 },
+        kind: "mcp",
+        server: "linear",
+      });
+    });
+
+    it("completes with the text the server returned", () => {
+      const completed = readCompleted(run([call, buildMcpResult("3 issues", false)]), MCP_TOOL);
+      expect(completed).toEqual({ status: "completed", detail: { content: "3 issues" } });
+    });
+
+    it("fails when the server flagged an error, and keeps a list of text blocks as it is", () => {
+      const blocks = [{ type: "text", text: "no access", citations: null }];
+      const completed = readCompleted(run([call, buildMcpResult(blocks, true)]), MCP_TOOL);
+      expect(completed).toEqual({ status: "failed", detail: { content: blocks } });
+    });
+  });
+
+  describe("each other result block", () => {
+    /** Runs a server call and its result, and returns what the item completed with. */
+    const complete = (toolName: string, content: unknown, resultType: string) =>
+      readCompleted(
+        run([
+          buildBlocks([buildServerToolUse(toolName, {})]),
+          buildBlocks([{ type: resultType, tool_use_id: SERVER_TOOL, content }]),
+        ]),
+        SERVER_TOOL,
+      );
+
+    const cases: ReadonlyArray<
+      readonly [name: string, tool: string, type: string, content: unknown, text: string]
+    > = [
+      [
+        "code execution",
+        "code_execution",
+        "code_execution_tool_result",
+        {
+          type: "code_execution_result",
+          stdout: "42\n",
+          stderr: "warn",
+          return_code: 0,
+          content: [],
+        },
+        "Return code: 0\nOutput:\n42\n\nError output:\nwarn",
+      ],
+      [
+        "encrypted code execution",
+        "code_execution",
+        "code_execution_tool_result",
+        {
+          type: "encrypted_code_execution_result",
+          encrypted_stdout: "ZW5jcnlwdGVk",
+          stderr: "",
+          return_code: 1,
+          content: [],
+        },
+        "Return code: 1\nThe output is encrypted.",
+      ],
+      [
+        "bash code execution",
+        "bash_code_execution",
+        "bash_code_execution_tool_result",
+        {
+          type: "bash_code_execution_result",
+          stdout: "hi",
+          stderr: "",
+          return_code: 0,
+          content: [],
+        },
+        "Return code: 0\nOutput:\nhi",
+      ],
+      [
+        "text editor view",
+        "text_editor_code_execution",
+        "text_editor_code_execution_tool_result",
+        {
+          type: "text_editor_code_execution_view_result",
+          content: "line one",
+          file_type: "text",
+          num_lines: 1,
+          start_line: 1,
+          total_lines: 1,
+        },
+        "line one",
+      ],
+      [
+        "text editor create",
+        "text_editor_code_execution",
+        "text_editor_code_execution_tool_result",
+        { type: "text_editor_code_execution_create_result", is_file_update: false },
+        "The file was created.",
+      ],
+      [
+        "text editor replace",
+        "text_editor_code_execution",
+        "text_editor_code_execution_tool_result",
+        {
+          type: "text_editor_code_execution_str_replace_result",
+          lines: ["-old", "+new"],
+          new_lines: 1,
+          new_start: 3,
+          old_lines: 1,
+          old_start: 3,
+        },
+        "-old\n+new",
+      ],
+      [
+        "tool search",
+        "tool_search_tool_regex",
+        "tool_search_tool_result",
+        {
+          type: "tool_search_tool_search_result",
+          tool_references: [
+            { type: "tool_reference", tool_name: "get_weather" },
+            { type: "tool_reference", tool_name: "get_time" },
+          ],
+        },
+        "Found tools: get_weather, get_time",
+      ],
+      [
+        "advisor",
+        "advisor",
+        "advisor_tool_result",
+        { type: "advisor_result", stop_reason: "end_turn", text: "Take the smaller step." },
+        "Take the smaller step.",
+      ],
+      [
+        "redacted advisor",
+        "advisor",
+        "advisor_tool_result",
+        { type: "advisor_redacted_result", stop_reason: null, encrypted_content: "abc" },
+        "The advice is encrypted.",
+      ],
+    ];
+
+    for (const [name, tool, type, content, text] of cases) {
+      it(`completes a ${name} call with readable text`, () => {
+        expect(complete(tool, content, type)).toEqual({
+          status: "completed",
+          detail: { content: text },
+        });
+      });
+    }
+
+    const errors: ReadonlyArray<
+      readonly [name: string, tool: string, type: string, errorType: string, text: string]
+    > = [
+      [
+        "web search",
+        "web_search",
+        "web_search_tool_result",
+        "web_search_tool_result_error",
+        "The web search failed: max_uses_exceeded",
+      ],
+      [
+        "web fetch",
+        "web_fetch",
+        "web_fetch_tool_result",
+        "web_fetch_tool_result_error",
+        "The web fetch failed: max_uses_exceeded",
+      ],
+      [
+        "code execution",
+        "code_execution",
+        "code_execution_tool_result",
+        "code_execution_tool_result_error",
+        "The code execution failed: max_uses_exceeded",
+      ],
+      [
+        "advisor",
+        "advisor",
+        "advisor_tool_result",
+        "advisor_tool_result_error",
+        "The advisor failed: max_uses_exceeded",
+      ],
+    ];
+
+    for (const [name, tool, type, errorType, text] of errors) {
+      it(`fails a ${name} call whose result is an error, and names the error code`, () => {
+        expect(complete(tool, { type: errorType, error_code: "max_uses_exceeded" }, type)).toEqual({
+          status: "failed",
+          detail: { content: text },
+        });
+      });
+    }
+  });
+
+  describe("a result whose call was never seen", () => {
+    it("starts and completes a web_search item of its own, in the current turn", () => {
+      const running = buildTestState();
+      const lines = run(
+        [
+          buildBlocks([
+            { type: "web_search_tool_result", tool_use_id: SERVER_TOOL, content: SEARCH_HITS },
+          ]),
+        ],
+        running,
+      ).map(formatEvent);
+      expect(lines).toEqual([
+        "turn.started",
+        `item.started web_search ${SERVER_TOOL}`,
+        `item.completed web_search ${SERVER_TOOL} completed`,
+      ]);
+    });
+
+    it("starts and completes a tool_call of its own for a result block of another tool", () => {
+      const lines = run([
+        buildBlocks([
+          { type: "mcp_tool_result", tool_use_id: MCP_TOOL, content: "ok", is_error: false },
+        ]),
+      ]).map(formatEvent);
+      expect(lines).toEqual([
+        "turn.started",
+        `item.started tool_call ${MCP_TOOL}`,
+        `item.completed tool_call ${MCP_TOOL} completed`,
+      ]);
+    });
+
+    it("does the same for a tool_result of a user message", () => {
+      const running = buildTestState();
+      const lines = run([TOOL_RESULT], running).map(formatEvent);
+      expect(lines).toEqual([
+        "turn.started",
+        `item.started tool_call ${TOOL}`,
+        `item.completed tool_call ${TOOL} completed`,
+        "turn.completed completed",
+      ]);
+    });
+  });
+
+  it("completes a late result in the turn its call started in", () => {
+    const running = buildTestState();
+    const events = run(
+      [
+        buildBlocks([buildServerToolUse("web_search", { query: "q" })]),
+        RESULT,
+        buildBlocks([
+          { type: "web_search_tool_result", tool_use_id: SERVER_TOOL, content: SEARCH_HITS },
+        ]),
+      ],
+      running,
+    );
+    const started = listItemEvents(events, "item.started", "web_search")[0];
+    const completed = listItemEvents(events, "item.completed", "web_search")[0];
+    expect(completed?.turnId).toBe(started?.turnId);
+    // The result opened no turn of its own.
+    expect(events.filter((event) => event._tag === "turn.started")).toHaveLength(1);
+    expect(running.turnId).toBeUndefined();
+  });
+
+  it("completes a subagent's late result as the subagent's, in its starting turn", () => {
+    const running = buildTestState();
+    const events = run(
+      [
+        buildTaskStarted(SUBAGENT, AGENT_CALL),
+        {
+          ...buildBlocks([buildServerToolUse("web_search", { query: "q" })]),
+          parent_tool_use_id: AGENT_CALL,
+        },
+        {
+          ...buildBlocks([
+            { type: "web_search_tool_result", tool_use_id: SERVER_TOOL, content: SEARCH_HITS },
+          ]),
+          parent_tool_use_id: AGENT_CALL,
+        },
+      ],
+      running,
+    );
+    const started = listItemEvents(events, "item.started", "web_search")[0];
+    const completed = listItemEvents(events, "item.completed", "web_search")[0];
+    expect(started?.subagentId).toBe(SUBAGENT);
+    expect(completed?.subagentId).toBe(SUBAGENT);
+    expect(completed?.turnId).toBe(started?.turnId);
+  });
+
+  describe("a block with no item to draw", () => {
+    it("drops redacted_thinking and compaction blocks, and opens no turn for them", () => {
+      const running = buildTestState();
+      const events = run(
+        [
+          buildBlocks([
+            { type: "redacted_thinking", data: "abc" },
+            { type: "compaction", content: "summary", encrypted_content: null },
+          ]),
+        ],
+        running,
+      );
+      expect(events).toEqual([]);
+      expect(running.turnId).toBeUndefined();
+    });
+
+    it("shows a container_upload and a fallback block as labelled unknown items", () => {
+      const { running, reports } = buildReportingState();
+      const events = run(
+        [
+          buildBlocks([
+            { type: "container_upload", file_id: "file_01" },
+            {
+              type: "fallback",
+              from: { model: "claude-a" },
+              to: { model: "claude-b" },
+              trigger: { type: "refusal" },
+            },
+          ]),
+        ],
+        running,
+      );
+      const labels = events.flatMap((event) =>
+        event._tag === "item.started" && event.kind === "unknown"
+          ? [Schema.decodeUnknownSync(UnknownItemDetail)(event.detail).label]
+          : [],
+      );
+      expect(labels).toEqual(["claude: assistant/container_upload", "claude: assistant/fallback"]);
+      expect(reports.map((report) => report.label)).toEqual(labels);
+    });
+
+    it("shows a block type the table does not have as a labelled item, between its siblings", () => {
+      const { running, reports } = buildReportingState();
+      const lines = run(
+        [
+          buildBlocks([
+            { type: "text", text: "before" },
+            { type: "hologram\u202e", payload: 1 },
+            { type: "text", text: "after" },
+          ]),
+        ],
+        running,
+      ).map(formatEvent);
+      expect(lines.filter((line) => line.startsWith("item.started"))).toHaveLength(3);
+      expect(lines.filter((line) => line.startsWith("content.delta"))).toEqual([
+        'content.delta assistant_text "before"',
+        'content.delta assistant_text "after"',
+      ]);
+      expect(reports.map((report) => report.label)).toEqual([
+        "claude: assistant/hologram\\u{202e}",
+      ]);
+    });
+
+    it("shows a block that cannot be read as one unknown item, without hiding or repeating its siblings", () => {
+      const { running, reports } = buildReportingState();
+      const events = run(
+        [
+          buildBlocks([
+            { type: "text", text: "before" },
+            // A web search result whose content is neither a list nor an error.
+            { type: "web_search_tool_result", tool_use_id: SERVER_TOOL, content: null },
+            { type: "text", text: "after" },
+          ]),
+        ],
+        running,
+      );
+      const lines = events.map(formatEvent);
+      expect(lines.filter((line) => line.startsWith("turn.started"))).toHaveLength(1);
+      expect(listItemEvents(events, "item.started", "assistant_message")).toHaveLength(2);
+      expect(listItemEvents(events, "item.started", "unknown")).toHaveLength(1);
+      expect(listItemEvents(events, "item.started", "web_search")).toEqual([]);
+      expect(reports).toHaveLength(1);
+      expect(reports[0]?.label).toBe("claude: assistant/web_search_tool_result");
+      expect(reports[0]?.error).toBeInstanceOf(Error);
+    });
+  });
+
+  describe("a message whose text and thinking already streamed", () => {
+    const streamedStart = (block: unknown) => [
+      MESSAGE_START,
+      buildStreamEvent({ type: "content_block_start", index: 0, content_block: block }),
+    ];
+
+    it("is not reported twice, but its other blocks are", () => {
+      const running = buildTestState();
+      const lines = run(
+        [
+          MESSAGE_START,
+          TEXT_START,
+          TEXT_DELTA,
+          TEXT_STOP,
+          buildBlocks([
+            { type: "text", text: "ready" },
+            buildServerToolUse("web_search", { query: "q" }),
+          ]),
+        ],
+        running,
+      ).map(formatEvent);
+      expect(
+        lines.filter((line) => line.startsWith("item.started assistant_message")),
+      ).toHaveLength(1);
+      expect(lines).toContain(`item.started web_search ${SERVER_TOOL}`);
+    });
+
+    it("shows a streamed server tool call exactly once, from the assistant message", () => {
+      const lines = run([
+        ...streamedStart({
+          type: "server_tool_use",
+          id: SERVER_TOOL,
+          name: "web_search",
+          input: {},
+        }),
+        buildStreamEvent({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: '{"query": "q' },
+        }),
+        buildStreamEvent({ type: "content_block_stop", index: 0 }),
+        buildBlocks([buildServerToolUse("web_search", { query: "q" })]),
+        buildBlocks([
+          { type: "web_search_tool_result", tool_use_id: SERVER_TOOL, content: SEARCH_HITS },
+        ]),
+      ]).map(formatEvent);
+      expect(lines.filter((line) => line.includes("web_search"))).toEqual([
+        `item.started web_search ${SERVER_TOOL}`,
+        `item.completed web_search ${SERVER_TOOL} completed`,
+      ]);
+    });
+  });
+
+  describe("a local WebFetch or WebSearch tool", () => {
+    const buildLocalWeb = (name: string, input: unknown) => ({
+      ...ASSISTANT_TOOL_USE,
+      message: {
+        ...ASSISTANT_TOOL_USE.message,
+        content: [{ type: "tool_use", id: TOOL, name, input }],
+      },
+    });
+
+    it("shows WebFetch as a web_search item with the url", () => {
+      const events = run([buildLocalWeb("WebFetch", { url: "https://example.com", prompt: "p" })]);
+      expect(listItemEvents(events, "item.started", "web_search")[0]?.detail).toEqual({
+        name: "WebFetch",
+        input: { url: "https://example.com", prompt: "p" },
+        url: "https://example.com",
+      });
+    });
+
+    it("shows WebSearch as a web_search item with the query", () => {
+      const events = run([buildLocalWeb("WebSearch", { query: "effect" })]);
+      expect(listItemEvents(events, "item.started", "web_search")[0]?.detail).toEqual({
+        name: "WebSearch",
+        input: { query: "effect" },
+        query: "effect",
+      });
+    });
+  });
+
+  it("turns a recorded run with a server web search into one search item with its results", () => {
+    const frames = readFileSync(
+      new URL("./claude-code-server-tools.fixture.jsonl", import.meta.url),
+      "utf8",
+    )
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => (JSON.parse(line) as { readonly frame: unknown }).frame);
+    const events = run(frames);
+
+    const started = listItemEvents(events, "item.started", "web_search");
+    expect(started).toHaveLength(1);
+    expect((started[0]?.detail as Record<string, unknown>)["query"]).toBe(
+      "effect schema discriminated union",
+    );
+    const completed = readCompleted(events, "srvtoolu_01ServerSearch0001");
+    expect(completed?.status).toBe("completed");
+    expect(completed?.detail["content"]).toBe(
+      [
+        "Schema - Effect Documentation",
+        "https://effect.website/docs/schema/introduction/",
+        "",
+        "Union | Effect Schema",
+        "https://effect.website/docs/schema/basic-usage/#unions",
+      ].join("\n"),
+    );
+    expect(
+      events.map((event) => event._tag).filter((tag) => tag === "turn.completed"),
+    ).toHaveLength(1);
+    for (const event of events) expect(() => encode(event)).not.toThrow();
   });
 });

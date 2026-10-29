@@ -49,6 +49,20 @@ import {
 import { clampCount, toJson } from "./normalize";
 import { judgeAnswer, type HarnessAnswer } from "./structured-result";
 import { buildEditedPathFields, type EditedPathFields } from "./edited-paths";
+import {
+  convertAdvisorResult,
+  convertBashCodeExecutionResult,
+  convertCodeExecutionResult,
+  convertMcpResult,
+  convertTextEditorResult,
+  convertToolSearchResult,
+  convertWebFetchResult,
+  convertWebSearchResult,
+  truncateResultContent,
+  type AssistantBlock,
+  type AssistantBlockFor,
+  type ConvertedResult,
+} from "./claude-code-block-results";
 import { escapeControlCharacters } from "../report";
 import { truncateFact, truncateMessage } from "./text";
 
@@ -183,8 +197,10 @@ interface RunningCompaction {
 /** A tool item that has started and not yet completed. */
 interface OpenTool {
   readonly kind: ItemKind;
-  /** The turn the tool started in. */
+  /** The turn the tool started in. Its result completes the item there, whatever turn is open then. */
   readonly turnId: string;
+  /** The subagent the tool started in, or `undefined` for the session's own agent. */
+  readonly subagentId: string | undefined;
   /**
    * The edited paths of a `file_change` tool, put on its `item.completed`.
    * Claude Code names the path only when the tool starts. Dropped when the
@@ -276,7 +292,7 @@ const ensureAgentStream = (state: Normalizing, agent: TurnOwner): AgentStream =>
 /**
  * The item kind for each Claude tool name. Only the tool families the
  * taxonomy has an item kind for are mapped: shell commands, file changes, file
- * reads, file searches, web search, subagents and plans. Every other tool is a
+ * reads, file searches, web search and fetch, subagents and plans. Every other tool is a
  * plain `tool_call` (spec 06 section 6.3).
  */
 const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
@@ -294,6 +310,7 @@ const TOOL_KINDS: Readonly<Record<string, ItemKind>> = {
   Glob: "file_search",
   LS: "file_search",
   WebSearch: "web_search",
+  WebFetch: "web_search",
   Task: "subagent",
   Agent: "subagent",
   SendMessage: "subagent",
@@ -378,6 +395,32 @@ const buildFileFields = (kind: ItemKind, input: unknown): Record<string, string>
     };
   }
   return {};
+};
+
+/**
+ * The detail field that holds what a web tool asks for: the search query or the
+ * URL to fetch. Claude's own `WebSearch` and `WebFetch` tools and the web tools
+ * Anthropic runs on its servers (`web_search`, `web_fetch`) name the same input
+ * fields, so every one of them shows up in the same two detail fields.
+ */
+const WEB_TOOL_FIELDS: Readonly<Record<string, "query" | "url">> = {
+  WebSearch: "query",
+  web_search: "query",
+  WebFetch: "url",
+  web_fetch: "url",
+};
+
+/**
+ * Builds the fixed detail field of a web search item, so a client can show the
+ * query or the URL without knowing which tool Claude called: `query` for a
+ * search and `url` for a fetch, each from the tool's input field of the same
+ * name. Returns no fields for any other tool or when the input holds none.
+ */
+const buildWebFields = (toolName: string, input: unknown): Record<string, string> => {
+  if (!Object.hasOwn(WEB_TOOL_FIELDS, toolName)) return {};
+  const field = WEB_TOOL_FIELDS[toolName]!;
+  const value = readInputFact(input, field);
+  return value === undefined ? {} : { [field]: value };
 };
 
 type Emit = Array<ProviderEvent>;
@@ -609,10 +652,23 @@ const emitUnknownItem = (
   out: Emit,
   sdk: unknown,
   error?: unknown,
+): void => emitLabelledUnknownItem(state, agent, out, buildUnknownLabel(sdk), error);
+
+/**
+ * Emits an `unknown` item with the given label, in the agent's turn, and tells
+ * the runner's log about it through `reportUnknownMessage`. `model` goes on the
+ * turn if this item opens it.
+ */
+const emitLabelledUnknownItem = (
+  state: Normalizing,
+  agent: TurnOwner,
+  out: Emit,
+  label: string,
+  error?: unknown,
+  model?: string,
 ): void => {
-  const label = buildUnknownLabel(sdk);
   state.reportUnknownMessage(label, error);
-  const turn = ensureAgentTurn(state, agent, out);
+  const turn = ensureAgentTurn(state, agent, out, model);
   const itemId = state.mint();
   const detail: UnknownItemDetail = { label };
   out.push(buildItemStarted(state, turn, itemId, "unknown", detail));
@@ -721,9 +777,13 @@ const onStreamEvent = (
     }
     case "content_block_start": {
       const block = event.content_block;
-      // A `tool_use` block streams only partial JSON arguments, which the
-      // taxonomy has no kind for. The complete assistant message carries the
-      // whole call later (spec 06 section 6.3).
+      // Only text and thinking stream, because they are the only blocks whose
+      // text a client wants before the block is done. Every other block
+      // (`tool_use`, `server_tool_use`, `mcp_tool_use` and every result block)
+      // streams as partial JSON, which the taxonomy has no kind for, and the
+      // SDK sends it whole in the assistant message it emits for each completed
+      // block (spec 06 section 6.3). Reading it here too would show the same
+      // call twice.
       const kind: ItemKind | undefined =
         block.type === "text"
           ? "assistant_message"
@@ -814,64 +874,278 @@ const readEditedPaths = (input: unknown): EditedPathFields | undefined => {
   return path === undefined ? undefined : buildEditedPathFields([path]);
 };
 
+/**
+ * What a handler in `CLAUDE_BLOCK_DECISIONS` needs besides the block: where it
+ * writes events, whose block it is, and the facts of the message around it.
+ */
+interface BlockScope {
+  readonly state: Normalizing;
+  readonly out: Emit;
+  readonly agent: TurnOwner;
+  /** The model that wrote the message. A turn the block opens carries it. */
+  readonly model: string | undefined;
+  /**
+   * Whether the message repeats blocks that already streamed. Only text and
+   * thinking stream, so only their handlers read this.
+   */
+  readonly echo: boolean;
+}
+
+/** Opens the agent's turn if none is open, and returns it. Only a block that emits an event calls it. */
+const openBlockTurn = (scope: BlockScope): TurnRef =>
+  ensureAgentTurn(scope.state, scope.agent, scope.out, scope.model);
+
+/**
+ * Handles a `text` block. Text that streamed was already emitted, and the
+ * complete message repeats it; only a message that never streamed still needs
+ * it reported. An empty block would only add a blank entry to the transcript.
+ */
+const emitAssistantText = (block: AssistantBlockFor<"text">, scope: BlockScope): void => {
+  if (scope.echo || block.text === "") return;
+  scope.out.push(
+    ...buildWholeItem(
+      scope.state,
+      openBlockTurn(scope),
+      scope.state.mint(),
+      "assistant_message",
+      "assistant_text",
+      block.text,
+    ),
+  );
+};
+
+/**
+ * Handles a `thinking` block, like `emitAssistantText`. A thinking block whose
+ * text the harness leaves out is empty and is skipped.
+ */
+const emitAssistantThinking = (block: AssistantBlockFor<"thinking">, scope: BlockScope): void => {
+  if (scope.echo || block.thinking === "") return;
+  scope.out.push(
+    ...buildWholeItem(
+      scope.state,
+      openBlockTurn(scope),
+      scope.state.mint(),
+      "reasoning",
+      "reasoning_text",
+      block.thinking,
+    ),
+  );
+};
+
+/** Handles a `tool_use` block: starts the item for a tool that runs on this machine. */
+const startLocalTool = (block: AssistantBlockFor<"tool_use">, scope: BlockScope): void => {
+  const { state, out, agent } = scope;
+  const turn = openBlockTurn(scope);
+  const kind = classifyTool(block.name);
+  const itemId = cleanItemId(block.id) ?? state.mint();
+  const editedPaths = kind === "file_change" ? readEditedPaths(block.input) : undefined;
+  state.tools.set(itemId, { kind, turnId: turn.turnId, subagentId: turn.subagentId, editedPaths });
+  if (AGENT_TOOLS.has(block.name)) {
+    recordAgentCall(
+      state.subagents,
+      itemId,
+      agent?.subagentId,
+      readInputString(block.input, "name"),
+    );
+  }
+  const subagentIds = listMessagedSubagents(state, block.name, block.input);
+  out.push(
+    buildItemStarted(state, turn, itemId, kind, {
+      name: block.name,
+      input: block.input,
+      ...buildFileFields(kind, block.input),
+      ...buildWebFields(block.name, block.input),
+      ...editedPaths,
+      ...(kind === "tool_call" ? { kind: isMcp(block.name) ? "mcp" : "native" } : {}),
+      ...(subagentIds.length === 0 ? {} : { subagentIds }),
+    }),
+  );
+};
+
+/** The server tools that are a web search item. Every other server tool is a plain `tool_call`. */
+const SERVER_WEB_TOOLS: ReadonlySet<string> = new Set(["web_search", "web_fetch"]);
+
+/**
+ * Handles a `server_tool_use` block: a tool Anthropic runs on its own servers.
+ * Its name never goes through `classifyTool`, because that table names tools
+ * that run on this machine, and a server tool must not open an edit-watch
+ * window for files it cannot touch.
+ */
+const startServerTool = (block: AssistantBlockFor<"server_tool_use">, scope: BlockScope): void => {
+  const { state } = scope;
+  const turn = openBlockTurn(scope);
+  const kind: ItemKind = SERVER_WEB_TOOLS.has(block.name) ? "web_search" : "tool_call";
+  const itemId = cleanItemId(block.id) ?? state.mint();
+  state.tools.set(itemId, {
+    kind,
+    turnId: turn.turnId,
+    subagentId: turn.subagentId,
+    editedPaths: undefined,
+  });
+  scope.out.push(
+    buildItemStarted(state, turn, itemId, kind, {
+      name: block.name,
+      input: block.input,
+      ...buildWebFields(block.name, block.input),
+      ...(kind === "tool_call" ? { kind: "native" } : {}),
+    }),
+  );
+};
+
+/** Handles an `mcp_tool_use` block: a call to an MCP server that Anthropic's API makes. */
+const startMcpTool = (block: AssistantBlockFor<"mcp_tool_use">, scope: BlockScope): void => {
+  const { state } = scope;
+  const turn = openBlockTurn(scope);
+  const itemId = cleanItemId(block.id) ?? state.mint();
+  state.tools.set(itemId, {
+    kind: "tool_call",
+    turnId: turn.turnId,
+    subagentId: turn.subagentId,
+    editedPaths: undefined,
+  });
+  scope.out.push(
+    buildItemStarted(state, turn, itemId, "tool_call", {
+      name: block.name,
+      input: block.input,
+      kind: "mcp",
+      server: truncateFact(block.server_name),
+    }),
+  );
+};
+
+/** The result of a tool call, as `completeTool` needs it. */
+interface ToolOutcome extends ConvertedResult {
+  /** The id of the call the result answers: a `tool_use_id`. Anything but a non-empty string gets a new id. */
+  readonly toolUseId: unknown;
+  /** The item to start first when the call was never seen. */
+  readonly orphan: { readonly kind: ItemKind; readonly detail: object };
+}
+
+/**
+ * Completes the item of the call a result answers, found by its id, and forgets
+ * the call. The item completes in the turn and the agent it started in, not in
+ * whatever turn is open now: a result can arrive after its turn ended, and a
+ * client finds an item inside its own turn.
+ *
+ * A result whose call was never seen (it started before this process, or the
+ * harness left the call out) starts an item of its own, kind and detail from
+ * `outcome.orphan`, and completes it at once, in the agent's current turn.
+ * Opening that turn is the only reason this function ever opens one.
+ */
+const completeTool = (
+  state: Normalizing,
+  out: Emit,
+  agent: TurnOwner,
+  outcome: ToolOutcome,
+): void => {
+  const itemId = cleanItemId(outcome.toolUseId) ?? state.mint();
+  const open = state.tools.get(itemId);
+  state.tools.delete(itemId);
+  const status = outcome.failed ? "failed" : "completed";
+  const detail = {
+    ...open?.editedPaths,
+    ...(outcome.content === undefined ? {} : { content: outcome.content }),
+  };
+  if (open !== undefined) {
+    const turn: TurnRef = { turnId: open.turnId, subagentId: open.subagentId };
+    out.push(buildItemCompleted(state, turn, itemId, open.kind, status, detail));
+    return;
+  }
+  const turn = ensureAgentTurn(state, agent, out);
+  const { kind } = outcome.orphan;
+  out.push(buildItemStarted(state, turn, itemId, kind, outcome.orphan.detail));
+  out.push(buildItemCompleted(state, turn, itemId, kind, status, detail));
+};
+
+/** The item that opens for a result whose call was never seen, by the kind of call. */
+const ORPHAN_WEB_SEARCH = { kind: "web_search", detail: {} } as const;
+const ORPHAN_NATIVE_TOOL = { kind: "tool_call", detail: { kind: "native" } } as const;
+const ORPHAN_MCP_TOOL = { kind: "tool_call", detail: { kind: "mcp" } } as const;
+
+/**
+ * Builds the handler of one kind of result block: it converts the block with
+ * `convert` and completes the call the block names. `orphan` is the item to
+ * show when that call was never seen.
+ */
+const buildResultHandler =
+  <Block extends { readonly tool_use_id: string }>(
+    orphan: ToolOutcome["orphan"],
+    convert: (block: Block) => ConvertedResult,
+  ) =>
+  (block: Block, scope: BlockScope): void =>
+    completeTool(scope.state, scope.out, scope.agent, {
+      ...convert(block),
+      toolUseId: block.tool_use_id,
+      orphan,
+    });
+
+/**
+ * Builds the label of an `unknown` item for a content block of an assistant
+ * message, such as `claude: assistant/container_upload`. The type is text from
+ * Claude, so it is escaped like a message's type (`buildUnknownLabel`).
+ */
+const buildUnknownBlockLabel = (block: unknown): string => {
+  const type = readInputString(block, "type");
+  const name = type === undefined || type === "" ? "block with no type" : type;
+  return truncateFact(`claude: assistant/${escapeControlCharacters(name)}`);
+};
+
+/** Emits an `unknown` item for a content block this adapter cannot show. */
+const emitUnknownBlock = (scope: BlockScope, block: unknown, error?: unknown): void =>
+  emitLabelledUnknownItem(
+    scope.state,
+    scope.agent,
+    scope.out,
+    buildUnknownBlockLabel(block),
+    error,
+    scope.model,
+  );
+
+/**
+ * Runs the decision for one content block. A block with no entry in the table,
+ * such as a type a newer `claude` binary added, becomes a labelled `unknown`
+ * item. So does a block whose handler throws because a field is not what the
+ * SDK promises. In that case the events the handler had already emitted are
+ * discarded, except those that opened a turn, so the block's siblings are
+ * still reported and the block itself shows once.
+ */
+const handleBlock = (block: AssistantBlock, scope: BlockScope): void => {
+  const type = readInputString(block, "type") ?? "";
+  const decision = Object.hasOwn(DECISIONS_BY_BLOCK_TYPE, type)
+    ? DECISIONS_BY_BLOCK_TYPE[type]
+    : undefined;
+  if (decision === undefined) {
+    emitUnknownBlock(scope, block);
+    return;
+  }
+  if (typeof decision !== "function") return;
+  const { out } = scope;
+  const start = out.length;
+  try {
+    decision(block, scope);
+  } catch (error) {
+    const kept = out.splice(start).filter(isTurnOpeningEvent);
+    out.push(...kept);
+    emitUnknownBlock(scope, block, error);
+  }
+};
+
 const onAssistant = (
   state: Normalizing,
   sdk: Extract<SDKMessage, { type: "assistant" }>,
   out: Emit,
   agent: TurnOwner,
 ): void => {
-  const turn = ensureAgentTurn(state, agent, out, sdk.message.model);
-  // Text and reasoning that streamed were already emitted, and this message
-  // repeats them. Only a message that never streamed still needs them reported.
-  const echo = ensureAgentStream(state, agent).streamed.has(sdk.message.id);
-  for (const block of sdk.message.content) {
-    if (block.type === "tool_use") {
-      const kind = classifyTool(block.name);
-      const itemId = cleanItemId(block.id) ?? state.mint();
-      const editedPaths = kind === "file_change" ? readEditedPaths(block.input) : undefined;
-      state.tools.set(itemId, { kind, turnId: turn.turnId, editedPaths });
-      if (AGENT_TOOLS.has(block.name)) {
-        recordAgentCall(
-          state.subagents,
-          itemId,
-          agent?.subagentId,
-          readInputString(block.input, "name"),
-        );
-      }
-      const subagentIds = listMessagedSubagents(state, block.name, block.input);
-      out.push(
-        buildItemStarted(state, turn, itemId, kind, {
-          name: block.name,
-          input: block.input,
-          ...buildFileFields(kind, block.input),
-          ...editedPaths,
-          ...(kind === "tool_call" ? { kind: isMcp(block.name) ? "mcp" : "native" } : {}),
-          ...(subagentIds.length === 0 ? {} : { subagentIds }),
-        }),
-      );
-      continue;
-    }
-    if (echo) continue;
-    // An empty block, such as a thinking block whose text the harness leaves
-    // out, would only add a blank entry to the transcript.
-    if (block.type === "text" && block.text !== "") {
-      out.push(
-        ...buildWholeItem(
-          state,
-          turn,
-          state.mint(),
-          "assistant_message",
-          "assistant_text",
-          block.text,
-        ),
-      );
-    } else if (block.type === "thinking" && block.thinking !== "") {
-      out.push(
-        ...buildWholeItem(state, turn, state.mint(), "reasoning", "reasoning_text", block.thinking),
-      );
-    }
-  }
+  const scope: BlockScope = {
+    state,
+    out,
+    agent,
+    model: sdk.message.model,
+    echo: ensureAgentStream(state, agent).streamed.has(sdk.message.id),
+  };
+  for (const block of sdk.message.content) handleBlock(block, scope);
   if (sdk.error !== undefined) {
+    const turn = openBlockTurn(scope);
     const itemId = state.mint();
     out.push(buildItemStarted(state, turn, itemId, "error", { class: sdk.error }));
     out.push(buildItemCompleted(state, turn, itemId, "error", "failed", { class: sdk.error }));
@@ -885,7 +1159,7 @@ const onAssistant = (
  * (spec 06 section 6.3). So the adapter reports user messages itself, and this
  * function ignores their text. A subagent's brief arrives as a user message
  * too, and is reported from `task_started` instead. This function only
- * handles `tool_result` blocks, each of which closes a tool item.
+ * handles `tool_result` blocks, each of which completes a tool item.
  */
 const onUser = (
   state: Normalizing,
@@ -895,38 +1169,15 @@ const onUser = (
 ): void => {
   const content = sdk.message.content;
   if (typeof content === "string") return;
-  // A message with no tool result opens no turn: for a subagent it is the
-  // brief, and its turn opens at the subagent's first answer.
-  if (!content.some((block) => block.type === "tool_result")) return;
-  const turn = ensureAgentTurn(state, agent, out);
   for (const block of content) {
-    if (block.type === "tool_result") {
-      const itemId = cleanItemId(block.tool_use_id) ?? state.mint();
-      const tool = state.tools.get(itemId);
-      const kind = tool?.kind ?? "tool_call";
-      state.tools.delete(itemId);
-      out.push(
-        buildItemCompleted(
-          state,
-          turn,
-          itemId,
-          kind,
-          block.is_error === true ? "failed" : "completed",
-          {
-            ...tool?.editedPaths,
-            // Truncated because a `Read` of a big file returns it whole; `raw` keeps all of it.
-            ...(block.content === undefined
-              ? {}
-              : {
-                  content:
-                    typeof block.content === "string"
-                      ? truncateMessage(block.content)
-                      : block.content,
-                }),
-          },
-        ),
-      );
-    }
+    if (block.type !== "tool_result") continue;
+    completeTool(state, out, agent, {
+      toolUseId: block.tool_use_id,
+      failed: block.is_error === true,
+      // Truncated because a `Read` of a big file returns it whole; `raw` keeps all of it.
+      content: truncateResultContent(block.content),
+      orphan: ORPHAN_NATIVE_TOOL,
+    });
   }
 };
 
@@ -1793,3 +2044,62 @@ const dispatch = (state: Normalizing, sdk: SDKMessage, agent: TurnOwner, out: Em
   }
   if (typeof decision === "function") decision(state, sdk, out, agent);
 };
+
+/** The `type` of every content block an assistant message can hold in the pinned SDK. */
+type AssistantBlockType = AssistantBlock["type"];
+
+/**
+ * What the adapter does with one type of content block: a function that adds
+ * its events to `scope.out`, or a string with the reason nothing is shown (the
+ * block is dropped).
+ */
+type BlockDecision<Type extends AssistantBlockType> =
+  | ((block: AssistantBlockFor<Type>, scope: BlockScope) => void)
+  | string;
+
+/**
+ * The decision for every content block of an assistant message (spec 06
+ * section 6.7). Like `CLAUDE_MESSAGE_DECISIONS`, it is checked when the code is
+ * compiled: a block type the pinned SDK lists and this table lacks is an error,
+ * so an SDK upgrade that adds a block type fails typecheck until someone
+ * decides it. A block type this build does not know is not here, and
+ * `handleBlock` turns it into a labelled `unknown` item.
+ */
+const CLAUDE_BLOCK_DECISIONS = {
+  text: emitAssistantText,
+  thinking: emitAssistantThinking,
+  tool_use: startLocalTool,
+  server_tool_use: startServerTool,
+  mcp_tool_use: startMcpTool,
+  web_search_tool_result: buildResultHandler(ORPHAN_WEB_SEARCH, convertWebSearchResult),
+  web_fetch_tool_result: buildResultHandler(ORPHAN_WEB_SEARCH, convertWebFetchResult),
+  mcp_tool_result: buildResultHandler(ORPHAN_MCP_TOOL, convertMcpResult),
+  code_execution_tool_result: buildResultHandler(ORPHAN_NATIVE_TOOL, convertCodeExecutionResult),
+  bash_code_execution_tool_result: buildResultHandler(
+    ORPHAN_NATIVE_TOOL,
+    convertBashCodeExecutionResult,
+  ),
+  text_editor_code_execution_tool_result: buildResultHandler(
+    ORPHAN_NATIVE_TOOL,
+    convertTextEditorResult,
+  ),
+  advisor_tool_result: buildResultHandler(ORPHAN_NATIVE_TOOL, convertAdvisorResult),
+  tool_search_tool_result: buildResultHandler(ORPHAN_NATIVE_TOOL, convertToolSearchResult),
+  redacted_thinking: "nothing readable",
+  compaction: "the compact_boundary system message already draws the compaction row",
+  // A file the model uploaded to its container, and a switch to another model
+  // after a refusal. Neither has an item kind, but the user should see that
+  // something happened.
+  container_upload: (block, scope) => emitUnknownBlock(scope, block),
+  fallback: (block, scope) => emitUnknownBlock(scope, block),
+} satisfies { readonly [Type in AssistantBlockType]: BlockDecision<Type> };
+
+/**
+ * `CLAUDE_BLOCK_DECISIONS` read by a type from a block, which can be anything
+ * at runtime. The one cast in the table, for the same reason as
+ * `DECISIONS_BY_KEY`: every entry is read as a handler of any block, and
+ * `satisfies` has already checked each entry against its own block type.
+ */
+const DECISIONS_BY_BLOCK_TYPE = CLAUDE_BLOCK_DECISIONS as Readonly<
+  Record<string, BlockDecision<AssistantBlockType>>
+>;
