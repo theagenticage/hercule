@@ -3,13 +3,15 @@
  * step or group of steps, from `buildWorkRows`. A row is its icon, its label
  * and target, its result when that is not "completed", the time it started,
  * shown while the pointer is on the row, and a chevron when there is
- * something to open: a group's steps, or a step's output and images.
+ * something to open: a group's steps, a todo list's steps, or a step's output
+ * and images.
  *
  * The book draws no expanded stretch, so the rows are built from its parts:
  * the divider's type and inks, the icons, and the code block's sunken box
  * for a step's output.
  */
 import type { JSX } from "react";
+import type { TodoStep } from "@hercule/contract";
 import type { WorkRow, WorkRowIcon } from "@hercule/client-core";
 import { ChevronRightIcon } from "../../icons/chevron-right";
 import { CloseIcon } from "../../icons/close";
@@ -18,13 +20,15 @@ import { CrewIcon } from "../../icons/crew";
 import { EyeIcon } from "../../icons/eye";
 import { FileIcon } from "../../icons/file";
 import { GlobeIcon } from "../../icons/globe";
-import type { IconProps } from "../../icons/icon-frame";
+import { IconFrame, type IconProps } from "../../icons/icon-frame";
 import { ListIcon } from "../../icons/list";
+import { Mark } from "../../marks";
 import { MoreIcon } from "../../icons/more";
 import { PuzzleIcon } from "../../icons/puzzle";
 import { QuestionIcon } from "../../icons/question";
 import { SearchIcon } from "../../icons/search";
 import { SparkleIcon } from "../../icons/sparkle";
+import { TasksIcon } from "../../icons/tasks";
 import { TerminalIcon } from "../../icons/terminal";
 import { ToolResultImages } from "../attachments/tool-result-images";
 import { formatBlockTime } from "../session/messages";
@@ -39,6 +43,7 @@ const WORK_ROW_ICONS: Record<WorkRowIcon, (props: IconProps) => JSX.Element> = {
   puzzle: PuzzleIcon,
   crew: CrewIcon,
   list: ListIcon,
+  tasks: TasksIcon,
   sparkle: SparkleIcon,
   close: CloseIcon,
   more: MoreIcon,
@@ -47,8 +52,8 @@ const WORK_ROW_ICONS: Record<WorkRowIcon, (props: IconProps) => JSX.Element> = {
 };
 
 /**
- * Renders `rows` as a list, and below each open row its steps, or its output
- * and images.
+ * Renders `rows` as a list, and below each open row its steps, its todo list,
+ * or its output and images.
  *
  * - `openKeys` holds the keys of the rows the reader opened. It belongs to
  *   the transcript, so a row stays open while its stretch scrolls out of the
@@ -99,6 +104,8 @@ export function WorkRowList({
                 timezone={timezone}
                 today={today}
               />
+            ) : row.todoSteps.length > 0 ? (
+              <TodoStepList steps={row.todoSteps} />
             ) : (
               <WorkRowOutput text={row.output} isCode={row.outputIsCode} images={row.images} />
             )}
@@ -130,6 +137,11 @@ const describeRowForScreenReader = (row: WorkRow): string =>
  * path, is drawn in the mono face; any other target, such as a web search's
  * query, in the UI face, since the design language keeps the mono face for
  * code.
+ *
+ * A todo list's target is the step in progress, set apart from its progress
+ * by a middle dot, as the app sets apart the parts of a line elsewhere:
+ * "Tasks 2/5 · Write the test". A todo list with no step in progress has no
+ * target, so it draws no dot.
  */
 function WorkRowCells({
   row,
@@ -149,7 +161,7 @@ function WorkRowCells({
         {row.label}
         {row.target === "" ? null : (
           <>
-            {" "}
+            {row.todoSteps.length > 0 ? " · " : " "}
             {row.targetIsCode ? (
               <code className="work-target">{row.target}</code>
             ) : (
@@ -217,5 +229,57 @@ function WorkRowOutput({
       )}
       {images.length === 0 ? null : <ToolResultImages images={images} />}
     </div>
+  );
+}
+
+/** The words a screen reader reads for each status of a todo step. */
+const TODO_STATUS_NAMES: Record<TodoStep["status"], string> = {
+  completed: "Completed",
+  in_progress: "In progress",
+  pending: "Pending",
+};
+
+/**
+ * Renders the mark of a todo step, named for screen readers by its status:
+ * the state marks' done circle for a completed step, their ringed dot for the
+ * step in progress, and an empty circle, drawn on the same grid, for a step
+ * that has not started. The three marks read as one progression: empty, then
+ * a dot, then a check. The working mark's three dots are too small at 12px to
+ * pick out the one step that is lit. The ringed dot is the waiting mark's
+ * glyph, drawn here in the live colour (thread.css), and the mark's name for
+ * screen readers is the step's status, so it never reads as "waiting".
+ */
+function TodoStepMark({ status }: { readonly status: TodoStep["status"] }): JSX.Element {
+  return (
+    <span className="work-todo-mark" role="img" aria-label={TODO_STATUS_NAMES[status]}>
+      {status === "completed" ? (
+        <Mark state="done" size={12} />
+      ) : status === "in_progress" ? (
+        <Mark state="waiting" size={12} />
+      ) : (
+        <IconFrame size={12}>
+          <circle cx="8" cy="8" r="5.6" />
+        </IconFrame>
+      )}
+    </span>
+  );
+}
+
+/**
+ * Renders the steps of an open todo list, in the agent's order, one per
+ * line: the step's mark, then its text. A long step wraps, because a step is
+ * a sentence the reader may need whole.
+ */
+function TodoStepList({ steps }: { readonly steps: readonly TodoStep[] }): JSX.Element {
+  return (
+    <ul className="work-todo">
+      {steps.map((step, index) => (
+        // The agent sends its whole list each time, so a step has no id but its place.
+        <li key={index} className={`work-todo-step is-${step.status}`}>
+          <TodoStepMark status={step.status} />
+          <span>{step.text}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

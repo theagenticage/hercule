@@ -417,10 +417,49 @@ const setCompletion = (
     : step;
 };
 
+/** One step of the Fix thread's todo list. */
+type TodoStepBody = {
+  readonly text: string;
+  readonly status: "pending" | "in_progress" | "completed";
+};
+
+/**
+ * Returns the todo list of the Fix thread with its first `completedCount`
+ * steps completed, the next one in progress and the rest pending. The agent
+ * sends its whole list again each time, as Claude Code's TodoWrite does.
+ */
+const buildTodoSteps = (completedCount: number): TodoStepBody[] =>
+  [
+    "Find where Stripe's result is handled",
+    "Write a test that reproduces the failure",
+    "Handle requires_action in handlePaymentResult",
+    "Open the 3\u2011D Secure modal for it",
+    "Run the checkout tests",
+  ].map((text, index) => ({
+    text,
+    status:
+      index < completedCount ? "completed" : index === completedCount ? "in_progress" : "pending",
+  }));
+
+/** Returns an `item.updated` step of the Fix thread's todo list, `completedCount` steps in. */
+const updateTodoList = (seconds: number, completedCount: number): TranscriptStep => [
+  seconds,
+  {
+    _tag: "item.updated",
+    turnId: TURN_ID,
+    itemId: "it-todo",
+    kind: "todo_list",
+    detail: { steps: buildTodoSteps(completedCount) },
+  },
+];
+
 /**
  * The Fix thread whose first stretch shows what an open stretch draws, which
- * the book never draws: a web search before the reads, what the first read
- * returned, and a command that failed with its error.
+ * the book never draws: a web search and a page fetch before the reads, what
+ * the first read returned, a command that failed with its error, and the
+ * agent's todo list. The list is one item, started with no step done and
+ * updated in place twice, so it ends at "Tasks 2/5" with the third step in
+ * progress.
  */
 const FIX_STEPS_WITH_RESULTS: ReadonlyArray<TranscriptStep> = [
   ...FIX_STEPS.slice(0, 3),
@@ -428,8 +467,23 @@ const FIX_STEPS_WITH_RESULTS: ReadonlyArray<TranscriptStep> = [
     name: "WebSearch",
     input: { query: "Stripe confirmPayment requires_action 3-D Secure SDK v14" },
   }),
-  ...FIX_STEPS.slice(3).map((step) =>
-    setCompletion(
+  ...runItem([4, 5], "it-fetch", "web_search", {
+    name: "WebFetch",
+    url: "https://docs.stripe.com/payments/3d-secure/authentication-flow",
+  }),
+  [
+    7,
+    {
+      _tag: "item.started",
+      turnId: TURN_ID,
+      itemId: "it-todo",
+      kind: "todo_list",
+      detail: { steps: buildTodoSteps(0) },
+    },
+  ],
+  ...FIX_STEPS.slice(3).flatMap((step): TranscriptStep[] => {
+    const [seconds] = step;
+    const completed = setCompletion(
       setCompletion(step, "it-read-1", "completed", {
         content: [{ type: "text", text: PAYMENT_SOURCE }],
       }),
@@ -439,8 +493,11 @@ const FIX_STEPS_WITH_RESULTS: ReadonlyArray<TranscriptStep> = [
         content:
           "fatal: bad revision 'src/checkout'\nhint: use '--' to separate paths from revisions",
       },
-    ),
-  ),
+    );
+    if (seconds === 70) return [updateTodoList(66, 1), completed];
+    if (seconds === 145) return [updateTodoList(143, 2), completed];
+    return [completed];
+  }),
 ];
 
 /** The message the user queued behind the turn, four minutes ago. */

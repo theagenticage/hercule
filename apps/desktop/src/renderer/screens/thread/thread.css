@@ -246,8 +246,49 @@ button.work-row:hover > .ic {
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
-/* Steps hold no steps, so an output is at most two lists deep. */
+/* The steps of an open todo list (work-rows.tsx), one line each, starting at
+   the label column like the output. A line is a 16px slot for the mark and
+   the text, 8px apart as in a row, and as tall as a row: 4px of air above and
+   below one line of text. A long step wraps and keeps its mark on the first
+   line, and the lines grow by the same amount as the rows when the Text
+   size changes. */
+.work-todo {
+  margin: 2px 0 6px 24px;
+  padding: 0;
+  list-style: none;
+}
+.work-todo-step {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 8px;
+  padding: 4px 0;
+  line-height: calc(16px + var(--text-size-step));
+  overflow-wrap: anywhere;
+}
+/* The mark sits in a box as tall as one line, so it centres on the first. */
+.work-todo-mark {
+  display: grid;
+  place-items: center;
+  height: calc(16px + var(--text-size-step));
+  color: var(--faint);
+  line-height: 0;
+}
+/* A finished step is quiet: its circle and check in the muted ink. The step
+   in progress is the one that is lit: its ringed dot in the live colour and
+   its words in ink. A step that has not started keeps the rows' muted ink and
+   the empty circle. */
+.work-todo-step.is-completed .mark {
+  color: var(--muted);
+}
+.work-todo-step.is-in_progress {
+  color: var(--ink);
+}
+.work-todo-step.is-in_progress .mark {
+  color: var(--live);
+}
+/* Steps hold no steps, so an output or a list is at most two lists deep. */
 .worked + .work-rows > li:last-child > .work-output,
+.worked + .work-rows > li:last-child > .work-todo,
 .worked + .work-rows > li:last-child > .work-rows > li:last-child > .work-output {
   margin-bottom: 0;
 }
