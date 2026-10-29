@@ -694,12 +694,14 @@ A face's accessible name is its label and its pose's words: "Fix 3-D Secure chec
       - `web_search`: "Searched the web", globe
       - `tool_call`: the tool's name, puzzle
       - `subagent`: "Subagent", crew
-      - `plan`: "Planned", list
+      - `plan`: "Planned", list. *(Amended 2026-10-29, [#895](https://github.com/theagenticage/hercule/issues/895).)* The row opens to the plan's text, drawn as prose in the UI face like a compaction's summary (`WorkRow.outputIsCode` is false), not as code
       - `reasoning`: "Thought", sparkle
       - `context_compaction`: "Compacted the context", more
+      - *(Added 2026-10-29, [#895](https://github.com/theagenticage/hercule/issues/895).)* `wait`: "Waited 30s", clock. The label carries how long the agent asked to wait ("Waited 500ms" under a second) and the row has no target
+      - *(Added 2026-10-29, [#895](https://github.com/theagenticage/hercule/issues/895).)* `image_generation`: "Generated an image", palette, with the path Codex saved the image to as the target, in mono; no target when it saved none
       - `error`: "Error", close
       - an unknown kind: "Step", more
-    - **Two or more steps of one kind in a row fold into one row:** "Read 3 files", "Searched 2 times", "Ran 3 commands", "Edited 2 files", "Searched the web 2 times", "Used WebFetch 3 times", with the tool's name. A tool call folds only with calls of the same tool. A subagent call, reasoning, a plan, a compaction, an error and an unknown step never fold. The folded row opens to its steps.
+    - **Two or more steps of one kind in a row fold into one row:** "Read 3 files", "Searched 2 times", "Ran 3 commands", "Edited 2 files", "Searched the web 2 times", "Used WebFetch 3 times", with the tool's name. A tool call folds only with calls of the same tool. A subagent call, reasoning, a plan, a compaction, an error and an unknown step never fold. *(Amended 2026-10-29, [#895](https://github.com/theagenticage/hercule/issues/895).)* A wait and a generated image never fold either. The folded row opens to its steps.
     - **Opening a step shows the text it returned:** `item.completed`'s `detail.content`. A string result is used as it is; the adapter has already cut it to 4096 characters. A list of content blocks (Claude Code's tool result) is read for its text blocks, joined by line breaks, and the client cuts that text to 4096 characters, cutting each block to the room left so a long result never builds a long string. A cut never leaves half a character at the end. ~~Any other block, such as an image, is not drawn.~~ Any other block is not drawn. *(Amended 2026-10-10, [#478](https://github.com/theagenticage/hercule/issues/478).)* An image the tool returned is drawn under the text, as the bubble's 210px tiles at 4:3, as many as fit in a row; a click opens it in the lightbox, named "Image 1", "Image 2" and so on among the step's stored images. The runner stores each image and leaves a reference in the content ([./06-providers.md](./06-providers.md)), so a tile reads its thumbnail through `attachment.readContent` the first time it draws, and an image that could not be kept is a quiet line with the reason, in the ~~faint~~ muted ink. *(Amended 2026-10-27, [#866](https://github.com/theagenticage/hercule/issues/866).)* A step that returned images and no text has something to open, and draws no empty text box. Codex sends no result content today, so a Codex step has nothing to open and shows no chevron. The text sits in a scroll box with a maximum height, in the book's mono face, each line kept whole and scrolling sideways. Only an open step puts its text in the page.
     - **A failed step shows a quiet failure mark,** in `--muted`, not tomato (`--fail`), as the warning line's dot does. A declined, running or awaiting-approval step shows that word in ~~`--faint`~~ `--muted`. *(Amended 2026-10-27, [#866](https://github.com/theagenticage/hercule/issues/866).)*
     - **The transcript keeps which rows are open,** as it keeps which stretches are expanded, so a row stays open when it scrolls out of the mounted range and back. A row keeps its key when a second step folds onto it, so an open row stays open and then shows its steps. It is not stored.
@@ -2549,6 +2551,30 @@ Measured on Linux on 2026-10-29 with `pnpm --filter @hercule/desktop build` and 
 `pnpm --filter @hercule/desktop ui:metrics` on Linux: the ratchet passed and all 72 goldens equal their screenshots pixel for pixel. No golden moved, because no captured screen opens a stretch. The opened row was checked by eye, at 4x, in all six themes.
 
 **Not measured:** process count, memory, idle wakeups and the time of a streamed row on the desktop itself. The perf script needs macOS, and the Mac runner was not reachable, so it was not run; `pnpm compare:bureau` needs macOS too, and was not run locally. On 2026-10-29 Rogier excepted #894 from the macOS readings and from the local `pnpm compare:bureau`, as for #897, #893 and #851, by approving the merge: it merges without them. CI runs `compare:bureau` on macOS. The design adds no process, timer or listener, but that is the design and not a measurement.
+
+*(Added 2026-10-29, [#895](https://github.com/theagenticage/hercule/issues/895).)* **The wait row, the generated image row and the plan row's prose text, issue #895.** The cost:
+
+- **Processes, timers and subscriptions:** none added. The rows have no clock, no animation and no listener.
+- **Work while idle:** none. A wait and an image generation are rows like any other: they join the transcript when their event arrives and nothing runs for them afterwards.
+- **Work per streamed token:** none added for text. Each projection of the transcript decodes the detail of a wait or an image generation row once per event of that row (`readWaitDetail`, `readImageGenerationDetail`), a struct with one field, so the work is constant per row. A plan row costs nothing more than before: its text was already `detail.content`, and only the way it is drawn changed.
+- **Work per row drawn:** the same as another work row. No component is added. The clock and palette icons were already in the tree and gain an import in the work rows.
+- **Memory:** a wait holds one integer and an image generation one path, at most the fact bound.
+- **Bundle bytes:** about 1.3 kB raw of client-core and icons: the two decoders, the duration label, the summary words for waits and images, two table entries and the two icon imports. Measured below.
+
+Measured on Linux on 2026-10-29 with `vite build --config vite.renderer.config.ts` of the renderer, in a clean worktree of `107b418d` (main, before #895) and in the tree at `e7c77a62`, the head of the #895 work (the uncommitted changes there are in `apps/runner` and the spec, which the renderer does not import). Gzipped figures use `node:zlib` at its default level, and a kB is 1,000 bytes as `check-bundle-budget.ts` counts it.
+
+| Measure | `107b418d` | `e7c77a62` | Change |
+|---|---|---|---|
+| The first screen's total, as `check-bundle-budget.ts` counts it | 466.6 kB (25 chunks) | 467.6 kB (26 chunks) | +1.0 kB. Over the 250 kB guide as before, and the check passes because the budget is a guide |
+| Every JavaScript and CSS file in `out/renderer`, raw | 3,402,271 bytes (146 files) | 3,403,603 bytes (147 files) | +1,332 bytes. The new file is the palette icon, which the thread's rows and the lazy screens that already used it now share |
+| The same files, each gzipped and summed | 1,086,130 bytes | 1,088,106 bytes | +1,976 bytes |
+| The entry chunk (`first-screen-*.js`), gzipped | 409,495 bytes | 409,704 bytes | +209 bytes |
+| The thread's chunk (`agent-page-*.js`), gzipped | 17,771 bytes | 17,956 bytes | +185 bytes |
+| The thread's stylesheet and the entry stylesheet, gzipped | 1,966 and 14,994 bytes | 1,966 and 14,994 bytes | unchanged |
+
+`pnpm --filter @hercule/desktop ui:metrics` on Linux (Bun 1.4.4, Chromium 153) at `e7c77a62`: the ratchet passed and all 72 goldens equal their screenshots pixel for pixel, so no golden was re-recorded and no metric got worse than the baseline. No captured screen shows a wait, a generated image or a plan's text, or a stretch summary that counts them, so no golden was expected to move. The ✗ marks in the tables are absolute targets that the baseline already misses, not regressions.
+
+**Not measured:** process count, memory, idle wakeups and the time of a streamed row on the desktop itself. The perf script needs macOS, and this was run on Linux. The design adds no process, timer or listener, but that is the design and not a measurement. On 2026-10-29 Rogier excepted #895 from the macOS readings and from `pnpm test:desktop`, as for #893, #894 and #897: it merges without them.
 
 **The budgets guide the first milestone; they do not gate it.** *(Amended 2026-09-29, [#275](https://github.com/theagenticage/hercule/issues/275).)* Slices 1 to 4 were each measured against the budgets before they merged, and a slice that missed one did not merge. From slice 5 on, the milestone's functionality comes first, and performance passes follow it:
 

@@ -30,11 +30,14 @@ import { readJsonObject } from "../json-shape";
 import type { AgentState } from "./agent-state";
 import {
   describeCompactionTarget,
+  describeWaitDuration,
   readCompactionDetail,
   readFetchedUrl,
+  readImageGenerationDetail,
   readToolCallName,
   readTodoListDetail,
   readUnknownLabel,
+  readWaitDetail,
   summarizeTodoList,
 } from "./item-detail";
 
@@ -222,6 +225,8 @@ const VERBS: Partial<Record<ItemKind, string>> = {
   subagent: "subagent",
   plan: "plan",
   todo_list: "tasks",
+  wait: "wait",
+  image_generation: "image",
   context_compaction: "compaction",
   error: "error",
 };
@@ -353,6 +358,26 @@ const describeTodoListTarget = (list: TodoListDetail): string => {
 };
 
 /**
+ * Returns the one-line target of an item whose detail `StartedItem` does not
+ * keep decoded: how long a wait asked to wait (`describeWaitDuration`), the
+ * path an image generation saved the image to, or a summary of the detail
+ * (`summarizeDetail`) for any other kind. The first two are "" when the
+ * detail does not decode or holds no path.
+ */
+const describeDetailTarget = (event: ItemStarted | ItemUpdated | ItemCompleted): string => {
+  switch (event.kind) {
+    case "wait": {
+      const wait = readWaitDetail(event.detail);
+      return wait === undefined ? "" : describeWaitDuration(wait);
+    }
+    case "image_generation":
+      return cutToTargetLine(readImageGenerationDetail(event.detail)?.path ?? "");
+    default:
+      return summarizeDetail(event.detail);
+  }
+};
+
+/**
  * Returns the parts of an `item.started`, `item.updated` or `item.completed`
  * row's detail that the projections draw from: the verb, the target and what
  * was decoded on the way (`StartedItem`). The verb is "fetch" for a
@@ -363,6 +388,10 @@ const describeTodoListTarget = (list: TodoListDetail): string => {
  *   its detail does not decode;
  * - for a todo list, its progress and current step (`describeTodoListTarget`),
  *   or "" when its detail does not decode;
+ * - for a wait, how long it asked to wait (`describeWaitDuration`), or "" when
+ *   its detail does not decode;
+ * - for an image generation, the path it saved the image to, or "" when it
+ *   saved none;
  * - for an `unknown` item that has one, the label the adapter wrote;
  * - for any other item, a one-line summary of its detail.
  */
@@ -385,7 +414,7 @@ const readItemDetail = (
           : describeTodoListTarget(todoList)
         : unknownLabel !== ""
           ? unknownLabel
-          : summarizeDetail(event.detail);
+          : describeDetailTarget(event);
   return {
     verb: readItemVerb(event.kind, event.detail),
     target,
@@ -438,12 +467,10 @@ export interface UpdatedItem<Item extends ThreadItem> {
 
 /**
  * Returns `item` once an `item.updated` row `event` has replaced its detail,
- * with the verb, target and todo steps read from the new detail. A todo list's
- * `item.completed` row carries its final list and is applied the same way:
- * the latest detail wins, which also recovers a list whose last update lost
- * its detail to the frame limit. The result, and every field that does not
- * come from the detail, stay as they were. Returns `undefined` when the row
- * cannot be applied, and the caller then keeps the item as it is:
+ * with the verb, target and todo steps read from the new detail. The result,
+ * and every field that does not come from the detail, stay as they were.
+ * Returns `undefined` when the row cannot be applied, and the caller then keeps
+ * the item as it is:
  *
  * - the row has no `detail`: the runner leaves it off an event that is too
  *   big for one frame, and a missing detail must never empty a list;
@@ -464,21 +491,40 @@ export const buildUpdatedItem = <Item extends ThreadItem>(
   };
 };
 
+/** What `buildCompletedItem` returns. */
+export interface CompletedItem<Item extends ThreadItem> {
+  readonly item: Item;
+  /**
+   * The decoded detail of the completion when the item took it over (only a
+   * todo list does), otherwise `undefined`. The desktop's blocks read their
+   * own fields from the same row when this is set.
+   */
+  readonly update: UpdatedItem<Item> | undefined;
+  /**
+   * The detail of a compaction item with the start and the completion merged,
+   * or `undefined` for any other kind and when neither decodes.
+   */
+  readonly compaction: ContextCompactionDetail | undefined;
+}
+
 /**
  * Returns `item` once its `item.completed` row `event` has landed: its result
- * is the row's status, and `compaction` is the detail of a compaction item
- * with the start and the completion merged, or `undefined` for any other kind
- * and when neither decodes.
+ * is the row's status. Two kinds also take something from the row:
  *
- * A compaction reports its token counts and summary when it completes, and
- * may have reported some of them (the trigger, the count before) when it
- * started or was updated. `latestCompaction` is the detail the latest of those
- * rows decoded to. The merge lets a field of the completion win over the same
- * field of that detail, so a summary given earlier survives a completion that
- * has none. When the row holds a compaction detail, the target is read from
- * the merged detail.
- * Without one, such as on a failed compaction, the target the start gave
- * stays.
+ * - A todo list takes the final list the completion carries. The latest
+ *   detail wins, which also recovers a list whose last update lost its detail
+ *   to the frame limit. A completion without a usable detail (`buildUpdatedItem`)
+ *   leaves the list as it is.
+ * - A compaction reports its token counts and summary when it completes, and
+ *   may have reported some of them (the trigger, the count before) when it
+ *   started or was updated. `latestCompaction` is the detail the latest of those
+ *   rows decoded to. The merge lets a field of the completion win over the same
+ *   field of that detail, so a summary given earlier survives a completion that
+ *   has none. When the row holds a compaction detail, the target is read from
+ *   the merged detail. Without one, such as on a failed compaction, the target
+ *   the start gave stays.
+ *
+ * Any other kind keeps its target whatever the completion carries.
  *
  * The desktop's blocks build their items on this too, so both screens end up
  * with the same words.
@@ -487,7 +533,8 @@ export const buildCompletedItem = <Item extends ThreadItem>(
   item: Item,
   latestCompaction: ContextCompactionDetail | undefined,
   event: ItemCompleted,
-): { readonly item: Item; readonly compaction: ContextCompactionDetail | undefined } => {
+): CompletedItem<Item> => {
+  const update = event.kind === "todo_list" ? buildUpdatedItem(item, event) : undefined;
   const completion =
     item.kind === "context_compaction" ? readCompactionDetail(event.detail) : undefined;
   const compaction =
@@ -496,12 +543,13 @@ export const buildCompletedItem = <Item extends ThreadItem>(
       : { ...latestCompaction, ...completion };
   return {
     item: {
-      ...item,
+      ...(update?.item ?? item),
       result: event.status,
       ...(completion === undefined || compaction === undefined
         ? {}
         : { target: describeCompactionTarget(compaction) }),
     },
+    update,
     compaction,
   };
 };
@@ -689,11 +737,8 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
         if (event.kind === "user_message" || event.kind === "assistant_message") break;
         const index = turn.itemIndex.get(event.itemId);
         if (index === undefined) break;
-        const current = turn.items[index]!;
         turn.items[index] = buildCompletedItem(
-          event.kind === "todo_list"
-            ? (buildUpdatedItem(current, event)?.item ?? current)
-            : current,
+          turn.items[index]!,
           turn.latestCompactions.get(event.itemId),
           event,
         ).item;

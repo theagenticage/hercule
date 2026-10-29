@@ -110,7 +110,9 @@ export const attributeEvent = (event: ProviderEvent): SubagentId | undefined => 
  *
  * Migration 0067 copies this list to count the tool calls stored before it.
  * A kind added here counts only the calls stored after the change, unless a
- * new migration counts the earlier ones.
+ * new migration counts the earlier ones. `wait` and `image_generation` need no
+ * migration: Codex's sleep and image generation items were stored as
+ * `unknown`, which was never counted.
  */
 export const TOOL_CALL_KINDS: ReadonlySet<ItemKind> = new Set([
   "command_execution",
@@ -120,6 +122,8 @@ export const TOOL_CALL_KINDS: ReadonlySet<ItemKind> = new Set([
   "tool_call",
   "web_search",
   "subagent",
+  "wait",
+  "image_generation",
 ]);
 
 /**

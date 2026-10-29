@@ -311,6 +311,7 @@ const readItemPaths = (event: ItemStarted | ItemUpdated | ItemCompleted): readon
 const CODE_TARGET_KINDS: ReadonlySet<ItemStarted["kind"]> = new Set([
   "command_execution",
   "file_change",
+  "image_generation",
 ]);
 
 /**
@@ -600,17 +601,14 @@ export const buildThreadBlocks = (
         const work = workItems.get(event.itemId);
         if (work !== undefined) {
           const current = work.stretch.items[work.index]!;
-          // A todo list's completion carries its final list: the latest detail wins.
-          const updated = event.kind === "todo_list" ? buildUpdatedItem(current, event) : undefined;
-          const item =
-            updated === undefined
-              ? current
-              : { ...updated.item, ...readWorkItemDetail(event, updated.item, updated.todoList) };
-          const completed = buildCompletedItem(item, work.latestCompaction, event);
+          const completed = buildCompletedItem(current, work.latestCompaction, event);
           work.stretch.items[work.index] = {
             ...completed.item,
+            ...(completed.update === undefined
+              ? {}
+              : readWorkItemDetail(event, completed.item, completed.update.todoList)),
             resultContent:
-              item.kind === "context_compaction"
+              current.kind === "context_compaction"
                 ? completed.compaction?.summary
                 : readJsonObject(event.detail)?.content,
           };

@@ -453,13 +453,20 @@ const buildTodoListUpdate = (seconds: number, completedCount: number): Transcrip
   },
 ];
 
+/** The text of the plan the agent proposes in the Fix thread's first stretch. */
+const PLAN_TEXT = [
+  "1. Write a test that reproduces the failure with a `requires_action` result.",
+  "2. Handle `requires_action` in handlePaymentResult by opening the 3\u2011D Secure modal.",
+  "3. Run the checkout tests.",
+].join("\n");
+
 /**
  * The Fix thread whose first stretch shows what an open stretch draws, which
  * the book never draws: a web search and a page fetch before the reads, what
- * the first read returned, a command that failed with its error, and the
- * agent's todo list. The list is one item, started with no step done and
- * updated in place twice, so it ends at "Tasks 2/5" with the third step in
- * progress.
+ * the first read returned, a command that failed with its error, a wait, a
+ * generated image, a plan with its text, and the agent's todo list. The list
+ * is one item, started with no step done and updated in place twice, so it
+ * ends at "Tasks 2/5" with the third step in progress.
  */
 const FIX_STEPS_WITH_RESULTS: ReadonlyArray<TranscriptStep> = [
   ...FIX_STEPS.slice(0, 3),
@@ -494,7 +501,26 @@ const FIX_STEPS_WITH_RESULTS: ReadonlyArray<TranscriptStep> = [
           "fatal: bad revision 'src/checkout'\nhint: use '--' to separate paths from revisions",
       },
     );
-    if (seconds === 70) return [buildTodoListUpdate(66, 1), completed];
+    if (seconds === 45) {
+      return [...runItem([33, 43], "it-wait", "wait", { durationMs: 10_000 }), completed];
+    }
+    if (seconds === 58) {
+      return [
+        ...runItem([47, 56], "it-image", "image_generation", {
+          path: "/tmp/checkout-3ds-mock.png",
+        }),
+        completed,
+      ];
+    }
+    if (seconds === 70) {
+      return [
+        ...runItem([61, 62], "it-plan", "plan", undefined).map((planStep) =>
+          setCompletion(planStep, "it-plan", "completed", { content: PLAN_TEXT }),
+        ),
+        buildTodoListUpdate(66, 1),
+        completed,
+      ];
+    }
     if (seconds === 145) return [buildTodoListUpdate(143, 2), completed];
     return [completed];
   }),

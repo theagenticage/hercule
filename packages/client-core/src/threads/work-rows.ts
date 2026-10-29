@@ -32,6 +32,8 @@ export type WorkRowIcon =
   | "close"
   | "question"
   | "compress"
+  | "clock"
+  | "palette"
   | "more";
 
 /** One row of an expanded work stretch: a single step, or consecutive steps folded together. */
@@ -65,8 +67,9 @@ export interface WorkRow {
   readonly output: string;
   /**
    * Whether the output is code, drawn in the mono face and kept in whole
-   * lines, as a command's output is. False for a compaction's summary, which
-   * is prose, and for a group, which has no output of its own.
+   * lines, as a command's output is. False for a compaction's summary and a
+   * plan's text, which are prose, and for a group, which has no output of its
+   * own.
    */
   readonly outputIsCode: boolean;
   /**
@@ -145,6 +148,10 @@ const STEP_WORDS: Record<ItemKind, StepWords> = {
   unknown: UNKNOWN_STEP,
   // The label of a todo list carries its progress, set in `buildStepRow`. It never folds.
   todo_list: { icon: "tasks", verb: "Tasks" },
+  // The target of a wait is how long it waited, such as "30s".
+  wait: { icon: "clock", verb: "Waited" },
+  // The verb of an image generation follows its result, set in `chooseStepWords`.
+  image_generation: { icon: "palette", verb: "Generated an image" },
   // Messages never sit in a work stretch.
   user_message: UNKNOWN_STEP,
   assistant_message: UNKNOWN_STEP,
@@ -157,9 +164,28 @@ const PAGE_FETCH_WORDS: StepWords = {
   describeGroup: (steps) => `Fetched ${formatCount(steps.length, "page")}`,
 };
 
-/** Returns the words that draw `item`: its kind's, or a page fetch's. */
+/**
+ * The verb of an image generation for each result, so a row that is still
+ * running or that failed never reads as an image that exists.
+ */
+const IMAGE_GENERATION_VERBS: Record<WorkItem["result"], string> = {
+  running: "Generating an image",
+  "awaiting approval": "Generating an image",
+  completed: "Generated an image",
+  failed: "Could not generate an image",
+  declined: "Could not generate an image",
+};
+
+/**
+ * Returns the words that draw `item`: its kind's, a page fetch's, or for an
+ * image generation, the verb that fits its result.
+ */
 const chooseStepWords = (item: WorkItem): StepWords =>
-  item.isPageFetch ? PAGE_FETCH_WORDS : STEP_WORDS[item.kind];
+  item.isPageFetch
+    ? PAGE_FETCH_WORDS
+    : item.kind === "image_generation"
+      ? { ...STEP_WORDS.image_generation, verb: IMAGE_GENERATION_VERBS[item.result] }
+      : STEP_WORDS[item.kind];
 
 /** The results a group can take from its steps, in the order the first one present wins. */
 const GROUP_RESULTS = ["awaiting approval", "running", "failed", "declined"] as const;
@@ -256,7 +282,7 @@ const buildStepRow = (item: WorkItem, key: string): WorkRow => {
     startedAt: item.startedAt,
     result: item.result,
     output,
-    outputIsCode: item.kind !== "context_compaction",
+    outputIsCode: item.kind !== "context_compaction" && item.kind !== "plan",
     images,
     steps: [],
     todoSteps: item.kind === "todo_list" ? item.todoSteps : null,
@@ -293,7 +319,8 @@ const buildRunRow = (run: readonly WorkItem[]): WorkRow => {
  * that folds become one group row when there are two or more of them:
  * commands, file changes, file reads, file searches, web searches, page
  * fetches, and tool calls of the same tool and server. Reasoning, subagents,
- * plans, todo lists, compactions, errors and unknown steps never fold.
+ * plans, todo lists, waits, image generations, compactions, errors and unknown
+ * steps never fold.
  *
  * Each step's result text and images are read here, so the desktop calls
  * this only while a stretch is open.

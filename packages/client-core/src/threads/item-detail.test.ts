@@ -1,15 +1,19 @@
 /**
  * Tests `readCompactionDetail`, `describeCompactionTarget`,
- * `readUnknownLabel` and `readToolCallName`, which read the details every
+ * `readUnknownLabel`, `readWaitDetail`, `describeWaitDuration`,
+ * `readImageGenerationDetail` and `readToolCallName`, which read the details every
  * adapter shares. The todo list and page fetch readers are tested through the
  * projections that use them (`buildTurns`, `buildThreadBlocks`).
  */
 import { describe, expect, it } from "vitest";
 import {
   describeCompactionTarget,
+  describeWaitDuration,
   readCompactionDetail,
+  readImageGenerationDetail,
   readToolCallName,
   readUnknownLabel,
+  readWaitDetail,
 } from "./item-detail";
 
 describe("describeCompactionTarget", () => {
@@ -90,5 +94,50 @@ describe("readToolCallName", () => {
     ["no detail", undefined, ""],
   ])("reads %s", (_name, detail, expected) => {
     expect(readToolCallName(detail)).toBe(expected);
+  });
+});
+
+describe("describeWaitDuration", () => {
+  it.each([
+    [0, "0ms"],
+    [500, "500ms"],
+    [999, "999ms"],
+    [1000, "1s"],
+    [30_000, "30s"],
+    [90_000, "1m 30s"],
+    [3_660_000, "1h 1m"],
+  ])("reads %d ms as %s", (durationMs, words) => {
+    expect(describeWaitDuration({ durationMs })).toBe(words);
+  });
+});
+
+describe("readWaitDetail", () => {
+  it("returns the detail it decodes", () => {
+    expect(readWaitDetail({ durationMs: 30_000 })).toEqual({ durationMs: 30_000 });
+  });
+
+  it.each([
+    ["no detail", undefined],
+    ["a detail that is not an object", "30s"],
+    ["a duration that is not a number", { durationMs: "30s" }],
+    ["a negative duration", { durationMs: -1 }],
+    ["no duration", {}],
+  ])("returns nothing for %s", (_name, detail) => {
+    expect(readWaitDetail(detail)).toBeUndefined();
+  });
+});
+
+describe("readImageGenerationDetail", () => {
+  it("returns the path it decodes, and a detail with no path", () => {
+    expect(readImageGenerationDetail({ path: "/tmp/logo.png" })).toEqual({ path: "/tmp/logo.png" });
+    expect(readImageGenerationDetail({})).toEqual({});
+  });
+
+  it.each([
+    ["no detail", undefined],
+    ["a path that is not text", { path: 7 }],
+    ["an empty path", { path: "" }],
+  ])("returns nothing for %s", (_name, detail) => {
+    expect(readImageGenerationDetail(detail)).toBeUndefined();
   });
 });

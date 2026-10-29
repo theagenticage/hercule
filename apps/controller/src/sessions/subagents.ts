@@ -75,6 +75,8 @@ const ACTIVITY_VERBS: Readonly<Record<ItemKind, string>> = {
   error: "Reporting an error",
   unknown: "Working",
   todo_list: "Updating its task list",
+  wait: "Waiting",
+  image_generation: "Generating an image",
 };
 
 /**

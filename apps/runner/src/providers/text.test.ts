@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH } from "@hercule/protocol";
-import { truncateFact, truncateMessage } from "./text";
+import { describeErrorAsFact, truncateFact, truncateMessage } from "./text";
 
 describe.each([
   { name: "truncateFact", truncate: truncateFact, maxLength: MAX_FACT_LENGTH },
@@ -29,5 +29,24 @@ describe.each([
     const value = `${"a".repeat(maxLength - 2)}😀${"b".repeat(10)}`;
 
     expect(truncate(value)).toBe(`${"a".repeat(maxLength - 2)}…`);
+  });
+});
+
+describe("describeErrorAsFact", () => {
+  it("returns an error's message, and any other value as text", () => {
+    expect(describeErrorAsFact(new Error("boom"))).toBe("boom");
+    expect(describeErrorAsFact("plain")).toBe("plain");
+  });
+
+  it("replaces an empty message, which a Fact does not accept", () => {
+    expect(describeErrorAsFact(new Error(""))).toBe(
+      "the harness failed with an empty error message",
+    );
+  });
+
+  it("truncates a message longer than a Fact", () => {
+    expect(describeErrorAsFact(new Error("a".repeat(MAX_FACT_LENGTH + 1)))).toBe(
+      `${"a".repeat(MAX_FACT_LENGTH - 1)}…`,
+    );
   });
 });

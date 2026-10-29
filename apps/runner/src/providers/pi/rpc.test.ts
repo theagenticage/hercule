@@ -9,7 +9,7 @@ import { createLines } from "./testing";
 import { RPC_DEADLINE, makeRpc } from "./rpc";
 
 /** Builds an rpc over a pi that records its commands and responds only when the test says so. */
-const createPeer = () => {
+const createPeer = (onLine: (line: string, frame: unknown) => void = () => undefined) => {
   const stdout = createLines();
   const writes: Array<Record<string, unknown>> = [];
   const rpc = makeRpc(
@@ -21,11 +21,11 @@ const createPeer = () => {
       kill: () => undefined,
       exited: new Promise<number>(() => undefined),
     },
-    () => undefined,
+    onLine,
   );
   const respondToLast = (): void =>
     stdout.push(JSON.stringify({ type: "response", id: writes.at(-1)!["id"], success: true }));
-  return { rpc, respondToLast };
+  return { rpc, respondToLast, stdout };
 };
 
 describe("the time pi gets to respond to a command", () => {
@@ -69,5 +69,21 @@ describe("the time pi gets to respond to a command", () => {
       ),
     );
     expect(failure._tag).toBe("PiTimedOut");
+  });
+});
+
+describe("the lines pi writes that are not responses", () => {
+  it("hands every JSON value that is not a response object to the line reader, null included", async () => {
+    const frames: Array<unknown> = [];
+    const { rpc, stdout } = createPeer((_line, frame) => void frames.push(frame));
+
+    stdout.push("null");
+    stdout.push("5");
+    stdout.push('{"type":"agent_start"}');
+    stdout.push('{"type":"response","id":"nobody","success":true}');
+    stdout.end();
+    await Effect.runPromise(rpc.pump);
+
+    expect(frames).toEqual([null, 5, { type: "agent_start" }]);
   });
 });

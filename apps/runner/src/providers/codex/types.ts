@@ -30,6 +30,7 @@ export type { ItemStartedNotification } from "./generated/v2/ItemStartedNotifica
 export type { ItemCompletedNotification } from "./generated/v2/ItemCompletedNotification";
 export type { AgentMessageDeltaNotification } from "./generated/v2/AgentMessageDeltaNotification";
 export type { ThreadItem } from "./generated/v2/ThreadItem";
+export type { ServerNotification } from "./generated/ServerNotification";
 export type { ThreadTokenUsageUpdatedNotification } from "./generated/v2/ThreadTokenUsageUpdatedNotification";
 export type { ErrorNotification } from "./generated/v2/ErrorNotification";
 export type { HookCompletedNotification } from "./generated/v2/HookCompletedNotification";

@@ -47,3 +47,13 @@ export const requireText = (value: unknown, what: string): string => {
   if (typeof value !== "string") throw new Error(`${what} is not text`);
   return value;
 };
+
+/**
+ * Returns the error's message, truncated to fit a `Fact`. An `Error` can have an
+ * empty message, which a `Fact` does not accept, so an empty message is
+ * replaced with a fixed one.
+ */
+export const describeErrorAsFact = (error: unknown): string => {
+  const said = truncateFact(error instanceof Error ? error.message : String(error));
+  return said === "" ? "the harness failed with an empty error message" : said;
+};

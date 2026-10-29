@@ -38,7 +38,13 @@ interface Note {
 
 const buildNote = (method: string, params: Record<string, unknown>): Note => ({ method, params });
 
-const buildTestState = () => buildNormalizingState(SESSION, THREAD, undefined);
+/** Ignores what the normalizer reports to the runner's log. */
+const IGNORE_REPORT = {
+  reportUnknownMessage: (): void => undefined,
+  reportIgnoredMessage: (): void => undefined,
+};
+
+const buildTestState = () => buildNormalizingState(SESSION, THREAD, undefined, IGNORE_REPORT);
 
 const normalizeNotes = (
   running: ReturnType<typeof buildNormalizingState>,
@@ -236,12 +242,14 @@ const ITEMS: ReadonlyArray<readonly [Record<string, unknown>, string | null]> = 
   ],
   [{ type: "plan", id: "i12", text: "1. look" }, "plan"],
   [{ type: "contextCompaction", id: "i13" }, "context_compaction"],
-  [{ type: "hookPrompt", id: "i14", fragments: [] }, "unknown"],
+  // Hooks are trimmed on purpose (spec 06 section 6.7).
+  [{ type: "hookPrompt", id: "i14", fragments: [] }, null],
   [{ type: "imageView", id: "i15", path: "/tmp/a.png" }, "file_read"],
-  [{ type: "sleep", id: "i16", durationMs: 10 }, "unknown"],
-  [{ type: "imageGeneration", id: "i17" }, "unknown"],
-  [{ type: "enteredReviewMode", id: "i18", review: "r" }, "unknown"],
-  [{ type: "exitedReviewMode", id: "i19", review: "r" }, "unknown"],
+  [{ type: "sleep", id: "i16", durationMs: 10 }, "wait"],
+  [{ type: "imageGeneration", id: "i17", status: "completed", result: "" }, "image_generation"],
+  // Review mode is shown as a notice and not as an item.
+  [{ type: "enteredReviewMode", id: "i18", review: "r" }, null],
+  [{ type: "exitedReviewMode", id: "i19", review: "r" }, null],
   // Not in the union at 0.154.0: an item type added by a later release.
   [{ type: "somethingCodexGrew", id: "i20" }, "unknown"],
 ];
@@ -291,6 +299,7 @@ describe("the text of an assistant message", () => {
     const state = buildTestState();
 
     const events = normalizeNotes(state, [
+      TURN_STARTED,
       buildItemCompleted(ASYNC_MESSAGE),
       buildItemCompleted(ASYNC_MESSAGE),
     ]);
@@ -383,6 +392,7 @@ const listStreamedDeltas = (
 describe("which reasoning channel a session streams", () => {
   it("streams the summary when the summary is all Codex sends", () => {
     const events = normalizeFromStart([
+      TURN_STARTED,
       buildSummaryDelta("Weighing "),
       buildSummaryDelta("the options"),
     ]);
@@ -395,6 +405,7 @@ describe("which reasoning channel a session streams", () => {
 
   it("streams only raw reasoning when raw arrives first", () => {
     const running = buildTestState();
+    normalizeNotes(running, [TURN_STARTED]);
 
     const first = normalizeNotes(running, [buildRawDelta("Because ")]);
     const second = normalizeNotes(running, [buildSummaryDelta("Weighing the options")]);
@@ -407,6 +418,7 @@ describe("which reasoning channel a session streams", () => {
 
   it("switches to raw when raw follows a summary, and drops the summary after it", () => {
     const running = buildTestState();
+    normalizeNotes(running, [TURN_STARTED]);
 
     const opened = normalizeNotes(running, [buildSummaryDelta("Weighing ")]);
     const switched = normalizeNotes(running, [buildRawDelta("Because ")]);
@@ -422,9 +434,11 @@ describe("which reasoning channel a session streams", () => {
 
   it("streams an assistant message as assistant text and a command's output as command output", () => {
     const message = normalizeFromStart([
+      TURN_STARTED,
       buildDeltaNote("item/agentMessage/delta", { delta: "Hello" }),
     ]);
     const output = normalizeFromStart([
+      TURN_STARTED,
       buildDeltaNote("item/commandExecution/outputDelta", { delta: "hi\n" }),
     ]);
 
@@ -760,11 +774,9 @@ describe("the detail a surface shows for an item without opening it", () => {
     // A row for a plan or an assistant message shows the item's text, and a
     // detail repeating it would be a second copy to keep in sync.
     for (const item of [
-      { type: "plan", id: "i12", text: "1. look" },
       { type: "agentMessage", id: "i13", text: "hi" },
       { type: "reasoning", id: "i14", summary: [], content: [] },
       { type: "contextCompaction", id: "i15" },
-      { type: "somethingCodexGrew", id: "i16" },
     ]) {
       expect(
         readItemDetail(normalizeFromStart([buildItemCompleted(item)])),
@@ -775,6 +787,7 @@ describe("the detail a surface shows for an item without opening it", () => {
 
   it("includes the same detail on item.started as on item.completed", () => {
     const opened = normalizeFromStart([
+      TURN_STARTED,
       buildNote("item/started", {
         item: {
           type: "commandExecution",
@@ -805,7 +818,7 @@ const assignThread = (note: Note, threadId: string): Note => ({
 
 describe("a subagent's native thread", () => {
   it("attributes every event to its subagent and keeps the native thread id", () => {
-    const state = buildNormalizingState(SESSION, CHILD, undefined, {
+    const state = buildNormalizingState(SESSION, CHILD, undefined, IGNORE_REPORT, {
       subagentId: CHILD,
       rootThreadId: THREAD,
     });
@@ -847,7 +860,7 @@ describe("a subagent's native thread", () => {
       ],
     });
     expect(normalize(buildTestState(), input)).toEqual([]);
-    const child = buildNormalizingState(SESSION, CHILD, undefined, {
+    const child = buildNormalizingState(SESSION, CHILD, undefined, IGNORE_REPORT, {
       subagentId: CHILD,
       rootThreadId: THREAD,
     });
@@ -855,9 +868,13 @@ describe("a subagent's native thread", () => {
       buildNote("item/started", input.params as Record<string, unknown>),
       CHILD,
     );
-    const events = normalizeNotes(child, [started, assignThread(input, CHILD)]);
-    expect(listEventTags(events)).toEqual(["item.started", "item.completed"]);
-    for (const event of events) {
+    const events = normalizeNotes(child, [
+      assignThread(TURN_STARTED, CHILD),
+      started,
+      assignThread(input, CHILD),
+    ]);
+    expect(listEventTags(events)).toEqual(["turn.started", "item.started", "item.completed"]);
+    for (const event of events.slice(1)) {
       expect(event).toMatchObject({
         subagentId: CHILD,
         itemId: "brief",
@@ -874,8 +891,8 @@ describe("a subagent's native thread", () => {
       required: ["result"],
       properties: { result: { type: "string" } },
     } as const;
-    const root = buildNormalizingState(SESSION, THREAD, schema);
-    const child = buildNormalizingState(SESSION, CHILD, schema, {
+    const root = buildNormalizingState(SESSION, THREAD, schema, IGNORE_REPORT);
+    const child = buildNormalizingState(SESSION, CHILD, schema, IGNORE_REPORT, {
       subagentId: CHILD,
       rootThreadId: THREAD,
     });
@@ -903,7 +920,7 @@ describe("a subagent's native thread", () => {
 
   it("counts cached usage, repeated reports and resets independently for concurrent threads", () => {
     const root = buildTestState();
-    const child = buildNormalizingState(SESSION, CHILD, undefined, {
+    const child = buildNormalizingState(SESSION, CHILD, undefined, IGNORE_REPORT, {
       subagentId: CHILD,
       rootThreadId: THREAD,
     });
@@ -935,7 +952,7 @@ describe("a subagent's native thread", () => {
 
 describe("the subagents named by a native item", () => {
   it("never links the session's root as a subagent, including when a child targets it", () => {
-    const child = buildNormalizingState(SESSION, CHILD, undefined, {
+    const child = buildNormalizingState(SESSION, CHILD, undefined, IGNORE_REPORT, {
       subagentId: CHILD,
       rootThreadId: THREAD,
     });
@@ -1162,13 +1179,766 @@ describe("incomplete Codex token accounting", () => {
 });
 
 describe("a method or a status named like an object method", () => {
-  it("normalizes a notification whose method is `constructor` to nothing", () => {
-    expect(normalizeFromStart([buildDeltaNote("constructor", { delta: "x" })])).toEqual([]);
+  it("finds no decision for a method named `constructor`, and reports it as unknown", () => {
+    const events = normalizeFromStart([buildDeltaNote("constructor", { delta: "x" })]);
+
+    expect(filterByTag(events, "item.completed").map((event) => event.detail)).toEqual([
+      { label: "codex: constructor" },
+    ]);
   });
 
   it("does not end a turn whose status is `constructor`", () => {
     const events = normalizeFromStart([TURN_STARTED, buildTurnCompleted("constructor")]);
 
     expect(listEventTags(events)).not.toContain("turn.completed");
+  });
+});
+
+/** Encodes every event with the protocol schema, which is what the runner does before it sends one. */
+const encodeAll = (events: ReadonlyArray<ProviderEvent>): void => {
+  const encode = Schema.encodeUnknownSync(ProviderEvent);
+  for (const event of events) expect(() => encode(event), event._tag).not.toThrow();
+};
+
+/** Builds a state whose reports about unknown messages are collected in `reports`. */
+const buildReportingState = (reports: Array<string>, ignored: Array<string> = []) =>
+  buildNormalizingState(SESSION, THREAD, undefined, {
+    reportUnknownMessage: (label) => {
+      reports.push(label);
+    },
+    reportIgnoredMessage: (key) => {
+      ignored.push(key);
+    },
+  });
+
+const buildPlanNote = (
+  plan: ReadonlyArray<{ readonly step: string; readonly status: string }>,
+  turnId: string = TURN,
+): Note => buildNote("turn/plan/updated", { threadId: THREAD, turnId, explanation: "why", plan });
+
+describe("the text of a plan", () => {
+  it("reaches the completed plan item, whatever the deltas add up to", () => {
+    const planItem = { type: "plan", id: "plan_0", text: "1. look\n2. fix" };
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildNote("item/started", {
+        item: { ...planItem, text: "" },
+        threadId: THREAD,
+        turnId: TURN,
+        startedAtMs: 1,
+      }),
+      buildDeltaNote("item/plan/delta", { itemId: "plan_0", delta: "1. lo" }),
+      buildDeltaNote("item/plan/delta", { itemId: "plan_0", delta: "ok" }),
+      buildNote("item/completed", {
+        item: planItem,
+        threadId: THREAD,
+        turnId: TURN,
+        completedAtMs: 2,
+      }),
+    ]);
+
+    expect(listEventTags(events)).toEqual(["turn.started", "item.started", "item.completed"]);
+    expect(filterByTag(events, "item.started")[0]?.detail).toBeUndefined();
+    expect(filterByTag(events, "item.completed")[0]).toMatchObject({
+      kind: "plan",
+      detail: { content: "1. look\n2. fix" },
+    });
+    encodeAll(events);
+  });
+});
+
+describe("the todo list of Codex's plan", () => {
+  const FIRST = [
+    { step: "Read the code", status: "completed" },
+    { step: "Write the fix", status: "inProgress" },
+    { step: "Run the tests", status: "pending" },
+  ];
+  const FIRST_STEPS = [
+    { text: "Read the code", status: "completed" },
+    { text: "Write the fix", status: "in_progress" },
+    { text: "Run the tests", status: "pending" },
+  ];
+  const SECOND = [
+    { step: "Read the code", status: "completed" },
+    { step: "Write the fix", status: "completed" },
+    { step: "Run the tests", status: "inProgress" },
+  ];
+
+  it("is one item for the turn: started, then updated with the whole list, then completed before the turn", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildPlanNote(FIRST),
+      buildPlanNote(SECOND),
+      buildTurnCompleted("completed"),
+    ]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.updated",
+      "item.completed",
+      "turn.completed",
+    ]);
+    const todo = events.filter((event) => "kind" in event && event.kind === "todo_list");
+    expect(new Set(todo.map((event) => "itemId" in event && event.itemId)).size).toBe(1);
+    expect(todo[0]).toMatchObject({ turnId: TURN, detail: { steps: FIRST_STEPS } });
+    expect(todo[1]).toMatchObject({
+      detail: {
+        steps: [
+          FIRST_STEPS[0],
+          { text: "Write the fix", status: "completed" },
+          { text: "Run the tests", status: "in_progress" },
+        ],
+      },
+    });
+    expect(todo[2]).toMatchObject({
+      status: "completed",
+      detail: todo[1] && "detail" in todo[1] ? todo[1].detail : undefined,
+    });
+    encodeAll(events);
+  });
+
+  it("emits nothing for an update that shows what the item already shows", () => {
+    const events = normalizeFromStart([TURN_STARTED, buildPlanNote(FIRST), buildPlanNote(FIRST)]);
+
+    expect(listEventTags(events)).toEqual(["turn.started", "item.started"]);
+  });
+
+  it.each(["failed", "interrupted"])("completes the list before a turn that %s", (status) => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildPlanNote(FIRST),
+      buildTurnCompleted(status),
+    ]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.completed",
+      "turn.completed",
+    ]);
+    expect(filterByTag(events, "item.completed")[0]).toMatchObject({ status: "completed" });
+  });
+
+  it("starts a new item in the next turn", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildPlanNote(FIRST),
+      buildTurnCompleted("completed"),
+      {
+        ...TURN_STARTED,
+        params: { threadId: THREAD, turn: { ...buildTurn("inProgress"), id: "turn_2" } },
+      },
+      buildPlanNote(FIRST, "turn_2"),
+    ]);
+
+    const started = filterByTag(events, "item.started");
+    expect(started).toHaveLength(2);
+    expect(started[0]?.itemId).not.toBe(started[1]?.itemId);
+  });
+
+  it("completes a list left open by a turn whose completion never arrived", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildPlanNote(FIRST),
+      {
+        ...TURN_STARTED,
+        params: { threadId: THREAD, turn: { ...buildTurn("inProgress"), id: "turn_2" } },
+      },
+    ]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.completed",
+      "turn.started",
+    ]);
+  });
+
+  it("ignores an update that names a turn other than the running one", () => {
+    const state = buildTestState();
+
+    expect(normalizeNotes(state, [buildPlanNote(FIRST)])).toEqual([]);
+    expect(normalizeNotes(state, [TURN_STARTED, buildPlanNote(FIRST, "turn_old")])).toHaveLength(1);
+  });
+
+  it("is not closed or cleared by the late completion of another turn", () => {
+    const state = buildTestState();
+    normalizeNotes(state, [TURN_STARTED, buildPlanNote(FIRST)]);
+
+    const late = normalizeNotes(state, [
+      buildNote("turn/completed", {
+        threadId: THREAD,
+        turn: { ...buildTurn("interrupted"), id: "turn_old" },
+      }),
+    ]);
+    const after = normalizeNotes(state, [buildPlanNote(SECOND), buildTurnCompleted("completed")]);
+
+    expect(listEventTags(late)).toEqual(["turn.completed"]);
+    expect(listEventTags(after)).toEqual(["item.updated", "item.completed", "turn.completed"]);
+  });
+
+  it("keeps one list per agent", () => {
+    const root = buildTestState();
+    const child = buildNormalizingState(SESSION, CHILD, undefined, IGNORE_REPORT, {
+      subagentId: CHILD,
+      rootThreadId: THREAD,
+    });
+    const childTurn = { ...buildTurn("inProgress"), id: "turn_child" };
+    normalizeNotes(root, [TURN_STARTED, buildPlanNote(FIRST)]);
+    const childEvents = normalizeNotes(child, [
+      buildNote("turn/started", { threadId: CHILD, turn: childTurn }),
+      buildPlanNote(SECOND, "turn_child"),
+      buildNote("turn/completed", { threadId: CHILD, turn: { ...childTurn, status: "completed" } }),
+    ]);
+    const rootEnd = normalizeNotes(root, [buildTurnCompleted("completed")]);
+
+    expect(childEvents.map((event) => event._tag)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.completed",
+      "turn.completed",
+    ]);
+    expect(childEvents.every((event) => "subagentId" in event && event.subagentId === CHILD)).toBe(
+      true,
+    );
+    expect(listEventTags(rootEnd)).toEqual(["item.completed", "turn.completed"]);
+    encodeAll([...childEvents, ...rootEnd]);
+  });
+
+  it("warns instead of cutting a plan of more than 128 steps, and keeps the item as it was", () => {
+    const long = Array.from({ length: 129 }, (_, index) => ({
+      step: `Step ${index}`,
+      status: "pending",
+    }));
+    const events = normalizeFromStart([TURN_STARTED, buildPlanNote(FIRST), buildPlanNote(long)]);
+
+    expect(listEventTags(events)).toEqual(["turn.started", "item.started", "runtime.warning"]);
+    expect(filterByTag(events, "runtime.warning")[0]).toMatchObject({
+      turnId: TURN,
+      message: "Codex's plan has 129 steps, more than the 128 a todo list can show",
+    });
+    encodeAll(events);
+  });
+
+  it.each([
+    ["a step with no text", [{ step: "", status: "pending" }]],
+    ["a status this build does not know", [{ step: "Think", status: "blocked" }]],
+  ])("reports a plan with %s as unknown, not as a wrong list", (_name, plan) => {
+    const events = normalizeFromStart([TURN_STARTED, buildPlanNote(plan)]);
+
+    expect(filterByTag(events, "item.completed").map((event) => event.detail)).toEqual([
+      { label: "codex: turn/plan/updated" },
+    ]);
+    encodeAll(events);
+  });
+});
+
+describe("the notices and warnings Codex sends", () => {
+  it("shows a model switch as a notice in the running turn", () => {
+    const rerouted = buildNote("model/rerouted", {
+      threadId: THREAD,
+      turnId: TURN,
+      fromModel: "gpt-a",
+      toModel: "gpt-b",
+      reason: "highRiskCyberActivity",
+    });
+    const state = buildTestState();
+
+    const inTurn = normalizeNotes(state, [TURN_STARTED, rerouted]);
+    const late = normalizeNotes(state, [
+      buildNote("model/rerouted", { ...(rerouted.params as object), turnId: "turn_old" }),
+    ]);
+
+    expect(filterByTag(inTurn, "runtime.notice")).toMatchObject([
+      { turnId: TURN, message: "Codex switched model from gpt-a to gpt-b" },
+    ]);
+    expect(filterByTag(late, "runtime.notice")[0]?.turnId).toBeUndefined();
+    encodeAll([...inTurn, ...late]);
+  });
+
+  it.each([
+    ["warning", { threadId: THREAD, message: "Disk is almost full" }, "Disk is almost full"],
+    [
+      "guardianWarning",
+      { threadId: THREAD, message: "Command was blocked" },
+      "Command was blocked",
+    ],
+  ])("draws %s inside the running turn of its thread", (method, params, message) => {
+    const running = normalizeFromStart([TURN_STARTED, buildNote(method, params)]);
+    const idle = normalizeFromStart([buildNote(method, params)]);
+
+    expect(filterByTag(running, "runtime.warning")).toMatchObject([{ turnId: TURN, message }]);
+    expect(listEventTags(idle)).toEqual(["runtime.warning"]);
+    expect(filterByTag(idle, "runtime.warning")[0]?.turnId).toBeUndefined();
+    encodeAll([...running, ...idle]);
+  });
+
+  it.each([
+    ["warning", { threadId: null, message: "Disk is almost full" }, "Disk is almost full"],
+    ["deprecationNotice", { summary: "Flag x is old", details: "Use y" }, "Flag x is old\nUse y"],
+    ["deprecationNotice", { summary: "Flag x is old", details: null }, "Flag x is old"],
+    [
+      "configWarning",
+      { summary: "Bad key", details: "Line 3", path: "/home/u/.codex/config.toml" },
+      "Bad key\nLine 3\nConfig file: /home/u/.codex/config.toml",
+    ],
+    ["configWarning", { summary: "Bad key", details: null }, "Bad key"],
+  ])(
+    "shows %s, which concerns the whole session, as a warning that names no turn",
+    (method, params, message) => {
+      const events = normalizeFromStart([TURN_STARTED, buildNote(method, params)]);
+
+      const warnings = filterByTag(events, "runtime.warning");
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]?.message).toBe(message);
+      expect(warnings[0]?.turnId).toBeUndefined();
+      encodeAll(events);
+    },
+  );
+
+  it("opens no turn for a warning outside any turn", () => {
+    const events = normalizeFromStart([
+      buildNote("warning", { threadId: null, message: "Heads up" }),
+    ]);
+
+    expect(listEventTags(events)).toEqual(["runtime.warning"]);
+  });
+});
+
+describe("the items Codex has no tool kind for", () => {
+  const buildImage = (extra: Record<string, unknown>) => ({
+    type: "imageGeneration",
+    id: "img_0",
+    status: "completed",
+    revisedPrompt: "a cat",
+    result: "",
+    failure: null,
+    ...extra,
+  });
+
+  it("shows a sleep as a wait of the length it asked for", () => {
+    const events = normalizeFromStart([
+      buildItemCompleted({ type: "sleep", id: "s_0", durationMs: 30000 }),
+    ]);
+
+    expect(filterByTag(events, "item.completed")[0]).toMatchObject({
+      kind: "wait",
+      detail: { durationMs: 30000 },
+    });
+    encodeAll(events);
+  });
+
+  it("shows an image generation, with its saved path as an update right before the completion", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildNote("item/started", {
+        item: buildImage({ status: "inProgress" }),
+        threadId: THREAD,
+        turnId: TURN,
+        startedAtMs: 1,
+      }),
+      buildItemCompleted(buildImage({ savedPath: "/tmp/cat.png" })),
+    ]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.updated",
+      "item.completed",
+    ]);
+    expect(filterByTag(events, "item.started")[0]?.detail).toBeUndefined();
+    expect(events.filter((event) => event._tag === "item.updated")[0]).toMatchObject({
+      kind: "image_generation",
+      itemId: "img_0",
+      detail: { path: "/tmp/cat.png" },
+    });
+    expect(filterByTag(events, "item.completed")[0]).toMatchObject({
+      kind: "image_generation",
+      status: "completed",
+      detail: { path: "/tmp/cat.png" },
+    });
+    encodeAll(events);
+  });
+
+  it("fails a generation that failed, and has no detail without a saved path", () => {
+    const events = normalizeFromStart([
+      buildItemCompleted(
+        buildImage({ status: "failed", failure: { message: "no" }, savedPath: "" }),
+      ),
+    ]);
+
+    const completed = filterByTag(events, "item.completed")[0];
+    expect(completed).toMatchObject({ kind: "image_generation", status: "failed" });
+    expect(completed?.detail).toBeUndefined();
+    expect(listEventTags(events)).not.toContain("item.updated");
+  });
+
+  it("shows entering and leaving review mode as notices, only when the item completes", () => {
+    const entered = { type: "enteredReviewMode", id: "r_0", review: "current changes" };
+    const exited = { type: "exitedReviewMode", id: "r_1", review: "Found 2 problems ..." };
+    const started = normalizeFromStart([
+      TURN_STARTED,
+      buildNote("item/started", { item: entered, threadId: THREAD, turnId: TURN, startedAtMs: 1 }),
+    ]);
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildItemCompleted(entered),
+      buildItemCompleted(exited),
+    ]);
+
+    expect(listEventTags(started)).toEqual(["turn.started"]);
+    expect(filterByTag(events, "runtime.notice")).toMatchObject([
+      { turnId: TURN, message: "Codex started a review: current changes" },
+      { turnId: TURN, message: "Codex finished the review" },
+    ]);
+    encodeAll(events);
+  });
+
+  it("shows nothing for a hook prompt", () => {
+    const hook = { type: "hookPrompt", id: "h_0", fragments: [] };
+
+    expect(normalizeFromStart([TURN_STARTED, buildItemCompleted(hook)])).toHaveLength(1);
+  });
+});
+
+describe("what Codex sends that this build has no decision for", () => {
+  const FUTURE = buildNote("future/thing", { threadId: THREAD, turnId: TURN, detail: "x" });
+
+  it("becomes a labelled unknown item in the running turn, with the frame in raw, reported once", () => {
+    const reports: Array<string> = [];
+    const state = buildReportingState(reports);
+
+    const events = normalizeNotes(state, [TURN_STARTED, FUTURE, FUTURE]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.completed",
+      "item.started",
+      "item.completed",
+    ]);
+    const [started, completed] = [
+      filterByTag(events, "item.started")[0],
+      filterByTag(events, "item.completed")[0],
+    ];
+    // The frame is in `raw` of the first event only.
+    expect(started).toMatchObject({
+      kind: "unknown",
+      turnId: TURN,
+      detail: { label: "codex: future/thing" },
+      raw: { source: SOURCE, payload: { method: "future/thing" } },
+    });
+    expect(completed?.raw).toBeUndefined();
+    expect(reports).toEqual(["codex: future/thing", "codex: future/thing"]);
+    encodeAll(events);
+  });
+
+  it("opens a turn that holds only the item when no turn is running", () => {
+    const events = normalizeFromStart([buildNote("future/thing", { threadId: THREAD })]);
+
+    expect(listEventTags(events)).toEqual([
+      "turn.started",
+      "item.started",
+      "item.completed",
+      "turn.completed",
+    ]);
+    const turnIds = new Set(events.map((event) => "turnId" in event && event.turnId));
+    expect(turnIds.size).toBe(1);
+    expect(filterByTag(events, "turn.completed")[0]?.state).toBe("completed");
+    encodeAll(events);
+  });
+
+  it("puts a frame of another turn in the running turn, and ends no turn", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildNote("future/thing", { threadId: THREAD, turnId: "turn_old" }),
+    ]);
+
+    // One agent never has two turns at once: a synthetic turn that ended here
+    // would make the controller take the session for idle in the middle of
+    // the running turn.
+    expect(listEventTags(events)).toEqual(["turn.started", "item.started", "item.completed"]);
+    expect(filterByTag(events, "item.completed")[0]?.turnId).toBe(TURN);
+    expect(filterByTag(events, "item.started")[0]?.raw).toMatchObject({
+      payload: { params: { turnId: "turn_old" } },
+    });
+  });
+
+  it("draws nothing, and tells the log, while a turn is asked for but has not started", () => {
+    const reports: Array<string> = [];
+    const state = buildReportingState(reports);
+    state.isTurnPending = () => true;
+
+    const events = normalizeNotes(state, [FUTURE]);
+
+    expect(events).toEqual([]);
+    expect(reports).toEqual(["codex: future/thing"]);
+  });
+
+  it("is what a known method with unreadable params becomes", () => {
+    const reports: Array<string> = [];
+    const state = buildReportingState(reports);
+
+    const events = normalizeNotes(state, [TURN_STARTED, buildNote("item/completed", {})]);
+
+    expect(filterByTag(events, "item.completed")[0]).toMatchObject({
+      kind: "unknown",
+      detail: { label: "codex: item/completed" },
+    });
+    expect(reports).toEqual(["codex: item/completed"]);
+    encodeAll(events);
+  });
+
+  it.each([
+    ["model/rerouted without model names", "model/rerouted", { threadId: THREAD, turnId: TURN }],
+    ["a warning whose message is not text", "warning", { threadId: THREAD, message: 5 }],
+    ["a config warning whose summary is not text", "configWarning", { summary: {}, details: null }],
+    [
+      "a deprecation notice whose details are not text",
+      "deprecationNotice",
+      { summary: "x", details: 7 },
+    ],
+  ])("is what %s becomes", (_name, method, params) => {
+    const events = normalizeFromStart([TURN_STARTED, buildNote(method, params)]);
+
+    expect(filterByTag(events, "runtime.warning")).toEqual([]);
+    expect(filterByTag(events, "runtime.notice")).toEqual([]);
+    expect(filterByTag(events, "item.completed")[0]).toMatchObject({
+      kind: "unknown",
+      detail: { label: `codex: ${method}` },
+    });
+    encodeAll(events);
+  });
+
+  it("is what a sleep without a duration becomes", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildItemCompleted({ type: "sleep", id: "s_0", durationMs: "soon" }),
+    ]);
+
+    expect(
+      filterByTag(events, "item.completed").find((event) => event.kind === "unknown"),
+    ).toMatchObject({ detail: { label: "codex: item/sleep" } });
+  });
+
+  it("closes the row of an item that started fine and then completed unreadable, as failed", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildNote("item/started", {
+        item: { type: "sleep", id: "w", durationMs: 5 },
+        threadId: THREAD,
+        turnId: TURN,
+        startedAtMs: 1,
+      }),
+      buildItemCompleted({ type: "sleep", id: "w", durationMs: "bad" }),
+      buildTurnCompleted("completed"),
+    ]);
+
+    const completed = filterByTag(events, "item.completed");
+    expect(completed[0]).toMatchObject({
+      itemId: "w",
+      kind: "wait",
+      status: "failed",
+      turnId: TURN,
+    });
+    expect(completed.filter((event) => event.kind === "unknown")).toHaveLength(1);
+    expect(listEventTags(events).at(-1)).toBe("turn.completed");
+    encodeAll(events);
+  });
+
+  it("is what an item type added by a newer Codex becomes", () => {
+    const reports: Array<string> = [];
+
+    const events = normalizeNotes(buildReportingState(reports), [
+      buildItemCompleted({ type: "somethingCodexGrew", id: "i20" }),
+    ]);
+
+    expect(filterByTag(events, "item.completed")[0]).toMatchObject({
+      kind: "unknown",
+      detail: { label: "codex: item/somethingCodexGrew" },
+    });
+    expect(reports).toEqual(["codex: item/somethingCodexGrew"]);
+  });
+
+  it("still throws for an unreadable usage report, which the adapter recovers from", () => {
+    const state = buildTestState();
+
+    expect(() =>
+      normalize(
+        state,
+        buildNote("thread/tokenUsage/updated", { threadId: THREAD, tokenUsage: {} }),
+      ),
+    ).toThrow();
+  });
+});
+
+describe("a frame of a turn that is over", () => {
+  const TURN_2 = "turn_2";
+  const START_TURN_2 = buildNote("turn/started", {
+    threadId: THREAD,
+    turn: { ...buildTurn("inProgress"), id: TURN_2 },
+  });
+  const buildAnswer = (turnId: string, text: string): Note =>
+    buildNote("item/completed", {
+      item: { ...MESSAGE, id: `answer_${turnId}`, text },
+      threadId: THREAD,
+      turnId,
+      completedAtMs: 1,
+    });
+
+  it("starts no item, and tells the log", () => {
+    const ignored: Array<string> = [];
+    const state = buildReportingState([], ignored);
+
+    const events = normalizeNotes(state, [
+      TURN_STARTED,
+      START_TURN_2,
+      buildNote("item/started", {
+        item: { type: "sleep", id: "s_0", durationMs: 5 },
+        threadId: THREAD,
+        turnId: TURN,
+        startedAtMs: 1,
+      }),
+    ]);
+
+    expect(listEventTags(events)).toEqual(["turn.started", "turn.started"]);
+    expect(ignored).toEqual(["late item/started"]);
+  });
+
+  it("streams no delta, and does not mark its message as streamed", () => {
+    const ignored: Array<string> = [];
+    const state = buildReportingState([], ignored);
+
+    const late = normalizeNotes(state, [
+      TURN_STARTED,
+      START_TURN_2,
+      buildDeltaNote("item/agentMessage/delta", { delta: "late" }),
+    ]);
+    const current = normalizeNotes(state, [
+      buildNote("item/agentMessage/delta", {
+        threadId: THREAD,
+        turnId: TURN_2,
+        itemId: "answer_turn_2",
+        delta: "now",
+      }),
+    ]);
+
+    expect(listEventTags(late)).toEqual(["turn.started", "turn.started"]);
+    expect(ignored).toEqual(["late item/agentMessage/delta"]);
+    expect(listStreamedDeltas(current)).toEqual([["assistant_text", "now"]]);
+  });
+
+  it("completes its item but does not replace the running turn's answer", () => {
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["result"],
+      properties: { result: { type: "string" } },
+    } as const;
+    const state = buildNormalizingState(SESSION, THREAD, schema, IGNORE_REPORT);
+
+    const events = normalizeNotes(state, [
+      TURN_STARTED,
+      START_TURN_2,
+      buildAnswer(TURN_2, '{"result":"right"}'),
+      buildAnswer(TURN, "late prose"),
+      buildNote("turn/completed", {
+        threadId: THREAD,
+        turn: { ...buildTurn("completed"), id: TURN_2 },
+      }),
+    ]);
+
+    expect(filterByTag(events, "item.completed").map((event) => event.turnId)).toEqual([
+      TURN_2,
+      TURN,
+    ]);
+    expect(filterByTag(events, "turn.completed")[0]).toMatchObject({
+      structuredResult: { outcome: "ok", value: { result: "right" } },
+    });
+  });
+});
+
+describe("a frame of a turn that has already ended", () => {
+  const SLEEP = { type: "sleep", id: "s_0", durationMs: 5 };
+
+  it("starts no item and streams no delta, and still completes an item started before", () => {
+    const ignored: Array<string> = [];
+    const state = buildReportingState([], ignored);
+    normalizeNotes(state, [
+      TURN_STARTED,
+      buildNote("item/started", { item: SLEEP, threadId: THREAD, turnId: TURN, startedAtMs: 1 }),
+      buildTurnCompleted("completed"),
+    ]);
+
+    const late = normalizeNotes(state, [
+      buildNote("item/started", {
+        item: { ...SLEEP, id: "s_1" },
+        threadId: THREAD,
+        turnId: TURN,
+        startedAtMs: 2,
+      }),
+      buildDeltaNote("item/agentMessage/delta", { delta: "late" }),
+      buildItemCompleted(SLEEP),
+    ]);
+
+    expect(listEventTags(late)).toEqual(["item.completed"]);
+    expect(filterByTag(late, "item.completed")[0]).toMatchObject({ itemId: "s_0", kind: "wait" });
+    expect(ignored).toEqual(["late item/started", "late item/agentMessage/delta"]);
+  });
+});
+
+describe("a completed message whose text cannot be read", () => {
+  it("leaves no trace, so the same message completed again still gives its text", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildItemCompleted({ ...MESSAGE, text: 42 }),
+      ITEM_COMPLETED,
+    ]);
+
+    // The unreadable completion closes its row as failed, then shows as a
+    // fallback item; the good repeat completes normally and gives its text.
+    expect(filterByTag(events, "item.completed").map((event) => event.kind)).toEqual([
+      "assistant_message",
+      "unknown",
+      "assistant_message",
+    ]);
+    expect(listStreamedDeltas(events)).toEqual([["assistant_text", "Hello"]]);
+    encodeAll(events);
+  });
+});
+
+describe("a delta that cannot be read", () => {
+  it("is reported as unknown, and leaves the message's text to its completion", () => {
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildDeltaNote("item/agentMessage/delta", { delta: 42 }),
+      ITEM_COMPLETED,
+    ]);
+
+    expect(filterByTag(events, "item.completed").map((event) => event.kind)).toEqual([
+      "unknown",
+      "assistant_message",
+    ]);
+    expect(listStreamedDeltas(events)).toEqual([["assistant_text", "Hello"]]);
+    encodeAll(events);
+  });
+});
+
+describe("a plan with too many steps", () => {
+  it("warns once for the turn, however often Codex sends it", () => {
+    const long = Array.from({ length: 129 }, (_, index) => ({
+      step: `Step ${index}`,
+      status: "pending",
+    }));
+
+    const events = normalizeFromStart([
+      TURN_STARTED,
+      buildPlanNote(long),
+      buildPlanNote(long),
+      buildPlanNote(long),
+    ]);
+
+    expect(filterByTag(events, "runtime.warning")).toHaveLength(1);
   });
 });
