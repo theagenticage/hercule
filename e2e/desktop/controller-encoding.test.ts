@@ -35,7 +35,7 @@ async function startRecordingServer() {
 }
 
 describe("the Accept-Encoding of a request", () => {
-  it("asks the saved controller for brotli from the page, and asks another origin as Chromium does", async () => {
+  it("asks the saved controller for brotli from the page and from main, and asks another origin as Chromium does", async () => {
     const controller = await startRecordingServer();
     const other = await startRecordingServer();
     const controllerUrl = `http://controller.test:${controller.port}`;
@@ -54,12 +54,16 @@ describe("the Accept-Encoding of a request", () => {
     );
     expect(controller.acceptEncodings).toEqual(["gzip, deflate, br"]);
 
-    // The page's policy lets it reach only the controller, so main fetches
-    // the other origin. Main's requests go through the same session.
-    await app.evaluate(
-      ({ net }, url) => net.fetch(`${url}/probe`).then((response) => response.text()),
-      otherUrl,
-    );
+    // Main's own requests go through the same session. The page's policy
+    // lets it reach only the controller, so main fetches the other origin too.
+    const fetchFromMain = (url: string) =>
+      app.evaluate(
+        ({ net }, url) => net.fetch(`${url}/probe`).then((response) => response.text()),
+        url,
+      );
+    await fetchFromMain(controllerUrl);
+    expect(controller.acceptEncodings).toEqual(["gzip, deflate, br", "gzip, deflate, br"]);
+    await fetchFromMain(otherUrl);
     expect(other.acceptEncodings).toEqual([CHROMIUM_PLAIN_HTTP_ENCODING]);
   });
 });

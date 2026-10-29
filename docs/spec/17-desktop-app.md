@@ -4517,7 +4517,7 @@ The sidebar was drawn from a specimen with 3,000 and with 200 threads, every sec
 - **Pixels.** None of the 12 captured screens shows an unknown event or an unreadable stream, so no golden moved.
 - **Not measured:** process count, summed and per-process memory, idle wakeups, and the time of a streamed row in the packaged app. The perf script (`apps/desktop/scripts/perf.ts`) needs macOS, and the Mac runner (atlas) was not reachable. On 2026-10-29 Rogier excepted #897 from the macOS readings, as for #893 and #851: it merges without them. The design adds no process, timer or listener, but that is the design and not a measurement. The decode timing ran on Bun and not in the renderer. The packaged app (`electron-builder --mac`) was not built either, and byte counts do not need it.
 
-**Brotli from the saved controller,** measured 2026-10-29 on this Mac (macOS 15, arm64) for [#920](https://github.com/theagenticage/hercule/issues/920), before (`0a506385`, main) and after the change. Main sets `Accept-Encoding: gzip, deflate, br` on requests to the saved controller ([Reaching the controller](#reaching-the-controller)).
+**Brotli from the saved controller,** for [#920](https://github.com/theagenticage/hercule/issues/920), 2026-10-29. The read of 400 workspaces is the measurement reported in #920, taken against Rogier's controller when the issue was found. The bundle bytes and the per-request cost were measured on a Mac (macOS 15, arm64), before (`0a506385`, main) and after the change. Main sets `Accept-Encoding: gzip, deflate, br` on requests to the saved controller ([Reaching the controller](#reaching-the-controller)).
 
 | Measure | Budget | Measured |
 |---|---|---|
