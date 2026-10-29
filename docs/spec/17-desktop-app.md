@@ -122,6 +122,13 @@ Measured 2026-09-29 against Electron 44.4.5:
 
 **Verify at build time:** that the `codeCache` privilege caches the renderer's scripts in Electron 44, and how much it shortens a warm launch.
 
+*(Added 2026-10-29, [#920](https://github.com/theagenticage/hercule/issues/920).)* **Main asks the saved controller for brotli.** The controller compresses a JSON answer with brotli when the request asks for it, and with gzip otherwise ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) §1.4). Chromium asks for brotli only from an HTTPS or localhost address, so a controller on plain http, on the LAN or a tailnet, would answer the app with gzip. Main therefore sets `Accept-Encoding: gzip, deflate, br` on every request to the saved controller's origin (`askControllerForBrotli`, in `session.webRequest.onBeforeSendHeaders`). Chromium decodes a brotli answer over plain http when the request asked for it.
+
+- **Only the saved controller.** A request to any other origin keeps the header Chromium gave it. Main reads the saved controller URL for each request, as it does for the Content-Security-Policy, so a newly saved controller is asked for brotli from its first request.
+- **The renderer's requests and main's own** both carry the header, because both go through the session. An end-to-end test checks both from a stand-in reached by a name that is not localhost (`e2e/desktop/controller-encoding.test.ts`).
+- **On loopback, the header replaces Chromium's own,** which there also offers `zstd`. The controller never answers with `zstd`, so nothing is lost.
+- **What it costs** (stated before the measurement, as [ADR 0037](../adr/0037-the-desktop-app-is-its-own-electron-client-of-the-public-api.md) asks). No process, no timer and no work while idle. Nothing per streamed token: the live stream is the WebSocket, whose `ws:` URL the hook does not see. Each `http:` or `https:` request makes one call into main and one read of the settings in memory; a file the `app` scheme serves makes none. Main's startup file grows by the new module. The numbers are in [Measured](#measured).
+
 ### The controller URL and the connect screen
 
 - **One controller.** The first milestone connects to one controller at a time.
@@ -4509,6 +4516,23 @@ The sidebar was drawn from a specimen with 3,000 and with 200 threads, every sec
 - **Memory.** One string (a time) per thread, and the one note built from it, nothing while streaming. An `unknown` event holds the whole event it came from (`payload`) in the rows cache, so a row of an unknown type costs about its own size, which is bounded by the size of a message the controller sends. A thread holds a few of them at most, in the rare case that the controller is newer than the app.
 - **Pixels.** None of the 12 captured screens shows an unknown event or an unreadable stream, so no golden moved.
 - **Not measured:** process count, summed and per-process memory, idle wakeups, and the time of a streamed row in the packaged app. The perf script (`apps/desktop/scripts/perf.ts`) needs macOS, and the Mac runner (atlas) was not reachable. On 2026-10-29 Rogier excepted #897 from the macOS readings, as for #893 and #851: it merges without them. The design adds no process, timer or listener, but that is the design and not a measurement. The decode timing ran on Bun and not in the renderer. The packaged app (`electron-builder --mac`) was not built either, and byte counts do not need it.
+
+**Brotli from the saved controller,** measured 2026-10-29 on this Mac (macOS 15, arm64) for [#920](https://github.com/theagenticage/hercule/issues/920), before (`0a506385`, main) and after the change. Main sets `Accept-Encoding: gzip, deflate, br` on requests to the saved controller ([Reaching the controller](#reaching-the-controller)).
+
+| Measure | Budget | Measured |
+|---|---|---|
+| Reading all 400 workspaces from Rogier's controller over plain http, 19.5 MB of JSON | - | 9,973 ms with gzip (before), 606 ms with brotli (after), the same decoded body |
+| Main's startup file, minified | 170 kB | 169,977 to 170,317 bytes (166.0 kB to 166.3 kB): 340 more; gzipped 56,968 to 57,104 (136 more) |
+| The preload | - | 1,385 bytes, unchanged |
+| The renderer | - | unchanged: no renderer code changed |
+| Processes | none added | none added |
+| Work while idle | none added | none added |
+| Work per streamed token | none added | none: the hook sees no WebSocket traffic |
+| Work per request to an http or https address | - | about 0.1 ms: a page `fetch` to a stand-in on loopback took 0.44 ms with the hook and 0.28 to 0.32 ms with no hook, 500 fetches after 50 warm-up |
+
+- **The read was measured with Electron 44 against Rogier's controller,** when the issue was found, with the header set in `session.webRequest.onBeforeSendHeaders` as main now sets it. The time is the whole read, as the renderer waits for it: the controller's compression, the transfer and the decode.
+- **The per-request cost is the call into main,** not the read of the settings: a hook that only sets the header and reads nothing took 0.37 to 0.39 ms in the same run.
+- **Not measured:** memory, launch time and idle wakeups in the packaged app with the perf script. The change adds no process and no timer, its one listener runs only when a request is sent, and it holds nothing once the request has gone out, but that is the design and not a measurement.
 
 ## Slices
 

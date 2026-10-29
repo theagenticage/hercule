@@ -414,7 +414,9 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
         BrowserWindow.getAllWindows()[0]!.setContentSize(1920, 1200);
       });
     },
-    evidence === undefined ? undefined : { dir: evidence, size: { width: 1920, height: 1200 } },
+    evidence === undefined
+      ? {}
+      : { recordVideo: { dir: evidence, size: { width: 1920, height: 1200 } } },
   );
   onTestFinished(async () => {
     await close();

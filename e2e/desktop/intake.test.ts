@@ -591,7 +591,7 @@ describe("Intake", () => {
             BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900);
           });
         },
-        { dir: evidence!, size: { width: 1440, height: 900 } },
+        { recordVideo: { dir: evidence!, size: { width: 1440, height: 900 } } },
       );
       onTestFinished(async () => {
         await close();
