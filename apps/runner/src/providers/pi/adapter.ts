@@ -1922,8 +1922,10 @@ export const makePiAdapter = (seam: PiSeam): ProviderAdapter => {
         const root = held.root;
         // pi is idle while it compacts between turns: a steer would queue with
         // no run to answer it, and a prompt could start a run in a turn that
-        // is about to close. Nothing is written to pi. The input stays queued
-        // and runs when the compaction's turn ends.
+        // is about to close. The prompt or steer is withheld, so the input is
+        // not written to pi. (A `set_model` already in flight may still
+        // complete.) The input stays queued and runs when the compaction's
+        // turn ends.
         if (root.state.synthetic) {
           return yield* Effect.fail(new SteerRefused({ message: COMPACTING_MESSAGE }));
         }
