@@ -1290,7 +1290,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 10 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 11 satisfies typeof PROTOCOL_VERSION,
             capabilities: [
               "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,

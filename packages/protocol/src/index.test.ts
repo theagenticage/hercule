@@ -407,8 +407,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 10, the version that added the typed error on a refused input result", () => {
-    expect(PROTOCOL_VERSION).toBe(10);
+  it("is 11, the version that added the unknown event", () => {
+    expect(PROTOCOL_VERSION).toBe(11);
   });
 });
 

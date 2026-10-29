@@ -484,18 +484,19 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 9 sends a refused input result without a typed error, which a version 10 controller cannot decode.
-  it("refuses a runner on protocol version 9 and says to upgrade it", async () => {
+  // Version 10 cannot send the `unknown` event, so a version 11 controller refuses it rather than
+  // run a runner that closes its own socket on the first event tag it does not know.
+  it("refuses a runner on protocol version 10 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dialRunnerSocket(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 9 }));
+      wire.send(buildHello({ protocolVersion: 10 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(10);
+      expect(PROTOCOL_VERSION).toBe(11);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 10 and the runner does not; " +
-          "upgrade the runner to a build that uses version 10",
+        "this controller uses runner protocol version 11 and the runner does not; " +
+          "upgrade the runner to a build that uses version 11",
       );
       expect(wire.frames).toEqual([]);
     });
