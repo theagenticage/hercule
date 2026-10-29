@@ -935,6 +935,10 @@ const KNOWN_EVENTS = [
  * The envelope (`eventId`, `sessionId`, `at` and `subagentId`) is lifted out of
  * the payload, so the event is stored, ordered and attributed to a subagent's
  * transcript like any other.
+ *
+ * `originalType` is a `Fact`, because the UI draws it. So an unknown tag must
+ * still be a fact (1 to 512 characters): an empty or longer tag fails the event
+ * like any other malformed one, even though the tag is otherwise unknown.
  */
 const UnknownEvent = defineEvent("unknown", {
   ...attribution,
@@ -962,6 +966,9 @@ const ARM_TAGS: ReadonlySet<string> = new Set([
  * keeps a malformed event of a known kind a failure: without it, a broken
  * `session.exited` would decode as an unknown event and its session would
  * never be seen to end.
+ *
+ * The decoded event must be a valid `UnknownEvent`, so the tag must be a
+ * `Fact` (1 to 512 characters); any other tag fails like a malformed event.
  */
 const UnrecognisedEvent = Schema.StructWithRest(
   Schema.Struct({
@@ -996,10 +1003,34 @@ const UnrecognisedEvent = Schema.StructWithRest(
  * A normalized event. An event whose `_tag` is not one of the known ones
  * decodes as the `unknown` arm; a malformed event of a known tag fails.
  * Encoding writes the `unknown` arm as it is.
+ *
+ * `UnrecognisedEvent` has no literal `_tag`, and a union with such a member
+ * cannot look an event up by its tag. So the arms that have one are a union of
+ * their own, which keeps the lookup: decoding a known event stays about as
+ * fast as before the `unknown` arm existed.
  */
-export const ProviderEvent = Schema.Union([...KNOWN_EVENTS, UnknownEvent, UnrecognisedEvent]);
+export const ProviderEvent = Schema.Union([
+  Schema.Union([...KNOWN_EVENTS, UnknownEvent]),
+  UnrecognisedEvent,
+]);
 
 export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
+
+/**
+ * Returns an event read back from storage as a `ProviderEvent`. An event whose
+ * `_tag` this build has an arm for is returned as it is, without decoding it:
+ * decoding every stored row would cost time on a hot path, and could reject a
+ * row written in an older shape. An event of any other tag becomes the
+ * canonical `unknown` event, the same value `ProviderEvent` decodes it to.
+ *
+ * Needed because a newer build may store an event type this build does not
+ * know, and the operator may roll back to this build on the same database.
+ * Throws when such an event lacks the envelope that every stored event has.
+ */
+export const readStoredEvent = (stored: { readonly _tag: string }): ProviderEvent =>
+  ARM_TAGS.has(stored._tag)
+    ? (stored as ProviderEvent)
+    : Schema.decodeUnknownSync(ProviderEvent)(stored);
 
 /**
  * The longest a session token may be. Hercule creates 32 random bytes encoded

@@ -2639,6 +2639,52 @@ describe("transcript.read", () => {
     });
   });
 
+  it("reads a stored event of a type this build does not know as an unknown event", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      await reportTranscript(arranged, session.id);
+      await waitUntil("wrote the turn", async () => {
+        const found = await readTranscript(arranged, session.id);
+        return found.items.some((row) => row.event._tag === "turn.completed") ? found : undefined;
+      });
+      // What a later build leaves behind when it stores a native `turn.paused`
+      // event and the operator rolls back to this build on the same database.
+      const stored = {
+        _tag: "turn.paused",
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at: new Date().toISOString(),
+        turnId: "turn-1",
+      };
+      await Effect.runPromise(
+        Effect.orDie(
+          withTransaction(
+            arranged.harness.sql,
+            arranged.harness.sql`
+              INSERT INTO session_stream (session_id, position, runner_seq, at, event)
+              VALUES (unhex(replace(${session.id}, '-', '')), 7, 100, ${stored.at},
+                      ${JSON.stringify(stored)})`,
+          ),
+        ),
+      );
+
+      const page = await readTranscript(arranged, session.id);
+
+      expect(page.items.at(-1)).toEqual({
+        position: 7,
+        at: stored.at,
+        event: {
+          _tag: "unknown",
+          originalType: "turn.paused",
+          payload: stored,
+          eventId: stored.eventId,
+          sessionId: session.id,
+          at: stored.at,
+        },
+      });
+    });
+  });
+
   it("pages with a cursor that continues exactly where the last page stopped", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });

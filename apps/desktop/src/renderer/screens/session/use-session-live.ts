@@ -108,12 +108,12 @@ export interface SessionLive {
   /** Attaches the element an open message's paragraph being written is painted into. */
   readonly attachOpenParagraph: AttachOpenParagraph;
   /**
-   * True once the controller sent a row this app cannot decode, usually
-   * because the controller is newer than the app. The stream has stopped for
-   * good, the rows already cached stay, and the screen should tell the user
-   * to update the app.
+   * When (an ISO time) the controller sent a row this app cannot decode,
+   * usually because the controller is newer than the app, or undefined while
+   * the stream is readable. The stream has stopped for good, the rows already
+   * cached stay, and the screen should tell the user to update the app.
    */
-  readonly isStreamUnreadable: boolean;
+  readonly streamUnreadableAt: string | undefined;
 }
 
 /** What `useSessionLive` keeps current, and where. */
@@ -158,8 +158,8 @@ export interface SessionLiveOptions {
 /**
  * Subscribes to the live topics of one agent of a session, and returns the
  * function that attaches the element an open message's paragraph being
- * written is painted into (`attachOpenParagraph`), and whether the stream
- * became unreadable (`isStreamUnreadable`). The open message draws its finished paragraphs
+ * written is painted into (`attachOpenParagraph`), and when the stream
+ * became unreadable (`streamUnreadableAt`). The open message draws its finished paragraphs
  * as markdown, then that element, empty, such as
  * `<p ref={(element) => attachOpenParagraph(element, message)} />`: the
  * hook puts one text node inside it and writes there the rest of the
@@ -200,9 +200,12 @@ export interface SessionLiveOptions {
  * - An `unreadable` on the stream means the controller sent a row this app
  *   cannot decode, and the live connection has stopped the subscription for
  *   good. The hook unsubscribes, keeps the cached rows, and returns
- *   `isStreamUnreadable: true`. It is final too: the stream is not subscribed
- *   again, because it would stop at the same row. The tap is a separate topic
- *   and is left as it is.
+ *   `streamUnreadableAt`. It is final too: the stream is not subscribed
+ *   again, because it would stop at the same row. The tap is unsubscribed as
+ *   well, and the tails it held are dropped: the buffer forgets an item only
+ *   when that item's `item.completed` row arrives on the stream, so the taps
+ *   would pile up, and the open paragraph would keep painting text that no
+ *   row will ever match.
  *
  * The tail buffer skips the items that were open while the tap was not
  * subscribed, because the taps sent in that time are lost:
@@ -235,7 +238,8 @@ export const useSessionLive = ({
   onGone: onGoneAtMount,
 }: SessionLiveOptions): SessionLive => {
   const [buffer] = useState(createTailBuffer);
-  const [isStreamUnreadable, setStreamUnreadable] = useState(false);
+  const [streamUnreadableAt, setStreamUnreadableAt] = useState<string | undefined>(undefined);
+  const isStreamUnreadable = streamUnreadableAt !== undefined;
   const [rowsKey] = useState(() => rowsKeyAtMount);
   const [trimRows] = useState(() => trimRowsAtMount);
   const [onGone] = useState(() => onGoneAtMount);
@@ -346,8 +350,9 @@ export const useSessionLive = ({
 
   useEffect(() => {
     // An unreadable stream does not come back: it would stop at the same row.
-    // The effect runs again when the flag is set, which ends the subscription
-    // through the cleanup below.
+    // The delivery already called `stop()`. This effect runs again once the
+    // state is set, and its cleanup removes the cache listener below, which
+    // would otherwise subscribe to the stream again when the rows are read.
     if (live === null || isStreamUnreadable) return;
     const rowsHash = hashKey(rowsKey);
     const isReadingRows = (): boolean =>
@@ -376,7 +381,8 @@ export const useSessionLive = ({
             onGone?.();
           } else if (delivery.kind === "unreadable") {
             stop();
-            setStreamUnreadable(true);
+            // Kept if already set, so the time is the first unreadable delta's.
+            setStreamUnreadableAt((at) => at ?? new Date().toISOString());
           } else if (delivery.kind === "reset") {
             // The cache listener below follows the stream again when the read ends.
             // "all" starts the read even when no component observes the rows, so
@@ -461,6 +467,9 @@ export const useSessionLive = ({
   useEffect(() => {
     if (live === null || !visible) return;
     skipOpenItems();
+    // With the stream unreadable no row will ever match the tails, so the tap
+    // is not followed. The skip above has dropped the tails it held.
+    if (isStreamUnreadable) return;
     const unsubscribe = live.subscribe(buildAgentTapTopic(sessionId, subagentId), (delta) => {
       const delivery = decideTapDelivery(delta);
       if (delivery.kind === "gone") {
@@ -473,7 +482,16 @@ export const useSessionLive = ({
       }
     });
     return unsubscribe;
-  }, [live, sessionId, subagentId, visible, buffer, schedulePaint, skipOpenItems]);
+  }, [
+    live,
+    sessionId,
+    subagentId,
+    visible,
+    isStreamUnreadable,
+    buffer,
+    schedulePaint,
+    skipOpenItems,
+  ]);
 
   useEffect(
     () => () => {
@@ -499,5 +517,5 @@ export const useSessionLive = ({
     },
     [paint],
   );
-  return { attachOpenParagraph, isStreamUnreadable };
+  return { attachOpenParagraph, streamUnreadableAt };
 };

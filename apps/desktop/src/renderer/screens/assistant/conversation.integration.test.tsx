@@ -291,13 +291,15 @@ describe("an assistant's Conversation", () => {
     });
 
     await waitFor(() => {
-      expect(readBlocks().at(-1)).toBe(
-        "The rest of this thread can't be shown because this app is out of date. Update the app to see it.",
+      // The notice ends with the time the stream became unreadable, like a stored notice.
+      expect(readBlocks().at(-1)).toMatch(
+        /^The rest of this thread can't be shown because this app is out of date\. Update the app to see it\.\d{2}:\d{2}$/,
       );
     });
     expect(readBlocks().slice(0, -1)).toEqual(drawn);
     expect(findConversation().querySelectorAll(".notice")).toHaveLength(1);
     expect(live.readTopics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
+    expect(live.readTopics()).not.toContain(buildSessionTapTopic(SESSION_ID));
   });
 
   it("streams the reply being written, then hands it over to the stored reply when the turn ends", async () => {

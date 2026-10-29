@@ -191,7 +191,7 @@ function Page({
     staleTime: Infinity,
   });
   const rows = data ?? [];
-  const { attachOpenParagraph, isStreamUnreadable } = useSessionLive({
+  const { attachOpenParagraph, streamUnreadableAt } = useSessionLive({
     live,
     queryClient,
     sessionId: SESSION_ID,
@@ -203,7 +203,10 @@ function Page({
   const started = rows.some(
     ({ event }) => event._tag === "item.started" && event.itemId === NEW_ITEM_ID,
   );
-  const unreadableNote = isStreamUnreadable ? <p>The stream is unreadable.</p> : null;
+  const unreadableNote =
+    streamUnreadableAt === undefined ? null : (
+      <p>The stream is unreadable at {streamUnreadableAt}.</p>
+    );
   if (!started) return unreadableNote;
   return (
     <>
@@ -901,12 +904,34 @@ describe("useSessionLive", () => {
     expect(onGone).toHaveBeenCalledTimes(1);
   });
 
-  it("reports an unreadable stream, keeps the cached rows, and unsubscribes from the stream but not the tap", () => {
+  it("reports the moment the stream became unreadable, keeps the cached rows, and unsubscribes from the stream and the tap", () => {
     const { fake, queryClient } = mountHook();
+    const before = Date.now();
     fake.deliver(STREAM_TOPIC, { unreadable: true });
-    expect(screen.getByText("The stream is unreadable.")).toBeTruthy();
-    expect(fake.readSubscriptions().map(({ topic }) => topic)).toEqual([TAP_TOPIC]);
+    const after = Date.now();
+    const [, reportedAt] = /^The stream is unreadable at (.+)\.$/.exec(
+      screen.getByText(/^The stream is unreadable at /).textContent,
+    )!;
+    expect(new Date(reportedAt!).toISOString()).toBe(reportedAt);
+    expect(Date.parse(reportedAt!)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(reportedAt!)).toBeLessThanOrEqual(after);
+    expect(fake.readSubscriptions()).toEqual([]);
     expect(readCachedRows(queryClient)).toEqual(THREAD.transcript);
+  });
+
+  it("clears the open paragraph's tail when the stream becomes unreadable, because no row will ever match it", async () => {
+    const { fake, findOpenParagraph } = mountHook();
+    fake.pushRows(buildNextRows(THREAD.session.id, THREAD.transcript, NEW_ITEM_STARTED));
+    await settle();
+    fake.pushTaps("The fix ");
+    frames.run();
+    expect(findOpenParagraph()?.textContent).toBe("The fix ");
+
+    fake.deliver(STREAM_TOPIC, { unreadable: true });
+    await settle();
+    frames.run();
+
+    expect(findOpenParagraph()?.textContent).toBe("");
   });
 
   it("stays unsubscribed from the stream after it is unreadable, even when the transcript is read again", async () => {
@@ -917,7 +942,7 @@ describe("useSessionLive", () => {
     await settle();
     await settle();
     expect(readTranscript).toHaveBeenCalledOnce();
-    expect(fake.readSubscriptions().map(({ topic }) => topic)).toEqual([TAP_TOPIC]);
+    expect(fake.readSubscriptions()).toEqual([]);
   });
 
   it("stays unsubscribed from the stream after it is gone, even when the transcript is read again", async () => {

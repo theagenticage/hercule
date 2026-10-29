@@ -909,12 +909,12 @@ describe("buildThreadBlocks", () => {
     });
   });
 
-  it("draws an unknown event as a runtime notice naming its type in plain text, without splitting the work stretch", () => {
+  it("draws an unknown event as a runtime notice naming its type without backticks, without splitting the work stretch", () => {
     const rows = [
       buildTurnStarted("t1", 0),
       ...buildUserMessage("t1", "u1", 0, "Fix it"),
       ...buildCommand("t1", "c1", 1, 2),
-      // A type with backticks must reach the notice as it is, not as inline code.
+      // A type with backticks must reach the notice without them, so it is not drawn as inline code.
       buildUnknownEvent(3, "turn.`plan`.updated"),
       ...buildCommand("t1", "c2", 4, 5),
     ];
@@ -923,7 +923,7 @@ describe("buildThreadBlocks", () => {
 
     expect(blocks.map((block) => block.kind)).toEqual(["user", "work", "runtime-notice"]);
     expect(blocks.find((block) => block.kind === "runtime-notice")).toMatchObject({
-      message: "Unknown event: turn.`plan`.updated",
+      message: "Unknown event: turn.plan.updated",
       at: buildInstant(3),
     });
     expect(findBlock(blocks, "work", "work:c1").items.map((item) => item.itemId)).toEqual([

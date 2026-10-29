@@ -1366,6 +1366,27 @@ describe("Thread: token tap", () => {
     expect(answer.textContent).toBe("Hello world, again");
   });
 
+  it("unsubscribes from the tap and clears the tail when the stream becomes unreadable", async () => {
+    const { runFrame } = stubFrames();
+    const { live } = await openApp(buildSession({ status: "busy" }), buildOpenTurnRows());
+    await startAssistantMessage(live);
+    pushAssistantTap(live, "half a paragraph");
+    await settle();
+    runFrame();
+    await screen.findByText("half a paragraph");
+
+    act(() => {
+      live.push(STREAM, { _tag: "from-the-future" });
+    });
+
+    // No row will ever take this text from the tail, so it must not stay painted.
+    await waitFor(() => {
+      expect(screen.queryByText("half a paragraph")).toBeNull();
+    });
+    expect(live.topics()).not.toContain(TAP);
+    expect(live.topics()).not.toContain(STREAM);
+  });
+
   it("refetches the transcript and shows the refetched rows when the live overlay reports reset", async () => {
     const { runFrame } = stubFrames();
     const busy = buildSession({ status: "busy" });
@@ -1696,10 +1717,12 @@ describe("Thread: live subscriptions", () => {
     expect(screen.getAllByText("Error:")).toHaveLength(1);
     const lastTurn = screen.getByText("Added a test too.");
     expect(lastTurn.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // The stream is not subscribed again, because it would stop at the same row.
+    // Neither the stream nor the tap is subscribed again: the stream would
+    // stop at the same row, and no row will ever match what the tap delivers.
     await waitFor(() => {
       expect(live.topics()).not.toContain(stream);
     });
+    expect(live.topics()).not.toContain(buildSessionTapTopic(SESSION_ID));
   });
 
   it("replays a just-spawned thread's rows when the transcript read returned none", async () => {
@@ -2071,6 +2094,29 @@ describe("Thread: auto-scroll follows new content", () => {
 
     await waitFor(() => {
       expect(geometry.readScrollTop()).toBe(1200 - 100);
+    });
+  });
+
+  it("scrolls to the bottom to show the reload note when the reader was at the bottom", async () => {
+    const { live } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
+    const stream = buildSessionStreamTopic(SESSION_ID);
+    await waitFor(() => {
+      expect(live.topics()).toContain(stream);
+    });
+
+    geometry.set({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 });
+    geometry.scroll();
+    await settle();
+
+    // The note adds no row and no queued input, so only the unreadable stream
+    // itself can bring the reader down to it.
+    geometry.set({ scrollTop: 900, scrollHeight: 1100, clientHeight: 100 });
+    act(() => {
+      live.push(stream, { _tag: "from-the-future" });
+    });
+
+    await waitFor(() => {
+      expect(geometry.readScrollTop()).toBe(1100 - 100);
     });
   });
 

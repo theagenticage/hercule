@@ -44,16 +44,18 @@ import "../session/transcript.css";
 import "./thread.css";
 
 /**
- * The error that closes a transcript whose stream the app cannot read. It has
- * no time, because it describes this app, not an event in the thread: an
- * empty `at` is not a valid time, so `RuntimeNote` draws none.
+ * Returns the error that closes a transcript whose stream the app cannot read,
+ * from the moment (an ISO time) the stream became unreadable. `RuntimeNote`
+ * draws that time like the time of any other note.
  */
-const UNREADABLE_STREAM_BLOCK: Extract<ThreadBlock, { readonly kind: "error" }> = {
+const buildUnreadableStreamBlock = (
+  streamUnreadableAt: string,
+): Extract<ThreadBlock, { readonly kind: "error" }> => ({
   kind: "error",
   key: "stream-unreadable",
   message: UNREADABLE_STREAM_MESSAGE,
-  at: "",
-};
+  at: streamUnreadableAt,
+});
 
 /** What a subagent's page draws of its own, from the records the page reads. */
 export interface SubagentParts {
@@ -190,7 +192,7 @@ export function AgentPage({
     ...queuedInputsQuery(client, sessionId),
     enabled: subagentId === undefined,
   }).data;
-  const { attachOpenParagraph, isStreamUnreadable } = useSessionLive({
+  const { attachOpenParagraph, streamUnreadableAt } = useSessionLive({
     live,
     queryClient,
     sessionId,
@@ -227,7 +229,10 @@ export function AgentPage({
           ),
         }
       : splitSubagentBrief(threadBlocks);
-  const shownBlocks = isStreamUnreadable ? [...blocks, UNREADABLE_STREAM_BLOCK] : blocks;
+  const shownBlocks =
+    streamUnreadableAt === undefined
+      ? blocks
+      : [...blocks, buildUnreadableStreamBlock(streamUnreadableAt)];
   if (inThreadRoute && isNotFound(transcript.error)) {
     // The transcript read found that the thread no longer exists, which the saved
     // copy could not know. Show what the thread's loader shows for it, see

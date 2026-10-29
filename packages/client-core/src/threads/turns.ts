@@ -414,12 +414,16 @@ export const mayBeRunningTurn = (status: SessionStatus): boolean =>
   status !== "exited" && status !== "queued";
 
 /**
- * Returns the text a thread shows for an `unknown` event: `Unknown event: <type>`.
- * The type is an arbitrary string from another version, so it is written as plain
- * text and never between backticks, which would be read as inline code.
+ * Returns the text a thread shows for an `unknown` event: `Unknown event: <type>`,
+ * with every backtick removed from the type.
+ *
+ * The type comes from the runner, so it is untrusted text, and a note's message
+ * is drawn with each pair of backticks as inline code. A real event type never
+ * contains a backtick, so removing them costs nothing, and the message can
+ * never hold a code span.
  */
 export const buildUnknownEventMessage = (originalType: string): string =>
-  `Unknown event: ${originalType}`;
+  `Unknown event: ${originalType.replaceAll("`", "")}`;
 
 /**
  * Returns a `runtime.error`, `runtime.warning`, `runtime.notice` or `unknown` row as a

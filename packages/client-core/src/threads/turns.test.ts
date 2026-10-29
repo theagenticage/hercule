@@ -1246,7 +1246,7 @@ describe("buildTurns runtime notes", () => {
       ["notice", "Unknown event: before.any.turn"],
     ]);
     expect(turns[0]?.runtimeNotes.map((note) => [note.key, note.severity, note.message])).toEqual([
-      ["unknown:3", "notice", "Unknown event: turn.`plan`.updated"],
+      ["unknown:3", "notice", "Unknown event: turn.plan.updated"],
     ]);
   });
 

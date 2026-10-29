@@ -30,10 +30,8 @@
  *   the taps sent while it was not subscribed are lost. It is told so each
  *   time it subscribes again.
  * - A message this client cannot decode ends a subscription that resumes from
- *   a cursor for good, because the controller would send the same message
- *   again from the same cursor. The subscriber is told (`unreadable`) and
- *   decides what the user sees. A subscription with no cursor loses nothing by
- *   subscribing again, so it is retried like any other failure.
+ *   a cursor for good, and the subscriber is told (`unreadable`). See
+ *   `follow` for why, and for what a subscription with no cursor does.
  */
 import {
   isAppendOnlyLiveTopic,
@@ -136,18 +134,13 @@ export interface LiveInvalidatePush {
  * (with the function `subscribe` returned) once it sees `gone`.
  *
  * `unreadable` is true when the controller sent something this client cannot
- * decode, usually because the controller is newer than the client. It is only
- * set for a subscription that resumes from a cursor: retrying would fetch the
- * same message again from the same cursor, and skipping it is impossible,
- * because the whole chunk is lost and the client cannot tell where the failed
- * row sits in the log. So the subscription has stopped. It stays stopped, also
- * after a reconnect, until the caller unsubscribes and subscribes again. The
- * caller should tell the user to update (or reload) the app. A subscription
- * with no cursor (every mutable topic, a tap, a log followed from the head
- * before its first message) is retried instead, because the new subscription's
- * first push covers what was lost. `unreadable` does not mean `gone` (the
- * record does not exist) or `reset` (the cursor was discarded and the
- * subscription restarts at the head).
+ * decode, usually because the controller is newer than the client, and the
+ * subscription has stopped for good. It stays stopped, also after a reconnect,
+ * until the caller unsubscribes and subscribes again. The caller should tell
+ * the user to update (or reload) the app. `follow` explains why it stops and
+ * which subscriptions it applies to. It does not mean `gone` (the record does
+ * not exist) or `reset` (the cursor was discarded and the subscription
+ * restarts at the head).
  */
 export interface LiveDelta {
   readonly cursor: string | null;
@@ -212,9 +205,9 @@ interface Subscription {
   cursor: string | undefined;
   /**
    * True once the controller sent something this client cannot decode on a
-   * subscription that resumes from a cursor. The subscription is then neither
-   * followed nor reset again, on this connection or any later one, because the
-   * same thing would arrive from the same cursor.
+   * subscription that resumes from a cursor (see `follow`). The subscription
+   * is then neither followed nor reset again, on this connection or any later
+   * one.
    */
   unreadable: boolean;
 }
@@ -370,11 +363,16 @@ export const createLive = (options: LiveOptions): Live => {
    *   tell where the failed row sits in the log. So the subscriber is told it
    *   is `unreadable`, and the subscription stops. It stays stopped, also
    *   after a reconnect, until the caller unsubscribes and subscribes again.
+   *   (This is the one place that explains why; the other comments point here.)
    * - A schema decode defect on a subscription with no cursor (every mutable
    *   topic, a tap, a log followed from the head before its first message):
    *   handled like the case below, because subscribing again loses nothing.
    * - Anything else (falling behind, a failed read, a stream that ended): the
-   *   subscription is retried after a growing wait. Just before that, a tap
+   *   subscription is retried after a growing wait. The wait starts again from
+   *   the shortest one after an attempt that delivered a message, because the
+   *   subscription was making progress: the controller ends a subscription
+   *   with `cap_exceeded` when too much waits for a slow reader, and a client
+   *   catching up on a large backlog is cut off again and again. Just before that, a tap
    *   subscriber is told to reset (`resetCursorlessSubscriber`), which covers
    *   the taps lost during the wait too. A mutable subscriber learns what it
    *   missed from the controller's first push on the new subscription. An
@@ -398,6 +396,7 @@ export const createLive = (options: LiveOptions): Live => {
         // subscription with a push that says every record may have changed
         // (spec 14 §Live model).
         let replay = subscription.cursor !== undefined;
+        let delivered = false;
         // The RPC client turns a pushed chunk it cannot decode into a defect
         // (a `SchemaError`) of this one request. `Effect.result` only sees
         // typed failures, so `catchDefect` picks out that defect; any other
@@ -409,6 +408,7 @@ export const createLive = (options: LiveOptions): Live => {
             Effect.sync(() => {
               deliver(subscription, message, replay);
               replay = false;
+              delivered = true;
             }),
           ),
         ).pipe(
@@ -477,6 +477,7 @@ export const createLive = (options: LiveOptions): Live => {
           );
           continue;
         }
+        if (delivered) delay = FIRST_RETRY_MS;
         yield* sleepWithJitter(delay);
         delay = Math.min(delay * 2, MAX_RETRY_MS);
         resetCursorlessSubscriber(subscription);

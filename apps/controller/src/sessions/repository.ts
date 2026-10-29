@@ -12,12 +12,13 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Fragment } from "effect/sql/Statement";
-import type {
-  AccessMode,
-  DisallowedTool,
-  ModelSelection,
-  ProviderEvent,
-  SubagentId,
+import {
+  readStoredEvent,
+  type AccessMode,
+  type DisallowedTool,
+  type ModelSelection,
+  type ProviderEvent,
+  type SubagentId,
 } from "@hercule/protocol";
 import {
   createNotFoundError,
@@ -841,8 +842,10 @@ const make = Effect.gen(function* () {
     /**
      * Returns one page of one agent's transcript, in position order, limited
      * to the rows past `request.after` when it is set. The stored
-     * `event` is parsed with `JSON.parse` rather than decoded with the schema:
-     * the schema has no transformations, so the JSON is already the value.
+     * `event` is parsed with `JSON.parse` rather than decoded with the schema,
+     * because the JSON of a known event is already the value. Only an event of
+     * a type this build does not know goes through `readStoredEvent`, which
+     * turns it into an `unknown` event.
      */
     transcript: (
       request: TranscriptPageRequest,
@@ -883,7 +886,7 @@ const make = Effect.gen(function* () {
               found.map((row) => ({
                 position: row.position,
                 at: row.at,
-                event: JSON.parse(row.event) as ProviderEvent,
+                event: readStoredEvent(JSON.parse(row.event) as { readonly _tag: string }),
               })),
             ),
           (last) => encodeIntegerKeyCursor(scope, last.position),

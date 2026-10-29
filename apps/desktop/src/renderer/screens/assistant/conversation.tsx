@@ -41,7 +41,7 @@ import {
   OVERSCAN,
   useMessageList,
 } from "../session/message-list";
-import { UserMessage } from "../session/messages";
+import { formatBlockTime, UserMessage } from "../session/messages";
 import { useStartOfToday } from "../session/start-of-today";
 import type { AttachOpenParagraph } from "../session/use-session-live";
 import { UNREADABLE_STREAM_MESSAGE } from "../session/unreadable-stream";
@@ -109,18 +109,15 @@ const estimateBlockHeight = (block: ListBlock): number => {
 
 /**
  * What closes the list when the live stream is unreadable (see
- * `isStreamUnreadable` on `Conversation`). It is drawn as a notice, but it is
- * no stored message, so it is not a `ConversationBlock`.
+ * `streamUnreadableAt` on `Conversation`). It is drawn as a notice, but it is
+ * no stored message, so it is not a `ConversationBlock`. `at` is the moment
+ * the stream became unreadable, an ISO time.
  */
 interface UnreadableStreamBlock {
   readonly kind: "unreadable-stream";
   readonly key: string;
+  readonly at: string;
 }
-
-const UNREADABLE_STREAM_BLOCK: UnreadableStreamBlock = {
-  kind: "unreadable-stream",
-  key: "stream-unreadable",
-};
 
 /** A block of the list: what `buildConversationBlocks` returns, then the unreadable-stream note when it applies. */
 type ListBlock = ConversationBlock | UnreadableStreamBlock;
@@ -147,10 +144,11 @@ export interface ConversationHandle {
  *   none has started. Its running turn is in `runningTurnRows`, oldest
  *   first, and `attachOpenParagraph` paints the text it is writing.
  * - `pose` is the assistant's pose, which the open reply's face shows.
- * - `isStreamUnreadable` is true once the session's live stream stopped because
- *   the controller sent a row this app cannot decode. The Conversation then ends
- *   with a notice that asks the user to update the app, and keeps every message
- *   it shows.
+ * - `streamUnreadableAt` is the moment (an ISO time) the session's live stream
+ *   stopped because the controller sent a row this app cannot decode, or
+ *   undefined while it is readable. The Conversation then ends with a notice
+ *   that asks the user to update the app, drawn with that time like a stored
+ *   notice, and keeps every message it shows.
  * - `composerStack` and `onBottomChange` are as `useMessageList` takes
  *   them.
  * - `ref` receives a `ConversationHandle`.
@@ -162,7 +160,7 @@ export function Conversation({
   runningTurnRows,
   pose,
   attachOpenParagraph,
-  isStreamUnreadable,
+  streamUnreadableAt,
   composerStack,
   onBottomChange,
   ref,
@@ -173,7 +171,7 @@ export function Conversation({
   readonly runningTurnRows: readonly TranscriptRow[];
   readonly pose: Pose;
   readonly attachOpenParagraph: AttachOpenParagraph;
-  readonly isStreamUnreadable: boolean;
+  readonly streamUnreadableAt: string | undefined;
   readonly composerStack: HTMLElement | null;
   readonly onBottomChange: (atBottom: boolean) => void;
   readonly ref?: Ref<ConversationHandle>;
@@ -196,9 +194,13 @@ export function Conversation({
     timezone,
     now: startOfToday,
   });
-  const blocks: readonly ListBlock[] = isStreamUnreadable
-    ? [...storedBlocks, UNREADABLE_STREAM_BLOCK]
-    : storedBlocks;
+  const blocks: readonly ListBlock[] =
+    streamUnreadableAt === undefined
+      ? storedBlocks
+      : [
+          ...storedBlocks,
+          { kind: "unreadable-stream", key: "stream-unreadable", at: streamUnreadableAt },
+        ];
 
   if (blocks.length === 0) {
     return (
@@ -368,7 +370,13 @@ function ConversationList({
       case "notice":
         return <Notice look={look} text={block.message.text} time={block.time} />;
       case "unreadable-stream":
-        return <Notice look={look} text={UNREADABLE_STREAM_MESSAGE} time={undefined} />;
+        return (
+          <Notice
+            look={look}
+            text={UNREADABLE_STREAM_MESSAGE}
+            time={formatBlockTime(block.at, timezone, today)}
+          />
+        );
       case "open-reply":
         return (
           <OpenReply

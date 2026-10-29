@@ -6,7 +6,8 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import type { RuntimeNote } from "@hercule/client-core";
+import type { TranscriptRow } from "@hercule/contract";
+import { buildTurns, type RuntimeNote } from "@hercule/client-core";
 import { RuntimeNoteLine } from "./runtime-note-line";
 
 afterEach(cleanup);
@@ -31,6 +32,35 @@ describe("RuntimeNoteLine", () => {
     const code = container.querySelector("code")!;
     expect(code.textContent).toBe(`cat ${path}`);
     expect([...code.querySelectorAll("span")].map((word) => word.textContent)).toEqual(["cat"]);
+  });
+
+  it("draws no code for an unknown event whose type holds backticks", () => {
+    const at = "2026-09-08T10:00:00.000Z";
+    const row: TranscriptRow = {
+      position: 1,
+      at,
+      event: {
+        _tag: "unknown",
+        eventId: "n1",
+        sessionId: "session-1",
+        at,
+        originalType: "turn.`plan`.updated",
+        payload: {},
+      },
+    };
+    const { outsideRuntimeNotes } = buildTurns([row], {
+      working: false,
+      mayBeRunningTurn: false,
+      openRequests: [],
+      model: "claude-sonnet-5",
+    });
+
+    const { container } = render(<RuntimeNoteLine note={outsideRuntimeNotes[0]!} />);
+
+    expect(container.querySelector("code")).toBeNull();
+    expect(container.querySelector("p")?.textContent).toBe(
+      "Notice: Unknown event: turn.plan.updated",
+    );
   });
 
   it.each([

@@ -153,12 +153,12 @@ describe("the subagent's page", () => {
     });
 
     const note = await screen.findByText(/can't be shown because this app is out of date/);
-    expect(note.textContent).toBe(
-      "The rest of this thread can't be shown because this app is out of date. Update the app to see it.",
+    expect(note.textContent).toMatch(
+      /^The rest of this thread can't be shown because this app is out of date\. Update the app to see it\.\d{2}:\d{2}$/,
     );
-    // The brief stays, and the stream is not subscribed again.
+    // The brief stays, and neither topic is subscribed again.
     expect(screen.getByText(SUBAGENT_BRIEF)).toBeTruthy();
-    expect(readAgentTopics(live.readTopics())).toEqual([SUBAGENT_TAP]);
+    expect(readAgentTopics(live.readTopics())).toEqual([]);
   });
 
   it("drops the subagent's tap while the window is hidden, and keeps its stream", async () => {

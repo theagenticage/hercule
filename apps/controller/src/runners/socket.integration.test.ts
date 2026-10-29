@@ -484,8 +484,9 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 10 cannot send the `unknown` event, so a version 11 controller refuses it rather than
-  // run a runner that closes its own socket on the first event tag it does not know.
+  // From version 11 a runner may add an event tag without a version bump, and a controller on
+  // version 10 would close the socket on it. So versions 10 and 11 refuse each other at hello;
+  // this is the version 11 controller refusing a version 10 runner.
   it("refuses a runner on protocol version 10 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);

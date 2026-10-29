@@ -901,6 +901,32 @@ describe("createLive", () => {
     assert.isNull(socket.closedWith);
   });
 
+  it("waits the shortest delay again after an attempt that delivered a message", async () => {
+    const { fetch } = stubTicketServer();
+    const { live: started, socket } = await startConnectedSupervisor(fetch);
+
+    started.subscribe("event", () => undefined, "10");
+    await settleTimers();
+
+    // An attempt that delivers nothing doubles the wait: 1 s, then 2 s.
+    socket.fail(socket.calls("subscribe")[0]?.id, capFailure);
+    await settleTimers();
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+    assert.strictEqual(socket.calls("subscribe").length, 2);
+
+    // A client catching up on a large backlog is cut off by the controller
+    // again and again, and each cut-off follows progress. Its wait must not
+    // keep growing, or the catch-up would take minutes.
+    const second = socket.calls("subscribe")[1];
+    socket.chunk(second?.id, [{ _tag: "delta", cursor: "11", items: [buildEvent(11)] }]);
+    socket.fail(second?.id, capFailure);
+    await settleTimers();
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+    assert.strictEqual(socket.calls("subscribe").length, 3);
+  });
+
   it("ends a subscription the caller unsubscribes, and delivers nothing more to it", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);

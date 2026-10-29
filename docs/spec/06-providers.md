@@ -385,7 +385,9 @@ interface ProviderEventBase {
 
 - A received event whose `_tag` no arm has decodes into this arm. `originalType` is that tag, and `payload` is the whole event as it arrived.
 - A malformed event of a known type still fails to decode. Without that, a broken `session.exited` would be stored as an unknown event and its session would never be seen to end.
+- `originalType` is a `Fact`, so the tag must be 1 to 512 characters. An empty or longer tag fails like any malformed event.
 - The arm encodes as itself. The controller stores the `unknown` event and serves it as it is, and does not read the stored event again as a known type after an upgrade. Its projections (the session's status, turns, usage) never applied it, and a later controller does not apply it either.
+- A stored event of a type the controller's build has no arm for is read back as an `unknown` event too (`readStoredEvent`, used by both transcript reads). So rolling back to an earlier build on the same protocol still serves the rows a newer build stored.
 - The controller stores it like any event, and the runner's socket stays open. Clients draw it as a note, "Unknown event: <type>" (spec 14, 17 and 18).
 
 *(Amended 2026-10-29, [#897](https://github.com/theagenticage/hercule/issues/897).)* **Adding an event type does not raise `PROTOCOL_VERSION`; changing an existing event does** ([./03-controller-and-runners.md](./03-controller-and-runners.md) section 2.2). The enums rule above ("unknown kinds render generically, never crash") now holds for the event type too.

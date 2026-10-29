@@ -121,7 +121,7 @@ function AssistantPage({ assistant }: { readonly assistant: Assistant }): JSX.El
           session={null}
           runningTurnRows={NO_ROWS}
           attachOpenParagraph={attachNothing}
-          isStreamUnreadable={false}
+          streamUnreadableAt={undefined}
         />
       ) : (
         // Keyed by the session, because the live tail it keeps belongs to
@@ -164,7 +164,7 @@ function SessionConversation({
   const { client, live } = useRouteContext({ from: "/_connected" }).controller;
   const queryClient = useQueryClient();
   const rows = useSuspenseQuery(runningTurnQuery(client, session.id)).data;
-  const { attachOpenParagraph, isStreamUnreadable } = useSessionLive({
+  const { attachOpenParagraph, streamUnreadableAt } = useSessionLive({
     live,
     queryClient,
     sessionId: session.id,
@@ -189,7 +189,7 @@ function SessionConversation({
       session={session}
       runningTurnRows={rows}
       attachOpenParagraph={attachOpenParagraph}
-      isStreamUnreadable={isStreamUnreadable}
+      streamUnreadableAt={streamUnreadableAt}
     />
   );
 }

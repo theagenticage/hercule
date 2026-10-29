@@ -10,6 +10,7 @@ import {
   isAsyncQuestion,
   ContextCompactionDetail,
   ProviderEvent,
+  readStoredEvent,
   SessionBinding,
   SessionInputResult,
   SessionInterrupt,
@@ -188,14 +189,17 @@ const requests = [
   },
 ] as const;
 
-/** The tags the arms of `ProviderEvent` decode, not counting the arm for tags it does not know. */
-const listTags = (union: typeof ProviderEvent) =>
-  union.members.flatMap((member) => {
-    if (!("fields" in member || "members" in member)) return [];
-    return "fields" in member
-      ? [member.fields._tag.literal]
-      : member.members.map((branch) => branch.fields._tag.literal);
-  });
+/**
+ * The tags the arms of `ProviderEvent` decode, the `unknown` arm included. The
+ * member that only decodes an event of a tag no arm has is not counted: it has
+ * no tag of its own.
+ */
+const listTags = (schema: unknown): ReadonlyArray<string> => {
+  if ((typeof schema !== "object" && typeof schema !== "function") || schema === null) return [];
+  if ("fields" in schema) return [(schema.fields as { _tag: { literal: string } })._tag.literal];
+  if ("members" in schema) return (schema.members as ReadonlyArray<unknown>).flatMap(listTags);
+  return [];
+};
 
 describe("the normalized event taxonomy", () => {
   it.each(events)("round-trips $_tag unchanged", (event) => {
@@ -486,6 +490,12 @@ describe("an event whose tag this build does not know", () => {
     expect(decode(ProviderEvent, omitKey(received, "_tag"))._tag).toBe("Failure");
   });
 
+  it("fails for a tag that is not a fact, because the UI draws the tag", () => {
+    expect(decode(ProviderEvent, { ...received, _tag: "" })._tag).toBe("Failure");
+    expect(decode(ProviderEvent, { ...received, _tag: "x".repeat(513) })._tag).toBe("Failure");
+    expect(decode(ProviderEvent, { ...received, _tag: "x".repeat(512) })._tag).toBe("Success");
+  });
+
   it("never takes in a malformed event of a tag it knows", () => {
     const exited = { _tag: "session.exited", ...baseFields, reason: "process_exit" };
     expect(decode(ProviderEvent, { ...exited, reason: "killed" })._tag).toBe("Failure");
@@ -499,6 +509,40 @@ describe("an event whose tag this build does not know", () => {
     const unknown = { _tag: "unknown", ...baseFields, originalType: "turn.paused", payload: 1 };
     expect(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(unknown))).toEqual(unknown);
     expect(decode(ProviderEvent, omitKey(unknown, "originalType"))._tag).toBe("Failure");
+  });
+});
+
+describe("reading an event back from storage", () => {
+  it("turns a stored event of a tag this build does not know into the unknown event", () => {
+    const stored = { _tag: "turn.paused", ...baseFields, turnId: "t1", subagentId: "agent-b" };
+    const read = readStoredEvent(stored);
+    expect(read).toEqual(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(stored)));
+    expect(read).toMatchObject({
+      _tag: "unknown",
+      originalType: "turn.paused",
+      payload: stored,
+      subagentId: "agent-b",
+    });
+    // The result can be encoded again, which the raw stored row could not.
+    expect(() => Schema.encodeSync(ProviderEvent)(read)).not.toThrow();
+  });
+
+  it("returns a stored event of a known tag as it is, without decoding it", () => {
+    // Not a valid `turn.completed` (its state is outside the vocabulary): a
+    // decode would reject it, so the same object coming back proves there was none.
+    const stored = {
+      _tag: "turn.completed",
+      ...baseFields,
+      turnId: "t1",
+      state: "from-an-older-build",
+    };
+    expect(readStoredEvent(stored)).toBe(stored);
+  });
+
+  it("returns a stored unknown event as it is", () => {
+    const stored = events.find((event) => event._tag === "unknown");
+    expect(stored).toBeDefined();
+    expect(readStoredEvent(stored as Event)).toBe(stored);
   });
 });
 

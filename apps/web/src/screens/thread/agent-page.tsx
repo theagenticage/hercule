@@ -45,18 +45,17 @@ import { Turn } from "./turn";
 import { useAgentLive } from "./use-agent-live";
 
 /**
- * The note that closes a transcript whose stream the page cannot read. The
- * web app is served by the controller, so reloading fetches the page that
- * matches it. Its time is empty: the note describes this page, not an event in
- * the thread, and `RuntimeNoteLine` draws no time anyway.
+ * Returns the note that closes a transcript whose stream the page cannot read,
+ * from the moment (an ISO time) the stream became unreadable. The web app is
+ * served by the controller, so reloading fetches the page that matches it.
  */
-const UNREADABLE_STREAM_NOTE: RuntimeNote = {
+const buildUnreadableStreamNote = (streamUnreadableAt: string): RuntimeNote => ({
   key: "stream-unreadable",
   severity: "error",
   message:
     "The rest of this thread can't be shown because this page is out of date. Reload the page to see it.",
-  at: "",
-};
+  at: streamUnreadableAt,
+});
 
 export function AgentPage({
   client,
@@ -96,7 +95,7 @@ export function AgentPage({
   // opens with the brief leaves that opening message out.
   const brief = subagent === undefined ? undefined : findSubagentBrief(turns);
   const { followIfAtBottom, scrollToBottom } = useStickToBottom();
-  const { tailRef, isStreamUnreadable } = useAgentLive(
+  const { tailRef, streamUnreadableAt } = useAgentLive(
     live,
     queryClient,
     sessionId,
@@ -129,6 +128,7 @@ export function AgentPage({
 
   const assistantId = findAnsweredAssistantId(session);
   const openRequestIds = session.openRequests.map((request) => request.requestId).join(" ");
+  const isStreamUnreadable = streamUnreadableAt !== undefined;
 
   // Runs after the DOM has updated with whatever just grew. A change in
   // `rows.length` or `queuedCount` triggers it, and `followIfAtBottom` decides
@@ -139,8 +139,9 @@ export function AgentPage({
     followIfAtBottom();
     // A Request docking above the composer takes space from the column just
     // like a queued row, so a change in the open Requests also triggers a
-    // follow.
-  }, [rows.length, queuedCount, openRequestIds, followIfAtBottom]);
+    // follow. So does the reload note that closes the column once the stream
+    // is unreadable: a reader at the bottom would otherwise not see it.
+  }, [rows.length, queuedCount, openRequestIds, isStreamUnreadable, followIfAtBottom]);
 
   return (
     <div className="flex flex-1 flex-col">
@@ -192,7 +193,9 @@ export function AgentPage({
             );
           })}
           {drawRuntimeNotesAfter(turns.length)}
-          {isStreamUnreadable ? <RuntimeNoteLine note={UNREADABLE_STREAM_NOTE} /> : null}
+          {isStreamUnreadable ? (
+            <RuntimeNoteLine note={buildUnreadableStreamNote(streamUnreadableAt)} />
+          ) : null}
           {subagent === undefined ? (
             <SendingMessages client={client} sessionId={sessionId} />
           ) : null}
