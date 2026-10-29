@@ -442,7 +442,7 @@ const buildTodoSteps = (completedCount: number): TodoStepBody[] =>
   }));
 
 /** Returns an `item.updated` step of the Fix thread's todo list, `completedCount` steps in. */
-const updateTodoList = (seconds: number, completedCount: number): TranscriptStep => [
+const buildTodoListUpdate = (seconds: number, completedCount: number): TranscriptStep => [
   seconds,
   {
     _tag: "item.updated",
@@ -494,8 +494,8 @@ const FIX_STEPS_WITH_RESULTS: ReadonlyArray<TranscriptStep> = [
           "fatal: bad revision 'src/checkout'\nhint: use '--' to separate paths from revisions",
       },
     );
-    if (seconds === 70) return [updateTodoList(66, 1), completed];
-    if (seconds === 145) return [updateTodoList(143, 2), completed];
+    if (seconds === 70) return [buildTodoListUpdate(66, 1), completed];
+    if (seconds === 145) return [buildTodoListUpdate(143, 2), completed];
     return [completed];
   }),
 ];

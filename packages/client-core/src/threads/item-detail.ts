@@ -67,20 +67,34 @@ export const readUnknownLabel = (detail: unknown): string =>
   Option.getOrUndefined(decodeUnknownItemDetail(detail))?.label ?? "";
 
 /**
+ * The result of decoding each todo list detail object, kept for as long as the
+ * object lives. A todo list rewrites its whole list on every update, and the
+ * transcript is projected again from all its rows each time one arrives. The
+ * rows are the same objects each time, so without this a long list of updates
+ * would be decoded again on every projection.
+ */
+const decodedTodoLists = new WeakMap<object, TodoListDetail | undefined>();
+
+/**
  * Returns the todo list `detail` holds, or `undefined` when it is absent or
  * does not decode. The runner leaves `detail` off an event that is too big
  * for one frame, so a caller must keep the list it already has when this
  * returns `undefined`, and never read that as an empty list.
+ *
+ * The decoded list is shared by every call with the same `detail` object, so
+ * a caller must not change it.
  */
-export const readTodoListDetail = (detail: unknown): TodoListDetail | undefined =>
-  Option.getOrUndefined(decodeTodoListDetail(detail));
+export const readTodoListDetail = (detail: unknown): TodoListDetail | undefined => {
+  // Only an object can be a key. Any other detail is cheap to decode and does not decode to a list.
+  if (typeof detail !== "object" || detail === null) return undefined;
+  if (decodedTodoLists.has(detail)) return decodedTodoLists.get(detail);
+  const list = Option.getOrUndefined(decodeTodoListDetail(detail));
+  decodedTodoLists.set(detail, list);
+  return list;
+};
 
 /** How far a todo list has come, as the rows of both clients show it. */
-export interface TodoListSummary {
-  /** How many steps are completed. */
-  readonly completed: number;
-  /** How many steps the list has. */
-  readonly total: number;
+interface TodoListSummary {
   /** The progress as one count, such as "2/5". */
   readonly progress: string;
   /**
@@ -92,15 +106,10 @@ export interface TodoListSummary {
 }
 
 /** Returns how far a todo list's `steps` have come (`TodoListSummary`). */
-export const summarizeTodoList = (steps: readonly TodoStep[]): TodoListSummary => {
-  const completed = steps.filter((step) => step.status === "completed").length;
-  return {
-    completed,
-    total: steps.length,
-    progress: `${completed}/${steps.length}`,
-    current: steps.find((step) => step.status === "in_progress")?.text ?? "",
-  };
-};
+export const summarizeTodoList = (steps: readonly TodoStep[]): TodoListSummary => ({
+  progress: `${steps.filter((step) => step.status === "completed").length}/${steps.length}`,
+  current: steps.find((step) => step.status === "in_progress")?.text ?? "",
+});
 
 /**
  * Returns the name a tool call's `detail` holds, as the rows show it: the

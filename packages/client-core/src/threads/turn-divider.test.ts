@@ -24,6 +24,7 @@ const ITEM: ThreadItem = {
   verb: "command",
   target: "ls -la",
   result: "completed",
+  todoSteps: [],
 };
 
 /** Builds a turn that completed after five seconds with no tool items. */

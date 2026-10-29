@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useState, type JSX } from "react";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { TodoStep } from "@hercule/contract";
 import type { WorkRow } from "@hercule/client-core";
 import { WorkRowList } from "./work-rows";
 
@@ -25,7 +26,7 @@ const buildRow = (fields: Partial<WorkRow> & Pick<WorkRow, "key">): WorkRow => (
   outputIsCode: true,
   images: [],
   steps: [],
-  todoSteps: [],
+  todoSteps: null,
   canOpen: false,
   ...fields,
 });
@@ -63,17 +64,18 @@ const WEB_SEARCH = buildRow({
   targetIsCode: false,
 });
 
+const TODO_STEPS: readonly TodoStep[] = [
+  { text: "Find the cause", status: "completed" },
+  { text: "Write the failing test", status: "in_progress" },
+  { text: "Fix handlePaymentResult", status: "pending" },
+];
 const TODO_LIST = buildRow({
   key: "row:t",
   icon: "tasks",
   label: "Tasks 1/3",
   target: "Write the failing test",
   targetIsCode: false,
-  todoSteps: [
-    { text: "Find the cause", status: "completed" },
-    { text: "Write the failing test", status: "in_progress" },
-    { text: "Fix handlePaymentResult", status: "pending" },
-  ],
+  todoSteps: TODO_STEPS,
   canOpen: true,
 });
 
@@ -255,7 +257,7 @@ describe("WorkRowList", () => {
       ...TODO_LIST,
       label: "Tasks 3/3",
       target: "",
-      todoSteps: TODO_LIST.todoSteps.map((step) => ({ ...step, status: "completed" })),
+      todoSteps: TODO_STEPS.map((step) => ({ ...step, status: "completed" })),
     });
     render(<RowsWithOpenKeys rows={[allDone]} />);
     const row = screen.getByRole("button", { name: "Tasks 3/3" });

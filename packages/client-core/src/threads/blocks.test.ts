@@ -1432,6 +1432,29 @@ describe("buildThreadBlocks: compaction and unknown steps, drawn as work rows", 
     });
   });
 
+  it("merges a compaction's completion over its latest update, not over its start", () => {
+    const rows = buildRowsOf([
+      buildItemStarted("t1", "k1", "context_compaction", 1, {
+        trigger: "auto",
+        tokensBefore: 100_000,
+        summary: "from the start",
+      }),
+      buildItemUpdated("t1", "k1", "context_compaction", 2, {
+        trigger: "auto",
+        tokensBefore: 182_000,
+        summary: "from the update",
+      }),
+      buildItemCompleted("t1", "k1", "context_compaction", 5, "completed", {
+        tokensAfter: 31_000,
+      }),
+    ]);
+
+    expect(rows[0]).toMatchObject({
+      target: "182k → 31k tokens (auto)",
+      output: "from the update",
+    });
+  });
+
   it("opens a compaction to the summary it started with when the completion has none", () => {
     const rows = buildRowsOf([
       buildItemStarted("t1", "k1", "context_compaction", 1, {
@@ -1620,6 +1643,55 @@ describe("buildThreadBlocks: todo lists, page fetches and MCP calls, drawn as wo
       ],
       steps: [],
     });
+  });
+
+  it("draws an update that turns a search into a fetch as a fetch", () => {
+    const search = buildItemStarted("t1", "w1", "web_search", 1, { query: "effect schema" });
+    const toFetch = buildItemUpdated("t1", "w1", "web_search", 2, {
+      url: "https://example.com/a",
+    });
+
+    expect(
+      [[search], [search, toFetch]].map((itemRows) =>
+        buildRowsOf(itemRows).map((row) => [row.label, row.target, row.targetIsCode]),
+      ),
+    ).toEqual([
+      [["Searched the web", "effect schema", false]],
+      [["Fetched", "https://example.com/a", true]],
+    ]);
+  });
+
+  it("gives the same steps to every projection of the same rows", () => {
+    // The transcript is projected again from all its rows each time one
+    // arrives; the steps must stay the same array so a memoized list does not redraw.
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 0, "Hi"),
+      buildItemStarted("t1", "todo", "todo_list", 1, buildTodoDetail("in_progress", "pending")),
+      buildItemUpdated("t1", "todo", "todo_list", 2, buildTodoDetail("completed", "in_progress")),
+    ];
+    const readSteps = () =>
+      findBlock(buildThreadBlocks(rows, buildSessionAgentState(BUSY)), "work", "work:todo")
+        .items[0]!.todoSteps;
+
+    expect(readSteps()).toBe(readSteps());
+  });
+
+  it("ends a stretch that starts after its turn ended, so its divider stops counting", () => {
+    const blocks = buildThreadBlocks(
+      [
+        buildTurnStarted("t1", 0),
+        ...buildUserMessage("t1", "u1", 0, "Hi"),
+        buildTurnCompleted("t1", 5),
+        buildItemStarted("t1", "late", "command_execution", 8, {
+          name: "Bash",
+          input: { command: "ls" },
+        }),
+      ],
+      buildSessionAgentState(IDLE),
+    );
+
+    expect(findBlock(blocks, "work", "work:late").endedAt).toBe(buildInstant(8));
   });
 
   it("keeps the list when an update has no detail or one that does not decode", () => {

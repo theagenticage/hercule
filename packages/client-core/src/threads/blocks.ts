@@ -16,7 +16,6 @@ import {
   type ContextCompactionDetail,
   type Input,
   type TodoListDetail,
-  type TodoStep,
   type TranscriptRow,
 } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
@@ -81,11 +80,6 @@ export interface WorkItem extends ThreadItem {
    * detail names a URL (`readFetchedUrl`). False for every other item.
    */
   readonly isPageFetch: boolean;
-  /**
-   * The steps of a `todo_list` item, in the agent's order, as of its latest
-   * update. Empty for any other item.
-   */
-  readonly todoSteps: readonly TodoStep[];
   /**
    * The label of an `unknown` item, such as `claude: system/foo_bar`: it names
    * a message no decision covers, or a known message that could not be read.
@@ -328,6 +322,7 @@ const readWorkItemTarget = (
   event: ItemStarted | ItemUpdated | ItemCompleted,
   threadItem: ThreadItem,
   todoList: TodoListDetail | undefined,
+  isPageFetch: boolean,
 ): { readonly target: string; readonly targetIsCode: boolean } => {
   switch (event.kind) {
     case "file_read":
@@ -347,35 +342,31 @@ const readWorkItemTarget = (
     case "todo_list":
       return { target: summarizeTodoList(todoList?.steps ?? []).current, targetIsCode: false };
     case "web_search":
-      return { target: threadItem.target, targetIsCode: readFetchedUrl(event.detail) !== "" };
+      return { target: threadItem.target, targetIsCode: isPageFetch };
     default:
       return { target: threadItem.target, targetIsCode: CODE_TARGET_KINDS.has(event.kind) };
   }
 };
 
-/** The steps of every item that is not a todo list. One shared array, for the same reason as `NO_ATTACHMENTS`. */
-const NO_TODO_STEPS: readonly TodoStep[] = Object.freeze([]);
-
 /**
  * Returns the fields of a work item that come from the detail of an
- * `item.started` or `item.updated` row, with `threadItem` as the projection
- * the web's row shows. Both rows build them here, so an update redraws
- * exactly what a start draws.
+ * `item.started`, `item.updated` or `item.completed` row, with `threadItem` as
+ * the projection the web's row shows. Every row that carries a detail builds
+ * them here, so an update redraws exactly what a start draws.
  */
 const readWorkItemDetail = (
   event: ItemStarted | ItemUpdated | ItemCompleted,
   threadItem: ThreadItem,
   todoList: TodoListDetail | undefined,
-): Pick<
-  WorkItem,
-  "target" | "targetIsCode" | "paths" | "toolName" | "isPageFetch" | "todoSteps"
-> => ({
-  ...readWorkItemTarget(event, threadItem, todoList),
-  paths: readItemPaths(event),
-  toolName: event.kind === "tool_call" ? readToolCallName(event.detail) : "",
-  isPageFetch: event.kind === "web_search" && readFetchedUrl(event.detail) !== "",
-  todoSteps: todoList === undefined || todoList.steps.length === 0 ? NO_TODO_STEPS : todoList.steps,
-});
+): Pick<WorkItem, "target" | "targetIsCode" | "paths" | "toolName" | "isPageFetch"> => {
+  const isPageFetch = event.kind === "web_search" && readFetchedUrl(event.detail) !== "";
+  return {
+    ...readWorkItemTarget(event, threadItem, todoList, isPageFetch),
+    paths: readItemPaths(event),
+    toolName: event.kind === "tool_call" ? readToolCallName(event.detail) : "",
+    isPageFetch,
+  };
+};
 
 /**
  * Returns the blocks of one agent's transcript in reading order: the
@@ -439,8 +430,8 @@ export const buildThreadBlocks = (
     {
       readonly stretch: BuildingStretch;
       readonly index: number;
-      /** The decoded start detail of a compaction (`StartedItem.compaction`). */
-      readonly startedCompaction: ContextCompactionDetail | undefined;
+      /** The latest decoded detail of a compaction (`StartedItem.compaction`, `UpdatedItem.compaction`). */
+      latestCompaction: ContextCompactionDetail | undefined;
     }
   >();
   // An object rather than a `let`, because the helpers below reassign it and
@@ -558,11 +549,15 @@ export const buildThreadBlocks = (
             slots.push(turn.stretch);
           }
           const stretch = turn.stretch;
+          // The turn already ended, so nothing closes this stretch later. It
+          // ends with the item that opened it, or its divider would count
+          // "Working for" forever.
+          if (turn.finished) stretch.endedAt = event.at;
           const started = buildStartedItem(event);
           workItems.set(event.itemId, {
             stretch,
             index: stretch.items.length,
-            startedCompaction: started.compaction,
+            latestCompaction: started.compaction,
           });
           const threadItem = started.item;
           stretch.items.push({
@@ -587,6 +582,7 @@ export const buildThreadBlocks = (
           ...updated.item,
           ...readWorkItemDetail(event, updated.item, updated.todoList),
         };
+        if (updated.compaction !== undefined) work.latestCompaction = updated.compaction;
         break;
       }
       case "item.completed": {
@@ -607,7 +603,7 @@ export const buildThreadBlocks = (
             updated === undefined
               ? current
               : { ...updated.item, ...readWorkItemDetail(event, updated.item, updated.todoList) };
-          const completed = buildCompletedItem(item, work.startedCompaction, event);
+          const completed = buildCompletedItem(item, work.latestCompaction, event);
           work.stretch.items[work.index] = {
             ...completed.item,
             resultContent:

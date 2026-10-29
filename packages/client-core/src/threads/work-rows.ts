@@ -77,10 +77,11 @@ export interface WorkRow {
   /** A group's steps, in order. Empty for a single step. */
   readonly steps: readonly WorkRow[];
   /**
-   * The steps of a todo list row, in the agent's order. Empty for every
-   * other row. A group's tool calls are `steps`, not these.
+   * The steps of a todo list row, in the agent's order. `null` for every
+   * other row, which is how a row tells a todo list from any other; a list
+   * with no steps is `[]`. A group's tool calls are `steps`, not these.
    */
-  readonly todoSteps: readonly TodoStep[];
+  readonly todoSteps: readonly TodoStep[] | null;
   /**
    * Whether the row has something to open: it is a group, a todo list with
    * steps, or a step that returned text or images.
@@ -258,7 +259,7 @@ const buildStepRow = (item: WorkItem, key: string): WorkRow => {
     outputIsCode: item.kind !== "context_compaction",
     images,
     steps: [],
-    todoSteps: item.todoSteps,
+    todoSteps: item.kind === "todo_list" ? item.todoSteps : null,
     canOpen: output !== "" || images.length > 0 || item.todoSteps.length > 0,
   };
 };
@@ -282,7 +283,7 @@ const buildRunRow = (run: readonly WorkItem[]): WorkRow => {
     outputIsCode: false,
     images: [],
     steps: run.map((item) => buildStepRow(item, `step:${item.itemId}`)),
-    todoSteps: [],
+    todoSteps: null,
     canOpen: true,
   };
 };

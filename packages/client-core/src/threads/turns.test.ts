@@ -1284,6 +1284,7 @@ describe("buildTurns: compaction and unknown items", () => {
         verb: "compaction",
         target: "182k → 31k tokens (auto)",
         result: "completed",
+        todoSteps: [],
       },
     ]);
   });
@@ -1368,7 +1369,11 @@ describe("buildTurns: todo lists, page fetches and MCP calls", () => {
     startDetail: unknown,
     ...events: readonly (
       | { readonly _tag: "item.updated"; readonly detail?: unknown }
-      | { readonly _tag: "item.completed"; readonly status: "completed" | "failed" }
+      | {
+          readonly _tag: "item.completed";
+          readonly status: "completed" | "failed";
+          readonly detail?: unknown;
+        }
     )[]
   ): TranscriptRow[] => [
     buildRow({
@@ -1409,6 +1414,7 @@ describe("buildTurns: todo lists, page fetches and MCP calls", () => {
             itemId: "i1",
             kind,
             status: event.status,
+            ...(event.detail === undefined ? {} : { detail: event.detail as never }),
           }),
     ),
   ];
@@ -1425,7 +1431,14 @@ describe("buildTurns: todo lists, page fetches and MCP calls", () => {
     );
 
     expect(readItems(rows)).toEqual([
-      { itemId: "i1", kind: "todo_list", verb: "tasks", target: "2/2", result: "completed" },
+      {
+        itemId: "i1",
+        kind: "todo_list",
+        verb: "tasks",
+        target: "2/2",
+        result: "completed",
+        todoSteps: todo("completed", "completed").steps,
+      },
     ]);
     expect(readItems(rows.slice(0, 3))[0]!.target).toBe("1/2 · step 2");
     expect(readItems(rows.slice(0, 2))[0]!.target).toBe("0/2 · step 1");
@@ -1437,9 +1450,63 @@ describe("buildTurns: todo lists, page fetches and MCP calls", () => {
       todo("in_progress", "pending"),
       { _tag: "item.updated" },
       { _tag: "item.updated", detail: { steps: 3 } },
+      { _tag: "item.updated", detail: { steps: [{ text: "step 9", status: "blocked" }] } },
+      { _tag: "item.updated", detail: { steps: [{ text: "", status: "pending" }] } },
     );
 
-    expect(readItems(rows)[0]!.target).toBe("0/2 · step 1");
+    expect(readItems(rows)[0]).toMatchObject({
+      target: "0/2 · step 1",
+      todoSteps: todo("in_progress", "pending").steps,
+    });
+  });
+
+  it("names the first step in progress, and just the progress when none is or the list is empty", () => {
+    const targetOf = (detail: unknown) => readItems(buildRowsOfItem("todo_list", detail))[0]!;
+
+    expect(targetOf(todo("completed", "in_progress", "in_progress", "pending")).target).toBe(
+      "1/4 · step 2",
+    );
+    expect(targetOf(todo("completed", "pending")).target).toBe("1/2");
+    expect(targetOf({ steps: [] })).toMatchObject({ target: "0/0", todoSteps: [] });
+  });
+
+  it("shows only the first line of a step, cut like any other target", () => {
+    const tall = { steps: [{ text: "First line\nsecond line", status: "in_progress" }] };
+    const wide = { steps: [{ text: "x".repeat(512), status: "in_progress" }] };
+
+    expect(readItems(buildRowsOfItem("todo_list", tall))[0]!.target).toBe("0/1 · First line");
+    const target = readItems(buildRowsOfItem("todo_list", wide))[0]!.target;
+    expect(target).toBe(`0/1 · ${"x".repeat(194)}…`);
+    // The steps themselves are not cut: the divider lists them whole.
+    expect(readItems(buildRowsOfItem("todo_list", wide))[0]!.todoSteps[0]!.text).toHaveLength(512);
+  });
+
+  it("draws an update that turns a search into a fetch as a fetch, and keeps that when the next update has no detail", () => {
+    const rows = buildRowsOfItem(
+      "web_search",
+      { query: "effect schema" },
+      { _tag: "item.updated", detail: { url: "https://example.com/a" } },
+      { _tag: "item.updated" },
+    );
+
+    expect(readItems(rows.slice(0, 2))[0]).toMatchObject({
+      verb: "search",
+      target: "effect schema",
+    });
+    expect(readItems(rows)[0]).toMatchObject({ verb: "fetch", target: "https://example.com/a" });
+  });
+
+  it("merges a compaction's completion over its latest update, not over its start", () => {
+    const rows = buildRowsOfItem(
+      "context_compaction",
+      { trigger: "auto", tokensBefore: 100_000 },
+      { _tag: "item.updated", detail: { trigger: "auto", tokensBefore: 182_000 } },
+      // A detail that does not decode leaves the latest one in place.
+      { _tag: "item.updated", detail: { tokensBefore: "lots" } },
+      { _tag: "item.completed", status: "completed", detail: { tokensAfter: 31_000 } },
+    );
+
+    expect(readItems(rows)[0]!.target).toBe("182k → 31k tokens (auto)");
   });
 
   it("ignores an update for an item that never started", () => {

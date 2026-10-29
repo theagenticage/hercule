@@ -25,6 +25,7 @@ const SPAWN_ITEM: ThreadItem = {
   verb: "Started",
   target: "Find the flaky webhook test",
   result: "running",
+  todoSteps: [],
 };
 
 /** Renders the spawn lines of a stretch holding `items`, on screen, on `thread`. */

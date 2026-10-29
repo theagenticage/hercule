@@ -104,7 +104,7 @@ export function WorkRowList({
                 timezone={timezone}
                 today={today}
               />
-            ) : row.todoSteps.length > 0 ? (
+            ) : row.todoSteps !== null ? (
               <TodoStepList steps={row.todoSteps} />
             ) : (
               <WorkRowOutput text={row.output} isCode={row.outputIsCode} images={row.images} />
@@ -161,7 +161,7 @@ function WorkRowCells({
         {row.label}
         {row.target === "" ? null : (
           <>
-            {row.todoSteps.length > 0 ? " · " : " "}
+            {row.todoSteps !== null ? " · " : " "}
             {row.targetIsCode ? (
               <code className="work-target">{row.target}</code>
             ) : (

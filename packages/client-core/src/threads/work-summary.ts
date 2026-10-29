@@ -62,8 +62,9 @@ export const countDistinctFiles = (items: readonly WorkItem[]): number => {
 /**
  * Returns the summary of a stretch's items: one phrase per item kind, such as
  * "ran 2 commands", in the order each kind first appears. Reasoning and todo
- * lists are left out. Page fetches count apart from web searches. File changes and file reads count distinct files
- * (`countDistinctFiles`), so two edits to one file read "edited 1 file".
+ * lists are left out. Page fetches count apart from web searches. File
+ * changes and file reads count distinct files (`countDistinctFiles`), so two
+ * edits to one file read "edited 1 file".
  */
 export const summarizeWork = (items: readonly WorkItem[]): readonly string[] => {
   // A Map keeps its keys in insertion order, which is the order of first appearance.
