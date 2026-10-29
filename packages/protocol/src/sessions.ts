@@ -7,7 +7,7 @@
  * reads a session. An `unknown` item kind and a `raw` passthrough keep a vendor
  * message nobody mapped, rather than dropping it.
  */
-import { Schema, SchemaGetter } from "effect";
+import { Option, Schema, SchemaGetter } from "effect";
 
 import { AdapterError } from "./adapter-errors";
 import { AttachmentReference } from "./attachments";
@@ -1017,20 +1017,42 @@ export const ProviderEvent = Schema.Union([
 export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
 
 /**
- * Returns an event read back from storage as a `ProviderEvent`. An event whose
- * `_tag` this build has an arm for is returned as it is, without decoding it:
- * decoding every stored row would cost time on a hot path, and could reject a
- * row written in an older shape. An event of any other tag becomes the
- * canonical `unknown` event, the same value `ProviderEvent` decodes it to.
+ * Parses the JSON text of a stored event into a `ProviderEvent`. The text is
+ * trusted: the controller wrote it itself, so it is well-formed JSON of an
+ * object with a string `_tag`, and the function does not check that. Fails
+ * only when the text is not valid JSON.
+ *
+ * - An event whose `_tag` this build has an arm for is returned as parsed,
+ *   without decoding it. Decoding every stored row would cost time on a hot
+ *   path, and could reject a row written in an older shape.
+ * - An event of any other tag becomes the `unknown` event, the same value
+ *   `ProviderEvent` decodes it to.
+ * - An event of another tag that does not decode, such as a future row whose tag
+ *   is longer than a `Fact` or whose `subagentId` has a newer format, still
+ *   becomes an `unknown` event: its `originalType`, `payload`, `eventId`,
+ *   `sessionId`, `at` and `subagentId` are copied from the row without
+ *   validating them. The controller stored the row, so it already is a
+ *   transcript row, and throwing here would make the whole transcript
+ *   unreadable after a rollback to this build because of one row.
  *
  * Needed because a newer build may store an event type this build does not
  * know, and the operator may roll back to this build on the same database.
- * Throws when such an event lacks the envelope that every stored event has.
  */
-export const readStoredEvent = (stored: { readonly _tag: string }): ProviderEvent =>
-  ARM_TAGS.has(stored._tag)
-    ? (stored as ProviderEvent)
-    : Schema.decodeUnknownSync(ProviderEvent)(stored);
+export const parseStoredEvent = (text: string): ProviderEvent => {
+  const stored = JSON.parse(text) as { readonly _tag: string } & Record<string, unknown>;
+  if (ARM_TAGS.has(stored._tag)) return stored as ProviderEvent;
+  const decoded = Schema.decodeUnknownOption(ProviderEvent)(stored);
+  if (Option.isSome(decoded)) return decoded.value;
+  return {
+    _tag: "unknown",
+    originalType: stored._tag,
+    payload: stored,
+    eventId: stored.eventId,
+    sessionId: stored.sessionId,
+    at: stored.at,
+    ...("subagentId" in stored ? { subagentId: stored.subagentId } : {}),
+  } as ProviderEvent;
+};
 
 /**
  * The longest a session token may be. Hercule creates 32 random bytes encoded

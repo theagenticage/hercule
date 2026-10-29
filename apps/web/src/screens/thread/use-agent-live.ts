@@ -181,7 +181,7 @@ export const useAgentLive = (
     let frame: number | null = null;
     skipOpenItems();
     // With the stream unreadable no row will ever match the tail, so the tap
-    // is not followed. The skip above has dropped the tail it held.
+    // is not followed. The skip above has dropped the tails of the open items.
     if (isStreamUnreadable) return;
     const unsubscribe = live.subscribe(buildAgentTapTopic(sessionId, subagentId), (delta) => {
       const delivery = decideTapDelivery(delta);

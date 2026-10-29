@@ -93,6 +93,10 @@ export const readLogHead = (sql: SqlClient.SqlClient): Effect.Effect<number, Sql
  * text (`refs`, `payload` and `raw`). A live subscription uses it to limit the
  * memory it holds for a client that reads slowly, without encoding the event
  * again.
+ *
+ * The size is `length(CAST(x AS BLOB))`, which counts bytes in every SQLite
+ * version. `octet_length` would do the same, but it needs SQLite 3.43, and the
+ * SQLite that Bun links on macOS can be older.
  */
 export const readEventsAfter = (
   sql: SqlClient.SqlClient,
@@ -102,7 +106,8 @@ export const readEventsAfter = (
   Effect.map(
     sql<EventRow & { readonly bytes: number }>`
       SELECT ${sql.literal(EVENT_COLUMNS)},
-        octet_length(refs) + octet_length(payload) + coalesce(octet_length(raw), 0) AS bytes
+        length(CAST(refs AS BLOB)) + length(CAST(payload AS BLOB))
+          + coalesce(length(CAST(raw AS BLOB)), 0) AS bytes
       FROM events
       WHERE id > ${after} ORDER BY id LIMIT ${limit}
     `,

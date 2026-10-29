@@ -901,7 +901,7 @@ describe("createLive", () => {
     assert.isNull(socket.closedWith);
   });
 
-  it("waits the shortest delay again after an attempt that delivered a message", async () => {
+  it("waits the shortest delay again after an attempt that moved the cursor", async () => {
     const { fetch } = stubTicketServer();
     const { live: started, socket } = await startConnectedSupervisor(fetch);
 
@@ -922,6 +922,34 @@ describe("createLive", () => {
     socket.chunk(second?.id, [{ _tag: "delta", cursor: "11", items: [buildEvent(11)] }]);
     socket.fail(second?.id, capFailure);
     await settleTimers();
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+    assert.strictEqual(socket.calls("subscribe").length, 3);
+  });
+
+  it("keeps doubling the wait when an attempt only got the first message every subscription gets", async () => {
+    const { fetch } = stubTicketServer();
+    const { live: started, socket } = await startConnectedSupervisor(fetch);
+
+    started.subscribe("event", () => undefined, "10");
+    await settleTimers();
+
+    socket.fail(socket.calls("subscribe")[0]?.id, capFailure);
+    await settleTimers();
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+    assert.strictEqual(socket.calls("subscribe").length, 2);
+
+    // The controller answers a subscription with a cursor with a first
+    // message even when there is nothing to replay. It moves no cursor, so
+    // it is no progress, and the next wait is 2 s, not 1 s.
+    const second = socket.calls("subscribe")[1];
+    socket.chunk(second?.id, [{ _tag: "delta", cursor: "10", items: [] }]);
+    socket.fail(second?.id, capFailure);
+    await settleTimers();
+    await vi.advanceTimersByTimeAsync(1000);
+    await settleTimers();
+    assert.strictEqual(socket.calls("subscribe").length, 2);
     await vi.advanceTimersByTimeAsync(1000);
     await settleTimers();
     assert.strictEqual(socket.calls("subscribe").length, 3);

@@ -158,7 +158,9 @@ describe("the subagent's page", () => {
     );
     // The brief stays, and neither topic is subscribed again.
     expect(screen.getByText(SUBAGENT_BRIEF)).toBeTruthy();
-    expect(readAgentTopics(live.readTopics())).toEqual([]);
+    await waitFor(() => {
+      expect(readAgentTopics(live.readTopics())).toEqual([]);
+    });
   });
 
   it("drops the subagent's tap while the window is hidden, and keeps its stream", async () => {

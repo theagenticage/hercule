@@ -363,21 +363,23 @@ export const createLive = (options: LiveOptions): Live => {
    *   tell where the failed row sits in the log. So the subscriber is told it
    *   is `unreadable`, and the subscription stops. It stays stopped, also
    *   after a reconnect, until the caller unsubscribes and subscribes again.
-   *   (This is the one place that explains why; the other comments point here.)
    * - A schema decode defect on a subscription with no cursor (every mutable
    *   topic, a tap, a log followed from the head before its first message):
    *   handled like the case below, because subscribing again loses nothing.
    * - Anything else (falling behind, a failed read, a stream that ended): the
    *   subscription is retried after a growing wait. The wait starts again from
-   *   the shortest one after an attempt that delivered a message, because the
-   *   subscription was making progress: the controller ends a subscription
-   *   with `cap_exceeded` when too much waits for a slow reader, and a client
-   *   catching up on a large backlog is cut off again and again. Just before that, a tap
-   *   subscriber is told to reset (`resetCursorlessSubscriber`), which covers
-   *   the taps lost during the wait too. A mutable subscriber learns what it
-   *   missed from the controller's first push on the new subscription. An
-   *   error that keeps repeating costs two frames a minute rather than a
-   *   flood.
+   *   the shortest one after an attempt that moved the subscription's cursor,
+   *   because that subscription was making progress: the controller ends a
+   *   subscription with `cap_exceeded` when too much waits for a slow reader,
+   *   and a client catching up on a large backlog is cut off again and again.
+   *   Delivering a message is not progress: every new subscription gets a
+   *   first message for free (a mutable topic's push, a log's first message),
+   *   so the wait would almost never grow. Just before the next attempt, a
+   *   tap subscriber is told to reset (`resetCursorlessSubscriber`), which
+   *   covers the taps lost during the wait too. A mutable subscriber learns
+   *   what it missed from the controller's first push on the new
+   *   subscription. An error that keeps repeating, with no progress between,
+   *   costs two frames a minute rather than a flood.
    *
    * Apart from `not_found` and an unreadable message after a cursor, nothing here ends a
    * subscription for good: only the caller does that. A defect that is not a
@@ -396,7 +398,7 @@ export const createLive = (options: LiveOptions): Live => {
         // subscription with a push that says every record may have changed
         // (spec 14 §Live model).
         let replay = subscription.cursor !== undefined;
-        let delivered = false;
+        const cursorAtStart = subscription.cursor;
         // The RPC client turns a pushed chunk it cannot decode into a defect
         // (a `SchemaError`) of this one request. `Effect.result` only sees
         // typed failures, so `catchDefect` picks out that defect; any other
@@ -408,7 +410,6 @@ export const createLive = (options: LiveOptions): Live => {
             Effect.sync(() => {
               deliver(subscription, message, replay);
               replay = false;
-              delivered = true;
             }),
           ),
         ).pipe(
@@ -477,7 +478,7 @@ export const createLive = (options: LiveOptions): Live => {
           );
           continue;
         }
-        if (delivered) delay = FIRST_RETRY_MS;
+        if (subscription.cursor !== cursorAtStart) delay = FIRST_RETRY_MS;
         yield* sleepWithJitter(delay);
         delay = Math.min(delay * 2, MAX_RETRY_MS);
         resetCursorlessSubscriber(subscription);

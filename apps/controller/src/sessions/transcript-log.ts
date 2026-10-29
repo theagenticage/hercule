@@ -23,7 +23,7 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { readStoredEvent, type SubagentId } from "@hercule/protocol";
+import { parseStoredEvent, type SubagentId } from "@hercule/protocol";
 import type { TranscriptRow } from "@hercule/contract";
 import { UUID_PATTERN, uuidFromString } from "../db";
 import { buildAgentClause } from "./repository";
@@ -73,8 +73,11 @@ export const readTranscriptHead = (
  * Returns up to `limit` rows of an agent's transcript after a position, oldest
  * first. Each comes with `bytes`, the size in bytes of its stored JSON text. A
  * live subscription uses it to limit the memory it holds for a client that
- * reads slowly, without encoding the row again. An event of a type this build
- * does not know comes back as an `unknown` event (see `readStoredEvent`).
+ * reads slowly, without encoding the row again. The size is
+ * `length(CAST(event AS BLOB))`, which counts bytes in every SQLite version
+ * (`octet_length` needs SQLite 3.43, and the SQLite that Bun links on macOS can
+ * be older). An event of a type this build does not know comes back as an
+ * `unknown` event (see `parseStoredEvent`).
  */
 export const readTranscriptRowsAfter = (
   sql: SqlClient.SqlClient,
@@ -93,7 +96,7 @@ export const readTranscriptRowsAfter = (
       readonly event: string;
       readonly bytes: number;
     }>`
-      SELECT position, at, event, octet_length(event) AS bytes FROM session_stream
+      SELECT position, at, event, length(CAST(event AS BLOB)) AS bytes FROM session_stream
       WHERE session_id = ${uuidFromString(sessionId)} AND ${buildAgentClause(sql, subagentId)}
         AND position > ${after}
       ORDER BY position LIMIT ${limit}
@@ -103,7 +106,7 @@ export const readTranscriptRowsAfter = (
         row: {
           position: row.position,
           at: row.at,
-          event: readStoredEvent(JSON.parse(row.event) as { readonly _tag: string }),
+          event: parseStoredEvent(row.event),
         },
         bytes: row.bytes,
       })),

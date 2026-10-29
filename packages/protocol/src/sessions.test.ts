@@ -10,7 +10,7 @@ import {
   isAsyncQuestion,
   ContextCompactionDetail,
   ProviderEvent,
-  readStoredEvent,
+  parseStoredEvent,
   SessionBinding,
   SessionInputResult,
   SessionInterrupt,
@@ -512,10 +512,10 @@ describe("an event whose tag this build does not know", () => {
   });
 });
 
-describe("reading an event back from storage", () => {
+describe("parsing an event back from storage", () => {
   it("turns a stored event of a tag this build does not know into the unknown event", () => {
     const stored = { _tag: "turn.paused", ...baseFields, turnId: "t1", subagentId: "agent-b" };
-    const read = readStoredEvent(stored);
+    const read = parseStoredEvent(JSON.stringify(stored));
     expect(read).toEqual(Effect.runSync(Schema.decodeUnknownEffect(ProviderEvent)(stored)));
     expect(read).toMatchObject({
       _tag: "unknown",
@@ -527,22 +527,46 @@ describe("reading an event back from storage", () => {
     expect(() => Schema.encodeSync(ProviderEvent)(read)).not.toThrow();
   });
 
-  it("returns a stored event of a known tag as it is, without decoding it", () => {
+  it("returns a stored event of a known tag as parsed, without decoding it", () => {
     // Not a valid `turn.completed` (its state is outside the vocabulary): a
-    // decode would reject it, so the same object coming back proves there was none.
+    // decode would reject it, so getting it back proves there was none.
     const stored = {
       _tag: "turn.completed",
       ...baseFields,
       turnId: "t1",
       state: "from-an-older-build",
     };
-    expect(readStoredEvent(stored)).toBe(stored);
+    expect(parseStoredEvent(JSON.stringify(stored))).toEqual(stored);
   });
 
-  it("returns a stored unknown event as it is", () => {
+  it("returns a stored unknown event as it was stored", () => {
     const stored = events.find((event) => event._tag === "unknown");
     expect(stored).toBeDefined();
-    expect(readStoredEvent(stored as Event)).toBe(stored);
+    expect(parseStoredEvent(JSON.stringify(stored))).toEqual(stored);
+  });
+
+  it.each([
+    ["a tag over the 512 characters of a fact", { _tag: "x".repeat(513) }],
+    ["a subagent id in a format this build rejects", { _tag: "turn.paused", subagentId: "a:b" }],
+  ])("still returns an unknown event for a row of an unknown tag with %s", (_name, extra) => {
+    // A future row. Throwing would make the whole transcript unreadable after
+    // a rollback to this build because of this one row.
+    const stored = { ...baseFields, ...extra };
+    expect(decode(ProviderEvent, stored)._tag).toBe("Failure");
+    expect(parseStoredEvent(JSON.stringify(stored))).toEqual({
+      _tag: "unknown",
+      originalType: extra._tag,
+      payload: stored,
+      ...baseFields,
+      ...("subagentId" in extra ? { subagentId: extra.subagentId } : {}),
+    });
+  });
+
+  it("leaves out the subagent of a row that does not name one", () => {
+    const stored = { _tag: "", ...baseFields };
+    const read = parseStoredEvent(JSON.stringify(stored));
+    expect(read).toMatchObject({ _tag: "unknown", originalType: "" });
+    expect("subagentId" in read).toBe(false);
   });
 });
 
