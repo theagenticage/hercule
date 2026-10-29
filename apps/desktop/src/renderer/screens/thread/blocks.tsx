@@ -36,6 +36,7 @@ import {
 } from "@hercule/client-core";
 import { useAgeLabel, useDurationText } from "../../app/age-clock";
 import { ChevronRightIcon } from "../../icons/chevron-right";
+import { InfoIcon } from "../../icons/info";
 import type { Look } from "../../faces";
 import { Mark } from "../../marks";
 import { Markdown } from "../session/markdown";
@@ -283,52 +284,44 @@ export const WaitingNote = memo(function WaitingNote({
   );
 });
 
-/**
- * Renders a warning the runner or the harness reported about the agent's
- * work, such as a retried request or an event too large to send whole: the
- * dot, the warning's `message` as the runner wrote it, and its time.
- *
- * The note is quiet, because the work went on: the dot and the message are
- * in the muted ink, not in tomato, which means something failed. The dot is
- * named "Warning", so a screen reader says what kind of note this is.
- */
-export const WarningNote = memo(function WarningNote({
-  message,
-  at,
-  timezone,
-  today,
-}: {
-  readonly message: string;
-  readonly at: string;
-  readonly timezone: string;
-  readonly today: number;
-}): JSX.Element {
-  const time = formatBlockTime(at, timezone, today);
-  return (
-    <div className="warning-note">
-      <i className="dot" role="img" aria-label="Warning" />
-      <p>
-        {message}
-        {time === undefined ? null : <span className="time">{time}</span>}
-      </p>
-    </div>
-  );
-});
+/** The kinds of block that `RuntimeNote` draws. */
+type RuntimeNoteKind = "warning" | "runtime-notice" | "error";
+
+const RUNTIME_NOTE_CLASS: Record<RuntimeNoteKind, string> = {
+  warning: "warning-note",
+  "runtime-notice": "runtime-notice-note",
+  error: "error-note",
+};
 
 /**
- * Renders an error the runner or the harness reported: a session that could
- * not start, such as one whose skill could not be loaded, or a turn that
- * failed, such as one whose context window is full. It is the warning note
- * drawn in the failure colours: the book's tomato dot, the error's `message`
- * in the failure ink, and its time in the muted ink. The dot is named
- * "Error", so a screen reader says what kind of note this is.
+ * Renders a note the runner, the harness or the provider reported about the
+ * agent's work: a marker in the first column, the `message` as the runner wrote
+ * it, and its time. The three `kind`s share the layout and differ in colour and
+ * marker, so a note of any kind starts its words at the same edge:
+ *
+ * - `warning` is something like a retried request or an event too large to send
+ *   whole. It is quiet, because the work went on: the dot and the message are in
+ *   the muted ink, not in tomato, which means something failed. The dot is named
+ *   "Warning".
+ * - `runtime-notice` is something the provider reported that is neither a warning
+ *   nor an error, such as "Conversation was cleared" or "Recalled 3 memories".
+ *   It is the warning's neutral sibling, with the 14px info icon in the dot's
+ *   column. The icon is named "Notice".
+ * - `error` is a session that could not start, such as one whose skill could not
+ *   be loaded, or a turn that failed, such as one whose context window is full.
+ *   It is drawn in the failure colours: the book's tomato dot, the message in the
+ *   failure ink, and the time in the muted ink. The dot is named "Error".
+ *
+ * The marker is named so a screen reader says what kind of note this is.
  */
-export const ErrorNote = memo(function ErrorNote({
+export const RuntimeNote = memo(function RuntimeNote({
+  kind,
   message,
   at,
   timezone,
   today,
 }: {
+  readonly kind: RuntimeNoteKind;
   readonly message: string;
   readonly at: string;
   readonly timezone: string;
@@ -336,8 +329,14 @@ export const ErrorNote = memo(function ErrorNote({
 }): JSX.Element {
   const time = formatBlockTime(at, timezone, today);
   return (
-    <div className="error-note">
-      <i className="dot" role="img" aria-label="Error" />
+    <div className={RUNTIME_NOTE_CLASS[kind]}>
+      {kind === "runtime-notice" ? (
+        <span className="runtime-notice-icon" role="img" aria-label="Notice">
+          <InfoIcon size={14} />
+        </span>
+      ) : (
+        <i className="dot" role="img" aria-label={kind === "warning" ? "Warning" : "Error"} />
+      )}
       <p>
         {message}
         {time === undefined ? null : <span className="time">{time}</span>}

@@ -668,6 +668,39 @@ const TurnCompleted = defineEvent("turn.completed", {
 });
 
 /**
+ * The `detail` of an `unknown` item: the label names a message that no decision
+ * covers, or a known message that could not be read. It is written as
+ * `<harness>: <message type>`, such as `claude: system/foo_bar`. A client shows
+ * it so the gap is visible and not a bare "Step". The label is absent on rows
+ * written before it existed.
+ */
+export const UnknownItemDetail = Schema.Struct({ label: Schema.optionalKey(Fact) });
+
+export type UnknownItemDetail = Schema.Schema.Type<typeof UnknownItemDetail>;
+
+/**
+ * The `detail` of a `context_compaction` item: how the harness shrank the
+ * conversation to fit its context window. Every field is optional, because a
+ * harness reports only what it knows, and the item is already shown while the
+ * compaction runs.
+ *
+ * - `trigger` is `auto` when the harness compacted on its own, `manual` when
+ *   the user asked for it.
+ * - `tokensBefore` and `tokensAfter` count the conversation's tokens before
+ *   and after.
+ * - `summary` is the text that replaces the conversation, cut to the length of
+ *   a message.
+ */
+export const ContextCompactionDetail = Schema.Struct({
+  trigger: Schema.optionalKey(Schema.Literals(["auto", "manual"])),
+  tokensBefore: Schema.optionalKey(Tokens),
+  tokensAfter: Schema.optionalKey(Tokens),
+  summary: Schema.optionalKey(Message),
+});
+
+export type ContextCompactionDetail = Schema.Schema.Type<typeof ContextCompactionDetail>;
+
+/**
  * `detail` stays Json: each adapter decides its shape per kind, and fixing
  * twelve shapes here would limit what each harness can report in future.
  *
@@ -688,6 +721,11 @@ const TurnCompleted = defineEvent("turn.completed", {
  * session's agent sent carries that session's id in `detail.senderSessionId`,
  * copied from the input's `senderSessionId`. The field is absent on any other
  * message, the owner's included.
+ *
+ * Two more shapes are shared by every adapter and exported as schemas:
+ * `UnknownItemDetail` for an `unknown` item and `ContextCompactionDetail` for a
+ * `context_compaction` item. Both are written by the adapter and decoded by
+ * clients; the event itself still carries Json.
  */
 const itemFields = {
   ...attribution,
@@ -775,8 +813,24 @@ const SessionUsageUpdated = Schema.Union([
   }),
 ]);
 
-/** Either may fire inside a turn or between turns, so the turn id is optional. */
+/**
+ * Something went wrong, but the session goes on, such as a retry or an event
+ * the runner had to shrink. It may fire inside a turn or between turns, so the
+ * turn id is optional.
+ */
 const RuntimeWarning = defineEvent("runtime.warning", {
+  ...attribution,
+  turnId: Schema.optionalKey(Fact),
+  message: Message,
+});
+
+/**
+ * Neutral information about the session, such as "Conversation was cleared".
+ * Unlike a warning, nothing went wrong: a client draws it as a plain note, not
+ * as a problem. Like a warning, it may fire inside a turn or between turns, so
+ * the turn id is optional, and it never opens a turn of its own.
+ */
+const RuntimeNotice = defineEvent("runtime.notice", {
   ...attribution,
   turnId: Schema.optionalKey(Fact),
   message: Message,
@@ -864,6 +918,7 @@ export const ProviderEvent = Schema.Union([
   ContentDelta,
   SessionUsageUpdated,
   RuntimeWarning,
+  RuntimeNotice,
   RuntimeError,
   RequestOpened,
   RequestResolved,

@@ -1,8 +1,9 @@
 /**
- * Truncates text from a harness to the lengths the protocol accepts. It lives
- * in one module because two adapters truncating the same vendor string to
- * different lengths, or one not truncating at all, would produce a frame the
- * runner cannot encode, and the runner drops an event it cannot encode.
+ * Prepares text from a harness for the protocol: truncates it to the lengths
+ * the protocol accepts. It lives in one module because two adapters truncating the same
+ * vendor string to different lengths, or one not truncating at all, would
+ * produce a frame the runner cannot encode, and the runner drops an event it
+ * cannot encode.
  */
 import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH } from "@hercule/protocol";
 

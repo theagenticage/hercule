@@ -56,6 +56,8 @@ import {
   openTurn,
   classifyTool,
   isAnyAgentWorking,
+  buildRuntimeEvent,
+  completeCompactionAtEnd,
   type Normalizing,
 } from "./claude-code-normalize";
 import {
@@ -202,6 +204,55 @@ const describeError = (error: unknown): string => {
   const said = truncateFact(error instanceof Error ? error.message : String(error));
   return said === "" ? "the harness failed with an empty error message" : said;
 };
+
+/**
+ * The most distinct labels one session's log hears of. Labels come from text
+ * Claude sends, so a harness that sends a new type with every message would
+ * otherwise fill the log and the set that remembers them.
+ */
+const MAX_REPORTED_UNKNOWN_LABELS = 100;
+
+/**
+ * Returns the function that writes a session's `reportUnknownMessage` lines to
+ * the runner's log. It captures the services of the fiber that runs this
+ * effect, loggers included, because the harness's messages are read outside
+ * any fiber, and a line written there would miss `runner.log`. The line names
+ * the message type and never holds the message itself.
+ *
+ * Each label is logged once per session, up to `MAX_REPORTED_UNKNOWN_LABELS`.
+ * One more line then says that further types are not logged, and nothing is
+ * logged after it.
+ */
+const captureUnknownMessageReporter = (
+  sessionId: string,
+): Effect.Effect<Normalizing["reportUnknownMessage"]> =>
+  Effect.map(Effect.context<never>(), (services) => {
+    const reported = new Set<string>();
+    let capReported = false;
+    const logWarning = (text: string): void => {
+      void Effect.runForkWith(services)(
+        Effect.logWarning(text).pipe(Effect.annotateLogs({ sessionId })),
+      );
+    };
+    return (label, error) => {
+      if (reported.has(label)) return;
+      if (reported.size >= MAX_REPORTED_UNKNOWN_LABELS) {
+        if (!capReported) {
+          capReported = true;
+          logWarning(
+            `Claude sent more than ${MAX_REPORTED_UNKNOWN_LABELS} different unknown message types in this session. Further ones are not logged.`,
+          );
+        }
+        return;
+      }
+      reported.add(label);
+      logWarning(
+        error === undefined
+          ? `Claude sent a message type this runner has no decision for: ${label}`
+          : `Claude sent a message this runner could not read: ${label}. Error: ${describeError(error)}`,
+      );
+    };
+  });
 
 /**
  * Builds the effort option from a list of effort levels. The levels come from
@@ -1274,14 +1325,14 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
         held.stopping !== undefined || live.get(held.binding.sessionId) !== held;
       if (refused === undefined || sessionStopped) return;
       clearRefusedStop(held.state.subagents, subagentId);
-      emit({
-        _tag: "runtime.warning",
-        eventId: held.state.mint(),
-        sessionId: held.binding.sessionId,
-        at: held.state.now(),
-        subagentId,
-        message: `the subagent was not stopped: ${refused}`,
-      });
+      emit(
+        buildRuntimeEvent(
+          held.state,
+          "runtime.warning",
+          `the subagent was not stopped: ${refused}`,
+          subagentId,
+        ),
+      );
     });
 
   /**
@@ -1301,15 +1352,13 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
     if (held.stopping !== undefined) return Effect.void;
     const { subagents } = held.state;
     if (!subagents.byId.has(subagentId)) {
-      emit({
-        _tag: "runtime.warning",
-        eventId: held.state.mint(),
-        sessionId: held.binding.sessionId,
-        at: held.state.now(),
-        message: truncateMessage(
+      emit(
+        buildRuntimeEvent(
+          held.state,
+          "runtime.warning",
           `subagent ${subagentId} is not known to this process, so nothing was stopped`,
         ),
-      });
+      );
       return Effect.void;
     }
     const targets = [subagentId, ...collectDescendants(subagents, subagentId)];
@@ -1418,6 +1467,10 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       // for ever, and it leaves an approval card on a session that is gone,
       // which nobody can answer.
       withdrawAllParks(held.parks);
+      // A compaction still running has no later message to complete it.
+      const compactionEnd: Array<ProviderEvent> = [];
+      completeCompactionAtEnd(held.state, compactionEnd);
+      for (const event of compactionEnd) emit(event);
       // Compare by identity: a session started again under the same id has a
       // new entry, and that entry belongs to a different pump.
       if (live.get(sessionId) === held) live.delete(sessionId);
@@ -1472,10 +1525,10 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
       spec: SessionSpec,
       ctx: ProviderRunnerContext,
     ): Effect.Effect<SessionBinding, string> =>
-      Effect.suspend(() => {
+      Effect.gen(function* () {
         const binary = ctx.binary;
         if (binary === undefined) {
-          return Effect.fail(`no ${CLAUDE_BINARY} on this machine`);
+          return yield* Effect.fail(`no ${CLAUDE_BINARY} on this machine`);
         }
         const native = resolveNativeSession(spec);
         const binding: SessionBinding = {
@@ -1484,71 +1537,65 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): ProviderAdapter => {
           instanceId: spec.instanceId,
         };
         const input = createPushable<SDKUserMessage>();
-        return Effect.map(
-          Effect.flatMap(buildSessionSettings(ctx, spec.workspaceId !== null), (settings) =>
-            Effect.suspend(() => {
-              // Checked after the settings file is written, which waits: the
-              // check and `live.set` below must follow each other with no
-              // wait between them. Two harnesses under one Hercule session id
-              // would mix up their events and their exits, so the second
-              // start fails.
-              if (live.has(sessionId)) {
-                return Effect.fail(`session ${sessionId} is already running here`);
-              }
-              return Effect.try({
-                try: () =>
-                  seam.stream({
-                    options: buildSessionOptions(
-                      ctx,
-                      spec,
-                      binary,
-                      native.options,
-                      buildCanUseTool(sessionId, spec.accessMode),
-                      buildRefuseMessageToOtherSession(sessionId),
-                      settings,
-                    ),
-                    input,
-                  }),
-                catch: describeError,
-              });
-            }),
-          ),
-          (stream) => {
-            const held: Live = {
-              binding,
-              input,
-              stream,
-              state: buildNormalizingState(
-                sessionId,
-                () => crypto.randomUUID(),
-                now,
-                spec.outputSchema,
-                spec.continue?.subagents,
+        const reportUnknownMessage = yield* captureUnknownMessageReporter(sessionId);
+        const settings = yield* buildSessionSettings(ctx, spec.workspaceId !== null);
+        // Checked after the settings file is written, which waits. From this
+        // check to `live.set` below nothing may wait, so no other start can
+        // slip in between. Two harnesses under one Hercule session id would
+        // mix up their events and their exits, so the second start fails.
+        if (live.has(sessionId)) {
+          return yield* Effect.fail(`session ${sessionId} is already running here`);
+        }
+        const stream = yield* Effect.try({
+          try: () =>
+            seam.stream({
+              options: buildSessionOptions(
+                ctx,
+                spec,
+                binary,
+                native.options,
+                buildCanUseTool(sessionId, spec.accessMode),
+                buildRefuseMessageToOtherSession(sessionId),
+                settings,
               ),
-              attachmentUploader: ctx.attachmentUploader,
-              editMarks: ctx.editMarks,
-              shellItems: new Map(),
-              uploads: new AbortController(),
-              parks: new Map(),
-              stopping: undefined,
-              inputGeneration: 0,
-              model: spec.modelSelection.model,
-            };
-            live.set(sessionId, held);
-            void pumpEvents(sessionId, held);
-            // The event carries the native id because the controller has no
-            // other way to learn it: `sessionsReport` is sent only once, at
-            // hello, so it never includes a session started after that.
-            emit({
-              _tag: "session.started",
-              eventId: held.state.mint(),
-              sessionId,
-              at: held.state.now(),
-              providerRefs: { nativeSessionId: binding.nativeSessionId },
-            });
-            return binding;
-          },
-        );
+              input,
+            }),
+          catch: describeError,
+        });
+        const held: Live = {
+          binding,
+          input,
+          stream,
+          state: buildNormalizingState(
+            sessionId,
+            () => crypto.randomUUID(),
+            now,
+            spec.outputSchema,
+            reportUnknownMessage,
+            spec.continue?.subagents,
+          ),
+          attachmentUploader: ctx.attachmentUploader,
+          editMarks: ctx.editMarks,
+          shellItems: new Map(),
+          uploads: new AbortController(),
+          parks: new Map(),
+          stopping: undefined,
+          inputGeneration: 0,
+          model: spec.modelSelection.model,
+        };
+        live.set(sessionId, held);
+        void pumpEvents(sessionId, held);
+        // The event carries the native id because the controller has no
+        // other way to learn it: `sessionsReport` is sent only once, at
+        // hello, so it never includes a session started after that.
+        emit({
+          _tag: "session.started",
+          eventId: held.state.mint(),
+          sessionId,
+          at: held.state.now(),
+          providerRefs: { nativeSessionId: binding.nativeSessionId },
+        });
+        return binding;
       }),
 
     sendInput: (

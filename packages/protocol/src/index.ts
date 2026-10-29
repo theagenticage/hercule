@@ -108,8 +108,11 @@ export {
  *   decode an async question or the result frame, and an older runner never
  *   sends the result that a newer controller waits for, so the two refuse each
  *   other at hello.
+ * - Version 9 added the `runtime.notice` event. An older controller could not
+ *   decode it and would close the socket on it, again after every reconnect, so
+ *   the two refuse each other at hello.
  */
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 /**
  * The close code and reason the controller uses to end the connection of a

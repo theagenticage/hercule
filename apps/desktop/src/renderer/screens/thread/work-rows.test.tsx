@@ -22,6 +22,7 @@ const buildRow = (fields: Partial<WorkRow> & Pick<WorkRow, "key">): WorkRow => (
   startedAt: "2026-10-10T09:04:00Z",
   result: "completed",
   output: "",
+  outputIsCode: true,
   images: [],
   steps: [],
   canOpen: false,
@@ -127,6 +128,24 @@ describe("WorkRowList", () => {
 
     await userEvent.click(row);
     expect(screen.queryByText(/1 pass/)).toBeNull();
+  });
+
+  it("draws an output that is code in the mono face and prose, such as a summary, wrapped", async () => {
+    const summary = buildRow({
+      key: "row:s",
+      icon: "compress",
+      label: "Compacted the context",
+      target: "",
+      output: "Summary:\n1. The user asked for a login fix.",
+      outputIsCode: false,
+      canOpen: true,
+    });
+    render(<RowsWithOpenKeys rows={[TEST_RUN, summary]} />);
+    await userEvent.click(screen.getByRole("button", { name: "Ran, bun test, failed" }));
+    await userEvent.click(screen.getByRole("button", { name: "Compacted the context" }));
+
+    expect(screen.getByText(/1 pass/).className).toBe("work-output-text");
+    expect(screen.getByText(/login fix/).className).toBe("work-output-text is-prose");
   });
 
   it("shows a step's images under its output, and no empty box for a step with images only", async () => {

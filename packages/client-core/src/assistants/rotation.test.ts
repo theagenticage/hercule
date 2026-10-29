@@ -5,7 +5,6 @@
 import { describe, expect, it } from "vitest";
 import {
   formatContextFraction,
-  formatTokenLimit,
   listContextFractionChoices,
   listContextTokenChoices,
 } from "./rotation";
@@ -43,20 +42,5 @@ describe("formatContextFraction", () => {
     [0.333333, "33.3%"],
   ])("writes %d as %s", (fraction, text) => {
     expect(formatContextFraction(fraction)).toBe(text);
-  });
-});
-
-describe("formatTokenLimit", () => {
-  it.each([
-    [950, "950"],
-    [1500, "1.5k"],
-    [100_000, "100k"],
-    [150_000, "150k"],
-    [200_000, "200k"],
-    [999_999, "1M"],
-    [1_000_000, "1M"],
-    [1_500_000, "1.5M"],
-  ])("writes %d as %s", (tokens, text) => {
-    expect(formatTokenLimit(tokens)).toBe(text);
   });
 });

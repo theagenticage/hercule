@@ -400,8 +400,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 8, the version that added async questions and the answer result", () => {
-    expect(PROTOCOL_VERSION).toBe(8);
+  it("is 9, the version that added the runtime notice", () => {
+    expect(PROTOCOL_VERSION).toBe(9);
   });
 });
 

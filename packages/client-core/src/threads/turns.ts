@@ -15,14 +15,20 @@
  *   transcript order.
  */
 import { Schema } from "effect";
-import { Attachment, type SessionStatus, type TranscriptRow } from "@hercule/contract";
+import {
+  Attachment,
+  type ContextCompactionDetail,
+  type SessionStatus,
+  type TranscriptRow,
+} from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
 import type { AgentState } from "./agent-state";
+import { describeCompactionTarget, readCompactionDetail, readUnknownLabel } from "./item-detail";
 
 type ProviderEvent = TranscriptRow["event"];
 type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
 type ItemKind = ItemStarted["kind"];
-type ItemStatus = Extract<ProviderEvent, { _tag: "item.completed" }>["status"];
+type ItemCompleted = Extract<ProviderEvent, { _tag: "item.completed" }>;
 type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
 
 export interface ThreadItem {
@@ -247,17 +253,102 @@ export const describeToolCallTarget = (detail: unknown): ToolCallTarget => {
 };
 
 /**
- * Returns the row the transcript shows for an item that has just started: its
- * verb, a one-line summary of its detail as the target, and `running` as its
- * result until its `item.completed` row lands.
+ * What a projection pass reads from an `item.started` row: the item to draw,
+ * and the parts of its detail that the pass needs again later. The detail is
+ * decoded here and not again, so a row that streams in never costs a second
+ * decode.
  */
-export const buildThreadItem = (event: ItemStarted): ThreadItem => ({
-  itemId: event.itemId,
-  kind: event.kind,
-  verb: readItemVerb(event.kind),
-  target: summarizeDetail(event.detail),
-  result: "running",
-});
+export interface StartedItem {
+  readonly item: ThreadItem;
+  /**
+   * The label of an `unknown` item (`readUnknownLabel`), or "" when it has
+   * none and for any other kind.
+   */
+  readonly unknownLabel: string;
+  /**
+   * The decoded detail of a `context_compaction` item, or `undefined` for any
+   * other kind and when the detail does not decode. The pass keeps it to merge
+   * with the detail of the row that completes the item (`buildCompletedItem`).
+   */
+  readonly compaction: ContextCompactionDetail | undefined;
+}
+
+/**
+ * Returns the row the transcript shows for an item that has just started,
+ * with the detail parts read on the way (`StartedItem`). The row has the
+ * item's verb and `running` as its result until its `item.completed` row
+ * lands. Its target is:
+ *
+ * - for a compaction, its token counts (`describeCompactionTarget`), or "" when
+ *   its detail does not decode;
+ * - for an `unknown` item that has one, the label the adapter wrote;
+ * - for any other item, a one-line summary of its detail.
+ */
+export const buildStartedItem = (event: ItemStarted): StartedItem => {
+  const unknownLabel = event.kind === "unknown" ? readUnknownLabel(event.detail) : "";
+  const compaction =
+    event.kind === "context_compaction" ? readCompactionDetail(event.detail) : undefined;
+  const target =
+    event.kind === "context_compaction"
+      ? compaction === undefined
+        ? ""
+        : describeCompactionTarget(compaction)
+      : unknownLabel !== ""
+        ? unknownLabel
+        : summarizeDetail(event.detail);
+  return {
+    item: {
+      itemId: event.itemId,
+      kind: event.kind,
+      verb: readItemVerb(event.kind),
+      target,
+      result: "running",
+    },
+    unknownLabel,
+    compaction,
+  };
+};
+
+/**
+ * Returns `item` once its `item.completed` row `event` has landed: its result
+ * is the row's status, and `compaction` is the detail of a compaction item
+ * with the start and the completion merged, or `undefined` for any other kind
+ * and when neither decodes.
+ *
+ * A compaction reports its token counts and summary when it completes, and
+ * may have reported some of them (the trigger, the count before) when it
+ * started. `startedCompaction` is the detail the start decoded to. The merge
+ * lets a field of the completion win over the same field of the start, so a
+ * summary given at the start survives a completion that has none. When the row
+ * holds a compaction detail, the target is read from the merged detail.
+ * Without one, such as on a failed compaction, the target the start gave
+ * stays.
+ *
+ * The desktop's blocks build their items on this too, so both screens end up
+ * with the same words.
+ */
+export const buildCompletedItem = <Item extends ThreadItem>(
+  item: Item,
+  startedCompaction: ContextCompactionDetail | undefined,
+  event: ItemCompleted,
+): { readonly item: Item; readonly compaction: ContextCompactionDetail | undefined } => {
+  const completion =
+    item.kind === "context_compaction" ? readCompactionDetail(event.detail) : undefined;
+  const compaction =
+    startedCompaction === undefined && completion === undefined
+      ? undefined
+      : { ...startedCompaction, ...completion };
+  return {
+    item: {
+      ...item,
+      result: event.status,
+      ...(completion === undefined || compaction === undefined
+        ? {}
+        : { target: describeCompactionTarget(compaction) }),
+    },
+    compaction,
+  };
+};
 
 interface Building {
   turnId: string;
@@ -267,6 +358,8 @@ interface Building {
   userMessages: ThreadUserMessage[];
   items: ThreadItem[];
   itemIndex: Map<string, number>;
+  /** The decoded start detail of each running compaction, by item id (`StartedItem.compaction`). */
+  startedCompactions: Map<string, ContextCompactionDetail>;
   assistantText: string;
   /**
    * The item of the last `assistant_text` delta, used to insert a paragraph
@@ -313,6 +406,7 @@ export const buildTurns = (
       userMessages: [],
       items: [],
       itemIndex: new Map(),
+      startedCompactions: new Map(),
       assistantText: "",
       lastAssistantItemId: null,
     };
@@ -338,8 +432,10 @@ export const buildTurns = (
         if (event.kind === "user_message") {
           turn.userMessages.push(buildUserMessage(event));
         } else if (event.kind !== "assistant_message") {
+          const { item, compaction } = buildStartedItem(event);
           turn.itemIndex.set(event.itemId, turn.items.length);
-          turn.items.push(buildThreadItem(event));
+          turn.items.push(item);
+          if (compaction !== undefined) turn.startedCompactions.set(event.itemId, compaction);
         }
         break;
       }
@@ -348,8 +444,11 @@ export const buildTurns = (
         if (event.kind === "user_message" || event.kind === "assistant_message") break;
         const index = turn.itemIndex.get(event.itemId);
         if (index === undefined) break;
-        const status: ItemStatus = event.status;
-        turn.items[index] = { ...turn.items[index]!, result: status };
+        turn.items[index] = buildCompletedItem(
+          turn.items[index]!,
+          turn.startedCompactions.get(event.itemId),
+          event,
+        ).item;
         break;
       }
       case "content.delta": {

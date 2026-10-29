@@ -42,7 +42,7 @@ import {
   type RepositorySkillFolder,
   type SkippedRepositorySkill,
 } from "@hercule/protocol";
-import { describeError } from "../report";
+import { describeError, escapeControlCharacters } from "../report";
 import type { RegisteredCheckout } from "../workspaces/registry";
 import {
   MAX_LISTING_ENTRIES,
@@ -148,17 +148,6 @@ const isSkillName = Schema.is(SkillName);
 
 /** Returns `text` cut to `MAX_QUOTED_LENGTH` characters, ending in `...` when it was cut. */
 const shorten = (text: string): string => shortenText(text, MAX_QUOTED_LENGTH);
-
-/**
- * Returns `text` with each control character written as `\u{...}`. Text the
- * repository controls would otherwise carry line breaks or direction marks
- * into a client's screen.
- */
-const escapeControlCharacters = (text: string): string =>
-  text.replace(
-    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu,
-    (character) => `\\u{${(character.codePointAt(0) ?? 0).toString(16)}}`,
-  );
 
 /** Builds a skipped entry whose path and reason fit the protocol's limits and carry no control characters. */
 const buildSkipped = (path: string, reason: string): SkippedRepositorySkill => ({
