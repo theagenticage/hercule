@@ -558,6 +558,105 @@ describe("an assistant's Conversation", () => {
     expect(screen.getByText("2 of 2")).toBeTruthy();
   });
 
+  describe("a question in the composer", () => {
+    const ASKED: OpenRequest = {
+      requestId: "req-1",
+      itemId: "tool-1",
+      kind: "question",
+      detail: {
+        questions: [
+          {
+            question: "Run the backup again?",
+            header: "Rerun",
+            options: [{ label: "Yes" }, { label: "No" }],
+            multiSelect: false,
+          },
+        ],
+      },
+    };
+    const RESPOND = `/api/v1/sessions/${SESSION_ID}/respond-to-question`;
+
+    it("takes the answer in the field, replaces Send with the step button beside Stop, and keeps the message as it was", async () => {
+      const user = userEvent.setup();
+      const { calls, context } = await openConversation({
+        readSession: () => buildAdaSession({ openRequests: [ASKED] }),
+        messages: [QUESTION],
+        transcript: buildAdaTranscript(TURN_STARTED),
+        handlers: { [`POST ${RESPOND}`]: { body: buildAdaSession() } },
+      });
+      const draftKey = buildAssistantDraftKey(ADA.id);
+      const { pendingSubmissions } = context.controller!;
+      act(() => {
+        pendingSubmissions.writeText(draftKey, "Half a mess");
+      });
+      const field = screen.getByRole("textbox", { name: "Message" });
+      expect(readFieldPlaceholder(field)).toBe("Or type your own answer");
+      expect(readFieldText(field)).toBe("");
+      expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Send answers" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+
+      await user.type(field, "Only the Sunday one{Enter}");
+
+      await waitFor(() => {
+        expect(calls.filter((call) => call.path === RESPOND).map((call) => call.body)).toEqual([
+          { requestId: "req-1", answers: { Rerun: "Only the Sunday one" } },
+        ]);
+      });
+      expect(pendingSubmissions.read(draftKey).message.text).toBe("Half a mess");
+    });
+
+    it("refuses a pasted image with a notice, and keeps Attach off with the reason", async () => {
+      await openConversation({
+        readSession: () => buildAdaSession({ openRequests: [ASKED] }),
+        messages: [QUESTION],
+        transcript: buildAdaTranscript(TURN_STARTED),
+      });
+      const attach = screen.getByRole("button", { name: "Attach" });
+      expect(attach.title).toBe("An answer takes text only");
+
+      fireEvent.paste(screen.getByRole("textbox", { name: "Message" }), {
+        clipboardData: {
+          files: [new File(["png"], "shot.png", { type: "image/png" })],
+          types: ["Files"],
+          getData: () => "",
+        },
+      });
+
+      expect(document.querySelector(".composer-notice")?.textContent).toBe(
+        "An answer takes text only. Images can be sent in a message.",
+      );
+    });
+
+    it("waits for the user to leave the field before a question takes the composer over", async () => {
+      const user = userEvent.setup();
+      let session = buildAdaSession();
+      const { live } = await openConversation({
+        readSession: () => session,
+        messages: [QUESTION],
+        transcript: buildAdaTranscript(TURN_STARTED),
+      });
+      const field = screen.getByRole("textbox", { name: "Message" });
+      await user.type(field, "Half a mes");
+
+      session = buildAdaSession({ openRequests: [ASKED] });
+      act(() => {
+        live.pushInvalidation("session", [SESSION_ID], { [SESSION_ID]: ADA.mainConversationId });
+      });
+      await waitFor(() => {
+        expect(document.querySelector(".dock")).not.toBeNull();
+      });
+      expect(readFieldText(field)).toBe("Half a mes");
+      expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Send answers" })).toBeNull();
+
+      fireEvent.blur(field);
+
+      expect(screen.getByRole("button", { name: "Send answers" })).toBeTruthy();
+      expect(readFieldText(field)).toBe("");
+    });
+  });
+
   it("answers the current session's Permission Request in the dock, naming its profile", async () => {
     const user = userEvent.setup();
     const session = buildAdaSession({

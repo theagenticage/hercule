@@ -168,6 +168,18 @@ button.pick:not([aria-disabled="true"]):hover,
   box-shadow: inset 0 0 0 1px var(--line);
   margin-left: 4px;
 }
+/* Not in the book. While the composer answers an agent's question, Previous
+   and the step button take Send's place. The group is as high as Send, so the
+   row keeps its height and no control beside it moves. Stop, when it shows,
+   stays at the row's end with its own 4px. */
+.composer-step {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  margin-left: 4px;
+}
 .lip {
   display: flex;
   align-items: center;

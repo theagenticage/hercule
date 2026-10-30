@@ -1,5 +1,5 @@
 import { useRef, type FocusEvent, type JSX, type ReactNode, type Ref } from "react";
-import type { ShelfItem, ShelfModel } from "@hercule/client-core";
+import { PREVIOUS_QUESTION_LABEL, type ShelfItem, type ShelfModel } from "@hercule/client-core";
 import { IMAGE_MIME_TYPES } from "@hercule/contract";
 import { MicIcon } from "../../icons/mic";
 import { PlusIcon } from "../../icons/plus";
@@ -54,6 +54,27 @@ export interface ComposerAttachments {
 /** The types the file picker offers: the image types the controller takes. */
 const PICKER_ACCEPT = IMAGE_MIME_TYPES.join(",");
 
+/**
+ * The step controls that take Send's place while the composer answers an
+ * agent's question: Previous, from the second question on, and the step
+ * button, which shows the next question or sends the answers.
+ *
+ * - `label` is the step button's label, "Next" or "Send answers".
+ * - `showsPrevious` draws Previous. `canGoBack` draws it as off when the
+ *   answers are already sent.
+ * - `ready` draws the step button as off, such as while the shown question is
+ *   unanswered. The callbacks are called whether or not the button is off,
+ *   so the caller decides, as with `onSend`.
+ */
+export interface ComposerStep {
+  readonly label: string;
+  readonly showsPrevious: boolean;
+  readonly canGoBack: boolean;
+  readonly ready: boolean;
+  readonly onPrevious: () => void;
+  readonly onStep: () => void;
+}
+
 /** Stop, drawn in Send's place while a turn runs. */
 export interface ComposerStop {
   /** True while a Stop is on its way, which draws Stop as off. */
@@ -76,6 +97,17 @@ export interface ComposerStop {
  *
  * `error` is drawn in the app's error colour and announced; `notice`, shown
  * only when there is no `error`, is a quiet line, such as why Send is off.
+ *
+ * With `step`, Send gives way to the step controls and Stop, when given,
+ * stays at the row's end beside them: the composer is answering a question
+ * (see `ComposerStep`). Nothing else in the row moves. The caller makes the
+ * field a plain-text one by leaving out `skills`, and keeps images out by
+ * passing `attachments` with an empty `shelf` and an `attachBlockedReason`.
+ *
+ * `historyKey`, `onFieldBlur` and `onComposingChange` are the message field's
+ * own, see `MessageField`: `historyKey` names what `text` is, `onFieldBlur`
+ * is called when the field (not the card) loses the focus, and
+ * `onComposingChange` tells when an IME composition starts and ends.
  *
  * With `skills`, the message field offers the thread's skills (see
  * `MessageField`), and its list opens against the top edge of this card.
@@ -103,6 +135,10 @@ export function ComposerCard({
   fieldId,
   autoFocus,
   skills,
+  step,
+  historyKey,
+  onFieldBlur,
+  onComposingChange,
   sendTitle = "Send",
 }: {
   readonly text: string;
@@ -131,6 +167,11 @@ export function ComposerCard({
   readonly autoFocus?: boolean;
   /** Given when the message field handles Skill References, see `MessageField`. */
   readonly skills?: ComposerSkills | undefined;
+  /** Given while the composer answers a question: replaces Send. */
+  readonly step?: ComposerStep | undefined;
+  readonly historyKey?: string | undefined;
+  readonly onFieldBlur?: (() => void) | undefined;
+  readonly onComposingChange?: ((composing: boolean) => void) | undefined;
   /** The tooltip of Send, which names what sending does. */
   readonly sendTitle?: string;
 }): JSX.Element {
@@ -166,6 +207,9 @@ export function ComposerCard({
         onPasteFiles={taking?.onFiles}
         autoFocus={autoFocus}
         skills={skills}
+        historyKey={historyKey}
+        onBlur={onFieldBlur}
+        onComposingChange={onComposingChange}
       />
       {dragging ? <div className="drop-overlay">Drop images to attach</div> : null}
       <div className="fold">
@@ -207,17 +251,33 @@ export function ComposerCard({
           <button type="button" className="icon-btn" title="Dictate" aria-disabled="true">
             <MicIcon />
           </button>
-          {stop === undefined ? (
-            <button
-              type="button"
-              className={canSend ? "send" : "send send--off"}
-              title={sendTitle}
-              aria-disabled={!canSend || undefined}
-              onClick={onSend}
-            >
-              <SendIcon />
-            </button>
-          ) : (
+          {step === undefined ? null : (
+            <span className="composer-step">
+              {step.showsPrevious ? (
+                <button
+                  type="button"
+                  className="btn btn--quiet btn--sm"
+                  aria-disabled={!step.canGoBack}
+                  data-unready={!step.canGoBack || undefined}
+                  onClick={step.onPrevious}
+                >
+                  {PREVIOUS_QUESTION_LABEL}
+                </button>
+              ) : null}
+              {/* `aria-disabled` rather than `disabled`, so the button keeps the
+                  focus when Next turns into Send answers. */}
+              <button
+                type="button"
+                className="btn btn--accent btn--sm"
+                aria-disabled={!step.ready}
+                data-unready={!step.ready || undefined}
+                onClick={step.onStep}
+              >
+                {step.label}
+              </button>
+            </span>
+          )}
+          {stop !== undefined ? (
             <button
               type="button"
               className="stop"
@@ -227,7 +287,17 @@ export function ComposerCard({
             >
               <StopIcon size={14} />
             </button>
-          )}
+          ) : step === undefined ? (
+            <button
+              type="button"
+              className={canSend ? "send" : "send send--off"}
+              title={sendTitle}
+              aria-disabled={!canSend || undefined}
+              onClick={onSend}
+            >
+              <SendIcon />
+            </button>
+          ) : null}
         </div>
         {error !== null ? (
           <p className="composer-error" role="alert">
@@ -265,7 +335,8 @@ export function ComposerCard({
  *   is what the composer covers of the messages, less the 18px the stack
  *   sits above the pane's bottom edge.
  * - `error` is the line under the row, when the last send or Stop failed.
- * - `notice`, `attachments` and `skills` are the card's, see `ComposerCard`.
+ * - `notice`, `attachments`, `skills`, `step`, `historyKey`, `onFieldBlur` and
+ *   `onComposingChange` are the card's, see `ComposerCard`.
  *   While the card's skill list is open, the stack above the card is hidden
  *   (see composer.css), so the list does not cover half of it.
  */
@@ -281,6 +352,10 @@ export function ComposerFrame({
   notice = null,
   attachments,
   skills,
+  step,
+  historyKey,
+  onFieldBlur,
+  onComposingChange,
   start,
   note,
   end,
@@ -302,6 +377,10 @@ export function ComposerFrame({
   readonly notice?: string | null;
   readonly attachments?: ComposerAttachments | undefined;
   readonly skills?: ComposerSkills | undefined;
+  readonly step?: ComposerStep | undefined;
+  readonly historyKey?: string | undefined;
+  readonly onFieldBlur?: (() => void) | undefined;
+  readonly onComposingChange?: ((composing: boolean) => void) | undefined;
   /** The controls after Attach. */
   readonly start?: ReactNode;
   /** The text that fills the space between `start` and `end`, so no control moves when it shows. */
@@ -370,6 +449,10 @@ export function ComposerFrame({
           notice={notice}
           attachments={attachments}
           skills={skills}
+          step={step}
+          historyKey={historyKey}
+          onFieldBlur={onFieldBlur}
+          onComposingChange={onComposingChange}
           start={start}
           note={note}
           end={end}

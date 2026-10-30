@@ -14,9 +14,10 @@
  */
 import { createRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { findResumeBlockedReason } from "@hercule/client-core";
+import { findResumeBlockedReason, queryKeys, TYPING_PAUSE_MS } from "@hercule/client-core";
 import type {
   Attachment,
   ProviderInstance,
@@ -40,6 +41,7 @@ import {
   type ThreadRecords,
 } from "../../app/testing";
 import { readRecentModels } from "../../app/recent-models";
+import { useRequestDraft } from "../../app/request-drafts";
 import { ThreadComposer } from "./composer";
 import { renderThreadPart } from "./testing";
 
@@ -226,6 +228,33 @@ const renderLeavableComposer = async (thread: ThreadRecords) => {
     },
   );
   return { ...rendered, answer: held.answer };
+};
+
+/** A button that unfolds the async question `req-2`, as the dock's Answer button does. */
+function UnfoldButton({ sessionId }: { readonly sessionId: string }) {
+  const [, changeDraft] = useRequestDraft(sessionId, "req-2");
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        changeDraft((draft) => ({ ...draft, unfolded: true }));
+      }}
+    >
+      Unfold
+    </button>
+  );
+}
+
+/**
+ * Has the composer read the session again, as it does after a push from the
+ * controller, and waits until the new Requests are drawn. The query library
+ * hands a result to the components on a timer, so the wait covers one.
+ */
+const refreshSession = async (queryClient: QueryClient, sessionId: string): Promise<void> => {
+  await act(async () => {
+    await queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 };
 
 describe("the composer", () => {
@@ -993,5 +1022,432 @@ describe("the skills in the composer", () => {
     const { calls } = await renderComposer(thread);
 
     expect(readSkillReads(calls, thread)).toEqual([]);
+  });
+});
+
+describe("the composer answering a question", () => {
+  const STORAGE = {
+    question: "Which storage should drafts use?",
+    header: "Storage",
+    options: [{ label: "localStorage", description: "small" }, { label: "IndexedDB" }],
+    multiSelect: false,
+  } as const;
+  const NOTES = {
+    question: "Anything else the agent should know?",
+    header: "Notes",
+    options: [],
+    multiSelect: false,
+  } as const;
+  const ASK: SessionRequest = {
+    requestId: "req-2",
+    itemId: "tool-2",
+    kind: "question",
+    detail: { questions: [STORAGE, NOTES] },
+  };
+
+  /** The waiting thread, busy, whose only Request is the two questions. */
+  const ASKED = changeSession(THREAD_FIXTURES.waiting, { openRequests: [ASK] });
+  const RESPOND = `POST /api/v1/sessions/${ASKED.session.id}/respond-to-question`;
+
+  /** Returns the bodies the composer sent with `session.respondToQuestion`, oldest first. */
+  const readAnswers = (calls: readonly Call[]): readonly unknown[] =>
+    calls.filter((call) => `${call.method} ${call.path}` === RESPOND).map((call) => call.body);
+
+  /** Returns the clipboard that holds `text` and no files. */
+  const buildTextClipboard = (text: string): object => ({
+    files: [],
+    types: ["text/plain"],
+    getData: (type: string) => (type === "text/plain" ? text : ""),
+  });
+
+  /** Undoes as the browser's undo command does. */
+  const undo = (): void => {
+    fireEvent(
+      readField(),
+      new InputEvent("beforeinput", { inputType: "historyUndo", cancelable: true }),
+    );
+  };
+
+  /**
+   * Renders the composer for `thread` and returns `ask`, which changes the
+   * Requests the controller reports as open and waits until the composer has
+   * read them, as a push from the controller does.
+   */
+  const renderAsking = async (thread: ThreadRecords) => {
+    let openRequests = thread.session.openRequests;
+    const rendered = await renderComposer(thread, {
+      handlers: {
+        [`GET /api/v1/sessions/${thread.session.id}`]: () => ({
+          body: { ...thread.session, openRequests },
+        }),
+        [RESPOND]: { body: thread.session },
+      },
+    });
+    const ask = async (requests: Session["openRequests"]): Promise<void> => {
+      openRequests = requests;
+      await refreshSession(rendered.queryClient, thread.session.id);
+    };
+    return { ...rendered, ask };
+  };
+
+  it("types the answer in the field, steps with ⏎, and sends from the last question with Stop beside the step button", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderAsking(ASKED);
+    expect(readFieldPlaceholder(readField())).toBe("Or type your own answer");
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+
+    await user.type(readField(), "Whatever is closest{Enter}");
+
+    expect(readFieldPlaceholder(readField())).toBe("Type your answer");
+    expect(readText()).toBe("");
+    expect(screen.getByRole("button", { name: "Previous" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send answers" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    await user.type(readField(), "First line{Shift>}{Enter}{/Shift}second line{Enter}");
+
+    await waitFor(() => {
+      expect(readAnswers(calls)).toEqual([
+        {
+          requestId: "req-2",
+          answers: { Storage: "Whatever is closest", Notes: "First line\nsecond line" },
+        },
+      ]);
+    });
+    // Locked until the controller closes the Request.
+    expect(readField().getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("button", { name: "Send answers" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+  });
+
+  it("does nothing on ⏎ or the step button for an unanswered question, and does not skip it", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderAsking(ASKED);
+    await user.click(readField());
+
+    await user.keyboard("{Enter}");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(readFieldPlaceholder(readField())).toBe("Or type your own answer");
+    expect(screen.getByRole("button", { name: "Next" }).getAttribute("aria-disabled")).toBe("true");
+    // A key that does step proves the keys before did not send.
+    await user.type(readField(), "IndexedDB{Enter}");
+    await user.type(readField(), "Nothing{Enter}");
+    await waitFor(() => {
+      expect(readAnswers(calls)).toHaveLength(1);
+    });
+  });
+
+  it("steps with the step button and the menu's Send, and goes back with Previous, keeping each answer", async () => {
+    const user = userEvent.setup();
+    const { calls, sendMenuCommand } = await renderAsking(ASKED);
+
+    await user.type(readField(), "Postgres");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.type(readField(), "Mind the migration");
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+
+    expect(readText()).toBe("Postgres");
+    expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(readText()).toBe("Mind the migration");
+
+    act(() => {
+      sendMenuCommand("send");
+    });
+
+    await waitFor(() => {
+      expect(readAnswers(calls)).toEqual([
+        { requestId: "req-2", answers: { Storage: "Postgres", Notes: "Mind the migration" } },
+      ]);
+    });
+  });
+
+  it("goes back from a blank question, and shows why the controller refused the answers on the error line", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderComposer(ASKED, {
+      handlers: {
+        [RESPOND]: { status: 409, body: buildErrorBody("invalid_state", "The request is closed.") },
+      },
+    });
+    await user.type(readField(), "Postgres{Enter}");
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(readText()).toBe("");
+
+    await user.type(readField(), "Mind the migration{Enter}");
+
+    expect((await screen.findByRole("alert")).textContent).toBe("The request is closed.");
+    expect(readAnswers(calls)).toHaveLength(1);
+    // The failure unlocks the answers, so the user can send them again.
+    expect(readField().getAttribute("aria-disabled")).toBeNull();
+    expect(screen.getByRole("button", { name: "Send answers" }).getAttribute("aria-disabled")).toBe(
+      "false",
+    );
+  });
+
+  it("keeps the half-typed message as it was, and shows it again once the Request closes", async () => {
+    const user = userEvent.setup();
+    const { calls, pendingSubmissions, ask } = await renderAsking(ASKED);
+    act(() => {
+      pendingSubmissions.writeText(ASKED.session.id, "Half a mess");
+    });
+    expect(readText()).toBe("");
+
+    await user.type(readField(), "Postgres{Enter}Mind the migration{Enter}");
+    await waitFor(() => {
+      expect(readAnswers(calls)).toHaveLength(1);
+    });
+    expect(pendingSubmissions.read(ASKED.session.id).message.text).toBe("Half a mess");
+    await ask([]);
+
+    expect(readText()).toBe("Half a mess");
+    expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send answers" })).toBeNull();
+  });
+
+  it("starts a new undo history on the switch, so undo never brings the message back into the answer", async () => {
+    const user = userEvent.setup();
+    const { ask, pendingSubmissions } = await renderAsking(
+      changeSession(ASKED, { openRequests: [] }),
+    );
+    act(() => {
+      pendingSubmissions.writeText(ASKED.session.id, "Draft");
+    });
+    // The message is deleted again, so the answer starts empty as well: the
+    // field has no text to replace, and only the undo history can leak it.
+    readField().focus();
+    await user.keyboard("{Backspace>5/}");
+    expect(readText()).toBe("");
+    fireEvent.blur(readField());
+    await ask([ASK]);
+    expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+
+    undo();
+
+    expect(readText()).toBe("");
+  });
+
+  it("offers no skills and draws no chips in an answer", async () => {
+    const user = userEvent.setup();
+    const skills = [
+      { source: "library", name: "review", description: "Review a diff" },
+    ] as unknown as readonly SessionSkill[];
+    await renderAsking({ ...ASKED, skills });
+
+    await user.type(readField(), "Use $review");
+
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.querySelector("[data-skill]")).toBeNull();
+    expect(readText()).toBe("Use $review");
+  });
+
+  it("refuses a pasted image with a notice, keeps Attach off with the reason, and puts nothing on the shelf", async () => {
+    const user = userEvent.setup();
+    const { calls, pendingSubmissions } = await renderAsking(ASKED);
+    const attach = screen.getByRole("button", { name: "Attach" });
+    expect(attach.getAttribute("aria-disabled")).toBe("true");
+    expect(attach.title).toBe("An answer takes text only");
+
+    fireEvent.paste(readField(), {
+      clipboardData: {
+        files: [buildImage("shot.png")],
+        types: ["Files"],
+        getData: () => "",
+      },
+    });
+
+    expect(readNotice()).toBe("An answer takes text only. Images can be sent in a message.");
+    expect(pendingSubmissions.read(ASKED.session.id).message.attachments).toEqual([]);
+    expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
+    expect(calls.some((call) => call.path === "/api/v1/attachments")).toBe(false);
+    // The notice goes with the next key.
+    await user.type(readField(), "x");
+    expect(readNotice()).toBe("");
+  });
+
+  it("shows the length notice and turns the step button off over the limit, and still goes back", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderAsking(ASKED);
+    await user.type(readField(), "Postgres{Enter}");
+
+    fireEvent.paste(readField(), { clipboardData: buildTextClipboard("x".repeat(4097)) });
+
+    expect(readNotice()).toBe("This answer is longer than 4,096 characters.");
+    expect(screen.getByRole("button", { name: "Send answers" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+    await user.keyboard("{Enter}");
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(readText()).toBe("Postgres");
+    expect(readAnswers(calls)).toEqual([]);
+  });
+
+  it("answers an async question only once it is unfolded, and then draws no Stop while the session is idle", async () => {
+    const user = userEvent.setup();
+    const idle = changeSession(IDLE, { openRequests: [{ ...ASK, async: true }] });
+    await renderThreadPart(
+      ({ sessionId }) => (
+        <>
+          <UnfoldButton sessionId={sessionId} />
+          <ThreadComposer
+            sessionId={sessionId}
+            shrunk={false}
+            onFocusChange={() => {}}
+            scrollTranscriptToBottom={() => {}}
+          />
+        </>
+      ),
+      { thread: idle, handlers: { "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] } } },
+    );
+    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
+    expect(readFieldPlaceholder(readField())).toBe("Reply…");
+
+    await user.click(screen.getByRole("button", { name: "Unfold" }));
+
+    expect(readFieldPlaceholder(readField())).toBe("Or type your own answer");
+    expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
+});
+
+describe("the typing guard in the composer", () => {
+  const ASK: SessionRequest = {
+    requestId: "req-2",
+    itemId: "tool-2",
+    kind: "question",
+    detail: {
+      questions: [
+        { question: "Which storage?", header: "Storage", options: [], multiSelect: false },
+      ],
+    },
+  };
+  const THREAD = changeSession(IDLE, { openRequests: [] });
+
+  /**
+   * Renders the idle thread, types "Half a mes" as a message, and has the
+   * controller report the question. Returns the user, the calls, and the
+   * pending submissions.
+   */
+  const typeThenAsk = async () => {
+    const user = userEvent.setup();
+    let openRequests: Session["openRequests"] = [];
+    const rendered = await renderComposer(THREAD, {
+      handlers: {
+        [`GET /api/v1/sessions/${THREAD.session.id}`]: () => ({
+          body: { ...THREAD.session, openRequests },
+        }),
+      },
+    });
+    await user.type(readField(), "Half a mes");
+    openRequests = [ASK];
+    await refreshSession(rendered.queryClient, THREAD.session.id);
+    return { ...rendered, user };
+  };
+
+  /** Checks that the composer still edits the message, and shows the message text. */
+  const expectMessageMode = (): void => {
+    expect(readText()).toBe("Half a mes");
+    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
+  };
+
+  /** Checks that the composer answers the question, with an empty answer. */
+  const expectAnswerMode = (): void => {
+    expect(readText()).toBe("");
+    expect(screen.getByRole("button", { name: "Send answers" })).toBeTruthy();
+  };
+
+  it("keeps a question from taking the composer while the user types, and gives it after a pause", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    try {
+      await typeThenAsk();
+      expectMessageMode();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(TYPING_PAUSE_MS - 100);
+      });
+      expectMessageMode();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(TYPING_PAUSE_MS);
+      });
+
+      expectAnswerMode();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives the composer to the question when the field loses the focus", async () => {
+    await typeThenAsk();
+    expectMessageMode();
+
+    fireEvent.blur(readField());
+
+    expectAnswerMode();
+  });
+
+  it("gives the composer to the question when the user sends the message", async () => {
+    const user = userEvent.setup();
+    const { calls } = await typeThenAsk();
+
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(readSent(calls, THREAD)).toEqual([{ text: "Half a mes" }]);
+    });
+    expectAnswerMode();
+  });
+
+  it("gives the composer to the question after a send that fails", async () => {
+    const user = userEvent.setup();
+    let openRequests: Session["openRequests"] = [];
+    const rendered = await renderComposer(THREAD, {
+      handlers: {
+        [`GET /api/v1/sessions/${THREAD.session.id}`]: () => ({
+          body: { ...THREAD.session, openRequests },
+        }),
+        [buildInputOperation(THREAD)]: {
+          status: 409,
+          body: buildErrorBody("invalid_state", "Not now."),
+        },
+      },
+    });
+    await user.type(readField(), "Half a mes");
+    openRequests = [ASK];
+    await refreshSession(rendered.queryClient, THREAD.session.id);
+    expectMessageMode();
+
+    await user.keyboard("{Enter}");
+
+    // The failed message is kept for the user, and the question has the field.
+    await waitFor(() => {
+      expect(rendered.pendingSubmissions.read(THREAD.session.id).failure).toBe("Not now.");
+    });
+    expectAnswerMode();
+  });
+
+  it("keeps holding while an IME composition is open, however long the pause", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    try {
+      await typeThenAsk();
+      fireEvent.compositionStart(readField());
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(TYPING_PAUSE_MS * 3);
+      });
+      expectMessageMode();
+      fireEvent.compositionEnd(readField());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(TYPING_PAUSE_MS);
+      });
+
+      expectAnswerMode();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

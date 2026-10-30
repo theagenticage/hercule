@@ -1,14 +1,16 @@
 /**
  * Tests how a composer's card takes images: Attach opens the file picker,
  * and pasted, dropped and picked files reach the caller. A card that takes
- * no images, such as an assistant's Conversation's, keeps Attach off.
+ * no images, such as an assistant's Conversation's, keeps Attach off. Also
+ * tests the step controls that take Send's place while the composer answers a
+ * question, and the message field's blur and composition reports.
  */
 import { describe, expect, it, vi, type Mock } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ShelfItem } from "@hercule/client-core";
 import { readFieldText } from "../../app/testing";
-import { ComposerCard, type ComposerAttachments } from "./composer-frame";
+import { ComposerCard, type ComposerAttachments, type ComposerStep } from "./composer-frame";
 
 const IMAGE = new File(["png"], "shot.png", { type: "image/png" });
 
@@ -147,5 +149,116 @@ describe("the composer card's images", () => {
     );
     fireEvent.paste(screen.getByRole("textbox"), { clipboardData: buildFileClipboard([IMAGE]) });
     expect(attachments.onFiles).not.toHaveBeenCalled();
+  });
+});
+
+describe("the composer card's step controls", () => {
+  const buildStep = (over: Partial<ComposerStep> = {}): ComposerStep => ({
+    label: "Next",
+    showsPrevious: true,
+    canGoBack: true,
+    ready: true,
+    onPrevious: vi.fn<() => void>(),
+    onStep: vi.fn<() => void>(),
+    ...over,
+  });
+
+  const renderStepCard = (step: ComposerStep | undefined, stop = false) =>
+    render(
+      <ComposerCard
+        text=""
+        onTextChange={() => {}}
+        placeholder="Message"
+        readOnly={false}
+        canSend
+        onSend={() => {}}
+        stop={stop ? { stopping: false, onStop: () => {} } : undefined}
+        error={null}
+        step={step}
+        fieldRef={null}
+      />,
+    );
+
+  /** Returns the names of the buttons at the end of the row, after Dictate. */
+  const readEndOfRow = (): readonly string[] =>
+    [
+      ...document.querySelectorAll(
+        ".composer-row > button, .composer-row > .composer-step > button",
+      ),
+    ]
+      .slice(2)
+      .map((button) => button.getAttribute("title") ?? button.textContent ?? "");
+
+  it("replaces Send with Previous and the step button, and calls what each one is for", async () => {
+    const user = userEvent.setup();
+    const step = buildStep();
+    renderStepCard(step);
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(readEndOfRow()).toEqual(["Previous", "Next"]);
+
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(step.onPrevious).toHaveBeenCalledOnce();
+    expect(step.onStep).toHaveBeenCalledOnce();
+  });
+
+  it("leaves Previous out on the first question, and labels the step button as given", () => {
+    renderStepCard(buildStep({ showsPrevious: false, label: "Send answers" }));
+
+    expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Send answers" })).toBeTruthy();
+  });
+
+  it("draws the step button and Previous as off when they cannot work, and keeps them in the tab order", () => {
+    renderStepCard(buildStep({ ready: false, canGoBack: false }));
+
+    for (const name of ["Previous", "Next"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      expect(button.hasAttribute("data-unready")).toBe(true);
+      expect((button as HTMLButtonElement).disabled).toBe(false);
+    }
+  });
+
+  it("keeps Stop at the end of the row, beside the step controls", () => {
+    renderStepCard(buildStep(), true);
+
+    expect(readEndOfRow()).toEqual(["Previous", "Next", "Stop"]);
+  });
+
+  it("draws Send when there is no step", () => {
+    renderStepCard(undefined);
+
+    expect(readEndOfRow()).toEqual(["Send"]);
+  });
+});
+
+describe("the composer card's message field reports", () => {
+  it("reports when the field loses the focus, and when a composition starts and ends", () => {
+    const onFieldBlur = vi.fn<() => void>();
+    const onComposingChange = vi.fn<(composing: boolean) => void>();
+    render(
+      <ComposerCard
+        text=""
+        onTextChange={() => {}}
+        placeholder="Message"
+        readOnly={false}
+        canSend
+        onSend={() => {}}
+        error={null}
+        onFieldBlur={onFieldBlur}
+        onComposingChange={onComposingChange}
+        fieldRef={null}
+      />,
+    );
+    const field = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.compositionStart(field);
+    fireEvent.compositionEnd(field);
+    fireEvent.blur(field);
+
+    expect(onComposingChange.mock.calls).toEqual([[true], [false]]);
+    expect(onFieldBlur).toHaveBeenCalledOnce();
   });
 });
