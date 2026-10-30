@@ -14,7 +14,7 @@ import {
   type Thread,
   readErrorMessage,
 } from "@hercule/client-core";
-import { ImageLightbox } from "@hercule/ui";
+import { cn, ImageLightbox } from "@hercule/ui";
 import {
   localRunnerQuery,
   projectsQuery,
@@ -28,14 +28,16 @@ import { AccessModeSelector } from "./access-mode-selector";
 import { AttachmentShelf, DropOverlay } from "./attachment-shelf";
 import { ComposerCard } from "./composer-card";
 import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
-import { AttachButton, SendButton, VoiceButton } from "./controls";
+import { AttachButton, PreviousButton, SendButton, StepButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
 import { Lip } from "./lip";
 import { buildLoginSlot } from "./login-slot";
 import { ModelOptionsSelector } from "./model-options-selector";
 import { ModelSelector } from "./model-selector";
 import { MessageBox } from "./message-box";
+import { useComposerAnswer } from "./use-composer-answer";
 import { useComposerModel } from "./use-composer-model";
+import { useTypingGuard } from "./use-typing-guard";
 
 type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "branch" | "machine";
 
@@ -47,6 +49,15 @@ const isFileDrag = (event: DragEvent): boolean => event.dataTransfer.types.inclu
  * The same component serves a draft and an active thread. `useComposerModel`
  * handles the difference, and every lock, dimmed row and blocker comes from
  * `buildComposerFields`.
+ *
+ * While the Request dock shows a question the composer answers, the composer
+ * is in answer mode (`useComposerAnswer`): the text field shows and edits the
+ * shown question's own answer, and the step button takes the place of Send.
+ * Answers are plain text, so Attach is off, the shelf is hidden and a pasted
+ * or dropped file is refused. The message, its images and the model and
+ * option picks are not touched, and the message comes back when answer mode
+ * ends. A question that arrives while the user is typing a message waits for
+ * the user to pause (`useTypingGuard`).
  */
 export function Composer({
   thread,
@@ -84,6 +95,12 @@ export function Composer({
   // The position of the shelf image shown large, or null when none is.
   const [preview, setPreview] = useState<number | null>(null);
   const model = useComposerModel(thread, catalogs, client, uploads, onSend);
+  const guard = useTypingGuard();
+  const answer = useComposerAnswer(
+    client,
+    thread.kind === "active" ? thread.session : null,
+    guard.holding,
+  );
   const fields = model.fields;
   const { config } = model.resolved;
   const pending = buildPendingModelNote(model.resolved);
@@ -124,7 +141,20 @@ export function Composer({
   const attachDisabledReason =
     model.readOnly ??
     (fields.model.imageInput !== null ? null : `${fields.model.modelName} does not accept images`);
-  const notice = model.refusal ?? model.attachmentBlock;
+  const submitMessage = (): void => {
+    // Even a send that fails ends the typing guard: the user has finished the message.
+    guard.release();
+    model.submit();
+  };
+  const notice = answer === null ? (model.refusal ?? model.attachmentBlock) : answer.notice;
+  const noticeFailed = answer === null ? model.refusal !== null : answer.refusedFile;
+  // Each mode shows its own failure. A message that failed to send is shown
+  // when the message comes back, and a failed answer is not shown beside the
+  // message. A failure to stop the agent belongs to both.
+  const stopFailure = model.stopError === null ? null : readErrorMessage(model.stopError);
+  const sendFailure = model.sendError === null ? null : readErrorMessage(model.sendError);
+  const errorText =
+    answer === null ? (sendFailure ?? stopFailure) : (answer.failure ?? stopFailure);
   return (
     // A draft shows its sentence above the card, and the sentence takes the free space.
     <div className={fields.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
@@ -141,10 +171,12 @@ export function Composer({
           const files = [...event.clipboardData.files];
           if (files.length === 0 || model.readOnly !== null) return;
           event.preventDefault();
-          model.attachFiles(files);
+          if (answer === null) model.attachFiles(files);
+          else answer.attachments.onFiles();
         }}
         onDragEnter={(event) => {
-          if (isFileDrag(event) && model.readOnly === null) setDragging(true);
+          // An answer takes no files, so it offers no place to drop them.
+          if (isFileDrag(event) && model.readOnly === null && answer === null) setDragging(true);
         }}
         onDragOver={(event) => {
           // Without this the browser refuses the drop and opens the file instead.
@@ -159,89 +191,173 @@ export function Composer({
           setDragging(false);
           if (!isFileDrag(event) || model.readOnly !== null) return;
           event.preventDefault();
-          model.attachFiles([...event.dataTransfer.files]);
+          if (answer === null) model.attachFiles([...event.dataTransfer.files]);
+          else answer.attachments.onFiles();
         }}
       >
         <ComposerCard>
           {dragging ? <DropOverlay /> : null}
-          <AttachmentShelf
-            shelf={shelf}
-            model={fields.model}
-            onPreview={setPreview}
-            onRemove={model.removeAttachment}
-            onRetry={model.retryAttachment}
-          />
-          <MessageBox
-            value={model.message.text}
-            placeholder={model.placeholder}
-            disabled={model.readOnly !== null}
-            onChange={model.setMessage}
-            onSubmit={() => {
-              if (canSend) model.submit();
-            }}
-          />
-          <div className="flex items-center gap-1.5">
-            <AttachButton disabledReason={attachDisabledReason} onFiles={model.attachFiles} />
-            <AccessModeSelector
-              mode={fields.accessMode.value}
-              items={fields.accessMode.rows}
-              locked={fields.accessMode.locked}
-              open={open === "accessMode"}
-              onOpenChange={(next) => {
-                handleOpenChange("accessMode", next);
-              }}
-              onPick={(mode) => {
-                model.recordThreadChoice({ kind: "accessMode", value: mode });
-              }}
+          {answer === null ? (
+            <AttachmentShelf
+              shelf={shelf}
+              model={fields.model}
+              onPreview={setPreview}
+              onRemove={model.removeAttachment}
+              onRetry={model.retryAttachment}
             />
-            {pending === null ? null : (
-              <span className="ml-1 font-mono text-[11px] text-attn">{pending}</span>
-            )}
-            <div className="ml-auto flex min-w-0 items-center gap-1.5">
-              {fields.options === null ? null : (
-                <ModelOptionsSelector
-                  descriptors={fields.options}
-                  selected={config.options}
-                  label={buildOptionsLabel(fields.options, config.options)}
-                  modelName={fields.model.pill.name}
-                  disabled={model.readOnly !== null}
-                  open={open === "options"}
+          ) : null}
+          <MessageBox
+            value={answer === null ? model.message.text : answer.text}
+            placeholder={answer === null ? model.placeholder : answer.placeholder}
+            readOnly={model.readOnly !== null || (answer?.locked ?? false)}
+            onChange={(text) => {
+              if (answer !== null) {
+                answer.onTextChange(text);
+                return;
+              }
+              guard.holdAfterEdit();
+              model.setMessage(text);
+            }}
+            onSubmit={() => {
+              if (answer !== null) answer.step.onStep();
+              else if (canSend) submitMessage();
+              else guard.release();
+            }}
+            onBlur={guard.release}
+            // Only a composition in the Message Draft holds off a question.
+            // While answering, the hold would make the composer show the
+            // Message Draft instead of the answer being composed.
+            onCompositionStart={
+              answer === null
+                ? () => {
+                    guard.reportComposing(true);
+                  }
+                : undefined
+            }
+            onCompositionEnd={
+              answer === null
+                ? () => {
+                    guard.reportComposing(false);
+                  }
+                : undefined
+            }
+          />
+          {/* Two clusters in a wrapping row. The pickers (Attach, access mode,
+              options, model) are one cluster and the actions (dictation,
+              Stop, Previous, the step or send button) are another, which never
+              shrinks or splits. The pickers' flex basis is the least they need:
+              Attach, a few characters of the access mode, the options trigger
+              and a model pill with its logo and a few characters. While that
+              and the actions fit on one line, the pickers grow into the free
+              space and the model controls sit next to the actions. Otherwise
+              the actions wrap to their own line, right-aligned, and the
+              pickers keep the whole line above them to shrink into. Nothing
+              is measured in JavaScript. */}
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
+            <div className="flex min-w-0 flex-[1_1_304px] items-center gap-1.5">
+              <AttachButton
+                disabledReason={
+                  answer === null ? attachDisabledReason : answer.attachments.attachBlockedReason
+                }
+                // The picker can come back after a question took the composer
+                // over, so the mode is read when the files arrive, as for paste.
+                onFiles={(files) => {
+                  if (answer === null) model.attachFiles(files);
+                  else answer.attachments.onFiles();
+                }}
+              />
+              {/* The access mode is cut with an ellipsis, but not below about five characters. */}
+              <span className="flex min-w-[80px] shrink">
+                <AccessModeSelector
+                  mode={fields.accessMode.value}
+                  items={fields.accessMode.rows}
+                  locked={fields.accessMode.locked}
+                  open={open === "accessMode"}
                   onOpenChange={(next) => {
-                    handleOpenChange("options", next);
+                    handleOpenChange("accessMode", next);
                   }}
-                  onPick={(id, value) => {
-                    model.recordThreadChoice({ kind: "option", id, value });
+                  onPick={(mode) => {
+                    model.recordThreadChoice({ kind: "accessMode", value: mode });
                   }}
-                />
-              )}
-              <span ref={pill} className="inline-flex min-w-0">
-                <ModelSelector
-                  menu={models}
-                  filter={filter}
-                  onFilter={setFilter}
-                  pill={fields.model.pill}
-                  disabled={model.readOnly !== null}
-                  open={open === "model"}
-                  onOpenChange={(next) => {
-                    handleOpenChange("model", next);
-                  }}
-                  onChoose={model.recordThreadChoice}
-                  loginSlot={login}
                 />
               </span>
+              {pending === null ? null : (
+                <span className="ml-1 min-w-0 truncate font-mono text-[11px] text-attn">
+                  {pending}
+                </span>
+              )}
+              {/* The group's minimum is the sum of its children's: the options
+                  trigger's 84px, the gap, and the pill's 96px. */}
+              <div
+                className={cn(
+                  "ml-auto flex shrink items-center gap-1.5",
+                  fields.options === null ? "min-w-24" : "min-w-[186px]",
+                )}
+              >
+                {fields.options === null ? null : (
+                  <ModelOptionsSelector
+                    descriptors={fields.options}
+                    selected={config.options}
+                    label={buildOptionsLabel(fields.options, config.options)}
+                    modelName={fields.model.pill.name}
+                    disabled={model.readOnly !== null}
+                    open={open === "options"}
+                    onOpenChange={(next) => {
+                      handleOpenChange("options", next);
+                    }}
+                    onPick={(id, value) => {
+                      model.recordThreadChoice({ kind: "option", id, value });
+                    }}
+                  />
+                )}
+                {/* The pill is cut with an ellipsis, but never below its logo and a few characters. */}
+                <span ref={pill} className="inline-flex min-w-24 shrink">
+                  <ModelSelector
+                    menu={models}
+                    filter={filter}
+                    onFilter={setFilter}
+                    pill={fields.model.pill}
+                    disabled={model.readOnly !== null}
+                    open={open === "model"}
+                    onOpenChange={(next) => {
+                      handleOpenChange("model", next);
+                    }}
+                    onChoose={model.recordThreadChoice}
+                    loginSlot={login}
+                  />
+                </span>
+              </div>
             </div>
-            <VoiceButton />
-            {model.busy ? <StopButton title={SESSION_STOP_TITLE} onStop={model.stop} /> : null}
-            <SendButton tip={model.sendTip} disabled={!canSend} onSend={model.submit} />
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              <VoiceButton />
+              {model.busy ? <StopButton title={SESSION_STOP_TITLE} onStop={model.stop} /> : null}
+              {answer === null ? (
+                <SendButton tip={model.sendTip} disabled={!canSend} onSend={submitMessage} />
+              ) : (
+                <>
+                  {answer.step.showsPrevious ? (
+                    <PreviousButton
+                      disabled={!answer.step.canGoBack}
+                      onPrevious={answer.step.onPrevious}
+                    />
+                  ) : null}
+                  <StepButton
+                    label={answer.step.label}
+                    disabled={!answer.step.ready || model.readOnly !== null}
+                    onStep={answer.step.onStep}
+                  />
+                </>
+              )}
+            </div>
           </div>
-          {model.error === null ? null : (
+          {errorText === null ? null : (
             <p className="text-fine text-fail" role="alert">
-              {readErrorMessage(model.error)}
+              {errorText}
             </p>
           )}
           {notice === null ? null : (
             <p
-              className={model.refusal === null ? "text-fine text-muted" : "text-fine text-fail"}
+              className={noticeFailed ? "text-fine text-fail" : "text-fine text-muted"}
               role="status"
             >
               {notice}

@@ -20,6 +20,7 @@ import {
   holdsMessageContent,
   formatAccessMode,
   isMutationRunning,
+  locateShownRequest,
   markShelfItemsExpired,
   queryKeys,
   readErrorMessage,
@@ -43,6 +44,7 @@ import {
   workspacesQuery,
 } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
+import { useShownRequestId } from "../../app/request-drafts";
 import { BranchIcon } from "../../icons/branch";
 import { LaptopIcon } from "../../icons/laptop";
 import { ShieldIcon } from "../../icons/shield";
@@ -50,6 +52,8 @@ import { WorkspaceIcon } from "../../icons/workspace";
 import { useComposerImages } from "../attachments/use-composer-images";
 import { ComposerFrame } from "../session/composer-frame";
 import { useSendOnMenuCommand } from "../session/send-key";
+import { MESSAGE_HISTORY_KEY, useComposerAnswer } from "../session/use-composer-answer";
+import { useTypingGuard } from "../session/use-typing-guard";
 import { TallyPill } from "../subagents/tally-pill";
 import { useStopAgent } from "../use-stop-agent";
 import { AgentRequestDock } from "./agent-request-dock";
@@ -83,6 +87,15 @@ interface SentSubmission {
  *   the model options when the model has any, the model, Dictate, and Send,
  *   or Stop while a turn runs;
  * - the lip under the card: where the thread works, and on which machine.
+ *
+ * While the dock shows a question the agent asked, the composer answers it
+ * instead (`useComposerAnswer`): the field shows and edits the shown
+ * question's own answer, and Send gives way to Previous and the step button,
+ * with Stop beside them while a turn runs. The field then takes text only, no
+ * images and no skills. The Message Draft below is kept as it is and comes
+ * back when the Request closes, or when the dock shows another Request. A
+ * question does not take over while the user is typing a message: it waits
+ * until they pause, send, or leave the field (`useTypingGuard`).
  *
  * ⏎ in the field sends the message and ⇧⏎ starts a new line. The controller
  * opens a turn with a message sent to an idle thread, and queues one sent
@@ -138,6 +151,7 @@ export function ThreadComposer({
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
   const threads = useSuspenseQuery(threadsQuery(client)).data;
+  const [shownRequestId] = useShownRequestId(sessionId);
   const pending = useSyncExternalStore(pendingSubmissions.subscribe, () =>
     pendingSubmissions.read(sessionId),
   );
@@ -209,8 +223,15 @@ export function ThreadComposer({
     },
   });
   const stopAgent = useStopAgent(client, sessionId);
+  const guard = useTypingGuard();
+  // The Request the dock shows, which `AgentRequestDock` decides the same way.
+  const shownRequest =
+    locateShownRequest(session.openRequests, (request) => request.requestId, shownRequestId)
+      ?.request ?? null;
+  const answer = useComposerAnswer(sessionId, shownRequest, guard.holding);
+  const stopFailure = stopAgent.error === null ? null : readErrorMessage(stopAgent.error);
   const error =
-    pending.failure ?? (stopAgent.error === null ? null : readErrorMessage(stopAgent.error));
+    answer === null ? (pending.failure ?? stopFailure) : (answer.failure ?? stopFailure);
   const images = useComposerImages({
     storeKey: sessionId,
     shelf: pending.message.attachments,
@@ -232,6 +253,8 @@ export function ThreadComposer({
     pendingSubmissions.writePicks(sessionId, applyThreadChoice(picks, choice));
   };
   const submit = (): void => {
+    // The user is done typing, whether or not the send goes through.
+    guard.release();
     if (!canSend || isMutationRunning(queryClient, sendKey)) return;
     const submission = buildSubmission(resolved, pending.message);
     pendingSubmissions.clearFailure(sessionId);
@@ -245,7 +268,8 @@ export function ThreadComposer({
     });
     scrollTranscriptToBottom();
   };
-  useSendOnMenuCommand(submit);
+  const sendOrStep = answer === null ? submit : answer.step.onStep;
+  useSendOnMenuCommand(sendOrStep);
   const stop = (): void => {
     // `useStopAgent` already ignores a second stop, but Stop is only
     // `aria-disabled` while one is in flight, so it can still be clicked:
@@ -257,25 +281,41 @@ export function ThreadComposer({
 
   return (
     <ComposerFrame
-      text={pending.message.text}
-      onTextChange={(text) => {
-        pendingSubmissions.writeText(sessionId, text);
-      }}
-      placeholder={placeholder}
-      readOnly={readOnly !== null}
+      text={answer?.text ?? pending.message.text}
+      onTextChange={
+        answer?.onTextChange ??
+        ((text) => {
+          guard.holdAfterEdit();
+          pendingSubmissions.writeText(sessionId, text);
+        })
+      }
+      placeholder={answer?.placeholder ?? placeholder}
+      readOnly={readOnly !== null || answer?.locked === true}
       canSend={canSend}
-      onSend={submit}
+      onSend={sendOrStep}
       stop={busy ? { stopping: stopAgent.isPending, onStop: stop } : undefined}
       error={error}
-      notice={images.notice}
-      attachments={images.attachments}
-      skills={{
-        skills: sessionSkills.data?.items,
-        failure: sessionSkills.error === null ? undefined : readErrorMessage(sessionSkills.error),
-        refreshIfStale: () => {
-          readSkillsIfStale(queryClient, sessionSkillsQuery(client, sessionId));
-        },
-      }}
+      notice={answer === null ? images.notice : answer.notice}
+      attachments={answer?.attachments ?? images.attachments}
+      skills={
+        answer === null
+          ? {
+              skills: sessionSkills.data?.items,
+              failure:
+                sessionSkills.error === null ? undefined : readErrorMessage(sessionSkills.error),
+              refreshIfStale: () => {
+                readSkillsIfStale(queryClient, sessionSkillsQuery(client, sessionId));
+              },
+            }
+          : undefined
+      }
+      step={answer?.step}
+      historyKey={answer?.historyKey ?? MESSAGE_HISTORY_KEY}
+      onFieldBlur={guard.release}
+      // Only a composition in the Message Draft holds off a question. While
+      // answering, the hold would make the composer show the Message Draft
+      // instead of the answer being composed.
+      onComposingChange={answer === null ? guard.reportComposing : undefined}
       start={
         <>
           <span className="pick" title={fields.accessMode.locked ?? undefined}>
@@ -313,7 +353,7 @@ export function ThreadComposer({
           <div className="fold">
             <QueuedInputs sessionId={sessionId} />
           </div>
-          <AgentRequestDock sessionId={sessionId} pageSubagentId={undefined} />
+          <AgentRequestDock sessionId={sessionId} pageSubagentId={undefined} composerBelow />
         </>
       }
       below={

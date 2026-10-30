@@ -103,6 +103,17 @@ export const UI_SCREENS: ReadonlyArray<UiScreen> = [
     ],
   },
   {
+    name: "thread-question",
+    path: "thread.html?state=question",
+    contentSelector: 'section.transcript[aria-label="Transcript"] .tx > *',
+    nonTextParts: [
+      { selector: COMPOSER_SELECTOR, kind: "boundary" },
+      { selector: "header.top .icon-btn svg", kind: "mark" },
+      { selector: ".composer-row .icon-btn svg", kind: "mark" },
+      { selector: ".dock-choice", kind: "boundary" },
+    ],
+  },
+  {
     name: "draft",
     path: "draft.html",
     contentSelector: ".hello .column > *",

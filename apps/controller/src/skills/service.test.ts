@@ -807,7 +807,11 @@ describe("the update check", () => {
         const held = github.holdNextCommitRead();
         const first = yield* Effect.forkChild(checkAll);
         yield* Deferred.await(held.entered);
-        const second = yield* Effect.forkChild(checkAll);
+        // The second pass must claim its Skills while the first check still runs.
+        // A fork that starts later lets the first check end first, and the second
+        // pass then starts a check of its own. Started immediately, the fork runs
+        // the pass's synchronous reads and its claim before it returns.
+        const second = yield* Effect.forkChild(checkAll, { startImmediately: true });
         yield* held.release;
         // The second pass ends only once the check it joined has stored its result.
         yield* Fiber.join(second);
@@ -836,7 +840,7 @@ describe("the update check", () => {
           ...GITHUB_SOURCE,
           sourcePath: "skills/teach-v2",
         });
-        const second = yield* Effect.forkChild(checkAll);
+        const second = yield* Effect.forkChild(checkAll, { startImmediately: true });
         yield* held.release;
         yield* Fiber.join(first);
         yield* Fiber.join(second);
@@ -876,7 +880,7 @@ describe("the update check", () => {
         const first = yield* Effect.forkChild(checkAll);
         yield* Deferred.await(held.entered);
         yield* importFrom("acme/new");
-        const second = yield* Effect.forkChild(checkAll);
+        const second = yield* Effect.forkChild(checkAll, { startImmediately: true });
         yield* held.release;
         yield* Fiber.join(first);
         yield* Fiber.join(second);

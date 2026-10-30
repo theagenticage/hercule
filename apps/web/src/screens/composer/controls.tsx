@@ -1,5 +1,5 @@
 import { useRef, type JSX } from "react";
-import type { ModelPill } from "@hercule/client-core";
+import { PREVIOUS_QUESTION_LABEL, type ModelPill } from "@hercule/client-core";
 import { IMAGE_MIME_TYPES } from "@hercule/contract";
 import { cn, ProviderLogo } from "@hercule/ui";
 
@@ -80,6 +80,13 @@ export function VoiceButton(): JSX.Element {
   );
 }
 
+/**
+ * The button that sends the message. Pressing the mouse on it does not take
+ * the focus from the message field. Taking it would end the typing guard
+ * (see `useTypingGuard`), a question could then take the composer over, and
+ * this button would be replaced before the click that the user aimed at it
+ * arrived. The keyboard is not affected: the button is still a tab stop.
+ */
 export function SendButton({
   tip,
   disabled,
@@ -96,10 +103,69 @@ export function SendButton({
       aria-label="Send"
       title={tip}
       disabled={disabled}
+      onMouseDown={(event) => {
+        event.preventDefault();
+      }}
       onClick={onSend}
       className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full bg-ink text-[13px] text-bg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live disabled:cursor-default disabled:bg-line disabled:text-faint"
     >
       <span aria-hidden="true">↑</span>
+    </button>
+  );
+}
+
+/**
+ * The button that replaces Send while the composer answers a question: Next,
+ * or Send answers on the last question. It is as tall as the Send button and
+ * has the same colours, so the composer's right edge stays where it is.
+ *
+ * While `disabled` the button is `aria-disabled` rather than `disabled` and
+ * ignores clicks, so it keeps the focus: Next on an unanswered question
+ * leaves the focus where it was.
+ */
+export function StepButton({
+  label,
+  disabled,
+  onStep,
+}: {
+  /** "Next" or "Send answers". */
+  readonly label: string;
+  readonly disabled: boolean;
+  readonly onStep: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      title={`${label} ⏎`}
+      aria-disabled={disabled || undefined}
+      onClick={disabled ? undefined : onStep}
+      className="inline-flex h-7 shrink-0 cursor-pointer items-center rounded-full bg-ink px-3 text-meta leading-[18px] font-emph text-bg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live aria-disabled:cursor-default aria-disabled:bg-line aria-disabled:text-faint"
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
+ * The button that shows the question before the shown one. Quiet, as it is
+ * not the main action. Like `StepButton`, it is `aria-disabled` while
+ * `disabled`.
+ */
+export function PreviousButton({
+  disabled,
+  onPrevious,
+}: {
+  readonly disabled: boolean;
+  readonly onPrevious: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      aria-disabled={disabled || undefined}
+      onClick={disabled ? undefined : onPrevious}
+      className="inline-flex h-7 shrink-0 cursor-pointer items-center rounded-full px-2.5 text-meta leading-[18px] font-emph text-muted focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live not-aria-disabled:hover:bg-line-soft not-aria-disabled:hover:text-ink aria-disabled:cursor-default aria-disabled:text-faint"
+    >
+      {PREVIOUS_QUESTION_LABEL}
     </button>
   );
 }

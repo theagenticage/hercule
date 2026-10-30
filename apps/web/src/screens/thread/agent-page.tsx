@@ -212,6 +212,9 @@ export function AgentPage({
               session={session}
               subagents={subagents}
               subagent={subagent}
+              composer={
+                assistantId !== null ? "none" : subagent === undefined ? "below" : "elsewhere"
+              }
             />
             {subagent !== undefined ? (
               <StatusCard

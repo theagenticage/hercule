@@ -1,21 +1,46 @@
-import { type JSX, useId } from "react";
+import type { JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
-  type ApprovalQuestion,
   buildApprovalCard,
-  buildQuestionAnswers,
-  buildQuestionDraft,
+  describeFoldedQuestion,
+  findComposerQuestion,
+  FOLD_QUESTION_LABEL,
   type HerculeClient,
-  isQuestionAnswered,
-  pickQuestionOption,
-  type QuestionDraft,
   readErrorMessage,
-  type RequestDraft,
-  typeQuestionAnswer,
+  UNFOLD_QUESTION_LABEL,
 } from "@hercule/client-core";
-import type { ApprovalDecision, OpenRequest, QuestionAnswers } from "@hercule/contract";
-import { AnswerLedger, Button, ChoiceInput, cn, DecisionMark, Input } from "@hercule/ui";
-import { useRequestDraft } from "../../app/thread-drafts";
+import { type ApprovalDecision, isAsyncQuestion, type SessionRequest } from "@hercule/contract";
+import { AnswerLedger, Button, cn, DecisionMark } from "@hercule/ui";
+import { useRequestDraft, useSendAnswers } from "../../app/thread-drafts";
+import { QuestionForm } from "./question-form";
+
+/**
+ * Where the thread's composer is, relative to the dock that shows a
+ * Request. It decides where the user types the own answer to a question, and
+ * where the text goes that a picked option displaces.
+ *
+ * - `"below"`: the composer sits right under the dock (the thread's page).
+ *   The user types the own answer in the composer, which has the Previous
+ *   and Next buttons, so the dock shows no field and no buttons. Text typed
+ *   for a single-select question and then displaced by picking an option
+ *   moves to the end of the message in the composer.
+ * - `"elsewhere"`: the thread has a composer, but it is not on this page (a
+ *   subagent's page). The user types the own answer in a field in the dock,
+ *   with its own Previous and Next buttons. Displaced text still moves to the
+ *   end of the thread's message, which shows again on the thread's page.
+ * - `"none"`: the thread has no composer at all (an assistant's session).
+ *   The user types in the dock's field, as in `"elsewhere"`, but displaced
+ *   text is erased, because there is no message to move it to.
+ */
+export type DockComposer = "below" | "elsewhere" | "none";
+
+/**
+ * The dock's box: the composer's lip mirrored above the card (see
+ * `PermissionCard`). It sits behind the card, which is `z-[1]`, so the 8px
+ * of the dock tucked under it is covered by the card.
+ */
+const DOCK_CLASS =
+  "mx-3.5 -mb-2 grid grid-cols-[18px_minmax(0,1fr)] rounded-t-[10px] border border-b-0 border-line-soft bg-surface px-3 pt-[5px] pb-[13px] text-fine text-muted";
 
 /**
  * Renders the permission card: one Request the session's agents are parked
@@ -33,15 +58,20 @@ import { useRequestDraft } from "../../app/thread-drafts";
  * layout.
  *
  * A `question` request is not an approval. Where a command or path would
- * otherwise go, it shows the question form, and the user answers there. It
- * has no ledger: a question offers no decision. To turn down the session's
+ * otherwise go, it shows the question form. The user answers in the form's
+ * own field, or, where the composer is right below, in the composer itself.
+ * It has no ledger: a question offers no decision. To turn down the session's
  * own agent's question, the user stops the turn with the composer's Stop; to
  * turn down a subagent's, the user stops that subagent from its page.
+ *
+ * An async question, which the agent does not wait on, docks folded as one
+ * row with an Answer button. Answer opens the whole card, and Later folds it
+ * back with the answers kept.
  *
  * The request's text, its questions and its answers come from
  * `buildApprovalCard`, so an answer is described the same way everywhere and
  * no screen can reword or drop it. Only the controls' own labels, such as
- * Next, are written here.
+ * Answer, are written here.
  *
  * What the user has typed, which question is shown, and whether an answer was
  * sent are the thread's drafts, not the card's own state. The card unmounts
@@ -53,10 +83,12 @@ export function PermissionCard({
   client,
   sessionId,
   request,
+  composer,
 }: {
   readonly client: HerculeClient;
   readonly sessionId: string;
-  readonly request: OpenRequest;
+  readonly request: SessionRequest;
+  readonly composer: DockComposer;
 }): JSX.Element {
   const card = buildApprovalCard(request);
   const [draft, changeDraft] = useRequestDraft(request.requestId);
@@ -66,11 +98,7 @@ export function PermissionCard({
   const markAnswered = (answered: boolean): void => {
     changeDraft((current) => ({ ...current, answered }));
   };
-  // Neither response is written into the cache. It is a snapshot of the
-  // session from when the controller received the answer, still parked on
-  // the request, so writing it would bring back a card the live `session`
-  // topic has already cleared. That topic is the source of truth; until it
-  // clears the request, the card stays locked through the draft's `answered`.
+  // The decision is not written into the cache. See `useSendAnswers`.
   const decide = useMutation({
     mutationFn: (decision: ApprovalDecision) =>
       client.session.respondToApprovalRequest({
@@ -80,31 +108,61 @@ export function PermissionCard({
     onMutate: () => markAnswered(true),
     onError: () => markAnswered(false),
   });
-  const answer = useMutation({
-    mutationFn: (answers: QuestionAnswers) =>
-      client.session.respondToQuestion({
-        params: { id: sessionId },
-        payload: { requestId: request.requestId, answers },
-      }),
-    onMutate: () => markAnswered(true),
-    onError: () => markAnswered(false),
-  });
+  const send = useSendAnswers(client, sessionId);
   // One answer per request. The card stays until the runner reports the
   // request resolved, and a second click in that time could send an answer
   // that contradicts the one already recorded.
-  const locked = draft.answered || decide.isPending || answer.isPending;
-  const error = decide.error ?? answer.error;
+  const locked = draft.answered || decide.isPending;
+  // The composer owns the answer field while it answers this question, and
+  // then it shows the failure of a send. The dock shows it only when the
+  // dock has the field itself.
+  const composerAnswers = composer === "below" && findComposerQuestion(request, draft) !== null;
+  const failure =
+    decide.error !== null ? readErrorMessage(decide.error) : composerAnswers ? null : draft.failure;
+
+  const isAsync = request.kind === "question" && isAsyncQuestion(request);
+  if (request.kind === "question" && isAsync && !draft.unfolded) {
+    return (
+      <div className={cn(DOCK_CLASS, "items-center")}>
+        <DecisionMark />
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <span className="min-w-0 text-meta text-ink">{describeFoldedQuestion(request)}</span>
+          <Button
+            variant="primary"
+            className="shrink-0"
+            onClick={() => {
+              changeDraft((current) => ({ ...current, unfolded: true }));
+            }}
+          >
+            {UNFOLD_QUESTION_LABEL}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    // The dock sits behind the card: the card is `z-[1]`, so the 8px of the
-    // dock tucked under it is covered by the card.
-    <div className="mx-3.5 -mb-2 grid grid-cols-[18px_minmax(0,1fr)] rounded-t-[10px] border border-b-0 border-line-soft bg-surface px-3 pt-[5px] pb-[13px] text-fine text-muted">
+    <div className={DOCK_CLASS}>
       {/* The mark sits alone in its own column at the dock's left edge, so the
           title, the subject, the questions and the answer labels all line up
           on one left edge in the column beside it. */}
       <DecisionMark className="mt-[3px]" />
       <div className="flex min-w-0 flex-col">
-        <span className="text-meta font-emph text-ink">{card.title}</span>
+        {/* An unfolded async question has Later at the end of the title row,
+            so it adds no row of its own. */}
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-meta font-emph text-ink">{card.title}</span>
+          {isAsync ? (
+            <Button
+              className="-my-0.5 shrink-0 py-0.5"
+              onClick={() => {
+                changeDraft((current) => ({ ...current, unfolded: false }));
+              }}
+            >
+              {FOLD_QUESTION_LABEL}
+            </Button>
+          ) : null}
+        </div>
         {/* A 4096-character command or forty paths scroll here rather than
             push the composer off the screen. */}
         <div className="flex max-h-36 flex-col overflow-y-auto">
@@ -123,7 +181,11 @@ export function PermissionCard({
             draft={draft}
             onDraftChange={changeDraft}
             locked={locked}
-            onSend={(answers) => answer.mutate(answers)}
+            composer={composer}
+            composerAnswers={composerAnswers}
+            onSend={(answers) => {
+              send(request.requestId, answers);
+            }}
           />
         )}
         {/* The ledger's rows extend 8px past this column on both sides, so
@@ -139,162 +201,12 @@ export function PermissionCard({
             />
           </div>
         )}
-        {error === null ? null : (
+        {failure === null ? null : (
           <p className="mt-1 text-fail" role="alert">
-            {readErrorMessage(error)}
+            {failure}
           </p>
         )}
       </div>
     </div>
-  );
-}
-
-/**
- * Renders the questions of a `question` request one at a time, and calls
- * `onSend` with the answers to all of them once the user sends.
- *
- * Each question shows its chip, its text, its options as choices (radios when
- * it takes one answer, checkboxes when it takes several) and a field for the
- * user's own answer. Next and Send stay unusable until the shown question is
- * answered, so the answers sent never leave a question out. They use
- * `aria-disabled` rather than `disabled`, so the button keeps focus while the
- * user picks. The form submits on Enter in the field, like any form.
- */
-function QuestionForm({
-  questions,
-  draft: requestDraft,
-  onDraftChange,
-  locked,
-  onSend,
-}: {
-  readonly questions: readonly ApprovalQuestion[];
-  /** The Request's draft, which holds the answers typed so far and the shown question. */
-  readonly draft: RequestDraft;
-  readonly onDraftChange: (change: (draft: RequestDraft) => RequestDraft) => void;
-  /** Whether an answer was sent, so nothing in the form takes input. */
-  readonly locked: boolean;
-  readonly onSend: (answers: QuestionAnswers) => void;
-}): JSX.Element {
-  const draft = requestDraft.question ?? buildQuestionDraft(questions);
-  const { shownQuestionIndex } = requestDraft;
-  const setDraft = (question: QuestionDraft): void => {
-    onDraftChange((current) => ({ ...current, question }));
-  };
-  // Radios of one question share a name, so the browser moves between them
-  // with the arrow keys. The id keeps two cards from sharing a group.
-  const groupName = useId();
-  const question = questions[shownQuestionIndex]!;
-  const answer = draft[question.header]!;
-  const isLast = shownQuestionIndex === questions.length - 1;
-  const questionAnswered = isQuestionAnswered(draft, question);
-  const hasDescriptions = question.options.some((option) => option.description !== undefined);
-
-  return (
-    <form
-      className="mt-3 flex flex-col"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (locked || !questionAnswered) return;
-        if (!isLast) {
-          onDraftChange((current) => ({ ...current, shownQuestionIndex: shownQuestionIndex + 1 }));
-          return;
-        }
-        const answers = buildQuestionAnswers(draft, questions);
-        if (answers !== null) onSend(answers);
-      }}
-    >
-      <div className="flex items-baseline justify-between gap-3">
-        {/* The chip is styled as a lane label, not a sentence: 10px uppercase
-            `--faint`, the size of a label inside a surface (spec 14
-            §Measurements, the popover's options grid). */}
-        <span className="text-[10px] font-emph tracking-[0.09em] text-faint uppercase">
-          {question.header}
-        </span>
-        {questions.length === 1 ? null : (
-          <span className="text-[11px] text-faint tabular-nums">
-            {/* "Question" keeps this count apart from the dock's "1 of 2",
-                which pages through Requests. */}
-            Question {shownQuestionIndex + 1} of {questions.length}
-          </span>
-        )}
-      </div>
-      {/* An async question's text is the agent's whole title, which can run
-          to several paragraphs: it keeps its line breaks and scrolls past
-          about eight lines rather than push the transcript out of view. */}
-      <span className="mt-0.5 max-h-[8lh] overflow-y-auto text-meta whitespace-pre-line text-ink wrap-anywhere">
-        {question.question}
-      </span>
-      {/* The same two columns as the answer ledger, so options and answers
-          line up: the choice and its label on the shared left edge, its
-          meaning beside it. The whole row is the click target. The list, not
-          each row, reaches 8px past the column, because a scrolling box
-          clips its rows at its own edges. */}
-      {question.options.length === 0 ? null : (
-        <div className="-mx-2 mt-1 flex max-h-48 flex-col overflow-y-auto">
-          {question.options.map((option, index) => (
-            // Keyed by place, so a focused choice keeps the focus when the next
-            // question has a choice in the same place, and ↩ moves on again
-            // from there.
-            <label
-              key={index}
-              className={cn(
-                "grid items-baseline gap-3 rounded-control px-2 py-[3px]",
-                // With no description to line up, the label takes the whole
-                // row instead of wrapping in the first column.
-                hasDescriptions ? "grid-cols-[140px_minmax(0,1fr)]" : "grid-cols-1",
-                locked ? "cursor-not-allowed" : "cursor-pointer hover:bg-line-soft",
-              )}
-            >
-              {/* The label, not the choice, gives this column its baseline, so
-                the label sits on the same line as its description. The
-                choice is one line of the label's text tall and centred in
-                it, so it stays beside the first line when a long label
-                wraps. */}
-              <span className="flex min-w-0 items-baseline gap-2">
-                <ChoiceInput
-                  type={question.multiSelect ? "checkbox" : "radio"}
-                  name={groupName}
-                  checked={answer.picks.includes(option.label)}
-                  disabled={locked}
-                  onChange={() => setDraft(pickQuestionOption(draft, question, option.label))}
-                  className="h-[1lh] self-start text-meta"
-                />
-                <span className="text-meta font-emph text-ink wrap-anywhere">{option.label}</span>
-              </span>
-              {option.description === undefined ? null : (
-                <span className="text-fine text-muted wrap-anywhere">{option.description}</span>
-              )}
-            </label>
-          ))}
-        </div>
-      )}
-      {/* Smaller and fainter than an option, with space above it, so it does
-          not look like another option. */}
-      {question.note === null ? null : (
-        <span className="mt-1 text-[11px] text-faint">{question.note}</span>
-      )}
-      {question.secretWarning === null ? null : (
-        <span className="mt-1 text-[11px] text-attn">{question.secretWarning}</span>
-      )}
-      <div className="mt-2 flex items-center gap-2">
-        <Input
-          aria-label="Your own answer"
-          placeholder="Or type your own answer"
-          value={answer.text}
-          disabled={locked}
-          onChange={(event) => setDraft(typeQuestionAnswer(draft, question, event.target.value))}
-          className="py-1 text-meta"
-        />
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={locked}
-          aria-disabled={!questionAnswered}
-          className="py-1.5"
-        >
-          {isLast ? "Send answers" : "Next"}
-        </Button>
-      </div>
-    </form>
   );
 }

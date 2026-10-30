@@ -164,7 +164,7 @@ pnpm test:desktop  # Playwright drives the test package: window, security, fuses
 
 The desktop app's looks are checked in two places. The app is its own pixel reference (ADR 0047):
 
-- **The goldens** are 72 PNGs in `apps/desktop/ui-goldens/`: the 12 screens of `capture:ui` at 1x, in the six themes. `ui:metrics` records them on Linux and compares every pixel exactly, in the same pass as its metrics and their ratchet. When a golden fails on a screen you meant to change, re-record with `--write-goldens`, then look at every golden that moved in the diff before committing it, as for the Android goldens below. Rendering that only a Mac shows, such as font smoothing, is not in them: check it by eye on a Mac.
+- **The goldens** are 78 PNGs in `apps/desktop/ui-goldens/`: the 13 screens of `capture:ui` at 1x, in the six themes. `ui:metrics` records them on Linux and compares every pixel exactly, in the same pass as its metrics and their ratchet. When a golden fails on a screen you meant to change, re-record with `--write-goldens`, then look at every golden that moved in the diff before committing it, as for the Android goldens below. Rendering that only a Mac shows, such as font smoothing, is not in them: check it by eye on a Mac.
 - **The piece sheet** (faces, marks, icons) is compared with the frozen Crew Bureau book by `pnpm compare:bureau`, on macOS. The book is not edited.
 
 ```

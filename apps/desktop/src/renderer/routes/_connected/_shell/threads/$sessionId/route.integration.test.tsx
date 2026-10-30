@@ -591,7 +591,7 @@ describe("a thread opened from its saved copy", () => {
     });
     await app;
 
-    expect(await screen.findByText("Syncing…", {}, { timeout: 3000 })).toBeTruthy();
+    expect(await screen.findByText("Syncing…")).toBeTruthy();
 
     transcriptRead.answer({
       body: { items: thread.transcript.filter((row) => row.position >= lastCopiedPosition) },

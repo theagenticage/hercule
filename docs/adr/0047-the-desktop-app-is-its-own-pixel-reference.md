@@ -24,7 +24,7 @@ The comparison also runs only on macOS, so a pull request cannot check a screen 
 
 - **The rule.** The app's goldens and `tokens.css` decide a measurement. The spec decides a behaviour. This replaces "the pages decide a measurement and this text decides a behaviour".
 - **The goldens.**
-  - They are the 12 screens of `pnpm --filter @hercule/desktop capture:ui`, at 1x, glass 40%, in all five themes: 60 PNGs under `apps/desktop/ui-goldens/<theme>/<screen>.png`.
+  - They are the 13 screens of `pnpm --filter @hercule/desktop capture:ui`, at 1x, glass 40%, in all six themes: 78 PNGs under `apps/desktop/ui-goldens/<theme>/<screen>.png`.
   - They are recorded on Linux, by the same Playwright Chromium code as `capture:ui`, inside the single pass of the `ui:metrics` CI job. That job has a budget of 3 minutes. A nightly run on a Linux machine can re-record them.
   - The comparison is exact: every decoded pixel is equal. A missing golden, an extra golden and a size mismatch fail it too.
   - `pnpm --filter @hercule/desktop ui:metrics --write-goldens` re-records them. It never skips the metrics ratchet.

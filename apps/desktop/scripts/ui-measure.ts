@@ -561,6 +561,13 @@ export async function measurePage(
     await probe.applyPerturbation(perturbation);
     add(summarizeResilience(prefixName, await measureSettledClipping(page, probe)));
     await probe.removePerturbation();
+    // Lets the page draw the layout it returns to before the next change.
+    // Without the wait, the next change can land in the same frame, and the
+    // page then handles the scroll event of the first one against the layout
+    // of the second: a transcript that was at the bottom reads it as a
+    // scroll up, stops following the bottom, and the text it leaves under
+    // the header is counted as overlapping.
+    await waitForPageToSettle(page);
   }
   lap("resilience");
   return { values, timings };

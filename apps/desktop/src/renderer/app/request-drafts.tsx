@@ -1,6 +1,7 @@
 /**
- * A session's Request drafts: per open Request, the answers typed so far
- * and whether one was sent, and which Request the dock shows. The session is
+ * A session's Request drafts: per open Request, the answers typed so far,
+ * whether they were sent and why sending failed, and which Request the dock
+ * shows. The session is
  * a thread's, or the current session of an assistant's Conversation.
  *
  * The drafts live in this module, keyed by the session id, and each reader
@@ -36,7 +37,16 @@
  * The drafts live in memory only.
  */
 import { useEffect, useSyncExternalStore } from "react";
-import { EMPTY_REQUEST_DRAFT, changeRequestDraft, type RequestDraft } from "@hercule/client-core";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
+import {
+  EMPTY_REQUEST_DRAFT,
+  changeRequestDraft,
+  isAnswerSendRunning,
+  readErrorMessage,
+  type RequestDraft,
+} from "@hercule/client-core";
+import type { QuestionAnswers } from "@hercule/contract";
 
 interface SessionDrafts {
   /** The drafts of the session's Requests, by requestId. */
@@ -158,4 +168,66 @@ export function useShownRequestId(
       changeSessionDrafts(sessionId, (drafts) => ({ ...drafts, shownRequestId: requestId }));
     },
   ];
+}
+
+/**
+ * Returns a function that sends the answers to a `question` Request of the
+ * session `sessionId` with `session.respondToQuestion`. The dock and the
+ * composer both call it, so a Request is answered once whichever of them
+ * sends, and both read the outcome from the Request's draft.
+ *
+ * - `send(requestId, answers)` does nothing while a send for the same
+ *   Request is running (even one started by another component) or when the
+ *   Request's draft is already `answered`. Other Requests of the session send
+ *   independently.
+ * - A send marks the Request's draft `answered` and clears its `failure`. A
+ *   failed send makes the draft unanswered again and records the error
+ *   message as its `failure`.
+ *
+ * The result is never written into the cache. It is the session as the
+ * controller held it when the answer arrived, still waiting on the Request,
+ * so writing it could bring back a dock that the live `session` push has
+ * already cleared. Until that push clears the Request, the draft's
+ * `answered` keeps the answers locked.
+ *
+ * The mutation's callbacks change the draft through the store, so they land
+ * even when the component has unmounted. The store drops a change for a
+ * session nobody keeps, which is right: a failure after the user left the
+ * session must not bring its drafts back.
+ */
+export function useSendAnswers(
+  sessionId: string,
+): (requestId: string, answers: QuestionAnswers) => void {
+  const { controller } = useRouteContext({ from: "/_connected" });
+  const { client } = controller;
+  const queryClient = useQueryClient();
+  const changeDraft = (requestId: string, change: Partial<RequestDraft>): void => {
+    changeSessionDrafts(sessionId, (drafts) =>
+      changeRequestDraft(drafts, requestId, (current) => ({ ...current, ...change })),
+    );
+  };
+  const mutationKey = ["answer-question", sessionId];
+  const mutation = useMutation({
+    mutationKey,
+    mutationFn: (sent: { readonly requestId: string; readonly answers: QuestionAnswers }) =>
+      client.session.respondToQuestion({
+        params: { id: sessionId },
+        payload: sent,
+      }),
+    onMutate: (sent) => {
+      changeDraft(sent.requestId, { answered: true, failure: null });
+    },
+    onError: (error, sent) => {
+      changeDraft(sent.requestId, { answered: false, failure: readErrorMessage(error) });
+    },
+  });
+  return (requestId, answers) => {
+    // The mutation cache knows at once that a send started, and the draft
+    // is read from the store now, not from the last render, so two calls
+    // before the next render send once.
+    const sending = isAnswerSendRunning(queryClient, mutationKey, requestId);
+    const answered = readSessionDrafts(sessionId).requests.get(requestId)?.answered ?? false;
+    if (sending || answered) return;
+    mutation.mutate({ requestId, answers });
+  };
 }

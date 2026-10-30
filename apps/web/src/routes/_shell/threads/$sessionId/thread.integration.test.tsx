@@ -16,7 +16,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultScheduler, focusManager, notifyManager } from "@tanstack/react-query";
-import { buildApprovalCard, formatDuration, formatStamp, queryKeys } from "@hercule/client-core";
+import {
+  buildApprovalCard,
+  formatDuration,
+  formatStamp,
+  queryKeys,
+  TYPING_PAUSE_MS,
+} from "@hercule/client-core";
 import type {
   Assistant,
   Input,
@@ -3070,7 +3076,7 @@ describe("Thread: an exited thread that can be resumed", () => {
     await openApp(EXITED_RESUMABLE, buildTwoCompletedTurns());
 
     const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
-    expect(textarea.disabled).toBe(false);
+    expect(textarea.readOnly).toBe(false);
     expect(textarea.placeholder).toBe("Reply…");
 
     const pill = screen.getByRole<HTMLButtonElement>("button", { name: /claude sonnet 5/i });
@@ -3137,7 +3143,7 @@ describe("Thread: an exited thread that cannot be resumed", () => {
     );
 
     const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
-    expect(textarea.disabled).toBe(true);
+    expect(textarea.readOnly).toBe(true);
     expect(textarea.placeholder).toBe(`This thread can't be resumed: ${reason}.`);
 
     const pill = screen.getByRole<HTMLButtonElement>("button", { name: /claude sonnet 5/i });
@@ -3488,9 +3494,11 @@ describe("Thread: the permission card", () => {
 });
 
 /**
- * Tests for answering a `question` request in the permission card: one
- * question at a time, its options as choices, a field for an own answer, and
- * Next and Send. The answers go to `session.respondToQuestion` as
+ * Tests for answering a `question` request. The composer answers a question
+ * the dock shows: it shows and edits the question's own answer, and its step
+ * button takes the place of Send. The dock draws the question and its
+ * options, and keeps its own field only where the composer cannot answer (a
+ * secret question). The answers go to `session.respondToQuestion` as
  * `{ requestId, answers }`.
  */
 describe("Thread: answering the agent's questions", () => {
@@ -3548,6 +3556,55 @@ describe("Thread: answering the agent's questions", () => {
   };
 
   /**
+   * Opens a busy thread with `initial` open Requests and returns the app, its
+   * stubbed API, and `setOpenRequests`, which changes the session's open
+   * Requests the way the controller does: the read answers with the new
+   * session, and the live `session` topic nudges the app to read it. `extra`
+   * adds or replaces stubbed routes.
+   */
+  const openLive = async (
+    initial: readonly SessionRequest[],
+    extra: Readonly<Record<string, Handler>> = {},
+  ) => {
+    let current = buildSession({ status: "busy", openRequests: initial });
+    const app = await openApp(current, [], {
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
+      [RESPOND_TO_QUESTION]: () => ({ body: current }),
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
+        body: { inputId: "01a06d02-5000-7000-8000-000000000001", result: "queued" },
+      },
+      ...extra,
+    });
+    await waitFor(() => {
+      expect(app.live.topics()).toContain("session");
+    });
+    const setOpenRequests = (openRequests: readonly SessionRequest[]): void => {
+      current = buildSession({ status: "busy", openRequests });
+      act(() => {
+        app.live.push("session", { _tag: "invalidate", ids: [SESSION_ID], kind: "updated" });
+      });
+    };
+    return { ...app, setOpenRequests };
+  };
+
+  /**
+   * Opens the thread parked on `request`, with a controller that refuses the
+   * first answer with a 409 and accepts every later one, and returns the app
+   * and its stubbed API.
+   */
+  const openRefusingFirstAnswer = (request: SessionRequest) => {
+    const session = buildSession({ status: "busy", openRequests: [request] });
+    const replies = [
+      {
+        status: 409,
+        body: buildErrorBody("invalid_state", "The harness did not take the answer."),
+      },
+      { body: session },
+    ];
+    return openApp(session, [], { [RESPOND_TO_QUESTION]: () => replies.shift()! });
+  };
+
+  /**
    * Returns the bodies the app sent with `session.respondToQuestion` and
    * `session.respondToApprovalRequest`, oldest first, so a decision sent by
    * mistake would show up too.
@@ -3569,235 +3626,651 @@ describe("Thread: answering the agent's questions", () => {
   const findChoice = (role: "radio" | "checkbox", label: string): HTMLElement =>
     screen.getByRole(role, { name: (name) => name.startsWith(label) });
 
-  /** Returns the field the user types their own answer in. */
-  const readOwnAnswer = (): HTMLElement => screen.getByRole("textbox", { name: "Your own answer" });
+  /** Returns the composer's text field, which holds the message or, while a question is answered, the answer. */
+  const readComposerField = (): HTMLTextAreaElement =>
+    screen.getByRole<HTMLTextAreaElement>("textbox");
 
-  /** Returns the button that sends the answers, which the composer's Send is not. */
-  const readSend = (): HTMLElement => screen.getByRole("button", { name: "Send answers" });
+  /** Returns the button that steps to the next question, or sends the answers on the last one. */
+  const readStep = (label: "Next" | "Send answers"): HTMLElement =>
+    screen.getByRole("button", { name: label });
 
   /** Checks whether `element` takes no input, through `disabled` or `aria-disabled`. */
   const isLocked = (element: HTMLElement): boolean =>
     (element as HTMLInputElement | HTMLButtonElement).disabled === true ||
     element.getAttribute("aria-disabled") === "true";
 
-  it("shows one question at a time with its place among them, its options as choices, and a field for an own answer", async () => {
-    const user = userEvent.setup();
-    await openParked(QUESTIONS);
+  /** Returns the question form in the dock that shows `question`'s text. */
+  const findQuestionForm = async (question: string): Promise<HTMLElement> =>
+    (await screen.findByText(question)).closest<HTMLElement>('[role="group"]')!;
 
-    await screen.findByText("Which storage should drafts use?");
-    expect(screen.queryByText("Which features should ship?")).toBeNull();
-    expect(screen.getByText("Question 1 of 2")).toBeDefined();
-    expect(findChoice("radio", "localStorage")).toBeDefined();
-    expect(findChoice("radio", "IndexedDB")).toBeDefined();
-    expect(screen.queryAllByRole("checkbox")).toEqual([]);
-    expect(readOwnAnswer()).toBeDefined();
+  describe("in the composer", () => {
+    it("takes the composer over: the dock shows the question and its options, and the composer holds the answer, with Next in the place of Send", async () => {
+      const user = userEvent.setup();
+      await openParked(QUESTIONS);
 
-    await user.click(findChoice("radio", "localStorage"));
-    await user.click(screen.getByRole("button", { name: "Next" }));
+      const form = await findQuestionForm("Which storage should drafts use?");
+      expect(screen.queryByText("Which features should ship?")).toBeNull();
+      expect(screen.getByText("Question 1 of 2")).toBeDefined();
+      expect(findChoice("radio", "localStorage")).toBeDefined();
+      expect(findChoice("radio", "IndexedDB")).toBeDefined();
+      expect(screen.queryAllByRole("checkbox")).toEqual([]);
+      // The dock has no field and no step button of its own.
+      expect(within(form).queryAllByRole("textbox")).toEqual([]);
+      expect(within(form).queryAllByRole("button")).toEqual([]);
+      // The composer holds the answer, with the placeholder of a question that has options.
+      expect(readComposerField().placeholder).toBe("Or type your own answer");
+      expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Attach images" })).toHaveProperty(
+        "title",
+        "An answer takes text only",
+      );
+      expect(screen.getByRole("button", { name: "Attach images" })).toHaveProperty(
+        "disabled",
+        true,
+      );
 
-    expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
-    expect(screen.getByText("Which features should ship?")).toBeDefined();
-    expect(screen.getByText("Question 2 of 2")).toBeDefined();
-    expect(findChoice("checkbox", "Sync")).toBeDefined();
-    expect(findChoice("checkbox", "Search")).toBeDefined();
-    // The shell's own segmented control is a radio group too, so only the
-    // question form is checked for radios.
-    const questionForm = screen.getByText("Which features should ship?").closest("form")!;
-    expect(within(questionForm).queryAllByRole("radio")).toEqual([]);
-    expect(readOwnAnswer()).toBeDefined();
-    expect(readSend()).toBeDefined();
-  });
+      await user.click(findChoice("radio", "localStorage"));
+      await user.click(readStep("Next"));
 
-  it("shows a lone question without its place, and with Send rather than Next", async () => {
-    await openParked(ONE_QUESTION);
-
-    await screen.findByText("Which storage should drafts use?");
-    expect(screen.queryByText(/\b1 of 1\b/)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
-    expect(readSend()).toBeDefined();
-  });
-
-  it("warns that an answer the agent asked to keep secret is stored like any other", async () => {
-    await openParked({ ...QUESTIONS, detail: { questions: [{ ...STORAGE, secret: true }] } });
-
-    await screen.findByText("Which storage should drafts use?");
-    expect(
-      screen.getByText(
-        "The agent asked to keep this answer secret. It is stored in the thread like any other answer.",
-      ),
-    ).toBeDefined();
-  });
-
-  it("enables Send only once the question is answered with a pick or non-blank text", async () => {
-    const user = userEvent.setup();
-    await openParked(ONE_QUESTION);
-
-    await screen.findByText("Which storage should drafts use?");
-    expect(isLocked(readSend())).toBe(true);
-    await user.type(readOwnAnswer(), "   ");
-    expect(isLocked(readSend())).toBe(true);
-    await user.click(findChoice("radio", "IndexedDB"));
-    expect(isLocked(readSend())).toBe(false);
-  });
-
-  it("keeps Send disabled on the last question until that question is answered", async () => {
-    const user = userEvent.setup();
-    await openParked(QUESTIONS);
-
-    await user.click(
-      await screen.findByRole("radio", { name: (name) => name.startsWith("localStorage") }),
-    );
-    await user.click(screen.getByRole("button", { name: "Next" }));
-
-    expect(isLocked(readSend())).toBe(true);
-    await user.click(findChoice("checkbox", "Search"));
-    expect(isLocked(readSend())).toBe(false);
-  });
-
-  it("sends the answers of every question with session.respondToQuestion", async () => {
-    const user = userEvent.setup();
-    const { api } = await openParked(QUESTIONS);
-
-    await user.click(
-      await screen.findByRole("radio", { name: (name) => name.startsWith("localStorage") }),
-    );
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(findChoice("checkbox", "Sync"));
-    await user.click(findChoice("checkbox", "Search"));
-    await user.type(readOwnAnswer(), " Offline mode ");
-    await user.click(readSend());
-
-    await waitFor(() => {
-      expect(readBodies(api.calls)).toEqual([
-        {
-          requestId: "req-2",
-          answers: { Storage: "localStorage", Features: ["Sync", "Search", "Offline mode"] },
-        },
-      ]);
+      expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      expect(screen.getByText("Which features should ship?")).toBeDefined();
+      expect(screen.getByText("Question 2 of 2")).toBeDefined();
+      expect(findChoice("checkbox", "Sync")).toBeDefined();
+      expect(findChoice("checkbox", "Search")).toBeDefined();
+      expect(readStep("Send answers")).toBeDefined();
+      expect(screen.getByRole("button", { name: "Previous" })).toBeDefined();
     });
-  });
 
-  it("locks the choices, the field and Send once the answers are sent", async () => {
-    const user = userEvent.setup();
-    const { api } = await openParked(ONE_QUESTION);
+    it("leaves the Stop beside the step button while the session is busy, and Stop sends no answer", async () => {
+      const user = userEvent.setup();
+      const { api } = await openParked(QUESTIONS);
 
-    await user.click(
-      await screen.findByRole("radio", { name: (name) => name.startsWith("IndexedDB") }),
-    );
-    await user.click(readSend());
-    await waitFor(() => {
+      await screen.findByText("Which storage should drafts use?");
+      await user.click(screen.getByRole("button", { name: /^stop$/i }));
+
+      await waitFor(() => {
+        expect(
+          api.calls.filter((call) => call.path === `/api/v1/sessions/${SESSION_ID}/interrupt`),
+        ).toHaveLength(1);
+      });
+      expect(readBodies(api.calls)).toEqual([]);
+    });
+
+    it("shows no Stop while the session is idle, as with a message", async () => {
+      const session = buildSession({
+        status: "idle",
+        openRequests: [{ ...ONE_QUESTION, async: true }],
+      });
+      const user = userEvent.setup();
+      await openApp(session, []);
+
+      await user.click(await screen.findByRole("button", { name: "Answer" }));
+
+      await screen.findByText("Which storage should drafts use?");
+      expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+      expect(readStep("Send answers")).toBeDefined();
+    });
+
+    it("sends the answers of every question, and a multi-line own answer keeps its line breaks", async () => {
+      const user = userEvent.setup();
+      const { api } = await openParked(QUESTIONS);
+
+      // Each step stays off until its question is answered.
+      const pick = await screen.findByRole("radio", {
+        name: (name) => name.startsWith("localStorage"),
+      });
+      expect(isLocked(readStep("Next"))).toBe(true);
+      await user.click(pick);
+      expect(isLocked(readStep("Next"))).toBe(false);
+      await user.click(readStep("Next"));
+      expect(isLocked(readStep("Send answers"))).toBe(true);
+      await user.click(findChoice("checkbox", "Sync"));
+      expect(isLocked(readStep("Send answers"))).toBe(false);
+      await user.click(findChoice("checkbox", "Search"));
+      await user.type(readComposerField(), " Offline mode{Shift>}{Enter}{/Shift}Dark mode ");
+      await user.click(readStep("Send answers"));
+
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toEqual([
+          {
+            requestId: "req-2",
+            answers: {
+              Storage: "localStorage",
+              Features: ["Sync", "Search", "Offline mode\nDark mode"],
+            },
+          },
+        ]);
+      });
+    });
+
+    it("answers a question with no options with the user's own text", async () => {
+      const user = userEvent.setup();
+      const { api } = await openParked({
+        ...QUESTIONS,
+        detail: { questions: [{ ...STORAGE, options: [] }] },
+      });
+
+      const form = await findQuestionForm("Which storage should drafts use?");
+      expect(within(form).queryAllByRole("radio")).toEqual([]);
+      // A lone question has no place ("1 of 1"), no Next and no Previous.
+      expect(screen.queryByText(/\b1 of 1\b/)).toBeNull();
+      expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
+      await user.type(readComposerField(), "a sqlite file");
+      await user.click(readStep("Send answers"));
+
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toEqual([
+          { requestId: "req-2", answers: { Storage: "a sqlite file" } },
+        ]);
+      });
+    });
+
+    it("shows a notice and keeps the step button off while the answer is over 4,096 characters", async () => {
+      await openParked({
+        ...QUESTIONS,
+        detail: { questions: [{ ...STORAGE, options: [] }] },
+      });
+
+      await findQuestionForm("Which storage should drafts use?");
+      fireEvent.change(readComposerField(), { target: { value: "x".repeat(4097) } });
+      expect((await screen.findByRole("status")).textContent).toBe(
+        "This answer is longer than 4,096 characters.",
+      );
+      expect(isLocked(readStep("Send answers"))).toBe(true);
+
+      fireEvent.change(readComposerField(), { target: { value: "x".repeat(4096) } });
+      await waitFor(() => {
+        expect(screen.queryByRole("status")).toBeNull();
+      });
+      expect(isLocked(readStep("Send answers"))).toBe(false);
+    });
+
+    it("locks the choices, the composer and the step button once the answers are sent", async () => {
+      const user = userEvent.setup();
+      const { api } = await openParked(ONE_QUESTION);
+
+      await user.click(
+        await screen.findByRole("radio", { name: (name) => name.startsWith("IndexedDB") }),
+      );
+      await user.click(readStep("Send answers"));
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toHaveLength(1);
+      });
+
+      await waitFor(() => {
+        expect(isLocked(readStep("Send answers"))).toBe(true);
+      });
+      expect(isLocked(findChoice("radio", "localStorage"))).toBe(true);
+      expect(isLocked(findChoice("radio", "IndexedDB"))).toBe(true);
+      expect(isLocked(readComposerField())).toBe(true);
+    });
+
+    it("sends once when Enter is pressed twice before the controller answers", async () => {
+      const user = userEvent.setup();
+      const session = buildSession({ status: "busy", openRequests: [ONE_QUESTION] });
+      let release: (() => void) | undefined;
+      const { api } = await openApp(session, [], {
+        [RESPOND_TO_QUESTION]: () =>
+          new Promise<{ readonly body: unknown }>((resolve) => {
+            release = () => {
+              resolve({ body: session });
+            };
+          }),
+      });
+
+      await user.type(await screen.findByRole("textbox"), "a sqlite file");
+      // Both presses arrive before the app has drawn the first one's effect.
+      act(() => {
+        fireEvent.keyDown(readComposerField(), { key: "Enter", keyCode: 13 });
+        fireEvent.keyDown(readComposerField(), { key: "Enter", keyCode: 13 });
+      });
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toHaveLength(1);
+      });
+      await act(async () => {
+        release?.();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
       expect(readBodies(api.calls)).toHaveLength(1);
     });
 
-    await waitFor(() => {
-      expect(isLocked(readSend())).toBe(true);
-    });
-    expect(isLocked(findChoice("radio", "localStorage"))).toBe(true);
-    expect(isLocked(findChoice("radio", "IndexedDB"))).toBe(true);
-    expect(isLocked(readOwnAnswer())).toBe(true);
-    await user.click(readSend());
-    expect(readBodies(api.calls)).toEqual([
-      { requestId: "req-2", answers: { Storage: "IndexedDB" } },
-    ]);
-  });
+    it("shows the controller's error as it is and keeps every answer when sending fails", async () => {
+      const user = userEvent.setup();
+      const { api } = await openRefusingFirstAnswer(QUESTIONS);
 
-  it("shows the controller's error as it is and keeps every answer when sending fails", async () => {
-    const user = userEvent.setup();
-    const replies = [
-      {
-        status: 409,
-        body: buildErrorBody("invalid_state", "The harness did not take the answer."),
-      },
-      { body: buildSession({ status: "busy", openRequests: [QUESTIONS] }) },
-    ];
-    const session = buildSession({ status: "busy", openRequests: [QUESTIONS] });
-    const { api } = await openApp(session, [], {
-      [RESPOND_TO_QUESTION]: () => replies.shift()!,
-    });
+      await user.click(
+        await screen.findByRole("radio", { name: (name) => name.startsWith("IndexedDB") }),
+      );
+      await user.click(readStep("Next"));
+      await user.click(findChoice("checkbox", "Sync"));
+      await user.type(readComposerField(), "Offline mode");
+      // Enter sends from the field, which must keep the focus while the
+      // answers are on their way and after a failure.
+      await user.type(readComposerField(), "{Enter}");
 
-    await user.click(
-      await screen.findByRole("radio", { name: (name) => name.startsWith("IndexedDB") }),
-    );
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(findChoice("checkbox", "Sync"));
-    await user.type(readOwnAnswer(), "Offline mode");
-    await user.click(readSend());
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "The harness did not take the answer.",
+      );
+      expect(document.activeElement).toBe(readComposerField());
+      expect(isLocked(readStep("Send answers"))).toBe(false);
+      expect(isLocked(readComposerField())).toBe(false);
+      expect((findChoice("checkbox", "Sync") as HTMLInputElement).checked).toBe(true);
+      expect(readComposerField().value).toBe("Offline mode");
 
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "The harness did not take the answer.",
-    );
-    expect(isLocked(readSend())).toBe(false);
-    expect(isLocked(readOwnAnswer())).toBe(false);
-    expect((findChoice("checkbox", "Sync") as HTMLInputElement).checked).toBe(true);
-    expect((readOwnAnswer() as HTMLInputElement).value).toBe("Offline mode");
-
-    // The first question's pick is kept too: sending again sends all of it.
-    await user.click(readSend());
-    await waitFor(() => {
-      expect(readBodies(api.calls)).toHaveLength(2);
-    });
-    expect(readBodies(api.calls)[1]).toEqual({
-      requestId: "req-2",
-      answers: { Storage: "IndexedDB", Features: ["Sync", "Offline mode"] },
+      // The first question's pick is kept too: sending again sends all of it.
+      await user.click(readStep("Send answers"));
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toHaveLength(2);
+      });
+      expect(readBodies(api.calls)[1]).toEqual({
+        requestId: "req-2",
+        answers: { Storage: "IndexedDB", Features: ["Sync", "Offline mode"] },
+      });
     });
   });
 
-  it("goes to the next question on ↩ in the own-answer field", async () => {
-    const user = userEvent.setup();
-    const { api } = await openParked(QUESTIONS);
+  describe("keys and steps", () => {
+    it("keeps every question's answer when the user steps back and forward", async () => {
+      const user = userEvent.setup();
+      const { api } = await openParked(QUESTIONS);
 
-    await screen.findByText("Which storage should drafts use?");
-    await user.type(readOwnAnswer(), "a sqlite file{Enter}");
+      await screen.findByText("Which storage should drafts use?");
+      // Enter on an unanswered question steps nowhere and adds no new line.
+      await user.type(readComposerField(), "{Enter}");
+      expect(screen.getByText("Question 1 of 2")).toBeDefined();
+      expect(readComposerField().value).toBe("");
+      expect(readBodies(api.calls)).toEqual([]);
 
-    expect(screen.getByText("Question 2 of 2")).toBeDefined();
-    expect(readBodies(api.calls)).toEqual([]);
+      await user.type(readComposerField(), "a sqlite file{Enter}");
+      // Enter on a filled answer steps on, so Previous goes back to the first question.
+      await user.click(screen.getByRole("button", { name: "Previous" }));
+      expect(screen.getByText("Question 1 of 2")).toBeDefined();
+      await user.click(readStep("Next"));
+
+      await user.click(findChoice("checkbox", "Sync"));
+      await user.type(readComposerField(), "Offline mode");
+
+      await user.click(screen.getByRole("button", { name: "Previous" }));
+      expect(screen.getByText("Question 1 of 2")).toBeDefined();
+      expect(readComposerField().value).toBe("a sqlite file");
+
+      await user.click(readStep("Next"));
+      expect(screen.getByText("Question 2 of 2")).toBeDefined();
+      expect((findChoice("checkbox", "Sync") as HTMLInputElement).checked).toBe(true);
+      expect(readComposerField().value).toBe("Offline mode");
+      await user.click(readStep("Send answers"));
+
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toEqual([
+          {
+            requestId: "req-2",
+            answers: { Storage: "a sqlite file", Features: ["Sync", "Offline mode"] },
+          },
+        ]);
+      });
+    });
   });
 
-  it("stays on the question on ↩ while it is unanswered", async () => {
-    const user = userEvent.setup();
-    const { api } = await openParked(QUESTIONS);
+  describe("beside the message", () => {
+    it("leaves a half-typed message as it was once the answers are sent and the question closes", async () => {
+      const user = userEvent.setup();
+      const { api, setOpenRequests } = await openLive([]);
 
-    await screen.findByText("Which storage should drafts use?");
-    await user.type(readOwnAnswer(), "{Enter}");
+      await user.type(await screen.findByRole("textbox"), "Also check the logs");
+      // Leaving the field ends the typing guard, so the question takes over at once.
+      act(() => {
+        readComposerField().blur();
+      });
+      setOpenRequests([ONE_QUESTION]);
+      await screen.findByText("Which storage should drafts use?");
+      expect(readComposerField().value).toBe("");
 
-    expect(screen.getByText("Question 1 of 2")).toBeDefined();
-    expect(readBodies(api.calls)).toEqual([]);
-  });
+      await user.type(readComposerField(), "a sqlite file{Enter}");
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toHaveLength(1);
+      });
+      setOpenRequests([]);
 
-  it("answers a question with no options with the user's own text", async () => {
-    const user = userEvent.setup();
-    const { api } = await openParked({
-      ...QUESTIONS,
-      detail: { questions: [{ ...STORAGE, options: [] }] },
+      await waitFor(() => {
+        expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      });
+      expect(readComposerField().value).toBe("Also check the logs");
+      expect(api.calls.filter((call) => call.path.endsWith("/input"))).toEqual([]);
     });
 
-    const questionForm = (await screen.findByText("Which storage should drafts use?")).closest(
-      "form",
-    )!;
-    expect(within(questionForm).queryAllByRole("radio")).toEqual([]);
-    await user.type(readOwnAnswer(), "a sqlite file");
-    await user.click(readSend());
+    it("moves the text typed for a single-select question to the end of the message when the user picks an option", async () => {
+      const user = userEvent.setup();
+      const { api, setOpenRequests } = await openLive([]);
 
-    await waitFor(() => {
-      expect(readBodies(api.calls)).toEqual([
-        { requestId: "req-2", answers: { Storage: "a sqlite file" } },
-      ]);
+      await user.type(await screen.findByRole("textbox"), "Also check the logs");
+      act(() => {
+        readComposerField().blur();
+      });
+      setOpenRequests([ONE_QUESTION]);
+      await screen.findByText("Which storage should drafts use?");
+      await user.type(readComposerField(), "maybe a file");
+      await user.click(findChoice("radio", "IndexedDB"));
+
+      // The pick replaced the typed text, which is not erased.
+      expect(readComposerField().value).toBe("");
+      await user.click(readStep("Send answers"));
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toEqual([
+          { requestId: "req-2", answers: { Storage: "IndexedDB" } },
+        ]);
+      });
+      setOpenRequests([]);
+      await waitFor(() => {
+        expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      });
+      expect(readComposerField().value).toBe("Also check the logs\n\nmaybe a file");
+    });
+
+    it("keeps the typed text beside the picks on a multiSelect question", async () => {
+      const user = userEvent.setup();
+      await openParked({ ...ONE_QUESTION, detail: { questions: [FEATURES] } });
+
+      await screen.findByText("Which features should ship?");
+      await user.type(readComposerField(), "Offline mode");
+      await user.click(findChoice("checkbox", "Sync"));
+
+      expect(readComposerField().value).toBe("Offline mode");
+    });
+
+    it("refuses a pasted image with a notice, and the image does not land on the message's shelf", async () => {
+      const user = userEvent.setup();
+      const { setOpenRequests } = await openLive([ONE_QUESTION]);
+
+      await screen.findByText("Which storage should drafts use?");
+      fireEvent.paste(readComposerField(), {
+        clipboardData: { files: [new File(["png"], "shot.png", { type: "image/png" })] },
+      });
+
+      expect((await screen.findByRole("status")).textContent).toBe(
+        "An answer takes text only. Images can be sent in a message.",
+      );
+      expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
+      // Typing goes on, and the notice goes with the next edit.
+      await user.type(readComposerField(), "a sqlite file");
+      expect(screen.queryByRole("status")).toBeNull();
+      setOpenRequests([]);
+      await waitFor(() => {
+        expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      });
+      expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
     });
   });
 
-  it("turns the question down with the composer's Stop, which sends no answer", async () => {
-    const user = userEvent.setup();
-    const { api } = await openParked(QUESTIONS);
+  describe("the typing guard", () => {
+    it("waits while the user types a message, and takes over when the field loses focus", async () => {
+      const user = userEvent.setup();
+      const { setOpenRequests } = await openLive([]);
 
-    await screen.findByText("Which storage should drafts use?");
-    await user.click(screen.getByRole("button", { name: /^stop$/i }));
+      await user.type(await screen.findByRole("textbox"), "Also check");
+      setOpenRequests([ONE_QUESTION]);
+      await screen.findByText("Which storage should drafts use?");
 
-    await waitFor(() => {
+      // The question is docked with its options, but the composer is still the user's.
+      expect(readComposerField().value).toBe("Also check");
+      expect(screen.queryByRole("button", { name: "Send answers" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Send" })).toBeDefined();
+      expect(screen.queryByLabelText("Your own answer")).toBeNull();
+
+      act(() => {
+        readComposerField().blur();
+      });
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+      expect(readComposerField().value).toBe("");
+    });
+
+    // The mouse press on Send must not take the focus from the field. If it did,
+    // the typing guard would end, the question would take the composer over and
+    // replace Send with Next before the click arrived, and the message would
+    // never be sent.
+    it("sends the message when the user clicks Send while the guard still holds", async () => {
+      const user = userEvent.setup();
+      const { api, setOpenRequests } = await openLive([]);
+
+      await user.type(await screen.findByRole("textbox"), "Also check the logs");
+      setOpenRequests([ONE_QUESTION]);
+      await screen.findByText("Which storage should drafts use?");
+      expect(readComposerField().value).toBe("Also check the logs");
+
+      await user.click(screen.getByRole("button", { name: "Send" }));
+
+      await waitFor(() => {
+        expect(
+          api.calls.filter((call) => call.path.endsWith("/input")).map((call) => call.body),
+        ).toEqual([{ text: "Also check the logs" }]);
+      });
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+    });
+  });
+
+  describe("an IME composition", () => {
+    it("keeps the answer in the field while a composition starts and ends in it", async () => {
+      const user = userEvent.setup();
+      await openLive([ONE_QUESTION]);
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+
+      await user.type(readComposerField(), "IndexedDB");
+      // A composition in the answer must not hold off the question, or the
+      // field would show the saved message instead of the answer.
+      fireEvent.compositionStart(readComposerField());
+      expect(readComposerField().value).toBe("IndexedDB");
+      expect(readComposerField().placeholder).toBe("Or type your own answer");
+      fireEvent.compositionEnd(readComposerField());
+      expect(readComposerField().value).toBe("IndexedDB");
+      expect(readComposerField().placeholder).toBe("Or type your own answer");
+    });
+
+    it("keeps a question off the message for as long as a composition is open in it", async () => {
+      const user = userEvent.setup();
+      const { setOpenRequests } = await openLive([]);
+
+      await user.type(await screen.findByRole("textbox"), "Also check");
+      fireEvent.compositionStart(readComposerField());
+      setOpenRequests([ONE_QUESTION]);
+      await screen.findByText("Which storage should drafts use?");
+      // Longer than the pause that ends the hold after typing.
+      await new Promise((resolve) => setTimeout(resolve, TYPING_PAUSE_MS + 300));
+
+      expect(readComposerField().value).toBe("Also check");
+      expect(screen.getByRole("button", { name: "Send" })).toBeDefined();
+
+      fireEvent.compositionEnd(readComposerField());
+      await waitFor(
+        () => {
+          expect(readComposerField().placeholder).toBe("Or type your own answer");
+        },
+        { timeout: 3000 },
+      );
+    });
+  });
+
+  describe("the files of an answer", () => {
+    it("refuses a file the picker returns after a question took the composer over", async () => {
+      const { setOpenRequests } = await openLive([]);
+
+      await screen.findByRole("textbox");
+      // The picker was opened on the message and returns after the question arrived.
+      setOpenRequests([ONE_QUESTION]);
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+      const picker = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+      fireEvent.change(picker, {
+        target: { files: [new File(["png"], "shot.png", { type: "image/png" })] },
+      });
+
+      expect((await screen.findByRole("status")).textContent).toBe(
+        "An answer takes text only. Images can be sent in a message.",
+      );
+      setOpenRequests([]);
+      await waitFor(() => {
+        expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      });
+      expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
+    });
+  });
+
+  describe("errors", () => {
+    it("shows a failed message send in message mode only, not beside an answer", async () => {
+      const user = userEvent.setup();
+      const { setOpenRequests } = await openLive([], {
+        [`POST /api/v1/sessions/${SESSION_ID}/input`]: () => ({
+          status: 409,
+          body: buildErrorBody("invalid_state", "The message was refused."),
+        }),
+      });
+
+      await user.type(await screen.findByRole("textbox"), "Also check the logs{Enter}");
+      expect((await screen.findByRole("alert")).textContent).toBe("The message was refused.");
+
+      setOpenRequests([ONE_QUESTION]);
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+      expect(screen.queryByRole("alert")).toBeNull();
+
+      setOpenRequests([]);
+      expect((await screen.findByRole("alert")).textContent).toBe("The message was refused.");
+    });
+
+    it("keeps Next focusable while the question is unanswered", async () => {
+      await openParked(QUESTIONS);
+
+      await screen.findByText("Which storage should drafts use?");
+      const next = readStep("Next");
+      expect(next).toHaveProperty("disabled", false);
+      expect(next.getAttribute("aria-disabled")).toBe("true");
+    });
+  });
+
+  describe("a secret question", () => {
+    const SECRET: SessionRequest = {
+      ...ONE_QUESTION,
+      detail: { questions: [{ ...STORAGE, header: "Token", secret: true, options: [] }] },
+    };
+
+    it("is answered in a masked field, with a warning, apart from the message composer", async () => {
+      const user = userEvent.setup();
+      const { api } = await openParked(SECRET);
+
+      await screen.findByText("Which storage should drafts use?");
+      const field = screen.getByLabelText("Your own answer");
+      expect(field).toHaveProperty("type", "password");
+      // A password manager must not take it for a login: it is not a saved
+      // password, and it is not in a form that submits.
+      expect(field.getAttribute("autocomplete")).toBe("new-password");
+      expect(field.closest("form")).toBeNull();
       expect(
-        api.calls.filter((call) => call.path === `/api/v1/sessions/${SESSION_ID}/interrupt`),
-      ).toHaveLength(1);
+        screen.getByText(
+          "The agent asked to keep this answer secret. It is stored in the thread like any other answer.",
+        ),
+      ).toBeDefined();
+      // The composer is still for the message: it keeps Send, and takes no answer.
+      expect(readComposerField().placeholder).toBe("Queued until the turn finishes…");
+      expect(screen.getByRole("button", { name: "Send" })).toBeDefined();
+      await user.type(readComposerField(), "a message");
+
+      await user.type(field, "s3cret{Enter}");
+
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toEqual([
+          { requestId: "req-2", answers: { Token: "s3cret" } },
+        ]);
+      });
+      expect(readComposerField().value).toBe("a message");
     });
-    expect(readBodies(api.calls)).toEqual([]);
+
+    it("shows a failed send in the dock, which has the field, and keeps the typed secret", async () => {
+      const user = userEvent.setup();
+      const { api } = await openRefusingFirstAnswer(SECRET);
+
+      await user.type(await screen.findByLabelText("Your own answer"), "s3cret");
+      await user.click(readStep("Send answers"));
+
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "The harness did not take the answer.",
+      );
+      expect(screen.getByLabelText("Your own answer")).toHaveProperty("value", "s3cret");
+      await user.click(readStep("Send answers"));
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toHaveLength(2);
+      });
+    });
+
+    it("lets the composer answer the other questions of the same Request", async () => {
+      const user = userEvent.setup();
+      await openParked({
+        ...QUESTIONS,
+        detail: { questions: [STORAGE, { ...FEATURES, header: "Token", secret: true }] },
+      });
+
+      await screen.findByText("Which storage should drafts use?");
+      expect(readComposerField().placeholder).toBe("Or type your own answer");
+      await user.type(readComposerField(), "a sqlite file{Enter}");
+
+      await screen.findByText("Which features should ship?");
+      expect(screen.getByLabelText("Your own answer")).toHaveProperty("type", "password");
+      expect(readComposerField().placeholder).toBe("Queued until the turn finishes…");
+      // The dock steps back through the same draft.
+      await user.click(screen.getByRole("button", { name: "Previous" }));
+      expect(readComposerField().placeholder).toBe("Or type your own answer");
+      expect(readComposerField().value).toBe("a sqlite file");
+    });
+  });
+
+  describe("an async question", () => {
+    const ASYNC: SessionRequest = { ...QUESTIONS, async: true };
+
+    it("docks folded as one row, which Answer opens, and Later folds back with the answers kept", async () => {
+      const user = userEvent.setup();
+      await openParked(ASYNC);
+
+      await screen.findByText("The agent asked 2 questions. It keeps working.");
+      expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      // Folded, the composer is the user's.
+      expect(readComposerField().placeholder).toBe("Queued until the turn finishes…");
+      await user.type(readComposerField(), "a message");
+
+      await user.click(screen.getByRole("button", { name: "Answer" }));
+      await screen.findByText("Which storage should drafts use?");
+      act(() => {
+        readComposerField().blur();
+      });
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+      await user.type(readComposerField(), "a sqlite file");
+
+      // Later is in the title row, so it adds no row to the card.
+      expect(screen.getByRole("button", { name: "Later" }).parentElement).toBe(
+        screen.getByText("The agent needs answers.").parentElement,
+      );
+      await user.click(screen.getByRole("button", { name: "Later" }));
+      await screen.findByText("The agent asked 2 questions. It keeps working.");
+      expect(readComposerField().value).toBe("a message");
+
+      await user.click(screen.getByRole("button", { name: "Answer" }));
+      await screen.findByText("Which storage should drafts use?");
+      act(() => {
+        readComposerField().blur();
+      });
+      await waitFor(() => {
+        expect(readComposerField().value).toBe("a sqlite file");
+      });
+    });
   });
 });
 
@@ -4158,6 +4631,51 @@ describe("Thread: the session view of an assistant's session", () => {
     await screen.findByText("Book Friday");
     expect(screen.queryByRole("button", { name: /steer/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /cancel/i })).toBeNull();
+  });
+
+  it("answers a question in the dock's own field, with Previous, because the session has no composer; a pick erases the typed text", async () => {
+    const user = userEvent.setup();
+    const questions: SessionRequest = {
+      requestId: "req-ask",
+      itemId: "tool-ask",
+      kind: "question",
+      detail: {
+        questions: [
+          {
+            question: "Which day?",
+            header: "Day",
+            options: [{ label: "Monday", description: "" }],
+            multiSelect: false,
+          },
+          { question: "Which hour?", header: "Hour", options: [], multiSelect: false },
+        ],
+      },
+    };
+    const fixture = buildAssistantSession({ status: "busy", openRequests: [questions] });
+    const api = stubApi({
+      ...buildThreadRoutes(fixture, buildTwoCompletedTurns(), ASSISTANT_ROUTES),
+      [`POST /api/v1/sessions/${fixture.id}/respond-to-question`]: { body: fixture },
+    });
+    await renderApp({ path: `/threads/${fixture.id}`, api: api.fetch, token: "held" });
+
+    const field = await screen.findByLabelText("Your own answer");
+    expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
+    await user.type(field, "some day");
+    await user.click(screen.getByRole("radio", { name: (name) => name.startsWith("Monday") }));
+    expect(field).toHaveProperty("value", "");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.type(screen.getByLabelText("Your own answer"), "noon");
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(screen.getByText("Question 1 of 2")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+
+    await waitFor(() => {
+      expect(api.calls.find((call) => call.path.endsWith("/respond-to-question"))?.body).toEqual({
+        requestId: "req-ask",
+        answers: { Day: "Monday", Hour: "noon" },
+      });
+    });
   });
 
   it("still shows the permission card for an open request, and sends its answer to session.respondToApprovalRequest", async () => {

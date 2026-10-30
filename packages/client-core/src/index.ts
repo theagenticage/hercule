@@ -346,7 +346,7 @@ export {
 export { createLive, type Live, type LiveInvalidatePush } from "./live/live";
 export { invalidateWithoutCancelling } from "./live/invalidation";
 export { readEveryPage } from "./read-every-page";
-export { isMutationRunning } from "./mutation-running";
+export { isAnswerSendRunning, isMutationRunning } from "./mutation-running";
 export { queryKeys, buildQueryKeys, type EventListFilter, type LiveQueryKey } from "./live/keys";
 export { buildFetchIdentityProbe, detectLocalRunner } from "./local-runner";
 export {
@@ -806,6 +806,24 @@ export {
   type RequestDraft,
 } from "./threads/request-drafts";
 export {
+  ANSWER_ATTACH_OFF_REASON,
+  FOLD_QUESTION_LABEL,
+  NEXT_QUESTION_LABEL,
+  PREVIOUS_QUESTION_LABEL,
+  REFUSED_FILE_NOTICE,
+  SEND_ANSWERS_LABEL,
+  TYPING_PAUSE_MS,
+  UNFOLD_QUESTION_LABEL,
+  buildQuestionStepper,
+  describeFoldedQuestion,
+  findComposerQuestion,
+  decideQuestionStep,
+  typeAnswerInRequestDraft,
+  type ComposerQuestion,
+  type QuestionStep,
+  type QuestionStepper,
+} from "./threads/question-composer";
+export {
   buildQuestionAnswers,
   buildQuestionDraft,
   isQuestionAnswered,
@@ -813,6 +831,8 @@ export {
   typeQuestionAnswer,
   type QuestionDraft,
 } from "./threads/question-draft";
+export { locateShownRequest } from "./threads/shown-request";
+export { createTypingGuard, type TypingGuard } from "./threads/typing-guard";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
 export { isMarkedDone } from "./threads/status";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";

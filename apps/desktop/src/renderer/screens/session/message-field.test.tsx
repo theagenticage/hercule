@@ -8,6 +8,13 @@ import { createRef, useEffect, useState, type ComponentProps } from "react";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import {
+  EMPTY_REQUEST_DRAFT,
+  buildQuestionDraft,
+  typeAnswerInRequestDraft,
+  type ApprovalQuestion,
+  type RequestDraft,
+} from "@hercule/client-core";
 import { readFieldPlaceholder, readFieldText, spyOnExecCommand } from "../../app/testing";
 import { MessageField } from "./message-field";
 
@@ -68,6 +75,137 @@ const renderField = (over: Partial<FieldProps> = {}) => {
     },
   };
 };
+
+/**
+ * A field that shows either a draft or an answer, as a composer switches it:
+ * each has its own text, and the switch changes `text` and `historyKey` in
+ * one render. `Switch to ...` changes what the field shows; `Same text` only
+ * changes the key.
+ */
+function Switching({ onTextChange }: { readonly onTextChange: (text: string) => void }) {
+  const [texts, setTexts] = useState({ draft: "Draft text", answer: "" });
+  const [shown, setShown] = useState<"draft" | "answer">("draft");
+  const [key, setKey] = useState("draft");
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          const next = shown === "draft" ? "answer" : "draft";
+          setShown(next);
+          setKey(next);
+        }}
+      >
+        Switch
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setKey((previous) => `${previous}+`);
+        }}
+      >
+        Same text
+      </button>
+      <MessageField
+        {...buildProps({ onTextChange })}
+        text={texts[shown]}
+        historyKey={key}
+        onTextChange={(next) => {
+          onTextChange(next);
+          setTexts((previous) => ({ ...previous, [shown]: next }));
+        }}
+      />
+    </>
+  );
+}
+
+/**
+ * A field that shows one of several texts, each with its own owner, as a
+ * composer does while it answers questions: `texts` holds what each owner
+ * saved, and `show` moves the field to another owner in one render.
+ */
+function Owners({
+  initial,
+  showRef,
+  textsRef,
+}: {
+  readonly initial: string;
+  readonly showRef: { current: ((key: string) => void) | null };
+  readonly textsRef: { current: Record<string, string> };
+}) {
+  const [texts, setTexts] = useState<Record<string, string>>({
+    "answer-1": "first answer",
+    message: "saved draft",
+  });
+  const [shown, setShown] = useState(initial);
+  useEffect(() => {
+    showRef.current = setShown;
+  }, [showRef]);
+  useEffect(() => {
+    textsRef.current = texts;
+  }, [textsRef, texts]);
+  return (
+    <MessageField
+      {...buildProps()}
+      text={texts[shown]!}
+      historyKey={shown}
+      onTextChange={(next) => {
+        setTexts((previous) => ({ ...previous, [shown]: next }));
+      }}
+    />
+  );
+}
+
+const REQUEST_QUESTIONS: readonly ApprovalQuestion[] = ["Q1", "Q2"].map((header) => ({
+  header,
+  question: `${header}?`,
+  options: [],
+  multiSelect: false,
+  note: null,
+  secretWarning: null,
+}));
+
+/**
+ * A field that answers the questions of one Request the way the composer
+ * does: the answers and the shown question live in one `RequestDraft`, and
+ * each render hands the field a callback for the question it draws.
+ * `showRef` pages to the second question in one render.
+ */
+function RequestAnswers({
+  showRef,
+  draftRef,
+}: {
+  readonly showRef: { current: (() => void) | null };
+  readonly draftRef: { current: RequestDraft | null };
+}) {
+  const [draft, setDraft] = useState<RequestDraft>({
+    ...EMPTY_REQUEST_DRAFT,
+    question: {
+      ...buildQuestionDraft(REQUEST_QUESTIONS),
+      Q1: { picks: [], text: "first answer" },
+      Q2: { picks: [], text: "second answer" },
+    },
+  });
+  const question = REQUEST_QUESTIONS[draft.shownQuestionIndex]!;
+  useEffect(() => {
+    showRef.current = () => {
+      setDraft((current) => ({ ...current, shownQuestionIndex: 1 }));
+    };
+  }, [showRef]);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draftRef, draft]);
+  return (
+    <MessageField
+      {...buildProps()}
+      text={draft.question![question.header]!.text}
+      historyKey={question.header}
+      onTextChange={(text) => {
+        setDraft((current) => typeAnswerInRequestDraft(current, REQUEST_QUESTIONS, question, text));
+      }}
+    />
+  );
+}
 
 const readField = (): HTMLElement => screen.getByRole("textbox", { name: "Message" });
 
@@ -367,5 +505,128 @@ describe("the message field", () => {
     const ref = createRef<HTMLElement>();
     render(<MessageField {...buildProps({ ref })} />);
     expect(ref.current).toBe(readField());
+  });
+
+  describe("with a new historyKey", () => {
+    /** Undoes and redoes as the browser's own undo commands do, which type nothing when there is nothing to undo. */
+    const undo = (): void => {
+      fireEvent(
+        readField(),
+        new InputEvent("beforeinput", { inputType: "historyUndo", cancelable: true }),
+      );
+    };
+    const redo = (): void => {
+      fireEvent(
+        readField(),
+        new InputEvent("beforeinput", { inputType: "historyRedo", cancelable: true }),
+      );
+    };
+
+    it("does not bring the previous text back with undo", async () => {
+      const user = userEvent.setup();
+      render(<Switching onTextChange={vi.fn()} />);
+      readField().focus();
+      // The draft is deleted, so the answer starts empty as well: the field
+      // has no text to replace, and only the history can leak the draft.
+      await user.keyboard("{Backspace>10/}");
+      expect(readFieldText(readField())).toBe("");
+
+      fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+      undo();
+      expect(readFieldText(readField())).toBe("");
+
+      readField().focus();
+      await user.keyboard("Use blue");
+      undo();
+      expect(readFieldText(readField())).toBe("");
+      undo();
+      expect(readFieldText(readField())).toBe("");
+      redo();
+      expect(readFieldText(readField())).toBe("Use blue");
+    });
+
+    it("forgets the undo history even when the text stays the same", async () => {
+      const user = userEvent.setup();
+      render(<Switching onTextChange={vi.fn()} />);
+      readField().focus();
+      await user.keyboard("!");
+      fireEvent.click(screen.getByRole("button", { name: "Same text" }));
+      undo();
+      expect(readFieldText(readField())).toBe("Draft text!");
+    });
+
+    describe("when the page holds an edit the field has not read yet", () => {
+      it("gives it to the owner of the old content when the Request closes", async () => {
+        const showRef: { current: ((key: string) => void) | null } = { current: null };
+        const textsRef: { current: Record<string, string> } = { current: {} };
+        render(<Owners initial="answer-1" showRef={showRef} textsRef={textsRef} />);
+        readField().focus();
+        // An IME composition puts text in the page that the editor reads only later.
+        fireEvent.compositionStart(readField());
+        readField().querySelector("p")!.textContent = `${textsRef.current["answer-1"]!} 候補`;
+        act(() => showRef.current!("message"));
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        });
+        expect(textsRef.current.message).toBe("saved draft");
+        expect(textsRef.current["answer-1"]).toBe("first answer 候補");
+      });
+
+      it("keeps it in the old question when both answers live in one Request draft", async () => {
+        const showRef: { current: (() => void) | null } = { current: null };
+        const draftRef: { current: RequestDraft | null } = { current: null };
+        render(<RequestAnswers showRef={showRef} draftRef={draftRef} />);
+        readField().focus();
+        fireEvent.compositionStart(readField());
+        readField().querySelector("p")!.textContent = "first answer 候補";
+        act(() => showRef.current!());
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        });
+        expect(draftRef.current!.shownQuestionIndex).toBe(1);
+        expect(draftRef.current!.question!.Q1!.text).toBe("first answer 候補");
+        expect(draftRef.current!.question!.Q2!.text).toBe("second answer");
+      });
+    });
+
+    it("keeps the same field and its focus, puts the caret at the end, and reports no change", async () => {
+      const user = userEvent.setup();
+      const onTextChange = vi.fn<(text: string) => void>();
+      render(<Switching onTextChange={onTextChange} />);
+      const field = readField();
+      field.focus();
+
+      fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+      expect(readField()).toBe(field);
+      expect(document.activeElement).toBe(field);
+      expect(onTextChange).not.toHaveBeenCalled();
+
+      await user.keyboard("typed");
+      expect(readFieldText(field)).toBe("typed");
+
+      fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+      expect(document.activeElement).toBe(field);
+      await user.keyboard("!");
+      expect(readFieldText(field)).toBe("Draft text!");
+    });
+  });
+
+  it("calls onBlur when the field loses the focus", () => {
+    const onBlur = vi.fn<() => void>();
+    renderField({ onBlur });
+    readField().focus();
+    expect(onBlur).not.toHaveBeenCalled();
+    readField().blur();
+    expect(onBlur).toHaveBeenCalledOnce();
+  });
+
+  it("tells when an IME composition starts and ends", () => {
+    const onComposingChange = vi.fn<(composing: boolean) => void>();
+    renderField({ onComposingChange });
+    fireEvent.compositionStart(readField());
+    expect(onComposingChange).toHaveBeenLastCalledWith(true);
+    fireEvent.compositionEnd(readField());
+    expect(onComposingChange).toHaveBeenLastCalledWith(false);
+    expect(onComposingChange).toHaveBeenCalledTimes(2);
   });
 });

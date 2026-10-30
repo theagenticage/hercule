@@ -72,7 +72,7 @@ export function ConversationComposer({
         <MessageBox
           value={text}
           placeholder={`Message ${name}`}
-          disabled={false}
+          readOnly={false}
           onChange={setText}
           onSubmit={submit}
         />

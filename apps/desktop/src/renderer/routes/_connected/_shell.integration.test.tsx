@@ -398,14 +398,11 @@ describe("the shell's live connection", () => {
     const refresh = vi.spyOn(ageClock, "refresh");
 
     live.drop();
-    await waitFor(
-      () => {
-        for (const path of ["/api/v1/projects", "/api/v1/workspaces", "/api/v1/resources"]) {
-          expect(countReads(calls, path), path).toBe(path === "/api/v1/workspaces" ? 3 : 2);
-        }
-      },
-      { timeout: 5000 },
-    );
+    await waitFor(() => {
+      for (const path of ["/api/v1/projects", "/api/v1/workspaces", "/api/v1/resources"]) {
+        expect(countReads(calls, path), path).toBe(path === "/api/v1/workspaces" ? 3 : 2);
+      }
+    });
     expect(refresh).toHaveBeenCalled();
     refresh.mockRestore();
   });
@@ -446,9 +443,7 @@ describe("the shell's live connection", () => {
     // Reconnecting needs a ticket, which the controller refuses.
     revoked = true;
     live.drop();
-    expect(
-      await screen.findByRole("textbox", { name: "Username" }, { timeout: 5000 }),
-    ).toBeTruthy();
+    expect(await screen.findByRole("textbox", { name: "Username" })).toBeTruthy();
     expect(context.queryClient.getQueryData(projectsKey)).toBeUndefined();
 
     revoked = false;

@@ -443,8 +443,12 @@ describe("the thread screen", () => {
     expect(within(findTranscript()).getAllByRole("img", { name: "Error" })).toHaveLength(1);
     // The stream is not subscribed again, because it would stop at the same row.
     // The tap is not either, because no row will ever match what it delivers.
-    expect(live.readTopics()).not.toContain(buildSessionStreamTopic(sessionId));
-    expect(live.readTopics()).not.toContain(buildSessionTapTopic(sessionId));
+    // The live connection ends a subscription in a task of its own, so the
+    // topics may be joined a moment after the note shows.
+    await waitFor(() => {
+      expect(live.readTopics()).not.toContain(buildSessionStreamTopic(sessionId));
+      expect(live.readTopics()).not.toContain(buildSessionTapTopic(sessionId));
+    });
   });
 
   it("keeps the blocks it built when a session update changes nothing the agent state holds", async () => {

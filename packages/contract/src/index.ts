@@ -18,6 +18,8 @@ export {
   ImageGenerationDetail,
   isSkillNameCharacter,
   isSkillReferencePrefix,
+  MAX_ANSWERS_LENGTH,
+  MAX_MESSAGE_LENGTH,
   readSkillReferenceName,
   TodoListDetail,
   TodoStep,
