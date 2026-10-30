@@ -14,17 +14,33 @@ export interface RequestDraft {
    * sending fails.
    */
   readonly answered: boolean;
+  /**
+   * The error message of the last failed attempt to send the answers to this
+   * Request, or null when none failed since. Cleared when the next attempt
+   * starts. It lives here, not in the dock, so the dock and the composer
+   * show the same failure.
+   */
+  readonly failure: string | null;
   /** The answers to a `question` Request typed so far; null until the user gives one. */
   readonly question: QuestionDraft | null;
   /** The question of a `question` Request that is shown, from 0. */
   readonly shownQuestionIndex: number;
+  /**
+   * Whether the user opened an async question with Answer. A folded async
+   * question docks as one row and leaves the composer alone. It is false
+   * until the user opens it, and false again when they choose Later. A
+   * blocking question is always open and ignores it.
+   */
+  readonly unfolded: boolean;
 }
 
 /** The draft of a Request the user has not touched yet. */
 export const EMPTY_REQUEST_DRAFT: RequestDraft = {
   answered: false,
+  failure: null,
   question: null,
   shownQuestionIndex: 0,
+  unfolded: false,
 };
 
 /**

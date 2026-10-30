@@ -806,6 +806,23 @@ export {
   type RequestDraft,
 } from "./threads/request-drafts";
 export {
+  ANSWER_ATTACH_OFF_REASON,
+  FOLD_QUESTION_LABEL,
+  NEXT_QUESTION_LABEL,
+  PREVIOUS_QUESTION_LABEL,
+  REFUSED_FILE_NOTICE,
+  SEND_ANSWERS_LABEL,
+  TYPING_PAUSE_MS,
+  UNFOLD_QUESTION_LABEL,
+  buildQuestionStepper,
+  describeFoldedQuestion,
+  findComposerQuestion,
+  stepQuestions,
+  type ComposerQuestion,
+  type QuestionStep,
+  type QuestionStepper,
+} from "./threads/question-composer";
+export {
   buildQuestionAnswers,
   buildQuestionDraft,
   isQuestionAnswered,

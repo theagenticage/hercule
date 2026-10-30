@@ -15,6 +15,8 @@ import {
   isQuestionAnswered,
   pickQuestionOption,
   typeQuestionAnswer,
+  type ApprovalQuestion,
+  type QuestionDraft,
 } from "@hercule/client-core";
 
 const REQUEST: OpenRequest = {
@@ -50,6 +52,10 @@ const QUESTIONS = buildApprovalCard(REQUEST).questions;
 const STORAGE = QUESTIONS[0]!;
 const FEATURES = QUESTIONS[1]!;
 
+/** Picks an option when the user has no message text to move. */
+const pick = (draft: QuestionDraft, question: ApprovalQuestion, label: string): QuestionDraft =>
+  pickQuestionOption(draft, question, label, "").question;
+
 describe("the question draft", () => {
   it("starts with no question answered and no answers", () => {
     const draft = buildQuestionDraft(QUESTIONS);
@@ -62,15 +68,15 @@ describe("the question draft", () => {
   it("selects only the picked option on a single-select question, and clears the typed text", () => {
     let draft = buildQuestionDraft(QUESTIONS);
     draft = typeQuestionAnswer(draft, STORAGE, "a sqlite file");
-    draft = pickQuestionOption(draft, STORAGE, "localStorage");
-    draft = pickQuestionOption(draft, STORAGE, "IndexedDB");
+    draft = pick(draft, STORAGE, "localStorage");
+    draft = pick(draft, STORAGE, "IndexedDB");
 
     expect(draft[STORAGE.header]).toEqual({ picks: ["IndexedDB"], text: "" });
   });
 
   it("clears the pick when the user types on a single-select question", () => {
     let draft = buildQuestionDraft(QUESTIONS);
-    draft = pickQuestionOption(draft, STORAGE, "localStorage");
+    draft = pick(draft, STORAGE, "localStorage");
     draft = typeQuestionAnswer(draft, STORAGE, "a sqlite file");
 
     expect(draft[STORAGE.header]).toEqual({ picks: [], text: "a sqlite file" });
@@ -79,9 +85,9 @@ describe("the question draft", () => {
   it("toggles a picked option on a multiSelect question, and keeps the typed text", () => {
     let draft = buildQuestionDraft(QUESTIONS);
     draft = typeQuestionAnswer(draft, FEATURES, "Offline mode");
-    draft = pickQuestionOption(draft, FEATURES, "Sync");
-    draft = pickQuestionOption(draft, FEATURES, "Search");
-    draft = pickQuestionOption(draft, FEATURES, "Sync");
+    draft = pick(draft, FEATURES, "Sync");
+    draft = pick(draft, FEATURES, "Search");
+    draft = pick(draft, FEATURES, "Sync");
 
     expect(draft[FEATURES.header]).toEqual({ picks: ["Search"], text: "Offline mode" });
   });
@@ -89,30 +95,26 @@ describe("the question draft", () => {
   it("counts a question as answered by a pick or by non-blank text, not by blank text", () => {
     const empty = buildQuestionDraft(QUESTIONS);
 
-    expect(isQuestionAnswered(pickQuestionOption(empty, STORAGE, "IndexedDB"), STORAGE)).toBe(true);
+    expect(isQuestionAnswered(pick(empty, STORAGE, "IndexedDB"), STORAGE)).toBe(true);
     expect(isQuestionAnswered(typeQuestionAnswer(empty, STORAGE, " a file "), STORAGE)).toBe(true);
     expect(isQuestionAnswered(typeQuestionAnswer(empty, STORAGE, "  \n "), STORAGE)).toBe(false);
     // A multiSelect question whose only pick is toggled off again has no answer.
-    const toggledOff = pickQuestionOption(
-      pickQuestionOption(empty, FEATURES, "Sync"),
-      FEATURES,
-      "Sync",
-    );
+    const toggledOff = pick(pick(empty, FEATURES, "Sync"), FEATURES, "Sync");
     expect(isQuestionAnswered(toggledOff, FEATURES)).toBe(false);
   });
 
   it("builds no answers while one question is unanswered", () => {
-    const draft = pickQuestionOption(buildQuestionDraft(QUESTIONS), STORAGE, "localStorage");
+    const draft = pick(buildQuestionDraft(QUESTIONS), STORAGE, "localStorage");
 
     expect(buildQuestionAnswers(draft, QUESTIONS)).toBeNull();
   });
 
   it("builds a string per single-select question and a list per multiSelect question, picks in option order, then the trimmed text", () => {
     let draft = buildQuestionDraft(QUESTIONS);
-    draft = pickQuestionOption(draft, STORAGE, "localStorage");
+    draft = pick(draft, STORAGE, "localStorage");
     // Picked out of option order, so the list's order cannot come from the clicks.
-    draft = pickQuestionOption(draft, FEATURES, "Export");
-    draft = pickQuestionOption(draft, FEATURES, "Sync");
+    draft = pick(draft, FEATURES, "Export");
+    draft = pick(draft, FEATURES, "Sync");
     draft = typeQuestionAnswer(draft, FEATURES, "  Offline mode  ");
 
     expect(buildQuestionAnswers(draft, QUESTIONS)).toEqual({
@@ -124,7 +126,7 @@ describe("the question draft", () => {
   it("answers a single-select question with its trimmed text, and leaves blank text out of a multiSelect list", () => {
     let draft = buildQuestionDraft(QUESTIONS);
     draft = typeQuestionAnswer(draft, STORAGE, "  a sqlite file \n");
-    draft = pickQuestionOption(draft, FEATURES, "Search");
+    draft = pick(draft, FEATURES, "Search");
     draft = typeQuestionAnswer(draft, FEATURES, "   ");
 
     expect(buildQuestionAnswers(draft, QUESTIONS)).toEqual({
@@ -135,12 +137,66 @@ describe("the question draft", () => {
 
   it("answers a multiSelect question with only typed text as a one-item list", () => {
     let draft = buildQuestionDraft(QUESTIONS);
-    draft = pickQuestionOption(draft, STORAGE, "IndexedDB");
+    draft = pick(draft, STORAGE, "IndexedDB");
     draft = typeQuestionAnswer(draft, FEATURES, " Offline mode ");
 
     expect(buildQuestionAnswers(draft, QUESTIONS)).toEqual({
       Storage: "IndexedDB",
       Features: ["Offline mode"],
+    });
+  });
+
+  describe("picking an option while the user has typed text", () => {
+    const typed = typeQuestionAnswer(buildQuestionDraft(QUESTIONS), STORAGE, "a sqlite file");
+
+    it("moves the typed text to the end of the message after a blank line, on a single-select question", () => {
+      const picked = pickQuestionOption(typed, STORAGE, "IndexedDB", "Please check this");
+
+      expect(picked.question[STORAGE.header]).toEqual({ picks: ["IndexedDB"], text: "" });
+      expect(picked.messageText).toBe("Please check this\n\na sqlite file");
+    });
+
+    it("joins with exactly one blank line however the message ends", () => {
+      const picked = pickQuestionOption(typed, STORAGE, "IndexedDB", "Draft  \n\n\n");
+
+      expect(picked.messageText).toBe("Draft\n\na sqlite file");
+    });
+
+    it("moves the text trimmed, keeping its inner lines", () => {
+      const multiline = typeQuestionAnswer(
+        buildQuestionDraft(QUESTIONS),
+        STORAGE,
+        "\n  first\n\n  second \n ",
+      );
+
+      const picked = pickQuestionOption(multiline, STORAGE, "IndexedDB", "Hi");
+
+      expect(picked.messageText).toBe("Hi\n\nfirst\n\n  second");
+    });
+
+    it("makes the moved text the whole message when the message is empty or blank", () => {
+      expect(pickQuestionOption(typed, STORAGE, "IndexedDB", "").messageText).toBe("a sqlite file");
+      expect(pickQuestionOption(typed, STORAGE, "IndexedDB", " \n ").messageText).toBe(
+        "a sqlite file",
+      );
+    });
+
+    it("leaves the message exactly as it was when the typed text is blank", () => {
+      const blank = typeQuestionAnswer(buildQuestionDraft(QUESTIONS), STORAGE, " \n ");
+
+      const picked = pickQuestionOption(blank, STORAGE, "IndexedDB", "Draft\n");
+
+      expect(picked.messageText).toBe("Draft\n");
+      expect(picked.question[STORAGE.header]).toEqual({ picks: ["IndexedDB"], text: "" });
+    });
+
+    it("keeps the typed text and the message as they were on a multiSelect question", () => {
+      const withText = typeQuestionAnswer(buildQuestionDraft(QUESTIONS), FEATURES, "Offline mode");
+
+      const picked = pickQuestionOption(withText, FEATURES, "Sync", "Draft\n");
+
+      expect(picked.question[FEATURES.header]).toEqual({ picks: ["Sync"], text: "Offline mode" });
+      expect(picked.messageText).toBe("Draft\n");
     });
   });
 });
