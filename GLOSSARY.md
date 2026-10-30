@@ -125,7 +125,7 @@ What a thread runs with: provider instance, model and its options, access mode, 
 _Avoid_: settings (reserved for the settings store), spec (reserved for the session spec), setup
 
 **Message Draft**:
-The unsent content the composer holds for one thread or one assistant's Conversation: its text, and on a thread the Attachments on its shelf; context later. One per thread, draft or active, and one per assistant. It lives in the client's memory only, so a reload loses it.
+The unsent content the composer holds for one thread or one assistant's Conversation: its text, and on a thread the Attachments on its shelf; context later. One per thread, draft or active, and one per assistant. It lives in the client's memory only, so a reload loses it. While the composer answers a question Request, it shows that question's answer instead; the Message Draft is kept and comes back when the composer stops answering. Typed text that picking an option displaces from an answer is moved to the end of the Message Draft where the app has one.
 _Avoid_: prompt (the first message as the spawn carries it), composer state
 
 **Submission**:
