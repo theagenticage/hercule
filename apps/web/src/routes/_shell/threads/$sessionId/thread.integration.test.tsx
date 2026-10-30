@@ -16,7 +16,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultScheduler, focusManager, notifyManager } from "@tanstack/react-query";
-import { buildApprovalCard, formatDuration, formatStamp, queryKeys } from "@hercule/client-core";
+import {
+  buildApprovalCard,
+  formatDuration,
+  formatStamp,
+  queryKeys,
+  TYPING_PAUSE_MS,
+} from "@hercule/client-core";
 import type {
   Assistant,
   Input,
@@ -4153,6 +4159,49 @@ describe("Thread: answering the agent's questions", () => {
       await waitFor(() => {
         expect(readComposerField().placeholder).toBe("Or type your own answer");
       });
+    });
+  });
+
+  describe("an IME composition", () => {
+    it("keeps the answer in the field while a composition starts and ends in it", async () => {
+      const user = userEvent.setup();
+      await openLive([ONE_QUESTION]);
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+
+      await user.type(readComposerField(), "IndexedDB");
+      // A composition in the answer must not hold off the question, or the
+      // field would show the saved message instead of the answer.
+      fireEvent.compositionStart(readComposerField());
+      expect(readComposerField().value).toBe("IndexedDB");
+      expect(readComposerField().placeholder).toBe("Or type your own answer");
+      fireEvent.compositionEnd(readComposerField());
+      expect(readComposerField().value).toBe("IndexedDB");
+      expect(readComposerField().placeholder).toBe("Or type your own answer");
+    });
+
+    it("keeps a question off the message for as long as a composition is open in it", async () => {
+      const user = userEvent.setup();
+      const { setOpenRequests } = await openLive([]);
+
+      await user.type(await screen.findByRole("textbox"), "Also check");
+      fireEvent.compositionStart(readComposerField());
+      setOpenRequests([ONE_QUESTION]);
+      await screen.findByText("Which storage should drafts use?");
+      // Longer than the pause that ends the hold after typing.
+      await new Promise((resolve) => setTimeout(resolve, TYPING_PAUSE_MS + 300));
+
+      expect(readComposerField().value).toBe("Also check");
+      expect(screen.getByRole("button", { name: "Send" })).toBeDefined();
+
+      fireEvent.compositionEnd(readComposerField());
+      await waitFor(
+        () => {
+          expect(readComposerField().placeholder).toBe("Or type your own answer");
+        },
+        { timeout: 3000 },
+      );
     });
   });
 

@@ -162,7 +162,10 @@ export function ConversationComposer({
       step={answer?.step}
       historyKey={answer?.historyKey ?? MESSAGE_HISTORY_KEY}
       onFieldBlur={guard.release}
-      onComposingChange={guard.reportComposing}
+      // Only a composition in the Message Draft holds off a question. While
+      // answering, the hold would make the composer show the Message Draft
+      // instead of the answer being composed.
+      onComposingChange={answer === null ? guard.reportComposing : undefined}
       above={
         session === null ? null : (
           <ConversationRequestDock session={session} look={look} messageDraftKey={draftKey} />

@@ -242,7 +242,8 @@ export function ShrunkDockRow<Id extends string>({
  * `messageDraftKey` is the `pendingSubmissions` key of the Message Draft that
  * a pick moves typed text to. Picking an option on a single-select question
  * replaces the typed answer, and the typed text is appended to that Message
- * Draft rather than lost.
+ * Draft rather than lost. On a secret question a pick erases the typed text
+ * and never moves it to the Message Draft, which is not secret.
  *
  * While the composer is shrunk, all of that gives way to `dock-mini`: the
  * face, the question in the one line the sidebar's Waiting on you row
@@ -364,7 +365,11 @@ export function RequestDock({
     changeRequestDraft((current) => ({ ...current, shownQuestionIndex: step.index }));
   };
 
-  /** Picks an option, and moves the text it displaces to the end of the Message Draft. */
+  /**
+   * Picks an option, and moves the text it displaces to the end of the Message
+   * Draft. On a secret question the displaced text is erased instead, never
+   * moved to the Message Draft.
+   */
   const pickOption = (label: string): void => {
     if (shownQuestion === undefined) return;
     const messageText = pendingSubmissions.read(messageDraftKey).message.text;

@@ -31,7 +31,9 @@ import type { DockComposer } from "./permission-card";
  *
  * Picking an option on a single-select question clears the text typed for
  * it. Where the thread has a Message Draft, that text is not lost: it moves
- * to the end of the Message Draft.
+ * to the end of the Message Draft. The one exception is a secret question:
+ * a pick erases the typed text and never moves it to the Message Draft, which
+ * is not secret.
  */
 export function QuestionForm({
   questions,

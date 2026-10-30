@@ -1252,6 +1252,24 @@ describe("the composer answering a question", () => {
     expect(readText()).toBe("");
   });
 
+  it("keeps the answer in the field while an IME composition starts and ends in it", async () => {
+    const user = userEvent.setup();
+    const { pendingSubmissions } = await renderAsking(ASKED);
+    act(() => {
+      pendingSubmissions.writeText(ASKED.session.id, "Half a mess");
+    });
+    await user.type(readField(), "Post");
+
+    // A composition in the answer must not hold off the question that is
+    // already answered, or the field would show the saved message.
+    fireEvent.compositionStart(readField());
+    expect(readText()).toBe("Post");
+    expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+    fireEvent.compositionEnd(readField());
+    expect(readText()).toBe("Post");
+    expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+  });
+
   it("offers no skills and draws no chips in an answer", async () => {
     const user = userEvent.setup();
     const skills = [

@@ -224,12 +224,23 @@ export function Composer({
               else guard.release();
             }}
             onBlur={guard.release}
-            onCompositionStart={() => {
-              guard.reportComposing(true);
-            }}
-            onCompositionEnd={() => {
-              guard.reportComposing(false);
-            }}
+            // Only a composition in the Message Draft holds off a question.
+            // While answering, the hold would make the composer show the
+            // Message Draft instead of the answer being composed.
+            onCompositionStart={
+              answer === null
+                ? () => {
+                    guard.reportComposing(true);
+                  }
+                : undefined
+            }
+            onCompositionEnd={
+              answer === null
+                ? () => {
+                    guard.reportComposing(false);
+                  }
+                : undefined
+            }
           />
           {/* The controls on the right (dictation, Stop, Previous, the step or
               send button) never shrink. When the row is too narrow, the

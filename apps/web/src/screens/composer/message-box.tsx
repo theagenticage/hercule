@@ -32,9 +32,9 @@ export function MessageBox({
   /** Called when the field loses focus. */
   readonly onBlur?: () => void;
   /** Called when an IME composition starts in the field. */
-  readonly onCompositionStart?: () => void;
+  readonly onCompositionStart?: (() => void) | undefined;
   /** Called when an IME composition in the field ends. */
-  readonly onCompositionEnd?: () => void;
+  readonly onCompositionEnd?: (() => void) | undefined;
 }): JSX.Element {
   const ref = useRef<HTMLTextAreaElement>(null);
 
