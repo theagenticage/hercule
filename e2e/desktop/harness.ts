@@ -1077,6 +1077,88 @@ export function recordLastAgentText(containerSelector: string): void {
   takeSnapshot();
 }
 
+/** The size and position of a scroll area, sampled once for a painted frame, in CSS pixels. */
+export interface ScrollFrame {
+  /** How far the area is scrolled down. */
+  readonly top: number;
+  /** The height of everything in the area, as `scrollHeight`. */
+  readonly height: number;
+  /** The height of the part of the area on screen, as `clientHeight`. */
+  readonly viewport: number;
+}
+
+/** The page's global object, with the frames `recordScrollFrames` keeps on it. */
+type ScrollRecordingGlobal = typeof globalThis & { scrollFrames?: ScrollFrame[] };
+
+/**
+ * Starts recording the scroll area `selector` finds, once for each frame the
+ * page paints: its scroll position and its sizes. The frames collect, oldest
+ * first, in `scrollFrames` on the page's global object; read them with
+ * `readScrollFrames`.
+ *
+ * Each frame is read in a timer that the frame's own callback queues. The
+ * timer runs after that frame's rendering, so after the layout, the resize
+ * observers and any scroll they made. The sample is therefore usually what
+ * the frame painted. It is not guaranteed to be: another task can change the
+ * page between the frame's rendering and the timer, and reading the sizes
+ * then lays the page out again before the resize observers have followed the
+ * change. Such a sample can show a gap above the bottom that no painted frame
+ * had. A read made inside the frame's callback would be worse, as it would
+ * always see the new layout before the scripts that follow the content have
+ * moved the view.
+ *
+ * It runs in the page, handed over as a function to `page.evaluate`, so it
+ * closes over nothing in this file.
+ */
+export function recordScrollFrames(selector: string): void {
+  const area = document.querySelector(selector)!;
+  const frames: ScrollFrame[] = [];
+  (globalThis as ScrollRecordingGlobal).scrollFrames = frames;
+  const onFrame = () => {
+    setTimeout(() => {
+      frames.push({
+        top: area.scrollTop,
+        height: area.scrollHeight,
+        viewport: area.clientHeight,
+      });
+    }, 0);
+    requestAnimationFrame(onFrame);
+  };
+  requestAnimationFrame(onFrame);
+}
+
+/** Returns the newest frame `recordScrollFrames` has recorded, or `undefined` before the first. */
+export function readLastScrollFrame(page: Page): Promise<ScrollFrame | undefined> {
+  return page.evaluate(() => (globalThis as ScrollRecordingGlobal).scrollFrames?.at(-1));
+}
+
+/** Returns every frame `recordScrollFrames` has recorded so far, oldest first. */
+export function readScrollFrames(page: Page): Promise<ScrollFrame[]> {
+  return page.evaluate(() => [...((globalThis as ScrollRecordingGlobal).scrollFrames ?? [])]);
+}
+
+/**
+ * Returns how far a frame's scroll position is above the bottom of its
+ * area: 0 when the view is at the bottom.
+ */
+export function measureGapAboveBottom({ top, height, viewport }: ScrollFrame): number {
+  return height - viewport - top;
+}
+
+/**
+ * Waits until the page has painted `count` more frames and each frame's
+ * recording timer has run, so the scrolls that followed what the test just
+ * did have been applied.
+ */
+export function waitForFrames(page: Page, count: number): Promise<void> {
+  return page.evaluate(async (frames) => {
+    for (let frame = 0; frame < frames; frame += 1) {
+      await new Promise(requestAnimationFrame);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }, count);
+}
+
 /** Returns the text a snapshot shows: its markdown's text, then the paragraph being written. */
 export function joinShownText({ text, openParagraph }: AgentTextSnapshot): string {
   return `${text}${openParagraph ?? ""}`;
