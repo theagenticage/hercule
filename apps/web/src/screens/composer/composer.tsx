@@ -14,7 +14,7 @@ import {
   type Thread,
   readErrorMessage,
 } from "@hercule/client-core";
-import { ImageLightbox } from "@hercule/ui";
+import { cn, ImageLightbox } from "@hercule/ui";
 import {
   localRunnerQuery,
   projectsQuery,
@@ -242,90 +242,113 @@ export function Composer({
                 : undefined
             }
           />
-          {/* The controls on the right (dictation, Stop, Previous, the step or
-              send button) never shrink. When the row is too narrow, the
-              access mode and the model pill are cut with an ellipsis first. */}
-          <div className="flex min-w-0 items-center gap-1.5">
-            <AttachButton
-              disabledReason={
-                answer === null ? attachDisabledReason : answer.attachments.attachBlockedReason
-              }
-              // The picker can come back after a question took the composer
-              // over, so the mode is read when the files arrive, as for paste.
-              onFiles={(files) => {
-                if (answer === null) model.attachFiles(files);
-                else answer.attachments.onFiles();
-              }}
-            />
-            <AccessModeSelector
-              mode={fields.accessMode.value}
-              items={fields.accessMode.rows}
-              locked={fields.accessMode.locked}
-              open={open === "accessMode"}
-              onOpenChange={(next) => {
-                handleOpenChange("accessMode", next);
-              }}
-              onPick={(mode) => {
-                model.recordThreadChoice({ kind: "accessMode", value: mode });
-              }}
-            />
-            {pending === null ? null : (
-              <span className="ml-1 min-w-0 truncate font-mono text-[11px] text-attn">
-                {pending}
-              </span>
-            )}
-            <div className="ml-auto flex min-w-0 shrink items-center gap-1.5">
-              {fields.options === null ? null : (
-                <ModelOptionsSelector
-                  descriptors={fields.options}
-                  selected={config.options}
-                  label={buildOptionsLabel(fields.options, config.options)}
-                  modelName={fields.model.pill.name}
-                  disabled={model.readOnly !== null}
-                  open={open === "options"}
+          {/* Two clusters in a wrapping row. The pickers (Attach, access mode,
+              options, model) are one cluster and the actions (dictation,
+              Stop, Previous, the step or send button) are another, which never
+              shrinks or splits. The pickers' flex basis is the least they need:
+              Attach, a few characters of the access mode, the options trigger
+              and a model pill with its logo and a few characters. While that
+              and the actions fit on one line, the pickers grow into the free
+              space and the model controls sit next to the actions. Otherwise
+              the actions wrap to their own line, right-aligned, and the
+              pickers keep the whole line above them to shrink into. Nothing
+              is measured in JavaScript. */}
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
+            <div className="flex min-w-0 flex-[1_1_304px] items-center gap-1.5">
+              <AttachButton
+                disabledReason={
+                  answer === null ? attachDisabledReason : answer.attachments.attachBlockedReason
+                }
+                // The picker can come back after a question took the composer
+                // over, so the mode is read when the files arrive, as for paste.
+                onFiles={(files) => {
+                  if (answer === null) model.attachFiles(files);
+                  else answer.attachments.onFiles();
+                }}
+              />
+              {/* The access mode is cut with an ellipsis, but not below about five characters. */}
+              <span className="flex min-w-[80px] shrink">
+                <AccessModeSelector
+                  mode={fields.accessMode.value}
+                  items={fields.accessMode.rows}
+                  locked={fields.accessMode.locked}
+                  open={open === "accessMode"}
                   onOpenChange={(next) => {
-                    handleOpenChange("options", next);
+                    handleOpenChange("accessMode", next);
                   }}
-                  onPick={(id, value) => {
-                    model.recordThreadChoice({ kind: "option", id, value });
+                  onPick={(mode) => {
+                    model.recordThreadChoice({ kind: "accessMode", value: mode });
                   }}
                 />
+              </span>
+              {pending === null ? null : (
+                <span className="ml-1 min-w-0 truncate font-mono text-[11px] text-attn">
+                  {pending}
+                </span>
               )}
-              <span ref={pill} className="inline-flex min-w-0">
-                <ModelSelector
-                  menu={models}
-                  filter={filter}
-                  onFilter={setFilter}
-                  pill={fields.model.pill}
-                  disabled={model.readOnly !== null}
-                  open={open === "model"}
-                  onOpenChange={(next) => {
-                    handleOpenChange("model", next);
-                  }}
-                  onChoose={model.recordThreadChoice}
-                  loginSlot={login}
-                />
-              </span>
-            </div>
-            <VoiceButton />
-            {model.busy ? <StopButton title={SESSION_STOP_TITLE} onStop={model.stop} /> : null}
-            {answer === null ? (
-              <SendButton tip={model.sendTip} disabled={!canSend} onSend={submitMessage} />
-            ) : (
-              <>
-                {answer.step.showsPrevious ? (
-                  <PreviousButton
-                    disabled={!answer.step.canGoBack}
-                    onPrevious={answer.step.onPrevious}
+              {/* The group's minimum is the sum of its children's: the options
+                  trigger's 84px, the gap, and the pill's 96px. */}
+              <div
+                className={cn(
+                  "ml-auto flex shrink items-center gap-1.5",
+                  fields.options === null ? "min-w-24" : "min-w-[186px]",
+                )}
+              >
+                {fields.options === null ? null : (
+                  <ModelOptionsSelector
+                    descriptors={fields.options}
+                    selected={config.options}
+                    label={buildOptionsLabel(fields.options, config.options)}
+                    modelName={fields.model.pill.name}
+                    disabled={model.readOnly !== null}
+                    open={open === "options"}
+                    onOpenChange={(next) => {
+                      handleOpenChange("options", next);
+                    }}
+                    onPick={(id, value) => {
+                      model.recordThreadChoice({ kind: "option", id, value });
+                    }}
                   />
-                ) : null}
-                <StepButton
-                  label={answer.step.label}
-                  disabled={!answer.step.ready || model.readOnly !== null}
-                  onStep={answer.step.onStep}
-                />
-              </>
-            )}
+                )}
+                {/* The pill is cut with an ellipsis, but never below its logo and a few characters. */}
+                <span ref={pill} className="inline-flex min-w-24 shrink">
+                  <ModelSelector
+                    menu={models}
+                    filter={filter}
+                    onFilter={setFilter}
+                    pill={fields.model.pill}
+                    disabled={model.readOnly !== null}
+                    open={open === "model"}
+                    onOpenChange={(next) => {
+                      handleOpenChange("model", next);
+                    }}
+                    onChoose={model.recordThreadChoice}
+                    loginSlot={login}
+                  />
+                </span>
+              </div>
+            </div>
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
+              <VoiceButton />
+              {model.busy ? <StopButton title={SESSION_STOP_TITLE} onStop={model.stop} /> : null}
+              {answer === null ? (
+                <SendButton tip={model.sendTip} disabled={!canSend} onSend={submitMessage} />
+              ) : (
+                <>
+                  {answer.step.showsPrevious ? (
+                    <PreviousButton
+                      disabled={!answer.step.canGoBack}
+                      onPrevious={answer.step.onPrevious}
+                    />
+                  ) : null}
+                  <StepButton
+                    label={answer.step.label}
+                    disabled={!answer.step.ready || model.readOnly !== null}
+                    onStep={answer.step.onStep}
+                  />
+                </>
+              )}
+            </div>
           </div>
           {errorText === null ? null : (
             <p className="text-fine text-fail" role="alert">
