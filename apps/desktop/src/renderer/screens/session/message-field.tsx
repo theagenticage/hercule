@@ -17,7 +17,7 @@ import { Text } from "@tiptap/extension-text";
 import { Placeholder } from "@tiptap/extensions/placeholder";
 import { UndoRedo } from "@tiptap/extensions/undo-redo";
 import { Fragment, Slice, type Node as ProseMirrorNode, type Schema } from "@tiptap/pm/model";
-import { TextSelection } from "@tiptap/pm/state";
+import { EditorState, TextSelection } from "@tiptap/pm/state";
 import type { SessionSkill } from "@hercule/contract";
 import { filterSessionSkills } from "@hercule/client-core";
 import { isImeKey, isSendKey } from "./send-key";
@@ -78,6 +78,13 @@ export interface ComposerSkills {
   readonly refreshIfStale: () => void;
 }
 
+/**
+ * The names a field that takes no Skill References knows: none, so every
+ * chip in it turns back into plain `$name` text and no text becomes one. One
+ * shared set keeps `skillNames` the same value from one render to the next.
+ */
+const NO_SKILL_NAMES: ReadonlySet<string> = new Set();
+
 /** The list that is open and its highlighted row. */
 interface OpenList {
   readonly trigger: SkillTrigger;
@@ -113,6 +120,20 @@ const findHoveredChip = (
  * at its end, and keeps it out of the undo history, so undo cannot bring a
  * sent message back.
  *
+ * `historyKey` names what the text is: the user's Message Draft, or the answer
+ * to one particular question. While it stays the same, undo steps back
+ * through the user's typing. Each time it changes, the field forgets all
+ * earlier undo and redo steps, so ⌘Z cannot put text of the previous thing
+ * into the new one. The new `text` is in the field at once, even when it is
+ * the same as before. The editor is not recreated, so the focus stays where
+ * it is, and the caret goes to the end of the text. Change `historyKey` and
+ * `text` in the same render when both change. Left out, the history is never
+ * reset. A change also closes the open skill list and the hover card, and
+ * forgets a list the user dismissed with Esc: they belonged to the old text.
+ * Do not change `historyKey` while an IME composition is going on
+ * (`onComposingChange` tells when one is), because replacing the state under
+ * a composition can break it.
+ *
  * - ⏎, and so ⌘↵, calls `onSend`; ⇧⏎ starts a new line. A ⏎ that ends an IME
  *   composition does not send, see `isSendKey`.
  * - Paste inserts the clipboard's plain text, never its formatting. When the
@@ -123,10 +144,20 @@ const findHoveredChip = (
  *   field.
  * - A `readOnly` field takes no text and carries `aria-disabled`, but keeps
  *   the focus.
+ * - `onBlur` is called when the field loses the focus. `onComposingChange` is
+ *   called with `true` when an IME composition starts and with `false` when it
+ *   ends.
  * - `ref` receives the field's editable element, so a caller can focus it.
  *
- * With `skills`, the field also handles Skill References, which are `$name`
- * in the text:
+ * `skills` says whether the field handles Skill References, which are
+ * `$name` in the text. Left out, the field takes none, such as one that holds
+ * the plain-text answer to an agent's question: `$review` stays plain text,
+ * `$` and `/` open no list, and a chip already in the field turns back into
+ * `$name`. Given, the field handles them as follows. While the skills are
+ * not known yet, see `ComposerSkills`, the field keeps its chips and opens
+ * lists that say so.
+ *
+ * With `skills`:
  *
  * - A reference to one of the skills is drawn as a chip. The text still
  *   reads `$name`, so `onTextChange` and `text` never see a chip. A chip is
@@ -153,6 +184,9 @@ export function MessageField({
   id,
   autoFocus,
   skills,
+  historyKey,
+  onBlur,
+  onComposingChange,
   ref,
 }: {
   readonly text: string;
@@ -164,23 +198,33 @@ export function MessageField({
   readonly onPasteFiles?: ((files: readonly File[]) => void) | undefined;
   readonly id?: string | undefined;
   readonly autoFocus?: boolean | undefined;
-  /** Given when the field handles Skill References. */
+  /** Given when the field handles Skill References, see above. */
   readonly skills?: ComposerSkills | undefined;
+  /** Names what `text` is. Each change starts an empty undo history, see above. */
+  readonly historyKey?: string | undefined;
+  /** Called when the field loses the focus. */
+  readonly onBlur?: (() => void) | undefined;
+  /** Called with `true` when an IME composition starts in the field, and with `false` when it ends. */
+  readonly onComposingChange?: ((composing: boolean) => void) | undefined;
   readonly ref: Ref<HTMLElement>;
 }): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Editor | null>(null);
   const listId = useId();
+  const takesSkills = skills !== undefined;
   const availableSkills = skills?.skills;
   // `undefined` while the skills are not known, which is not the same as
   // knowing there are none: the chips stay while the skills load or fail to
-  // load, and dissolve when the skills read exclude them.
+  // load, and dissolve when the skills read exclude them. A field that takes
+  // no Skill References knows no names, so it has no chips.
   const skillNames = useMemo(
     () =>
-      availableSkills === undefined
-        ? undefined
-        : new Set(availableSkills.map((skill) => skill.name)),
-    [availableSkills],
+      !takesSkills
+        ? NO_SKILL_NAMES
+        : availableSkills === undefined
+          ? undefined
+          : new Set(availableSkills.map((skill) => skill.name)),
+    [takesSkills, availableSkills],
   );
   const [list, setList] = useState<OpenList | null>(null);
   // The token the user closed with Esc. Its list stays closed until the token
@@ -210,11 +254,16 @@ export function MessageField({
     return true;
   });
   const readSkillNames = useEffectEvent(() => skillNames);
+  const reportBlur = useEffectEvent(() => {
+    onBlur?.();
+  });
+  const reportComposing = useEffectEvent((composing: boolean) => {
+    onComposingChange?.(composing);
+  });
 
   /** Opens, updates or closes the list to match the token at the caret of `editor`. */
   const followTrigger = useEffectEvent((editor: Editor) => {
-    const trigger =
-      skills !== undefined && editor.isEditable ? readSkillTrigger(editor.state) : null;
+    const trigger = takesSkills && editor.isEditable ? readSkillTrigger(editor.state) : null;
     const dismissed = dismissedRef.current;
     if (dismissed !== null && (trigger === null || !isSameTrigger(dismissed, trigger))) {
       dismissedRef.current = null;
@@ -342,6 +391,19 @@ export function MessageField({
         //   `insertText` command inserts the text, as a native edit that
         //   ProseMirror reads back from the page, as it does a typed one.
         handleDOMEvents: {
+          // These only report. Returning false leaves the events to the editor.
+          blur: () => {
+            reportBlur();
+            return false;
+          },
+          compositionstart: () => {
+            reportComposing(true);
+            return false;
+          },
+          compositionend: () => {
+            reportComposing(false);
+            return false;
+          },
           paste: (view, event) => {
             if (!view.editable) return false;
             const clipboard = event.clipboardData;
@@ -409,14 +471,45 @@ export function MessageField({
   // Takes `text` when it differs from the field's: the first text, and then
   // any text the user did not type. Typing reports its text through
   // `onTextChange`, which comes back as `text` and finds the field equal.
+  //
+  // When `historyKey` changed, the field takes `text` even when it is equal,
+  // and starts over with a state of its own: the same schema and plugins, so
+  // the editor and the focus stay, and the plugins start from nothing, so the
+  // undo history is empty. A transaction cannot do that, because the history
+  // keeps its steps through every transaction.
+  const appliedHistoryKeyRef = useRef(historyKey);
   useLayoutEffect(() => {
     const { state, view } = editorRef.current!;
-    if (readDocumentText(state.doc) === text) return;
-    const replaced = state.tr.replaceWith(
-      0,
-      state.doc.content.size,
-      buildDocument(state.schema, text).content,
-    );
+    const startsHistory = appliedHistoryKeyRef.current !== historyKey;
+    appliedHistoryKeyRef.current = historyKey;
+    if (!startsHistory && readDocumentText(state.doc) === text) return;
+    const replacement = buildDocument(state.schema, text);
+    if (startsHistory) {
+      view.updateState(
+        EditorState.create({
+          schema: state.schema,
+          doc: replacement,
+          selection: TextSelection.atEnd(replacement),
+          plugins: state.plugins,
+        }),
+      );
+      // The new state has had no transaction yet. This one makes the chips
+      // and updates the open list, as the replacement below does.
+      view.dispatch(
+        view.state.tr
+          .setMeta(CONVERT_ALL_REFERENCES, true)
+          .setMeta("addToHistory", false)
+          .setMeta("preventUpdate", true),
+      );
+      // The list, the dismissed token and the hover card belonged to the old
+      // text. The dispatch above may have opened a list for a token at the
+      // end of the new text, which the user has not typed.
+      dismissedRef.current = null;
+      setList(null);
+      setHovered(null);
+      return;
+    }
+    const replaced = state.tr.replaceWith(0, state.doc.content.size, replacement.content);
     replaced
       .setSelection(TextSelection.atEnd(replaced.doc))
       // The text is not an edit of the user's: no undo, no `onTextChange`.
@@ -424,7 +517,7 @@ export function MessageField({
       .setMeta("addToHistory", false)
       .setMeta("preventUpdate", true);
     view.dispatch(replaced);
-  }, [text]);
+  }, [text, historyKey]);
 
   useLayoutEffect(() => {
     const editor = editorRef.current!;

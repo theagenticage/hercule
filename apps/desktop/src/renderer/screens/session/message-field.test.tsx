@@ -69,6 +69,49 @@ const renderField = (over: Partial<FieldProps> = {}) => {
   };
 };
 
+/**
+ * A field that shows either a draft or an answer, as a composer switches it:
+ * each has its own text, and the switch changes `text` and `historyKey` in
+ * one render. `Switch to ...` changes what the field shows; `Same text` only
+ * changes the key.
+ */
+function Switching({ onTextChange }: { readonly onTextChange: (text: string) => void }) {
+  const [texts, setTexts] = useState({ draft: "Draft text", answer: "" });
+  const [shown, setShown] = useState<"draft" | "answer">("draft");
+  const [key, setKey] = useState("draft");
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          const next = shown === "draft" ? "answer" : "draft";
+          setShown(next);
+          setKey(next);
+        }}
+      >
+        Switch
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setKey((previous) => `${previous}+`);
+        }}
+      >
+        Same text
+      </button>
+      <MessageField
+        {...buildProps({ onTextChange })}
+        text={texts[shown]}
+        historyKey={key}
+        onTextChange={(next) => {
+          onTextChange(next);
+          setTexts((previous) => ({ ...previous, [shown]: next }));
+        }}
+      />
+    </>
+  );
+}
+
 const readField = (): HTMLElement => screen.getByRole("textbox", { name: "Message" });
 
 /** Returns a clipboard that holds `text` and `html`, and no files. */
@@ -367,5 +410,108 @@ describe("the message field", () => {
     const ref = createRef<HTMLElement>();
     render(<MessageField {...buildProps({ ref })} />);
     expect(ref.current).toBe(readField());
+  });
+
+  describe("with a new historyKey", () => {
+    /** Undoes and redoes as the browser's own undo commands do, which type nothing when there is nothing to undo. */
+    const undo = (): void => {
+      fireEvent(
+        readField(),
+        new InputEvent("beforeinput", { inputType: "historyUndo", cancelable: true }),
+      );
+    };
+    const redo = (): void => {
+      fireEvent(
+        readField(),
+        new InputEvent("beforeinput", { inputType: "historyRedo", cancelable: true }),
+      );
+    };
+
+    it("does not bring the previous text back with undo", async () => {
+      const user = userEvent.setup();
+      render(<Switching onTextChange={vi.fn()} />);
+      readField().focus();
+      // The draft is deleted, so the answer starts empty as well: the field
+      // has no text to replace, and only the history can leak the draft.
+      await user.keyboard("{Backspace>10/}");
+      expect(readFieldText(readField())).toBe("");
+
+      fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+      undo();
+      expect(readFieldText(readField())).toBe("");
+
+      readField().focus();
+      await user.keyboard("Use blue");
+      undo();
+      expect(readFieldText(readField())).toBe("");
+      undo();
+      expect(readFieldText(readField())).toBe("");
+      redo();
+      expect(readFieldText(readField())).toBe("Use blue");
+    });
+
+    it("does not bring text of the answer back into the draft when switching back", async () => {
+      const user = userEvent.setup();
+      render(<Switching onTextChange={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+      readField().focus();
+      await user.keyboard("x{Backspace}");
+      fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+      expect(readFieldText(readField())).toBe("Draft text");
+      undo();
+      expect(readFieldText(readField())).toBe("Draft text");
+      redo();
+      expect(readFieldText(readField())).toBe("Draft text");
+    });
+
+    it("forgets the undo history even when the text stays the same", async () => {
+      const user = userEvent.setup();
+      render(<Switching onTextChange={vi.fn()} />);
+      readField().focus();
+      await user.keyboard("!");
+      fireEvent.click(screen.getByRole("button", { name: "Same text" }));
+      undo();
+      expect(readFieldText(readField())).toBe("Draft text!");
+    });
+
+    it("keeps the same field and its focus, puts the caret at the end, and reports no change", async () => {
+      const user = userEvent.setup();
+      const onTextChange = vi.fn<(text: string) => void>();
+      render(<Switching onTextChange={onTextChange} />);
+      const field = readField();
+      field.focus();
+
+      fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+      expect(readField()).toBe(field);
+      expect(document.activeElement).toBe(field);
+      expect(onTextChange).not.toHaveBeenCalled();
+
+      await user.keyboard("typed");
+      expect(readFieldText(field)).toBe("typed");
+
+      fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+      expect(document.activeElement).toBe(field);
+      await user.keyboard("!");
+      expect(readFieldText(field)).toBe("Draft text!");
+    });
+  });
+
+  it("calls onBlur when the field loses the focus", () => {
+    const onBlur = vi.fn<() => void>();
+    renderField({ onBlur });
+    readField().focus();
+    expect(onBlur).not.toHaveBeenCalled();
+    readField().blur();
+    expect(onBlur).toHaveBeenCalledOnce();
+  });
+
+  it("tells when an IME composition starts and ends", () => {
+    const onComposingChange = vi.fn<(composing: boolean) => void>();
+    renderField({ onComposingChange });
+    fireEvent.compositionStart(readField());
+    expect(onComposingChange).toHaveBeenLastCalledWith(true);
+    fireEvent.compositionEnd(readField());
+    expect(onComposingChange).toHaveBeenLastCalledWith(false);
+    expect(onComposingChange).toHaveBeenCalledTimes(2);
   });
 });

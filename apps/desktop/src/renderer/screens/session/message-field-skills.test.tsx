@@ -77,7 +77,7 @@ const renderField = (over: Partial<FieldProps> = {}) => {
     setTextFromOutside: (text: string): void => {
       act(() => setterRef.current!(text));
     },
-    changeSkills: (changed: ComposerSkills): void => {
+    changeSkills: (changed: ComposerSkills | undefined): void => {
       view.rerender(
         <Controlled fieldProps={{ ...props, skills: changed }} setterRef={setterRef} />,
       );
@@ -466,6 +466,62 @@ describe("skill chips in the message field", () => {
   });
 });
 
+describe("skills and a new historyKey", () => {
+  it("makes chips of the new text, and closes a list that was open on the old one", async () => {
+    const user = userEvent.setup();
+    const skills = { skills: SKILLS, failure: undefined, refreshIfStale: vi.fn<() => void>() };
+    const props: FieldProps = {
+      text: "",
+      onTextChange: vi.fn<(text: string) => void>(),
+      placeholder: "Message the thread",
+      readOnly: false,
+      onSend: vi.fn<() => void>(),
+      ref: null,
+      skills,
+      historyKey: "draft",
+    };
+    const view = render(<MessageField {...props} />);
+    act(() => readEditor().focus());
+    await user.keyboard("$");
+    expect(screen.getByRole("listbox")).toBeTruthy();
+
+    view.rerender(<MessageField {...props} text="Do $review now" historyKey="other" />);
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
+    expect(readFieldText(readEditor())).toBe("Do $review now");
+  });
+});
+
+describe("skills and a new historyKey, continued", () => {
+  const buildProps = (): FieldProps => ({
+    text: "",
+    onTextChange: vi.fn<(text: string) => void>(),
+    placeholder: "Message the thread",
+    readOnly: false,
+    onSend: vi.fn<() => void>(),
+    ref: null,
+    skills: { skills: SKILLS, failure: undefined, refreshIfStale: vi.fn<() => void>() },
+    historyKey: "message",
+  });
+
+  it("opens no list for a token at the end of the new text", () => {
+    const props = buildProps();
+    const view = render(<MessageField {...props} text="Look at" />);
+    view.rerender(<MessageField {...props} text="Look at $" historyKey="other" />);
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(readEditor().querySelector("[data-skill]")).toBeNull();
+  });
+
+  it("hides the hover card", () => {
+    const props = buildProps();
+    const view = render(<MessageField {...props} text="Do $review" />);
+    fireEvent.pointerOver(readEditor().querySelector("[data-skill='review']")!);
+    expect(screen.getByRole("tooltip", { hidden: true })).toBeTruthy();
+    view.rerender(<MessageField {...props} text="Do $review" historyKey="other" />);
+    expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
+  });
+});
+
 describe("the skill hover card in the message field", () => {
   it("shows the card when the pointer is over a chip, and hides it when it leaves", () => {
     const { setTextFromOutside } = renderField();
@@ -475,5 +531,60 @@ describe("the skill hover card in the message field", () => {
     expect(screen.getByRole("tooltip", { hidden: true }).textContent).toContain("Review a diff");
     fireEvent.pointerLeave(readEditor().parentElement!);
     expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
+  });
+});
+
+describe("a message field with its skills left out", () => {
+  it("opens no list for $ or /, ", async () => {
+    const user = userEvent.setup();
+    renderField({ skills: undefined });
+    await user.type(readField(), "$");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    await user.clear(readField());
+    await user.type(readField(), "/");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(readField().getAttribute("aria-expanded")).toBeNull();
+  });
+
+  it("keeps a typed reference as plain text", async () => {
+    const user = userEvent.setup();
+    const { onTextChange } = renderField({ skills: undefined });
+    await user.type(readField(), "Use $review please");
+    expect(readEditor().querySelector("[data-skill]")).toBeNull();
+    expect(lastText(onTextChange)).toBe("Use $review please");
+  });
+
+  it("makes no chip of references in text that comes from outside", () => {
+    const { setTextFromOutside, onTextChange } = renderField({ skills: undefined });
+    setTextFromOutside("Use $review and $implement");
+    expect(readEditor().querySelector("[data-skill]")).toBeNull();
+    expect(readFieldText(readEditor())).toBe("Use $review and $implement");
+    expect(onTextChange).not.toHaveBeenCalled();
+  });
+
+  it("closes an open list and turns chips back into text when the skills are taken away", async () => {
+    const user = userEvent.setup();
+    const { changeSkills, setTextFromOutside } = renderField();
+    setTextFromOutside("Do $review ");
+    expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
+    act(() => readEditor().focus());
+    await user.keyboard("$");
+    expect(screen.getByRole("listbox")).toBeTruthy();
+
+    changeSkills(undefined);
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(readEditor().querySelector("[data-skill]")).toBeNull();
+    expect(readFieldText(readEditor())).toBe("Do $review $");
+  });
+
+  it("offers skills again once they are given back", async () => {
+    const user = userEvent.setup();
+    const { changeSkills, setTextFromOutside } = renderField({ skills: undefined });
+    setTextFromOutside("Do $review ");
+    expect(readEditor().querySelector("[data-skill]")).toBeNull();
+    changeSkills({ skills: SKILLS, failure: undefined, refreshIfStale: vi.fn() });
+    expect(readEditor().querySelector("[data-skill='review']")).not.toBeNull();
+    await user.type(readField(), "$");
+    expect(screen.getByRole("listbox", { name: "Skills" })).toBeTruthy();
   });
 });
