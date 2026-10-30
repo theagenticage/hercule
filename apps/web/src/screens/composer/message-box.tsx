@@ -12,15 +12,29 @@ const MAX_LINES = 8;
 export function MessageBox({
   value,
   placeholder,
-  disabled,
+  readOnly,
   onChange,
   onSubmit,
+  onBlur,
+  onCompositionStart,
+  onCompositionEnd,
 }: {
   readonly value: string;
   readonly placeholder: string;
-  readonly disabled: boolean;
+  /**
+   * Whether the field takes no text. It keeps the focus and stays selectable,
+   * and shows as faint and `aria-disabled`. A field that were `disabled` would
+   * lose the focus and not get it back.
+   */
+  readonly readOnly: boolean;
   readonly onChange: (value: string) => void;
   readonly onSubmit: () => void;
+  /** Called when the field loses focus. */
+  readonly onBlur?: () => void;
+  /** Called when an IME composition starts in the field. */
+  readonly onCompositionStart?: () => void;
+  /** Called when an IME composition in the field ends. */
+  readonly onCompositionEnd?: () => void;
 }): JSX.Element {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -38,11 +52,15 @@ export function MessageBox({
       ref={ref}
       rows={1}
       value={value}
-      disabled={disabled}
+      readOnly={readOnly}
+      aria-disabled={readOnly || undefined}
       placeholder={placeholder}
       onChange={(event) => {
         onChange(event.target.value);
       }}
+      onBlur={onBlur}
+      onCompositionStart={onCompositionStart}
+      onCompositionEnd={onCompositionEnd}
       onKeyDown={(event) => {
         // Enter sends and Shift+Enter inserts a newline. The Enter that
         // commits an IME composition does not send, because treating it as
@@ -55,7 +73,7 @@ export function MessageBox({
         event.preventDefault();
         onSubmit();
       }}
-      className="block max-h-[168px] min-h-6 w-full resize-none overflow-y-auto bg-transparent text-body leading-[1.5] text-ink outline-none placeholder:text-faint disabled:text-faint"
+      className="block max-h-[168px] min-h-6 w-full resize-none overflow-y-auto bg-transparent text-body leading-[1.5] text-ink outline-none placeholder:text-faint read-only:cursor-default read-only:text-faint"
     />
   );
 }

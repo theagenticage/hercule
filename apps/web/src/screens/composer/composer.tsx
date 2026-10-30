@@ -2,6 +2,8 @@ import { useRef, useState, type DragEvent, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
+  PREVIOUS_QUESTION_LABEL,
+  REFUSED_FILE_NOTICE,
   buildBranchField,
   findDraftSubject,
   buildModelMenu,
@@ -28,14 +30,16 @@ import { AccessModeSelector } from "./access-mode-selector";
 import { AttachmentShelf, DropOverlay } from "./attachment-shelf";
 import { ComposerCard } from "./composer-card";
 import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
-import { AttachButton, SendButton, VoiceButton } from "./controls";
+import { AttachButton, PreviousButton, SendButton, StepButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
 import { Lip } from "./lip";
 import { buildLoginSlot } from "./login-slot";
 import { ModelOptionsSelector } from "./model-options-selector";
 import { ModelSelector } from "./model-selector";
 import { MessageBox } from "./message-box";
+import { useComposerAnswer } from "./use-composer-answer";
 import { useComposerModel } from "./use-composer-model";
+import { useTypingGuard } from "./use-typing-guard";
 
 type SelectorKey = "accessMode" | "options" | "model" | "workspace" | "branch" | "machine";
 
@@ -47,6 +51,15 @@ const isFileDrag = (event: DragEvent): boolean => event.dataTransfer.types.inclu
  * The same component serves a draft and an active thread. `useComposerModel`
  * handles the difference, and every lock, dimmed row and blocker comes from
  * `buildComposerFields`.
+ *
+ * While the Request dock shows a question the composer answers, the composer
+ * is in answer mode (`useComposerAnswer`): the text field shows and edits the
+ * shown question's own answer, and the step button takes the place of Send.
+ * Answers are plain text, so Attach is off, the shelf is hidden and a pasted
+ * or dropped file is refused. The message, its images and the model and
+ * option picks are not touched, and the message comes back when answer mode
+ * ends. A question that arrives while the user is typing a message waits for
+ * the user to pause (`useTypingGuard`).
  */
 export function Composer({
   thread,
@@ -84,6 +97,12 @@ export function Composer({
   // The position of the shelf image shown large, or null when none is.
   const [preview, setPreview] = useState<number | null>(null);
   const model = useComposerModel(thread, catalogs, client, uploads, onSend);
+  const guard = useTypingGuard();
+  const answer = useComposerAnswer(
+    client,
+    thread.kind === "active" ? thread.session : null,
+    guard.holding,
+  );
   const fields = model.fields;
   const { config } = model.resolved;
   const pending = buildPendingModelNote(model.resolved);
@@ -124,7 +143,16 @@ export function Composer({
   const attachDisabledReason =
     model.readOnly ??
     (fields.model.imageInput !== null ? null : `${fields.model.modelName} does not accept images`);
-  const notice = model.refusal ?? model.attachmentBlock;
+  const submitMessage = (): void => {
+    // Even a send that fails ends the typing guard: the user has finished the message.
+    guard.release();
+    model.submit();
+  };
+  const notice = answer === null ? (model.refusal ?? model.attachmentBlock) : answer.notice;
+  const noticeFailed =
+    answer === null ? model.refusal !== null : answer.notice === REFUSED_FILE_NOTICE;
+  const errorText =
+    answer?.failure ?? (model.error === null ? null : readErrorMessage(model.error));
   return (
     // A draft shows its sentence above the card, and the sentence takes the free space.
     <div className={fields.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
@@ -141,10 +169,12 @@ export function Composer({
           const files = [...event.clipboardData.files];
           if (files.length === 0 || model.readOnly !== null) return;
           event.preventDefault();
-          model.attachFiles(files);
+          if (answer === null) model.attachFiles(files);
+          else answer.attachments.onFiles();
         }}
         onDragEnter={(event) => {
-          if (isFileDrag(event) && model.readOnly === null) setDragging(true);
+          // An answer takes no files, so it offers no place to drop them.
+          if (isFileDrag(event) && model.readOnly === null && answer === null) setDragging(true);
         }}
         onDragOver={(event) => {
           // Without this the browser refuses the drop and opens the file instead.
@@ -159,29 +189,53 @@ export function Composer({
           setDragging(false);
           if (!isFileDrag(event) || model.readOnly !== null) return;
           event.preventDefault();
-          model.attachFiles([...event.dataTransfer.files]);
+          if (answer === null) model.attachFiles([...event.dataTransfer.files]);
+          else answer.attachments.onFiles();
         }}
       >
         <ComposerCard>
           {dragging ? <DropOverlay /> : null}
-          <AttachmentShelf
-            shelf={shelf}
-            model={fields.model}
-            onPreview={setPreview}
-            onRemove={model.removeAttachment}
-            onRetry={model.retryAttachment}
-          />
+          {answer === null ? (
+            <AttachmentShelf
+              shelf={shelf}
+              model={fields.model}
+              onPreview={setPreview}
+              onRemove={model.removeAttachment}
+              onRetry={model.retryAttachment}
+            />
+          ) : null}
           <MessageBox
-            value={model.message.text}
-            placeholder={model.placeholder}
-            disabled={model.readOnly !== null}
-            onChange={model.setMessage}
+            value={answer === null ? model.message.text : answer.text}
+            placeholder={answer === null ? model.placeholder : answer.placeholder}
+            readOnly={model.readOnly !== null || (answer?.locked ?? false)}
+            onChange={(text) => {
+              if (answer !== null) {
+                answer.onTextChange(text);
+                return;
+              }
+              guard.holdAfterEdit();
+              model.setMessage(text);
+            }}
             onSubmit={() => {
-              if (canSend) model.submit();
+              if (answer !== null) answer.onSend();
+              else if (canSend) submitMessage();
+              else guard.release();
+            }}
+            onBlur={guard.release}
+            onCompositionStart={() => {
+              guard.reportComposing(true);
+            }}
+            onCompositionEnd={() => {
+              guard.reportComposing(false);
             }}
           />
           <div className="flex items-center gap-1.5">
-            <AttachButton disabledReason={attachDisabledReason} onFiles={model.attachFiles} />
+            <AttachButton
+              disabledReason={
+                answer === null ? attachDisabledReason : answer.attachments.attachBlockedReason
+              }
+              onFiles={model.attachFiles}
+            />
             <AccessModeSelector
               mode={fields.accessMode.value}
               items={fields.accessMode.rows}
@@ -232,16 +286,33 @@ export function Composer({
             </div>
             <VoiceButton />
             {model.busy ? <StopButton title={SESSION_STOP_TITLE} onStop={model.stop} /> : null}
-            <SendButton tip={model.sendTip} disabled={!canSend} onSend={model.submit} />
+            {answer === null ? (
+              <SendButton tip={model.sendTip} disabled={!canSend} onSend={submitMessage} />
+            ) : (
+              <>
+                {answer.step.showsPrevious ? (
+                  <PreviousButton
+                    label={PREVIOUS_QUESTION_LABEL}
+                    disabled={!answer.step.canGoBack}
+                    onPrevious={answer.step.onPrevious}
+                  />
+                ) : null}
+                <StepButton
+                  label={answer.step.label}
+                  disabled={!answer.step.ready || model.readOnly !== null}
+                  onStep={answer.step.onStep}
+                />
+              </>
+            )}
           </div>
-          {model.error === null ? null : (
+          {errorText === null ? null : (
             <p className="text-fine text-fail" role="alert">
-              {readErrorMessage(model.error)}
+              {errorText}
             </p>
           )}
           {notice === null ? null : (
             <p
-              className={model.refusal === null ? "text-fine text-muted" : "text-fine text-fail"}
+              className={noticeFailed ? "text-fine text-fail" : "text-fine text-muted"}
               role="status"
             >
               {notice}

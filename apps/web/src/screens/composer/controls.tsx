@@ -105,6 +105,56 @@ export function SendButton({
 }
 
 /**
+ * The button that replaces Send while the composer answers a question: Next,
+ * or Send answers on the last question. It is as tall as the Send button and
+ * has the same colours, so the composer's right edge stays where it is.
+ */
+export function StepButton({
+  label,
+  disabled,
+  onStep,
+}: {
+  /** "Next" or "Send answers". */
+  readonly label: string;
+  readonly disabled: boolean;
+  readonly onStep: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      title={`${label} ⏎`}
+      disabled={disabled}
+      onClick={onStep}
+      className="inline-flex h-7 shrink-0 cursor-pointer items-center rounded-full bg-ink px-3 text-meta leading-[18px] font-emph text-bg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live disabled:cursor-default disabled:bg-line disabled:text-faint"
+    >
+      {label}
+    </button>
+  );
+}
+
+/** The button that shows the question before the shown one. Quiet, as it is not the main action. */
+export function PreviousButton({
+  label,
+  disabled,
+  onPrevious,
+}: {
+  readonly label: string;
+  readonly disabled: boolean;
+  readonly onPrevious: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onPrevious}
+      className="inline-flex h-7 shrink-0 cursor-pointer items-center rounded-full px-2.5 text-meta leading-[18px] font-emph text-muted focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live enabled:hover:bg-line-soft enabled:hover:text-ink disabled:cursor-default disabled:text-faint"
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
  * Renders the model pill's content: the provider logo, the account when a
  * provider has two, and the model name.
  *
