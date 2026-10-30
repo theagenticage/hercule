@@ -9,12 +9,11 @@ import {
   buildQuestionDraft,
   buildQuestionStepper,
   describeFoldedQuestion,
-  findComposerQuestion,
   formatDescribeLine,
   formatRequestQuestion,
   pickQuestionOption,
   readErrorMessage,
-  stepQuestions,
+  decideQuestionStep,
   typeQuestionAnswer,
   type QuestionDraft,
 } from "@hercule/client-core";
@@ -341,12 +340,12 @@ export function RequestDock({
     changeRequestDraft((current) => ({ ...current, unfolded }));
   };
   // The dock takes the own answer itself where the composer does not: with no
-  // composer below, or on a secret question.
+  // composer below, or on a secret question (`findComposerQuestion` leaves a
+  // secret question to the dock). The stepper is built only then, so a key
+  // typed in the composer costs the dock no more than its draft read.
   const ownsAnswerField =
-    shownQuestion !== undefined &&
-    (!composerBelow || findComposerQuestion(request, requestDraft) === null);
-  const stepper =
-    shownQuestion === undefined ? null : buildQuestionStepper(requestDraft, card.questions);
+    shownQuestion !== undefined && (!composerBelow || shownQuestion.secretWarning !== null);
+  const stepper = ownsAnswerField ? buildQuestionStepper(requestDraft, card.questions) : null;
   const error = ownsAnswerField
     ? requestDraft.failure
     : decide.error === null
@@ -356,7 +355,7 @@ export function RequestDock({
   /** Shows the question before or after the shown one, or sends the answers from the last one. */
   const stepThroughQuestions = (direction: "previous" | "next"): void => {
     if (shownQuestion === undefined) return;
-    const step = stepQuestions(requestDraft, card.questions, direction);
+    const step = decideQuestionStep(requestDraft, card.questions, direction);
     if (step === null) return;
     if (step.kind === "send") {
       sendAnswers(request.requestId, step.answers);
@@ -449,7 +448,7 @@ export function RequestDock({
             </>
           )}
         </div>
-        {shownQuestion === undefined || stepper === null ? null : (
+        {shownQuestion === undefined ? null : (
           <div className="dock-question">
             <div className="dock-question-top">
               <span className="dock-question-header">{shownQuestion.header}</span>
@@ -507,7 +506,7 @@ export function RequestDock({
             {shownQuestion.secretWarning === null ? null : (
               <span className="dock-question-warning">{shownQuestion.secretWarning}</span>
             )}
-            {ownsAnswerField ? (
+            {stepper === null ? null : (
               <div className="dock-own">
                 <input
                   className="field"
@@ -553,8 +552,8 @@ export function RequestDock({
                   {stepper.stepLabel}
                 </button>
               </div>
-            ) : null}
-            {ownsAnswerField && stepper.notice !== null ? (
+            )}
+            {stepper !== null && stepper.notice !== null ? (
               <p className="dock-error" id={`${titleId}-notice`}>
                 {stepper.notice}
               </p>

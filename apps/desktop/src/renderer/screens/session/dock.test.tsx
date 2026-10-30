@@ -1061,7 +1061,7 @@ describe("picking an option in the dock", () => {
 
     expect((readOwnAnswer() as HTMLInputElement).value).toBe("");
     expect(pendingSubmissions.read(FIXTURE_THREAD_IDS.runbook).message.text).toBe(
-      "Half a message\n\na sqlite file",
+      "Half a message  \n\na sqlite file",
     );
   });
 

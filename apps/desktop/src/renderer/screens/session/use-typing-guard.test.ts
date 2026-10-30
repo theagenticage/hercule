@@ -1,6 +1,7 @@
 /**
- * Tests when the typing guard holds and when it lets go: a pause in the
- * edits, a send, the field losing the focus, and an IME composition.
+ * Tests what the hook adds to client-core's typing guard: it redraws when
+ * the guard changes, and it stops the guard's timer on unmount. The rules of
+ * the guard are tested in client-core.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
@@ -15,98 +16,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const renderGuard = () => renderHook(() => useTypingGuard());
-
-describe("the typing guard", () => {
-  it("holds nothing until the user edits", () => {
-    const { result } = renderGuard();
-
-    act(() => {
-      vi.advanceTimersByTime(TYPING_PAUSE_MS * 10);
-    });
-
+describe("useTypingGuard", () => {
+  it("redraws with holding true after an edit, and false after the pause", () => {
+    const { result } = renderHook(() => useTypingGuard());
     expect(result.current.holding).toBe(false);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("holds after an edit, and lets go once a pause as long as the limit passes", () => {
-    const { result } = renderGuard();
 
     act(() => {
       result.current.holdAfterEdit();
-    });
-    expect(result.current.holding).toBe(true);
-    act(() => {
-      vi.advanceTimersByTime(TYPING_PAUSE_MS - 1);
-    });
-    expect(result.current.holding).toBe(true);
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
-
-    expect(result.current.holding).toBe(false);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("counts the pause from the last edit, so keys within the limit keep holding", () => {
-    const { result } = renderGuard();
-
-    for (let key = 0; key < 4; key += 1) {
-      act(() => {
-        result.current.holdAfterEdit();
-        vi.advanceTimersByTime(TYPING_PAUSE_MS - 100);
-      });
-      expect(result.current.holding).toBe(true);
-    }
-    act(() => {
-      vi.advanceTimersByTime(100);
-    });
-
-    expect(result.current.holding).toBe(false);
-  });
-
-  it("lets go at once on release, which a send and a blur call", () => {
-    const { result } = renderGuard();
-    act(() => {
-      result.current.holdAfterEdit();
-    });
-
-    act(() => {
-      result.current.release();
-    });
-
-    expect(result.current.holding).toBe(false);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("keeps holding while a composition is open, however long and however it is released", () => {
-    const { result } = renderGuard();
-    act(() => {
-      result.current.reportComposing(true);
-      result.current.holdAfterEdit();
-    });
-
-    act(() => {
-      vi.advanceTimersByTime(TYPING_PAUSE_MS * 3);
-    });
-    expect(result.current.holding).toBe(true);
-    act(() => {
-      result.current.release();
-    });
-
-    expect(result.current.holding).toBe(true);
-  });
-
-  it("lets go one pause after the composition ends, also when it left no edit", () => {
-    const { result } = renderGuard();
-    act(() => {
-      result.current.reportComposing(true);
-      result.current.holdAfterEdit();
-      vi.advanceTimersByTime(TYPING_PAUSE_MS * 3);
-    });
-
-    act(() => {
-      result.current.reportComposing(false);
     });
     expect(result.current.holding).toBe(true);
     act(() => {
@@ -116,19 +32,36 @@ describe("the typing guard", () => {
     expect(result.current.holding).toBe(false);
   });
 
-  it("starts no timer when a composition ends without a hold", () => {
-    const { result } = renderGuard();
-
+  it("redraws with holding false when release is called", () => {
+    const { result } = renderHook(() => useTypingGuard());
     act(() => {
-      result.current.reportComposing(true);
-      result.current.reportComposing(false);
+      result.current.holdAfterEdit();
     });
 
-    expect(vi.getTimerCount()).toBe(0);
+    act(() => {
+      result.current.release();
+    });
+
+    expect(result.current.holding).toBe(false);
   });
 
-  it("clears its timer when the composer goes away", () => {
-    const { result, unmount } = renderGuard();
+  it("keeps one guard across renders, so a composition reported earlier still holds", () => {
+    const { result, rerender } = renderHook(() => useTypingGuard());
+    act(() => {
+      result.current.reportComposing(true);
+    });
+    rerender();
+
+    act(() => {
+      vi.advanceTimersByTime(TYPING_PAUSE_MS * 3);
+      result.current.release();
+    });
+
+    expect(result.current.holding).toBe(true);
+  });
+
+  it("clears the guard's timer when the composer goes away", () => {
+    const { result, unmount } = renderHook(() => useTypingGuard());
     act(() => {
       result.current.holdAfterEdit();
     });

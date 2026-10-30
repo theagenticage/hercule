@@ -245,6 +245,27 @@ function UnfoldButton({ sessionId }: { readonly sessionId: string }) {
   );
 }
 
+/** A button that shows the question at `index` of `req-2`, as the dock's own Previous and Next do. */
+function ShowQuestionButton({
+  sessionId,
+  index,
+}: {
+  readonly sessionId: string;
+  readonly index: number;
+}) {
+  const [, changeDraft] = useRequestDraft(sessionId, "req-2");
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        changeDraft((draft) => ({ ...draft, shownQuestionIndex: index }));
+      }}
+    >
+      {`Show question ${String(index + 1)}`}
+    </button>
+  );
+}
+
 /**
  * Has the composer read the session again, as it does after a push from the
  * controller, and waits until the new Requests are drawn. The query library
@@ -1266,6 +1287,35 @@ describe("the composer answering a question", () => {
     expect(calls.some((call) => call.path === "/api/v1/attachments")).toBe(false);
     // The notice goes with the next key.
     await user.type(readField(), "x");
+    expect(readNotice()).toBe("");
+  });
+
+  it("shows a refused file's notice only on the question it happened on", async () => {
+    const user = userEvent.setup();
+    await renderThreadPart(
+      ({ sessionId }) => (
+        <>
+          <ShowQuestionButton sessionId={sessionId} index={0} />
+          <ShowQuestionButton sessionId={sessionId} index={1} />
+          <ThreadComposer
+            sessionId={sessionId}
+            shrunk={false}
+            onFocusChange={() => {}}
+            scrollTranscriptToBottom={() => {}}
+          />
+        </>
+      ),
+      { thread: ASKED, handlers: { "GET /api/v1/providers": { body: [FIXTURE_INSTANCE] } } },
+    );
+    fireEvent.paste(readField(), {
+      clipboardData: { files: [buildImage("shot.png")], types: ["Files"], getData: () => "" },
+    });
+    expect(readNotice()).toBe("An answer takes text only. Images can be sent in a message.");
+
+    await user.click(screen.getByRole("button", { name: "Show question 2" }));
+    expect(readNotice()).toBe("");
+
+    await user.click(screen.getByRole("button", { name: "Show question 1" }));
     expect(readNotice()).toBe("");
   });
 

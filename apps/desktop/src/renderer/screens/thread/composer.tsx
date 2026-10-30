@@ -40,7 +40,6 @@ import {
   sessionQuery,
   readSkillsIfStale,
   sessionSkillsQuery,
-  subagentsQuery,
   threadsQuery,
   workspacesQuery,
 } from "../../app/queries";
@@ -152,7 +151,6 @@ export function ThreadComposer({
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
   const threads = useSuspenseQuery(threadsQuery(client)).data;
-  const subagents = useSuspenseQuery(subagentsQuery(client, sessionId)).data;
   const [shownRequestId] = useShownRequestId(sessionId);
   const pending = useSyncExternalStore(pendingSubmissions.subscribe, () =>
     pendingSubmissions.read(sessionId),
@@ -227,8 +225,9 @@ export function ThreadComposer({
   const stopAgent = useStopAgent(client, sessionId);
   const guard = useTypingGuard();
   // The Request the dock shows, which `AgentRequestDock` decides the same way.
+  // The subagents only name who asks, so none are read here.
   const shownRequest =
-    buildRequestDock(session.openRequests, subagents, undefined, shownRequestId)?.request ?? null;
+    buildRequestDock(session.openRequests, [], undefined, shownRequestId)?.request ?? null;
   const answer = useComposerAnswer(sessionId, shownRequest, guard.holding);
   const stopFailure = stopAgent.error === null ? null : readErrorMessage(stopAgent.error);
   const error =
@@ -269,7 +268,7 @@ export function ThreadComposer({
     });
     scrollTranscriptToBottom();
   };
-  const sendOrStep = answer === null ? submit : answer.onSend;
+  const sendOrStep = answer === null ? submit : answer.step.onStep;
   useSendOnMenuCommand(sendOrStep);
   const stop = (): void => {
     // `useStopAgent` already ignores a second stop, but Stop is only

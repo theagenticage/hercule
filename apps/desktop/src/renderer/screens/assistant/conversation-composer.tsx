@@ -133,7 +133,7 @@ export function ConversationComposer({
     send.mutate(pending.message.text);
     scrollConversationToBottom();
   };
-  const sendOrStep = answer === null ? submit : answer.onSend;
+  const sendOrStep = answer === null ? submit : answer.step.onStep;
   useSendOnMenuCommand(sendOrStep);
   const stop = (): void => {
     if (session === null || interrupt.isPending) return;

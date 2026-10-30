@@ -5,7 +5,7 @@ import {
   buildQuestionDraft,
   buildQuestionStepper,
   findComposerQuestion,
-  stepQuestions,
+  decideQuestionStep,
   typeQuestionAnswer,
 } from "@hercule/client-core";
 import type { SessionRequest } from "@hercule/contract";
@@ -30,9 +30,8 @@ export interface ComposerAnswer {
   readonly historyKey: string;
   /** Whether the answers are sent. The field then takes no text, until the controller closes the Request. */
   readonly locked: boolean;
+  /** Previous and the step button. ⏎, ⌘↵ and the menu's Send call `step.onStep` too. */
   readonly step: ComposerStep;
-  /** Does what the step button does. ⏎, ⌘↵ and the menu's Send call it. */
-  readonly onSend: () => void;
   /** Attach off with its reason, no shelf, and a pasted or dropped file refused with a notice. */
   readonly attachments: ComposerAttachments;
   /** The refused file's notice, or else why a length limit stops the step; `null` when neither. */
@@ -73,20 +72,21 @@ export function useComposerAnswer(
   // A Request id is never empty, so "" reads the empty draft.
   const [draft, changeDraft] = useRequestDraft(sessionId, request?.requestId ?? "");
   const sendAnswers = useSendAnswers(sessionId);
-  const [refusedFile, setRefusedFile] = useState(false);
-  const found = holding ? null : findComposerQuestion(request, draft);
-  if (found === null) {
-    // The notice belongs to this answer, not to the next one.
-    if (refusedFile) setRefusedFile(false);
-    return null;
-  }
+  const found = findComposerQuestion(request, draft);
+  // Names the question being answered. A refusal belongs to it: it is
+  // forgotten once the composer answers another question of the same Request
+  // or of another one, and once it stops answering.
+  const answeringKey = found === null ? null : `${found.requestId}:${found.question.header}`;
+  const [refusedFor, setRefusedFor] = useState<string | null>(null);
+  if (refusedFor !== null && refusedFor !== answeringKey) setRefusedFor(null);
+  if (found === null || holding) return null;
   const { requestId, questions, question } = found;
   const stepper = buildQuestionStepper(draft, questions);
 
   const step = (direction: "previous" | "next"): void => {
-    const next = stepQuestions(draft, questions, direction);
+    const next = decideQuestionStep(draft, questions, direction);
     if (next === null) return;
-    setRefusedFile(false);
+    setRefusedFor(null);
     if (next.kind === "send") {
       sendAnswers(requestId, next.answers);
       return;
@@ -97,7 +97,7 @@ export function useComposerAnswer(
   return {
     text: (draft.question ?? buildQuestionDraft(questions))[question.header]!.text,
     onTextChange: (text) => {
-      setRefusedFile(false);
+      setRefusedFor(null);
       changeDraft((current) => ({
         ...current,
         question: typeQuestionAnswer(
@@ -122,16 +122,13 @@ export function useComposerAnswer(
         step("next");
       },
     },
-    onSend: () => {
-      step("next");
-    },
     attachments: {
       ...NO_IMAGES,
       onFiles: () => {
-        setRefusedFile(true);
+        setRefusedFor(answeringKey);
       },
     },
-    notice: refusedFile ? REFUSED_FILE_NOTICE : stepper.notice,
+    notice: refusedFor === answeringKey ? REFUSED_FILE_NOTICE : stepper.notice,
     failure: draft.failure,
   };
 }

@@ -112,6 +112,44 @@ function Switching({ onTextChange }: { readonly onTextChange: (text: string) => 
   );
 }
 
+/**
+ * A field that shows one of several texts, each with its own owner, as a
+ * composer does while it answers questions: `texts` holds what each owner
+ * saved, and `show` moves the field to another owner in one render.
+ */
+function Owners({
+  initial,
+  showRef,
+  textsRef,
+}: {
+  readonly initial: string;
+  readonly showRef: { current: ((key: string) => void) | null };
+  readonly textsRef: { current: Record<string, string> };
+}) {
+  const [texts, setTexts] = useState<Record<string, string>>({
+    "answer-1": "first answer",
+    "answer-2": "second answer",
+    message: "saved draft",
+  });
+  const [shown, setShown] = useState(initial);
+  useEffect(() => {
+    showRef.current = setShown;
+  }, [showRef]);
+  useEffect(() => {
+    textsRef.current = texts;
+  }, [textsRef, texts]);
+  return (
+    <MessageField
+      {...buildProps()}
+      text={texts[shown]!}
+      historyKey={shown}
+      onTextChange={(next) => {
+        setTexts((previous) => ({ ...previous, [shown]: next }));
+      }}
+    />
+  );
+}
+
 const readField = (): HTMLElement => screen.getByRole("textbox", { name: "Message" });
 
 /** Returns a clipboard that holds `text` and `html`, and no files. */
@@ -472,6 +510,41 @@ describe("the message field", () => {
       fireEvent.click(screen.getByRole("button", { name: "Same text" }));
       undo();
       expect(readFieldText(readField())).toBe("Draft text!");
+    });
+
+    describe("when the page holds an edit the field has not read yet", () => {
+      /**
+       * Starts an IME composition in the field, which puts text in the page
+       * that the editor reads only later, then moves the field to `next`.
+       */
+      const composeThenShow = (initial: string, next: string) => {
+        const showRef: { current: ((key: string) => void) | null } = { current: null };
+        const textsRef: { current: Record<string, string> } = { current: {} };
+        render(<Owners initial={initial} showRef={showRef} textsRef={textsRef} />);
+        readField().focus();
+        fireEvent.compositionStart(readField());
+        readField().querySelector("p")!.textContent = `${textsRef.current[initial]!} 候補`;
+        act(() => showRef.current!(next));
+        return textsRef;
+      };
+
+      it("gives it to the owner of the old content when the Request closes", async () => {
+        const textsRef = composeThenShow("answer-1", "message");
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        });
+        expect(textsRef.current.message).toBe("saved draft");
+        expect(textsRef.current["answer-1"]).toBe("first answer 候補");
+      });
+
+      it("gives it to the owner of the old answer when paging to another answer", async () => {
+        const textsRef = composeThenShow("answer-1", "answer-2");
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        });
+        expect(textsRef.current["answer-2"]).toBe("second answer");
+        expect(textsRef.current["answer-1"]).toBe("first answer 候補");
+      });
     });
 
     it("keeps the same field and its focus, puts the caret at the end, and reports no change", async () => {

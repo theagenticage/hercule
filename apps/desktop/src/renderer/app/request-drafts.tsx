@@ -42,6 +42,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import {
   EMPTY_REQUEST_DRAFT,
   changeRequestDraft,
+  isAnswerSendRunning,
   readErrorMessage,
   type RequestDraft,
 } from "@hercule/client-core";
@@ -169,13 +170,6 @@ export function useShownRequestId(
   ];
 }
 
-/** Checks whether `variables`, those of a running send, are the send to the Request `requestId`. */
-const isSendTo = (variables: unknown, requestId: string): boolean =>
-  typeof variables === "object" &&
-  variables !== null &&
-  "requestId" in variables &&
-  variables.requestId === requestId;
-
 /**
  * Returns a function that sends the answers to a `question` Request of the
  * session `sessionId` with `session.respondToQuestion`. The dock and the
@@ -212,8 +206,9 @@ export function useSendAnswers(
       changeRequestDraft(drafts, requestId, (current) => ({ ...current, ...change })),
     );
   };
+  const mutationKey = ["answer-question", sessionId];
   const mutation = useMutation({
-    mutationKey: ["answer-question", sessionId],
+    mutationKey,
     mutationFn: (sent: { readonly requestId: string; readonly answers: QuestionAnswers }) =>
       client.session.respondToQuestion({
         params: { id: sessionId },
@@ -230,12 +225,9 @@ export function useSendAnswers(
     // The mutation cache knows at once that a send started, and the draft
     // is read from the store now, not from the last render, so two calls
     // before the next render send once.
-    const sending = queryClient.isMutating({
-      mutationKey: ["answer-question", sessionId],
-      predicate: (running) => isSendTo(running.state.variables, requestId),
-    });
+    const sending = isAnswerSendRunning(queryClient, mutationKey, requestId);
     const answered = readSessionDrafts(sessionId).requests.get(requestId)?.answered ?? false;
-    if (sending > 0 || answered) return;
+    if (sending || answered) return;
     mutation.mutate({ requestId, answers });
   };
 }

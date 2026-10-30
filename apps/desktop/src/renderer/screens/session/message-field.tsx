@@ -245,7 +245,10 @@ export function MessageField({
   // The editor outlives the renders, so what it calls reaches the latest
   // props through effect events.
   const sendMessage = useEffectEvent(onSend);
-  const changeText = useEffectEvent(onTextChange);
+  // The `onTextChange` of the content the editor shows. It is renewed after
+  // the effect that swaps the content (see below), so an edit that the swap
+  // flushes out of the page goes to the owner of the old content.
+  const textOwnerRef = useRef(onTextChange);
   const readPlaceholder = useEffectEvent(() => placeholder);
   /** Passes `files` to `onPasteFiles` and returns true. Returns false, passing nothing, when there are no files or the field takes none. */
   const forwardFiles = useEffectEvent((files: readonly File[]): boolean => {
@@ -443,7 +446,7 @@ export function MessageField({
         handleDrop: (_view, event) => event.dataTransfer?.types.includes("Files") ?? false,
       },
       onUpdate: ({ editor: updated }) => {
-        changeText(readDocumentText(updated.state.doc));
+        textOwnerRef.current(readDocumentText(updated.state.doc));
       },
       onTransaction: ({ editor: changed, transaction }) => {
         followTrigger(changed);
@@ -485,6 +488,12 @@ export function MessageField({
     if (!startsHistory && readDocumentText(state.doc) === text) return;
     const replacement = buildDocument(state.schema, text);
     if (startsHistory) {
+      // Reads what the page holds that the editor has not read yet, such as
+      // the provisional text of an IME composition. Left alone, ProseMirror
+      // reads it after the swap, as an edit of the new content. Now it is
+      // still an edit of the old content, which `textOwnerRef` still serves.
+      // ProseMirror offers no public call for this.
+      (view as unknown as { domObserver: { flush: () => void } }).domObserver.flush();
       view.updateState(
         EditorState.create({
           schema: state.schema,
@@ -518,6 +527,15 @@ export function MessageField({
       .setMeta("preventUpdate", true);
     view.dispatch(replaced);
   }, [text, historyKey]);
+
+  // After the effect above on purpose. When `historyKey` changes, ProseMirror
+  // writes an edit that the page has but the editor has not read yet (an IME
+  // composition) through `onTextChange` while it installs the new state. That
+  // edit is the old content's, so it must reach the old owner's callback, and
+  // never overwrite what the new content belongs to.
+  useLayoutEffect(() => {
+    textOwnerRef.current = onTextChange;
+  });
 
   useLayoutEffect(() => {
     const editor = editorRef.current!;
