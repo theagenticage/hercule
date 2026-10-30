@@ -13,7 +13,6 @@ import {
   buildComposerPlaceholder,
   buildPendingModelNote,
   buildRecentModel,
-  buildRequestDock,
   buildSubmission,
   buildThreadWorkspaceLabel,
   findExpiredShelfKeys,
@@ -21,6 +20,7 @@ import {
   holdsMessageContent,
   formatAccessMode,
   isMutationRunning,
+  locateShownRequest,
   markShelfItemsExpired,
   queryKeys,
   readErrorMessage,
@@ -225,9 +225,9 @@ export function ThreadComposer({
   const stopAgent = useStopAgent(client, sessionId);
   const guard = useTypingGuard();
   // The Request the dock shows, which `AgentRequestDock` decides the same way.
-  // The subagents only name who asks, so none are read here.
   const shownRequest =
-    buildRequestDock(session.openRequests, [], undefined, shownRequestId)?.request ?? null;
+    locateShownRequest(session.openRequests, (request) => request.requestId, shownRequestId)
+      ?.request ?? null;
   const answer = useComposerAnswer(sessionId, shownRequest, guard.holding);
   const stopFailure = stopAgent.error === null ? null : readErrorMessage(stopAgent.error);
   const error =

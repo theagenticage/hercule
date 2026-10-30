@@ -924,21 +924,11 @@ describe("the dock for a question, with a composer below", () => {
 });
 
 describe("Previous in the dock", () => {
-  it("is not drawn on the first question and is drawn from the second on", async () => {
-    const user = userEvent.setup();
-    await renderDock(QUESTIONS);
-
-    expect(within(readQuestionDock()).queryByRole("button", { name: "Previous" })).toBeNull();
-    await user.click(findChoice("radio", "IndexedDB"));
-    await user.click(readButton("Next"));
-
-    expect(readButton("Previous")).toBeTruthy();
-  });
-
-  it("goes back from a question that is still blank, and keeps every answer", async () => {
+  it("is drawn from the second question on, goes back from a blank one, and keeps every answer", async () => {
     const user = userEvent.setup();
     const { calls } = await renderDock(QUESTIONS);
 
+    expect(within(readQuestionDock()).queryByRole("button", { name: "Previous" })).toBeNull();
     await user.click(findChoice("radio", "IndexedDB"));
     await user.click(readButton("Next"));
     // The second question is blank, so Send answers is off, but Previous works.
@@ -1051,30 +1041,20 @@ describe("an async question in the dock", () => {
 });
 
 describe("picking an option in the dock", () => {
-  it("moves the text typed as an answer to the end of the Message Draft", async () => {
+  it("moves the text typed as an answer to the end of the Message Draft it is given", async () => {
     const user = userEvent.setup();
-    const { pendingSubmissions } = await renderDock(QUESTIONS);
-    pendingSubmissions.writeText(FIXTURE_THREAD_IDS.runbook, "Half a message  ");
+    const { pendingSubmissions } = await renderDock(QUESTIONS, ACCEPTED, {
+      messageDraftKey: "assistant:a-1",
+    });
+    pendingSubmissions.writeText("assistant:a-1", "Half a message  ");
 
     await user.type(readOwnAnswer(), "a sqlite file");
     await user.click(findChoice("radio", "IndexedDB"));
 
     expect((readOwnAnswer() as HTMLInputElement).value).toBe("");
-    expect(pendingSubmissions.read(FIXTURE_THREAD_IDS.runbook).message.text).toBe(
+    expect(pendingSubmissions.read("assistant:a-1").message.text).toBe(
       "Half a message  \n\na sqlite file",
     );
-  });
-
-  it("moves it to the Message Draft the dock is given", async () => {
-    const user = userEvent.setup();
-    const { pendingSubmissions } = await renderDock(QUESTIONS, ACCEPTED, {
-      messageDraftKey: "assistant:a-1",
-    });
-
-    await user.type(readOwnAnswer(), "a sqlite file");
-    await user.click(findChoice("radio", "IndexedDB"));
-
-    expect(pendingSubmissions.read("assistant:a-1").message.text).toBe("a sqlite file");
     expect(pendingSubmissions.read(FIXTURE_THREAD_IDS.runbook).message.text).toBe("");
   });
 

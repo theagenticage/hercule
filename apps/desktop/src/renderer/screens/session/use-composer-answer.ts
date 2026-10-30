@@ -2,11 +2,9 @@ import { useState } from "react";
 import {
   ANSWER_ATTACH_OFF_REASON,
   REFUSED_FILE_NOTICE,
-  buildQuestionDraft,
-  buildQuestionStepper,
-  findComposerQuestion,
   decideQuestionStep,
-  typeQuestionAnswer,
+  findComposerQuestion,
+  typeShownQuestionAnswer,
 } from "@hercule/client-core";
 import type { SessionRequest } from "@hercule/contract";
 import { useRequestDraft, useSendAnswers } from "../../app/request-drafts";
@@ -50,19 +48,15 @@ const NO_IMAGES: Omit<ComposerAttachments, "onFiles"> = {
 };
 
 /**
- * Returns what a composer needs to answer the shown Request of the session
- * `sessionId`, or `null` when it stays a message composer. `request` is the
- * Request the dock shows, or `null` when none is open. The composer answers
- * when `findComposerQuestion` finds a question in `request` and `holding` is
- * false. `holding` is the typing guard's, see `useTypingGuard`.
+ * Returns what a composer needs to answer `request`, the Request of the
+ * session `sessionId` that the dock shows (`null` when none is open), or
+ * `null` when it stays a message composer: when `findComposerQuestion` finds
+ * no question in it, or `holding` is true (the typing guard's, see
+ * `useTypingGuard`).
  *
  * The answer is the Request's draft, so a half-typed answer survives paging
- * to another Request and back. The Message Draft is not touched.
- *
- * Previous works while the answers are not sent. The step button shows the
- * next question, and sends the answers from the last one with
- * `useSendAnswers`; it does nothing while the shown question is unanswered
- * or a length limit is exceeded.
+ * to another Request and back. The Message Draft is not touched. The step
+ * button, ⏎, ⌘↵ and the menu's Send all call `step.onStep`.
  */
 export function useComposerAnswer(
   sessionId: string,
@@ -73,15 +67,13 @@ export function useComposerAnswer(
   const [draft, changeDraft] = useRequestDraft(sessionId, request?.requestId ?? "");
   const sendAnswers = useSendAnswers(sessionId);
   const found = findComposerQuestion(request, draft);
-  // Names the question being answered. A refusal belongs to it: it is
-  // forgotten once the composer answers another question of the same Request
-  // or of another one, and once it stops answering.
-  const answeringKey = found === null ? null : `${found.requestId}:${found.question.header}`;
+  // A refusal belongs to the question it happened on. It is forgotten once
+  // the composer answers another question or stops answering.
+  const answerKey = found?.answerKey ?? null;
   const [refusedFor, setRefusedFor] = useState<string | null>(null);
-  if (refusedFor !== null && refusedFor !== answeringKey) setRefusedFor(null);
+  if (refusedFor !== null && refusedFor !== answerKey) setRefusedFor(null);
   if (found === null || holding) return null;
-  const { requestId, questions, question } = found;
-  const stepper = buildQuestionStepper(draft, questions);
+  const { requestId, questions, stepper } = found;
 
   const step = (direction: "previous" | "next"): void => {
     const next = decideQuestionStep(draft, questions, direction);
@@ -95,21 +87,14 @@ export function useComposerAnswer(
   };
 
   return {
-    text: (draft.question ?? buildQuestionDraft(questions))[question.header]!.text,
+    text: found.text,
     onTextChange: (text) => {
       setRefusedFor(null);
-      changeDraft((current) => ({
-        ...current,
-        question: typeQuestionAnswer(
-          current.question ?? buildQuestionDraft(questions),
-          question,
-          text,
-        ),
-      }));
+      changeDraft((current) => typeShownQuestionAnswer(current, questions, text));
     },
     placeholder: stepper.placeholder,
-    historyKey: `${requestId}:${question.header}`,
-    locked: draft.answered,
+    historyKey: found.answerKey,
+    locked: found.locked,
     step: {
       label: stepper.stepLabel,
       showsPrevious: stepper.showsPrevious,
@@ -125,10 +110,10 @@ export function useComposerAnswer(
     attachments: {
       ...NO_IMAGES,
       onFiles: () => {
-        setRefusedFor(answeringKey);
+        setRefusedFor(answerKey);
       },
     },
-    notice: refusedFor === answeringKey ? REFUSED_FILE_NOTICE : stepper.notice,
-    failure: draft.failure,
+    notice: refusedFor === answerKey ? REFUSED_FILE_NOTICE : stepper.notice,
+    failure: found.failure,
   };
 }

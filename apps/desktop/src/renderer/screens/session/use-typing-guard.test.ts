@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("useTypingGuard", () => {
-  it("redraws with holding true after an edit, and false after the pause", () => {
+  it("redraws with holding true after an edit, and false after the pause or a release", () => {
     const { result } = renderHook(() => useTypingGuard());
     expect(result.current.holding).toBe(false);
 
@@ -28,20 +28,14 @@ describe("useTypingGuard", () => {
     act(() => {
       vi.advanceTimersByTime(TYPING_PAUSE_MS);
     });
-
     expect(result.current.holding).toBe(false);
-  });
 
-  it("redraws with holding false when release is called", () => {
-    const { result } = renderHook(() => useTypingGuard());
     act(() => {
       result.current.holdAfterEdit();
     });
-
     act(() => {
       result.current.release();
     });
-
     expect(result.current.holding).toBe(false);
   });
 

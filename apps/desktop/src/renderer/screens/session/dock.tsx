@@ -14,7 +14,7 @@ import {
   pickQuestionOption,
   readErrorMessage,
   decideQuestionStep,
-  typeQuestionAnswer,
+  typeShownQuestionAnswer,
   type QuestionDraft,
 } from "@hercule/client-core";
 import {
@@ -524,7 +524,10 @@ export function RequestDock({
                   value={draft[shownQuestion.header]!.text}
                   disabled={locked}
                   onChange={(event) => {
-                    setDraft(typeQuestionAnswer(draft, shownQuestion, event.target.value));
+                    const text = event.target.value;
+                    changeRequestDraft((current) =>
+                      typeShownQuestionAnswer(current, card.questions, text),
+                    );
                   }}
                 />
                 {stepper.showsPrevious ? (

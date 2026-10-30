@@ -1,7 +1,12 @@
 import { useSyncExternalStore, type JSX, type Ref } from "react";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { buildRequestDock, isMutationRunning, readErrorMessage } from "@hercule/client-core";
+import {
+  buildRequestDock,
+  isMutationRunning,
+  locateShownRequest,
+  readErrorMessage,
+} from "@hercule/client-core";
 import type { Assistant, Session } from "@hercule/contract";
 import { buildAssistantDraftKey } from "../../app/pending-submissions";
 import { storeSentMessage } from "../../app/queries";
@@ -107,11 +112,12 @@ export function ConversationComposer({
   const [shownRequestId] = useShownRequestId(session?.id ?? "");
   const guard = useTypingGuard();
   // The Request the dock shows, which `ConversationRequestDock` decides the
-  // same way. A Conversation starts no subagents.
+  // same way.
   const shownRequest =
     session === null
       ? null
-      : (buildRequestDock(session.openRequests, [], undefined, shownRequestId)?.request ?? null);
+      : (locateShownRequest(session.openRequests, (request) => request.requestId, shownRequestId)
+          ?.request ?? null);
   // Without a session there is no Request, so the empty id is never read.
   const answer = useComposerAnswer(session?.id ?? "", shownRequest, guard.holding);
 
