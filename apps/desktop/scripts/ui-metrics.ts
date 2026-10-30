@@ -3,7 +3,7 @@
  * baseline, and the screenshots with the committed goldens:
  * `pnpm --filter @hercule/desktop ui:metrics`. The metrics are those
  * of docs/research/ui-hill-climb.md, section 4.1, and are read from the
- * specimen pages that `capture:ui` captures: 12 screens in 6 themes, at 1x and
+ * specimen pages that `capture:ui` captures: 13 screens in 6 themes, at 1x and
  * glass 40 % (scripts/ui-screens.ts). Each page loads once in one Playwright
  * Chromium, and its glass 0 %, its focus rings and its perturbations are
  * measured in place (scripts/ui-measure.ts). The registry of metrics and the

@@ -615,6 +615,65 @@ export const buildFixThreadWithPermissionRequests = (several: boolean): ThreadSc
   profiles: [WORKER_PROFILE],
 });
 
+/**
+ * The Request the Fix thread waits on in the thread specimen's `?state=question`:
+ * two questions about the pull request, as the agent's AskUserQuestion tool
+ * asks them. The first has two options with descriptions, the second has two
+ * and takes the user's own answer.
+ */
+const PULL_REQUEST_QUESTIONS: OpenRequest = {
+  requestId: "rq-fix-pull-request",
+  itemId: "it-pull-request",
+  kind: "question",
+  detail: {
+    questions: [
+      {
+        question: "Which branch should the pull request target?",
+        header: "Base branch",
+        options: [
+          { label: "main", description: "Where deploy #1289 shipped from." },
+          {
+            label: "release/eu-hotfix",
+            description: "Reaches EU shoppers without the rest of main.",
+          },
+        ],
+        multiSelect: false,
+      },
+      {
+        question: "Should the fix also cover Apple Pay, which returns the same status?",
+        header: "Scope",
+        options: [
+          {
+            label: "Cards only",
+            description: "Keeps this pull request small. Apple Pay gets its own.",
+          },
+          {
+            label: "Cards and Apple Pay",
+            description: "One change for every payment that needs more action.",
+          },
+        ],
+        multiSelect: false,
+      },
+    ],
+  },
+};
+
+/**
+ * The Fix thread working and waiting on `PULL_REQUEST_QUESTIONS`, which it
+ * asks after its tests pass, for the thread specimen's `?state=question`. The
+ * Request is the last step in place of the push, so the transcript ends as the
+ * Fix thread's does.
+ */
+export const FIX_THREAD_ASKING_QUESTIONS: ThreadScreenRecords = {
+  ...FIX_THREAD,
+  session: { ...FIX_SESSION, openRequests: [PULL_REQUEST_QUESTIONS] },
+  transcript: buildTranscript([
+    ...FIX_STEPS.slice(0, -1),
+    [1740, { _tag: "request.opened", request: PULL_REQUEST_QUESTIONS }],
+  ]),
+  queuedInputs: [],
+};
+
 /** Every list the shell reads: the sidebar specimen's, with Fix and Read in `FIX_WORKSPACE`. */
 export const THREAD_PAGE_RECORDS: SidebarRecords = {
   ...SPECIMEN_RECORDS,

@@ -169,9 +169,11 @@ button.pick:not([aria-disabled="true"]):hover,
   margin-left: 4px;
 }
 /* Not in the book. While the composer answers an agent's question, Previous
-   and the step button take Send's place. The group is as high as Send, so the
-   row keeps its height and no control beside it moves. Stop, when it shows,
-   stays at the row's end with its own 4px. */
+   and the step button take Send's place. They are as high as Send and Stop
+   (32px, the button radius, 12px type), so the group reads as one with Stop and the row keeps
+   its height. The gap is 4px between every control of the group, Stop
+   included: Stop's own 4px margin would make its gap 8px, so it gives it up
+   when it follows the group. */
 .composer-step {
   display: inline-flex;
   flex: none;
@@ -179,6 +181,12 @@ button.pick:not([aria-disabled="true"]):hover,
   gap: 4px;
   height: 32px;
   margin-left: 4px;
+}
+.composer-step .btn {
+  height: 32px;
+}
+.composer-step + .stop {
+  margin-left: 0;
 }
 .lip {
   display: flex;

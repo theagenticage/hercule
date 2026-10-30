@@ -30,7 +30,10 @@
  * header says "Syncing…" once 400 ms have passed. With `?state=long`, the thread has finished three turns of
  * long messages, with headings, lists, code and a link, enough to fill about
  * three windows of 900 px, and waits on nothing; the transcript opens at its
- * bottom.
+ * bottom. With `?state=question`, the thread waits on a Request of two
+ * questions, so the composer answers instead of sending a message: the page
+ * answers the first question and steps to the second, and types a short answer
+ * in the composer's field, as a user would.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as
 // its module loads.
@@ -38,6 +41,7 @@ import "./fixed-clock";
 import {
   buildFixThreadWithPermissionRequests,
   FIX_THREAD,
+  FIX_THREAD_ASKING_QUESTIONS,
   FIX_THREAD_COMPACTING,
   FIX_THREAD_WITH_RUNTIME_NOTICES,
   FIX_THREAD_WITH_RESULTS,
@@ -71,6 +75,49 @@ async function scrollTranscriptAway(computeTop: (transcript: Element) => number)
   while (document.querySelector(".composer.is-scrolled") === null) {
     transcript.scrollTop = computeTop(transcript);
     await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+}
+
+/**
+ * Waits until the page holds an element that matches `selector`, and returns
+ * it. Fails after five seconds.
+ */
+async function waitForElement(selector: string): Promise<HTMLElement> {
+  const deadline = performance.now() + 5000;
+  for (;;) {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (element !== null) return element;
+    if (performance.now() > deadline) {
+      throw new Error(`The thread specimen never drew ${selector}. Check the page's console.`);
+    }
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+}
+
+/**
+ * Answers the first question of the open Request by picking its first
+ * option, steps to the second question with the composer's Next button, and
+ * types `ownAnswer` in the composer's field. Fails when the dock or the
+ * composer lacks one of them.
+ */
+async function answerFirstQuestionAndTypeSecond(ownAnswer: string): Promise<void> {
+  (await waitForElement(".dock-option input")).click();
+  // The step button is off until the pick has been drawn.
+  const next = await waitForElement(
+    '.composer-step button.btn--accent:not([aria-disabled="true"])',
+  );
+  next.click();
+  while (
+    document.querySelector(".dock-question-place")?.textContent?.startsWith("Question 2") !== true
+  ) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+  const field = await waitForElement(".composer-field [contenteditable]");
+  field.focus();
+  // The field is a rich-text editor. Inserting text goes through the editing
+  // command, so the editor sees the same input a typed word makes.
+  if (!document.execCommand("insertText", false, ownAnswer)) {
+    throw new Error("The composer's field took no text.");
   }
 }
 
@@ -110,6 +157,9 @@ if (state === "senders") {
   await mountWithSidebarSession(thread);
 } else if (state === "long") {
   await mountWithSidebarSession(FIX_THREAD_LONG);
+} else if (state === "question") {
+  await mountWithSidebarSession(FIX_THREAD_ASKING_QUESTIONS);
+  await answerFirstQuestionAndTypeSecond("Cards only, but open an issue for Apple Pay");
 } else if (state === "syncing") {
   await mountThreadSpecimen(THREAD_PAGE_RECORDS, { ...FIX_THREAD, syncing: true });
 } else {

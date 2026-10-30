@@ -160,6 +160,7 @@ import { DoneMovesProvider } from "../app/done-moves";
 import { SessionPresentationProvider } from "../app/session-presentation";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
 import { DraftScreen } from "../screens/new-thread/draft-screen";
+import { useKeepRequestDrafts } from "../app/request-drafts";
 import { AgentPage } from "../screens/thread/agent-page";
 import { Route as SettingsRoute } from "../routes/_connected/_shell/settings/route";
 import { Route as AppearanceSettingsRoute } from "../routes/_connected/_shell/settings/appearance";
@@ -849,6 +850,16 @@ function NewThreadScreen(): JSX.Element {
   return <DraftScreen projectId={search.project ?? null} workspaceId={search.workspace ?? null} />;
 }
 
+/**
+ * Renders the thread's page and keeps the thread's Request drafts while it is
+ * shown, as the app's thread layout route does. Without it, an answer typed
+ * in the dock or the composer is dropped.
+ */
+function ThreadSpecimenPage({ sessionId }: { readonly sessionId: string }): JSX.Element {
+  useKeepRequestDrafts(sessionId);
+  return <AgentPage sessionId={sessionId} subagentId={undefined} inThreadRoute />;
+}
+
 /** Renders the page of the assistant the address names, as the app's assistant route does. */
 function AssistantRoute(): JSX.Element {
   const { assistantId } = useParams({ from: "/_connected/_shell/assistants/$assistantId" });
@@ -1013,12 +1024,7 @@ const buildRouter = (
           path: "threads/$sessionId",
           component: () =>
             openThreadId === undefined ? null : (
-              <AgentPage
-                key={openThreadId}
-                sessionId={openThreadId}
-                subagentId={undefined}
-                inThreadRoute
-              />
+              <ThreadSpecimenPage key={openThreadId} sessionId={openThreadId} />
             ),
         }),
         createRoute({
