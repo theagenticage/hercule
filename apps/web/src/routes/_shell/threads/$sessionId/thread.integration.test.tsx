@@ -3661,16 +3661,6 @@ describe("Thread: answering the agent's questions", () => {
       expect(screen.getByRole("button", { name: "Previous" })).toBeDefined();
     });
 
-    it("shows a lone question without its place and without Previous, and with Send answers rather than Next", async () => {
-      await openParked(ONE_QUESTION);
-
-      await screen.findByText("Which storage should drafts use?");
-      expect(screen.queryByText(/\b1 of 1\b/)).toBeNull();
-      expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
-      expect(readStep("Send answers")).toBeDefined();
-    });
-
     it("leaves the Stop beside the step button while the session is busy, and Stop sends no answer", async () => {
       const user = userEvent.setup();
       const { api } = await openParked(QUESTIONS);
@@ -3701,41 +3691,21 @@ describe("Thread: answering the agent's questions", () => {
       expect(readStep("Send answers")).toBeDefined();
     });
 
-    it("enables the step button only once the question is answered with a pick or non-blank text", async () => {
-      const user = userEvent.setup();
-      await openParked(ONE_QUESTION);
-
-      await screen.findByText("Which storage should drafts use?");
-      expect(isLocked(readStep("Send answers"))).toBe(true);
-      await user.type(readComposerField(), "   ");
-      expect(isLocked(readStep("Send answers"))).toBe(true);
-      await user.click(findChoice("radio", "IndexedDB"));
-      expect(isLocked(readStep("Send answers"))).toBe(false);
-    });
-
-    it("keeps Send answers off on the last question until that question is answered", async () => {
-      const user = userEvent.setup();
-      await openParked(QUESTIONS);
-
-      await user.click(
-        await screen.findByRole("radio", { name: (name) => name.startsWith("localStorage") }),
-      );
-      await user.click(readStep("Next"));
-
-      expect(isLocked(readStep("Send answers"))).toBe(true);
-      await user.click(findChoice("checkbox", "Search"));
-      expect(isLocked(readStep("Send answers"))).toBe(false);
-    });
-
     it("sends the answers of every question, and a multi-line own answer keeps its line breaks", async () => {
       const user = userEvent.setup();
       const { api } = await openParked(QUESTIONS);
 
-      await user.click(
-        await screen.findByRole("radio", { name: (name) => name.startsWith("localStorage") }),
-      );
+      // Each step stays off until its question is answered.
+      const pick = await screen.findByRole("radio", {
+        name: (name) => name.startsWith("localStorage"),
+      });
+      expect(isLocked(readStep("Next"))).toBe(true);
+      await user.click(pick);
+      expect(isLocked(readStep("Next"))).toBe(false);
       await user.click(readStep("Next"));
+      expect(isLocked(readStep("Send answers"))).toBe(true);
       await user.click(findChoice("checkbox", "Sync"));
+      expect(isLocked(readStep("Send answers"))).toBe(false);
       await user.click(findChoice("checkbox", "Search"));
       await user.type(readComposerField(), " Offline mode{Shift>}{Enter}{/Shift}Dark mode ");
       await user.click(readStep("Send answers"));
@@ -3763,7 +3733,16 @@ describe("Thread: answering the agent's questions", () => {
       const form = await findQuestionForm("Which storage should drafts use?");
       expect(within(form).queryAllByRole("radio")).toEqual([]);
       expect(readComposerField().placeholder).toBe("Type your answer");
+      // A lone question has no place ("1 of 1"), no Next and no Previous.
+      expect(screen.queryByText(/\b1 of 1\b/)).toBeNull();
+      expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
+      // A blank answer does not count.
+      await user.type(readComposerField(), "   ");
+      expect(isLocked(readStep("Send answers"))).toBe(true);
+      await user.clear(readComposerField());
       await user.type(readComposerField(), "a sqlite file");
+      expect(isLocked(readStep("Send answers"))).toBe(false);
       await user.click(readStep("Send answers"));
 
       await waitFor(() => {
@@ -3888,24 +3867,24 @@ describe("Thread: answering the agent's questions", () => {
       expect(readBodies(api.calls)).toEqual([]);
     });
 
-    it("does nothing on Enter while the question is unanswered", async () => {
-      const user = userEvent.setup();
-      const { api } = await openParked(QUESTIONS);
-
-      await screen.findByText("Which storage should drafts use?");
-      await user.type(readComposerField(), "{Enter}");
-
-      expect(screen.getByText("Question 1 of 2")).toBeDefined();
-      expect(readComposerField().value).toBe("");
-      expect(readBodies(api.calls)).toEqual([]);
-    });
-
     it("keeps every question's answer when the user steps back and forward", async () => {
       const user = userEvent.setup();
       const { api } = await openParked(QUESTIONS);
 
       await screen.findByText("Which storage should drafts use?");
+      // Enter on an unanswered question steps nowhere and adds no new line.
+      await user.type(readComposerField(), "{Enter}");
+      expect(screen.getByText("Question 1 of 2")).toBeDefined();
+      expect(readComposerField().value).toBe("");
+      expect(readBodies(api.calls)).toEqual([]);
+
       await user.type(readComposerField(), "a sqlite file{Enter}");
+      // The second question is blank, and Previous still works.
+      expect(isLocked(readStep("Send answers"))).toBe(true);
+      await user.click(screen.getByRole("button", { name: "Previous" }));
+      expect(screen.getByText("Question 1 of 2")).toBeDefined();
+      await user.click(readStep("Next"));
+
       await user.click(findChoice("checkbox", "Sync"));
       await user.type(readComposerField(), "Offline mode");
 
@@ -3927,19 +3906,6 @@ describe("Thread: answering the agent's questions", () => {
           },
         ]);
       });
-    });
-
-    it("lets the user step back from a blank question", async () => {
-      const user = userEvent.setup();
-      await openParked(QUESTIONS);
-
-      await screen.findByText("Which storage should drafts use?");
-      await user.type(readComposerField(), "a sqlite file{Enter}");
-
-      // The second question is blank, and Previous still works.
-      expect(isLocked(readStep("Send answers"))).toBe(true);
-      await user.click(screen.getByRole("button", { name: "Previous" }));
-      expect(screen.getByText("Question 1 of 2")).toBeDefined();
     });
   });
 
@@ -4405,12 +4371,6 @@ describe("Thread: answering the agent's questions", () => {
       await waitFor(() => {
         expect(readComposerField().value).toBe("a sqlite file");
       });
-    });
-
-    it("words a single async question as one question", async () => {
-      await openParked({ ...ONE_QUESTION, async: true });
-
-      await screen.findByText("The agent asked a question. It keeps working.");
     });
   });
 });

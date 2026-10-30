@@ -818,6 +818,7 @@ export {
   describeFoldedQuestion,
   findComposerQuestion,
   decideQuestionStep,
+  typeShownQuestionAnswer,
   type ComposerQuestion,
   type QuestionStep,
   type QuestionStepper,
@@ -830,6 +831,7 @@ export {
   typeQuestionAnswer,
   type QuestionDraft,
 } from "./threads/question-draft";
+export { locateShownRequest } from "./threads/shown-request";
 export { createTypingGuard, type TypingGuard } from "./threads/typing-guard";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
 export { isMarkedDone } from "./threads/status";

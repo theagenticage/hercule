@@ -19,6 +19,7 @@ import {
   buildQuestionAnswers,
   buildQuestionDraft,
   isQuestionAnswered,
+  typeQuestionAnswer,
   type QuestionDraft,
 } from "./question-draft";
 import type { RequestDraft } from "./request-drafts";
@@ -47,13 +48,26 @@ export const ANSWER_ATTACH_OFF_REASON = "An answer takes text only";
 /** The notice shown when the user pastes or drops a file while the composer answers a question. */
 export const REFUSED_FILE_NOTICE = "An answer takes text only. Images can be sent in a message.";
 
-/** The question the composer answers, with the Request it belongs to. */
+/** The question the composer answers, with the Request it belongs to and where its draft stands. */
 export interface ComposerQuestion {
   readonly requestId: string;
   /** Every question of the Request, in order. */
   readonly questions: readonly ApprovalQuestion[];
   /** The shown question, which is `questions[draft.shownQuestionIndex]`. */
   readonly question: ApprovalQuestion;
+  /**
+   * Names the shown question's answer across Requests, such as the key of its
+   * undo history and of a refused file's notice.
+   */
+  readonly answerKey: string;
+  /** The shown question's own answer typed so far; empty when the user typed nothing. */
+  readonly text: string;
+  /** Whether the answers are sent: nothing takes input until the controller closes the Request. */
+  readonly locked: boolean;
+  /** Why the last send failed, or `null`. */
+  readonly failure: string | null;
+  /** The step controls for the shown question. */
+  readonly stepper: QuestionStepper;
 }
 
 /**
@@ -67,8 +81,8 @@ export interface ComposerQuestion {
  *   clear.
  *
  * `draft` is the draft of `request`. A Request whose answers are already sent
- * still returns its question, so the composer stays locked on it until the
- * controller closes the Request.
+ * still returns its question, with `locked` set, so the composer stays locked
+ * on it until the controller closes the Request.
  */
 export const findComposerQuestion = (
   request: SessionRequest | null,
@@ -79,8 +93,36 @@ export const findComposerQuestion = (
   const questions = buildApprovalCard(request).questions;
   const question = questions[draft.shownQuestionIndex];
   if (question === undefined || question.secretWarning !== null) return null;
-  return { requestId: request.requestId, questions, question };
+  const status = buildQuestionStatus(draft, questions);
+  return {
+    requestId: request.requestId,
+    questions,
+    question,
+    answerKey: `${request.requestId}:${question.header}`,
+    text: status.questionDraft[question.header]!.text,
+    locked: draft.answered,
+    failure: draft.failure,
+    stepper: buildStepper(status),
+  };
 };
+
+/**
+ * Returns `draft` with `text` typed as the user's own answer to its shown
+ * question, out of `questions` (the Request's, in order). A draft the user has
+ * not touched yet starts from an empty answer to every question.
+ */
+export const typeShownQuestionAnswer = (
+  draft: RequestDraft,
+  questions: readonly ApprovalQuestion[],
+  text: string,
+): RequestDraft => ({
+  ...draft,
+  question: typeQuestionAnswer(
+    draft.question ?? buildQuestionDraft(questions),
+    questions[draft.shownQuestionIndex]!,
+    text,
+  ),
+});
 
 /** What the step button and the controls around it show and allow. */
 export interface QuestionStepper {
@@ -88,9 +130,9 @@ export interface QuestionStepper {
   readonly stepLabel: typeof NEXT_QUESTION_LABEL | typeof SEND_ANSWERS_LABEL;
   /** Whether to draw the Previous button: from the second question on. */
   readonly showsPrevious: boolean;
-  /** Whether Previous works: the answers are not sent yet. It works on a blank or over-long answer too. */
+  /** Whether Previous works. */
   readonly canGoBack: boolean;
-  /** Whether the step button works: see `decideQuestionStep`. */
+  /** Whether the step button works, which is whether `decideQuestionStep` allows "next". */
   readonly ready: boolean;
   /** The placeholder of the field that takes the shown question's own answer. */
   readonly placeholder: string;
@@ -116,35 +158,27 @@ const countValueCharacters = (value: string | readonly string[] | null): number 
     : value.reduce((total, item) => total + item.length, 0);
 };
 
-/**
- * Where the draft stands on the shown question: the one place that decides
- * what counts as answered and as within the limits, so the stepper and the
- * step cannot disagree.
- */
+/** Where the draft stands on the shown question, as `buildQuestionStatus` builds it. */
 interface QuestionStatus {
   readonly index: number;
   readonly isLast: boolean;
   readonly question: ApprovalQuestion;
   /** The draft of every question; the empty draft when the user touched nothing. */
   readonly questionDraft: QuestionDraft;
-  /** Whether Previous works: the shown question is not the first and the answers are not sent. */
   readonly canGoBack: boolean;
-  /**
-   * Whether the step button works: the answers are not sent, the shown
-   * question is answered (on the last question, all of them are, because the
-   * controller refuses answers that leave one out), and no limit is exceeded.
-   */
+  /** Whether "next" is allowed, by the rule `decideQuestionStep` states. */
   readonly isReady: boolean;
   /** The notice for the limit that is exceeded, or `null`. */
   readonly lengthNotice: string | null;
 }
 
 /**
- * Builds where `draft` stands on its shown question. The length of all answers
- * is computed from the values that would be sent (picks and trimmed typed
- * text, plus every header, as the protocol counts), so it is right while
- * other questions are still unanswered. Unanswered questions count their
- * header only, so the total never shrinks as the user answers on.
+ * Builds where `draft` stands on its shown question, the one place that
+ * decides readiness for the stepper and for `decideQuestionStep`. The length
+ * of all answers is computed from the values that would be sent (picks and
+ * trimmed typed text, plus every header, as the protocol counts), so it is
+ * right while other questions are still unanswered. Unanswered questions
+ * count their header only, so the total never shrinks as the user answers on.
  */
 const buildQuestionStatus = (
   draft: RequestDraft,
@@ -179,28 +213,25 @@ const buildQuestionStatus = (
   };
 };
 
+/** Builds the state of the step controls from where the draft stands. */
+const buildStepper = (status: QuestionStatus): QuestionStepper => ({
+  stepLabel: status.isLast ? SEND_ANSWERS_LABEL : NEXT_QUESTION_LABEL,
+  showsPrevious: status.index > 0,
+  canGoBack: status.canGoBack,
+  ready: status.isReady,
+  placeholder: status.question.options.length > 0 ? "Or type your own answer" : "Type your answer",
+  notice: status.lengthNotice,
+});
+
 /**
  * Builds the state of the step controls for the question `draft` shows, out
- * of `questions` (the Request's, in order). The step button is `ready` when
- * the answers are not sent, the shown question is answered (on the last
- * question, every question is), and no length limit is exceeded.
- * `decideQuestionStep` applies the same rule.
+ * of `questions` (the Request's, in order). `findComposerQuestion` carries
+ * the same state for the composer; the dock's own field calls this.
  */
 export const buildQuestionStepper = (
   draft: RequestDraft,
   questions: readonly ApprovalQuestion[],
-): QuestionStepper => {
-  const status = buildQuestionStatus(draft, questions);
-  return {
-    stepLabel: status.isLast ? SEND_ANSWERS_LABEL : NEXT_QUESTION_LABEL,
-    showsPrevious: status.index > 0,
-    canGoBack: status.canGoBack,
-    ready: status.isReady,
-    placeholder:
-      status.question.options.length > 0 ? "Or type your own answer" : "Type your answer",
-    notice: status.lengthNotice,
-  };
-};
+): QuestionStepper => buildStepper(buildQuestionStatus(draft, questions));
 
 /** What a step does: show another question, or send the answers. */
 export type QuestionStep =
@@ -209,14 +240,17 @@ export type QuestionStep =
 
 /**
  * Returns what stepping `direction` from the question `draft` shows should
- * do, or `null` when the step is not allowed.
+ * do, or `null` when the step is not allowed. This is the one statement of
+ * the rule; the stepper's `ready` and `canGoBack` report its result.
  *
- * - `"previous"` shows the question before. It is allowed whenever the
- *   answers are not sent, even on a blank or over-long answer, and it is not
- *   allowed on the first question.
- * - `"next"` shows the question after, or sends the answers from the last
- *   question. It is allowed when the stepper is `ready`. The answers are the
- *   ones `buildQuestionAnswers` builds from the draft.
+ * - `"previous"` shows the question before. It is allowed unless this is the
+ *   first question or the answers are sent. A blank or over-long answer does
+ *   not stop it.
+ * - `"next"` shows the question after, or on the last question sends the
+ *   answers `buildQuestionAnswers` builds from the draft. It is allowed
+ *   when the answers are not sent, the shown question is answered, and no
+ *   length limit is exceeded. On the last question every question must be
+ *   answered, because the controller refuses answers that leave one out.
  */
 export const decideQuestionStep = (
   draft: RequestDraft,

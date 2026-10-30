@@ -8,7 +8,7 @@ import {
   type QuestionDraft,
   type RequestDraft,
   decideQuestionStep,
-  typeQuestionAnswer,
+  typeShownQuestionAnswer,
 } from "@hercule/client-core";
 import type { QuestionAnswers } from "@hercule/contract";
 import { Button, ChoiceInput, cn, Input } from "@hercule/ui";
@@ -195,7 +195,10 @@ export function QuestionForm({
             placeholder={stepper.placeholder}
             value={answer.text}
             disabled={locked}
-            onChange={(event) => setDraft(typeQuestionAnswer(draft, question, event.target.value))}
+            onChange={(event) => {
+              const text = event.target.value;
+              onDraftChange((current) => typeShownQuestionAnswer(current, questions, text));
+            }}
             onKeyDown={(event) => {
               // The Enter that ends an IME composition only commits the text.
               if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229) {

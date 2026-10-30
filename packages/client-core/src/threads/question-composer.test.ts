@@ -10,9 +10,7 @@ import type { SessionRequest } from "@hercule/contract";
 import {
   EMPTY_REQUEST_DRAFT,
   NEXT_QUESTION_LABEL,
-  SEND_ANSWERS_LABEL,
   buildApprovalCard,
-  buildQuestionAnswers,
   buildQuestionDraft,
   buildQuestionStepper,
   describeFoldedQuestion,
@@ -20,6 +18,7 @@ import {
   pickQuestionOption,
   decideQuestionStep,
   typeQuestionAnswer,
+  typeShownQuestionAnswer,
   type ApprovalQuestion,
   type QuestionDraft,
   type RequestDraft,
@@ -108,7 +107,7 @@ describe("findComposerQuestion", () => {
   it("answers the shown question of a blocking question, without the user unfolding anything", () => {
     const found = findComposerQuestion(REQUEST, buildDraft({ shownQuestionIndex: 2 }));
 
-    expect(found).toEqual({ requestId: "req-1", questions: QUESTIONS, question: FEATURES });
+    expect(found).toMatchObject({ requestId: "req-1", questions: QUESTIONS, question: FEATURES });
   });
 
   it("stays a message composer while the shown question is secret, and answers the others around it", () => {
@@ -130,125 +129,216 @@ describe("findComposerQuestion", () => {
     );
   });
 
-  it("keeps the question once its answers are sent, so the composer stays locked on it", () => {
-    expect(findComposerQuestion(REQUEST, buildDraft({ answered: true }))?.question).toEqual(
-      STORAGE,
-    );
+  it("keeps the question once its answers are sent, locked", () => {
+    const found = findComposerQuestion(REQUEST, buildDraft({ answered: true }));
+
+    expect(found?.question).toEqual(STORAGE);
+    expect(found?.locked).toBe(true);
+  });
+
+  it("carries the answer's key, its typed text, the lock, the failure and the stepper", () => {
+    const untouched = findComposerQuestion(REQUEST, buildDraft())!;
+    const typed = findComposerQuestion(
+      REQUEST,
+      buildDraft({
+        question: buildTypedDraft(QUESTIONS, { Features: "mine" }),
+        shownQuestionIndex: 2,
+        failure: "The controller refused.",
+      }),
+    )!;
+
+    expect(untouched).toMatchObject({
+      answerKey: "req-1:Storage",
+      text: "",
+      locked: false,
+      failure: null,
+    });
+    expect(untouched.stepper).toEqual(buildQuestionStepper(buildDraft(), QUESTIONS));
+    expect(typed).toMatchObject({
+      answerKey: "req-1:Features",
+      text: "mine",
+      failure: "The controller refused.",
+    });
+    expect(typed.stepper).toMatchObject({ ready: true, stepLabel: NEXT_QUESTION_LABEL });
   });
 });
 
-describe("buildQuestionStepper", () => {
-  it("labels the step Next until the last question, then Send answers", () => {
-    const labels = QUESTIONS.map(
-      (_, index) =>
-        buildQuestionStepper(buildDraft({ shownQuestionIndex: index }), QUESTIONS).stepLabel,
-    );
+describe("typeShownQuestionAnswer", () => {
+  it("types into the shown question of a draft the user has not touched, leaving the rest alone", () => {
+    const draft = buildDraft({ shownQuestionIndex: 3, unfolded: true });
 
-    expect(labels).toEqual([
-      NEXT_QUESTION_LABEL,
-      NEXT_QUESTION_LABEL,
-      NEXT_QUESTION_LABEL,
-      SEND_ANSWERS_LABEL,
-    ]);
-    expect(labels[0]).toBe("Next");
-    expect(labels[3]).toBe("Send answers");
+    const typed = typeShownQuestionAnswer(draft, QUESTIONS, "no");
+
+    expect(typed).toEqual({
+      ...draft,
+      question: { ...buildQuestionDraft(QUESTIONS), Notes: { picks: [], text: "no" } },
+    });
+    expect(draft.question).toBeNull();
   });
 
-  it("shows Previous from the second question on", () => {
-    const first = buildQuestionStepper(buildDraft(), QUESTIONS);
-    const second = buildQuestionStepper(buildDraft({ shownQuestionIndex: 1 }), QUESTIONS);
+  it("replaces a pick on a single-select question and keeps the picks of a multiSelect one", () => {
+    const picked = pickQuestionOption(buildQuestionDraft(QUESTIONS), STORAGE, "IndexedDB", "");
+    const withFeature = pickQuestionOption(picked.question, FEATURES, "Sync", "");
 
-    expect([first.showsPrevious, first.canGoBack]).toEqual([false, false]);
-    expect([second.showsPrevious, second.canGoBack]).toEqual([true, true]);
+    const first = typeShownQuestionAnswer(
+      buildDraft({ question: withFeature.question }),
+      QUESTIONS,
+      "mine",
+    );
+    const third = typeShownQuestionAnswer(
+      buildDraft({ question: withFeature.question, shownQuestionIndex: 2 }),
+      QUESTIONS,
+      "more",
+    );
+
+    expect(first.question!.Storage).toEqual({ picks: [], text: "mine" });
+    expect(first.question!.Features).toEqual({ picks: ["Sync"], text: "" });
+    expect(third.question!.Features).toEqual({ picks: ["Sync"], text: "more" });
+  });
+});
+
+describe("the step controls", () => {
+  it("labels the step Next until the last question, then Send answers, and shows Previous from the second", () => {
+    const steppers = QUESTIONS.map((_, index) =>
+      buildQuestionStepper(buildDraft({ shownQuestionIndex: index }), QUESTIONS),
+    );
+
+    expect(steppers.map((stepper) => stepper.stepLabel)).toEqual([
+      "Next",
+      "Next",
+      "Next",
+      "Send answers",
+    ]);
+    expect(steppers.map((stepper) => stepper.showsPrevious)).toEqual([false, true, true, true]);
   });
 
   it("invites the user to type their own answer beside options, and just to type when there are none", () => {
-    const withOptions = buildQuestionStepper(buildDraft(), QUESTIONS);
-    const without = buildQuestionStepper(buildDraft({ shownQuestionIndex: 3 }), QUESTIONS);
-
-    expect(withOptions.placeholder).toBe("Or type your own answer");
-    expect(without.placeholder).toBe("Type your answer");
+    expect(buildQuestionStepper(buildDraft(), QUESTIONS).placeholder).toBe(
+      "Or type your own answer",
+    );
+    expect(buildQuestionStepper(buildDraft({ shownQuestionIndex: 3 }), QUESTIONS).placeholder).toBe(
+      "Type your answer",
+    );
   });
 
-  it("is not ready for a user who touched nothing, as if every question were blank", () => {
-    const stepper = buildQuestionStepper(buildDraft({ question: null }), QUESTIONS);
+  const PICKED = pickQuestionOption(buildQuestionDraft(QUESTIONS), STORAGE, "IndexedDB", "");
+  /** Builds a draft that shows question `at`, after the user typed `texts` (by header). */
+  const typed = (
+    texts: Readonly<Record<string, string>>,
+    at = 0,
+    extra: Partial<RequestDraft> = {},
+  ) =>
+    buildDraft({ question: buildTypedDraft(QUESTIONS, texts), shownQuestionIndex: at, ...extra });
+  const BIG = (length: number) => "a".repeat(length);
+  const OVER = "This answer is longer than 4,096 characters.";
+  const SHOW_1 = { kind: "show", index: 1 };
+  const SHOW_2 = { kind: "show", index: 2 };
+  const SEND = { kind: "send", answers: { Storage: "x", Token: "x", Features: ["x"], Notes: "x" } };
 
-    expect(stepper.ready).toBe(false);
-    expect(stepper.notice).toBeNull();
-  });
-
-  it("is ready once the shown question has a pick or typed text, not blank text", () => {
-    const picked = pickQuestionOption(buildQuestionDraft(QUESTIONS), STORAGE, "IndexedDB", "");
-    const blank = buildTypedDraft(QUESTIONS, { Storage: "  \n " });
-    const typed = buildTypedDraft(QUESTIONS, { Storage: " mine " });
-
-    expect(buildQuestionStepper(buildDraft({ question: picked.question }), QUESTIONS).ready).toBe(
+  // One row per situation: the stepper's `ready` and `notice`, then what "next" and "previous"
+  // do. Previous works exactly when its result is not null, so `canGoBack` is checked against it.
+  const cases: readonly (readonly [
+    string,
+    RequestDraft,
+    boolean,
+    string | null,
+    unknown,
+    unknown,
+  ])[] = [
+    ["untouched, first question", buildDraft(), false, null, null, null],
+    ["blank text, first question", typed({ Storage: "  \n " }), false, null, null, null],
+    ["typed text, first question", typed({ Storage: " mine " }), true, null, SHOW_1, null],
+    ["a pick, first question", buildDraft({ question: PICKED.question }), true, null, SHOW_1, null],
+    ["blank middle question", buildDraft({ shownQuestionIndex: 2 }), false, null, null, SHOW_1],
+    [
+      "last question, an earlier one unanswered",
+      typed({ Notes: "x" }, 3),
+      false,
+      null,
+      null,
+      SHOW_2,
+    ],
+    [
+      "last question, blank after the others",
+      buildDraft({
+        question: { ...ALL_ANSWERED, Notes: { picks: [], text: " \n" } },
+        shownQuestionIndex: 3,
+      }),
+      false,
+      null,
+      null,
+      SHOW_2,
+    ],
+    [
+      "last question, all answered",
+      buildDraft({ question: ALL_ANSWERED, shownQuestionIndex: 3 }),
       true,
-    );
-    expect(buildQuestionStepper(buildDraft({ question: blank }), QUESTIONS).ready).toBe(false);
-    expect(buildQuestionStepper(buildDraft({ question: typed }), QUESTIONS).ready).toBe(true);
-  });
-
-  it("asks for every question to be answered before it sends from the last one", () => {
-    const lastOnly = buildTypedDraft(QUESTIONS, { Notes: "x" });
-
-    const stepper = buildQuestionStepper(
-      buildDraft({ question: lastOnly, shownQuestionIndex: 3 }),
-      QUESTIONS,
-    );
-
-    expect(stepper.ready).toBe(false);
-    expect(stepper.notice).toBeNull();
-  });
-
-  it("locks everything once the answers are sent, but still shows Previous", () => {
-    const stepper = buildQuestionStepper(
+      null,
+      SEND,
+      SHOW_2,
+    ],
+    [
+      "answers already sent",
       buildDraft({ question: ALL_ANSWERED, shownQuestionIndex: 3, answered: true }),
-      QUESTIONS,
-    );
+      false,
+      null,
+      null,
+      null,
+    ],
+    ["answer of 4,096 characters", typed({ Storage: BIG(4096) }), true, null, SHOW_1, null],
+    [
+      "4,096 characters and spaces",
+      typed({ Storage: `  ${BIG(4096)}\n\n` }),
+      true,
+      null,
+      SHOW_1,
+      null,
+    ],
+    ["answer of 4,097 characters", typed({ Storage: BIG(4097) }), false, OVER, null, null],
+    ["4,097 typed on a multiSelect", typed({ Features: BIG(4097) }, 2), false, OVER, null, SHOW_1],
+  ];
 
-    expect(stepper.ready).toBe(false);
-    expect(stepper.canGoBack).toBe(false);
-    expect(stepper.showsPrevious).toBe(true);
+  it.each(cases)("%s", (_name, draft, ready, notice, next, previous) => {
+    expect(buildQuestionStepper(draft, QUESTIONS)).toMatchObject({
+      ready,
+      notice,
+      canGoBack: previous !== null,
+    });
+    expect(decideQuestionStep(draft, QUESTIONS, "next")).toEqual(next);
+    expect(decideQuestionStep(draft, QUESTIONS, "previous")).toEqual(previous);
   });
 
-  describe("the length limits", () => {
+  it("sends the answers as buildQuestionAnswers serializes them: picks, then trimmed text", () => {
+    let questionDraft = pickQuestionOption(
+      buildQuestionDraft(QUESTIONS),
+      STORAGE,
+      "IndexedDB",
+      "",
+    ).question;
+    questionDraft = typeQuestionAnswer(questionDraft, QUESTIONS[1]!, "  hunter2 ");
+    questionDraft = pickQuestionOption(questionDraft, FEATURES, "Search", "").question;
+    questionDraft = typeQuestionAnswer(questionDraft, FEATURES, " and more ");
+    questionDraft = typeQuestionAnswer(questionDraft, QUESTIONS[3]!, "no");
+
+    expect(
+      decideQuestionStep(
+        buildDraft({ question: questionDraft, shownQuestionIndex: 3 }),
+        QUESTIONS,
+        "next",
+      ),
+    ).toEqual({
+      kind: "send",
+      answers: {
+        Storage: "IndexedDB",
+        Token: "hunter2",
+        Features: ["Search", "and more"],
+        Notes: "no",
+      },
+    });
+  });
+
+  it("counts headers and every answer toward the 16,384 characters of all answers, even while a question is unanswered", () => {
     const LIMIT = 4096;
-
-    it("accepts an answer of exactly 4,096 characters and refuses one more, with a notice", () => {
-      const atLimit = buildDraft({
-        question: buildTypedDraft(QUESTIONS, { Storage: "a".repeat(LIMIT) }),
-      });
-      const over = buildDraft({
-        question: buildTypedDraft(QUESTIONS, { Storage: "a".repeat(LIMIT + 1) }),
-      });
-
-      expect(buildQuestionStepper(atLimit, QUESTIONS)).toMatchObject({ ready: true, notice: null });
-      expect(buildQuestionStepper(over, QUESTIONS)).toMatchObject({
-        ready: false,
-        notice: "This answer is longer than 4,096 characters.",
-      });
-    });
-
-    it("counts the trimmed text, so spaces around an answer at the limit do not push it over", () => {
-      const padded = buildDraft({
-        question: buildTypedDraft(QUESTIONS, { Storage: `  ${"a".repeat(LIMIT)}\n\n` }),
-      });
-
-      expect(buildQuestionStepper(padded, QUESTIONS).ready).toBe(true);
-    });
-
-    it("applies the answer limit to the typed text of a multiSelect question too", () => {
-      const over = buildDraft({
-        question: buildTypedDraft(QUESTIONS, { Features: "a".repeat(LIMIT + 1) }),
-        shownQuestionIndex: 2,
-      });
-
-      expect(buildQuestionStepper(over, QUESTIONS).notice).toBe(
-        "This answer is longer than 4,096 characters.",
-      );
-    });
-
     // Four one-letter headers, so the headers add 4 characters to the total.
     const buildFreeTextQuestion = (header: string) => ({
       question: header,
@@ -264,144 +354,37 @@ describe("buildQuestionStepper", () => {
         buildFreeTextQuestion("D"),
       ]),
     ).questions;
-
-    it("counts headers and every answer toward the 16,384 characters of all answers, even while a question is unanswered", () => {
-      // 4 headers + 3 * 4,096 + 4,092 = 16,384 exactly.
-      const atLimit = buildTypedDraft(FOUR, {
-        A: "a".repeat(LIMIT),
-        B: "a".repeat(LIMIT),
-        C: "a".repeat(LIMIT),
-        D: "a".repeat(LIMIT - 4),
-      });
-      const over = buildTypedDraft(FOUR, {
-        A: "a".repeat(LIMIT),
-        B: "a".repeat(LIMIT),
-        C: "a".repeat(LIMIT),
-        D: "a".repeat(LIMIT - 3),
-      });
-      // The user went back to the first question; the last is already typed.
-      const stepperAt = (question: QuestionDraft, shownQuestionIndex: number) =>
-        buildQuestionStepper(buildDraft({ question, shownQuestionIndex }), FOUR);
-
-      expect(stepperAt(atLimit, 3)).toMatchObject({ ready: true, notice: null });
-      expect(stepperAt(atLimit, 0)).toMatchObject({ ready: true, notice: null });
-      expect(stepperAt(over, 3)).toMatchObject({
-        ready: false,
-        notice: "These answers are longer than 16,384 characters together.",
-      });
-      expect(stepperAt(over, 0).ready).toBe(false);
-      // The last answer is still unanswered, but the others already leave no room for it.
-      const room = buildTypedDraft(FOUR, {
-        A: "a".repeat(LIMIT),
-        B: "a".repeat(LIMIT),
-        C: "a".repeat(LIMIT),
-      });
-      expect(stepperAt(room, 0).notice).toBeNull();
+    // 4 headers + 3 * 4,096 + 4,092 = 16,384 exactly.
+    const atLimit = buildTypedDraft(FOUR, {
+      A: "a".repeat(LIMIT),
+      B: "a".repeat(LIMIT),
+      C: "a".repeat(LIMIT),
+      D: "a".repeat(LIMIT - 4),
     });
-  });
-});
-
-describe("decideQuestionStep", () => {
-  it("has no question before the first", () => {
-    expect(decideQuestionStep(buildDraft(), QUESTIONS, "previous")).toBeNull();
-  });
-
-  it("goes back one question, even from a blank answer", () => {
-    const draft = buildDraft({ shownQuestionIndex: 2 });
-
-    expect(decideQuestionStep(draft, QUESTIONS, "previous")).toEqual({ kind: "show", index: 1 });
-  });
-
-  it("goes back from an over-long answer", () => {
-    const draft = buildDraft({
-      question: buildTypedDraft(QUESTIONS, { Features: "a".repeat(5000) }),
-      shownQuestionIndex: 2,
+    const over = buildTypedDraft(FOUR, {
+      A: "a".repeat(LIMIT),
+      B: "a".repeat(LIMIT),
+      C: "a".repeat(LIMIT),
+      D: "a".repeat(LIMIT - 3),
     });
-
-    expect(buildQuestionStepper(draft, QUESTIONS).ready).toBe(false);
-    expect(decideQuestionStep(draft, QUESTIONS, "previous")).toEqual({ kind: "show", index: 1 });
-  });
-
-  it("goes nowhere once the answers are sent", () => {
-    const draft = buildDraft({ question: ALL_ANSWERED, shownQuestionIndex: 3, answered: true });
-
-    expect(decideQuestionStep(draft, QUESTIONS, "previous")).toBeNull();
-    expect(decideQuestionStep(draft, QUESTIONS, "next")).toBeNull();
-  });
-
-  it("does not go on from an unanswered question", () => {
-    expect(decideQuestionStep(buildDraft(), QUESTIONS, "next")).toBeNull();
-  });
-
-  it("goes on to the next question, secret or not, once the shown one is answered", () => {
-    const draft = buildDraft({ question: buildTypedDraft(QUESTIONS, { Storage: "mine" }) });
-
-    expect(decideQuestionStep(draft, QUESTIONS, "next")).toEqual({ kind: "show", index: 1 });
-  });
-
-  it("sends from the last question the answers buildQuestionAnswers builds", () => {
-    let questionDraft = pickQuestionOption(
-      buildQuestionDraft(QUESTIONS),
-      STORAGE,
-      "IndexedDB",
-      "",
-    ).question;
-    questionDraft = typeQuestionAnswer(questionDraft, QUESTIONS[1]!, "  hunter2 ");
-    questionDraft = pickQuestionOption(questionDraft, FEATURES, "Search", "").question;
-    questionDraft = typeQuestionAnswer(questionDraft, FEATURES, " and more ");
-    questionDraft = typeQuestionAnswer(questionDraft, QUESTIONS[3]!, "no");
-    const draft = buildDraft({ question: questionDraft, shownQuestionIndex: 3 });
-
-    expect(decideQuestionStep(draft, QUESTIONS, "next")).toEqual({
-      kind: "send",
-      answers: buildQuestionAnswers(questionDraft, QUESTIONS),
+    // The last answer is still unanswered, but the others already leave no room for it.
+    const room = buildTypedDraft(FOUR, {
+      A: "a".repeat(LIMIT),
+      B: "a".repeat(LIMIT),
+      C: "a".repeat(LIMIT),
     });
-    expect(buildQuestionAnswers(questionDraft, QUESTIONS)).toEqual({
-      Storage: "IndexedDB",
-      Token: "hunter2",
-      Features: ["Search", "and more"],
-      Notes: "no",
+    // The user may be on the first question while the last is already typed.
+    const stepperAt = (question: QuestionDraft, shownQuestionIndex: number) =>
+      buildQuestionStepper(buildDraft({ question, shownQuestionIndex }), FOUR);
+
+    expect(stepperAt(atLimit, 3)).toMatchObject({ ready: true, notice: null });
+    expect(stepperAt(atLimit, 0)).toMatchObject({ ready: true, notice: null });
+    expect(stepperAt(over, 3)).toMatchObject({
+      ready: false,
+      notice: "These answers are longer than 16,384 characters together.",
     });
-  });
-
-  it("does not send while an earlier question is unanswered", () => {
-    const draft = buildDraft({
-      question: buildTypedDraft(QUESTIONS, { Notes: "x" }),
-      shownQuestionIndex: 3,
-    });
-
-    expect(decideQuestionStep(draft, QUESTIONS, "next")).toBeNull();
-  });
-
-  it("does not go on from an answer over the limit, and goes on at the limit", () => {
-    const at = buildDraft({ question: buildTypedDraft(QUESTIONS, { Storage: "a".repeat(4096) }) });
-    const over = buildDraft({
-      question: buildTypedDraft(QUESTIONS, { Storage: "a".repeat(4097) }),
-    });
-
-    expect(decideQuestionStep(at, QUESTIONS, "next")).toEqual({ kind: "show", index: 1 });
-    expect(decideQuestionStep(over, QUESTIONS, "next")).toBeNull();
-  });
-
-  it("never disagrees with the stepper about whether the step button works", () => {
-    const drafts: RequestDraft[] = [
-      buildDraft(),
-      buildDraft({ question: buildTypedDraft(QUESTIONS, { Storage: "x" }) }),
-      buildDraft({ question: buildTypedDraft(QUESTIONS, { Storage: "a".repeat(4097) }) }),
-      buildDraft({ question: ALL_ANSWERED, shownQuestionIndex: 3 }),
-      buildDraft({ question: ALL_ANSWERED, shownQuestionIndex: 3, answered: true }),
-      buildDraft({ question: buildTypedDraft(QUESTIONS, { Notes: "x" }), shownQuestionIndex: 3 }),
-      buildDraft({
-        question: { ...ALL_ANSWERED, Notes: { picks: [], text: " \n" } },
-        shownQuestionIndex: 3,
-      }),
-    ];
-
-    for (const draft of drafts) {
-      expect(decideQuestionStep(draft, QUESTIONS, "next") !== null).toBe(
-        buildQuestionStepper(draft, QUESTIONS).ready,
-      );
-    }
+    expect(stepperAt(over, 0).ready).toBe(false);
+    expect(stepperAt(room, 0).notice).toBeNull();
   });
 });
 

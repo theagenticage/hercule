@@ -12,15 +12,7 @@
  *
  * The drafts live in memory only. Leaving the thread drops them.
  */
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type JSX,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useState, type JSX, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   EMPTY_REQUEST_DRAFT,
@@ -55,13 +47,6 @@ interface ThreadDrafts {
 interface ThreadDraftsStore {
   readonly drafts: ThreadDrafts;
   readonly update: (change: (drafts: ThreadDrafts) => ThreadDrafts) => void;
-  /**
-   * Returns the drafts as they are right now, including changes made since
-   * the last render. A callback that decides from the drafts, such as the
-   * duplicate-send guard, reads them here rather than from the render it
-   * was created in.
-   */
-  readonly read: () => ThreadDrafts;
 }
 
 const EMPTY_COMPOSER_DRAFT: ComposerDraft = {
@@ -91,17 +76,6 @@ export function ThreadDraftsProvider({
     requests: new Map(),
     shownRequestId: undefined,
   });
-  // The drafts as of the last `update`, which `read` returns. State alone
-  // would give the render's snapshot. The effect brings the ref in line with
-  // the state after a render, which also covers the pruning below.
-  const latest = useRef(drafts);
-  useEffect(() => {
-    latest.current = drafts;
-  }, [drafts]);
-  const update = (change: (drafts: ThreadDrafts) => ThreadDrafts): void => {
-    latest.current = change(latest.current);
-    setDrafts(change);
-  };
   // The drafts are pruned while rendering, the way React advises to adjust
   // state when a prop changes, rather than in an effect, which would render
   // the closed Requests' drafts once more first.
@@ -111,7 +85,7 @@ export function ThreadDraftsProvider({
     setDrafts((current) => dropClosedRequestDrafts(current, openRequests));
   }
   return (
-    <ThreadDraftsContext.Provider value={{ drafts, update, read: () => latest.current }}>
+    <ThreadDraftsContext.Provider value={{ drafts, update: setDrafts }}>
       {children}
     </ThreadDraftsContext.Provider>
   );
@@ -167,10 +141,10 @@ export function useRequestDraft(
 
 /**
  * Returns the id of the Request the user paged the dock to, undefined until
- * they page, and a function that pages to another Request. The dock and the
- * composer both pass the id to `buildRequestDock`, which falls back to the
- * oldest Request when the id is no longer open, so they always agree on the
- * Request that is shown.
+ * they page, and a function that pages to another Request. The dock
+ * (`buildRequestDock`) and the composer (`locateShownRequest`) both find the
+ * Request with this id and fall back to the oldest when it is no longer
+ * open, so they always agree on the Request that is shown.
  *
  * In a draft thread, which has no thread drafts and no Requests, the id is
  * undefined and the function changes nothing.
@@ -257,7 +231,7 @@ export function useSendAnswers(
     // only changes with the next render.
     if (
       isAnswerSendRunning(queryClient, mutationKey, requestId) ||
-      store.read().requests.get(requestId)?.answered === true
+      store.drafts.requests.get(requestId)?.answered === true
     ) {
       return;
     }
