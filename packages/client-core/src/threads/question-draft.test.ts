@@ -156,13 +156,19 @@ describe("the question draft", () => {
       expect(picked.messageText).toBe("Please check this\n\na sqlite file");
     });
 
-    it("joins with exactly one blank line however the message ends", () => {
-      const picked = pickQuestionOption(typed, STORAGE, "IndexedDB", "Draft  \n\n\n");
+    it("adds only the newlines needed to leave one blank line, and never removes a character", () => {
+      const joined = (messageText: string): string =>
+        pickQuestionOption(typed, STORAGE, "IndexedDB", messageText).messageText;
 
-      expect(picked.messageText).toBe("Draft\n\na sqlite file");
+      expect(joined("Draft")).toBe("Draft\n\na sqlite file");
+      expect(joined("Draft\n")).toBe("Draft\n\na sqlite file");
+      expect(joined("Draft\r\n")).toBe("Draft\r\n\na sqlite file");
+      expect(joined("Draft\n\n")).toBe("Draft\n\na sqlite file");
+      expect(joined("Draft  \n\n\n")).toBe("Draft  \n\n\na sqlite file");
+      expect(joined("Draft  ")).toBe("Draft  \n\na sqlite file");
     });
 
-    it("moves the text trimmed, keeping its inner lines", () => {
+    it("moves the typed text exactly as typed, spaces and line breaks included", () => {
       const multiline = typeQuestionAnswer(
         buildQuestionDraft(QUESTIONS),
         STORAGE,
@@ -171,13 +177,13 @@ describe("the question draft", () => {
 
       const picked = pickQuestionOption(multiline, STORAGE, "IndexedDB", "Hi");
 
-      expect(picked.messageText).toBe("Hi\n\nfirst\n\n  second");
+      expect(picked.messageText).toBe("Hi\n\n\n  first\n\n  second \n ");
     });
 
-    it("makes the moved text the whole message when the message is empty or blank", () => {
+    it("appends the typed text to a blank message without a separator, keeping the blank message", () => {
       expect(pickQuestionOption(typed, STORAGE, "IndexedDB", "").messageText).toBe("a sqlite file");
       expect(pickQuestionOption(typed, STORAGE, "IndexedDB", " \n ").messageText).toBe(
-        "a sqlite file",
+        " \n a sqlite file",
       );
     });
 
@@ -188,6 +194,16 @@ describe("the question draft", () => {
 
       expect(picked.messageText).toBe("Draft\n");
       expect(picked.question[STORAGE.header]).toEqual({ picks: ["IndexedDB"], text: "" });
+    });
+
+    it("erases the typed text of a secret question and keeps it out of the message", () => {
+      const secret: ApprovalQuestion = { ...STORAGE, secretWarning: "Shown in the clear" };
+      const withSecret = typeQuestionAnswer(buildQuestionDraft(QUESTIONS), secret, "hunter2");
+
+      const picked = pickQuestionOption(withSecret, secret, "IndexedDB", "Draft");
+
+      expect(picked.question[STORAGE.header]).toEqual({ picks: ["IndexedDB"], text: "" });
+      expect(picked.messageText).toBe("Draft");
     });
 
     it("keeps the typed text and the message as they were on a multiSelect question", () => {

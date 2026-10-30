@@ -90,7 +90,7 @@ export interface QuestionStepper {
   readonly showsPrevious: boolean;
   /** Whether Previous works: the answers are not sent yet. It works on a blank or over-long answer too. */
   readonly canGoBack: boolean;
-  /** Whether the step button works: see `stepQuestions`. */
+  /** Whether the step button works: see `decideQuestionStep`. */
   readonly ready: boolean;
   /** The placeholder of the field that takes the shown question's own answer. */
   readonly placeholder: string;
@@ -127,6 +127,8 @@ interface QuestionStatus {
   readonly question: ApprovalQuestion;
   /** The draft of every question; the empty draft when the user touched nothing. */
   readonly questionDraft: QuestionDraft;
+  /** Whether Previous works: the shown question is not the first and the answers are not sent. */
+  readonly canGoBack: boolean;
   /**
    * Whether the step button works: the answers are not sent, the shown
    * question is answered (on the last question, all of them are, because the
@@ -138,13 +140,13 @@ interface QuestionStatus {
 }
 
 /**
- * Reads where `draft` stands on its shown question. The length of all answers
+ * Builds where `draft` stands on its shown question. The length of all answers
  * is computed from the values that would be sent (picks and trimmed typed
  * text, plus every header, as the protocol counts), so it is right while
  * other questions are still unanswered. Unanswered questions count their
  * header only, so the total never shrinks as the user answers on.
  */
-const readQuestionStatus = (
+const buildQuestionStatus = (
   draft: RequestDraft,
   questions: readonly ApprovalQuestion[],
 ): QuestionStatus => {
@@ -171,6 +173,7 @@ const readQuestionStatus = (
     isLast,
     question,
     questionDraft,
+    canGoBack: index > 0 && !draft.answered,
     isReady: !draft.answered && isAnswered && lengthNotice === null,
     lengthNotice,
   };
@@ -181,17 +184,17 @@ const readQuestionStatus = (
  * of `questions` (the Request's, in order). The step button is `ready` when
  * the answers are not sent, the shown question is answered (on the last
  * question, every question is), and no length limit is exceeded.
- * `stepQuestions` applies the same rule.
+ * `decideQuestionStep` applies the same rule.
  */
 export const buildQuestionStepper = (
   draft: RequestDraft,
   questions: readonly ApprovalQuestion[],
 ): QuestionStepper => {
-  const status = readQuestionStatus(draft, questions);
+  const status = buildQuestionStatus(draft, questions);
   return {
     stepLabel: status.isLast ? SEND_ANSWERS_LABEL : NEXT_QUESTION_LABEL,
     showsPrevious: status.index > 0,
-    canGoBack: status.index > 0 && !draft.answered,
+    canGoBack: status.canGoBack,
     ready: status.isReady,
     placeholder:
       status.question.options.length > 0 ? "Or type your own answer" : "Type your answer",
@@ -215,14 +218,14 @@ export type QuestionStep =
  *   question. It is allowed when the stepper is `ready`. The answers are the
  *   ones `buildQuestionAnswers` builds from the draft.
  */
-export const stepQuestions = (
+export const decideQuestionStep = (
   draft: RequestDraft,
   questions: readonly ApprovalQuestion[],
   direction: "previous" | "next",
 ): QuestionStep | null => {
-  const status = readQuestionStatus(draft, questions);
+  const status = buildQuestionStatus(draft, questions);
   if (direction === "previous") {
-    return !draft.answered && status.index > 0 ? { kind: "show", index: status.index - 1 } : null;
+    return status.canGoBack ? { kind: "show", index: status.index - 1 } : null;
   }
   if (!status.isReady) return null;
   if (!status.isLast) return { kind: "show", index: status.index + 1 };

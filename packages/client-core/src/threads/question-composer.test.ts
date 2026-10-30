@@ -18,7 +18,7 @@ import {
   describeFoldedQuestion,
   findComposerQuestion,
   pickQuestionOption,
-  stepQuestions,
+  decideQuestionStep,
   typeQuestionAnswer,
   type ApprovalQuestion,
   type QuestionDraft,
@@ -301,15 +301,15 @@ describe("buildQuestionStepper", () => {
   });
 });
 
-describe("stepQuestions", () => {
+describe("decideQuestionStep", () => {
   it("has no question before the first", () => {
-    expect(stepQuestions(buildDraft(), QUESTIONS, "previous")).toBeNull();
+    expect(decideQuestionStep(buildDraft(), QUESTIONS, "previous")).toBeNull();
   });
 
   it("goes back one question, even from a blank answer", () => {
     const draft = buildDraft({ shownQuestionIndex: 2 });
 
-    expect(stepQuestions(draft, QUESTIONS, "previous")).toEqual({ kind: "show", index: 1 });
+    expect(decideQuestionStep(draft, QUESTIONS, "previous")).toEqual({ kind: "show", index: 1 });
   });
 
   it("goes back from an over-long answer", () => {
@@ -319,24 +319,24 @@ describe("stepQuestions", () => {
     });
 
     expect(buildQuestionStepper(draft, QUESTIONS).ready).toBe(false);
-    expect(stepQuestions(draft, QUESTIONS, "previous")).toEqual({ kind: "show", index: 1 });
+    expect(decideQuestionStep(draft, QUESTIONS, "previous")).toEqual({ kind: "show", index: 1 });
   });
 
   it("goes nowhere once the answers are sent", () => {
     const draft = buildDraft({ question: ALL_ANSWERED, shownQuestionIndex: 3, answered: true });
 
-    expect(stepQuestions(draft, QUESTIONS, "previous")).toBeNull();
-    expect(stepQuestions(draft, QUESTIONS, "next")).toBeNull();
+    expect(decideQuestionStep(draft, QUESTIONS, "previous")).toBeNull();
+    expect(decideQuestionStep(draft, QUESTIONS, "next")).toBeNull();
   });
 
   it("does not go on from an unanswered question", () => {
-    expect(stepQuestions(buildDraft(), QUESTIONS, "next")).toBeNull();
+    expect(decideQuestionStep(buildDraft(), QUESTIONS, "next")).toBeNull();
   });
 
   it("goes on to the next question, secret or not, once the shown one is answered", () => {
     const draft = buildDraft({ question: buildTypedDraft(QUESTIONS, { Storage: "mine" }) });
 
-    expect(stepQuestions(draft, QUESTIONS, "next")).toEqual({ kind: "show", index: 1 });
+    expect(decideQuestionStep(draft, QUESTIONS, "next")).toEqual({ kind: "show", index: 1 });
   });
 
   it("sends from the last question the answers buildQuestionAnswers builds", () => {
@@ -352,7 +352,7 @@ describe("stepQuestions", () => {
     questionDraft = typeQuestionAnswer(questionDraft, QUESTIONS[3]!, "no");
     const draft = buildDraft({ question: questionDraft, shownQuestionIndex: 3 });
 
-    expect(stepQuestions(draft, QUESTIONS, "next")).toEqual({
+    expect(decideQuestionStep(draft, QUESTIONS, "next")).toEqual({
       kind: "send",
       answers: buildQuestionAnswers(questionDraft, QUESTIONS),
     });
@@ -370,7 +370,7 @@ describe("stepQuestions", () => {
       shownQuestionIndex: 3,
     });
 
-    expect(stepQuestions(draft, QUESTIONS, "next")).toBeNull();
+    expect(decideQuestionStep(draft, QUESTIONS, "next")).toBeNull();
   });
 
   it("does not go on from an answer over the limit, and goes on at the limit", () => {
@@ -379,8 +379,8 @@ describe("stepQuestions", () => {
       question: buildTypedDraft(QUESTIONS, { Storage: "a".repeat(4097) }),
     });
 
-    expect(stepQuestions(at, QUESTIONS, "next")).toEqual({ kind: "show", index: 1 });
-    expect(stepQuestions(over, QUESTIONS, "next")).toBeNull();
+    expect(decideQuestionStep(at, QUESTIONS, "next")).toEqual({ kind: "show", index: 1 });
+    expect(decideQuestionStep(over, QUESTIONS, "next")).toBeNull();
   });
 
   it("never disagrees with the stepper about whether the step button works", () => {
@@ -398,7 +398,7 @@ describe("stepQuestions", () => {
     ];
 
     for (const draft of drafts) {
-      expect(stepQuestions(draft, QUESTIONS, "next") !== null).toBe(
+      expect(decideQuestionStep(draft, QUESTIONS, "next") !== null).toBe(
         buildQuestionStepper(draft, QUESTIONS).ready,
       );
     }

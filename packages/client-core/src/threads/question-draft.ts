@@ -30,16 +30,37 @@ export const buildQuestionDraft = (questions: readonly ApprovalQuestion[]): Ques
   Object.fromEntries(questions.map((question) => [question.header, { picks: [], text: "" }]));
 
 /**
+ * Joins `moved` to the end of `messageText` without changing a character of
+ * either. The separator is the newlines needed to leave exactly one blank
+ * line between them, counting the newlines `messageText` already ends with:
+ *
+ * - `messageText` is blank (empty, or only whitespace): no separator, because
+ *   there is no content to set the text apart from;
+ * - it ends in no newline: "\n\n";
+ * - it ends in one newline: "\n";
+ * - it ends in two or more: no separator, because it already ends in a blank
+ *   line.
+ */
+const appendAfterBlankLine = (messageText: string, moved: string): string => {
+  if (messageText.trim() === "") return messageText + moved;
+  const trailingNewlines = (/(?:\r?\n)*$/.exec(messageText)![0].match(/\n/g) ?? []).length;
+  return messageText + "\n".repeat(Math.max(0, 2 - trailingNewlines)) + moved;
+};
+
+/**
  * Returns `draft` with the option labelled `label` picked for `question`, and
  * the text of the user's message after the pick.
  *
  * - On a single-select question the pick replaces any earlier pick and clears
  *   the typed text, because the question takes one answer. Typed text that is
- *   not blank is not lost: it moves to the end of `messageText`, after a blank
- *   line. The moved text is trimmed at both ends, so the message gets the
- *   user's words without stray spaces or line breaks. `messageText` loses its
- *   trailing whitespace first, so the join is always exactly one blank line;
- *   a `messageText` that is blank is replaced by the moved text.
+ *   not blank is not lost: it moves to the end of `messageText`, after a
+ *   blank line. The text moves exactly as typed (it is only trimmed to decide
+ *   whether it is blank) and `messageText` keeps every character it had, so
+ *   the move never edits what the user wrote.
+ * - The exception is a secret question (`secretWarning` is set). Its typed
+ *   text is erased and not moved, and `messageText` is returned unchanged,
+ *   because the Message Draft is visible and may be saved or sent, and a
+ *   secret must never land there.
  * - On a multiSelect question the pick toggles, and the typed text stays,
  *   because it is one more answer beside the picks. `messageText` is returned
  *   unchanged.
@@ -52,12 +73,10 @@ export const pickQuestionOption = (
 ): { readonly question: QuestionDraft; readonly messageText: string } => {
   const current = draft[question.header]!;
   if (!question.multiSelect) {
-    const displaced = current.text.trim();
-    const kept = messageText.trimEnd();
+    const moves = question.secretWarning === null && current.text.trim() !== "";
     return {
       question: { ...draft, [question.header]: { picks: [label], text: "" } },
-      messageText:
-        displaced === "" ? messageText : kept === "" ? displaced : `${kept}\n\n${displaced}`,
+      messageText: moves ? appendAfterBlankLine(messageText, current.text) : messageText,
     };
   }
   const picked = current.picks.includes(label);

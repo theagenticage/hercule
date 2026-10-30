@@ -346,7 +346,7 @@ export {
 export { createLive, type Live, type LiveInvalidatePush } from "./live/live";
 export { invalidateWithoutCancelling } from "./live/invalidation";
 export { readEveryPage } from "./read-every-page";
-export { isMutationRunning } from "./mutation-running";
+export { isAnswerSendRunning, isMutationRunning } from "./mutation-running";
 export { queryKeys, buildQueryKeys, type EventListFilter, type LiveQueryKey } from "./live/keys";
 export { buildFetchIdentityProbe, detectLocalRunner } from "./local-runner";
 export {
@@ -817,7 +817,7 @@ export {
   buildQuestionStepper,
   describeFoldedQuestion,
   findComposerQuestion,
-  stepQuestions,
+  decideQuestionStep,
   type ComposerQuestion,
   type QuestionStep,
   type QuestionStepper,
@@ -830,6 +830,7 @@ export {
   typeQuestionAnswer,
   type QuestionDraft,
 } from "./threads/question-draft";
+export { createTypingGuard, type TypingGuard } from "./threads/typing-guard";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
 export { isMarkedDone } from "./threads/status";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";
