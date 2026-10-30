@@ -677,10 +677,71 @@ describe("the Conversation's pages", () => {
     expect(findPageReads(calls)).toHaveLength(3);
   });
 
+  /**
+   * Opens the Conversation with sixty messages, at the bottom of a list of
+   * 4000px, and holds the read of the page of earlier messages until the
+   * test answers it. Returns a function that scrolls the list, and the
+   * function that answers the held read with the ten earlier messages.
+   */
+  const openWithHeldEarlierPage = async () => {
+    const messages = buildSixtyMessages();
+    const earlierPage = holdAnswer();
+    const opened = await openConversation({
+      messages,
+      handlers: {
+        [`GET ${MESSAGES_PATH}`]: (call) =>
+          call.search.includes("cursor")
+            ? earlierPage.handler()
+            : { body: { items: messages.slice(10).reverse(), nextCursor: "11" } },
+      },
+    });
+    const scrollTo = sizeConversation(4000, 3200);
+    // The reader notes the bottom first, as in the app, where the list has
+    // scrolled to the bottom on its own.
+    scrollTo(3200);
+    return {
+      ...opened,
+      scrollTo,
+      answerWithEarlierMessages: () => {
+        earlierPage.answer({ body: { items: messages.slice(0, 10).reverse() } });
+      },
+    };
+  };
+
+  it("moves the view of a reader by the height of the earlier messages that are added above", async () => {
+    const { context, scrollTo, answerWithEarlierMessages } = await openWithHeldEarlierPage();
+    scrollTo(700);
+    answerWithEarlierMessages();
+
+    await waitFor(() => {
+      expect(readHeldPositions(context.queryClient)).toEqual(range(1, 60));
+    });
+    expect(findConversation().scrollTop).toBeGreaterThan(700);
+  });
+
+  it("does not move the view of a reader who is back at the bottom when the earlier messages are added", async () => {
+    const { context, scrollTo, answerWithEarlierMessages } = await openWithHeldEarlierPage();
+    // Scrolling up starts the read of the earlier page; the reader returns
+    // to the bottom before it answers.
+    scrollTo(700);
+    scrollTo(3200);
+    answerWithEarlierMessages();
+
+    await waitFor(() => {
+      expect(readHeldPositions(context.queryClient)).toEqual(range(1, 60));
+    });
+    expect(findConversation().scrollTop).toBe(3200);
+  });
+
   it("reads only the newest page on a push, however many pages are held, also on a push that names no conversation", async () => {
     const messages = buildSixtyMessages();
     const { calls, live, context } = await openConversation({ messages });
-    sizeConversation(4000, 3200)(0);
+    const scrollTo = sizeConversation(4000, 3200);
+    // A list that follows the bottom is not moved when earlier messages are
+    // added, so the reader first notes the bottom and then scrolls up, as in
+    // the app, where the list has scrolled to the bottom on its own.
+    scrollTo(3200);
+    scrollTo(0);
     await waitFor(() => {
       expect(readHeldPositions(context.queryClient)).toEqual(range(1, 60));
     });

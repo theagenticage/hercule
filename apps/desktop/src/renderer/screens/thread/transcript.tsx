@@ -11,12 +11,12 @@
  * the same layout, so the transcript follows in the frame that drew the text,
  * without waiting for React to render.
  *
- * While the reader is at the bottom, the browser's scroll anchoring keeps the
- * view there, on `.transcript-end` below the column (see
- * ../session/transcript.css). A scroll made by a script would show macOS's
- * overlay scroll bar, and a streaming turn would keep it on screen; a
- * scroll made by anchoring does not. What the transcript shares with an
- * assistant's Conversation is in ../session/message-list.
+ * While the reader is at the bottom, a script keeps the view there: the
+ * browser's scroll anchoring is off (see ../session/transcript.css). On macOS
+ * the thin overlay scroll bar therefore shows while a reply streams at the
+ * bottom. What the transcript shares with an assistant's Conversation, the
+ * virtualizer and the rules for who keeps the view, is in
+ * ../session/message-list.
  *
  * The transcript is not a live region: the agent's streaming text would flood
  * a screen reader.
@@ -29,7 +29,6 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   resolveBrowserTimezone,
   type Pose,
@@ -37,13 +36,7 @@ import {
   type ThreadItem,
 } from "@hercule/client-core";
 import { buildLook } from "../../faces";
-import {
-  DEFAULT_END_PADDING,
-  HEADER_CLEARANCE,
-  measureBlock,
-  OVERSCAN,
-  useMessageList,
-} from "../session/message-list";
+import { HEADER_CLEARANCE, useMessageList } from "../session/message-list";
 import { UserMessage } from "../session/messages";
 import { useStartOfToday } from "../session/start-of-today";
 import type { AttachOpenParagraph } from "../session/use-session-live";
@@ -185,6 +178,13 @@ export function Transcript({
   readonly renderSpawnLines?: (items: readonly ThreadItem[], onScreen: boolean) => ReactNode;
   readonly ref?: Ref<TranscriptHandle>;
 }): JSX.Element {
+  "use no memo";
+  // The React Compiler would memoize what this component reads from the
+  // virtualizer, such as the virtual items. The virtualizer is one object
+  // that changes inside while its identity stays the same, so the compiler
+  // would keep showing stale items. The compiler already skips the hook that
+  // creates the virtualizer, but not this component, so it is opted out by
+  // hand.
   const [timezone] = useState(() => resolveBrowserTimezone());
   const today = useStartOfToday();
   // The keys of the work stretches, and of the rows inside them, that the
@@ -201,10 +201,9 @@ export function Transcript({
     });
   }, []);
 
-  // The React Compiler does not memoize this component, because it cannot
-  // see into the virtualizer (see below). These callbacks are memoized by
-  // hand: the virtualizer measures the blocks again whenever `getItemKey`
-  // changes.
+  // The React Compiler does not memoize this component (see the directive
+  // above). These callbacks are memoized by hand: the virtualizer measures
+  // the blocks again whenever `getItemKey` changes.
   // `lead`, when set, is the virtualizer's item 0, and the blocks follow it.
   // The virtualizer asks only for indexes below `count`, which is
   // `blocks.length` plus the lead.
@@ -220,36 +219,16 @@ export function Transcript({
         : (index === 0 ? 0 : BLOCK_GAP) + estimateBlockHeight(blocks[index - leadCount]!),
     [blocks, leadCount],
   );
-  // The estimated scroll position of the bottom, so the first render mounts
-  // the last blocks rather than the first. Read once, when the virtualizer is
-  // created.
-  const estimateBottomOffset = (): number => {
-    let height = HEADER_CLEARANCE + DEFAULT_END_PADDING;
-    for (let index = 0; index < blocks.length + leadCount; index += 1) {
-      height += estimateSize(index);
-    }
-    return Math.max(0, height - window.innerHeight);
-  };
 
-  const { scrollRef, columnRef, showsScrollbar, noteScroll, scrollToBottom } = useMessageList({
-    composerStack,
-    onBottomChange,
-  });
-
-  // eslint-disable-next-line react-hooks/incompatible-library -- The virtualizer returns an object that changes inside while its identity stays the same, which the React Compiler cannot memoize, so the compiler leaves this component alone. The callbacks above and the memoized blocks keep the renders cheap instead.
-  const virtualizer = useVirtualizer({
-    count: blocks.length + leadCount,
-    getScrollElement: () => scrollRef.current,
-    estimateSize,
-    getItemKey,
-    measureElement: measureBlock,
-    overscan: OVERSCAN,
-    scrollMargin: HEADER_CLEARANCE,
-    // The transcript fills the pane, so the window's height is close to its
-    // own until the virtualizer measures it.
-    initialRect: { width: 0, height: window.innerHeight },
-    initialOffset: estimateBottomOffset,
-  });
+  const { virtualizer, scrollRef, columnRef, showsScrollbar, noteScroll, scrollToBottom } =
+    useMessageList({
+      count: blocks.length + leadCount,
+      estimateSize,
+      getItemKey,
+      scrollMargin: HEADER_CLEARANCE,
+      composerStack,
+      onBottomChange,
+    });
 
   useImperativeHandle(ref, () => ({ scrollToBottom }));
 
@@ -371,7 +350,6 @@ export function Transcript({
         ))}
         {last === undefined || last.end >= end ? null : <div style={{ height: end - last.end }} />}
       </div>
-      <div className="transcript-end" />
     </section>
   );
 }
