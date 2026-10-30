@@ -4,7 +4,7 @@ import {
   REFUSED_FILE_NOTICE,
   decideQuestionStep,
   findComposerQuestion,
-  typeShownQuestionAnswer,
+  typeAnswerInRequestDraft,
 } from "@hercule/client-core";
 import type { SessionRequest } from "@hercule/contract";
 import { useRequestDraft, useSendAnswers } from "../../app/request-drafts";
@@ -73,7 +73,7 @@ export function useComposerAnswer(
   const [refusedFor, setRefusedFor] = useState<string | null>(null);
   if (refusedFor !== null && refusedFor !== answerKey) setRefusedFor(null);
   if (found === null || holding) return null;
-  const { requestId, questions, stepper } = found;
+  const { requestId, questions, question, stepper } = found;
 
   const step = (direction: "previous" | "next"): void => {
     const next = decideQuestionStep(draft, questions, direction);
@@ -90,7 +90,7 @@ export function useComposerAnswer(
     text: found.text,
     onTextChange: (text) => {
       setRefusedFor(null);
-      changeDraft((current) => typeShownQuestionAnswer(current, questions, text));
+      changeDraft((current) => typeAnswerInRequestDraft(current, questions, question, text));
     },
     placeholder: stepper.placeholder,
     historyKey: found.answerKey,

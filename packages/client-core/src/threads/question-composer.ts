@@ -107,21 +107,25 @@ export const findComposerQuestion = (
 };
 
 /**
- * Returns `draft` with `text` typed as the user's own answer to its shown
- * question, out of `questions` (the Request's, in order). A draft the user has
- * not touched yet starts from an empty answer to every question.
+ * Returns `draft` with `text` typed as the user's own answer to `question`,
+ * one of `questions` (the Request's, in order). A draft the user has not
+ * touched yet starts from an empty answer to every question.
+ *
+ * The caller passes the question its field was drawn for, and the answer goes
+ * to that question even when `draft.shownQuestionIndex` has moved on. This
+ * matters because a field can report its last edit late: an input method
+ * editor (IME) edit that is still being composed is flushed when the user
+ * pages to the next question, after the draft already shows that one. The
+ * function reads the answers of `draft` but never its navigation state.
  */
-export const typeShownQuestionAnswer = (
+export const typeAnswerInRequestDraft = (
   draft: RequestDraft,
   questions: readonly ApprovalQuestion[],
+  question: ApprovalQuestion,
   text: string,
 ): RequestDraft => ({
   ...draft,
-  question: typeQuestionAnswer(
-    draft.question ?? buildQuestionDraft(questions),
-    questions[draft.shownQuestionIndex]!,
-    text,
-  ),
+  question: typeQuestionAnswer(draft.question ?? buildQuestionDraft(questions), question, text),
 });
 
 /** What the step button and the controls around it show and allow. */

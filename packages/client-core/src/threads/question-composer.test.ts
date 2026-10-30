@@ -18,7 +18,7 @@ import {
   pickQuestionOption,
   decideQuestionStep,
   typeQuestionAnswer,
-  typeShownQuestionAnswer,
+  typeAnswerInRequestDraft,
   type ApprovalQuestion,
   type QuestionDraft,
   type RequestDraft,
@@ -163,11 +163,11 @@ describe("findComposerQuestion", () => {
   });
 });
 
-describe("typeShownQuestionAnswer", () => {
-  it("types into the shown question of a draft the user has not touched, leaving the rest alone", () => {
+describe("typeAnswerInRequestDraft", () => {
+  it("types into a draft the user has not touched, leaving the other answers alone", () => {
     const draft = buildDraft({ shownQuestionIndex: 3, unfolded: true });
 
-    const typed = typeShownQuestionAnswer(draft, QUESTIONS, "no");
+    const typed = typeAnswerInRequestDraft(draft, QUESTIONS, QUESTIONS[3]!, "no");
 
     expect(typed).toEqual({
       ...draft,
@@ -176,18 +176,32 @@ describe("typeShownQuestionAnswer", () => {
     expect(draft.question).toBeNull();
   });
 
+  it("types into the question it is given, not the one the draft shows", () => {
+    const draft = buildDraft({ shownQuestionIndex: 3, unfolded: true });
+
+    const typed = typeAnswerInRequestDraft(draft, QUESTIONS, STORAGE, "late edit");
+
+    expect(typed.shownQuestionIndex).toBe(3);
+    expect(typed.question).toEqual({
+      ...buildQuestionDraft(QUESTIONS),
+      Storage: { picks: [], text: "late edit" },
+    });
+  });
+
   it("replaces a pick on a single-select question and keeps the picks of a multiSelect one", () => {
     const picked = pickQuestionOption(buildQuestionDraft(QUESTIONS), STORAGE, "IndexedDB", "");
     const withFeature = pickQuestionOption(picked.question, FEATURES, "Sync", "");
 
-    const first = typeShownQuestionAnswer(
+    const first = typeAnswerInRequestDraft(
       buildDraft({ question: withFeature.question }),
       QUESTIONS,
+      STORAGE,
       "mine",
     );
-    const third = typeShownQuestionAnswer(
+    const third = typeAnswerInRequestDraft(
       buildDraft({ question: withFeature.question, shownQuestionIndex: 2 }),
       QUESTIONS,
+      FEATURES,
       "more",
     );
 

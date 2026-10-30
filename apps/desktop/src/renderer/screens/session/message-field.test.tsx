@@ -8,6 +8,13 @@ import { createRef, useEffect, useState, type ComponentProps } from "react";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import {
+  EMPTY_REQUEST_DRAFT,
+  buildQuestionDraft,
+  typeAnswerInRequestDraft,
+  type ApprovalQuestion,
+  type RequestDraft,
+} from "@hercule/client-core";
 import { readFieldPlaceholder, readFieldText, spyOnExecCommand } from "../../app/testing";
 import { MessageField } from "./message-field";
 
@@ -145,6 +152,57 @@ function Owners({
       historyKey={shown}
       onTextChange={(next) => {
         setTexts((previous) => ({ ...previous, [shown]: next }));
+      }}
+    />
+  );
+}
+
+const REQUEST_QUESTIONS: readonly ApprovalQuestion[] = ["Q1", "Q2"].map((header) => ({
+  header,
+  question: `${header}?`,
+  options: [],
+  multiSelect: false,
+  note: null,
+  secretWarning: null,
+}));
+
+/**
+ * A field that answers the questions of one Request the way the composer
+ * does: the answers and the shown question live in one `RequestDraft`, and
+ * each render hands the field a callback for the question it draws.
+ * `showSecondQuestion` pages to the second question in one render.
+ */
+function RequestAnswers({
+  showRef,
+  draftRef,
+}: {
+  readonly showRef: { current: (() => void) | null };
+  readonly draftRef: { current: RequestDraft | null };
+}) {
+  const [draft, setDraft] = useState<RequestDraft>({
+    ...EMPTY_REQUEST_DRAFT,
+    question: {
+      ...buildQuestionDraft(REQUEST_QUESTIONS),
+      Q1: { picks: [], text: "first answer" },
+      Q2: { picks: [], text: "second answer" },
+    },
+  });
+  const question = REQUEST_QUESTIONS[draft.shownQuestionIndex]!;
+  useEffect(() => {
+    showRef.current = () => {
+      setDraft((current) => ({ ...current, shownQuestionIndex: 1 }));
+    };
+  }, [showRef]);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draftRef, draft]);
+  return (
+    <MessageField
+      {...buildProps()}
+      text={draft.question![question.header]!.text}
+      historyKey={question.header}
+      onTextChange={(text) => {
+        setDraft((current) => typeAnswerInRequestDraft(current, REQUEST_QUESTIONS, question, text));
       }}
     />
   );
@@ -544,6 +602,22 @@ describe("the message field", () => {
         });
         expect(textsRef.current["answer-2"]).toBe("second answer");
         expect(textsRef.current["answer-1"]).toBe("first answer 候補");
+      });
+
+      it("keeps it in the old question when both answers live in one Request draft", async () => {
+        const showRef: { current: (() => void) | null } = { current: null };
+        const draftRef: { current: RequestDraft | null } = { current: null };
+        render(<RequestAnswers showRef={showRef} draftRef={draftRef} />);
+        readField().focus();
+        fireEvent.compositionStart(readField());
+        readField().querySelector("p")!.textContent = "first answer 候補";
+        act(() => showRef.current!());
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        });
+        expect(draftRef.current!.shownQuestionIndex).toBe(1);
+        expect(draftRef.current!.question!.Q1!.text).toBe("first answer 候補");
+        expect(draftRef.current!.question!.Q2!.text).toBe("second answer");
       });
     });
 

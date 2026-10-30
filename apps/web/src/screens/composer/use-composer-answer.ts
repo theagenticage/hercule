@@ -5,7 +5,7 @@ import {
   decideQuestionStep,
   findComposerQuestion,
   locateShownRequest,
-  typeShownQuestionAnswer,
+  typeAnswerInRequestDraft,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
@@ -81,7 +81,7 @@ export function useComposerAnswer(
   if (refusedFor !== null && refusedFor !== answerKey) setRefusedFor(null);
 
   if (found === null || holding) return null;
-  const { requestId, questions, stepper } = found;
+  const { requestId, questions, question, stepper } = found;
   const refusedFile = refusedFor === answerKey;
 
   const step = (direction: "previous" | "next"): void => {
@@ -99,7 +99,7 @@ export function useComposerAnswer(
     text: found.text,
     onTextChange: (text) => {
       setRefusedFor(null);
-      changeDraft((current) => typeShownQuestionAnswer(current, questions, text));
+      changeDraft((current) => typeAnswerInRequestDraft(current, questions, question, text));
     },
     placeholder: stepper.placeholder,
     locked: found.locked,

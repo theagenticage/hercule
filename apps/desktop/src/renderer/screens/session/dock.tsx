@@ -14,7 +14,7 @@ import {
   pickQuestionOption,
   readErrorMessage,
   decideQuestionStep,
-  typeShownQuestionAnswer,
+  typeAnswerInRequestDraft,
   type QuestionDraft,
 } from "@hercule/client-core";
 import {
@@ -526,7 +526,7 @@ export function RequestDock({
                   onChange={(event) => {
                     const text = event.target.value;
                     changeRequestDraft((current) =>
-                      typeShownQuestionAnswer(current, card.questions, text),
+                      typeAnswerInRequestDraft(current, card.questions, shownQuestion, text),
                     );
                   }}
                 />

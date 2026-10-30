@@ -818,7 +818,7 @@ export {
   describeFoldedQuestion,
   findComposerQuestion,
   decideQuestionStep,
-  typeShownQuestionAnswer,
+  typeAnswerInRequestDraft,
   type ComposerQuestion,
   type QuestionStep,
   type QuestionStepper,
