@@ -6,6 +6,8 @@ Date: 2026-08-31
 
 Accepted. Amends [ADR 0018](./0018-hercule-ships-as-one-self-contained-binary.md) (the embedded Claude binary clause is withdrawn). Decided by [Runner substrate details (#43)](https://github.com/theagenticage/hercule/issues/43).
 
+**Amended 2026-10-30 ([#406](https://github.com/theagenticage/hercule/issues/406)):** [ADR 0048](./0048-harnesses-and-provider-accounts-are-separate.md) separates the harness from the account it runs for. Harnesses stay runner-installed, floor-pinned and explicitly updated, and the version verdict is per harness per runner, no longer per instance per runner. A runner login is no longer the only way an account works on a runner: an API key or a Claude subscription token, held by the controller, works on every runner where the harness is installed.
+
 ## Context
 
 ADR 0018 planned to embed the Claude Agent SDK's native Claude Code binary inside the Hercule executable (~250-270 MB per platform, `extractFromBunfs` at boot), while spec 03 §3.3 separately installed `claude` on each runner for login - two copies of the same harness. pi was assumed to be hosted through its SDK in a Hercule-owned child process, compiling pi's pre-1.0 TypeScript API into the Hercule binary and tying pi's version to Hercule releases. Harnesses ship weekly; Hercule will not, and the user explicitly wants to update harnesses independently ("they change way more often than I intend to release hercule updates").

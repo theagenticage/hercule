@@ -37,7 +37,7 @@ Rules:
 | `accessMode` | `full-access` (the Agent's field, same default) | 7 |
 | `disallowedTools` | `["edit"]` (the Agent's field; agents generally default to none) | 7 |
 | `systemPrompt` | a shipped persona: a brief, plain assistant that delegates work through the `hercule` CLI and ~~cannot edit files~~ is told "Do not edit files yourself; delegate that work." (the Agent's field) *(added 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92); amended 2026-09-27, [#92](https://github.com/theagenticage/hercule/issues/92): "cannot" was false, because the shell can still write files and Codex does not remove its edit tools, section 7)* | 1 |
-| `instanceId` | the oldest provider instance whose provider this build carries; `create` fails with `invalid_state` when there is none (the Agent's field) *(added 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))* | 1 |
+| ~~`instanceId`~~ `providerAccountId`, `harnessId`, `model` *(amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406))* | ~~the oldest provider instance whose provider this build carries; `create` fails with `invalid_state` when there is none (the Agent's field) *(added 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))*~~ the first Provider Account, in the order the accounts were added, that can run now; `harnessId` absent, which means the account's default harness when the session starts; `model` absent, which means the default model of the account's Model Catalog. `create` fails with `invalid_state` when no account can run (the Agent's fields). An assistant names an account and a model, never a Model Profile: profiles are the composer's menus ([./06-providers.md](./06-providers.md), [ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md)) | 1 |
 | `permissionProfileId` | the shipped `assistant` profile (the Agent's field) *(added 2026-09-25, [#92](https://github.com/theagenticage/hercule/issues/92))* | 7 |
 
 Bindings, conversations, memory documents and reminders hang off the assistant in their own tables. There is no display name: v1 mentions are platform mentions only (section 4.2), so the Agent's `name` suffices until name-pattern mentions arrive (Post-v1).
@@ -161,7 +161,7 @@ A conversation is backed by generational sessions: a lineage of ordinary Session
 
 - Assistant sessions are ordinary Sessions with the assistant as their agent, no Task, and no Workspace (`workspaceId: null` in the SessionSpec, [./06-providers.md](./06-providers.md)). They are literally workspace-less: nothing is materialized on runner disk for them beyond the empty scratch cwd every workspace-less session gets ([./06-providers.md](./06-providers.md) section 9.1).
 - The session carries a Session Token with the assistant's permission profile ([./11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)); the assistant acts through the `hercule` CLI.
-- An assistant session runs inside its provider instance's isolated provider home (one instance = one login = one home), so user-global instructions, skills and packages never leak in ([./06-providers.md](./06-providers.md)).
+- An assistant session runs inside ~~its provider instance's isolated provider home (one instance = one login = one home)~~ the Harness Home of its account and harness (one per account, harness and runner) *(amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406))*, so user-global instructions, skills and packages never leak in ([./06-providers.md](./06-providers.md)).
 - **Provider-native auto-compaction is disabled for assistant sessions.** Rotation is the only memory event. The adapter reports context usage (`session.usage.updated`, [./06-providers.md](./06-providers.md)) so the controller can rotate at Hercule's own threshold. Per-provider switches (Claude `DISABLE_COMPACT` / `--autocompact`, pi `compaction.enabled=false`, Codex `model_auto_compact_token_limit`) are listed in [./06-providers.md](./06-providers.md).
 - Session-held Subscriptions are delivered as queued input on a turn boundary (rendered text plus structured payload), never as steering by default ([./08-events-and-connections.md](./08-events-and-connections.md)).
 
@@ -547,6 +547,7 @@ ADRs:
 - [ADR 0020 - Assistant memory is reached only through the API](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)
 - [ADR 0023 - Chat messages are conversation input, not events](../adr/0023-chat-messages-are-conversation-input-not-events.md)
 - [ADR 0024 - Assistants are woken by the scheduler, not by workflows](../adr/0024-assistants-are-woken-by-the-scheduler-not-by-workflows.md)
+- [ADR 0048 - Harnesses and provider accounts are separate](../adr/0048-harnesses-and-provider-accounts-are-separate.md) *(added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406))*
 
 Research:
 

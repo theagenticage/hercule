@@ -6,6 +6,8 @@ Date: 2026-10-14
 
 Accepted by [Workflow step for a cheap classify/extract text generation: pick a shape (#286)](https://github.com/theagenticage/hercule/issues/286). Extends [ADR 0008](./0008-workflow-graphs-route-on-declared-outputs.md): a text generation step's declared output schema is its whole contract with the graph, as an agent step's is. Amends [ADR 0041](./0041-text-generation-is-one-model-call-on-a-runner.md), which carries a dated note.
 
+**Amended 2026-10-30 ([#406](https://github.com/theagenticage/hercule/issues/406)):** the text generation model setting the step uses names a Provider Account ([ADR 0048](./0048-harnesses-and-provider-accounts-are-separate.md)). The step itself is unchanged.
+
 ## Context
 
 A workflow sometimes needs one cheap classify or extract call: "is this mail something the user must act on?", or "pull the version number out of this release note". An agent step is too heavy for that. It starts a Session with tools and a workspace. Text generation ([ADR 0041](./0041-text-generation-is-one-model-call-on-a-runner.md)) is the right size: one model call on a runner, with no tools, that returns a value matching a schema. Until now only code inside the controller could make one.
