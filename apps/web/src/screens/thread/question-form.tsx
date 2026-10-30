@@ -3,12 +3,11 @@ import {
   type ApprovalQuestion,
   buildQuestionDraft,
   buildQuestionStepper,
-  FOLD_QUESTION_LABEL,
   pickQuestionOption,
   PREVIOUS_QUESTION_LABEL,
   type QuestionDraft,
   type RequestDraft,
-  stepQuestions,
+  decideQuestionStep,
   typeQuestionAnswer,
 } from "@hercule/client-core";
 import type { QuestionAnswers } from "@hercule/contract";
@@ -27,8 +26,8 @@ import type { DockComposer } from "./permission-card";
  * field of a secret question is masked. Next and Send stay unusable until
  * the shown question is answered, so the answers sent never leave a question
  * out. They use `aria-disabled` rather than `disabled`, so the button keeps
- * focus while the user picks. The form submits on Enter in the field, like
- * any form. `client-core` decides what each step does.
+ * focus while the user picks. Enter in the field steps too. `client-core`
+ * decides what each step does.
  *
  * Picking an option on a single-select question clears the text typed for
  * it. Where the thread has a Message Draft, that text is not lost: it moves
@@ -41,7 +40,6 @@ export function QuestionForm({
   locked,
   composer,
   composerAnswers,
-  onFold,
   onSend,
 }: {
   readonly questions: readonly ApprovalQuestion[];
@@ -54,8 +52,6 @@ export function QuestionForm({
   readonly composer: DockComposer;
   /** Whether the composer, not this form, takes the shown question's own answer. */
   readonly composerAnswers: boolean;
-  /** Folds the async question back into one row; undefined for a question that cannot be folded. */
-  readonly onFold: (() => void) | undefined;
   readonly onSend: (answers: QuestionAnswers) => void;
 }): JSX.Element {
   const [composerDraft, changeComposerDraft] = useComposerDraft();
@@ -74,7 +70,7 @@ export function QuestionForm({
   const hasDescriptions = question.options.some((option) => option.description !== undefined);
 
   const step = (direction: "previous" | "next"): void => {
-    const next = stepQuestions(requestDraft, questions, direction);
+    const next = decideQuestionStep(requestDraft, questions, direction);
     if (next === null) return;
     if (next.kind === "send") onSend(next.answers);
     else onDraftChange((current) => ({ ...current, shownQuestionIndex: next.index }));
@@ -100,13 +96,10 @@ export function QuestionForm({
   };
 
   return (
-    <form
-      className="mt-3 flex flex-col"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (!locked) step("next");
-      }}
-    >
+    // Not a `<form>`: a native submit next to a masked field makes browsers
+    // offer to save the answer as a password. Enter and the step button call
+    // `step` themselves.
+    <div role="group" aria-label={question.header} className="mt-3 flex flex-col">
       <div className="flex items-baseline justify-between gap-3">
         {/* The chip is styled as a lane label, not a sentence: 10px uppercase
             `--faint`, the size of a label inside a surface (spec 14
@@ -182,32 +175,36 @@ export function QuestionForm({
       {question.secretWarning === null ? null : (
         <span className="mt-1 text-[11px] text-attn">{question.secretWarning}</span>
       )}
-      {composerAnswers && onFold === undefined ? null : (
-        // When the composer takes the answer, only the fold button is left,
-        // at the end of the row where the step buttons would be.
-        <div className={cn("mt-2 flex items-center gap-2", composerAnswers && "justify-end")}>
-          {composerAnswers ? null : (
-            <Input
-              aria-label="Your own answer"
-              // A secret answer is masked, and the browser must not offer to
-              // remember it.
-              type={isSecret ? "password" : "text"}
-              autoComplete={isSecret ? "off" : undefined}
-              placeholder={stepper.placeholder}
-              value={answer.text}
-              disabled={locked}
-              onChange={(event) =>
-                setDraft(typeQuestionAnswer(draft, question, event.target.value))
+      {composerAnswers ? null : (
+        <div className="mt-2 flex items-center gap-2">
+          <Input
+            aria-label="Your own answer"
+            // A secret answer is masked, and no password manager may treat it
+            // as a login. Chrome ignores `autocomplete="off"` on a password
+            // field. `new-password` tells it that this is not the saved
+            // password, so it does not fill the Hercule login into the
+            // field. The `data-` attributes do the same for the 1Password,
+            // LastPass and Bitwarden extensions.
+            type={isSecret ? "password" : "text"}
+            autoComplete={isSecret ? "new-password" : undefined}
+            data-1p-ignore={isSecret ? true : undefined}
+            data-lpignore={isSecret ? "true" : undefined}
+            data-bwignore={isSecret ? "true" : undefined}
+            placeholder={stepper.placeholder}
+            value={answer.text}
+            disabled={locked}
+            onChange={(event) => setDraft(typeQuestionAnswer(draft, question, event.target.value))}
+            onKeyDown={(event) => {
+              // The Enter that ends an IME composition only commits the text.
+              if (event.key !== "Enter" || event.nativeEvent.isComposing || event.keyCode === 229) {
+                return;
               }
-              className="py-1 text-meta"
-            />
-          )}
-          {onFold === undefined ? null : (
-            <Button className="py-1.5" onClick={onFold}>
-              {FOLD_QUESTION_LABEL}
-            </Button>
-          )}
-          {composerAnswers || !stepper.showsPrevious ? null : (
+              event.preventDefault();
+              if (!locked) step("next");
+            }}
+            className="py-1 text-meta"
+          />
+          {stepper.showsPrevious ? (
             <Button
               disabled={!stepper.canGoBack}
               className="py-1.5"
@@ -217,18 +214,18 @@ export function QuestionForm({
             >
               {PREVIOUS_QUESTION_LABEL}
             </Button>
-          )}
-          {composerAnswers ? null : (
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={locked}
-              aria-disabled={!stepper.ready}
-              className="py-1.5"
-            >
-              {stepper.stepLabel}
-            </Button>
-          )}
+          ) : null}
+          <Button
+            variant="primary"
+            disabled={locked}
+            aria-disabled={!stepper.ready}
+            className="py-1.5"
+            onClick={() => {
+              step("next");
+            }}
+          >
+            {stepper.stepLabel}
+          </Button>
         </div>
       )}
       {composerAnswers || stepper.notice === null ? null : (
@@ -236,6 +233,6 @@ export function QuestionForm({
           {stepper.notice}
         </span>
       )}
-    </form>
+    </div>
   );
 }

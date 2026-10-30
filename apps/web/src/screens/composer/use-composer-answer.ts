@@ -6,7 +6,7 @@ import {
   buildQuestionStepper,
   buildRequestDock,
   findComposerQuestion,
-  stepQuestions,
+  decideQuestionStep,
   typeQuestionAnswer,
   type HerculeClient,
 } from "@hercule/client-core";
@@ -38,8 +38,6 @@ export interface ComposerAnswer {
   /** Whether the answers are sent. The field then takes no text, until the controller closes the Request. */
   readonly locked: boolean;
   readonly step: ComposerStep;
-  /** Does what the step button does. Enter calls it. */
-  readonly onSend: () => void;
   /** Attach is off with its reason, and a pasted or dropped file is refused with a notice. */
   readonly attachments: {
     readonly attachBlockedReason: string;
@@ -47,6 +45,8 @@ export interface ComposerAnswer {
   };
   /** The refused file's notice, or else why a length limit stops the step; `null` when neither. */
   readonly notice: string | null;
+  /** Whether `notice` is the refusal of a pasted, dropped or picked file, which is shown as a failure. */
+  readonly refusedFile: boolean;
   /** Why sending the answers failed, or `null`. */
   readonly failure: string | null;
 }
@@ -68,7 +68,7 @@ export interface ComposerAnswer {
  * Previous works while the answers are not sent. The step button shows the
  * next question, and sends the answers from the last one with
  * `useSendAnswers`; it does nothing while the shown question is unanswered
- * or a length limit is exceeded.
+ * or a length limit is exceeded. Enter calls the same `step.onStep`.
  */
 export function useComposerAnswer(
   client: HerculeClient,
@@ -94,9 +94,10 @@ export function useComposerAnswer(
   if (found === null || holding) return null;
   const { requestId, questions, question } = found;
   const stepper = buildQuestionStepper(draft, questions);
+  const refusedFile = refusedFor === answeringKey;
 
   const step = (direction: "previous" | "next"): void => {
-    const next = stepQuestions(draft, questions, direction);
+    const next = decideQuestionStep(draft, questions, direction);
     if (next === null) return;
     setRefusedFor(null);
     if (next.kind === "send") {
@@ -133,16 +134,14 @@ export function useComposerAnswer(
         step("next");
       },
     },
-    onSend: () => {
-      step("next");
-    },
     attachments: {
       attachBlockedReason: ANSWER_ATTACH_OFF_REASON,
       onFiles: () => {
         setRefusedFor(answeringKey);
       },
     },
-    notice: refusedFor === answeringKey ? REFUSED_FILE_NOTICE : stepper.notice,
+    notice: refusedFile ? REFUSED_FILE_NOTICE : stepper.notice,
+    refusedFile,
     failure: draft.failure,
   };
 }

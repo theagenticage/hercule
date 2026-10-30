@@ -3614,7 +3614,7 @@ describe("Thread: answering the agent's questions", () => {
 
   /** Returns the question form in the dock that shows `question`'s text. */
   const findQuestionForm = async (question: string): Promise<HTMLElement> =>
-    (await screen.findByText(question)).closest("form")!;
+    (await screen.findByText(question)).closest<HTMLElement>('[role="group"]')!;
 
   describe("in the composer", () => {
     it("takes the composer over: the dock shows the question and its options, and the composer holds the answer, with Next in the place of Send", async () => {
@@ -4129,6 +4129,101 @@ describe("Thread: answering the agent's questions", () => {
         expect(readComposerField().placeholder).toBe("Or type your own answer");
       });
     });
+
+    // The mouse press on Send must not take the focus from the field. If it did,
+    // the typing guard would end, the question would take the composer over and
+    // replace Send with Next before the click arrived, and the message would
+    // never be sent.
+    it("sends the message when the user clicks Send while the guard still holds", async () => {
+      const user = userEvent.setup();
+      const { api, setOpenRequests } = await openLive([]);
+
+      await user.type(await screen.findByRole("textbox"), "Also check the logs");
+      setOpenRequests([ONE_QUESTION]);
+      await screen.findByText("Which storage should drafts use?");
+      expect(readComposerField().value).toBe("Also check the logs");
+
+      await user.click(screen.getByRole("button", { name: "Send" }));
+
+      await waitFor(() => {
+        expect(
+          api.calls.filter((call) => call.path.endsWith("/input")).map((call) => call.body),
+        ).toEqual([{ text: "Also check the logs" }]);
+      });
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+    });
+  });
+
+  describe("the files of an answer", () => {
+    it("refuses a file the picker returns after a question took the composer over", async () => {
+      const { setOpenRequests } = await openLive([]);
+
+      await screen.findByRole("textbox");
+      // The picker was opened on the message and returns after the question arrived.
+      setOpenRequests([ONE_QUESTION]);
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+      const picker = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+      fireEvent.change(picker, {
+        target: { files: [new File(["png"], "shot.png", { type: "image/png" })] },
+      });
+
+      expect((await screen.findByRole("status")).textContent).toBe(
+        "An answer takes text only. Images can be sent in a message.",
+      );
+      setOpenRequests([]);
+      await waitFor(() => {
+        expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      });
+      expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
+    });
+  });
+
+  describe("errors", () => {
+    it("shows a failed message send in message mode only, not beside an answer", async () => {
+      const user = userEvent.setup();
+      let current = buildSession({ status: "busy", openRequests: [] });
+      const app = await openApp(current, [], {
+        [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
+        [`POST /api/v1/sessions/${SESSION_ID}/input`]: () => ({
+          status: 409,
+          body: buildErrorBody("invalid_state", "The message was refused."),
+        }),
+      });
+      await waitFor(() => {
+        expect(app.live.topics()).toContain("session");
+      });
+      const setOpenRequests = (openRequests: readonly SessionRequest[]): void => {
+        current = buildSession({ status: "busy", openRequests });
+        act(() => {
+          app.live.push("session", { _tag: "invalidate", ids: [SESSION_ID], kind: "updated" });
+        });
+      };
+
+      await user.type(await screen.findByRole("textbox"), "Also check the logs{Enter}");
+      expect((await screen.findByRole("alert")).textContent).toBe("The message was refused.");
+
+      setOpenRequests([ONE_QUESTION]);
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+      expect(screen.queryByRole("alert")).toBeNull();
+
+      setOpenRequests([]);
+      expect((await screen.findByRole("alert")).textContent).toBe("The message was refused.");
+    });
+
+    it("keeps Next focusable while the question is unanswered", async () => {
+      await openParked(QUESTIONS);
+
+      await screen.findByText("Which storage should drafts use?");
+      const next = readStep("Next");
+      expect(next).toHaveProperty("disabled", false);
+      expect(next.getAttribute("aria-disabled")).toBe("true");
+    });
   });
 
   describe("a secret question", () => {
@@ -4155,6 +4250,10 @@ describe("Thread: answering the agent's questions", () => {
       await screen.findByText("Which storage should drafts use?");
       const field = screen.getByLabelText("Your own answer");
       expect(field).toHaveProperty("type", "password");
+      // A password manager must not take it for a login: it is not a saved
+      // password, and it is not in a form that submits.
+      expect(field.getAttribute("autocomplete")).toBe("new-password");
+      expect(field.closest("form")).toBeNull();
       // The composer is still for the message: it keeps Send, and takes no answer.
       expect(readComposerField().placeholder).toBe("Queued until the turn finishes…");
       expect(screen.getByRole("button", { name: "Send" })).toBeDefined();
@@ -4241,6 +4340,10 @@ describe("Thread: answering the agent's questions", () => {
       });
       await user.type(readComposerField(), "a sqlite file");
 
+      // Later is in the title row, so it adds no row to the card.
+      expect(screen.getByRole("button", { name: "Later" }).parentElement).toBe(
+        screen.getByText("The agent needs answers.").parentElement,
+      );
       await user.click(screen.getByRole("button", { name: "Later" }));
       await screen.findByText("The agent asked 2 questions. It keeps working.");
       expect(readComposerField().value).toBe("a message");

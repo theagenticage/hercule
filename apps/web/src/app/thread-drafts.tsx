@@ -21,11 +21,12 @@ import {
   type JSX,
   type ReactNode,
 } from "react";
-import { useMutation, useQueryClient, type Mutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   EMPTY_REQUEST_DRAFT,
   changeRequestDraft,
   dropClosedRequestDrafts,
+  isAnswerSendRunning,
   readErrorMessage,
   type HerculeClient,
   type MessageDraft,
@@ -191,9 +192,6 @@ interface SentAnswers {
   readonly answers: QuestionAnswers;
 }
 
-const isSentAnswers = (value: unknown): value is SentAnswers =>
-  typeof value === "object" && value !== null && "requestId" in value;
-
 /**
  * Returns the function that sends the answers to the `question` Request
  * `requestId` of the session `sessionId` with `session.respondToQuestion`.
@@ -257,14 +255,12 @@ export function useSendAnswers(
     }
     // The mutation cache knows at once that a send started, while the draft
     // only changes with the next render.
-    const isSending =
-      queryClient.isMutating({
-        mutationKey,
-        predicate: (mutation: Mutation) =>
-          isSentAnswers(mutation.state.variables) &&
-          mutation.state.variables.requestId === requestId,
-      }) > 0;
-    if (isSending || store.read().requests.get(requestId)?.answered === true) return;
+    if (
+      isAnswerSendRunning(queryClient, mutationKey, requestId) ||
+      store.read().requests.get(requestId)?.answered === true
+    ) {
+      return;
+    }
     send.mutate({ requestId, answers });
   };
 }

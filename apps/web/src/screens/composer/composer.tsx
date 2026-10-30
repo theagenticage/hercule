@@ -2,8 +2,6 @@ import { useRef, useState, type DragEvent, type JSX } from "react";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  PREVIOUS_QUESTION_LABEL,
-  REFUSED_FILE_NOTICE,
   buildBranchField,
   findDraftSubject,
   buildModelMenu,
@@ -149,10 +147,14 @@ export function Composer({
     model.submit();
   };
   const notice = answer === null ? (model.refusal ?? model.attachmentBlock) : answer.notice;
-  const noticeFailed =
-    answer === null ? model.refusal !== null : answer.notice === REFUSED_FILE_NOTICE;
+  const noticeFailed = answer === null ? model.refusal !== null : answer.refusedFile;
+  // Each mode shows its own failure. A message that failed to send is shown
+  // when the message comes back, and a failed answer is not shown beside the
+  // message. A failure to stop the agent belongs to both.
+  const stopFailure = model.stopError === null ? null : readErrorMessage(model.stopError);
+  const sendFailure = model.sendError === null ? null : readErrorMessage(model.sendError);
   const errorText =
-    answer?.failure ?? (model.error === null ? null : readErrorMessage(model.error));
+    answer === null ? (sendFailure ?? stopFailure) : (answer.failure ?? stopFailure);
   return (
     // A draft shows its sentence above the card, and the sentence takes the free space.
     <div className={fields.lead === null ? "flex w-full flex-col" : "flex w-full flex-1 flex-col"}>
@@ -217,7 +219,7 @@ export function Composer({
               model.setMessage(text);
             }}
             onSubmit={() => {
-              if (answer !== null) answer.onSend();
+              if (answer !== null) answer.step.onStep();
               else if (canSend) submitMessage();
               else guard.release();
             }}
@@ -229,12 +231,20 @@ export function Composer({
               guard.reportComposing(false);
             }}
           />
-          <div className="flex items-center gap-1.5">
+          {/* The controls on the right (dictation, Stop, Previous, the step or
+              send button) never shrink. When the row is too narrow, the
+              access mode and the model pill are cut with an ellipsis first. */}
+          <div className="flex min-w-0 items-center gap-1.5">
             <AttachButton
               disabledReason={
                 answer === null ? attachDisabledReason : answer.attachments.attachBlockedReason
               }
-              onFiles={model.attachFiles}
+              // The picker can come back after a question took the composer
+              // over, so the mode is read when the files arrive, as for paste.
+              onFiles={(files) => {
+                if (answer === null) model.attachFiles(files);
+                else answer.attachments.onFiles();
+              }}
             />
             <AccessModeSelector
               mode={fields.accessMode.value}
@@ -249,9 +259,11 @@ export function Composer({
               }}
             />
             {pending === null ? null : (
-              <span className="ml-1 font-mono text-[11px] text-attn">{pending}</span>
+              <span className="ml-1 min-w-0 truncate font-mono text-[11px] text-attn">
+                {pending}
+              </span>
             )}
-            <div className="ml-auto flex min-w-0 items-center gap-1.5">
+            <div className="ml-auto flex min-w-0 shrink items-center gap-1.5">
               {fields.options === null ? null : (
                 <ModelOptionsSelector
                   descriptors={fields.options}
@@ -292,7 +304,6 @@ export function Composer({
               <>
                 {answer.step.showsPrevious ? (
                   <PreviousButton
-                    label={PREVIOUS_QUESTION_LABEL}
                     disabled={!answer.step.canGoBack}
                     onPrevious={answer.step.onPrevious}
                   />

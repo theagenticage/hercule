@@ -82,7 +82,10 @@ export interface ComposerModel {
   readonly readOnly: string | null;
   readonly busy: boolean;
   readonly sending: boolean;
-  readonly error: Error | null;
+  /** Why the last attempt to start the thread or send the message failed; `null` when it did not. */
+  readonly sendError: Error | null;
+  /** Why the last attempt to stop the agent failed; `null` when it did not. */
+  readonly stopError: Error | null;
   readonly setMessage: (text: string) => void;
   /** Adds images to the shelf and starts their uploads. */
   readonly attachFiles: (files: readonly ImageFile[]) => void;
@@ -240,7 +243,8 @@ export function useComposerModel(
     readOnly,
     busy,
     sending: spawn.isPending || input.isPending,
-    error: spawn.error ?? input.error ?? stopAgent.error,
+    sendError: spawn.error ?? input.error,
+    stopError: stopAgent.error,
     setMessage: (text) => {
       changeDraft((draft) => ({ ...draft, message: { ...draft.message, text } }));
     },

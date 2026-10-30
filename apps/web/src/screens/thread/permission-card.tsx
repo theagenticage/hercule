@@ -4,6 +4,7 @@ import {
   buildApprovalCard,
   describeFoldedQuestion,
   findComposerQuestion,
+  FOLD_QUESTION_LABEL,
   type HerculeClient,
   readErrorMessage,
   UNFOLD_QUESTION_LABEL,
@@ -147,7 +148,21 @@ export function PermissionCard({
           on one left edge in the column beside it. */}
       <DecisionMark className="mt-[3px]" />
       <div className="flex min-w-0 flex-col">
-        <span className="text-meta font-emph text-ink">{card.title}</span>
+        {/* An unfolded async question has Later at the end of the title row,
+            so it adds no row of its own. */}
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-meta font-emph text-ink">{card.title}</span>
+          {isAsync ? (
+            <Button
+              className="-my-0.5 shrink-0 py-0.5"
+              onClick={() => {
+                changeDraft((current) => ({ ...current, unfolded: false }));
+              }}
+            >
+              {FOLD_QUESTION_LABEL}
+            </Button>
+          ) : null}
+        </div>
         {/* A 4096-character command or forty paths scroll here rather than
             push the composer off the screen. */}
         <div className="flex max-h-36 flex-col overflow-y-auto">
@@ -168,13 +183,6 @@ export function PermissionCard({
             locked={locked}
             composer={composer}
             composerAnswers={composerAnswers}
-            onFold={
-              isAsync
-                ? () => {
-                    changeDraft((current) => ({ ...current, unfolded: false }));
-                  }
-                : undefined
-            }
             onSend={(answers) => {
               send(request.requestId, answers);
             }}
