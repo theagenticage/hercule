@@ -129,7 +129,7 @@ describe("the skills list in the message field", () => {
     expect(readRows()[0]!.textContent).toContain("/skill:review");
   });
 
-  it("opens nothing for a path, a number, a closed token or a field without skills", async () => {
+  it("opens nothing for a path, a number or a closed token", async () => {
     const user = userEvent.setup();
     renderField();
     await user.type(readField(), "/tmp/x");
@@ -139,13 +139,6 @@ describe("the skills list in the message field", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
     await user.clear(readField());
     await user.type(readField(), "word$");
-    expect(screen.queryByRole("listbox")).toBeNull();
-  });
-
-  it("opens nothing without a skills prop", async () => {
-    const user = userEvent.setup();
-    renderField({ skills: undefined });
-    await user.type(readField(), "$");
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
@@ -535,7 +528,7 @@ describe("the skill hover card in the message field", () => {
 });
 
 describe("a message field with its skills left out", () => {
-  it("opens no list for $ or /, ", async () => {
+  it("opens no list for $ or /", async () => {
     const user = userEvent.setup();
     renderField({ skills: undefined });
     await user.type(readField(), "$");

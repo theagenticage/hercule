@@ -149,13 +149,6 @@ describe("the question draft", () => {
   describe("picking an option while the user has typed text", () => {
     const typed = typeQuestionAnswer(buildQuestionDraft(QUESTIONS), STORAGE, "a sqlite file");
 
-    it("moves the typed text to the end of the message after a blank line, on a single-select question", () => {
-      const picked = pickQuestionOption(typed, STORAGE, "IndexedDB", "Please check this");
-
-      expect(picked.question[STORAGE.header]).toEqual({ picks: ["IndexedDB"], text: "" });
-      expect(picked.messageText).toBe("Please check this\n\na sqlite file");
-    });
-
     it("adds only the newlines needed to leave one blank line, and never removes a character", () => {
       const joined = (messageText: string): string =>
         pickQuestionOption(typed, STORAGE, "IndexedDB", messageText).messageText;

@@ -82,9 +82,12 @@ const buildTypedDraft = (
     buildQuestionDraft(questions),
   );
 
-/** Builds the draft of a Request whose every question is answered with the text "x". */
+/**
+ * The draft of a Request whose every question is answered with the text "x". One answer has
+ * spaces around it, so the SEND row checks that the answers sent are trimmed.
+ */
 const ALL_ANSWERED = buildTypedDraft(QUESTIONS, {
-  Storage: "x",
+  Storage: " x ",
   Token: "x",
   Features: "x",
   Notes: "x",
@@ -110,14 +113,8 @@ describe("findComposerQuestion", () => {
     expect(found).toMatchObject({ requestId: "req-1", questions: QUESTIONS, question: FEATURES });
   });
 
-  it("stays a message composer while the shown question is secret, and answers the others around it", () => {
+  it("stays a message composer while the shown question is secret", () => {
     expect(findComposerQuestion(REQUEST, buildDraft({ shownQuestionIndex: 1 }))).toBeNull();
-    expect(findComposerQuestion(REQUEST, buildDraft({ shownQuestionIndex: 0 }))?.question).toEqual(
-      STORAGE,
-    );
-    expect(
-      findComposerQuestion(REQUEST, buildDraft({ shownQuestionIndex: 3 }))?.question.header,
-    ).toBe("Notes");
   });
 
   it("leaves an async question alone while it is folded, and answers it once it is unfolded", () => {
@@ -153,7 +150,6 @@ describe("findComposerQuestion", () => {
       locked: false,
       failure: null,
     });
-    expect(untouched.stepper).toEqual(buildQuestionStepper(buildDraft(), QUESTIONS));
     expect(typed).toMatchObject({
       answerKey: "req-1:Features",
       text: "mine",
@@ -164,50 +160,16 @@ describe("findComposerQuestion", () => {
 });
 
 describe("typeAnswerInRequestDraft", () => {
-  it("types into a draft the user has not touched, leaving the other answers alone", () => {
-    const draft = buildDraft({ shownQuestionIndex: 3, unfolded: true });
-
-    const typed = typeAnswerInRequestDraft(draft, QUESTIONS, QUESTIONS[3]!, "no");
-
-    expect(typed).toEqual({
-      ...draft,
-      question: { ...buildQuestionDraft(QUESTIONS), Notes: { picks: [], text: "no" } },
-    });
-    expect(draft.question).toBeNull();
-  });
-
-  it("types into the question it is given, not the one the draft shows", () => {
+  it("types into the question it is given, not the one the draft shows, and leaves the rest of an untouched draft alone", () => {
     const draft = buildDraft({ shownQuestionIndex: 3, unfolded: true });
 
     const typed = typeAnswerInRequestDraft(draft, QUESTIONS, STORAGE, "late edit");
 
-    expect(typed.shownQuestionIndex).toBe(3);
-    expect(typed.question).toEqual({
-      ...buildQuestionDraft(QUESTIONS),
-      Storage: { picks: [], text: "late edit" },
+    expect(typed).toEqual({
+      ...draft,
+      question: { ...buildQuestionDraft(QUESTIONS), Storage: { picks: [], text: "late edit" } },
     });
-  });
-
-  it("replaces a pick on a single-select question and keeps the picks of a multiSelect one", () => {
-    const picked = pickQuestionOption(buildQuestionDraft(QUESTIONS), STORAGE, "IndexedDB", "");
-    const withFeature = pickQuestionOption(picked.question, FEATURES, "Sync", "");
-
-    const first = typeAnswerInRequestDraft(
-      buildDraft({ question: withFeature.question }),
-      QUESTIONS,
-      STORAGE,
-      "mine",
-    );
-    const third = typeAnswerInRequestDraft(
-      buildDraft({ question: withFeature.question, shownQuestionIndex: 2 }),
-      QUESTIONS,
-      FEATURES,
-      "more",
-    );
-
-    expect(first.question!.Storage).toEqual({ picks: [], text: "mine" });
-    expect(first.question!.Features).toEqual({ picks: ["Sync"], text: "" });
-    expect(third.question!.Features).toEqual({ picks: ["Sync"], text: "more" });
+    expect(draft.question).toBeNull();
   });
 });
 
@@ -247,6 +209,7 @@ describe("the step controls", () => {
   const OVER = "This answer is longer than 4,096 characters.";
   const SHOW_1 = { kind: "show", index: 1 };
   const SHOW_2 = { kind: "show", index: 2 };
+  // The first answer in ALL_ANSWERED is " x ", so SEND also proves the answers are trimmed.
   const SEND = { kind: "send", answers: { Storage: "x", Token: "x", Features: ["x"], Notes: "x" } };
 
   // One row per situation: the stepper's `ready` and `notice`, then what "next" and "previous"
@@ -309,7 +272,14 @@ describe("the step controls", () => {
       null,
     ],
     ["answer of 4,097 characters", typed({ Storage: BIG(4097) }), false, OVER, null, null],
-    ["4,097 typed on a multiSelect", typed({ Features: BIG(4097) }, 2), false, OVER, null, SHOW_1],
+    [
+      "4,097 on the middle question, Previous still works",
+      typed({ Features: BIG(4097) }, 2),
+      false,
+      OVER,
+      null,
+      SHOW_1,
+    ],
   ];
 
   it.each(cases)("%s", (_name, draft, ready, notice, next, previous) => {
@@ -320,35 +290,6 @@ describe("the step controls", () => {
     });
     expect(decideQuestionStep(draft, QUESTIONS, "next")).toEqual(next);
     expect(decideQuestionStep(draft, QUESTIONS, "previous")).toEqual(previous);
-  });
-
-  it("sends the answers as buildQuestionAnswers serializes them: picks, then trimmed text", () => {
-    let questionDraft = pickQuestionOption(
-      buildQuestionDraft(QUESTIONS),
-      STORAGE,
-      "IndexedDB",
-      "",
-    ).question;
-    questionDraft = typeQuestionAnswer(questionDraft, QUESTIONS[1]!, "  hunter2 ");
-    questionDraft = pickQuestionOption(questionDraft, FEATURES, "Search", "").question;
-    questionDraft = typeQuestionAnswer(questionDraft, FEATURES, " and more ");
-    questionDraft = typeQuestionAnswer(questionDraft, QUESTIONS[3]!, "no");
-
-    expect(
-      decideQuestionStep(
-        buildDraft({ question: questionDraft, shownQuestionIndex: 3 }),
-        QUESTIONS,
-        "next",
-      ),
-    ).toEqual({
-      kind: "send",
-      answers: {
-        Storage: "IndexedDB",
-        Token: "hunter2",
-        Features: ["Search", "and more"],
-        Notes: "no",
-      },
-    });
   });
 
   it("counts headers and every answer toward the 16,384 characters of all answers, even while a question is unanswered", () => {

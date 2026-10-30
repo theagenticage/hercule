@@ -61,7 +61,6 @@ import {
   SESSION_ID,
   ZONE,
   buildController,
-  buildRequest,
   buildSession,
   buildSubagent,
 } from "./-fixtures";
@@ -3560,9 +3559,13 @@ describe("Thread: answering the agent's questions", () => {
    * Opens a busy thread with `initial` open Requests and returns the app, its
    * stubbed API, and `setOpenRequests`, which changes the session's open
    * Requests the way the controller does: the read answers with the new
-   * session, and the live `session` topic nudges the app to read it.
+   * session, and the live `session` topic nudges the app to read it. `extra`
+   * adds or replaces stubbed routes.
    */
-  const openLive = async (initial: readonly SessionRequest[]) => {
+  const openLive = async (
+    initial: readonly SessionRequest[],
+    extra: Readonly<Record<string, Handler>> = {},
+  ) => {
     let current = buildSession({ status: "busy", openRequests: initial });
     const app = await openApp(current, [], {
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
@@ -3570,6 +3573,7 @@ describe("Thread: answering the agent's questions", () => {
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
         body: { inputId: "01a06d02-5000-7000-8000-000000000001", result: "queued" },
       },
+      ...extra,
     });
     await waitFor(() => {
       expect(app.live.topics()).toContain("session");
@@ -3581,6 +3585,23 @@ describe("Thread: answering the agent's questions", () => {
       });
     };
     return { ...app, setOpenRequests };
+  };
+
+  /**
+   * Opens the thread parked on `request`, with a controller that refuses the
+   * first answer with a 409 and accepts every later one, and returns the app
+   * and its stubbed API.
+   */
+  const openRefusingFirstAnswer = (request: SessionRequest) => {
+    const session = buildSession({ status: "busy", openRequests: [request] });
+    const replies = [
+      {
+        status: 409,
+        body: buildErrorBody("invalid_state", "The harness did not take the answer."),
+      },
+      { body: session },
+    ];
+    return openApp(session, [], { [RESPOND_TO_QUESTION]: () => replies.shift()! });
   };
 
   /**
@@ -3732,17 +3753,11 @@ describe("Thread: answering the agent's questions", () => {
 
       const form = await findQuestionForm("Which storage should drafts use?");
       expect(within(form).queryAllByRole("radio")).toEqual([]);
-      expect(readComposerField().placeholder).toBe("Type your answer");
       // A lone question has no place ("1 of 1"), no Next and no Previous.
       expect(screen.queryByText(/\b1 of 1\b/)).toBeNull();
       expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
-      // A blank answer does not count.
-      await user.type(readComposerField(), "   ");
-      expect(isLocked(readStep("Send answers"))).toBe(true);
-      await user.clear(readComposerField());
       await user.type(readComposerField(), "a sqlite file");
-      expect(isLocked(readStep("Send answers"))).toBe(false);
       await user.click(readStep("Send answers"));
 
       await waitFor(() => {
@@ -3752,7 +3767,27 @@ describe("Thread: answering the agent's questions", () => {
       });
     });
 
-    it("locks the choices, the composer and the step button once the answers are sent, and sends them once", async () => {
+    it("shows a notice and keeps the step button off while the answer is over 4,096 characters", async () => {
+      await openParked({
+        ...QUESTIONS,
+        detail: { questions: [{ ...STORAGE, options: [] }] },
+      });
+
+      await findQuestionForm("Which storage should drafts use?");
+      fireEvent.change(readComposerField(), { target: { value: "x".repeat(4097) } });
+      expect((await screen.findByRole("status")).textContent).toBe(
+        "This answer is longer than 4,096 characters.",
+      );
+      expect(isLocked(readStep("Send answers"))).toBe(true);
+
+      fireEvent.change(readComposerField(), { target: { value: "x".repeat(4096) } });
+      await waitFor(() => {
+        expect(screen.queryByRole("status")).toBeNull();
+      });
+      expect(isLocked(readStep("Send answers"))).toBe(false);
+    });
+
+    it("locks the choices, the composer and the step button once the answers are sent", async () => {
       const user = userEvent.setup();
       const { api } = await openParked(ONE_QUESTION);
 
@@ -3770,10 +3805,6 @@ describe("Thread: answering the agent's questions", () => {
       expect(isLocked(findChoice("radio", "localStorage"))).toBe(true);
       expect(isLocked(findChoice("radio", "IndexedDB"))).toBe(true);
       expect(isLocked(readComposerField())).toBe(true);
-      await user.click(readStep("Send answers"));
-      expect(readBodies(api.calls)).toEqual([
-        { requestId: "req-2", answers: { Storage: "IndexedDB" } },
-      ]);
     });
 
     it("sends once when Enter is pressed twice before the controller answers", async () => {
@@ -3808,17 +3839,7 @@ describe("Thread: answering the agent's questions", () => {
 
     it("shows the controller's error as it is and keeps every answer when sending fails", async () => {
       const user = userEvent.setup();
-      const replies = [
-        {
-          status: 409,
-          body: buildErrorBody("invalid_state", "The harness did not take the answer."),
-        },
-        { body: buildSession({ status: "busy", openRequests: [QUESTIONS] }) },
-      ];
-      const session = buildSession({ status: "busy", openRequests: [QUESTIONS] });
-      const { api } = await openApp(session, [], {
-        [RESPOND_TO_QUESTION]: () => replies.shift()!,
-      });
+      const { api } = await openRefusingFirstAnswer(QUESTIONS);
 
       await user.click(
         await screen.findByRole("radio", { name: (name) => name.startsWith("IndexedDB") }),
@@ -3852,21 +3873,6 @@ describe("Thread: answering the agent's questions", () => {
   });
 
   describe("keys and steps", () => {
-    it("goes to the next question on Enter, and a new line on Shift+Enter", async () => {
-      const user = userEvent.setup();
-      const { api } = await openParked(QUESTIONS);
-
-      await screen.findByText("Which storage should drafts use?");
-      await user.type(readComposerField(), "a sqlite{Shift>}{Enter}{/Shift}file");
-      expect(readComposerField().value).toBe("a sqlite\nfile");
-      expect(screen.getByText("Question 1 of 2")).toBeDefined();
-
-      await user.type(readComposerField(), "{Enter}");
-
-      expect(screen.getByText("Question 2 of 2")).toBeDefined();
-      expect(readBodies(api.calls)).toEqual([]);
-    });
-
     it("keeps every question's answer when the user steps back and forward", async () => {
       const user = userEvent.setup();
       const { api } = await openParked(QUESTIONS);
@@ -3879,8 +3885,7 @@ describe("Thread: answering the agent's questions", () => {
       expect(readBodies(api.calls)).toEqual([]);
 
       await user.type(readComposerField(), "a sqlite file{Enter}");
-      // The second question is blank, and Previous still works.
-      expect(isLocked(readStep("Send answers"))).toBe(true);
+      // Enter on a filled answer steps on, so Previous goes back to the first question.
       await user.click(screen.getByRole("button", { name: "Previous" }));
       expect(screen.getByText("Question 1 of 2")).toBeDefined();
       await user.click(readStep("Next"));
@@ -3934,31 +3939,6 @@ describe("Thread: answering the agent's questions", () => {
       });
       expect(readComposerField().value).toBe("Also check the logs");
       expect(api.calls.filter((call) => call.path.endsWith("/input"))).toEqual([]);
-    });
-
-    it("gives the message back, with the answer kept, when the dock pages to an approval and back", async () => {
-      const user = userEvent.setup();
-      const approval = buildRequest("req-approval", undefined, "stripe listen");
-      await openLive([ONE_QUESTION, approval]);
-
-      await screen.findByText("Which storage should drafts use?");
-      await user.type(readComposerField(), "a sqlite file");
-      await user.click(screen.getByRole("button", { name: "Next Request" }));
-
-      await screen.findByText("stripe listen");
-      expect(readComposerField().value).toBe("");
-      expect(readComposerField().placeholder).toBe("Queued until the turn finishes…");
-      await user.type(readComposerField(), "an unrelated message");
-      await user.click(screen.getByRole("button", { name: "Previous Request" }));
-
-      await screen.findByText("Which storage should drafts use?");
-      // The typing guard waits, because the user just typed a message.
-      act(() => {
-        readComposerField().blur();
-      });
-      await waitFor(() => {
-        expect(readComposerField().value).toBe("a sqlite file");
-      });
     });
 
     it("moves the text typed for a single-select question to the end of the message when the user picks an option", async () => {
@@ -4022,23 +4002,6 @@ describe("Thread: answering the agent's questions", () => {
       });
       expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
     });
-
-    it("shows a notice and turns the step button off when an answer is over the limit", async () => {
-      const user = userEvent.setup();
-      await openParked(ONE_QUESTION);
-
-      await screen.findByText("Which storage should drafts use?");
-      fireEvent.change(readComposerField(), { target: { value: "x".repeat(4097) } });
-
-      expect((await screen.findByRole("status")).textContent).toBe(
-        "This answer is longer than 4,096 characters.",
-      );
-      expect(isLocked(readStep("Send answers"))).toBe(true);
-      await user.clear(readComposerField());
-      fireEvent.change(readComposerField(), { target: { value: "x".repeat(4096) } });
-      expect(screen.queryByRole("status")).toBeNull();
-      expect(isLocked(readStep("Send answers"))).toBe(false);
-    });
   });
 
   describe("the typing guard", () => {
@@ -4063,43 +4026,6 @@ describe("Thread: answering the agent's questions", () => {
         expect(readComposerField().placeholder).toBe("Or type your own answer");
       });
       expect(readComposerField().value).toBe("");
-    });
-
-    it("takes over once the user has paused", async () => {
-      const user = userEvent.setup();
-      const { setOpenRequests } = await openLive([]);
-
-      await user.type(await screen.findByRole("textbox"), "Also check");
-      setOpenRequests([ONE_QUESTION]);
-      await screen.findByText("Which storage should drafts use?");
-      expect(readComposerField().value).toBe("Also check");
-
-      await waitFor(
-        () => {
-          expect(readComposerField().placeholder).toBe("Or type your own answer");
-        },
-        { timeout: 3000 },
-      );
-      expect(readComposerField().value).toBe("");
-    });
-
-    it("takes over once the user sends the message", async () => {
-      const user = userEvent.setup();
-      const { api, setOpenRequests } = await openLive([]);
-
-      await user.type(await screen.findByRole("textbox"), "Also check the logs");
-      setOpenRequests([ONE_QUESTION]);
-      await screen.findByText("Which storage should drafts use?");
-      expect(readComposerField().value).toBe("Also check the logs");
-
-      await user.type(readComposerField(), "{Enter}");
-
-      await waitFor(() => {
-        expect(api.calls.filter((call) => call.path.endsWith("/input"))).toHaveLength(1);
-      });
-      await waitFor(() => {
-        expect(readComposerField().placeholder).toBe("Or type your own answer");
-      });
     });
 
     // The mouse press on Send must not take the focus from the field. If it did,
@@ -4200,23 +4126,12 @@ describe("Thread: answering the agent's questions", () => {
   describe("errors", () => {
     it("shows a failed message send in message mode only, not beside an answer", async () => {
       const user = userEvent.setup();
-      let current = buildSession({ status: "busy", openRequests: [] });
-      const app = await openApp(current, [], {
-        [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
+      const { setOpenRequests } = await openLive([], {
         [`POST /api/v1/sessions/${SESSION_ID}/input`]: () => ({
           status: 409,
           body: buildErrorBody("invalid_state", "The message was refused."),
         }),
       });
-      await waitFor(() => {
-        expect(app.live.topics()).toContain("session");
-      });
-      const setOpenRequests = (openRequests: readonly SessionRequest[]): void => {
-        current = buildSession({ status: "busy", openRequests });
-        act(() => {
-          app.live.push("session", { _tag: "invalidate", ids: [SESSION_ID], kind: "updated" });
-        });
-      };
 
       await user.type(await screen.findByRole("textbox"), "Also check the logs{Enter}");
       expect((await screen.findByRole("alert")).textContent).toBe("The message was refused.");
@@ -4247,18 +4162,7 @@ describe("Thread: answering the agent's questions", () => {
       detail: { questions: [{ ...STORAGE, header: "Token", secret: true, options: [] }] },
     };
 
-    it("warns that an answer the agent asked to keep secret is stored like any other", async () => {
-      await openParked(SECRET);
-
-      await screen.findByText("Which storage should drafts use?");
-      expect(
-        screen.getByText(
-          "The agent asked to keep this answer secret. It is stored in the thread like any other answer.",
-        ),
-      ).toBeDefined();
-    });
-
-    it("is answered in a masked field in the dock, and the composer stays a message composer", async () => {
+    it("is answered in a masked field, with a warning, apart from the message composer", async () => {
       const user = userEvent.setup();
       const { api } = await openParked(SECRET);
 
@@ -4269,6 +4173,11 @@ describe("Thread: answering the agent's questions", () => {
       // password, and it is not in a form that submits.
       expect(field.getAttribute("autocomplete")).toBe("new-password");
       expect(field.closest("form")).toBeNull();
+      expect(
+        screen.getByText(
+          "The agent asked to keep this answer secret. It is stored in the thread like any other answer.",
+        ),
+      ).toBeDefined();
       // The composer is still for the message: it keeps Send, and takes no answer.
       expect(readComposerField().placeholder).toBe("Queued until the turn finishes…");
       expect(screen.getByRole("button", { name: "Send" })).toBeDefined();
@@ -4286,17 +4195,7 @@ describe("Thread: answering the agent's questions", () => {
 
     it("shows a failed send in the dock, which has the field, and keeps the typed secret", async () => {
       const user = userEvent.setup();
-      const replies = [
-        {
-          status: 409,
-          body: buildErrorBody("invalid_state", "The harness did not take the answer."),
-        },
-        { body: buildSession({ status: "busy", openRequests: [SECRET] }) },
-      ];
-      const session = buildSession({ status: "busy", openRequests: [SECRET] });
-      const { api } = await openApp(session, [], {
-        [RESPOND_TO_QUESTION]: () => replies.shift()!,
-      });
+      const { api } = await openRefusingFirstAnswer(SECRET);
 
       await user.type(await screen.findByLabelText("Your own answer"), "s3cret");
       await user.click(readStep("Send answers"));

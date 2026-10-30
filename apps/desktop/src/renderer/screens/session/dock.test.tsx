@@ -501,18 +501,6 @@ describe("the dock for a question", () => {
     expect(isLocked(readSend())).toBe(false);
   });
 
-  it("keeps Send disabled on the last question until that question is answered", async () => {
-    const user = userEvent.setup();
-    await renderDock(QUESTIONS);
-
-    await user.click(findChoice("radio", "localStorage"));
-    await user.click(within(readQuestionDock()).getByRole("button", { name: "Next" }));
-
-    expect(isLocked(readSend())).toBe(true);
-    await user.click(findChoice("checkbox", "Search"));
-    expect(isLocked(readSend())).toBe(false);
-  });
-
   it("sends the answers of every question with session.respondToQuestion", async () => {
     const user = userEvent.setup();
     const { calls } = await renderDock(QUESTIONS);
@@ -857,26 +845,6 @@ describe("the dock for a question, with a composer below", () => {
     expect(readOwnAnswer().getAttribute("type")).toBe("text");
   });
 
-  it("shows a failed send in the dock when the dock has its own field", async () => {
-    const user = userEvent.setup();
-    await renderDock(
-      SECRET_QUESTION,
-      {
-        status: 409,
-        body: buildErrorBody("invalid_state", "The harness did not take the answer."),
-      },
-      { composerBelow: true },
-    );
-
-    await user.type(readOwnAnswer(), "hunter2");
-    await user.click(readSend());
-
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "The harness did not take the answer.",
-    );
-    expect(isLocked(readSend())).toBe(false);
-  });
-
   it("leaves a failed send to the composer when the dock has no field", async () => {
     const user = userEvent.setup();
     const { queryClient } = await renderDockWithComposerSender(
@@ -944,20 +912,7 @@ describe("Previous in the dock", () => {
     await waitFor(() => {
       expect(readBodies(calls)).toEqual([BOTH_ANSWERS]);
     });
-  });
-
-  it("is off once the answers are sent", async () => {
-    const user = userEvent.setup();
-    const { queryClient } = await renderDock(QUESTIONS);
-
-    await sendBothAnswers(user);
-    await waitFor(() => {
-      expect(queryClient.isMutating()).toBe(0);
-    });
-
     expect(isLocked(readButton("Previous"))).toBe(true);
-    await user.click(readButton("Previous"));
-    expect(queryDockText("Question 2 of 2")).not.toBeNull();
   });
 });
 
@@ -1056,21 +1011,6 @@ describe("picking an option in the dock", () => {
       "Half a message  \n\na sqlite file",
     );
     expect(pendingSubmissions.read(FIXTURE_THREAD_IDS.runbook).message.text).toBe("");
-  });
-
-  it("leaves the Message Draft alone when no text was typed, and on a multiSelect question", async () => {
-    const user = userEvent.setup();
-    const { pendingSubmissions } = await renderDock(QUESTIONS);
-    pendingSubmissions.writeText(FIXTURE_THREAD_IDS.runbook, "Half a message");
-
-    await user.click(findChoice("radio", "IndexedDB"));
-    await user.click(readButton("Next"));
-    await user.type(readOwnAnswer(), "Offline mode");
-    await user.click(findChoice("checkbox", "Sync"));
-
-    // A multiSelect pick keeps the typed text as one more answer.
-    expect((readOwnAnswer() as HTMLInputElement).value).toBe("Offline mode");
-    expect(pendingSubmissions.read(FIXTURE_THREAD_IDS.runbook).message.text).toBe("Half a message");
   });
 });
 

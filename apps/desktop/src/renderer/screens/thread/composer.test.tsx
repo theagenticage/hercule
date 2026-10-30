@@ -1409,8 +1409,16 @@ describe("the typing guard in the composer", () => {
    * the fake clock with the real one. Once the user has typed, the fake clock
    * is stopped, so the time the guard has left to run is exactly what the
    * test then advances, however slow the machine is.
+   *
+   * `handlers` answer other operations, such as a message that fails to send.
    */
-  const typeThenAsk = async ({ holdClock = false }: { readonly holdClock?: boolean } = {}) => {
+  const typeThenAsk = async ({
+    holdClock = false,
+    handlers = {},
+  }: {
+    readonly holdClock?: boolean;
+    readonly handlers?: Readonly<Record<string, Handler>>;
+  } = {}) => {
     const user = userEvent.setup();
     let openRequests: Session["openRequests"] = [];
     const rendered = await renderComposer(THREAD, {
@@ -1418,6 +1426,7 @@ describe("the typing guard in the composer", () => {
         [`GET /api/v1/sessions/${THREAD.session.id}`]: () => ({
           body: { ...THREAD.session, openRequests },
         }),
+        ...handlers,
       },
     });
     await user.type(readField(), "Half a mes");
@@ -1469,8 +1478,7 @@ describe("the typing guard in the composer", () => {
   });
 
   it("gives the composer to the question when the user sends the message", async () => {
-    const user = userEvent.setup();
-    const { calls } = await typeThenAsk();
+    const { calls, user } = await typeThenAsk();
 
     await user.keyboard("{Enter}");
 
@@ -1481,29 +1489,21 @@ describe("the typing guard in the composer", () => {
   });
 
   it("gives the composer to the question after a send that fails", async () => {
-    const user = userEvent.setup();
-    let openRequests: Session["openRequests"] = [];
-    const rendered = await renderComposer(THREAD, {
+    const { pendingSubmissions, user } = await typeThenAsk({
       handlers: {
-        [`GET /api/v1/sessions/${THREAD.session.id}`]: () => ({
-          body: { ...THREAD.session, openRequests },
-        }),
         [buildInputOperation(THREAD)]: {
           status: 409,
           body: buildErrorBody("invalid_state", "Not now."),
         },
       },
     });
-    await user.type(readField(), "Half a mes");
-    openRequests = [ASK];
-    await refreshSession(rendered.queryClient, THREAD.session.id);
     expectMessageMode();
 
     await user.keyboard("{Enter}");
 
     // The failed message is kept for the user, and the question has the field.
     await waitFor(() => {
-      expect(rendered.pendingSubmissions.read(THREAD.session.id).failure).toBe("Not now.");
+      expect(pendingSubmissions.read(THREAD.session.id).failure).toBe("Not now.");
     });
     expectAnswerMode();
   });

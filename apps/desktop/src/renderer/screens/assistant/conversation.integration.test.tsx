@@ -582,7 +582,7 @@ describe("an assistant's Conversation", () => {
     };
     const RESPOND = `/api/v1/sessions/${SESSION_ID}/respond-to-question`;
 
-    it("takes the answer in the field, replaces Send with the step button beside Stop, and keeps the message as it was", async () => {
+    it("answers the question in the Conversation's composer and keeps the message", async () => {
       const user = userEvent.setup();
       const { calls, context } = await openConversation({
         readSession: () => buildAdaSession({ openRequests: [ASKED] }),
@@ -601,6 +601,20 @@ describe("an assistant's Conversation", () => {
       expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
       expect(screen.getByRole("button", { name: "Send answers" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Attach" }).title).toBe(
+        "An answer takes text only",
+      );
+
+      fireEvent.paste(field, {
+        clipboardData: {
+          files: [new File(["png"], "shot.png", { type: "image/png" })],
+          types: ["Files"],
+          getData: () => "",
+        },
+      });
+      expect(document.querySelector(".composer-notice")?.textContent).toBe(
+        "An answer takes text only. Images can be sent in a message.",
+      );
 
       await user.type(field, "Only the Sunday one{Enter}");
 
@@ -610,28 +624,6 @@ describe("an assistant's Conversation", () => {
         ]);
       });
       expect(pendingSubmissions.read(draftKey).message.text).toBe("Half a mess");
-    });
-
-    it("refuses a pasted image with a notice, and keeps Attach off with the reason", async () => {
-      await openConversation({
-        readSession: () => buildAdaSession({ openRequests: [ASKED] }),
-        messages: [QUESTION],
-        transcript: buildAdaTranscript(TURN_STARTED),
-      });
-      const attach = screen.getByRole("button", { name: "Attach" });
-      expect(attach.title).toBe("An answer takes text only");
-
-      fireEvent.paste(screen.getByRole("textbox", { name: "Message" }), {
-        clipboardData: {
-          files: [new File(["png"], "shot.png", { type: "image/png" })],
-          types: ["Files"],
-          getData: () => "",
-        },
-      });
-
-      expect(document.querySelector(".composer-notice")?.textContent).toBe(
-        "An answer takes text only. Images can be sent in a message.",
-      );
     });
 
     it("waits for the user to leave the field before a question takes the composer over", async () => {

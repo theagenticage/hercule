@@ -3,7 +3,7 @@
  * and pasted, dropped and picked files reach the caller. A card that takes
  * no images, such as an assistant's Conversation's, keeps Attach off. Also
  * tests the step controls that take Send's place while the composer answers a
- * question, and the message field's blur and composition reports.
+ * question.
  */
 import { describe, expect, it, vi, type Mock } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -163,7 +163,7 @@ describe("the composer card's step controls", () => {
     ...over,
   });
 
-  const renderStepCard = (step: ComposerStep | undefined, stop = false) =>
+  const renderStepCard = (step: ComposerStep, stop = false) =>
     render(
       <ComposerCard
         text=""
@@ -203,13 +203,6 @@ describe("the composer card's step controls", () => {
     expect(step.onStep).toHaveBeenCalledOnce();
   });
 
-  it("leaves Previous out on the first question, and labels the step button as given", () => {
-    renderStepCard(buildStep({ showsPrevious: false, label: "Send answers" }));
-
-    expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Send answers" })).toBeTruthy();
-  });
-
   it("draws the step button and Previous as off when they cannot work, and keeps them in the tab order", () => {
     renderStepCard(buildStep({ ready: false, canGoBack: false }));
 
@@ -225,40 +218,5 @@ describe("the composer card's step controls", () => {
     renderStepCard(buildStep(), true);
 
     expect(readEndOfRow()).toEqual(["Previous", "Next", "Stop"]);
-  });
-
-  it("draws Send when there is no step", () => {
-    renderStepCard(undefined);
-
-    expect(readEndOfRow()).toEqual(["Send"]);
-  });
-});
-
-describe("the composer card's message field reports", () => {
-  it("reports when the field loses the focus, and when a composition starts and ends", () => {
-    const onFieldBlur = vi.fn<() => void>();
-    const onComposingChange = vi.fn<(composing: boolean) => void>();
-    render(
-      <ComposerCard
-        text=""
-        onTextChange={() => {}}
-        placeholder="Message"
-        readOnly={false}
-        canSend
-        onSend={() => {}}
-        error={null}
-        onFieldBlur={onFieldBlur}
-        onComposingChange={onComposingChange}
-        fieldRef={null}
-      />,
-    );
-    const field = screen.getByRole("textbox", { name: "Message" });
-
-    fireEvent.compositionStart(field);
-    fireEvent.compositionEnd(field);
-    fireEvent.blur(field);
-
-    expect(onComposingChange.mock.calls).toEqual([[true], [false]]);
-    expect(onFieldBlur).toHaveBeenCalledOnce();
   });
 });

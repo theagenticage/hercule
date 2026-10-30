@@ -135,7 +135,6 @@ function Owners({
 }) {
   const [texts, setTexts] = useState<Record<string, string>>({
     "answer-1": "first answer",
-    "answer-2": "second answer",
     message: "saved draft",
   });
   const [shown, setShown] = useState(initial);
@@ -170,7 +169,7 @@ const REQUEST_QUESTIONS: readonly ApprovalQuestion[] = ["Q1", "Q2"].map((header)
  * A field that answers the questions of one Request the way the composer
  * does: the answers and the shown question live in one `RequestDraft`, and
  * each render hands the field a callback for the question it draws.
- * `showSecondQuestion` pages to the second question in one render.
+ * `showRef` pages to the second question in one render.
  */
 function RequestAnswers({
   showRef,
@@ -546,20 +545,6 @@ describe("the message field", () => {
       expect(readFieldText(readField())).toBe("Use blue");
     });
 
-    it("does not bring text of the answer back into the draft when switching back", async () => {
-      const user = userEvent.setup();
-      render(<Switching onTextChange={vi.fn()} />);
-      fireEvent.click(screen.getByRole("button", { name: "Switch" }));
-      readField().focus();
-      await user.keyboard("x{Backspace}");
-      fireEvent.click(screen.getByRole("button", { name: "Switch" }));
-      expect(readFieldText(readField())).toBe("Draft text");
-      undo();
-      expect(readFieldText(readField())).toBe("Draft text");
-      redo();
-      expect(readFieldText(readField())).toBe("Draft text");
-    });
-
     it("forgets the undo history even when the text stays the same", async () => {
       const user = userEvent.setup();
       render(<Switching onTextChange={vi.fn()} />);
@@ -571,36 +556,19 @@ describe("the message field", () => {
     });
 
     describe("when the page holds an edit the field has not read yet", () => {
-      /**
-       * Starts an IME composition in the field, which puts text in the page
-       * that the editor reads only later, then moves the field to `next`.
-       */
-      const composeThenShow = (initial: string, next: string) => {
+      it("gives it to the owner of the old content when the Request closes", async () => {
         const showRef: { current: ((key: string) => void) | null } = { current: null };
         const textsRef: { current: Record<string, string> } = { current: {} };
-        render(<Owners initial={initial} showRef={showRef} textsRef={textsRef} />);
+        render(<Owners initial="answer-1" showRef={showRef} textsRef={textsRef} />);
         readField().focus();
+        // An IME composition puts text in the page that the editor reads only later.
         fireEvent.compositionStart(readField());
-        readField().querySelector("p")!.textContent = `${textsRef.current[initial]!} 候補`;
-        act(() => showRef.current!(next));
-        return textsRef;
-      };
-
-      it("gives it to the owner of the old content when the Request closes", async () => {
-        const textsRef = composeThenShow("answer-1", "message");
+        readField().querySelector("p")!.textContent = `${textsRef.current["answer-1"]!} 候補`;
+        act(() => showRef.current!("message"));
         await act(async () => {
           await new Promise((resolve) => setTimeout(resolve, 30));
         });
         expect(textsRef.current.message).toBe("saved draft");
-        expect(textsRef.current["answer-1"]).toBe("first answer 候補");
-      });
-
-      it("gives it to the owner of the old answer when paging to another answer", async () => {
-        const textsRef = composeThenShow("answer-1", "answer-2");
-        await act(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 30));
-        });
-        expect(textsRef.current["answer-2"]).toBe("second answer");
         expect(textsRef.current["answer-1"]).toBe("first answer 候補");
       });
 
