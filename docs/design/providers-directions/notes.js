@@ -1,0 +1,138 @@
+// PROTOTYPE - the notes drawer (?notes=1, or Notes in the bar): the question, the model the
+// variants assume, how each of Rogier's four questions is answered, what the research found
+// about signing in once, and what this contradicts. Prototype chrome, not part of the design.
+(function () {
+  var HTML = [
+    "<h3>Round 3, step 4: harnesses, and less chrome</h3>",
+    "<ul>",
+    "<li><b>No summary line.</b> The count is on the tab. Rename, Duplicate and Delete sit in a small menu on the selected tab; renaming happens in the tab itself.</li>",
+    "<li><b>Can run in</b> is a fact about an account, not a setting: a Claude plan runs only in Claude Code; a ChatGPT plan in Codex, pi and OpenCode; Z.ai and OpenCode Go in all four. The account sheet lists each harness, and why not where it cannot.</li>",
+    "<li><b>Each account has a default harness</b>, chosen in its sheet: its vendor's own (Claude Code, Codex) unless you pick another, and pi for accounts without one. The harnesses it cannot run in stay in the list, struck through, with why. The global line for \"open models\" is gone. Installing harnesses is the Fleet page's job.</li>",
+    "<li><b>Per profile, per account</b>: the pill on an account's line (\"Codex ▾\") starts at \"Same as the account\" and can pick another harness for this profile only. Open source runs OpenCode Go in OpenCode; Personal runs it in pi.</li>",
+    "<li><b>Per model</b>: a model's ⋯ moves just that model, or <b>Also offer in pi</b>: Work has GPT-6.1 Sol in Codex and in pi. Only then does the composer name the harness on the row (\"in pi\"); each account's head in the composer names its harness.</li>",
+    "</ul>",
+
+    "<h3>Round 3, step 3: I, polished</h3>",
+    "<ul>",
+    "<li><b>New profile asks for a name</b>, with suggestions, and starts from nothing or from a copy of another profile. Rename, Duplicate and Delete sit on the profile's own line.</li>",
+    "<li><b>Add an account to Work</b>: one plain row at the end of the profile's menu. It lists your accounts Work does not use yet, and New account. The account you pick opens its model picker at once.</li>",
+    "<li><b>No projects</b> on this page for now: a profile is a menu a thread uses.</li>",
+    "<li><b>An empty profile teaches</b>: build its menu in three steps, with your accounts as tiles on the left and the composer's menu, empty, on the right.</li>",
+    "<li><b>The preview is an accordion</b>: one profile open at a time, in a fixed order, so a model always sits under its profile's name. composer.html does the same.</li>",
+    "</ul>",
+
+    "<h3>Round 3, step 2: Shared accounts (I)</h3>",
+    "<p>H, rebuilt so accounts are one pool that profiles pick from.</p>",
+    "<ul>",
+    "<li><b>Accounts on top, outside the tabs.</b> Every account once, with the avatars of the profiles that use it. Select a profile and its accounts light up; the others fade, with <b>Use in Work</b> one click away. The tabs no longer look like they own the cards.</li>",
+    "<li><b>Any account in any number of profiles</b>, and the one-per-vendor rule is gone: a profile may hold both Claude accounts, and the menu tells them apart by section. Per-project profiles that share every account work the same way.</li>",
+    "<li><b>One profile, no tabs</b> (<code>state=single</code>): the page reads Accounts, then The menu. \"Split into profiles\" makes the second one; only then do tabs appear.</li>",
+    "<li><b>Popover or browser, by catalog size.</b> Up to 40 models: the quick popover, with a link to the browser. More (OpenRouter's 466): <b>Browse 466 models</b> opens the model browser: search by name, maker or id; filter by maker, by tools, images and reasoning, by context and price; sort; collect in a tray; Add.</li>",
+    "<li><b>Leaving</b>: the × on an account's head takes it out of this profile (its picks go with it). The account sheet's Profiles boxes now work too.</li>",
+    "<li><i>Superseded in step 3: the \"Also yours\" line, the project line, and other profiles folded under the menu.</i></li>",
+    "</ul>",
+    "<p class=\"proto-q\">The browser's facts (maker, context, price, release, tools) are made up here, but OpenRouter's model list carries all of them (research/model-catalogs.md). For a plan account (Z.ai, OpenCode Go) price is moot: the browser would hide that column.</p>",
+
+    "<h3>Round 3: Profiles (H)</h3>",
+    "<p>F, refined on your notes. A wallet is now a <b>Profile</b>.</p>",
+    "<ul>",
+    "<li><b>Profiles are plain tabs</b>, so the accounts are the only cards on the page. More than four scroll; New profile sits at the end.</li>",
+    "<li><b>No Deco face.</b> Avatars and numbers use the UI face.</li>",
+    "<li><b>One rule for every account.</b> Its section lists exactly what is in the menu, nothing else. Add a model opens the same picker for every account: the composer's own selector, with search, families and older models folded. Anthropic shows 14, OpenRouter 466; the picker is the same.</li>",
+    "<li><b>New models</b> come as one quiet line (GPT-6 Astra in Work): Add or Not now. They never join the menu by themselves.</li>",
+    "<li><b>Reorder</b>: drag a model by its handle within its account, or drag an account's head to move its whole part of the menu. Alt+Up and Alt+Down do it from the keyboard. Models stay grouped by account, as in the menu.</li>",
+    "<li><b>The composer</b> (Composer ↗): the profile's accounts are open, and every other profile folds into one row, as today's selector folds other accounts. That holds for any number of profiles. Compare <code>?switch=pick</code>, where the profile is its own pick beside the model.</li>",
+    "</ul>",
+    "<p class=\"proto-q\">Naming: Settings already has Profile (you) and Permission profiles, and GLOSSARY lists \"profile\" under Avoid for provider accounts. One concept, one spelling: maybe \"Model profile\" in the glossary and the code, \"Profile\" on this page.</p>",
+
+    "<h3>Round 2: the Wallet</h3>",
+    "<p>Your three questions had one answer. A <b>Wallet</b> is a named set of accounts, at most one per vendor, with its own model menu. A project picks a wallet; the composer opens on it.</p>",
+    "<ul>",
+    "<li><b>Work Claude and work ChatGPT together.</b> The Work wallet holds Anthropic · Work and OpenAI · Work. payments-api picks Work once and gets both.</li>",
+    "<li><b>Daybreak.</b> Only OpenAI · Work offers it, so it can only appear in Work's menu. It never mixes into Personal.</li>",
+    "<li><b>Opus 4.8 at work only.</b> The menu belongs to the wallet: Work keeps Opus 4.8 (tagged older), Personal does not have it.</li>",
+    "<li><b>The same model from another account.</b> The composer's menu has a tab per wallet. The project's wallet is open; the other tab has its own Opus 5.5.</li>",
+    "<li><b>Shared accounts.</b> One account may sit in two wallets (OpenRouter here), and each wallet picks its own models from it.</li>",
+    "</ul>",
+    "<p>Three ways to draw it, each with its own account row:</p>",
+    "<ul>",
+    "<li><b>E, Menu cards</b>: a column per wallet, and the column <i>is</i> the composer's menu with a box on each model. The account is the head of its own section, so the row and the menu are one thing.</li>",
+    "<li><b>F, Cards on the table</b>: one wallet at a time. Accounts are cards (usage as a big Deco numeral); below, what they offer beside the menu. Point at a card and its lines light up on both sides.</li>",
+    "<li><b>G, The ledger</b>: the quietest. A wallet is two sentences, who pays and what the menu offers; point at Menu to see it as the composer will. Accounts are ledger lines.</li>",
+    "</ul>",
+    "<p>Clicking any account opens its sheet: usage windows, each machine, how it signs in, where it runs, which wallets it pays for. The rows show only name, machines and usage.</p>",
+    "<p><b>Proposed for the book</b>, each usable beyond this page: the <b>monogram</b> (a wallet's initial in the Deco face, in a brass ring); <b>pips</b> (one dot per machine, marigold ring where it waits on you); the <b>gauge</b> (a plan window as a short meter, marigold from 80%); and in F the <b>account card</b>.</p>",
+    "<p class=\"proto-q\">To decide: the word (Wallet? Purse? Billing?). It is a new GLOSSARY term. A project picking a wallet contradicts GLOSSARY's Project (\"no behaviour, no defaults\"). One account per vendor per wallet keeps the menu unambiguous; is that too strict?</p>",
+
+    "<h3>D, the pick of round 1</h3>",
+    "<p>Built on your notes after round 1; round 2 grew out of it.</p>",
+    "<ul>",
+    "<li><b>Models per vendor.</b> Tick Opus, Fable, Sonnet and Haiku once under Anthropic; every Anthropic account shows them. \"Choose per account\" gives one account its own list.</li>",
+    "<li><b>Accounts per project.</b> Where a vendor has two accounts, each project picks one (payments-api and ops pay with Work). The composer starts there; a thread can still take the other account, under Other accounts.</li>",
+    "<li><b>Usage from B</b>, on every account, and now in A and C too.</li>",
+    "<li><b>The rail is the composer's menu</b>, live, for the project you pick. Tick a model and it appears there. composer.html draws the same menu in the real composer.</li>",
+    "<li><b>The menu</b> works like today's: the project's accounts open, other accounts folded with their models, so the same model from another account is two clicks away.</li>",
+    "<li><b>Harness</b> is one choice per vendor (\"Runs in Codex\"). In the composer a small pick beside the model switches it per thread, and only shows when a model can run in more than one harness.</li>",
+    "<li><b>Add models</b> is live: search, filter by vendor, and one switch per vendor on each row, so GLM 5.3 can come from Z.ai, OpenCode Go and OpenRouter at once.</li>",
+    "</ul>",
+    "<p class=\"proto-q\">Contradicts GLOSSARY: a Project is \"purely a way to organise information inside Hercule: no behaviour, no defaults.\" D gives a project a default account. #404 decides.</p>",
+
+    "<h3>The question</h3>",
+    "<p>What does Settings › Providers look like once <b>who pays</b> and <b>what runs it</b> are separate, without adding to your load? And can one sign-in serve every machine?</p>",
+
+    "<h3>The model A to C share</h3>",
+    "<ul>",
+    "<li><b>Account</b>: who pays. One sign-in or key: <code>Anthropic · Work</code>, <code>OpenRouter</code>.</li>",
+    "<li><b>Harness</b>: the agent program on the machines: Claude Code, Codex, pi, OpenCode.</li>",
+    "<li><b>Model</b>: what you pick: Opus 5.5, GLM 5.3.</li>",
+    "<li><b>Menu entry</b> = one model, from one account, in one harness. The composer's menu is exactly this list, in this order. Example: <code>GPT-6.1 Sol · pi</code> is GPT-6.1 Sol, paid by OpenAI · Personal, run by pi.</li>",
+    "</ul>",
+
+    "<h3>Your four questions</h3>",
+    "<ul>",
+    "<li><b>One ChatGPT plan in Codex, pi and OpenCode.</b> OpenAI · Personal runs in all three. B shows three switches on the account; A shows one row of three radios in GPT-6.1 Sol's route; C shows three ticks on one row. Two of them are in the menu: <code>GPT-6.1 Sol · Codex</code> and <code>· pi</code>.</li>",
+    "<li><b>GLM 5.3 from Z.ai, OpenCode Go and OpenRouter.</b> One model, three accounts. A: open GLM 5.3. C: three rows under GLM 5.3. The catalog says \"From Z.ai · Go · OpenRouter\". With <code>state=failed</code>, Z.ai's key is refused and the other two are offered.</li>",
+    "<li><b>Work and personal.</b> A label after the vendor: <code>Anthropic · Work</code>. In the menu the label shows only when the same model comes from both: <code>Opus 5.5 · Work</code>, but plain <code>Sonnet 5.5</code>.</li>",
+    "<li><b>Two ways to sign in to one vendor.</b> Add Anthropic offers long-lived token, sign in per machine, or API key, each with what it means for your machines. The method belongs to the account, so Personal can use a token while Work signs in per machine.</li>",
+    "</ul>",
+
+    "<h3>Rules that keep the load down</h3>",
+    "<ul>",
+    "<li><b>Quiet when healthy.</b> Healthy rows are grey facts. Only what needs you is marigold, only a failure is red. No green ticks.</li>",
+    "<li><b>Machines by exception.</b> \"Every machine\" is two words. A machine is named only when it is missing.</li>",
+    "<li><b>The shortest name that is still clear.</b> A suffix appears only when two entries would read the same.</li>",
+    "<li><b>Defaults decide.</b> A new account ticks only the newest model of each tier. Older models never enter the menu by themselves. Open models get your one default harness.</li>",
+    "<li><b>One place per question.</b> Menu: what can I pick. Accounts: who pays, and does every machine have it. Harnesses: are the programs installed.</li>",
+    "</ul>",
+
+    "<h3>Signing in once: what the research found</h3>",
+    "<ul>",
+    "<li><b>Claude long-lived token</b> (<code>claude setup-token</code>): one year, fixed; a static token with no refresh, so one copy serves every machine at once. Hercule keeps it and passes <code>CLAUDE_CODE_OAUTH_TOKEN</code> at session start. You act once a year. No API tells the end date, so Hercule records the day it was made. Cost: it can only run models, so no usage windows and no account email. Several tokens can live side by side, so renewing never breaks a running session.</li>",
+    "<li><b>Claude sign-in</b> (<code>/login</code>): refresh tokens are single-use; two machines with one copy log each other out. These logins also end now and then (Claude warns 3 days before). So: per machine, and not maintenance-free either.</li>",
+    "<li><b>ChatGPT, Sign in with ChatGPT</b>: access token 1 hour, refresh token 30 days and renewed on every use, rotating. Exactly one place may refresh: the controller. Machines get a fresh 1-hour token; a longer session needs a new one (Codex can fetch it with a command, untested; otherwise restart and resume). OpenAI wants a host ID per host, so the clean form is one quick approval per machine, done from this page, no account picking.</li>",
+    "<li><b>Codex's own ChatGPT login</b>: rotates; per machine, as today.</li>",
+    "<li><b>API keys</b>: no refresh, every machine. OpenRouter keys can carry an end date Hercule can read. OpenCode keys can end too, unreadable. Z.ai plan keys are their own key type since 16 Oct 2026.</li>",
+    "</ul>",
+    "<p>Not designed for: the Agent SDK has an undocumented hook that would let one controller-held Claude login feed every machine. It is undocumented, and keeping Claude.ai session tokens is exactly what Anthropic's terms name.</p>",
+    "<p>Full findings: <code>research/fleet-sign-in.md</code> on <code>research/fleet-sign-in</code>.</p>",
+
+    "<h3>What this contradicts, to decide in #404</h3>",
+    "<ul>",
+    "<li class=\"proto-q\">GLOSSARY and spec 06 §1: a Provider Instance is one account <i>of one harness</i>. Here an account serves several harnesses.</li>",
+    "<li class=\"proto-q\">Spec 06 §11: per-machine login is \"the durable model\". Here a token, a key or a controller-held ChatGPT sign-in reaches every machine.</li>",
+    "<li class=\"proto-q\">GLOSSARY reserves \"account\" for a future Hercule user, and avoids \"harness\" for the adapter. The UI uses both, because they are your words.</li>",
+    "<li class=\"proto-q\">Anthropic's terms: developers \"may not collect, store, or intermediate Claude.ai credentials or session tokens\". Whether a self-hosted tool keeping your own token falls under that is your call.</li>",
+    "<li class=\"proto-q\">Page name: Providers, or Models?</li>",
+    "</ul>",
+
+    "<h3>How to look</h3>",
+    "<p>← and → switch variants. The bar picks the moment (ready, failed, expiring, empty), opens any sheet, and switches theme. Composer ↗ opens the menu the page feeds; add <code>?q=glm</code> or <code>?machine=build-box-2</code> there.</p>",
+  ].join("");
+
+  Pv.notes = function () {
+    var el = document.createElement("aside");
+    el.className = "proto-notes";
+    el.innerHTML = HTML;
+    document.body.appendChild(el);
+  };
+})();

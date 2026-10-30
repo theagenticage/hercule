@@ -1,0 +1,57 @@
+<!doctype html>
+<!-- PROTOTYPE (#405): variants of Settings > Providers in three rounds, switchable with ?variant=
+     and the floating bar. Throwaway: it lives on prototype/desktop-settings-providers, not on main.
+     The book's tokens and components, with the app's tokens.css of today on top. -->
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../shared/page.js"></script>
+    <link rel="stylesheet" href="../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../../apps/desktop/src/renderer/styles/tokens.css" />
+    <link rel="stylesheet" href="../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="providers.css" />
+    <link rel="stylesheet" href="r2.css" />
+    <link rel="stylesheet" href="r3.css" />
+    <meta charset="utf-8" />
+    <title>Providers · Settings · Hercule (prototype)</title>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="settings"></aside>
+      <main class="main">
+        <header class="bar">
+          <span class="crumb">Settings /</span>
+          <h1 class="title" style="margin-left: -6px">Providers</h1>
+          <span class="spacer"></span>
+          <span id="pv-action"></span>
+        </header>
+        <div class="settings">
+          <nav data-setnav="providers"></nav>
+          <div class="set-body" id="pv-body"></div>
+        </div>
+      </main>
+    </div>
+    <script src="../crew-bureau-2/brands.js"></script>
+    <script src="../crew-bureau-2/crew.js"></script>
+    <script src="marks.js"></script>
+    <script src="world.js"></script>
+    <script src="shared.js"></script>
+    <script src="variant-a.js"></script>
+    <script src="variant-b.js"></script>
+    <script src="variant-c.js"></script>
+    <script src="menu-d.js"></script>
+    <script src="variant-d.js"></script>
+    <script src="catalog.js"></script>
+    <script src="r2.js"></script>
+    <script src="r2-sheets.js"></script>
+    <script src="variant-e.js"></script>
+    <script src="variant-f.js"></script>
+    <script src="variant-g.js"></script>
+    <script src="r3.js"></script>
+    <script src="variant-h.js"></script>
+    <script src="browser.js"></script>
+    <script src="variant-i.js"></script>
+    <script src="sheets.js"></script>
+    <script src="notes.js"></script>
+    <script src="proto.js"></script>
+  </body>
+</html>

@@ -1,0 +1,2087 @@
+/* PROTOTYPE - the Providers prototype (#405). Shared parts first, then one block per variant
+   (.va, .vb, .vc), the sheets (.ov-), and last the prototype's own chrome (.proto-), which is
+   not part of the design. Built on the book's system.css, with the app's tokens.css on top so
+   the type and colours are the app's of today (Inter, the retuned themes). */
+
+/* ---------- The frame, as the app draws Settings today ---------- */
+.bar .crumb {
+  color: var(--muted);
+}
+.bar .title {
+  font-size: var(--t-18);
+}
+.set-body {
+  padding-top: 26px;
+  scroll-padding-top: 24px;
+}
+.set-col.pv-col {
+  width: min(820px, 100%);
+  gap: 40px;
+}
+.pv-lead {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* ---------- Shared pieces ---------- */
+/* A section's head: its name, one line on what it holds, and its one action on the right. */
+.pv-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.pv-head h2 {
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.pv-head p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pv-head .spacer {
+  flex: 1;
+}
+/* A mark on a sunken square: the vendor of an account, or a harness. */
+.pv-mk {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--ink);
+}
+.pv-mk--lg {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+.pv-mk.is-off {
+  color: var(--faint);
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+/* Who pays, then where it runs: two marks with their names, in the muted ink. */
+.pv-route {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.pv-route .br,
+.pv-route .ic,
+.pv-route .pi {
+  color: var(--ink);
+  opacity: 0.72;
+}
+.pv-route .pv-in {
+  color: var(--faint);
+}
+.pv-route > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+/* A note at the end of a row: plain facts in faint ink; what waits on the user in marigold; what failed in tomato. */
+.pv-note {
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.pv-note--you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.pv-note--fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.pv-note .dot {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+.dot--you {
+  background: var(--you);
+}
+.pv-chip-default {
+  height: 18px;
+  padding: 0 6px;
+  font-size: var(--t-11);
+}
+.pv-hair {
+  border-top: 1px solid var(--divider, var(--line-soft));
+}
+.pv-link {
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+}
+.pv-link:hover {
+  color: var(--ink);
+}
+.pv-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 9px 0 10px;
+  border-radius: var(--r-btn);
+  background: var(--btn-fill);
+  box-shadow: inset 0 0 0 1px var(--btn-rim);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.pv-select::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  margin: -3px 0 0 3px;
+  border-right: 1.5px solid var(--faint);
+  border-bottom: 1.5px solid var(--faint);
+  transform: rotate(45deg);
+}
+
+/* The empty page: nothing to pay for models yet. Three ways in, then everything else. */
+.pv-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 72px 0 8px;
+  text-align: center;
+}
+.pv-empty h2 {
+  margin: 10px 0 0;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.pv-empty p {
+  margin: 0;
+  max-width: 460px;
+  color: var(--muted);
+}
+.pv-starts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  width: 100%;
+  margin-top: 22px;
+}
+.pv-start {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 14px 14px 15px;
+  border-radius: var(--r-lg);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  text-align: left;
+  transition: background var(--dur-1), box-shadow var(--dur-1);
+}
+.pv-start:hover {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-2);
+}
+.pv-start-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+}
+.pv-start b {
+  font-weight: var(--w-medium);
+}
+.pv-start small {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.pv-empty-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ================================================================== A: The menu */
+/* One list, the composer's own menu, in its order. Accounts and harnesses sit below it. */
+.va-list {
+  border-bottom: 1px solid var(--divider, var(--line-soft));
+}
+.va-entry {
+  border-top: 1px solid var(--divider, var(--line-soft));
+}
+.va-row {
+  display: grid;
+  grid-template-columns: 14px 32px minmax(0, 1fr) auto 28px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 2px 8px 0;
+  text-align: left;
+  border-radius: var(--r-md);
+}
+.va-row:hover .va-grip {
+  opacity: 1;
+}
+.va-grip {
+  color: var(--faint);
+  opacity: 0;
+  cursor: grab;
+  transition: opacity var(--dur-1);
+}
+.va-name {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.va-name b {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: var(--w-medium);
+}
+.va-end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.va-entry.is-open {
+  padding-bottom: 14px;
+}
+.va-entry.is-open .va-row .va-chev {
+  transform: rotate(90deg);
+}
+.va-chev {
+  color: var(--faint);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.va-entry.is-fail .va-row {
+  background: linear-gradient(90deg, var(--fail-tint), transparent 72%);
+}
+/* The route editor: every account that offers the model, against every harness. */
+.va-route {
+  margin: 2px 0 0 58px;
+  padding: 14px 16px 12px;
+  border-radius: var(--r-lg);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.va-route-q {
+  margin: 0 0 12px;
+  font-weight: var(--w-medium);
+}
+.va-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(4, 96px);
+  align-items: center;
+}
+.va-grid > * {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
+.va-grid .va-gh {
+  min-height: 26px;
+  white-space: nowrap;
+  justify-content: center;
+  gap: 5px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.va-grid .va-gh .br,
+.va-grid .va-gh .pi {
+  color: var(--muted);
+}
+.va-grid .va-src {
+  gap: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+.va-grid .va-src small {
+  display: block;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.va-grid .va-src b {
+  font-weight: var(--w-medium);
+}
+.va-grid .va-cell {
+  justify-content: center;
+  border-top: 1px solid var(--line-soft);
+}
+/* One cell: a radio in the book's ink. A route that cannot exist is a short faint rule. */
+.va-dot {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--faint) 70%, transparent);
+  transition: box-shadow var(--dur-1);
+}
+.va-dot:hover {
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+.va-dot.is-on {
+  box-shadow: inset 0 0 0 1.5px var(--ink), inset 0 0 0 4.5px var(--bg), inset 0 0 0 9px var(--ink);
+}
+.va-dot.is-other {
+  box-shadow: inset 0 0 0 1.5px var(--faint), inset 0 0 0 4.5px var(--bg), inset 0 0 0 9px color-mix(in oklab, var(--faint) 60%, transparent);
+}
+.va-dot.is-fail {
+  box-shadow: inset 0 0 0 1.5px var(--fail), inset 0 0 0 4.5px var(--bg), inset 0 0 0 9px var(--fail);
+}
+.va-no {
+  width: 10px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--line);
+}
+.va-route-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.va-route-why {
+  margin: 10px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.va-more {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* Accounts and harnesses: one line each; a fact column, a reach column, and the row's action. */
+.va-acct,
+.va-harn {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 156px 252px 28px;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 2px 8px 0;
+  border-top: 1px solid var(--divider, var(--line-soft));
+}
+.va-harn {
+  grid-template-columns: 32px minmax(0, 1fr) 232px 28px;
+}
+.va-acct:last-child,
+.va-harn:last-child {
+  border-bottom: 1px solid var(--divider, var(--line-soft));
+}
+.va-who {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.va-who b {
+  font-weight: var(--w-medium);
+}
+.va-who span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.va-method {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.va-reach {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+.va-acct.is-fail {
+  background: linear-gradient(90deg, var(--fail-tint), transparent 72%);
+}
+.va-pref {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 10px 2px 10px 44px;
+  border-bottom: 1px solid var(--divider, var(--line-soft));
+}
+
+/* ================================================================== B: The wallet */
+/* Accounts first, one block each; the composer's menu rides along in the right rail. */
+.vb {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 252px;
+  gap: 28px;
+  width: min(940px, 100%);
+  margin: 0 auto;
+  align-items: start;
+}
+.vb-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.vb-acct {
+  padding: 18px 0 20px;
+  border-top: 1px solid var(--divider, var(--line-soft));
+}
+.vb-acct:first-of-type {
+  border-top: 0;
+  padding-top: 4px;
+}
+.vb-acct.is-fail {
+  margin: 0 -14px;
+  padding-left: 14px;
+  padding-right: 14px;
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--fail-tint), transparent 80%);
+}
+.vb-acct.is-fail + .vb-acct {
+  border-top-color: transparent;
+}
+.vb-top {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 236px 28px;
+  align-items: center;
+  gap: 12px;
+}
+.vb-id {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.vb-id b {
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.vb-id span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.vb-use {
+  display: grid;
+  gap: 6px;
+}
+.vb-use-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.vb-use-top b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.vb-use .meter i {
+  background: var(--ink);
+}
+.vb-facts {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 12px 12px;
+  margin-top: 14px;
+  padding-left: 52px;
+}
+.vb-facts > small {
+  padding-top: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.vb-fact {
+  display: grid;
+  gap: 7px;
+  align-content: start;
+  min-width: 0;
+}
+.vb-fact--wide {
+  grid-column: 1 / -1;
+}
+.vb-fact > small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.vb-fact > p {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.vb-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--t-12);
+}
+.vb-line .muted {
+  font-size: var(--t-12);
+}
+/* A machine, or a harness the account runs in: a small tablet. Off is a dashed outline. */
+.vb-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.vb-tab .br,
+.vb-tab .pi,
+.vb-tab .ic {
+  opacity: 0.8;
+}
+.vb-tab.is-off {
+  background: none;
+  color: var(--faint);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-weight: var(--w-regular);
+}
+.vb-tab.is-you {
+  background: var(--you-tint);
+  color: var(--you-ink);
+}
+button.vb-tab:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+/* A harness the account runs in is a switch: the check means on. */
+.vb-sw {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px 0 7px;
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  transition: box-shadow var(--dur-1), background var(--dur-1);
+}
+.vb-sw .vb-box {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--faint) 60%, transparent);
+  color: var(--field);
+}
+.vb-sw.is-on {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1);
+}
+.vb-sw.is-on .vb-box {
+  background: var(--ink);
+  box-shadow: none;
+}
+.vb-sw:not(.is-on) {
+  color: var(--muted);
+}
+.vb-models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.vb-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.vb-model small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+}
+.vb-model.is-default {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--surface);
+}
+.vb-model.is-default small {
+  color: color-mix(in oklab, var(--surface) 70%, transparent);
+}
+.vb-model--add {
+  box-shadow: none;
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.vb-model--add:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.vb-harnesses {
+  display: grid;
+  gap: 0;
+  margin-top: 6px;
+  padding-top: 18px;
+  border-top: 1px solid var(--divider, var(--line-soft));
+}
+.vb-harnesses h3 {
+  margin: 0 0 8px;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.vb-hrow {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  font-size: var(--t-13);
+}
+.vb-hrow .ver {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* The rail: the composer's menu, as it will read. */
+.vb-rail {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 0;
+  padding: 14px 8px 8px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+}
+.vb-rail-h {
+  display: grid;
+  gap: 2px;
+  padding: 0 8px 10px;
+}
+.vb-rail-h b {
+  font-weight: var(--w-bold);
+}
+.vb-rail-h span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vb-pick {
+  display: grid;
+  grid-template-columns: 10px 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 8px 4px 2px;
+  border-radius: var(--r-md);
+}
+.vb-pick:hover {
+  background: var(--hover);
+}
+.vb-pick:hover .va-grip {
+  opacity: 1;
+}
+.vb-pick-t {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.vb-pick-t b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.vb-pick-t small {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.vb-pick .br,
+.vb-pick .pi {
+  color: var(--muted);
+}
+.vb-rail-foot {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft);
+}
+.vb-rail-foot .line {
+  font-size: var(--t-12);
+}
+
+/* ================================================================== C: The switchboard */
+/* Accounts on top as tiles; then one table: model and account down, harness across. */
+.vc {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  width: min(860px, 100%);
+  margin: 0 auto;
+}
+.vc-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.vc-tile {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 3px 10px;
+  min-height: 60px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--bg);
+  text-align: left;
+  transition: box-shadow var(--dur-1);
+}
+.vc-tile:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.vc-tile b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.vc-tile > span:nth-child(3) {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.vc-tile.is-you {
+  background: var(--you-tint);
+}
+.vc-tile.is-you > span:nth-child(3) {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.vc-tile.is-fail {
+  background: var(--fail-tint);
+}
+.vc-tile.is-fail > span:nth-child(3) {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.vc-tile--add {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+}
+.vc-tile .vc-use {
+  grid-column: 2;
+  margin-top: 6px;
+}
+.vc-table {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) repeat(4, 92px);
+}
+.vc-table > * {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+/* The header: one column per harness, with its version and where it is missing. */
+.vc-th {
+  position: sticky;
+  top: -26px;
+  z-index: 2;
+  flex-direction: column;
+  align-items: center !important;
+  justify-content: flex-end;
+  gap: 3px;
+  min-height: 58px;
+  padding: 8px 0 9px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-soft);
+  font-weight: var(--w-medium);
+  text-align: center;
+}
+.vc-th:first-child,
+.vc-th:nth-child(2) {
+  align-items: flex-start !important;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.vc-th .vc-h {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--t-12);
+}
+.vc-th small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+}
+.vc-th small.you-ink {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.vc-fam {
+  grid-column: 1 / -1;
+  gap: 8px;
+  min-height: 40px;
+  padding-top: 14px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.vc-fam small {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+.vc-m,
+.vc-a,
+.vc-c {
+  min-height: 40px;
+  border-top: 1px solid var(--line-soft);
+}
+.vc-m {
+  gap: 8px;
+  font-weight: var(--w-medium);
+}
+.vc-m.is-cont {
+  border-top-color: transparent;
+}
+.vc-m small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+}
+.vc-a {
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vc-a .br,
+.vc-a .pi {
+  color: var(--ink);
+  opacity: 0.75;
+}
+.vc-a .pv-note {
+  font-size: var(--t-11);
+}
+.vc-c {
+  justify-content: center;
+}
+.vc-row-fail {
+  background: var(--fail-tint);
+}
+/* A cell: a checkbox in the book's ink. Checked means "this route is in the menu". */
+.vc-box {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--faint) 55%, transparent);
+  color: var(--surface);
+  transition: box-shadow var(--dur-1), background var(--dur-1);
+}
+.vc-box:hover {
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+.vc-box.is-on {
+  background: var(--ink);
+  box-shadow: none;
+}
+.vc-box.is-fail {
+  background: var(--fail);
+  box-shadow: none;
+}
+.vc-star {
+  position: absolute;
+  left: calc(100% + 5px);
+  top: 50%;
+  transform: translateY(-52%);
+  color: var(--ink);
+  font-size: 11px;
+}
+.vc-no {
+  width: 10px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--line);
+}
+.vc-collapsed .vc-a {
+  color: var(--faint);
+}
+.vc-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 14px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.vc-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.vc-legend .vc-box {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+}
+
+/* ================================================================== Sheets */
+/* A sheet is a glass dialog over the window: a title, its steps, then its buttons. */
+.ov-scrim {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 11vh;
+  background: var(--scrim);
+}
+.ov {
+  width: 520px;
+  max-width: calc(100% - 48px);
+  max-height: 78vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.ov--wide {
+  width: 820px;
+  height: 640px;
+}
+.ov-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px 12px;
+}
+.ov-h h2 {
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.ov-h .ov-step {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-h .icon-btn {
+  margin-left: auto;
+}
+.ov-b {
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 18px 16px;
+}
+.ov-b > p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.ov-f {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line-soft);
+}
+.ov-f .note {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-f .spacer {
+  flex: 1;
+}
+/* Vendors, as a list of rows: mark, name, what it offers. */
+.ov-vendors {
+  display: grid;
+  gap: 2px;
+  margin: 0 -8px;
+}
+.ov-vendor {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.ov-vendor:hover {
+  background: var(--hover);
+}
+.ov-vendor b {
+  display: block;
+  font-weight: var(--w-medium);
+}
+.ov-vendor small {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-vendor .chev {
+  color: var(--faint);
+}
+.ov-group {
+  margin: 12px 0 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.02em;
+}
+/* A method: a radio card, with what it means for the machines under its name. */
+.ov-methods {
+  display: grid;
+  gap: 8px;
+}
+.ov-method {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 4px 12px;
+  padding: 12px 14px 13px;
+  border-radius: var(--r-md);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  text-align: left;
+  transition: box-shadow var(--dur-1), background var(--dur-1);
+}
+.ov-method:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.ov-method.is-on {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1.5px var(--ink), var(--shadow-1);
+}
+.ov-method .va-dot {
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+}
+.ov-method.is-on .va-dot {
+  box-shadow: inset 0 0 0 1.5px var(--ink), inset 0 0 0 4px var(--raised), inset 0 0 0 8px var(--ink);
+}
+.ov-method-t {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ov-method-t b {
+  font-weight: var(--w-medium);
+}
+.ov-method p {
+  grid-column: 2;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.ov-reach {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.ov-reach .ic {
+  color: var(--muted);
+}
+.ov-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 16px;
+}
+.ov-field label {
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.ov-field small {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: var(--field);
+}
+.ov-input::placeholder {
+  color: var(--faint);
+}
+/* The browser step: what is happening, the code to type or paste, and what Hercule waits for. */
+.ov-wait {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 10px 0 6px;
+  text-align: center;
+}
+.ov-wait p {
+  margin: 0;
+  max-width: 400px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.ov-code {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+.ov-code span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 44px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 600;
+}
+.ov-code i {
+  width: 10px;
+}
+.ov-url {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--ink);
+  animation: ov-spin 0.9s linear infinite;
+}
+@keyframes ov-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ov-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-tip {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 16px;
+  padding: 11px 12px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.ov-tip b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.ov-done {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.ov-done b {
+  display: block;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.ov-done span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ov-picks {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+.ov-pick {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 38px;
+  border-top: 1px solid var(--line-soft);
+}
+.ov-pick b {
+  font-weight: var(--w-medium);
+}
+.ov-pick small {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-pick-more {
+  padding-top: 10px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* The catalog: accounts on the left, the models by family on the right. */
+.ov-cat {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+}
+.ov-cat-side {
+  overflow: auto;
+  padding: 6px 8px 12px;
+  border-right: 1px solid var(--line-soft);
+}
+.ov-cat-side .line {
+  font-size: var(--t-13);
+}
+.ov-cat-side .line.is-on {
+  background: var(--selected);
+}
+.ov-cat-side .line .br,
+.ov-cat-side .line .pi,
+.ov-cat-side .line .ic {
+  color: var(--muted);
+}
+.ov-cat-side .line .grow {
+  color: var(--ink);
+}
+.ov-cat-main {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 18px 16px;
+}
+.ov-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0 10px;
+  background: var(--glass-fill);
+}
+.ov-search .field {
+  flex: 1;
+}
+.ov-search .field .ic {
+  color: var(--faint);
+}
+.ov-fam {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 4px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.ov-fam small {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+.ov-mrow {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  padding: 5px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.ov-mrow-t {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.ov-mrow-t b {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: var(--w-medium);
+}
+.ov-mrow-t small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ov-mrow .ov-from {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+.ov-mrow .ov-from .br,
+.ov-mrow .ov-from .pi {
+  opacity: 0.75;
+}
+.ov-mrow.is-in {
+  color: var(--faint);
+}
+.ov-mrow.is-in .ov-mrow-t b {
+  color: var(--muted);
+}
+.ov-older {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ov-older .ic {
+  color: var(--faint);
+}
+.ov-count {
+  margin: 14px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-align: center;
+}
+.ov-cap {
+  display: inline-flex;
+  height: 18px;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.ov-cap--new {
+  background: var(--ok-tint);
+  color: var(--ok);
+}
+
+/* ================================================================== The prototype's own chrome */
+/* Not part of the design: the switcher bar and the notes drawer. Dark ink in every theme, so it
+   never reads as the app. */
+.proto-bar {
+  position: fixed;
+  z-index: 60;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 40px;
+  padding: 0 6px;
+  border-radius: 12px;
+  background: #16181d;
+  color: #e9e6df;
+  box-shadow: 0 10px 30px -8px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.08);
+  font: 500 12px/1 ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: normal;
+}
+.proto-bar button,
+.proto-bar select {
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.proto-bar button {
+  padding: 0 9px;
+}
+.proto-bar button:hover,
+.proto-bar select:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+.proto-bar select {
+  padding: 0 6px;
+  cursor: pointer;
+}
+.proto-bar select option {
+  color: #111;
+}
+.proto-bar .proto-v {
+  min-width: 120px;
+  text-align: center;
+  white-space: nowrap;
+}
+.proto-bar select {
+  max-width: 190px;
+}
+.proto-bar a button {
+  white-space: nowrap;
+}
+.proto-bar .proto-v b {
+  color: #fff;
+}
+.proto-bar .proto-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: rgb(255 255 255 / 0.16);
+}
+.proto-bar .proto-tag {
+  padding: 0 8px 0 6px;
+  color: #f2b84b;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+.proto-notes {
+  position: fixed;
+  z-index: 59;
+  top: 12px;
+  right: 12px;
+  bottom: 64px;
+  width: 440px;
+  overflow: auto;
+  padding: 18px 20px 24px;
+  border-radius: 14px;
+  background: #16181d;
+  color: #d9d6cf;
+  box-shadow: 0 20px 50px -12px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.08);
+  font: 400 12.5px/1.55 ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: normal;
+}
+.proto-notes h3 {
+  margin: 18px 0 6px;
+  color: #fff;
+  font-size: 13px;
+}
+.proto-notes h3:first-child {
+  margin-top: 0;
+}
+.proto-notes p,
+.proto-notes ul {
+  margin: 0 0 8px;
+}
+.proto-notes ul {
+  padding-left: 18px;
+}
+.proto-notes li {
+  margin: 3px 0;
+}
+.proto-notes b {
+  color: #fff;
+  font-weight: 600;
+}
+.proto-notes code {
+  color: #f2b84b;
+  font-size: 11.5px;
+}
+.proto-notes .proto-q {
+  color: #f2b84b;
+}
+
+/* ================================================================== D: By vendor */
+/* One block per vendor: its accounts with their usage, the models you tick, where they run.
+   The composer's own menu rides beside it, for the project you pick. */
+.vd {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 316px;
+  gap: 32px;
+  width: min(980px, 100%);
+  margin: 0 auto;
+  align-items: start;
+}
+.vd-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.vd-main > .pv-lead {
+  margin-bottom: 10px;
+}
+.vd-v {
+  padding: 18px 0 18px;
+  border-top: 1px solid var(--divider, var(--line-soft));
+}
+.vd-main > .pv-lead + .vd-v {
+  border-top: 0;
+}
+.vd-vh {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 12px;
+}
+.vd-vt {
+  display: grid;
+  gap: 1px;
+}
+.vd-vt b {
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.vd-vt span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vd-accts,
+.vd-models,
+.vd-run {
+  margin-left: 52px;
+}
+.vd-accts {
+  margin-top: 10px;
+}
+/* An account: its name and facts, then its usage, then its menu. */
+.vd-acct {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 176px 28px;
+  align-items: center;
+  gap: 16px;
+  min-height: 48px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.vd-acct:first-child {
+  border-top: 0;
+}
+.vd-acct.is-fail {
+  margin: 0 -10px;
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  background: var(--fail-tint);
+}
+.vd-an {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.vd-an b {
+  font-weight: var(--w-medium);
+}
+.vd-an b .vd-used {
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.vd-an > span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vd-act {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.vd-use {
+  display: grid;
+  gap: 5px;
+}
+.vd-use-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.vd-use-top b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.vd-use .meter {
+  height: 5px;
+}
+.vd-use .meter i {
+  background: var(--ink);
+}
+.vd-models {
+  margin-top: 12px;
+}
+.vd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* A model switch: the book's checkbox in a tablet. Off is a quiet outline. */
+.vd-sw {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px 0 7px;
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  transition: box-shadow var(--dur-1), background var(--dur-1), color var(--dur-1);
+}
+.vd-sw:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.vd-sw .vb-box {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--faint) 60%, transparent);
+  color: var(--field);
+}
+.vd-sw.is-on {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1);
+  color: var(--ink);
+}
+.vd-sw.is-on .vb-box {
+  background: var(--ink);
+  box-shadow: none;
+}
+.vd-sw small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+}
+.vd-sw--sm {
+  height: 24px;
+  padding: 0 8px 0 6px;
+  font-size: var(--t-11);
+}
+.vd-sw--sm .vb-box {
+  width: 12px;
+  height: 12px;
+}
+.vd-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vd-more:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.vd-hint {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.vd-per {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.vd-per-n {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.vd-reset {
+  margin-left: 6px;
+  font-size: var(--t-12);
+}
+.vd-run {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vd-run .br,
+.vd-run .pi {
+  color: var(--ink);
+  opacity: 0.7;
+}
+.vd-run .faint {
+  margin-left: 4px;
+}
+/* A native select dressed as the book's quiet field: keeps the keyboard and the OS menu. */
+.vd-select {
+  height: 24px;
+  padding: 0 22px 0 8px;
+  border: 0;
+  border-radius: var(--r-btn);
+  background: var(--btn-fill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5l3 3 3-3' fill='none' stroke='%23888' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 7px center;
+  box-shadow: inset 0 0 0 1px var(--btn-rim);
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  appearance: none;
+  cursor: pointer;
+}
+.vd-select--box {
+  width: 100%;
+  height: 30px;
+  font-size: var(--t-13);
+}
+.vd-sec {
+  padding-top: 22px;
+  margin-top: 6px;
+  border-top: 1px solid var(--divider, var(--line-soft));
+}
+.vd-ptable {
+  display: grid;
+  align-items: center;
+  gap: 0 16px;
+}
+.vd-ph {
+  padding: 0 0 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.vd-pn,
+.vd-pc {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  border-top: 1px solid var(--line-soft);
+}
+/* The rail: the composer's menu, drawn as the composer draws it. */
+.vd-rail {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 10px;
+}
+.vd-rail-h {
+  display: grid;
+  gap: 4px;
+  padding: 0 4px;
+}
+.vd-rail-h b {
+  font-weight: var(--w-bold);
+}
+.vd-rail-h > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vd-rail-foot {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.vd-rail-foot .pv-link {
+  font-size: var(--t-12);
+}
+
+/* ---------- The composer's menu in D's model (rail and composer page) ---------- */
+.md {
+  padding: 6px;
+  border-radius: var(--r-lg);
+}
+.md-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin: 2px 2px 4px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--faint);
+}
+.md-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--ink);
+  font-size: var(--t-13);
+}
+.md-list {
+  max-height: 540px;
+  overflow: auto;
+}
+.md-gh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px 3px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+}
+.md-gh .br,
+.md-gh .pi {
+  color: var(--muted);
+}
+.md-gh-r {
+  margin-left: auto;
+  font-weight: var(--w-regular);
+}
+.md-gh--other {
+  padding-top: 6px;
+}
+.md-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 30px;
+  padding: 3px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.md-row:hover,
+.md-row.is-hot {
+  background: var(--hover);
+}
+.md-row b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.md-row b small {
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+}
+.md-row.is-dim b {
+  color: var(--faint);
+}
+.md-row--in {
+  padding-left: 30px;
+}
+.md-row--x {
+  grid-template-columns: minmax(0, 1fr) auto 22px;
+}
+.md-ok {
+  color: var(--ink);
+}
+.md-use {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.md-add {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--muted);
+}
+.md-add:hover {
+  background: var(--press);
+  color: var(--ink);
+}
+.md-sep {
+  height: 1px;
+  margin: 6px 4px 0;
+  background: var(--line-soft);
+}
+.md-acct {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto 12px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 3px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.md-acct:hover {
+  background: var(--hover);
+}
+.md-acct .br,
+.md-acct .pi {
+  color: var(--muted);
+}
+.md-acct b {
+  font-weight: var(--w-medium);
+}
+.md-n {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.md-chev {
+  color: var(--faint);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.md-acct.is-open .md-chev {
+  transform: rotate(90deg);
+}
+.md-none {
+  margin: 10px 8px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ---------- The interactive catalog ---------- */
+.cat-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 5px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.cat-t {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.cat-t b {
+  font-weight: var(--w-medium);
+}
+.cat-t mark {
+  border-radius: 3px;
+  background: var(--you-tint);
+  color: inherit;
+}
+.cat-tier {
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.cat-t small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.cat-srcs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 330px;
+}
+.cat-src {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px 0 6px;
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.cat-src:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.cat-src .vb-box {
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 3.5px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--faint) 60%, transparent);
+  color: var(--field);
+}
+.cat-src.is-on {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1);
+  color: var(--ink);
+}
+.cat-src.is-on .vb-box {
+  background: var(--ink);
+  box-shadow: none;
+}
+.cat-src .br,
+.cat-src .pi {
+  opacity: 0.75;
+}
+button.cat-more {
+  width: 100%;
+  text-align: left;
+}
+button.cat-more:hover {
+  color: var(--ink);
+}
+.cat-empty {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 60px 0;
+  color: var(--muted);
+  text-align: center;
+}
+.cat-empty span {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.cat-note {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 480px;
+}

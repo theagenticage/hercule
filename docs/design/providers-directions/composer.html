@@ -1,0 +1,306 @@
+<!doctype html>
+<!-- PROTOTYPE (#405): the composer's model menu in round 3, fed by the profiles (r3.js).
+     ?switch=rows|pick compares two ways to reach another profile; ?project=payments-api opens
+     on Work; ?q=glm filters; ?open=profile opens the profile pick. -->
+<html lang="en" data-theme="whitehaven">
+  <head>
+    <script src="../shared/page.js"></script>
+    <link rel="stylesheet" href="../crew-bureau-2/tokens.css" />
+    <link rel="stylesheet" href="../../../apps/desktop/src/renderer/styles/tokens.css" />
+    <link rel="stylesheet" href="../crew-bureau-2/system.css" />
+    <link rel="stylesheet" href="providers.css" />
+    <link rel="stylesheet" href="r2.css" />
+    <link rel="stylesheet" href="r3.css" />
+    <meta charset="utf-8" />
+    <title>New thread · model menu (prototype)</title>
+    <style>
+      .hello {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        padding: 0 0 170px;
+      }
+      .hello .column {
+        width: min(700px, 100% - 48px);
+        margin: 0 auto;
+      }
+      .newbie {
+        display: grid;
+        justify-items: center;
+        gap: 14px;
+        margin-bottom: 26px;
+        text-align: center;
+      }
+      .newbie h1 {
+        margin: 0;
+        font-size: var(--t-20);
+        font-weight: var(--w-bold);
+        letter-spacing: -0.015em;
+      }
+      .newbie p {
+        margin: -6px 0 0;
+        color: var(--muted);
+      }
+      .newbie-face {
+        display: grid;
+        place-items: center;
+        width: 92px;
+        height: 92px;
+        border-radius: 50%;
+        background: var(--sunken);
+      }
+      .composer {
+        position: relative;
+      }
+      /* The model menu: a glass popover over the composer, its right edge on the model pill's. */
+      .mm {
+        position: absolute;
+        z-index: 10;
+        right: 56px;
+        bottom: calc(100% - 46px);
+        width: 340px;
+        padding: 6px;
+        border-radius: var(--r-lg);
+      }
+      .mm .md-list {
+        max-height: 430px;
+      }
+      .mm-search {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 34px;
+        margin: 2px 2px 6px;
+        padding: 0 10px;
+        border-radius: var(--r-md);
+        background: var(--field);
+        box-shadow: inset 0 0 0 1px var(--line-soft);
+        color: var(--faint);
+      }
+      .mm-search input {
+        flex: 1;
+        border: 0;
+        outline: 0;
+        background: none;
+        color: var(--ink);
+      }
+      .mm-h {
+        padding: 8px 8px 4px;
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-weight: var(--w-bold);
+        letter-spacing: 0.02em;
+      }
+      .mm-row {
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr) auto 14px;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        min-height: 34px;
+        padding: 4px 8px;
+        border-radius: var(--r-md);
+        text-align: left;
+      }
+      .mm-row:hover,
+      .mm-row.is-hot {
+        background: var(--hover);
+      }
+      .mm-row b {
+        overflow: hidden;
+        font-weight: var(--w-medium);
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .mm-row .br,
+      .mm-row .pi {
+        color: var(--muted);
+      }
+      .mm-row .mm-h2 {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--faint);
+        font-size: var(--t-12);
+        white-space: nowrap;
+      }
+      .mm-row .mm-h2 .br,
+      .mm-row .mm-h2 .pi {
+        color: var(--faint);
+      }
+      .mm-row .ok {
+        color: var(--ink);
+      }
+      .mm-row.is-dim b,
+      .mm-row.is-dim .br {
+        color: var(--faint);
+      }
+      .mm-row.is-dim .mm-h2 {
+        color: var(--you-ink);
+      }
+      .mm-row small {
+        display: block;
+        color: var(--faint);
+        font-size: var(--t-11);
+        font-weight: var(--w-regular);
+      }
+      .mm-add {
+        display: grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        color: var(--muted);
+      }
+      .mm-add:hover {
+        background: var(--press);
+        color: var(--ink);
+      }
+      .mm-foot {
+        margin-top: 4px;
+        padding-top: 4px;
+        border-top: 1px solid var(--line-soft);
+      }
+      .mm-foot .line {
+        font-size: var(--t-12);
+      }
+      .mm-foot kbd {
+        margin-left: auto;
+      }
+      .pick--on {
+        background: var(--selected);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <aside data-side="new"></aside>
+      <main class="main">
+        <header class="top">
+          <nav class="pill" aria-label="Threads in this workspace">
+            <span class="pill-crumb"><span class="proj proj--webshop">webshop</span></span>
+            <a class="ptab is-on" href="#" aria-current="page"><i data-i="compose" data-size="14"></i>New thread</a>
+          </nav>
+        </header>
+        <div class="hello">
+          <div class="column">
+            <div class="newbie">
+              <span class="newbie-face"><i data-face="New thread in webshop" data-pose="idle" data-size="68"></i></span>
+              <h1>What should the agent do in webshop?</h1>
+              <p>It gets its own worktree of webshop, on a new branch from remote default.</p>
+            </div>
+            <div class="composer">
+              <div class="composer-card">
+                <textarea class="composer-input" rows="2" placeholder="Say what you want done…"></textarea>
+                <div class="composer-row">
+                  <button class="icon-btn" title="Attach"><i data-i="plus"></i></button>
+                  <button class="pick"><i data-i="shield" data-size="14"></i>Auto-accept edits</button>
+                  <button class="pick"><i data-i="sliders" data-size="14"></i>High</button>
+                  <span class="spacer"></span>
+                  <button class="pick pick--pill pick--on" id="mm-pill"></button>
+                  <button class="icon-btn" title="Dictate"><i data-i="mic"></i></button>
+                  <button class="send send--off" title="Send"><i data-i="send"></i></button>
+                </div>
+              </div>
+              <div class="lip">
+                <span><i data-i="worktree" data-size="13"></i>New worktree</span>
+                <span><i data-i="branch" data-size="13"></i>remote default</span>
+                <span class="spacer"></span>
+                <span id="mm-machine"></span>
+              </div>
+              <div class="mm md pop" id="mm"></div>
+              <div class="pf-menu pop" id="pf" hidden></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script src="../crew-bureau-2/brands.js"></script>
+    <script src="../crew-bureau-2/crew.js"></script>
+    <script src="marks.js"></script>
+    <script src="world.js"></script>
+    <script src="shared.js"></script>
+    <script src="menu-d.js"></script>
+    <script src="r2.js"></script>
+    <script src="r3.js"></script>
+    <script>
+      // PROTOTYPE - the composer's model menu in round 3, two ways to reach another profile:
+      //   ?switch=rows (default)  every profile is a head of an accordion, one open at a time;
+      //   ?switch=pick            the profile is its own pick beside the model, and the model
+      //                           menu shows only the current profile. ?open=profile opens it.
+      // ?project= picks the project, ?q= filters.
+      (function () {
+        var W = World, P = Pv.P3, R = Pv.R, mark = Pv.mark, icon = Crew.icon;
+        var params = new URLSearchParams(location.search);
+        var project = params.get("project") || "webshop";
+        var mode = params.get("switch") === "pick" ? "pick" : "rows";
+        var machine = params.get("machine") || "studio-mac";
+        var q = params.get("q") || "";
+        var prof = P.profileOf(project);
+        var open = {};
+        var current = [prof.id].concat(P.state.defaults[prof.id]);
+        var acc = prof.id;
+
+        /** Returns the menu: in rows mode an accordion of every profile; in pick mode only the current profile. */
+        function list() {
+          return mode === "pick"
+            ? P.sectionsHTML(prof, q.trim().toLowerCase(), { current: current }) || '<p class="md-none">No model matches.</p>'
+            : P.accordionHTML(acc, { current: current, query: q });
+        }
+        var profOpen = params.get("open") === "profile";
+
+        function draw() {
+          var mm = document.getElementById("mm");
+          mm.hidden = profOpen;
+          mm.innerHTML =
+            '<label class="md-search">' + icon("search", 14) + '<input data-q placeholder="Search ' + (mode === "pick" ? P.count(prof) + " models in " + prof.name : W.catalogCount() + " models") + '" value="' + q + '" /></label>' +
+            '<div class="md-list">' + list() + "</div>" +
+            '<div class="mm-foot"><a class="line" href="index.html?variant=h">' + icon("sliders", 14) + '<span class="grow" style="color:var(--ink)">Manage models</span><kbd>⌘,</kbd></a></div>';
+          mm.querySelectorAll("[data-ac]").forEach(function (b) {
+            b.addEventListener("click", function () { acc = acc === b.dataset.ac ? "" : b.dataset.ac; draw(); });
+          });
+          var input = mm.querySelector("[data-q]");
+          input.addEventListener("input", function () {
+            q = input.value;
+            mm.querySelector(".md-list").innerHTML = list();
+          });
+          var pf = document.getElementById("pf");
+          pf.hidden = !profOpen;
+          pf.innerHTML = P.state.profiles.map(function (x) {
+            var home = P.profileOf(project).id === x.id;
+            return '<button class="pf-row' + (x.id === prof.id ? " is-cur" : "") + '" data-prof="' + x.id + '">' + P.avatar(x, "sm") + "<b>" + x.name + "</b><small>" + (home ? "default · " : "") + P.count(x) + " models" + '</small><span class="pf-ok">' + (x.id === prof.id ? icon("check", 14) : "") + "</span></button>";
+          }).join("") + '<div class="mm-foot"><a class="line" href="index.html?variant=h">' + icon("plus", 14) + '<span class="grow">New profile</span></a></div>';
+          pf.querySelectorAll("[data-prof]").forEach(function (b) {
+            b.addEventListener("click", function () { prof = P.profile(b.dataset.prof); current = [prof.id].concat(P.state.defaults[prof.id]); acc = prof.id; profOpen = false; draw(); pills(); });
+          });
+        }
+
+        function pills() {
+          var a = W.account(current[1]), m = W.catalogModel(current[2]);
+          var v = a.vendor;
+          var many = W.HARNESSES.filter(function (h) { return a.harnesses.indexOf(h.id) !== -1; }).length > 1;
+          var harness = W.harness(a.harnesses[0] === "claude-code" ? "claude-code" : v === "openai" ? "codex" : "pi");
+          var row = document.querySelector(".composer-row");
+          row.querySelectorAll("[data-extra]").forEach(function (x) { x.remove(); });
+          var pill = document.getElementById("mm-pill");
+          pill.innerHTML = mark(W.VENDORS[v].mark, 13) + m.name + (mode === "rows" ? '<span class="faint" style="font-weight:400">' + prof.name + "</span>" : "") + icon("chev-ud", 12);
+          if (mode === "pick") {
+            pill.insertAdjacentHTML("beforebegin", '<button class="pick' + (profOpen ? " pick--on" : "") + '" data-extra data-prof-pick>' + P.avatar(prof, "sm") + prof.name + "</button>");
+            row.querySelector("[data-prof-pick]").addEventListener("click", function () { profOpen = !profOpen; draw(); pills(); });
+          }
+          if (many) pill.insertAdjacentHTML("beforebegin", '<button class="pick" data-extra>' + mark(harness.mark, 13) + harness.name + "</button>");
+        }
+
+        draw();
+        pills();
+        document.getElementById("mm-machine").innerHTML = icon(machine === "studio-mac" ? "laptop" : "server", 13) + machine;
+        document.querySelector(".newbie h1").textContent = "What should the agent do in " + project + "?";
+        document.querySelector(".pill-crumb .proj").textContent = project;
+        document.querySelector(".pill-crumb .proj").className = "proj proj--" + W.PROJECTS.filter(function (p) { return p.id === project; })[0].rug;
+      })();
+    </script>
+  </body>
+</html>

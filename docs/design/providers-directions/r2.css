@@ -1,0 +1,1191 @@
+/* PROTOTYPE - round 2 (#405): the Wallet and its pieces, then one block per variant (.ve, .vf,
+   .vg), then the account sheet. Three pieces are proposed for the book, each with a use beyond
+   this page:
+     .mono   a wallet's monogram: its initial in the Deco face inside a brass double ring. The
+             Deco face's third use after the wordmark and big numerals; brass stays ornament.
+     .pips   one dot per machine: filled where a thing works, a marigold ring where it waits
+             on you, tomato where it failed. Machines are named only on hover.
+     .gauge  a plan window as a 32px meter and its number; marigold from 80%. */
+
+/* ---------- The monogram ---------- */
+.mono {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1.25px var(--brass), inset 0 0 0 3px var(--raised), inset 0 0 0 3.75px color-mix(in oklab, var(--brass) 55%, transparent);
+  color: var(--ink);
+  font-family: var(--font-deco);
+  font-feature-settings: normal;
+  font-size: 14px;
+  line-height: 1;
+  padding-top: 1px;
+}
+.mono--sm {
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+  box-shadow: inset 0 0 0 1px var(--brass);
+}
+.mono--lg {
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+  box-shadow: inset 0 0 0 1.5px var(--brass), inset 0 0 0 4px var(--raised), inset 0 0 0 5px color-mix(in oklab, var(--brass) 55%, transparent), var(--shadow-1);
+}
+
+/* ---------- Pips: one per machine ---------- */
+.pips {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+.pips .ic {
+  margin-right: 2px;
+  color: var(--faint);
+}
+.pip {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--ink) 58%, transparent);
+}
+.pip.is-you {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--you);
+}
+.pip.is-fail {
+  background: var(--fail);
+}
+
+/* ---------- The gauge: a plan window ---------- */
+.gauge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: none;
+  min-width: 64px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.gauge b {
+  min-width: 26px;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.gauge-bar {
+  position: relative;
+  width: 32px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.gauge-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--ink);
+}
+.gauge--hot .gauge-bar > i {
+  background: var(--you);
+}
+.gauge--hot b {
+  color: var(--you-ink);
+}
+.gauge--none {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.gauge--fail {
+  color: var(--fail-ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+
+/* ---------- The composer's menu, round 2: wallet tabs, then a section per account ---------- */
+.mw-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 2px 2px 4px;
+  padding: 2px;
+  border-radius: var(--r-md);
+  background: var(--sunken);
+}
+.mw-tabs button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.mw-tabs button[aria-selected="true"] {
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+}
+.mw-home {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink);
+  opacity: 0.55;
+}
+.mw-sec {
+  padding: 2px 0 4px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-2);
+}
+.mw-sec.is-hot {
+  background: color-mix(in oklab, var(--ink) 4%, transparent);
+}
+.mw-sh {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 3px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+}
+.mw-sh .br,
+.mw-sh .pi {
+  color: var(--muted);
+}
+.mw-sh span:first-of-type {
+  flex: 1;
+}
+.mw-sh .gauge {
+  min-width: 0;
+  font-weight: var(--w-regular);
+}
+.mw-sh .gauge b {
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-11);
+}
+.mw-sh .gauge-bar {
+  width: 24px;
+  height: 3px;
+}
+.mw-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 3px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.mw-row:hover,
+.mw-row.is-cur {
+  background: var(--hover);
+}
+.mw-row b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mw-row small {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.mw-row.is-dim b {
+  color: var(--faint);
+}
+.mw-ok {
+  grid-column: 3;
+  color: var(--ink);
+}
+
+/* ================================================================== E: Menu cards */
+.ve {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: min(1000px, 100%);
+  margin: 0 auto;
+}
+.ve-lead {
+  max-width: 620px;
+}
+.ve-cols {
+  display: grid;
+  gap: 24px;
+  align-items: start;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.ve-w {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.ve-wh {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 4px;
+}
+.ve-wt {
+  display: grid;
+  gap: 1px;
+  justify-items: start;
+}
+.ve-wt b {
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.ve-proj {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: -4px;
+  padding: 1px 4px;
+  border-radius: var(--r-xs, 5px);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ve-proj:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ve-proj .ic {
+  color: var(--faint);
+}
+.ve-pmenu {
+  position: absolute;
+  z-index: 6;
+  top: 50px;
+  left: 56px;
+  width: 260px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+}
+.ve-pmenu .line {
+  font-size: var(--t-13);
+}
+.ve-pmenu .line .grow {
+  color: var(--ink);
+}
+/* The card: the wallet's composer menu, drawn as the composer draws a popover. */
+.ve-card {
+  padding: 4px 6px 6px;
+  border-radius: var(--r-lg);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-2);
+}
+.ve-card-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 8px 6px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.ve-card-h small {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+.ve-card-h .ve-peek {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  border-radius: 6px;
+  color: var(--faint);
+}
+.ve-card-h .ve-peek:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ve-sec {
+  margin-top: 2px;
+  padding: 2px 0 4px;
+  border-top: 1px solid var(--line-soft);
+}
+.ve-sec:first-of-type {
+  border-top: 0;
+}
+.ve-sec.is-fail .ve-sh {
+  background: var(--fail-tint);
+}
+/* An account heads its own section: who pays, then its machines and its usage. */
+.ve-sh {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 4px 0 2px;
+  padding: 6px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.ve-sh:hover {
+  background: var(--hover);
+}
+.ve-mk {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+}
+.ve-sn {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+.ve-sn b {
+  overflow: hidden;
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ve-sn small {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ve-need {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 8px 4px 44px;
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.ve-need--you {
+  color: var(--you-ink);
+}
+.ve-need--fail {
+  color: var(--fail-ink);
+}
+.ve-need .btn {
+  margin-left: auto;
+}
+/* A model: a box to put it in the menu, its name, and the default mark. */
+.ve-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  padding: 2px 8px 2px 14px;
+  border-radius: var(--r-md);
+}
+.ve-row:hover {
+  background: var(--hover);
+}
+.ve-row b {
+  font-weight: var(--w-medium);
+}
+.ve-row:not(.is-on) b {
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.ve-row.is-fresh {
+  animation: ve-in var(--dur-3) var(--ease-out);
+}
+@keyframes ve-in {
+  from {
+    background: color-mix(in oklab, var(--accent) 16%, transparent);
+  }
+}
+.ve-box {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1.25px color-mix(in oklab, var(--faint) 65%, transparent);
+  color: var(--raised);
+  transition: background var(--dur-1), box-shadow var(--dur-1);
+}
+.ve-box:hover {
+  box-shadow: inset 0 0 0 1.25px var(--ink);
+}
+.ve-row.is-on .ve-box {
+  background: var(--ink);
+  box-shadow: none;
+}
+.ve-tag {
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 16px;
+}
+.ve-def {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ve-mkdef {
+  color: var(--faint);
+  font-size: var(--t-11);
+  opacity: 0;
+  transition: opacity var(--dur-1);
+}
+.ve-row:hover .ve-mkdef {
+  opacity: 1;
+}
+.ve-mkdef:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.ve-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  margin-left: 6px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ve-more:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ve-addacct {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px 8px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ve-addacct:hover {
+  color: var(--ink);
+}
+.ve-empty {
+  margin: 10px 8px 14px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.ve-harn {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 14px 4px 0;
+  border-top: 1px solid var(--divider, var(--line-soft));
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ve-harn-h {
+  color: var(--faint);
+  font-weight: var(--w-medium);
+}
+.ve-h {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+}
+.ve-h small {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.ve-h.is-you small {
+  color: var(--you-ink);
+}
+.ve-h .pv-link {
+  font-size: var(--t-12);
+}
+
+/* ================================================================== The account sheet */
+.as {
+  width: 500px;
+}
+.as-t {
+  display: grid;
+  gap: 1px;
+}
+.as-t small {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.as-sec {
+  padding: 12px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.as-sec:first-child {
+  border-top: 0;
+  padding-top: 4px;
+}
+.as-sec h3 {
+  margin: 0 0 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.as-sec p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.as-sec p .pv-link {
+  font-size: var(--t-12);
+}
+.as-use {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) 40px 96px;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  font-size: var(--t-12);
+}
+.as-use b {
+  font-weight: var(--w-medium);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.as-use small {
+  color: var(--faint);
+}
+.as-big {
+  grid-column: 2 / 4;
+  text-align: left !important;
+  font-size: var(--t-14);
+}
+.as-bar {
+  position: relative;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.as-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--ink);
+}
+.as-bar.is-hot > i {
+  background: var(--you);
+}
+.as-m {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 130px 70px;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  font-size: var(--t-13);
+}
+.as-m .ic {
+  color: var(--muted);
+}
+.as-m small {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.as-st {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.as-runs {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+.as-runs > span:first-child {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.as-w {
+  display: grid;
+  grid-template-columns: 14px 18px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  font-size: var(--t-13);
+}
+.as-w b {
+  font-weight: var(--w-medium);
+}
+.as-w small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-align: right;
+}
+.as-w.is-off {
+  color: var(--faint);
+}
+
+/* ================================================================== F: Cards on the table */
+.vf {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: min(1000px, 100%);
+  margin: 0 auto;
+}
+.vf-tabs {
+  display: flex;
+  gap: 8px;
+}
+.vf-tab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 200px;
+  padding: 8px 14px 8px 8px;
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  text-align: left;
+  transition: background var(--dur-1), box-shadow var(--dur-1);
+}
+.vf-tab span {
+  display: grid;
+  gap: 0;
+}
+.vf-tab b {
+  font-weight: var(--w-bold);
+}
+.vf-tab small {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vf-tab:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.vf-tab[aria-selected="true"] {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1.5px var(--ink), var(--shadow-1);
+}
+.vf-tab--new {
+  min-width: 0;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  border: 1px dashed transparent;
+}
+.vf-tab--new b {
+  font-weight: var(--w-medium);
+}
+.vf-tab--new small {
+  color: var(--faint);
+}
+.vf-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
+  gap: 10px;
+}
+/* An account as a card: ivory, a brass inlay, its usage in the Deco face. */
+.vf-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  gap: 1px;
+  min-height: 132px;
+  padding: 12px 14px 12px;
+  border-radius: 14px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+  text-align: left;
+  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2);
+}
+.vf-card::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 38%, transparent);
+  pointer-events: none;
+}
+.vf-card:hover,
+.vf-card.is-hot {
+  transform: translateY(-2px);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-2);
+}
+.vf-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.vf-card-mk {
+  color: var(--ink);
+}
+.vf-card-name {
+  font-weight: var(--w-bold);
+}
+.vf-card-plan {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vf-card-use {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0 10px;
+  align-self: end;
+  margin-top: 10px;
+}
+.vf-num {
+  font-family: var(--font-deco);
+  font-feature-settings: normal;
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+.vf-bar {
+  position: relative;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.vf-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--ink);
+}
+.vf-card-use small {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.vf-card.is-you {
+  background: color-mix(in oklab, var(--you-tint) 70%, var(--raised));
+}
+.vf-card.is-you .vf-card-use small {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.vf-card.is-fail {
+  background: color-mix(in oklab, var(--fail-tint) 80%, var(--raised));
+}
+.vf-card.is-fail .vf-num,
+.vf-card.is-fail .vf-card-use small {
+  color: var(--fail-ink);
+}
+.vf-card--add {
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+}
+.vf-card--add::after {
+  display: none;
+}
+.vf-card--add small {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.vf-build {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 28px;
+  align-items: start;
+}
+.vf-offer-h {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.vf-offer-h b {
+  flex: 1;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.vf-q {
+  width: 180px;
+  height: 30px;
+}
+.vf-q input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: none;
+  font-size: var(--t-12);
+}
+.vf-og {
+  margin-top: 6px;
+  padding: 6px 8px 6px;
+  border-radius: var(--r-lg);
+  transition: background var(--dur-2);
+}
+.vf-og.is-hot {
+  background: color-mix(in oklab, var(--ink) 4%, transparent);
+}
+.vf-og-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0 4px;
+}
+.vf-og-h b {
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.vf-og-h small {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.vf-o {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  border-top: 1px solid var(--line-soft);
+}
+.vf-o b {
+  font-weight: var(--w-regular);
+  color: var(--muted);
+}
+.vf-o.is-on b {
+  font-weight: var(--w-medium);
+  color: var(--ink);
+}
+.vf-o small {
+  margin-left: 8px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.vf-o .toggle {
+  transform: scale(0.85);
+  transform-origin: right center;
+}
+.vf-preview {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 8px;
+}
+.vf-prev-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px;
+  color: var(--muted);
+}
+.vf-prev-h b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.vf-prev-h small {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.vf-menu {
+  max-height: 560px;
+  overflow: auto;
+}
+
+/* ================================================================== G: The ledger */
+.vg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(820px, 100%);
+  margin: 0 auto;
+}
+.vg-w {
+  position: relative;
+  padding: 18px 0 20px;
+  border-bottom: 1px solid var(--divider, var(--line-soft));
+}
+.vg-wh {
+  display: grid;
+  grid-template-columns: 40px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.vg-wh h2 {
+  margin: 0;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.015em;
+}
+.vg-for {
+  margin: 3px 0 0;
+  color: var(--muted);
+}
+.vg-for b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.vg-for .pv-link {
+  margin-left: 4px;
+  font-size: var(--t-12);
+}
+.vg-pmenu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -4px 0 12px 54px;
+}
+.vg-pchip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vg-pchip.is-on {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+  color: var(--ink);
+}
+.vg-line {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 14px;
+  margin: 0 0 8px 54px;
+}
+.vg-k {
+  position: relative;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.vg-v {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 6px;
+  line-height: 1.9;
+}
+.vg-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.vg-pill:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.vg-pill .pips {
+  margin-left: 2px;
+}
+.vg-pill.is-you {
+  background: var(--you-tint);
+  color: var(--you-ink);
+}
+.vg-pill.is-fail {
+  background: var(--fail-tint);
+  color: var(--fail-ink);
+}
+.vg-g {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-right: 12px;
+}
+.vg-g > .br,
+.vg-g > .pi {
+  margin-right: 5px;
+  color: var(--faint);
+}
+.vg-m {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 3px;
+  border-radius: 6px;
+  font-size: var(--t-14);
+  font-weight: var(--w-medium);
+}
+.vg-m i {
+  color: var(--faint);
+  font-size: 10px;
+  font-style: normal;
+}
+.vg-m button {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  color: var(--faint);
+  opacity: 0;
+}
+.vg-m:hover {
+  background: var(--hover);
+}
+.vg-m:hover button {
+  opacity: 1;
+}
+.vg-m button:hover {
+  background: var(--press);
+  color: var(--ink);
+}
+.vg-dot {
+  color: var(--faint);
+}
+.vg-add {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+}
+.vg-add--text {
+  display: inline-flex;
+  gap: 4px;
+  width: auto;
+  padding: 0 10px 0 8px;
+  font-size: var(--t-12);
+}
+.vg-add:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+}
+.vg-peek {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: default;
+}
+.vg-peek:hover {
+  color: var(--ink);
+}
+.vg-pop {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 8px);
+  left: -10px;
+  width: 300px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity var(--dur-2), transform var(--dur-2) var(--ease-out), visibility var(--dur-2);
+}
+.vg-peek:hover .vg-pop,
+.vg-peek:focus .vg-pop {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+.vg-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin: 8px 0 0 54px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vg-new:hover {
+  color: var(--ink);
+}
+.vg-ledger {
+  margin-top: 26px;
+}
+.vg-ledger h3 {
+  margin: 0 0 6px;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.vg-row {
+  display: grid;
+  grid-template-columns: 16px auto minmax(24px, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 6px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.vg-row:hover {
+  background: var(--hover);
+}
+.vg-row > .br,
+.vg-row > .pi {
+  color: var(--ink);
+  opacity: 0.8;
+}
+.vg-rn {
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.vg-rn small {
+  margin-left: 4px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.vg-lead {
+  height: 1px;
+  border-bottom: 1.5px dotted var(--line);
+  transform: translateY(3px);
+}
+.vg-rw {
+  display: inline-flex;
+  gap: 3px;
+}
+.vg-rs {
+  color: var(--muted);
+  font-size: var(--t-12);
+  white-space: nowrap;
+}
+.vg-rs.you-ink {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.vg-rs.fail-ink {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}

@@ -1,0 +1,1629 @@
+/* PROTOTYPE - round 3 (#405): variant H, "Profiles", and the composer menu with profiles.
+   No Deco face here: a profile's avatar and every number are in the UI face. */
+
+/* ---------- A profile's avatar ---------- */
+.pav {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--sunken);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--ink);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  line-height: 1;
+}
+.pav--sm {
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+}
+
+/* ================================================================== H: Profiles */
+.vh {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(1000px, 100%);
+  margin: 0 auto;
+}
+/* Profiles are text tabs on one rule, so the only cards on the page are the accounts. */
+.vh-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--divider, var(--line-soft));
+  scrollbar-width: none;
+}
+.vh-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px 0 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.vh-tab small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.vh-tab:hover {
+  color: var(--ink);
+}
+.vh-tab[aria-selected="true"] {
+  color: var(--ink);
+}
+.vh-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ink);
+}
+.vh-tab--new {
+  gap: 6px;
+  margin-left: 4px;
+  color: var(--faint);
+}
+.vh-for {
+  margin: 2px 0 0;
+  color: var(--muted);
+}
+.vh-for b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.vh-for .pv-link {
+  margin-left: 4px;
+  font-size: var(--t-12);
+}
+.vh-pmenu {
+  margin: 0;
+}
+.vh-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+.vh-card {
+  min-height: 118px;
+}
+.vh-card::after {
+  display: none;
+}
+.vh-num {
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.vh-card.is-fail .vh-num {
+  font-size: var(--t-14);
+  color: var(--fail-ink);
+}
+.vh-build {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 28px;
+  align-items: start;
+  margin-top: 8px;
+}
+.vh-menu-h {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.vh-menu-h b {
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.vh-menu-h small {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* One account's part of the menu: a head you can drag, then its models in order. */
+.vh-sec {
+  position: relative;
+  padding: 4px 0 6px;
+  border-top: 1px solid var(--line-soft);
+}
+.vh-sh {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  margin: 0 -8px;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  color: var(--muted);
+  font-size: var(--t-12);
+  cursor: grab;
+}
+.vh-sh b {
+  flex: 1;
+  color: var(--ink);
+  font-weight: var(--w-bold);
+}
+.vh-sh .br,
+.vh-sh .pi {
+  color: var(--ink);
+  opacity: 0.8;
+}
+.vh-grip {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  color: var(--faint);
+  opacity: 0;
+  cursor: grab;
+  transition: opacity var(--dur-1);
+}
+.vh-sh:hover .vh-grip,
+.vh-row:hover .vh-grip,
+.vh-row:focus-visible .vh-grip {
+  opacity: 1;
+}
+.vh-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  margin: 0 -8px;
+  padding: 0 6px 0 8px;
+  border-radius: var(--r-md);
+  transition: background var(--dur-1), opacity var(--dur-1);
+}
+.vh-row:hover {
+  background: var(--hover);
+}
+.vh-row b {
+  font-weight: var(--w-medium);
+}
+.vh-row small {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.vh-row.is-dragging {
+  opacity: 0.4;
+}
+.vh-row.is-fresh {
+  animation: ve-in var(--dur-3) var(--ease-out);
+}
+.vh-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+/* Where a dragged model or account will land: a short ink rule. */
+.vh-row.drop-before,
+.vh-sec.drop-before {
+  box-shadow: inset 0 2px 0 var(--ink);
+}
+.vh-row.drop-after,
+.vh-sec.drop-after {
+  box-shadow: inset 0 -2px 0 var(--ink);
+}
+.vh-x {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--faint);
+  opacity: 0;
+  transition: opacity var(--dur-1);
+}
+.vh-row:hover .vh-x {
+  opacity: 1;
+}
+.vh-x:hover {
+  background: var(--press);
+  color: var(--ink);
+}
+.vh-new {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  margin: 2px -8px;
+  padding: 0 6px 0 30px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ok-tint) 60%, transparent);
+}
+.vh-new b {
+  font-weight: var(--w-medium);
+}
+.vh-new small {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pk-new {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--ok-tint);
+  color: var(--ok);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+}
+.vh-addwrap {
+  position: relative;
+}
+.vh-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  margin: 2px -2px 0;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vh-add small {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.vh-add:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* The picker: the composer's own selector, opened for one account, to add from. */
+.vh-picker {
+  position: absolute;
+  z-index: 12;
+  top: 34px;
+  left: -8px;
+  width: 360px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+}
+.vh-plist {
+  max-height: 320px;
+  overflow: auto;
+}
+.pk-fam {
+  padding: 10px 8px 3px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+}
+.pk-fam small {
+  font-weight: var(--w-regular);
+}
+.pk-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 30px;
+  padding: 3px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.pk-row:hover {
+  background: var(--hover);
+}
+.pk-row b {
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.pk-row small {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pk-row.is-on b {
+  color: var(--ink);
+}
+.pk-row:not(.is-on) b {
+  color: var(--muted);
+}
+.pk-more {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.pk-more:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.vh-pfoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 4px 0 8px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.vh-rail {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: 8px;
+}
+.vh-prev .md-list {
+  max-height: 520px;
+}
+.vh-empty {
+  display: grid;
+  gap: 6px;
+  padding: 40px 0;
+  justify-items: start;
+}
+.vh-empty b {
+  font-size: var(--t-14);
+}
+.vh-empty > span {
+  color: var(--muted);
+}
+.vh-use {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+/* ---------- The composer, round 3: a profile pick beside the model ---------- */
+.pf-menu {
+  position: absolute;
+  z-index: 11;
+  right: 172px;
+  bottom: calc(100% - 46px);
+  width: 240px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+}
+.pf-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 3px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.pf-row:hover,
+.pf-row.is-cur {
+  background: var(--hover);
+}
+.pf-row b {
+  font-weight: var(--w-medium);
+}
+.pf-row small {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.pf-ok {
+  color: var(--ink);
+}
+
+/* ================================================================== I: Shared accounts */
+.pav--xs {
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
+  box-shadow: 0 0 0 1.5px var(--raised);
+}
+.vi {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  width: min(1000px, 100%);
+  margin: 0 auto;
+}
+.vi-h {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+.vi-h h2 {
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.vi-h p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vi-h p .pv-link {
+  font-size: var(--t-12);
+}
+.vi-h--menu {
+  margin-bottom: 6px;
+}
+/* The pool: every account once. The selected profile's accounts are lit; the rest wait. */
+.vi-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 8px;
+}
+.vi-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+  transition: box-shadow var(--dur-2), background var(--dur-2), opacity var(--dur-2), transform var(--dur-2) var(--ease-out);
+}
+.vi-card.is-member {
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--ink) 70%, transparent), var(--shadow-1);
+}
+.vi-card.is-out {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.vi-card.is-out .vi-card-b {
+  opacity: 0.55;
+}
+.vi-card.is-out:hover .vi-card-b {
+  opacity: 0.85;
+}
+.vi-card.is-hot {
+  transform: translateY(-2px);
+  box-shadow: inset 0 0 0 1.5px var(--ink), var(--shadow-2);
+}
+.vi-card.is-you.is-member {
+  background: color-mix(in oklab, var(--you-tint) 60%, var(--raised));
+}
+.vi-card.is-fail.is-member {
+  background: color-mix(in oklab, var(--fail-tint) 70%, var(--raised));
+}
+.vi-card-b {
+  display: grid;
+  gap: 2px;
+  padding: 11px 12px 8px;
+  text-align: left;
+  border-radius: 12px 12px 0 0;
+  transition: opacity var(--dur-2);
+}
+.vi-card-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.vi-card-top b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.vi-card-plan {
+  padding-left: 22px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.vi-card-use {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.vi-card-use b {
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.vi-card.is-fail .vi-card-use b {
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+}
+.vi-card-sub {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.vi-card.is-you .vi-card-sub {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.vi-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px 0 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.vi-used {
+  display: inline-flex;
+  align-items: center;
+}
+.vi-used .pav + .pav {
+  margin-left: -4px;
+}
+.vi-out {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.vi-in {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.vi-use {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.vi-use:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.vi-profiles .vh-tabs {
+  margin-top: 4px;
+}
+.vi-profiles .vh-for {
+  margin: 10px 0 0;
+}
+.vi-profiles .vh-pmenu {
+  margin-top: 8px;
+}
+.vi-profiles .vh-build {
+  margin-top: 14px;
+}
+.vh-sec.is-hot {
+  background: color-mix(in oklab, var(--ink) 3%, transparent);
+  border-radius: var(--r-md);
+}
+.vi-leave {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 4px;
+  border-radius: 6px;
+  color: var(--faint);
+  opacity: 0;
+}
+.vh-sh:hover .vi-leave {
+  opacity: 1;
+}
+.vi-leave:hover {
+  background: var(--press);
+  color: var(--ink);
+}
+.vi-none {
+  margin: 10px 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.vi-none--sec {
+  margin: 4px 0 2px 22px;
+}
+.vi-spare {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.vi-spare > span {
+  margin-right: 4px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.vi-spare .vg-pill {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-weight: var(--w-regular);
+}
+.vi-spare .vg-pill:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+}
+.vh-pfoot .pv-link {
+  font-size: var(--t-12);
+}
+
+/* ================================================================== The model browser */
+.mb {
+  width: 920px;
+  height: min(680px, 84vh);
+}
+.mb-h {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.mb-t {
+  display: grid;
+  gap: 0;
+  min-width: 150px;
+}
+.mb-t b {
+  font-weight: var(--w-bold);
+}
+.mb-t small {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.mb-search {
+  flex: 1;
+  height: 36px;
+}
+.mb-search input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: none;
+  font-size: var(--t-14);
+}
+.mb-search .ic {
+  color: var(--faint);
+}
+.mb-sortsel {
+  height: 30px;
+}
+.mb-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+}
+.mb-side {
+  overflow: auto;
+  padding: 10px 14px 16px;
+  border-right: 1px solid var(--line-soft);
+}
+.mb-facet {
+  margin-bottom: 16px;
+}
+.mb-facet h4 {
+  margin: 0 0 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.mb-check {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  font-size: var(--t-12);
+  cursor: pointer;
+}
+.mb-check small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+.mb-seg {
+  display: flex;
+}
+.mb-seg button {
+  flex: 1;
+  height: 24px;
+  padding: 0 6px;
+  font-size: var(--t-11);
+}
+.mb-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.mb-clear {
+  font-size: var(--t-12);
+}
+.mb-main {
+  overflow: auto;
+  padding: 0 16px 12px;
+}
+.mb-th,
+.mb-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 118px 92px 30px;
+  align-items: center;
+  gap: 12px;
+}
+.mb-th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 36px;
+  background: var(--glass-fill);
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.mb-sort {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.mb-sort:hover,
+.mb-sort.is-on {
+  color: var(--ink);
+}
+.mb-row {
+  min-height: 46px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.mb-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.mb-name b {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: var(--w-medium);
+}
+.mb-name b .pk-new {
+  margin: 0;
+}
+.mb-name small {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mb-num {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.mb-num i {
+  color: var(--faint);
+  font-style: normal;
+}
+.mb-date {
+  color: var(--faint);
+}
+.mb-act {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+}
+.mb-act:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+}
+.mb-act.is-on {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--surface);
+}
+.mb-row.is-adding {
+  background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 9%, transparent), transparent 70%);
+}
+.mb-row.is-removing b {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+.mb-more {
+  justify-content: center;
+  margin-top: 8px;
+}
+.mb-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line-soft);
+}
+.mb-tray {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  font-size: var(--t-12);
+  scrollbar-width: none;
+}
+.mb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 4px 0 8px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--accent) 12%, var(--raised));
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.mb-chip--out {
+  background: var(--sunken);
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.mb-chip button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--faint);
+}
+.mb-chip button:hover {
+  background: var(--press);
+  color: var(--ink);
+}
+
+/* ---------- The composer's menu as an accordion: one profile open at a time ---------- */
+.ac + .ac {
+  border-top: 1px solid var(--line-soft);
+}
+.ac-h {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto 12px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 3px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+button.ac-h:hover {
+  background: var(--hover);
+}
+.ac-h b {
+  font-weight: var(--w-bold);
+}
+.ac.is-open > .ac-h .md-chev {
+  transform: rotate(90deg);
+}
+.ac-b {
+  padding: 0 0 6px 10px;
+  animation: ac-open var(--dur-2) var(--ease-out);
+}
+@keyframes ac-open {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+.ac-b .mw-sh {
+  padding-left: 6px;
+}
+.mw-row.is-fresh {
+  animation: ve-in var(--dur-3) var(--ease-out);
+}
+
+/* ---------- I: the profile's own line, and its actions ---------- */
+.vi-sum {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 34px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vi-sum-acts {
+  display: inline-flex;
+  gap: 14px;
+  margin-left: auto;
+}
+.vi-sum-acts .pv-link {
+  font-size: var(--t-12);
+}
+.vi-sum--edit .vi-rename {
+  width: 240px;
+  height: 30px;
+  border: 0;
+  outline: 0;
+  font-size: var(--t-13);
+}
+.vi-sum--del {
+  padding: 6px 8px 6px 12px;
+  border-radius: var(--r-md);
+  background: var(--fail-tint);
+  color: var(--ink);
+}
+.vi-sum--del span {
+  flex: 1;
+}
+.vh-sec.is-fresh-sec {
+  animation: ve-in var(--dur-3) var(--ease-out);
+}
+
+/* ---------- I: add an account, inside the profile ---------- */
+.vi-addacct-wrap {
+  position: relative;
+  margin-top: 8px;
+}
+.vi-addacct {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  height: 40px;
+  border-radius: var(--r-md);
+  box-shadow: inset 0 0 0 1px var(--line);
+  border: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 6px, transparent 6px 10px);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  outline: 1px dashed color-mix(in oklab, var(--faint) 55%, transparent);
+  outline-offset: -1px;
+  box-shadow: none;
+  transition: background var(--dur-1), color var(--dur-1);
+}
+.vi-addacct:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.vi-acctpop {
+  position: absolute;
+  z-index: 12;
+  top: 46px;
+  left: 0;
+  width: 380px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+}
+.vi-arow {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 4px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.vi-arow:hover {
+  background: var(--hover);
+}
+.vi-arow-t {
+  display: grid;
+  gap: 0;
+}
+.vi-arow b {
+  font-weight: var(--w-medium);
+}
+.vi-arow small {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+
+/* ---------- I: an empty profile teaches ---------- */
+.vi-teach {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 40px;
+  align-items: start;
+  margin-top: 18px;
+  padding: 24px 26px 26px;
+  border-radius: 18px;
+  background: color-mix(in oklab, var(--sunken) 55%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.vi-teach-l h3 {
+  margin: 0 0 6px;
+  font-size: var(--t-18);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.01em;
+}
+.vi-teach-l > p {
+  max-width: 520px;
+  margin: 0 0 16px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+.vi-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 18px;
+  padding: 0;
+  list-style: none;
+}
+.vi-steps li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: var(--muted);
+}
+.vi-steps i {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.25px var(--line);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-style: normal;
+  font-weight: var(--w-bold);
+}
+.vi-steps li.is-now i {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--surface);
+}
+.vi-steps span {
+  display: grid;
+  gap: 1px;
+}
+.vi-steps b {
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.vi-steps small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 1.4;
+}
+.vi-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+.vi-tile {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft), var(--shadow-1);
+  text-align: left;
+  transition: box-shadow var(--dur-1), transform var(--dur-2) var(--ease-out);
+}
+.vi-tile:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 1.5px var(--ink), var(--shadow-2);
+}
+.vi-tile-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vi-tile-top b {
+  flex: 1;
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.vi-tile-plus {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--sunken);
+  color: var(--muted);
+}
+.vi-tile:hover .vi-tile-plus {
+  background: var(--ink);
+  color: var(--surface);
+}
+.vi-tile small {
+  padding-left: 23px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.vi-newacct {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vi-newacct:hover {
+  color: var(--ink);
+}
+.vi-ghost {
+  display: grid;
+  gap: 8px;
+}
+.vi-ghost-menu .ac-h {
+  cursor: default;
+}
+/* Empty rows waiting to fill: quiet bars where the account heads and the models will be. */
+.vi-dash {
+  display: block;
+  height: 10px;
+  margin: 13px 8px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+.vi-dash--h {
+  width: 34%;
+  height: 7px;
+  margin-top: 18px;
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+}
+.np .ov-method-t select {
+  margin-left: 4px;
+}
+
+/* ---------- The new-profile dialog ---------- */
+.np {
+  width: 480px;
+}
+.np-sugg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.np .ov-method-t .pav {
+  margin-right: 2px;
+}
+
+.vh-rail .vf-prev-h small {
+  overflow: hidden;
+  max-width: 150px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------- I: the selected tab's small menu, and renaming in the tab ---------- */
+.vi-tabwrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.vi-tabmore {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: 0 4px 0 -8px;
+  border-radius: 6px;
+  color: var(--faint);
+}
+.vi-tabmore:hover,
+.vi-tabmore.is-on {
+  background: var(--hover);
+  color: var(--ink);
+}
+.vi-tabpop {
+  position: absolute;
+  z-index: 14;
+  top: 38px;
+  left: 0;
+  width: 200px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+}
+.vi-tabpop .line {
+  font-size: var(--t-13);
+}
+.vi-tabpop .line .grow {
+  color: var(--ink);
+}
+.vi-danger .grow,
+.vi-danger .ic {
+  color: var(--fail-ink) !important;
+}
+.vi-tabpop--del {
+  width: 280px;
+  padding: 12px;
+}
+.vi-tabpop--del p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.vi-tabpop-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.vi-tab-edit::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ink);
+}
+.vi-rename {
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  outline: 0;
+  background: var(--field);
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+  color: var(--ink);
+  font: inherit;
+  font-weight: var(--w-medium);
+}
+
+/* ---------- I: where an account's models run, and one entry's menu ---------- */
+.vi-hpill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  margin-right: 8px;
+  padding: 0 6px 0 7px;
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.vi-hpill .br,
+.vi-hpill .pi {
+  opacity: 0.75;
+}
+button.vi-hpill:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+}
+.vi-hpill.is-fixed {
+  box-shadow: none;
+  color: var(--faint);
+}
+.vi-hpill.is-set {
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line), var(--shadow-1);
+  color: var(--ink);
+}
+.vi-hpop {
+  position: absolute;
+  z-index: 13;
+  top: 36px;
+  right: 24px;
+  width: 340px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+}
+.vi-hrow {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+button.vi-hrow:hover {
+  background: var(--hover);
+}
+.vi-hrow > span:last-child {
+  display: grid;
+  gap: 1px;
+}
+.vi-hrow b {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: var(--w-medium);
+}
+.vi-hrow small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 1.4;
+}
+.vi-hrow.is-off b {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+}
+.vi-radio {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.25px color-mix(in oklab, var(--faint) 65%, transparent);
+  flex: none;
+}
+.vi-radio.is-on {
+  box-shadow: inset 0 0 0 1.25px var(--ink), inset 0 0 0 3.5px var(--raised), inset 0 0 0 7px var(--ink);
+}
+.vi-hrow.is-off .vi-radio {
+  opacity: 0.4;
+}
+.vi-inh {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.vh-row {
+  position: relative;
+}
+.vh-row.is-menu {
+  background: var(--hover);
+}
+.vh-row.is-menu .vh-x {
+  opacity: 1;
+}
+.vi-rowpop {
+  position: absolute;
+  z-index: 13;
+  top: 32px;
+  right: 0;
+  width: 250px;
+  padding: 6px;
+  border-radius: var(--r-lg);
+}
+.vi-rowpop .line {
+  font-size: var(--t-13);
+}
+.vi-rowpop .line .grow {
+  color: var(--ink);
+}
+.vi-rowpop .line .vi-radio {
+  margin-top: 0;
+}
+.vi-rowpop-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--line-soft);
+}
+.mw-h {
+  color: var(--faint);
+  font-style: normal;
+  font-weight: var(--w-regular);
+}
+.mw-row .mw-in {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+}
+
+/* ---------- I: the harnesses, and the order that picks one ---------- */
+.vi-harn {
+  padding-top: 22px;
+  border-top: 1px solid var(--divider, var(--line-soft));
+}
+.vi-harn-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 32px;
+  align-items: start;
+}
+.vi-hline {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  border-top: 1px solid var(--line-soft);
+}
+.vi-hline:first-child {
+  border-top: 0;
+}
+.vi-hline > span:nth-child(2) {
+  display: grid;
+  gap: 1px;
+}
+.vi-hline b {
+  font-weight: var(--w-medium);
+}
+.vi-hline > span > small {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.vi-hline-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.vi-order {
+  display: grid;
+  gap: 2px;
+  padding: 14px 14px 10px;
+  border-radius: var(--r-lg);
+  background: color-mix(in oklab, var(--sunken) 55%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.vi-order > b {
+  font-size: var(--t-13);
+  font-weight: var(--w-bold);
+}
+.vi-order > small {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.vi-order ol {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vi-order li {
+  display: grid;
+  grid-template-columns: 12px 20px minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 4px 6px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  cursor: grab;
+}
+.vi-order li:hover .vh-grip {
+  opacity: 1;
+}
+.vi-order li i {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-style: normal;
+  font-weight: var(--w-bold);
+}
+.vi-order li > span:nth-child(3) {
+  display: grid;
+  gap: 0;
+}
+.vi-order li b {
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.vi-order li small {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.vi-order li .vh-x {
+  opacity: 0.6;
+}
+.vi-order li:hover .vh-x {
+  opacity: 1;
+}
+.vi-up .ic {
+  transform: rotate(-90deg);
+}
+
+/* ---------- The account sheet: which harnesses can run it ---------- */
+.as-h {
+  display: grid;
+  grid-template-columns: 14px 16px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  width: calc(100% + 16px);
+  min-height: 32px;
+  margin: 0 -8px;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  font-size: var(--t-13);
+  text-align: left;
+}
+button.as-h:hover {
+  background: var(--hover);
+}
+.as-h .vi-radio {
+  margin-top: 0;
+}
+.as-h b {
+  font-weight: var(--w-medium);
+}
+.as-h small {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.as-h.is-off b {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+  text-decoration: line-through;
+  text-decoration-color: var(--line);
+}
+.as-h.is-off .vi-radio {
+  opacity: 0.35;
+}
+.as-hint {
+  margin-top: 6px !important;
+  font-size: var(--t-11) !important;
+}
+/* The tab menu must not be clipped: these tabs wrap instead of scrolling. */
+.vi-tabs {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+
+/* ---------- I: the tab row's rule is the first account's top border ---------- */
+.vi-profiles .vi-build {
+  margin-top: 0;
+}
+.vi-build .vh-menu > .vh-sec:first-child {
+  border-top: 0;
+  padding-top: 8px;
+}
+.vi-build .vh-rail {
+  padding-top: 14px;
+}
+/* With one profile there is no tab row, so a rule of its own takes its place above the menu. */
+.vi-build--single {
+  margin-top: 12px !important;
+  border-top: 1px solid var(--divider, var(--line-soft));
+}
