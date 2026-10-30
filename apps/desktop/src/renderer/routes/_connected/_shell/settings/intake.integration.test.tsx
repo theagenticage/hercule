@@ -687,12 +687,9 @@ describe("Settings > Intake, opened from a signal", () => {
     expect(scrollIntoView).toHaveBeenCalled();
     expect(scrollIntoView.mock.contexts).toContain(row);
     // The tint is a transition, so the row loses the class and fades by itself.
-    await waitFor(
-      () => {
-        expect(getRow("Checks failed").classList.contains("is-pointed")).toBe(false);
-      },
-      { timeout: 3000 },
-    );
+    await waitFor(() => {
+      expect(getRow("Checks failed").classList.contains("is-pointed")).toBe(false);
+    });
     // No other row was highlighted.
     expect(document.querySelectorAll(".is-pointed")).toHaveLength(0);
   });

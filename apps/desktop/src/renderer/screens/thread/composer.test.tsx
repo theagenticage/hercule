@@ -269,12 +269,15 @@ function ShowQuestionButton({
 /**
  * Has the composer read the session again, as it does after a push from the
  * controller, and waits until the new Requests are drawn. The query library
- * hands a result to the components on a timer, so the wait covers one.
+ * hands a result to the components on a timer, so the wait covers one. Under
+ * fake timers the wait runs the timers that are due now and moves the clock
+ * by nothing, so a test that counts fake time is not disturbed.
  */
 const refreshSession = async (queryClient: QueryClient, sessionId: string): Promise<void> => {
   await act(async () => {
     await queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
+    else await new Promise((resolve) => setTimeout(resolve, 0));
   });
 };
 
@@ -1400,8 +1403,14 @@ describe("the typing guard in the composer", () => {
    * Renders the idle thread, types "Half a mes" as a message, and has the
    * controller report the question. Returns the user, the calls, and the
    * pending submissions.
+   *
+   * `holdClock` is for a test that uses fake timers. The test starts them
+   * with `shouldAdvanceTime`, which keeps typing and rendering going by moving
+   * the fake clock with the real one. Once the user has typed, the fake clock
+   * is stopped, so the time the guard has left to run is exactly what the
+   * test then advances, however slow the machine is.
    */
-  const typeThenAsk = async () => {
+  const typeThenAsk = async ({ holdClock = false }: { readonly holdClock?: boolean } = {}) => {
     const user = userEvent.setup();
     let openRequests: Session["openRequests"] = [];
     const rendered = await renderComposer(THREAD, {
@@ -1412,6 +1421,7 @@ describe("the typing guard in the composer", () => {
       },
     });
     await user.type(readField(), "Half a mes");
+    if (holdClock) vi.setTimerTickMode("manual");
     openRequests = [ASK];
     await refreshSession(rendered.queryClient, THREAD.session.id);
     return { ...rendered, user };
@@ -1432,7 +1442,7 @@ describe("the typing guard in the composer", () => {
   it("keeps a question from taking the composer while the user types, and gives it after a pause", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
     try {
-      await typeThenAsk();
+      await typeThenAsk({ holdClock: true });
       expectMessageMode();
 
       await act(async () => {
@@ -1501,7 +1511,7 @@ describe("the typing guard in the composer", () => {
   it("keeps holding while an IME composition is open, however long the pause", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
     try {
-      await typeThenAsk();
+      await typeThenAsk({ holdClock: true });
       fireEvent.compositionStart(readField());
 
       await act(async () => {

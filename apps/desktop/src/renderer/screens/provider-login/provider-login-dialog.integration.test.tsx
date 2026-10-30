@@ -183,7 +183,7 @@ describe("the provider login dialog", () => {
     });
 
     const view = within(dialog);
-    const expired = await view.findByRole("alert", {}, { timeout: 2000 });
+    const expired = await view.findByRole("alert");
     expect(expired.textContent).toBe("The code expired before the login finished.Start again");
 
     await userEvent.click(view.getByRole("button", { name: "Start again" }));

@@ -1,6 +1,20 @@
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { beforeEach, vi } from "vitest";
+import { configure } from "@testing-library/dom";
 import rowHeights from "./styles/row-heights.css?raw";
+
+/**
+ * Lets `waitFor`, `findBy*` and `waitForElementToBeRemoved` wait up to 30
+ * seconds, in place of Testing Library's 1 second. The wait ends as soon as
+ * its condition holds, so a passing test is not slower. The limit catches a
+ * hang, not a slow machine: with every core busy, an app that renders in 100
+ * ms alone takes more than a second, and a test that is correct fails.
+ *
+ * `configure` comes from `@testing-library/dom`, not `@testing-library/react`:
+ * importing the React one here loads React before the test files stub
+ * globals, which breaks the Office and workflow motion tests.
+ */
+configure({ asyncUtilTimeout: 30_000 });
 
 /**
  * Creates an empty `localStorage` held in memory.
