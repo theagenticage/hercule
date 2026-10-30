@@ -342,7 +342,8 @@ describe("the thread drawer", () => {
 
     await user.click(await within(drawer).findByRole("button", { name: /^Allow\b/ }));
     await user.click(within(drawer).getByRole("button", { name: "Next Request" }));
-    await user.type(within(drawer).getByRole("textbox", { name: "Your own answer" }), "SQLite");
+    // The drawer stands on the thread's composer, which takes the answer.
+    await user.type(within(drawer).getByRole("textbox", { name: "Message" }), "SQLite");
     await user.click(within(drawer).getByRole("button", { name: "Previous Request" }));
 
     expect(
@@ -353,9 +354,7 @@ describe("the thread drawer", () => {
     await user.click(within(drawer).getByRole("button", { name: /^Deny\b/ }));
     await user.click(within(drawer).getByRole("button", { name: "Next Request" }));
 
-    expect(
-      within(drawer).getByRole<HTMLInputElement>("textbox", { name: "Your own answer" }).value,
-    ).toBe("SQLite");
+    expect(within(drawer).getByRole("textbox", { name: "Message" }).textContent).toBe("SQLite");
     expect(calls.filter((call) => `${call.method} ${call.path}` === respond)).toHaveLength(1);
     held.answer({ body: thread.session });
   });

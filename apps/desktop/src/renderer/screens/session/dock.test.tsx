@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildApprovalCard, formatDescribeLine, queryKeys } from "@hercule/client-core";
-import type { OpenRequest } from "@hercule/contract";
+import type { OpenRequest, QuestionAnswers } from "@hercule/contract";
 import {
   buildErrorBody,
   FIXTURE_THREAD_IDS,
@@ -24,6 +24,7 @@ import {
 } from "../../app/testing";
 import { buildLook } from "../../faces";
 import { renderThreadPart } from "../thread/testing";
+import { useRequestDraft, useSendAnswers } from "../../app/request-drafts";
 import { RequestDock } from "./dock";
 
 /** A command approval that offers every decision. */
@@ -44,17 +45,36 @@ const RESPOND_TO_QUESTION = `POST /api/v1/sessions/${FIXTURE_THREAD_IDS.runbook}
 /** The controller's answer to a Request it accepts: the session, still waiting until the runner reports. */
 const ACCEPTED: Answer = { body: THREAD_FIXTURES.waiting.session };
 
+/** Where the dock stands: whether a composer is below it, and where a pick moves displaced text. */
+interface DockPlace {
+  readonly composerBelow?: boolean;
+  /** The Message Draft key; the thread's session id when absent. */
+  readonly messageDraftKey?: string;
+}
+
 /**
  * Renders the dock for `request` on the waiting fixture thread, with a button
  * outside it, and returns the calls and the query cache. The controller
- * accepts every answer unless `respond` says otherwise.
+ * accepts every answer unless `respond` says otherwise. `composerBelow` says
+ * whether the dock stands on a composer, as on a thread's page; the default
+ * is the dock of a subagent's page, which has none.
  */
-const renderDock = (request: OpenRequest, respond: Handler = ACCEPTED) =>
+const renderDock = (
+  request: OpenRequest,
+  respond: Handler = ACCEPTED,
+  { composerBelow = false, messageDraftKey }: DockPlace = {},
+) =>
   renderThreadPart(
     ({ sessionId }) => (
       <>
         <button type="button">Outside</button>
-        <RequestDock sessionId={sessionId} look={buildLook(sessionId)} request={request} />
+        <RequestDock
+          sessionId={sessionId}
+          look={buildLook(sessionId)}
+          request={request}
+          composerBelow={composerBelow}
+          messageDraftKey={messageDraftKey ?? sessionId}
+        />
       </>
     ),
     {
@@ -391,9 +411,12 @@ const readQuestionDock = (): HTMLElement => readDock(buildApprovalCard(QUESTIONS
 const findChoice = (role: "radio" | "checkbox", label: string): HTMLElement =>
   within(readQuestionDock()).getByRole(role, { name: (name) => name.startsWith(label) });
 
-/** Returns the field the user types their own answer in. */
+/**
+ * Returns the field the user types their own answer in. It is found by its
+ * label rather than its role, because a masked field has no role.
+ */
 const readOwnAnswer = (): HTMLElement =>
-  within(readQuestionDock()).getByRole("textbox", { name: "Your own answer" });
+  within(readQuestionDock()).getByLabelText("Your own answer");
 
 /** Returns the button that sends the answers. */
 const readSend = (): HTMLElement =>
@@ -728,6 +751,415 @@ describe("the dock for a question", () => {
     await waitFor(() => {
       expect(readBodies(calls)).toEqual([
         { requestId: "req-2", answers: { Storage: "a sqlite file" } },
+      ]);
+    });
+  });
+});
+
+/** A question request whose one question the agent asked to keep secret. */
+const SECRET_QUESTION: OpenRequest = {
+  ...QUESTIONS,
+  detail: { questions: [{ ...STORAGE, header: "Token", options: [], secret: true }] },
+};
+
+/** The folded row's words for `QUESTIONS`, which asks two questions. */
+const FOLDED_ROW = "The agent asked 2 questions. It keeps working.";
+
+/** A question request the agent does not wait on. */
+const ASYNC_QUESTIONS: OpenRequest = { ...QUESTIONS, async: true };
+
+/** Returns the dock while it is folded, named by its one row. */
+const readFoldedDock = (row = FOLDED_ROW): HTMLElement => readDock(row);
+
+/** Returns the dock's button named `name`. */
+const readButton = (name: string): HTMLElement =>
+  within(readQuestionDock()).getByRole("button", { name });
+
+/**
+ * Renders `QuestionsDock` with a stand-in for the composer: a button that
+ * sends `answers` to the Request `requestId` through the hook the composer
+ * uses, and the Request's draft failure in an output. Returns what
+ * `renderDock` does.
+ */
+const renderDockWithComposerSender = (
+  request: OpenRequest,
+  respond: Handler,
+  answers: QuestionAnswers,
+  place: DockPlace,
+) =>
+  renderThreadPart(
+    ({ sessionId }) => {
+      const send = useSendAnswers(sessionId);
+      const [draft] = useRequestDraft(sessionId, request.requestId);
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              send(request.requestId, answers);
+            }}
+          >
+            Send from the composer
+          </button>
+          <output aria-label="Failure in the draft">{draft.failure}</output>
+          <RequestDock
+            sessionId={sessionId}
+            look={buildLook(sessionId)}
+            request={request}
+            composerBelow={place.composerBelow ?? false}
+            messageDraftKey={sessionId}
+          />
+        </>
+      );
+    },
+    {
+      thread: THREAD_FIXTURES.waiting,
+      handlers: { [RESPOND_TO_QUESTION]: respond },
+    },
+  );
+
+describe("the dock for a question, with a composer below", () => {
+  it("draws no field and no step button for a question the composer answers, and still takes picks", async () => {
+    const user = userEvent.setup();
+    await renderDock(QUESTIONS, ACCEPTED, { composerBelow: true });
+
+    expect(within(readQuestionDock()).queryByLabelText("Your own answer")).toBeNull();
+    for (const name of ["Next", "Send answers", "Previous"]) {
+      expect(within(readQuestionDock()).queryByRole("button", { name })).toBeNull();
+    }
+    await user.click(findChoice("radio", "IndexedDB"));
+    expect((findChoice("radio", "IndexedDB") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("keeps a masked field and a step button for a secret question, and sends its answer", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(SECRET_QUESTION, ACCEPTED, { composerBelow: true });
+
+    const field = readOwnAnswer();
+    expect(field.getAttribute("type")).toBe("password");
+    await user.type(field, "hunter2");
+    await user.click(readSend());
+
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([{ requestId: "req-2", answers: { Token: "hunter2" } }]);
+    });
+  });
+
+  it("masks a secret answer also where no composer is below", async () => {
+    await renderDock(SECRET_QUESTION);
+
+    expect(readOwnAnswer().getAttribute("type")).toBe("password");
+  });
+
+  it("keeps a field that shows the typed text for a question that is not secret", async () => {
+    await renderDock(ONE_QUESTION);
+
+    expect(readOwnAnswer().getAttribute("type")).toBe("text");
+  });
+
+  it("shows a failed send in the dock when the dock has its own field", async () => {
+    const user = userEvent.setup();
+    await renderDock(
+      SECRET_QUESTION,
+      {
+        status: 409,
+        body: buildErrorBody("invalid_state", "The harness did not take the answer."),
+      },
+      { composerBelow: true },
+    );
+
+    await user.type(readOwnAnswer(), "hunter2");
+    await user.click(readSend());
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "The harness did not take the answer.",
+    );
+    expect(isLocked(readSend())).toBe(false);
+  });
+
+  it("leaves a failed send to the composer when the dock has no field", async () => {
+    const user = userEvent.setup();
+    const { queryClient } = await renderDockWithComposerSender(
+      ONE_QUESTION,
+      {
+        status: 409,
+        body: buildErrorBody("invalid_state", "The harness did not take the answer."),
+      },
+      { Storage: "IndexedDB" },
+      { composerBelow: true },
+    );
+
+    await user.click(screen.getByRole("button", { name: "Send from the composer" }));
+    await waitFor(() => {
+      expect(queryClient.isMutating()).toBe(0);
+    });
+
+    expect(screen.getByLabelText("Failure in the draft").textContent).toBe(
+      "The harness did not take the answer.",
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows the failure of a send the composer made when the dock has its own field", async () => {
+    const user = userEvent.setup();
+    const { queryClient } = await renderDockWithComposerSender(
+      ONE_QUESTION,
+      {
+        status: 409,
+        body: buildErrorBody("invalid_state", "The harness did not take the answer."),
+      },
+      { Storage: "IndexedDB" },
+      { composerBelow: false },
+    );
+
+    await user.click(screen.getByRole("button", { name: "Send from the composer" }));
+    await waitFor(() => {
+      expect(queryClient.isMutating()).toBe(0);
+    });
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "The harness did not take the answer.",
+    );
+  });
+});
+
+describe("Previous in the dock", () => {
+  it("is not drawn on the first question and is drawn from the second on", async () => {
+    const user = userEvent.setup();
+    await renderDock(QUESTIONS);
+
+    expect(within(readQuestionDock()).queryByRole("button", { name: "Previous" })).toBeNull();
+    await user.click(findChoice("radio", "IndexedDB"));
+    await user.click(readButton("Next"));
+
+    expect(readButton("Previous")).toBeTruthy();
+  });
+
+  it("goes back from a question that is still blank, and keeps every answer", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(QUESTIONS);
+
+    await user.click(findChoice("radio", "IndexedDB"));
+    await user.click(readButton("Next"));
+    // The second question is blank, so Send answers is off, but Previous works.
+    expect(isLocked(readSend())).toBe(true);
+    expect(isLocked(readButton("Previous"))).toBe(false);
+    await user.click(readButton("Previous"));
+
+    expect(queryDockText("Question 1 of 2")).not.toBeNull();
+    expect((findChoice("radio", "IndexedDB") as HTMLInputElement).checked).toBe(true);
+    await user.click(readButton("Next"));
+    await user.click(findChoice("checkbox", "Sync"));
+    await user.click(readSend());
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([BOTH_ANSWERS]);
+    });
+  });
+
+  it("is off once the answers are sent", async () => {
+    const user = userEvent.setup();
+    const { queryClient } = await renderDock(QUESTIONS);
+
+    await sendBothAnswers(user);
+    await waitFor(() => {
+      expect(queryClient.isMutating()).toBe(0);
+    });
+
+    expect(isLocked(readButton("Previous"))).toBe(true);
+    await user.click(readButton("Previous"));
+    expect(queryDockText("Question 2 of 2")).not.toBeNull();
+  });
+});
+
+describe("an async question in the dock", () => {
+  it("docks folded, as one row with the agent's face and an Answer button", async () => {
+    await renderDock(ASYNC_QUESTIONS);
+
+    const dock = readFoldedDock();
+    expect(within(dock).getByRole("button", { name: "Answer" })).toBeTruthy();
+    expect(within(dock).queryAllByRole("radio")).toEqual([]);
+    expect(within(dock).queryByLabelText("Your own answer")).toBeNull();
+    expect(
+      within(dock).queryByText("Which storage should drafts use?", { ignore: ".dock-mini *" }),
+    ).toBeNull();
+    expect(dock.querySelector(".dock-q .cr")).not.toBeNull();
+  });
+
+  it("opens the card with Answer, and folds it back with Later, keeping the answers", async () => {
+    const user = userEvent.setup();
+    await renderDock(ASYNC_QUESTIONS);
+
+    await user.click(within(readFoldedDock()).getByRole("button", { name: "Answer" }));
+    expect(queryDockText("Which storage should drafts use?")).not.toBeNull();
+    await user.click(findChoice("radio", "IndexedDB"));
+    await user.click(readButton("Next"));
+    await user.click(findChoice("checkbox", "Sync"));
+    await user.click(readButton("Later"));
+
+    expect(within(readFoldedDock()).queryAllByRole("checkbox")).toEqual([]);
+    await user.click(within(readFoldedDock()).getByRole("button", { name: "Answer" }));
+    // The card opens on the question it was folded on, with its pick.
+    expect(queryDockText("Question 2 of 2")).not.toBeNull();
+    expect((findChoice("checkbox", "Sync") as HTMLInputElement).checked).toBe(true);
+    await user.click(readButton("Previous"));
+    expect((findChoice("radio", "IndexedDB") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("offers no Later on a question the agent waits on", async () => {
+    await renderDock(QUESTIONS);
+
+    expect(within(readQuestionDock()).queryByRole("button", { name: "Later" })).toBeNull();
+    expect(within(readQuestionDock()).queryByRole("button", { name: "Answer" })).toBeNull();
+  });
+
+  it("steps and sends nothing on ↩ or ⌘↵ while it is folded", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock(ASYNC_QUESTIONS);
+
+    focus(readFoldedDock());
+    await user.keyboard("{Enter}");
+    const pressed = fireEvent.keyDown(readFoldedDock(), { key: "Enter", metaKey: true });
+
+    // ⌘↵ is still kept from the menu's Send, which would send the composer's message.
+    expect(pressed).toBe(false);
+    await user.click(within(readFoldedDock()).getByRole("button", { name: "Answer" }));
+    expect(queryDockText("Question 1 of 2")).not.toBeNull();
+    await sendBothAnswers(user);
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([BOTH_ANSWERS]);
+    });
+  });
+
+  it("answers in the card also with a composer below, when the question is secret", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderDock({ ...SECRET_QUESTION, async: true }, ACCEPTED, {
+      composerBelow: true,
+    });
+
+    await user.click(
+      within(readFoldedDock("The agent asked a question. It keeps working.")).getByRole("button", {
+        name: "Answer",
+      }),
+    );
+    await user.type(readOwnAnswer(), "hunter2");
+    await user.click(readSend());
+
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([{ requestId: "req-2", answers: { Token: "hunter2" } }]);
+    });
+  });
+});
+
+describe("picking an option in the dock", () => {
+  it("moves the text typed as an answer to the end of the Message Draft", async () => {
+    const user = userEvent.setup();
+    const { pendingSubmissions } = await renderDock(QUESTIONS);
+    pendingSubmissions.writeText(FIXTURE_THREAD_IDS.runbook, "Half a message  ");
+
+    await user.type(readOwnAnswer(), "a sqlite file");
+    await user.click(findChoice("radio", "IndexedDB"));
+
+    expect((readOwnAnswer() as HTMLInputElement).value).toBe("");
+    expect(pendingSubmissions.read(FIXTURE_THREAD_IDS.runbook).message.text).toBe(
+      "Half a message\n\na sqlite file",
+    );
+  });
+
+  it("moves it to the Message Draft the dock is given", async () => {
+    const user = userEvent.setup();
+    const { pendingSubmissions } = await renderDock(QUESTIONS, ACCEPTED, {
+      messageDraftKey: "assistant:a-1",
+    });
+
+    await user.type(readOwnAnswer(), "a sqlite file");
+    await user.click(findChoice("radio", "IndexedDB"));
+
+    expect(pendingSubmissions.read("assistant:a-1").message.text).toBe("a sqlite file");
+    expect(pendingSubmissions.read(FIXTURE_THREAD_IDS.runbook).message.text).toBe("");
+  });
+
+  it("leaves the Message Draft alone when no text was typed, and on a multiSelect question", async () => {
+    const user = userEvent.setup();
+    const { pendingSubmissions } = await renderDock(QUESTIONS);
+    pendingSubmissions.writeText(FIXTURE_THREAD_IDS.runbook, "Half a message");
+
+    await user.click(findChoice("radio", "IndexedDB"));
+    await user.click(readButton("Next"));
+    await user.type(readOwnAnswer(), "Offline mode");
+    await user.click(findChoice("checkbox", "Sync"));
+
+    // A multiSelect pick keeps the typed text as one more answer.
+    expect((readOwnAnswer() as HTMLInputElement).value).toBe("Offline mode");
+    expect(pendingSubmissions.read(FIXTURE_THREAD_IDS.runbook).message.text).toBe("Half a message");
+  });
+});
+
+describe("the length of an answer in the dock", () => {
+  it("shows a notice and turns the step button off over 4,096 characters", async () => {
+    await renderDock(ONE_QUESTION);
+
+    fireEvent.change(readOwnAnswer(), { target: { value: "x".repeat(4097) } });
+
+    expect(screen.getByText(/longer than 4,096 characters/)).toBeTruthy();
+    expect(isLocked(readSend())).toBe(true);
+  });
+});
+
+describe("sending answers once", () => {
+  it("sends once when two calls arrive before the next render", async () => {
+    const user = userEvent.setup();
+    const held = holdAnswer();
+    const { calls } = await renderThreadPart(
+      ({ sessionId }) => {
+        const send = useSendAnswers(sessionId);
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              send("req-2", { Storage: "IndexedDB" });
+              send("req-2", { Storage: "IndexedDB" });
+            }}
+          >
+            Send twice
+          </button>
+        );
+      },
+      { thread: THREAD_FIXTURES.waiting, handlers: { [RESPOND_TO_QUESTION]: held.handler } },
+    );
+
+    await user.click(screen.getByRole("button", { name: "Send twice" }));
+    held.answer(ACCEPTED);
+    await user.click(screen.getByRole("button", { name: "Send twice" }));
+
+    expect(readBodies(calls)).toEqual([{ requestId: "req-2", answers: { Storage: "IndexedDB" } }]);
+  });
+
+  it("sends the answers of two Requests independently", async () => {
+    const user = userEvent.setup();
+    const { calls } = await renderThreadPart(
+      ({ sessionId }) => {
+        const send = useSendAnswers(sessionId);
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              send("req-2", { Storage: "IndexedDB" });
+              send("req-3", { Storage: "localStorage" });
+            }}
+          >
+            Send both
+          </button>
+        );
+      },
+      { thread: THREAD_FIXTURES.waiting, handlers: { [RESPOND_TO_QUESTION]: ACCEPTED } },
+    );
+
+    await user.click(screen.getByRole("button", { name: "Send both" }));
+
+    await waitFor(() => {
+      expect(readBodies(calls)).toEqual([
+        { requestId: "req-2", answers: { Storage: "IndexedDB" } },
+        { requestId: "req-3", answers: { Storage: "localStorage" } },
       ]);
     });
   });

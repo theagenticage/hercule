@@ -2,24 +2,29 @@ import { Fragment, useId, type JSX, type KeyboardEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
+  FOLD_QUESTION_LABEL,
+  PREVIOUS_QUESTION_LABEL,
+  UNFOLD_QUESTION_LABEL,
   buildApprovalCard,
-  buildQuestionAnswers,
   buildQuestionDraft,
+  buildQuestionStepper,
+  describeFoldedQuestion,
+  findComposerQuestion,
   formatDescribeLine,
   formatRequestQuestion,
-  isQuestionAnswered,
   pickQuestionOption,
   readErrorMessage,
+  stepQuestions,
   typeQuestionAnswer,
   type QuestionDraft,
 } from "@hercule/client-core";
-import type {
-  ApprovalDecision,
-  DescribeLine,
-  QuestionAnswers,
-  SessionRequest,
+import {
+  isAsyncQuestion,
+  type ApprovalDecision,
+  type DescribeLine,
+  type SessionRequest,
 } from "@hercule/contract";
-import { useRequestDraft } from "../../app/request-drafts";
+import { useRequestDraft, useSendAnswers } from "../../app/request-drafts";
 import { buildLook, Face, type Look } from "../../faces";
 import { CheckIcon } from "../../icons/check";
 import { buildAgentFaceSeed } from "../subagents/subagent-face";
@@ -210,9 +215,12 @@ export function ShrunkDockRow<Id extends string>({
  *   Request shows the subagent's face, else `look`, the face of the
  *   session's own agent (the thread's or the assistant's);
  * - for a `question` request, one question at a time: its header, its place
- *   among the questions when there are several, its options as choices, a
- *   field for the user's own answer, and Next, or Send answers on the last
- *   question;
+ *   among the questions when there are several, its options as choices, and,
+ *   where the dock has to take the user's own answer itself, a field with
+ *   Previous and Next, or Send answers on the last question (see below). An
+ *   async question (one the agent does not wait on) is folded by default into
+ *   one row, with an Answer button that opens the card, and the open card has
+ *   a Later button that folds it back;
  * - for an approval, the ledger: one answer per decision the approval
  *   offers, in the approval's order, each with what it does and its key.
  *
@@ -221,7 +229,21 @@ export function ShrunkDockRow<Id extends string>({
  *
  * The request's text, its questions and its answers come from
  * `buildApprovalCard`, so an answer is described in the same words on every
- * screen. Only the controls' own labels, such as Next, are written here.
+ * screen. The controls' labels, and the rules for stepping through the
+ * questions, come from `@hercule/client-core`.
+ *
+ * Where the user's own answer is typed. With `composerBelow`, the composer
+ * under the dock answers the shown question (`findComposerQuestion`), and the
+ * dock draws no field and no step button. The dock keeps its own field, masked
+ * for a secret question, when the composer does not answer: a secret question,
+ * or a place with no composer below (a subagent's page, the Office's dossier).
+ * It then also shows the failure of a send, which the composer would show
+ * otherwise.
+ *
+ * `messageDraftKey` is the `pendingSubmissions` key of the Message Draft that
+ * a pick moves typed text to. Picking an option on a single-select question
+ * replaces the typed answer, and the typed text is appended to that Message
+ * Draft rather than lost.
  *
  * While the composer is shrunk, all of that gives way to `dock-mini`: the
  * face, the question in the one line the sidebar's Waiting on you row
@@ -252,13 +274,19 @@ export function RequestDock({
   sessionId,
   look,
   request,
+  composerBelow,
+  messageDraftKey,
 }: {
   readonly sessionId: string;
   readonly look: Look;
   readonly request: SessionRequest;
+  /** Whether a composer is drawn under the dock, which then answers a question that is not secret. */
+  readonly composerBelow: boolean;
+  /** The `pendingSubmissions` key of the Message Draft that text displaced by picking an option moves to. */
+  readonly messageDraftKey: string;
 }): JSX.Element {
   const { controller } = useRouteContext({ from: "/_connected" });
-  const { client } = controller;
+  const { client, pendingSubmissions } = controller;
   const titleId = useId();
   const card = buildApprovalCard(request);
   const answers = card.rows.map((row): DockAnswer<ApprovalDecision> => ({
@@ -271,15 +299,16 @@ export function RequestDock({
       ? look
       : buildLook(buildAgentFaceSeed(sessionId, request.subagentId));
   const [requestDraft, changeRequestDraft] = useRequestDraft(sessionId, request.requestId);
-  // A failed send unlocks the Request, so the user can answer again. The
+  const sendAnswers = useSendAnswers(sessionId);
+  // A failed decision unlocks the Request, so the user can decide again. The
   // mutation's own callbacks run even after the dock has unmounted, and the
   // draft is changed through the session's Request drafts, so the unlock lands
   // whether or not the dock is still shown.
   const markAnswered = (answered: boolean): void => {
     changeRequestDraft((current) => ({ ...current, answered }));
   };
-  // Neither response is written into the cache. It is the session as the
-  // controller held it when the answer arrived, still waiting on the
+  // The response is not written into the cache. It is the session as the
+  // controller held it when the decision arrived, still waiting on the
   // request, so writing it could bring back a dock the live `session` push
   // has already cleared. Until that push clears the request, the answers
   // stay disabled through the draft's `answered`.
@@ -292,53 +321,75 @@ export function RequestDock({
     onMutate: () => markAnswered(true),
     onError: () => markAnswered(false),
   });
-  const answer = useMutation({
-    mutationFn: (answers: QuestionAnswers) =>
-      client.session.respondToQuestion({
-        params: { id: sessionId },
-        payload: { requestId: request.requestId, answers },
-      }),
-    onMutate: () => markAnswered(true),
-    onError: () => markAnswered(false),
-  });
   // One answer per request. The dock stays until the runner reports the
   // request resolved, and a second answer in that time could contradict the
   // one already sent. The keys obey this too, so the keyboard cannot answer
   // where a click cannot.
-  const locked = requestDraft.answered || decide.isPending || answer.isPending;
-  const error = decide.error ?? answer.error;
+  const locked = requestDraft.answered || decide.isPending;
   // The state of a `question` request: what the user has given so far, and
   // which question is shown. For every other kind the draft stays empty and
   // the index is not used.
   const draft = requestDraft.question ?? buildQuestionDraft(card.questions);
-  const { shownQuestionIndex } = requestDraft;
-  const setDraft = (question: QuestionDraft): void => {
-    changeRequestDraft((current) => ({ ...current, question }));
+  const question = card.questions[requestDraft.shownQuestionIndex];
+  const setDraft = (next: QuestionDraft): void => {
+    changeRequestDraft((current) => ({ ...current, question: next }));
   };
-  const question = card.questions[shownQuestionIndex];
-  const questionAnswered = question !== undefined && isQuestionAnswered(draft, question);
-  const isLastQuestion = shownQuestionIndex === card.questions.length - 1;
+  // A folded async question is one row and has no question shown.
+  const folded = isAsyncQuestion(request) && !requestDraft.unfolded;
+  const shownQuestion = folded ? undefined : question;
+  const setUnfolded = (unfolded: boolean): void => {
+    changeRequestDraft((current) => ({ ...current, unfolded }));
+  };
+  // The dock takes the own answer itself where the composer does not: with no
+  // composer below, or on a secret question.
+  const ownsAnswerField =
+    shownQuestion !== undefined &&
+    (!composerBelow || findComposerQuestion(request, requestDraft) === null);
+  const stepper =
+    shownQuestion === undefined ? null : buildQuestionStepper(requestDraft, card.questions);
+  const error = ownsAnswerField
+    ? requestDraft.failure
+    : decide.error === null
+      ? null
+      : readErrorMessage(decide.error);
 
-  /** Shows the next question, or sends the answers from the last one, once the shown question is answered. */
-  const advanceQuestions = (): void => {
-    if (locked || !questionAnswered) return;
-    if (!isLastQuestion) {
-      changeRequestDraft((current) => ({ ...current, shownQuestionIndex: shownQuestionIndex + 1 }));
+  /** Shows the question before or after the shown one, or sends the answers from the last one. */
+  const stepThroughQuestions = (direction: "previous" | "next"): void => {
+    if (shownQuestion === undefined) return;
+    const step = stepQuestions(requestDraft, card.questions, direction);
+    if (step === null) return;
+    if (step.kind === "send") {
+      sendAnswers(request.requestId, step.answers);
       return;
     }
-    const answers = buildQuestionAnswers(draft, card.questions);
-    if (answers !== null) answer.mutate(answers);
+    changeRequestDraft((current) => ({ ...current, shownQuestionIndex: step.index }));
+  };
+
+  /** Picks an option, and moves the text it displaces to the end of the Message Draft. */
+  const pickOption = (label: string): void => {
+    if (shownQuestion === undefined) return;
+    const messageText = pendingSubmissions.read(messageDraftKey).message.text;
+    const picked = pickQuestionOption(draft, shownQuestion, label, messageText);
+    setDraft(picked.question);
+    if (picked.messageText !== messageText) {
+      pendingSubmissions.writeText(messageDraftKey, picked.messageText);
+    }
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (question !== undefined && isSendKey(event.nativeEvent) && !event.ctrlKey && !event.altKey) {
+    if (
+      request.kind === "question" &&
+      isSendKey(event.nativeEvent) &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
       // ↩ on a button presses that button. ⌘↵ is the app's send key, and
       // left alone it would reach the menu's Send and send the composer's
       // message, so it is caught wherever the focus is in the dock, even
       // once the answers are sent.
       if (event.target instanceof HTMLButtonElement && !event.metaKey) return;
       event.preventDefault();
-      advanceQuestions();
+      stepThroughQuestions("next");
       return;
     }
     if (locked || request.kind === "question") return;
@@ -359,57 +410,87 @@ export function RequestDock({
       onKeyDown={handleKeyDown}
     >
       <div className="fold">
-        <div className="dock-q">
+        <div className={folded ? "dock-q dock-q--folded" : "dock-q"}>
           <Face look={faceLook} pose="waiting" size={30} />
-          <span className="dock-text">
-            <span id={titleId}>{card.title}</span>
-            {card.subject.map((line, index) => (
-              <Fragment key={index}> {card.code ? <code>{line}</code> : line}</Fragment>
-            ))}
-          </span>
+          {request.kind === "question" && folded ? (
+            <>
+              <span className="dock-text" id={titleId}>
+                {describeFoldedQuestion(request)}
+              </span>
+              <button
+                type="button"
+                className="btn btn--accent btn--sm"
+                onClick={() => {
+                  setUnfolded(true);
+                }}
+              >
+                {UNFOLD_QUESTION_LABEL}
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="dock-text">
+                <span id={titleId}>{card.title}</span>
+                {card.subject.map((line, index) => (
+                  <Fragment key={index}> {card.code ? <code>{line}</code> : line}</Fragment>
+                ))}
+              </span>
+              {isAsyncQuestion(request) ? (
+                <button
+                  type="button"
+                  className="btn btn--quiet btn--sm"
+                  onClick={() => {
+                    setUnfolded(false);
+                  }}
+                >
+                  {FOLD_QUESTION_LABEL}
+                </button>
+              ) : null}
+            </>
+          )}
         </div>
-        {question === undefined ? null : (
+        {shownQuestion === undefined || stepper === null ? null : (
           <div className="dock-question">
             <div className="dock-question-top">
-              <span className="dock-question-header">{question.header}</span>
+              <span className="dock-question-header">{shownQuestion.header}</span>
               {card.questions.length === 1 ? null : (
                 <span className="dock-question-place">
-                  Question {shownQuestionIndex + 1} of {card.questions.length}
+                  Question {requestDraft.shownQuestionIndex + 1} of {card.questions.length}
                 </span>
               )}
             </div>
-            <span className="dock-question-text">{question.question}</span>
+            <span className="dock-question-text">{shownQuestion.question}</span>
             {/* The choices sit on the ledger's grid: the choice and its label
                 in the buttons' column, what it means in the descriptions'
                 column, so options and answers line up. The whole row is the
                 click target. */}
-            {question.options.length === 0 ? null : (
+            {shownQuestion.options.length === 0 ? null : (
               <div
                 className={
                   // Decided here, not by a `:has()` selector in the CSS:
                   // `:has()` makes style invalidation depend on descendants,
                   // which costs while the transcript streams.
-                  question.options.some((option) => option.description !== undefined)
+                  shownQuestion.options.some((option) => option.description !== undefined)
                     ? "dock-options"
                     : "dock-options dock-options--plain"
                 }
               >
-                {question.options.map((option, index) => (
+                {shownQuestion.options.map((option, index) => (
                   // Keyed by place, so a focused choice keeps the focus when
                   // the next question has a choice in the same place.
                   <label key={index} className="dock-option">
                     <span className="dock-option-label">
                       <span className="dock-choice">
                         <input
-                          type={question.multiSelect ? "checkbox" : "radio"}
+                          type={shownQuestion.multiSelect ? "checkbox" : "radio"}
                           name={titleId}
-                          checked={draft[question.header]!.picks.includes(option.label)}
+                          checked={draft[shownQuestion.header]!.picks.includes(option.label)}
                           disabled={locked}
-                          onChange={() =>
-                            setDraft(pickQuestionOption(draft, question, option.label))
-                          }
+                          onChange={() => {
+                            pickOption(option.label);
+                          }}
                         />
-                        {question.multiSelect ? <CheckIcon size={12} /> : null}
+                        {shownQuestion.multiSelect ? <CheckIcon size={12} /> : null}
                       </span>
                       {option.label}
                     </span>
@@ -420,39 +501,64 @@ export function RequestDock({
                 ))}
               </div>
             )}
-            {question.note === null ? null : (
-              <span className="dock-question-note">{question.note}</span>
+            {shownQuestion.note === null ? null : (
+              <span className="dock-question-note">{shownQuestion.note}</span>
             )}
-            {question.secretWarning === null ? null : (
-              <span className="dock-question-warning">{question.secretWarning}</span>
+            {shownQuestion.secretWarning === null ? null : (
+              <span className="dock-question-warning">{shownQuestion.secretWarning}</span>
             )}
-            <div className="dock-own">
-              <input
-                className="field"
-                type="text"
-                aria-label="Your own answer"
-                placeholder="Or type your own answer"
-                value={draft[question.header]!.text}
-                disabled={locked}
-                onChange={(event) =>
-                  setDraft(typeQuestionAnswer(draft, question, event.target.value))
-                }
-              />
-              {/* `aria-disabled` rather than `disabled`, so the button keeps
-                  the focus when Next turns into Send answers on a question
-                  not yet answered. Until the shown question is answered, and
-                  once the answers are sent, it looks like a plain button with
-                  a faint label, as the locked choices and field do. */}
-              <button
-                type="button"
-                className="btn btn--accent btn--sm"
-                aria-disabled={locked || !questionAnswered}
-                data-unready={locked || !questionAnswered || undefined}
-                onClick={advanceQuestions}
-              >
-                {isLastQuestion ? "Send answers" : "Next"}
-              </button>
-            </div>
+            {ownsAnswerField ? (
+              <div className="dock-own">
+                <input
+                  className="field"
+                  // A secret answer is masked, so it never shows on screen.
+                  type={shownQuestion.secretWarning === null ? "text" : "password"}
+                  autoComplete="off"
+                  aria-label="Your own answer"
+                  aria-describedby={stepper.notice === null ? undefined : `${titleId}-notice`}
+                  placeholder={stepper.placeholder}
+                  value={draft[shownQuestion.header]!.text}
+                  disabled={locked}
+                  onChange={(event) => {
+                    setDraft(typeQuestionAnswer(draft, shownQuestion, event.target.value));
+                  }}
+                />
+                {stepper.showsPrevious ? (
+                  <button
+                    type="button"
+                    className="btn btn--quiet btn--sm"
+                    aria-disabled={!stepper.canGoBack}
+                    data-unready={!stepper.canGoBack || undefined}
+                    onClick={() => {
+                      stepThroughQuestions("previous");
+                    }}
+                  >
+                    {PREVIOUS_QUESTION_LABEL}
+                  </button>
+                ) : null}
+                {/* `aria-disabled` rather than `disabled`, so the button keeps
+                    the focus when Next turns into Send answers on a question
+                    not yet answered. Until the shown question is answered, and
+                    once the answers are sent, it looks like a plain button with
+                    a faint label, as the locked choices and field do. */}
+                <button
+                  type="button"
+                  className="btn btn--accent btn--sm"
+                  aria-disabled={!stepper.ready}
+                  data-unready={!stepper.ready || undefined}
+                  onClick={() => {
+                    stepThroughQuestions("next");
+                  }}
+                >
+                  {stepper.stepLabel}
+                </button>
+              </div>
+            ) : null}
+            {ownsAnswerField && stepper.notice !== null ? (
+              <p className="dock-error" id={`${titleId}-notice`}>
+                {stepper.notice}
+              </p>
+            ) : null}
           </div>
         )}
         {answers.length === 0 ? null : (
@@ -465,7 +571,7 @@ export function RequestDock({
         )}
         {error === null ? null : (
           <p className="dock-error" role="alert">
-            {readErrorMessage(error)}
+            {error}
           </p>
         )}
       </div>
