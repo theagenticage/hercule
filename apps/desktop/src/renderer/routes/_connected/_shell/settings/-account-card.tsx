@@ -1,5 +1,5 @@
 import { useState, type JSX } from "react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
   addModelProfileAccount,
@@ -12,7 +12,6 @@ import {
   listProviderAccountMachines,
   readErrorMessage,
   resolveBrowserTimezone,
-  updateModelProfile,
   type AccountFix,
 } from "@hercule/client-core";
 import type { ProviderAccount } from "@hercule/contract";
@@ -23,7 +22,7 @@ import {
   runnersQuery,
 } from "../../../../app/queries";
 import { ProviderAccountCard, ProviderMark } from "../../../../screens/settings/providers";
-import { readCachedModelProfile, replaceCachedModelProfile } from "./-model-profile-cache";
+import { useModelProfileUpdate } from "./-model-profile-cache";
 import { useOpenModelProfile } from "./-open-model-profile";
 
 /**
@@ -60,24 +59,12 @@ export function AccountCard({
   const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
-  const queryClient = useQueryClient();
   const { profile: openProfile, profiles } = useOpenModelProfile(client);
   const [timezone] = useState(() => resolveBrowserTimezone());
-  const addToProfile = useMutation({
-    scope: { id: "model-profile" },
-    mutationFn: (profileId: string) => {
-      const newest = readCachedModelProfile(queryClient, client, profileId);
-      return updateModelProfile(client, newest, (current) =>
-        addModelProfileAccount(current, account.id),
-      );
-    },
-    onSuccess: (saved) => {
-      replaceCachedModelProfile(queryClient, client, saved);
-    },
-  });
+  const addToProfile = useModelProfileUpdate(client);
   // The save belongs to the profile it was started on, so a tab switched to
   // meanwhile shows neither its wait nor its refusal.
-  const startedHere = addToProfile.variables === openProfile?.id;
+  const startedHere = addToProfile.variables?.profileId === openProfile?.id;
   const holders = listAccountModelProfiles(profiles, account.id);
   // Usage and expiry are worked out as the card draws, and not kept current:
   // a push that changes them draws it again.
@@ -116,7 +103,12 @@ export function AccountCard({
         onOpen(account.id, name);
       }}
       onUse={() => {
-        if (openProfile !== undefined) addToProfile.mutate(openProfile.id);
+        if (openProfile !== undefined) {
+          addToProfile.mutate({
+            profileId: openProfile.id,
+            buildChange: (current) => addModelProfileAccount(current, account.id),
+          });
+        }
       }}
       onFix={(fix) => {
         onFix(account.id, name, fix);

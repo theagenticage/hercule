@@ -1,6 +1,6 @@
-import type { QueryClient } from "@tanstack/react-query";
-import type { HerculeClient } from "@hercule/client-core";
-import type { ModelProfile } from "@hercule/contract";
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { updateModelProfile, type HerculeClient } from "@hercule/client-core";
+import type { ModelProfile, ModelProfileUpdateInput } from "@hercule/contract";
 import { modelProfilesQuery } from "../../../../app/queries";
 
 /**
@@ -66,3 +66,37 @@ export const removeCachedModelProfile = (
     list?.filter((each) => each.id !== id),
   );
 };
+
+/**
+ * Returns the mutation that saves one change to a Model Profile. Call it with
+ * the id of the profile and `buildChange`, which builds the change from the
+ * profile it is given (`updateModelProfile`).
+ *
+ * Every save of every caller shares the "model-profile" mutation scope, so
+ * saves run one after the other. The profile is read from the cache when a
+ * save's turn comes, not when the user acted, so a save never writes over one
+ * that ran before it. The controller's answer replaces the profile in the
+ * cache. The mutation fails with the reason `readCachedModelProfile` gives
+ * when the profile is gone, or with the controller's refusal.
+ */
+export function useModelProfileUpdate(client: HerculeClient) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    scope: { id: "model-profile" },
+    mutationFn: ({
+      profileId,
+      buildChange,
+    }: {
+      readonly profileId: string;
+      readonly buildChange: (profile: ModelProfile) => ModelProfileUpdateInput;
+    }) =>
+      updateModelProfile(
+        client,
+        readCachedModelProfile(queryClient, client, profileId),
+        buildChange,
+      ),
+    onSuccess: (saved) => {
+      replaceCachedModelProfile(queryClient, client, saved);
+    },
+  });
+}

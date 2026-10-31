@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type HTMLAttributes, type JSX } from "react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   addModelProfileAccount,
   buildModelProfileSections,
@@ -12,7 +12,6 @@ import {
   readErrorMessage,
   setModelProfileEntryIncluded,
   takeOutModelProfileEntry,
-  updateModelProfile,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { ModelProfile, ModelProfileUpdateInput } from "@hercule/contract";
@@ -29,7 +28,7 @@ import { ProviderMark } from "../../../../screens/settings/providers/provider-ma
 import { useDragReorder } from "../../../../screens/settings/providers/use-drag-reorder";
 import { useOptimisticOrder } from "../../../../screens/settings/providers/use-optimistic-order";
 import "../../../../screens/settings/providers/models.css";
-import { readCachedModelProfile, replaceCachedModelProfile } from "./-model-profile-cache";
+import { useModelProfileUpdate } from "./-model-profile-cache";
 import { ModelProfilePreview } from "./-model-profile-preview";
 import { AccountModelPicker } from "./-models-picker";
 
@@ -74,28 +73,12 @@ export function ModelProfileMenu({
   readonly flashProviderAccountId: string | null;
   readonly onAddAccount: () => void;
 }): JSX.Element {
-  const queryClient = useQueryClient();
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const providers = useSuspenseQuery(providersQuery(client)).data;
   const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
 
-  const save = useMutation({
-    scope: { id: "model-profile" },
-    mutationFn: ({
-      profileId,
-      buildChange,
-    }: {
-      readonly profileId: string;
-      readonly buildChange: (profile: ModelProfile) => ModelProfileUpdateInput;
-    }) => {
-      const newest = readCachedModelProfile(queryClient, client, profileId);
-      return updateModelProfile(client, newest, buildChange);
-    },
-    onSuccess: (saved) => {
-      replaceCachedModelProfile(queryClient, client, saved);
-    },
-  });
+  const save = useModelProfileUpdate(client);
 
   /** Saves one change and resolves when the save is over, whether it worked or not; a failure shows above the sections. */
   const change = (buildChange: (profile: ModelProfile) => ModelProfileUpdateInput): Promise<void> =>
