@@ -9,13 +9,22 @@
  * it can run now) is worked out by the controller on every read and returned
  * on the `ResolvedModelProfileEntry`, so no client repeats that logic.
  *
- * Creating and deleting profiles is not part of this group yet.
+ * A profile is created empty or as a copy of another, and deleted unless it
+ * is the last one. A project may name one profile (`Project.modelProfileId`).
  */
 import { Schema } from "effect";
 import { ImageInputCapability, MAX_FACT_LENGTH, ModelOption } from "@hercule/protocol";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
-import { Conflict, Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../errors";
+import {
+  Conflict,
+  Forbidden,
+  Internal,
+  InvalidState,
+  NotFound,
+  Unauthenticated,
+  Validation,
+} from "../errors";
 import { Id, Timestamp } from "../ids";
 import { Authenticated } from "../security";
 import { atMost, bounded } from "../strings";
@@ -223,6 +232,19 @@ export const ModelProfileUpdateInput = Schema.Struct({
 
 export type ModelProfileUpdateInput = Schema.Schema.Type<typeof ModelProfileUpdateInput>;
 
+/**
+ * The payload of `modelProfile.create`. The profile starts empty, or with the
+ * accounts, entries, harness choices, default entry and dismissed models of
+ * the profile `copyFromId` names, as they are stored. A name another profile
+ * has is refused `validation`.
+ */
+export const ModelProfileCreateInput = Schema.Struct({
+  name: ModelProfileName,
+  copyFromId: Schema.optionalKey(Id),
+});
+
+export type ModelProfileCreateInput = Schema.Schema.Type<typeof ModelProfileCreateInput>;
+
 export const modelProfile = HttpApiGroup.make("modelProfile")
   .add(
     HttpApiEndpoint.get("query", "/model-profiles", {
@@ -234,11 +256,21 @@ export const modelProfile = HttpApiGroup.make("modelProfile")
       success: ModelProfile,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
+    HttpApiEndpoint.post("create", "/model-profiles", {
+      payload: ModelProfileCreateInput,
+      success: ModelProfile,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
     HttpApiEndpoint.patch("update", "/model-profiles/:id", {
       params: { id: Id },
       payload: ModelProfileUpdateInput,
       success: ModelProfile,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, Internal],
+    }),
+    HttpApiEndpoint.delete("delete", "/model-profiles/:id", {
+      params: { id: Id },
+      success: Schema.Struct({}),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
   )
   .middleware(Authenticated);

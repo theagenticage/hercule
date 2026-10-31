@@ -1,10 +1,11 @@
 /**
  * Projects: a way to group information inside Hercule.
  *
- * A project carries no behaviour. It has no default connection, no status and
- * nothing derived: a task points at one through `projectId`, and a resource
- * joins any number of them. Delete is soft, as it is for a task, and a task
- * keeps its `projectId` when its project is deleted.
+ * A project carries no behaviour and one default: the Model Profile a new
+ * thread in it starts on (`modelProfileId`). It has no default connection, no
+ * status and nothing derived: a task points at one through `projectId`, and a
+ * resource joins any number of them. Delete is soft, as it is for a task, and
+ * a task keeps its `projectId` when its project is deleted.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
@@ -28,6 +29,12 @@ export const Project = Schema.Struct({
   id: Id,
   name: ProjectName,
   description: Schema.optionalKey(ProjectDescription),
+  /**
+   * The Model Profile a new thread in this project starts on. Absent when the
+   * project names none, and then a new thread starts on the user's thread
+   * default. Deleting the profile removes it from the project.
+   */
+  modelProfileId: Schema.optionalKey(Id),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   /** Set by a delete. A deleted project is never returned, so a caller never sees this field. */
@@ -46,6 +53,8 @@ export const PROJECT_SORT_FIELDS = ["name", "createdAt", "updatedAt"] as const;
 export const ProjectCreateInput = Schema.Struct({
   name: ProjectName,
   description: Schema.optionalKey(ProjectDescription),
+  /** A Model Profile that exists; any other id is refused `validation`. */
+  modelProfileId: Schema.optionalKey(Id),
 });
 
 export type ProjectCreateInput = Schema.Schema.Type<typeof ProjectCreateInput>;
@@ -55,6 +64,8 @@ export const ProjectUpdateInput = Schema.Struct({
   name: Schema.optionalKey(ProjectName),
   /** `null` removes the description; no other value does. */
   description: Schema.optionalKey(Schema.NullOr(ProjectDescription)),
+  /** `null` removes the project's profile; an id that is no profile is refused `validation`. */
+  modelProfileId: Schema.optionalKey(Schema.NullOr(Id)),
 });
 
 export type ProjectUpdateInput = Schema.Schema.Type<typeof ProjectUpdateInput>;

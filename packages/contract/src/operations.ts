@@ -533,9 +533,19 @@ const TABLE = {
     method: "GET",
     path: "/api/v1/model-profiles/:id",
   },
+  "modelProfile.create": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/model-profiles",
+  },
   "modelProfile.update": {
     requires: "infra.write",
     method: "PATCH",
+    path: "/api/v1/model-profiles/:id",
+  },
+  "modelProfile.delete": {
+    requires: "infra.write",
+    method: "DELETE",
     path: "/api/v1/model-profiles/:id",
   },
 
