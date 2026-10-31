@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type FormEvent, type JSX } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type JSX } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { readErrorMessage } from "@hercule/client-core";
@@ -54,6 +54,12 @@ export function NewModelProfileDialog({
       onCreated(created);
     },
   });
+  // A modal dialog focuses its first control, the close button, when it
+  // opens. The user is here to type a name. This effect runs after the one in
+  // GlassDialog that opens the dialog, because that is a child's.
+  useEffect(() => {
+    nameRef.current?.focus();
+  }, []);
   const canCreate = name.trim() !== "" && !create.isPending;
   const change = (apply: () => void): void => {
     if (create.isPending) return;
@@ -118,7 +124,6 @@ export function NewModelProfileDialog({
           <input
             ref={nameRef}
             type="text"
-            autoFocus
             placeholder="Client work, Experiments, Cheap and fast…"
             spellCheck={false}
             autoComplete="off"

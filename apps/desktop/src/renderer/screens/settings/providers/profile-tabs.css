@@ -22,6 +22,10 @@
   position: relative;
   display: inline-flex;
   align-items: center;
+  /* The tab's menu opens under the whole tab, not under the small ⌄ button
+     that opens it. The name is scoped to each tab, so every tab can have it. */
+  anchor-name: --pm-tab;
+  anchor-scope: --pm-tab;
 }
 .pm-tab {
   position: relative;
@@ -80,9 +84,11 @@
   background: var(--hover);
   color: var(--ink);
 }
+/* The prototype's menu starts 2px above the tab's lower edge. */
 .pm-tabmenu {
   width: 200px;
-  margin-top: 2px;
+  margin-top: -2px;
+  position-anchor: --pm-tab;
   position-area: block-end span-inline-end;
 }
 .pm-tabmenu [role="menuitem"] > .ic {

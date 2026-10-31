@@ -14,12 +14,17 @@
  * sheet put it, so the ring shows. `?picker=<account>` opens the picker of the
  * account's "Add a model" (`?picker=Anthropic`), and `?rowmenu=<model>` opens
  * the ⋯ menu of that model's first row (`?rowmenu=Fable%205.1`).
+ * `?profiles=2` adds a second Model Profile, "Work", so the tabs show;
+ * `?tabmenu` opens the open tab's ⌄ menu, `?rename` edits the open tab's name,
+ * `?newprofile` opens the New profile dialog, and `?deleteprofile` the
+ * delete confirmation of the open profile.
  */
 import { mountProvidersSettingsSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
 import {
   PROVIDERS_SETTINGS_RECORDS,
   PROVIDERS_SIDEBAR_RECORDS,
+  PROVIDER_MODEL_PROFILES,
 } from "./settings-providers-fixture";
 
 /** Waits for the frame after `find` returns an element, and returns it. */
@@ -98,7 +103,25 @@ async function openAddAccountSheet(step: string): Promise<void> {
   );
 }
 
-await mountProvidersSettingsSpecimen(PROVIDERS_SIDEBAR_RECORDS, PROVIDERS_SETTINGS_RECORDS);
+const query = new URLSearchParams(location.search);
+const [main] = PROVIDER_MODEL_PROFILES;
+await mountProvidersSettingsSpecimen(
+  query.get("profiles") === "2" && main !== undefined
+    ? {
+        ...PROVIDERS_SIDEBAR_RECORDS,
+        modelProfiles: [
+          main,
+          {
+            ...main,
+            id: "01a06d02-8000-7000-8000-000000000b02",
+            name: "Work",
+            accounts: main.accounts.slice(1, 2),
+          },
+        ],
+      }
+    : PROVIDERS_SIDEBAR_RECORDS,
+  PROVIDERS_SETTINGS_RECORDS,
+);
 const sheet = new URLSearchParams(location.search).get("sheet");
 if (sheet !== null) {
   const card = document.querySelector<HTMLElement>(`button[title="Open ${sheet}"]`);
@@ -129,6 +152,30 @@ if (rowMenu !== null) {
   if (button === undefined || button === null)
     throw new Error(`The page has no row for ${rowMenu}.`);
   button.click();
+}
+// The open tab's ⌄ menu, and what its items open.
+const openTabMenu = async (item?: string): Promise<void> => {
+  const button = await waitFor(
+    () => document.querySelector<HTMLElement>(".pm-tabmore"),
+    "the open tab's ⌄ button",
+  );
+  button.click();
+  if (item === undefined) return;
+  const target = await waitFor(
+    () =>
+      [...document.querySelectorAll<HTMLElement>(".pm-tabmenu [role='menuitem']")].find(
+        (each) => each.textContent.trim() === item,
+      ),
+    `the menu item ${item}`,
+  );
+  target.click();
+};
+if (query.has("tabmenu")) await openTabMenu();
+if (query.has("rename")) await openTabMenu("Rename");
+if (query.has("deleteprofile")) await openTabMenu("Delete…");
+if (query.has("newprofile")) {
+  (await waitFor(() => document.querySelector<HTMLElement>(".pm-tab--new"), "New profile")).click();
+  await waitFor(() => document.querySelector("dialog.new-profile-dialog[open]"), "the dialog");
 }
 const add = new URLSearchParams(location.search).get("add");
 if (add !== null) {
