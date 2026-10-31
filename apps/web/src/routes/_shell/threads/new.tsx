@@ -1,12 +1,14 @@
-import type { JSX } from "react";
+import { useState, type JSX } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { buildDraftConfig, buildSiblingTabs } from "@hercule/client-core";
+import type { Project } from "@hercule/contract";
+import { buildDraftConfig, buildSiblingTabs, type HerculeClient } from "@hercule/client-core";
 import {
   ensureProviderAccountReads,
   localRunnerQuery,
   modelProfilesQuery,
   profilesQuery,
+  projectQuery,
   projectsQuery,
   providerAccountsQuery,
   resourcesQuery,
@@ -48,12 +50,20 @@ export const Route = createFileRoute("/_shell/threads/new")({
     project: typeof search.project === "string" ? search.project : undefined,
     workspace: typeof search.workspace === "string" ? search.workspace : undefined,
   }),
-  loader: async ({ context }) => {
+  loaderDeps: ({ search }) => ({ project: search.project }),
+  loader: async ({ context, deps }) => {
     const [runners] = await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
       ensureProviderAccountReads(context.queryClient, context.client),
       context.queryClient.ensureQueryData(profilesQuery(context.client)),
       context.queryClient.ensureQueryData(settingsQuery(context.client)),
+      // The addressed project is ensured, not prefetched: its Model Profile
+      // decides which model the draft sends. If it could not be read, the
+      // draft would fall back to the user's default model and send it as if
+      // the user had chosen it, so a failed read shows the screen's error.
+      deps.project === undefined
+        ? undefined
+        : context.queryClient.ensureQueryData(projectQuery(context.client, deps.project)),
       // The lists the workspace menu reads. They are prefetched rather than
       // ensured: if the controller cannot list them, the draft has no project
       // to choose from. The composer then offers fewer choices, but the screen
@@ -70,7 +80,31 @@ export const Route = createFileRoute("/_shell/threads/new")({
   component: NewThread,
 });
 
+/**
+ * Reads the addressed project, if the URL names one, and draws the draft with
+ * it. The loader has already read it, so this never renders without it.
+ */
 function NewThread(): JSX.Element {
+  const { client } = Route.useRouteContext();
+  const { project: projectId } = Route.useSearch();
+  return projectId === undefined ? (
+    <Draft project={undefined} />
+  ) : (
+    <ProjectDraft client={client} projectId={projectId} />
+  );
+}
+
+function ProjectDraft({
+  client,
+  projectId,
+}: {
+  readonly client: HerculeClient;
+  readonly projectId: string;
+}): JSX.Element {
+  return <Draft project={useSuspenseQuery(projectQuery(client, projectId)).data} />;
+}
+
+function Draft({ project }: { readonly project: Project | undefined }): JSX.Element {
   const { client, detectLocalRunner } = Route.useRouteContext();
   const search = Route.useSearch();
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
@@ -79,10 +113,12 @@ function NewThread(): JSX.Element {
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   const thisMacRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
-  const projects = useQuery(projectsQuery(client)).data?.items ?? [];
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
 
+  // Read once: the composer writes Recent only after a send, which leaves
+  // this screen for the new thread.
+  const [recent] = useState(readRecentModels);
   const joined = workspaces.find((each) => each.id === search.workspace);
   // The composer applies the user's picks on top of this config. It decides
   // where a draft that joins no workspace opens, and which runner a joined
@@ -95,8 +131,8 @@ function NewThread(): JSX.Element {
     profiles,
     thisMacRunnerId,
     modelProfiles,
-    projects,
-    recent: readRecentModels(),
+    projects: project === undefined ? [] : [project],
+    recent,
     projectId: search.project ?? null,
     workspaceId: search.workspace ?? null,
   });
@@ -104,7 +140,7 @@ function NewThread(): JSX.Element {
   return (
     <div className="flex flex-1 flex-col">
       <ThreadChrome
-        crumb={projects.find((each) => each.id === search.project)?.name}
+        crumb={project?.name}
         title="New thread"
         tabs={buildSiblingTabs({ workspace: joined, sessions, activeSessionId: null, draft: true })}
       />
