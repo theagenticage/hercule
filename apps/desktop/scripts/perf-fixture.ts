@@ -512,7 +512,8 @@ export async function runWithThreadFixture<T>(
         const agent = await call<{ readonly id: string }>("POST", "/agents", {
           name: "perf-group-agent",
           systemPrompt: "Review the change.",
-          instanceId: first!.instanceId,
+          providerAccountId: first!.providerAccountId,
+          harnessId: null,
           permissionProfileId: first!.permissionProfileId,
         });
         for (const trio of trios.slice(0, GROUPS_WITH_AGENT_SESSION)) {

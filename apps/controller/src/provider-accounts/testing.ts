@@ -134,7 +134,7 @@ export const addAccount = (
     );
   });
 
-/** Gives an account a legacy home, as the migration does for an account made from an instance. */
+/** Gives an account a legacy home, as the upgrade does for an account it made from the previous version's data. */
 export const giveLegacyHome = (
   accountId: string,
   folder: string,

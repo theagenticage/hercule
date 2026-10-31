@@ -26,7 +26,7 @@ export interface StoredProviderAccount {
   readonly planLabel: string | null;
   /** The qualified id of the harness a session uses when it names none. */
   readonly defaultHarnessId: string;
-  /** The folder name under `providers/` that an account made from a provider instance keeps, or null. */
+  /** The folder name under `providers/` that an account made by the upgrade from the previous version keeps, or null. */
   readonly legacyHomeFolder: string | null;
   /** The qualified id of the harness that folder belongs to, or null. Null exactly when the folder is. */
   readonly legacyHomeHarnessId: string | null;

@@ -233,7 +233,11 @@ describe("Settings > System, text generation", () => {
   });
 
   it("saves the picked model, and then Off", async () => {
-    const calls = await openSystem({ model: report(SONNET), lastFailure: null, unavailableReason: null });
+    const calls = await openSystem({
+      model: report(SONNET),
+      lastFailure: null,
+      unavailableReason: null,
+    });
 
     await userEvent.selectOptions(readSelect(), "Anthropic · Claude Opus 5");
     await waitFor(() => {

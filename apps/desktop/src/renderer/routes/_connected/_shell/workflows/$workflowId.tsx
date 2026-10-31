@@ -82,7 +82,7 @@ const validateWorkflowSearch = (search: Record<string, unknown>): WorkflowSearch
  *   each time a workflow opens because no topic covers them;
  * - the Runs tab's first page of runs, or the day its timeline shows.
  *
- * The triggers, the settings, the plugins and the provider instances are
+ * The triggers, the settings, the plugins and the Provider Accounts are
  * read by the Workflows layout and the shell, and are cached already.
  * Stepping the day or switching the view runs the loader again, with
  * `cause` "stay", and reads only the runs it has not read.

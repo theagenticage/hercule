@@ -63,7 +63,11 @@ const listAccounts = async (base: string, token: string): Promise<ReadonlyArray<
   return (await response.json()) as ReadonlyArray<AccountRecord>;
 };
 
-/** Adds an account of Acme straight into the database, as the next ticket's create will. */
+/**
+ * Adds an account of Acme straight into the database, as the next ticket's
+ * create will. The test controller has already seeded one Acme account without
+ * a label, and a provider allows only one, so every account added here needs a label.
+ */
 const insertAccount = async (
   sql: ServerHarness["sql"],
   account: Parameters<typeof addAccount>[0],
@@ -172,7 +176,7 @@ describe("the provider account routes", () => {
   it("stores a key through update, and secret.set refuses the provider-account owner kind", async () => {
     await withAccounts(async ({ base, sql }) => {
       const token = await completeSetup(base);
-      const id = await insertAccount(sql, { kind: KEY_KIND });
+      const id = await insertAccount(sql, { kind: KEY_KIND, label: "work" });
 
       const stored = await send("PATCH", base, `/api/v1/provider-accounts/${id}`, {
         body: { credentials: { apiKey: "sk-a-paid-credential" } },
@@ -218,7 +222,7 @@ describe("the provider account routes", () => {
   it("deletes an unused account, with its stored key", async () => {
     await withAccounts(async ({ base, sql }) => {
       const token = await completeSetup(base);
-      const id = await insertAccount(sql, { kind: KEY_KIND });
+      const id = await insertAccount(sql, { kind: KEY_KIND, label: "work" });
       await send("PATCH", base, `/api/v1/provider-accounts/${id}`, {
         body: { credentials: { apiKey: "sk-a-paid-credential" } },
         token,
@@ -245,7 +249,7 @@ describe("the provider account routes", () => {
   it("answers 404 when signing in or probing for an account or runner that does not exist", async () => {
     await withAccounts(async ({ base, sql }) => {
       const token = await completeSetup(base);
-      const id = await insertAccount(sql, { kind: MACHINE_KIND });
+      const id = await insertAccount(sql, { kind: MACHINE_KIND, label: "laptop" });
 
       expect(
         (

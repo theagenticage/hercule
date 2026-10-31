@@ -58,7 +58,7 @@ afterEach(() => {
 
 /**
  * Opens the app signed in at `thread`, with the sidebar fixture and the
- * provider instance, once the thread is subscribed to its live topics and its
+ * Provider Account, once the thread is subscribed to its live topics and its
  * stream has sent an empty replay, so the rows a test pushes are live rows.
  * `handlers` add or replace the stubbed controller's answers.
  */
@@ -183,9 +183,9 @@ describe("the thread screen", () => {
     expect(readBlocks()).toEqual([
       "Bump the Bun pin to 1.3.2 and make sure CI still passes.11:00",
       "Worked for 9s ›ran 2 commands",
-      "Claude Code · Claude Sonnet 5 · 11:00The pin lives in .bun-version and in two workflows. I'll update all three.",
+      "Anthropic · Claude Sonnet 5 · 11:00The pin lives in .bun-version and in two workflows. I'll update all three.",
       "Worked for 1m 57s ›edited 3 filesran 2 commands",
-      "Claude Code · Claude Sonnet 5 · 11:02Done. The pin is now 1.3.2 in:.bun-version.github/workflows/ci.yml.github/workflows/release.ymlbun install and bun test pass.",
+      "Anthropic · Claude Sonnet 5 · 11:02Done. The pin is now 1.3.2 in:.bun-version.github/workflows/ci.yml.github/workflows/release.ymlbun install and bun test pass.",
     ]);
 
     const transcript = findTranscript();
@@ -306,7 +306,7 @@ describe("the thread screen", () => {
     // The message is still open, so the paragraph being written shows as
     // stored, with the space the next word follows.
     expect(animated[0]!.closest(".msg")?.textContent).toBe(
-      "Claude Code · Claude Sonnet 5 · 11:03The three failures share one cause: ",
+      "Anthropic · Claude Sonnet 5 · 11:03The three failures share one cause: ",
     );
   });
 
@@ -331,7 +331,7 @@ describe("the thread screen", () => {
     // The face moves on to the new message, whose paragraph being written is
     // empty until the agent writes.
     await waitFor(() => {
-      expect(readBlocks().at(-1)).toBe("Claude Code · Claude Sonnet 5 · 11:03");
+      expect(readBlocks().at(-1)).toBe("Anthropic · Claude Sonnet 5 · 11:03");
     });
     const animated = [...findTranscript().querySelectorAll(".cr--animated")];
     expect(animated.map((face) => face.closest(".tx-item"))).toEqual([
@@ -365,7 +365,7 @@ describe("the thread screen", () => {
     });
     await expectOpenParagraphToShow("The fix is to lock it.");
     expect(readBlocks().at(-1)).toBe(
-      "Claude Code · Claude Sonnet 5 · 11:03It is a race in the retry queue.The fix is to lock it.",
+      "Anthropic · Claude Sonnet 5 · 11:03It is a race in the retry queue.The fix is to lock it.",
     );
 
     act(() => {
@@ -377,7 +377,7 @@ describe("the thread screen", () => {
     // The message has ended, so all of its text is drawn as markdown.
     expect(within(findTranscript()).getByText("retry").tagName).toBe("STRONG");
     expect(readBlocks().at(-1)).toBe(
-      "Claude Code · Claude Sonnet 5 · 11:03It is a race in the retry queue.The fix is to lock it.",
+      "Anthropic · Claude Sonnet 5 · 11:03It is a race in the retry queue.The fix is to lock it.",
     );
     expect(findTranscript().querySelector(".cr--animated")).toBeNull();
   });
@@ -406,7 +406,7 @@ describe("the thread screen", () => {
       live.resetStream(sessionId);
     });
     await waitFor(() => {
-      expect(readBlocks().at(-1)).toBe("Claude Code · Claude Sonnet 5 · 11:03It is a race ");
+      expect(readBlocks().at(-1)).toBe("Anthropic · Claude Sonnet 5 · 11:03It is a race ");
     });
     expect(calls.filter((call) => call.path === transcriptPath)).toHaveLength(2);
     // Taps may have been missed while the stream was lost, so the message's

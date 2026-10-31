@@ -85,7 +85,7 @@ const MAX_REPORTED_SESSIONS = 256;
 
 /**
  * A Mac with Claude Code installed. The fleet places threads on the Claude
- * Code instance, so the facts say its harness is present, and a screen that
+ * Code account, so the facts say its harness is present, and a screen that
  * checks for it shows the runner as healthy. The identity port is the
  * caller's to choose; see `enlistScriptedRunner`.
  */
@@ -324,7 +324,7 @@ interface ParkedRequest {
 /** A session the runner holds: its start has arrived and it has not exited. */
 interface HostedSession {
   readonly sessionId: string;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
   /** The credential the controller minted for the session's start, which an agent calls the API with. */
   readonly token: string;
   /** The sequence number of the last event sent. A new process numbers from 1 again. */
@@ -1126,7 +1126,7 @@ export async function enlistScriptedRunner(
         return send({
           _tag: "probeReport",
           requestId: frame.requestId,
-          instanceId: frame.instanceId,
+          providerAccountId: frame.harnessAccount.providerAccountId,
           result: PROBE_RESULT,
         });
       case "workspaceProvision": {
@@ -1178,7 +1178,7 @@ export async function enlistScriptedRunner(
       case "sessionStart": {
         const session: HostedSession = {
           sessionId: frame.sessionId,
-          instanceId: frame.spec.instanceId,
+          providerAccountId: frame.spec.providerAccountId,
           token: frame.token,
           seq: 0,
           main: {
@@ -1290,7 +1290,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 14 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 15 satisfies typeof PROTOCOL_VERSION,
             capabilities: [
               "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,
@@ -1374,7 +1374,7 @@ export async function enlistScriptedRunner(
       const bindings: Array<SessionBinding> = [...sessions].map(([sessionId, session]) => ({
         sessionId,
         nativeSessionId: buildNativeSessionId(sessionId),
-        instanceId: session.instanceId,
+        providerAccountId: session.providerAccountId,
       }));
       if (bindings.length > MAX_REPORTED_SESSIONS) {
         throw new Error(

@@ -22,16 +22,21 @@ const controllerRoot = resolve(import.meta.dirname, "../..");
 // another process before the server binds it. The configured `bind.port` is
 // left at its default: it only sets the origin of the setup URL, and the
 // tests read just the token from that URL.
+//
+// The Anthropic plugin is loaded beside Claude Code because the fresh-install
+// seed makes the account that setup's default assistant runs on from the
+// providers the registry has.
 const controllerCode = `
   import { Effect } from "effect";
   import * as HttpServer from "effect/http/HttpServer";
   import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
+  import { anthropic } from "@hercule/plugin-anthropic";
   import { claudeCode } from "@hercule/plugin-claude-code";
   import { bootWith } from ${JSON.stringify(join(controllerRoot, "bootstrap.ts"))};
   import { operationLayers, bodyLimits, serve } from ${JSON.stringify(join(controllerRoot, "http/index.ts"))};
   await Effect.runPromise(bootWith({
     argv: [], env: process.env,
-    masterKeyBackend: "file", plugins: [claudeCode]
+    masterKeyBackend: "file", plugins: [anthropic, claudeCode]
   }, () => Effect.gen(function* () {
     yield* serve(undefined);
     const { address } = yield* HttpServer.HttpServer;

@@ -195,7 +195,7 @@ button.line:hover {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-/* In a row that cannot be picked, the note says why ("not logged in"), so it
+/* In a row that cannot be picked, the note says why ("not signed in"), so it
    is content, not metadata. */
 .line--dimmed .line-note {
   color: var(--muted);

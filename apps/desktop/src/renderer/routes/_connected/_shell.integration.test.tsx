@@ -161,7 +161,9 @@ describe("the shell's loader", () => {
       "/api/v1/workspaces",
       "/api/v1/resources",
       "/api/v1/runners",
+      "/api/v1/provider-accounts",
       "/api/v1/providers",
+      "/api/v1/harnesses",
       "/api/v1/user",
       "/api/v1/assistants",
       "/api/v1/signals",
@@ -368,17 +370,20 @@ describe("the shell's live connection", () => {
     expect(mostRunning).toBe(1);
   });
 
-  it("reads the runners again on a runner push, and the providers on a provider push", async () => {
+  it("reads the runners again on a runner push, and the Provider Accounts on a provider push", async () => {
     const { calls, live } = await startShell();
     const runnersBefore = countReads(calls, "/api/v1/runners");
+    const accountsBefore = countReads(calls, "/api/v1/provider-accounts");
     const providersBefore = countReads(calls, "/api/v1/providers");
 
     act(() => {
       live.pushInvalidation("provider");
     });
     await waitFor(() => {
-      expect(countReads(calls, "/api/v1/providers")).toBe(providersBefore + 1);
+      expect(countReads(calls, "/api/v1/provider-accounts")).toBe(accountsBefore + 1);
     });
+    // The providers are what the plugins register, so a push does not read them.
+    expect(countReads(calls, "/api/v1/providers")).toBe(providersBefore);
     expect(countReads(calls, "/api/v1/runners")).toBe(runnersBefore);
 
     act(() => {

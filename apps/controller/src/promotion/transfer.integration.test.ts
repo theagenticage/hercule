@@ -281,7 +281,7 @@ describe("promotion transfer", () => {
             Effect.gen(function* () {
               yield* harness.sql`
               INSERT INTO sessions (
-                id, permission_profile_id, instance_id, runner_id,
+                id, permission_profile_id, provider_account_id, runner_id,
                 requested_access_mode, access_mode, spec, title, status,
                 created_at, last_activity_at
               ) VALUES (
@@ -484,7 +484,7 @@ describe("promotion transfer", () => {
             harness.sql,
             harness.sql`
               INSERT INTO sessions (
-                id, permission_profile_id, instance_id, runner_id,
+                id, permission_profile_id, provider_account_id, runner_id,
                 requested_access_mode, access_mode, spec, title, status,
                 created_at, last_activity_at
               ) VALUES (

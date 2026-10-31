@@ -61,7 +61,7 @@ const insertSession = (profileId: string, status: string) =>
     return withTransaction(
       sql,
       sql`
-      INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
+      INSERT INTO sessions (id, permission_profile_id, provider_account_id, runner_id,
                             requested_access_mode, access_mode, spec, title, status,
                             created_at, last_activity_at)
       VALUES (${id}, ${owner}, ${owner}, ${owner}, 'auto', 'auto', '{}', 'a session',
@@ -90,7 +90,7 @@ const insertAgent = (
         harnessId: "claude-code/claude-code",
         name,
         systemPrompt: "do the work",
-        instanceId: uuidToString(mintUuid()),
+        providerAccountId: uuidToString(mintUuid()),
         permissionProfileId: profileId,
         accessMode: "full-access",
         model: null,

@@ -14,13 +14,14 @@ import { uuidFromString, withTransaction } from "../db";
 import { hashToken } from "../credentials";
 import type { ServerHarness } from "../http/testing";
 import { SETUP_TOKEN, completeSetup, del, get, post, send, withServer } from "../http/testing";
-import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition } from "../plugins/testing";
 import {
   listFrames,
   waitForFrames,
   reportEvent,
   waitUntil,
   WAIT_DEADLINE_MS,
+  buildFleetPlugin,
   withFleet as sharedWithFleet,
   type Arranged,
 } from "../sessions/testing";
@@ -1260,12 +1261,7 @@ const FLEET_BUDGET_MS = WAIT_DEADLINE_MS * 3 + 10_000;
 
 const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   sharedWithFleet(body, {
-    plugins: [
-      createPluginFixture({
-        id: "harnesses",
-        definitions: [buildHarnessDefinition("full", { token: "t" })],
-      }).plugin,
-    ],
+    plugins: [buildFleetPlugin("harnesses", [buildHarnessDefinition("full")])],
     facts: FLEET_FACTS,
     models: [
       {

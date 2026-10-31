@@ -38,11 +38,11 @@ const openProofWorkspace = async (
   manager: Workspaces,
   remote: string,
 ): Promise<{ workspaceId: string; cwd: string }> => {
-  await waitUntil("probed the production provider on the proof runner", async () => {
-    const providers = (await (
-      await get(base, "/api/v1/providers", token)
+  await waitUntil("probed every account on the proof runner", async () => {
+    const accounts = (await (
+      await get(base, "/api/v1/provider-accounts", token)
     ).json()) as ReadonlyArray<{ snapshots: ReadonlyArray<unknown> }>;
-    return providers.every((provider) => provider.snapshots.length === 1) ? true : undefined;
+    return accounts.every((account) => account.snapshots.length === 1) ? true : undefined;
   });
   const resourceResponse = await post(base, "/api/v1/resources", { kind: "repo", remote }, token);
   expect(resourceResponse.status, await resourceResponse.clone().text()).toBe(200);

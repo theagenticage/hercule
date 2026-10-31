@@ -83,7 +83,7 @@ export function MarkedCard({
   );
 }
 
-/** Renders a green check followed by `children`, such as "Logged in", at a row's end. */
+/** Renders a green check followed by `children`, such as "Signed in", at a row's end. */
 export function DoneMark({ children }: { readonly children?: ReactNode }): JSX.Element {
   return (
     <span className="hx-ok">

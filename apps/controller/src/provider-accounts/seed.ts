@@ -40,8 +40,8 @@ const FRESH_INSTALL_ACCOUNTS = [
  * Creates the three default accounts when the controller has no Provider
  * Account at all and first-run setup is not complete. It does nothing
  * otherwise, so an account the user deleted after setup stays deleted, and an
- * install that was migrated from provider instances keeps exactly the
- * accounts the migration made.
+ * install that was upgraded from the previous version keeps exactly the
+ * accounts the upgrade made.
  *
  * A default is skipped when this build does not register its provider and
  * account kind, since an account of a provider nobody can run is of no use.

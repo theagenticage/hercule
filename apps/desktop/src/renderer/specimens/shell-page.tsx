@@ -12,6 +12,7 @@
  * - settings-profiles.tsx, which opens Settings > Permission profiles, the
  *   list or one profile's page;
  * - settings-connections.tsx, which opens Settings > Connections;
+ * - settings-providers.tsx, which opens Settings > Providers;
  * - intake.tsx, which opens Intake, with or without a signal's pane;
  * - workflows.tsx, which opens Workflows;
  * - run.tsx, which opens a run's page;
@@ -168,6 +169,7 @@ import { AgentPage } from "../screens/thread/agent-page";
 import { Route as SettingsRoute } from "../routes/_connected/_shell/settings/route";
 import { Route as AppearanceSettingsRoute } from "../routes/_connected/_shell/settings/appearance";
 import { Route as ConnectionsSettingsRoute } from "../routes/_connected/_shell/settings/connections";
+import { Route as ProvidersSettingsRoute } from "../routes/_connected/_shell/settings/providers";
 import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/settings/assistants/index";
 import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/index";
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
@@ -379,6 +381,15 @@ export interface ConnectionsSettingsRecords {
 }
 
 /**
+ * What Settings > Providers reads besides the shell's lists, which hold the
+ * accounts, the providers, the harnesses, the runners and the plugins.
+ */
+export interface ProvidersSettingsRecords {
+  /** The id of the runner on this Mac, which the account sheet draws as a laptop. */
+  readonly thisMacRunnerId: string;
+}
+
+/**
  * What Settings > Intake reads besides the shell's lists, which hold the
  * plugins and the Connections: the Ignore Rules, with what each caught.
  */
@@ -394,6 +405,7 @@ interface OpenScreens {
   readonly permissionProfilesSettings?: PermissionProfilesSettingsRecords;
   readonly appearanceSettings?: AppearanceSettingsRecords;
   readonly connectionsSettings?: ConnectionsSettingsRecords;
+  readonly providersSettings?: ProvidersSettingsRecords;
   readonly intake?: IntakeRecords;
   readonly intakeSettings?: IntakeSettingsRecords;
   readonly workflows?: WorkflowsRecords;
@@ -551,6 +563,7 @@ const seedQueryCache = (
     permissionProfilesSettings,
     appearanceSettings,
     connectionsSettings,
+    providersSettings,
     intake,
     intakeSettings,
     workflows,
@@ -667,6 +680,12 @@ const seedQueryCache = (
     queryClient.setQueryData(connectionsQuery(client).queryKey, connectionsSettings.connections);
     queryClient.setQueryData(pluginsQuery(client).queryKey, connectionsSettings.plugins);
     queryClient.setQueryData(eventCountsQuery(client).queryKey, connectionsSettings.counts);
+  }
+  if (providersSettings !== undefined) {
+    queryClient.setQueryData(
+      localRunnerQuery(REFUSING_BRIDGE, records.runners).queryKey,
+      providersSettings.thisMacRunnerId,
+    );
   }
   if (intakeSettings !== undefined) {
     queryClient.setQueryData(ignoreRulesQuery(client).queryKey, intakeSettings.ignoreRules);
@@ -966,6 +985,12 @@ const buildRouter = (
     getParentRoute: () => settingsRoute,
     loader: undefined,
   } as never);
+  const providersSettingsRoute = ProvidersSettingsRoute.update({
+    id: "/providers",
+    path: "/providers",
+    getParentRoute: () => settingsRoute,
+    loader: undefined,
+  } as never);
   const intakeSettingsRoute = IntakeSettingsRoute.update({
     id: "/intake",
     path: "/intake",
@@ -1047,6 +1072,7 @@ const buildRouter = (
         settingsRoute.addChildren([
           appearanceSettingsRoute,
           connectionsSettingsRoute,
+          providersSettingsRoute,
           intakeSettingsRoute,
           assistantsSettingsRoute,
           permissionProfilesSettingsRoute,
@@ -1167,6 +1193,11 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
   if (screens.connectionsSettings !== undefined && document.querySelector(".conn") === null) {
     throw new Error(
       "Settings > Connections drew no Connection's row. Check the page's console for the error.",
+    );
+  }
+  if (screens.providersSettings !== undefined && document.querySelector(".pa-card") === null) {
+    throw new Error(
+      "Settings > Providers drew no account's card. Check the page's console for the error.",
     );
   }
   if (screens.intakeSettings !== undefined && document.querySelector(".set-sec") === null) {
@@ -1407,6 +1438,21 @@ export async function mountConnectionsSettingsSpecimen(
   settings: ConnectionsSettingsRecords,
 ): Promise<void> {
   await mountShellSpecimen(records, "/settings/connections", { connectionsSettings: settings });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Settings > Providers open: the main pane shows the app's real
+ * Settings frame and Providers section, with the accounts, the machines and
+ * the plugins of `records`. Returns once the accounts' cards are in the
+ * document. Fails when the page has no `#root`, draws no sidebar row or no
+ * account's card, or tries to read a record the cache does not hold.
+ */
+export async function mountProvidersSettingsSpecimen(
+  records: SidebarRecords,
+  settings: ProvidersSettingsRecords,
+): Promise<void> {
+  await mountShellSpecimen(records, "/settings/providers", { providersSettings: settings });
 }
 
 /**

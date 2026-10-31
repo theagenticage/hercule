@@ -84,7 +84,7 @@ export function ProviderAccountSheet({
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const thisMacRunnerId = useQuery(localRunnerQuery(bridge, runners)).data ?? null;
-  const [login, setLogin] = useState<{ runnerId: string; runnerName: string } | null>(null);
+  const [loginRunnerId, setLoginRunnerId] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const label = useSavedAccountLabel(client, account);
   const draft = useTextDraft(label.value, label.save);
@@ -116,7 +116,7 @@ export function ProviderAccountSheet({
     if (machine.canSignIn) {
       return {
         label: "Sign in",
-        onPress: () => setLogin({ runnerId: machine.runnerId, runnerName: machine.runnerName }),
+        onPress: () => setLoginRunnerId(machine.runnerId),
       };
     }
     if (machine.install === "offered") {
@@ -156,7 +156,7 @@ export function ProviderAccountSheet({
         <AccountSheetSection heading="Name">
           <AccountNameField
             draft={draft}
-            placeholder="Work"
+            placeholder="Work, Personal, Team…"
             hint={`Shown after the vendor, as in ${buildProviderAccountName(providers, { providerId: account.providerId, label: "Work" })}. It tells your accounts apart in menus.`}
             error={label.error}
           />
@@ -181,19 +181,20 @@ export function ProviderAccountSheet({
           </AccountSheetSection>
         )}
         <AccountSheetSection heading={`Delete ${name}`}>
-          <button type="button" className="btn btn--danger" onClick={() => setConfirmingDelete(true)}>
+          <button
+            type="button"
+            className="btn btn--danger"
+            onClick={() => setConfirmingDelete(true)}
+          >
             Delete…
           </button>
         </AccountSheetSection>
       </AccountSheet>
-      {login !== null && (
+      {loginRunnerId !== null && (
         <ProviderLoginDialog
-          target={{
-            providerAccountId: account.id,
-            runnerId: login.runnerId,
-            subject: `${name} on ${login.runnerName}`,
-          }}
-          onClose={() => setLogin(null)}
+          providerAccountId={account.id}
+          runnerId={loginRunnerId}
+          onClose={() => setLoginRunnerId(null)}
         />
       )}
       {confirmingDelete && (

@@ -356,7 +356,7 @@ describe("a run's page", () => {
 });
 
 describe("a run with a text generation step", () => {
-  const REASON = "No provider instance can generate text";
+  const REASON = "No account can generate text";
   /** The run at `screen`, a text generation step, running while its call waits for a runner. */
   const SCREENING: Run = {
     ...LIVE,

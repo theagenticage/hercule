@@ -68,7 +68,7 @@ describe("prepareHarnessAccount", () => {
     expect(prepared).not.toHaveProperty("credential");
   });
 
-  it("sends the legacy folder for the harness the account's instance ran", async () => {
+  it("sends the legacy folder for the harness the account's old login belonged to", async () => {
     const prepared = await runWithAccounts(
       Effect.gen(function* () {
         const added = yield* addAccount({ kind: KEY_KIND });

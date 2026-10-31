@@ -104,7 +104,11 @@ export function ModelMenu({
               current={false}
               inert={row.dimmed !== null}
               onPick={() => {
-                onChoose({ kind: "model", providerAccountId: row.providerAccountId, model: row.model });
+                onChoose({
+                  kind: "model",
+                  providerAccountId: row.providerAccountId,
+                  model: row.model,
+                });
               }}
             />
           ))}

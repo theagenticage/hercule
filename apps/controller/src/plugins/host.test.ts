@@ -484,12 +484,12 @@ describe("what a harness declares it runs", () => {
     expect(message).toContain("the account kind api-key of vendor/vendor");
   });
 
-  it("is errored when the model argument has no place for the model", async () => {
-    const message = await bootAndReadError(
-      harnessWith([{ ...RUNS_ALPHA, modelArgument: "vendor/model" }]),
-    );
+  it("is errored, naming the field, when the model argument does not hold {model} exactly once", async () => {
+    for (const modelArgument of ["vendor/model", "{model}/{model}"]) {
+      const message = await bootAndReadError(harnessWith([{ ...RUNS_ALPHA, modelArgument }]));
 
-    expect(message).toContain("{model}");
+      expect(message, modelArgument).toContain("runs.0.modelArgument");
+    }
   });
 });
 

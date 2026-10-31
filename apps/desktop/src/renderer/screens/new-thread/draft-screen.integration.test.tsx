@@ -58,7 +58,7 @@ const CART_TASK: Task = {
 
 /**
  * Opens the app signed in at `path`, with the sidebar fixture and the
- * provider instance, and returns the app once the draft's message field
+ * Provider Account, and returns the app once the draft's message field
  * shows. The controller starts every thread as `STARTED` and has no open
  * task, unless `handlers` say otherwise.
  */

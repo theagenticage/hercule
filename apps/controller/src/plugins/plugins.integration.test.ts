@@ -143,6 +143,9 @@ describe("GET /plugins", () => {
         "greedy",
         "unrenderable",
         "flaky",
+        // None of the fixtures offers a provider, so the test controller adds
+        // this plugin to let setup create the default assistant.
+        "test",
       ]);
 
       for (const field of [

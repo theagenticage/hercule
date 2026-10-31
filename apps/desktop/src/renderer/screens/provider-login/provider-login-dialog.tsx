@@ -50,7 +50,8 @@ export function ProviderLoginDialog({
       : buildProviderRows(runner, accounts, providers, harnesses).find(
           (each) => each.id === providerAccountId,
         );
-  const subject = row === undefined || runner === undefined ? "the account" : `${row.name} on ${runner.name}`;
+  const subject =
+    row === undefined || runner === undefined ? "the account" : `${row.name} on ${runner.name}`;
 
   return (
     <GlassDialog

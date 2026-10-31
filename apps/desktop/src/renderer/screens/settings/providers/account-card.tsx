@@ -20,7 +20,11 @@ const describePip = ({ runnerName, signedIn }: MachinePip): string =>
  * account is signed in, a ring where it is not. Renders nothing when there
  * is no machine to show.
  */
-function MachinePips({ machines }: { readonly machines: ReadonlyArray<MachinePip> }): JSX.Element | null {
+function MachinePips({
+  machines,
+}: {
+  readonly machines: ReadonlyArray<MachinePip>;
+}): JSX.Element | null {
   if (machines.length === 0) return null;
   const description = machines.map(describePip).join(" · ");
   return (

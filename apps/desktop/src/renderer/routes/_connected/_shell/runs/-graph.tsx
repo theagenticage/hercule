@@ -21,7 +21,7 @@ import { WorkflowGraph } from "../../../../screens/workflows/workflow-graph";
  * fires next only while the workflow is enabled and valid. Open thread on a
  * card calls `onOpenSession`.
  *
- * The route's loader reads the triggers, the provider instances, the
+ * The route's loader reads the triggers, the Provider Accounts, the
  * plugins, the Agents and the workflow actions.
  */
 export function RunGraph({

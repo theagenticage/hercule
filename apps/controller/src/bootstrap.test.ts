@@ -20,7 +20,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { HOST_API, PluginError, type Plugin } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "./actor";
 import { boot, bootWith, hashToken, buildSetupUrl, type BootOutcome } from "./bootstrap";
-import { openDatabase, runMigrations, uuidFromString, withTransaction } from "./db";
+import { runMigrations, uuidFromString, withTransaction } from "./db";
+import { openDatabaseWriter } from "./db/client";
 import { migrations } from "./db/migrations/index";
 import { encryptSecretValue } from "./secrets/cipher";
 import type { SecretOwner } from "./secrets";
@@ -484,7 +485,7 @@ describe("a boot that upgrades a database with a Z.ai key", () => {
                            ${sealed.ciphertext}, ${at})`;
       }).pipe(
         Effect.provide(
-          openDatabase({
+          openDatabaseWriter({
             databaseFile: join(home, "data", "hercule.db"),
             controllerLockFile: join(home, "data", "seed.lock"),
           }),
@@ -498,7 +499,7 @@ describe("a boot that upgrades a database with a Z.ai key", () => {
 
     expect(
       query<{ owner_kind: string; owner_id: string; name: string }>(
-        "SELECT owner_kind, owner_id, name FROM secrets",
+        "SELECT owner_kind, owner_id, name FROM secrets WHERE owner_kind <> 'core'",
       ),
     ).toEqual([{ owner_kind: "provider-account", owner_id: owner.id, name: "apiKey" }]);
   });

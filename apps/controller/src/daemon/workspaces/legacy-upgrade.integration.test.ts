@@ -61,13 +61,18 @@ const readPaths = (root: string): ReadonlyMap<string, string> => {
 };
 const OLD = "2026-01-01T00:00:00.000Z";
 
+/** The harness the one Provider Instance of this installation ran in, qualified as the upgrade leaves it. */
+const CLAUDE_CODE = "claude-code/claude-code";
+
 const createLegacyInstallation = async () => {
   const home = createTemporaryDir("hercule-legacy-controller-home-");
   const storageDir = realpathSync(createTemporaryDir("hercule-legacy-runner-home-"));
   const remote = makeRemote();
   const resourceId = createFixtureId();
   const runnerId = createFixtureId();
-  const instanceId = createFixtureId();
+  // The id of the Provider Instance this installation has. The upgrade turns it into a Provider
+  // Account with the same id.
+  const accountId = createFixtureId();
   const profileId = createFixtureId();
   const credential = mintToken();
   const token = mintToken();
@@ -118,7 +123,7 @@ const createLegacyInstallation = async () => {
     cwd: entry.root,
     nativeSessionId: createFixtureId(),
   }));
-  const providerHome = join(storageDir, "providers", instanceId);
+  const providerHome = join(storageDir, "providers", accountId);
   for (const session of sessions) {
     const directory = join(providerHome, "projects", session.cwd.replaceAll("/", "-"));
     mkdirSync(directory, { recursive: true });
@@ -147,7 +152,7 @@ const createLegacyInstallation = async () => {
       yield* sql`INSERT INTO permission_profiles (id,name,grants,shipped,created_at,updated_at)
       VALUES (${uuidFromString(profileId)},'legacy unrestricted',${JSON.stringify(ALL_GRANTS)},0,${OLD},${OLD})`;
       yield* sql`INSERT INTO provider_instances (id,provider_id,name,config,created_at,updated_at)
-      VALUES (${uuidFromString(instanceId)},'claude-code','legacy provider','{}',${OLD},${OLD})`;
+      VALUES (${uuidFromString(accountId)},'claude-code','legacy provider','{}',${OLD},${OLD})`;
       yield* sql`INSERT INTO resources (id,kind,remote,canonical_remote,workspace_include,created_at,updated_at)
       VALUES (${uuidFromString(resourceId)},'repo',${remoteUrl},${`fixture.invalid/acme/${resourceId}`},1,${OLD},${OLD})`;
       for (const entry of entries) {
@@ -158,14 +163,14 @@ const createLegacyInstallation = async () => {
       }
       for (const session of sessions) {
         const spec = {
-          instanceId,
+          instanceId: accountId,
           workspaceId: session.workspaceId,
           modelSelection: { model: "fixture", options: {} },
           accessMode: "approval-required",
           timeouts: { inactivityMs: 60_000, absoluteMs: 60_000 },
         };
         yield* sql`INSERT INTO sessions (id,permission_profile_id,instance_id,runner_id,workspace_id,requested_access_mode,access_mode,spec,title,native_session_id,status,created_at,started_at,exited_at,last_activity_at,model_selection,agent_id,exit_reason)
-        VALUES (${uuidFromString(session.id)},${uuidFromString(profileId)},${uuidFromString(instanceId)},${uuidFromString(runnerId)},${uuidFromString(session.workspaceId)},'approval-required','approval-required',${JSON.stringify(spec)},'Legacy human thread',${session.nativeSessionId},'exited',${OLD},${OLD},${OLD},${OLD},${JSON.stringify(spec.modelSelection)},null,'stopped')`;
+        VALUES (${uuidFromString(session.id)},${uuidFromString(profileId)},${uuidFromString(accountId)},${uuidFromString(runnerId)},${uuidFromString(session.workspaceId)},'approval-required','approval-required',${JSON.stringify(spec)},'Legacy human thread',${session.nativeSessionId},'exited',${OLD},${OLD},${OLD},${OLD},${JSON.stringify(spec.modelSelection)},null,'stopped')`;
         yield* sql`INSERT INTO workspace_leases (workspace_id,holder_kind,holder_id,acquired_at,released_at,retention,kept_until)
         VALUES (${uuidFromString(session.workspaceId)},'session',${uuidFromString(session.id)},${OLD},${OLD},'idle',${OLD})`;
         const event = {
@@ -218,7 +223,7 @@ const createLegacyInstallation = async () => {
     database,
     runnerId,
     resourceId,
-    instanceId,
+    accountId,
     credential,
     token,
     primaryId,
@@ -260,8 +265,13 @@ const withLegacyController = async (
       expect(reader.query("SELECT * FROM controller_identity").all()).toEqual(
         fixture.before.identity,
       );
-      // The only changes to a session row are added columns:
+      // The only changes to a session row are the account columns and added columns:
       //
+      // - the instance the session ran on is now the Provider Account of the
+      //   same id, under the column `provider_account_id`, and the `instanceId`
+      //   key of its `spec` is renamed to `providerAccountId`;
+      // - the harness it ran in is the harness the account runs by default,
+      //   which is the one the instance had;
       // - who created it: these rows were written with no audit entry of
       //   their creation, so nobody can tell any more, and the column stays
       //   null;
@@ -278,18 +288,29 @@ const withLegacyController = async (
       // - its kind: computed from the ids, and no old session has an Agent, so
       //   each is a Thread.
       expect(reader.query("SELECT * FROM sessions ORDER BY id").all()).toEqual(
-        fixture.before.sessions.map((row) => ({
-          ...(row as object),
-          created_by: null,
-          tool_calls: 0,
-          needs_refinement: null,
-          done_at: null,
-          done_by: null,
-          reopened_at: null,
-          library_skills: null,
-          role: null,
-          kind: "thread",
-        })),
+        fixture.before.sessions.map((row) => {
+          const { instance_id, spec, ...kept } = row as Record<string, unknown>;
+          return {
+            ...kept,
+            provider_account_id: instance_id,
+            harness_id: CLAUDE_CODE,
+            // JSON.stringify leaves out the undefined `instanceId`.
+            spec: JSON.stringify({
+              ...JSON.parse(String(spec)),
+              instanceId: undefined,
+              providerAccountId: fixture.accountId,
+            }),
+            created_by: null,
+            tool_calls: 0,
+            needs_refinement: null,
+            done_at: null,
+            done_by: null,
+            reopened_at: null,
+            library_skills: null,
+            role: null,
+            kind: "thread",
+          };
+        }),
       );
       expect(reader.query("SELECT * FROM session_stream ORDER BY session_id").all()).toEqual(
         fixture.before.streams,
@@ -315,12 +336,11 @@ const withLegacyController = async (
       { credential: fixture.credential },
       { workspaces: manager, finishSessions: false },
     );
-    await waitUntil("probed the retained provider instance", async () => {
-      const providers = (await (
-        await get(controller.base, "/api/v1/providers", token)
+    await waitUntil("probed the retained Provider Account", async () => {
+      const accounts = (await (
+        await get(controller.base, "/api/v1/provider-accounts", token)
       ).json()) as ReadonlyArray<{ id: string; snapshots: ReadonlyArray<unknown> }>;
-      return providers.find((provider) => provider.id === fixture.instanceId)?.snapshots.length ===
-        1
+      return accounts.find((account) => account.id === fixture.accountId)?.snapshots.length === 1
         ? true
         : undefined;
     });
@@ -362,7 +382,8 @@ describe("pre-change controller and provider-state upgrade", () => {
           id: original.id,
           workspaceId: original.workspaceId,
           runnerId: fixture.runnerId,
-          instanceId: fixture.instanceId,
+          providerAccountId: fixture.accountId,
+          harnessId: CLAUDE_CODE,
           status: "exited",
           resumable: true,
         });
@@ -379,8 +400,9 @@ describe("pre-change controller and provider-state upgrade", () => {
               frame._tag === "sessionStart" && frame.sessionId === original.id,
           ),
         );
+        expect(start.harnessAccount.harnessHome).toBe(`providers/${fixture.accountId}`);
         expect(start.spec).toMatchObject({
-          instanceId: fixture.instanceId,
+          providerAccountId: fixture.accountId,
           workspaceId: original.workspaceId,
           continue: { nativeSessionId: original.nativeSessionId, mode: "resume" },
         });
@@ -392,7 +414,7 @@ describe("pre-change controller and provider-state upgrade", () => {
           resolveSessionContext(
             start,
             {
-              providersDir: join(fixture.storageDir, "providers"),
+              storageDir: fixture.storageDir,
               scratchDir: join(fixture.storageDir, "scratch"),
               attachmentsDir: join(fixture.storageDir, "attachments"),
               editMarksDir: join(fixture.storageDir, "edit-marks"),
@@ -456,7 +478,7 @@ describe("pre-change controller and provider-state upgrade", () => {
         {
           prompt: "Use unpublished standalone source",
           runnerId: fixture.runnerId,
-          instanceId: fixture.instanceId,
+          providerAccountId: fixture.accountId,
           workspace: {
             kind: "ephemeral",
             checkouts: [

@@ -184,10 +184,14 @@ describe("the model menu", () => {
 
     expect(readSections()[1]).toEqual(["Anthropic · work · work@example.com · Claude Pro1 model"]);
     await user.click(
-      screen.getByRole("button", { name: "Anthropic · work · work@example.com · Claude Pro1 model" }),
+      screen.getByRole("button", {
+        name: "Anthropic · work · work@example.com · Claude Pro1 model",
+      }),
     );
 
-    expect(onChoose.mock.calls).toEqual([[{ kind: "account", providerAccountId: WORK_ACCOUNT.id }]]);
+    expect(onChoose.mock.calls).toEqual([
+      [{ kind: "account", providerAccountId: WORK_ACCOUNT.id }],
+    ]);
   });
 
   it("lists another account's matching models on a Draft Thread, each choosing the account and the model together", async () => {

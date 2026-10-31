@@ -6,9 +6,10 @@ import type { StoredProviderAccount } from "./repository";
  * the runner's storage directory, which the runner joins to it and never
  * works out itself (spec 06 section 9.1).
  *
- * - An account made from a provider instance keeps that instance's folder,
- *   `providers/<legacyHomeFolder>`, for the harness the instance ran. Moving
- *   the folder would break Codex's resume and Claude Code's login.
+ * - An account made by the upgrade from the previous version (which had
+ *   one folder per harness login) keeps that folder,
+ *   `providers/<legacyHomeFolder>`, for the harness that login belonged to.
+ *   Moving the folder would break Codex's resume and Claude Code's login.
  * - Every other pair of account and harness gets
  *   `providers/homes/<providerAccountId>/<harnessId>`, where the qualified
  *   harness id supplies the two last folder levels.

@@ -1,5 +1,5 @@
-/* The login dialog that the draft's Log in button opens. The book draws no
-   such dialog: it is the first run's provider row on the glass of the
+/* The sign-in dialog that the draft's Sign in button opens. The book draws no
+   such dialog: it is the first run's account row on the glass of the
    project picker, as wide as the first run's card is inside its padding. */
 .login-dialog {
   width: 448px;

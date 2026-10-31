@@ -22,7 +22,7 @@ describe("resolveHarnessHome", () => {
     );
   });
 
-  it("keeps the legacy folder for the harness the instance ran", () => {
+  it("keeps the legacy folder for the harness the old login belonged to", () => {
     expect(resolveHarnessHome(MIGRATED, "codex/codex")).toBe(
       "providers/0199e0e7-aaaa-7000-8000-000000000002",
     );
