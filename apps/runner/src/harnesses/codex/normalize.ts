@@ -539,11 +539,18 @@ export const requireUsageBaseline = (state: Normalizing): void => {
 };
 
 /**
- * Initializes a zero baseline after native replay finishes without a report.
- * Returns false if a rejected report requires a later usable baseline.
+ * Initializes a zero baseline after native replay finishes without a report,
+ * for a thread that has never run a turn. Returns false when the baseline is
+ * unknown, so the caller must require one from a later usable report:
+ *
+ * - A rejected report requires a later usable baseline.
+ * - A thread with turns but no replayed report is not unused. Codex 0.166 does
+ *   not replay the usage of a native V1 child that was forked from a parent
+ *   turn that had not ended, so a zero baseline would count its whole history.
  */
-export const initializeUsageBaseline = (state: Normalizing): boolean => {
+export const initializeUsageBaseline = (state: Normalizing, threadHasTurns: boolean): boolean => {
   if (state.usageBaselineRequired) return false;
+  if (state.previousTotal === undefined && threadHasTurns) return false;
   state.previousTotal ??= NO_TOKENS;
   return true;
 };
