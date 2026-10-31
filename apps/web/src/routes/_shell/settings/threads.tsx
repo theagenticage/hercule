@@ -75,14 +75,14 @@ function Threads(): JSX.Element {
   // - a stored id of an account that no longer exists falls back to the open
   //   profile's default entry;
   // - "nothing picked" is null.
-  const defaults = computeThreadDefaults(
-    settings.user,
+  const defaults = computeThreadDefaults({
+    settingsUser: settings.user,
     accounts,
     runners,
     profiles,
-    localId,
+    thisMacRunnerId: localId,
     modelProfiles,
-  );
+  });
   const modelField = buildThreadModelField(
     { accounts, providers, harnesses, modelProfiles, runners, thisMacRunnerId: localId },
     defaults,

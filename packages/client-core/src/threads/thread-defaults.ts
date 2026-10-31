@@ -71,7 +71,7 @@ interface StartingEntry {
  * The Model Profile a project names and the entries the user picked lately,
  * which together decide where a new thread in that project starts.
  */
-export interface ProjectStart {
+interface ProjectStart {
   readonly modelProfile: ModelProfile;
   /** The entries the user picked, newest first. */
   readonly recent: readonly RecentModel[];
@@ -165,21 +165,35 @@ const chooseStartingEntry = (
   };
 };
 
+/** What `computeThreadDefaults` reads. */
+interface ThreadDefaultsInput {
+  readonly settingsUser: SettingsState["user"];
+  readonly accounts: readonly ProviderAccount[];
+  readonly runners: readonly Runner[];
+  readonly profiles: readonly Profile[];
+  readonly thisMacRunnerId: string | null;
+  /** The user's Model Profiles; the first is the open one. */
+  readonly modelProfiles: readonly ModelProfile[];
+  /**
+   * Given for a thread in a project that names a profile. It decides the model
+   * before the settings do.
+   */
+  readonly projectStart?: ProjectStart | undefined;
+}
+
 /**
  * Returns the defaults for a new thread, from the user's settings, the open
- * Model Profile (the first one) and the available runners. `projectStart` is
- * given for a thread in a project that names a profile, and decides the
- * model before the settings do.
+ * Model Profile (the first one) and the available runners.
  */
-export const computeThreadDefaults = (
-  settingsUser: SettingsState["user"],
-  accounts: readonly ProviderAccount[],
-  runners: readonly Runner[],
-  profiles: readonly Profile[],
-  thisMacRunnerId: string | null,
-  modelProfiles: readonly ModelProfile[],
-  projectStart?: ProjectStart,
-): ThreadDefaults => {
+export const computeThreadDefaults = ({
+  settingsUser,
+  accounts,
+  runners,
+  profiles,
+  thisMacRunnerId,
+  modelProfiles,
+  projectStart,
+}: ThreadDefaultsInput): ThreadDefaults => {
   const { account, harnessId, model } = chooseStartingEntry(
     settingsUser,
     accounts,
@@ -249,15 +263,15 @@ export const buildDraftConfig = ({
 }): ThreadConfig => {
   const modelProfile = findProjectModelProfile(projects, modelProfiles, projectId);
   return {
-    ...computeThreadDefaults(
+    ...computeThreadDefaults({
       settingsUser,
       accounts,
       runners,
       profiles,
       thisMacRunnerId,
       modelProfiles,
-      modelProfile === undefined ? undefined : { modelProfile, recent },
-    ),
+      projectStart: modelProfile === undefined ? undefined : { modelProfile, recent },
+    }),
     options: {},
     projectId,
     workspace: workspaceId === null ? null : { kind: "existing", workspaceId },

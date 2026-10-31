@@ -69,14 +69,14 @@ const NO_SETTINGS: SettingsState["user"] = {};
 describe("computeThreadDefaults", () => {
   it("starts on the open profile's default entry when no thread setting is stored", () => {
     expect(
-      computeThreadDefaults(
-        NO_SETTINGS,
-        [CLAUDE, CODEX],
-        [LOCAL],
-        [UNRESTRICTED, WORKER],
-        LOCAL.id,
-        [MAIN],
-      ),
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [CLAUDE, CODEX],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED, WORKER],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }),
     ).toEqual({
       providerAccountId: CLAUDE.id,
       harnessId: "claude-code/claude-code",
@@ -102,7 +102,14 @@ describe("computeThreadDefaults", () => {
     );
 
     expect(
-      computeThreadDefaults(NO_SETTINGS, [codex], [LOCAL], [UNRESTRICTED], LOCAL.id, [profile]),
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [codex],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [profile],
+      }),
     ).toMatchObject({ providerAccountId: codex.id, harnessId: "pi/pi", model: "gpt-6" });
   });
 
@@ -110,9 +117,14 @@ describe("computeThreadDefaults", () => {
     const profile = { ...MAIN, defaultEntry: null };
 
     expect(
-      computeThreadDefaults(NO_SETTINGS, [CLAUDE, CODEX], [LOCAL], [UNRESTRICTED], LOCAL.id, [
-        profile,
-      ]),
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [CLAUDE, CODEX],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [profile],
+      }),
     ).toMatchObject({ providerAccountId: CLAUDE.id, model: "claude-sonnet-5" });
   });
 
@@ -126,9 +138,14 @@ describe("computeThreadDefaults", () => {
     };
 
     expect(
-      computeThreadDefaults(stored, [CLAUDE, CODEX], [LOCAL], [UNRESTRICTED, WORKER], LOCAL.id, [
-        MAIN,
-      ]),
+      computeThreadDefaults({
+        settingsUser: stored,
+        accounts: [CLAUDE, CODEX],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED, WORKER],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }),
     ).toEqual({
       providerAccountId: CODEX.id,
       harnessId: OPENAI_IDENTITY.harnessId,
@@ -143,7 +160,14 @@ describe("computeThreadDefaults", () => {
     const stored: SettingsState["user"] = { "thread.providerAccountId": CODEX.id };
 
     expect(
-      computeThreadDefaults(stored, [CLAUDE, CODEX], [LOCAL], [UNRESTRICTED], LOCAL.id, [MAIN]),
+      computeThreadDefaults({
+        settingsUser: stored,
+        accounts: [CLAUDE, CODEX],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }),
     ).toMatchObject({
       providerAccountId: CODEX.id,
       harnessId: OPENAI_IDENTITY.harnessId,
@@ -155,8 +179,14 @@ describe("computeThreadDefaults", () => {
     const stale: SettingsState["user"] = { "thread.providerAccountId": "account-that-went-away" };
 
     expect(
-      computeThreadDefaults(stale, [CLAUDE, CODEX], [LOCAL], [UNRESTRICTED], LOCAL.id, [MAIN])
-        .providerAccountId,
+      computeThreadDefaults({
+        settingsUser: stale,
+        accounts: [CLAUDE, CODEX],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }).providerAccountId,
     ).toBe(CLAUDE.id);
   });
 
@@ -168,7 +198,14 @@ describe("computeThreadDefaults", () => {
     };
 
     expect(
-      computeThreadDefaults(stale, [CLAUDE], [LOCAL], [UNRESTRICTED], LOCAL.id, [MAIN]),
+      computeThreadDefaults({
+        settingsUser: stale,
+        accounts: [CLAUDE],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }),
     ).toMatchObject({
       providerAccountId: CLAUDE.id,
       harnessId: "claude-code/claude-code",
@@ -183,7 +220,14 @@ describe("computeThreadDefaults", () => {
     };
 
     expect(
-      computeThreadDefaults(stored, [CLAUDE], [LOCAL], [UNRESTRICTED], LOCAL.id, [MAIN]).model,
+      computeThreadDefaults({
+        settingsUser: stored,
+        accounts: [CLAUDE],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }).model,
     ).toBe("claude-haiku-5");
   });
 
@@ -196,9 +240,14 @@ describe("computeThreadDefaults", () => {
     const empty = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [])]);
 
     expect(
-      computeThreadDefaults(NO_SETTINGS, [first, CODEX], [LOCAL], [UNRESTRICTED], LOCAL.id, [
-        empty,
-      ]),
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [first, CODEX],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [empty],
+      }),
     ).toMatchObject({ providerAccountId: CODEX.id, harnessId: null, model: null });
   });
 
@@ -211,9 +260,14 @@ describe("computeThreadDefaults", () => {
     );
 
     expect(
-      computeThreadDefaults(NO_SETTINGS, [claude], [LOCAL, REMOTE], [UNRESTRICTED], LOCAL.id, [
-        MAIN,
-      ]).runnerId,
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [claude],
+        runners: [LOCAL, REMOTE],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }).runnerId,
     ).toBe(REMOTE.id);
   });
 
@@ -225,19 +279,41 @@ describe("computeThreadDefaults", () => {
     );
 
     expect(
-      computeThreadDefaults(NO_SETTINGS, [claude], [LOCAL], [UNRESTRICTED], LOCAL.id, [MAIN])
-        .runnerId,
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [claude],
+        runners: [LOCAL],
+        profiles: [UNRESTRICTED],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }).runnerId,
     ).toBeNull();
   });
 
   it("takes the first profile when none is named unrestricted", () => {
     expect(
-      computeThreadDefaults(NO_SETTINGS, [CLAUDE], [LOCAL], [WORKER], LOCAL.id, [MAIN]).profileId,
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [CLAUDE],
+        runners: [LOCAL],
+        profiles: [WORKER],
+        thisMacRunnerId: LOCAL.id,
+        modelProfiles: [MAIN],
+      }).profileId,
     ).toBe(WORKER.id);
   });
 
   it("returns null for every field when there is nothing to pick", () => {
-    expect(computeThreadDefaults(NO_SETTINGS, [], [], [], null, [])).toEqual({
+    expect(
+      computeThreadDefaults({
+        settingsUser: NO_SETTINGS,
+        accounts: [],
+        runners: [],
+        profiles: [],
+        thisMacRunnerId: null,
+        modelProfiles: [],
+      }),
+    ).toEqual({
       providerAccountId: null,
       harnessId: null,
       model: null,
