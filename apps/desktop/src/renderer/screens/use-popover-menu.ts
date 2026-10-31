@@ -8,7 +8,7 @@ import {
   type RefObject,
   type ToggleEvent,
 } from "react";
-import { moveMenuFocus } from "./move-menu-focus";
+import { FOCUSABLE_MENU_ITEM_SELECTOR, moveMenuFocus } from "./move-menu-focus";
 
 /** What `usePopoverMenu` returns: the props of the trigger, the menu and each item. */
 export interface PopoverMenu {
@@ -29,15 +29,20 @@ export interface PopoverMenu {
    * Returns the props of the item named `item`: its role, its name in
    * `data-item`, and the class that draws it active. A `disabled` item is
    * marked `aria-disabled`, and the pointer and the arrow keys pass over it.
+   * An item that is one of a group of choices passes `checked`, whether it is
+   * the chosen one: its role is then `menuitemradio` and it carries
+   * `aria-checked`.
    */
   readonly buildItemProps: (
     item: string,
     disabled?: boolean,
+    checked?: boolean,
   ) => {
-    readonly role: "menuitem";
+    readonly role: "menuitem" | "menuitemradio";
     readonly className: string | undefined;
     readonly "data-item": string;
     readonly "aria-disabled"?: true;
+    readonly "aria-checked"?: boolean;
     readonly onFocus: () => void;
     readonly onPointerEnter: (event: PointerEvent<HTMLElement>) => void;
   };
@@ -75,9 +80,7 @@ export function usePopoverMenu(): PopoverMenu {
       setActiveItem(null);
       return;
     }
-    const first = event.currentTarget.querySelector<HTMLElement>(
-      "[role='menuitem']:not([aria-disabled='true'])",
-    );
+    const first = event.currentTarget.querySelector<HTMLElement>(FOCUSABLE_MENU_ITEM_SELECTOR);
     first?.focus({ preventScroll: true });
     // The focus above makes the first item active. A menu opened by the
     // pointer starts with no item active, so this replaces that state.
@@ -100,11 +103,12 @@ export function usePopoverMenu(): PopoverMenu {
       },
     },
     menuProps: { ref: menuRef, id: menuId, onToggle: handleToggle, onKeyDown: handleKeys },
-    buildItemProps: (item, disabled = false) => ({
-      role: "menuitem",
+    buildItemProps: (item, disabled = false, checked) => ({
+      role: checked === undefined ? "menuitem" : "menuitemradio",
       className: item === activeItem ? "is-active" : undefined,
       "data-item": item,
       ...(disabled ? { "aria-disabled": true } : {}),
+      ...(checked === undefined ? {} : { "aria-checked": checked }),
       onFocus: () => {
         setActiveItem(disabled ? null : item);
       },

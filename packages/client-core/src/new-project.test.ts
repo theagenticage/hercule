@@ -83,6 +83,15 @@ describe("createProjectWithRepositories", () => {
     expect(isNewProjectCreated(next)).toBe(true);
   });
 
+  it("creates the project with the Model Profile it names", async () => {
+    const { api, client } = buildController();
+    const modelProfileId = "01a06d02-7300-7000-8000-000000000009";
+
+    await createProjectWithRepositories(client, { ...FORM, modelProfileId, repositories: [] });
+
+    expect(listWrites(api)).toEqual([["/api/v1/projects", { name: "webshop", modelProfileId }]]);
+  });
+
   it("sends no setup command and no Connection when there is none", async () => {
     const { api, client } = buildController();
 

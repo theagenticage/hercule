@@ -60,7 +60,7 @@
 .pop.popover-menu {
   padding: 6px;
 }
-.popover-menu :where([role="menuitem"]) {
+.popover-menu :where([role="menuitem"], [role="menuitemradio"]) {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -73,13 +73,13 @@
   text-align: left;
   text-decoration: none;
 }
-.popover-menu [role="menuitem"].is-active {
+.popover-menu :is([role="menuitem"], [role="menuitemradio"]).is-active {
   background: var(--hover);
 }
-.popover-menu [role="menuitem"]:focus-visible {
+.popover-menu :is([role="menuitem"], [role="menuitemradio"]):focus-visible {
   outline: none;
 }
-.popover-menu [role="menuitem"][aria-disabled="true"] {
+.popover-menu :is([role="menuitem"], [role="menuitemradio"])[aria-disabled="true"] {
   color: var(--faint);
   cursor: default;
 }

@@ -1,0 +1,20 @@
+/* A project's context menu (ProjectProfileMenu), a popover opened at the
+   pointer. Not in the book. The menu is placed from `left` and `top` that the
+   component sets after it measures the menu; `.popover-menu` clears the
+   browser's centring. */
+.project-menu {
+  min-width: 200px;
+}
+.project-menu .q-h {
+  /* The same left edge as the items' text, which sit after their padding. */
+  padding: 6px 8px;
+}
+/* The slot for the check mark, 14px wide whether or not the item is checked,
+   so the names of all the items start at the same place. */
+.project-menu-check {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+}

@@ -54,6 +54,12 @@ export interface NewProjectForm<Repository extends RepositorySubmission = Reposi
   readonly name: string;
   /** The project's id once a submission created it, or `null` while it does not exist. */
   readonly projectId: string | null;
+  /**
+   * The Model Profile a new thread in the project starts on. Left out, the
+   * project names none. Sent only when the project is created: a submission
+   * that already holds a `projectId` never changes the project's profile.
+   */
+  readonly modelProfileId?: string;
   readonly repositories: readonly Repository[];
 }
 
@@ -143,7 +149,11 @@ export const createProjectWithRepositories = async <Repository extends Repositor
   let projectId = form.projectId;
   if (projectId === null) {
     try {
-      projectId = (await client.project.create({ payload: { name } })).id;
+      const payload = {
+        name,
+        ...(form.modelProfileId === undefined ? {} : { modelProfileId: form.modelProfileId }),
+      };
+      projectId = (await client.project.create({ payload })).id;
     } catch (error) {
       return { ...form, failure: readErrorMessage(error), repositories: checked };
     }

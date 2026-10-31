@@ -96,4 +96,28 @@ describe("usePopoverMenu", () => {
 
     expect(listActiveItems()).toEqual(["third"]);
   });
+
+  it("gives an item that is one of a group of choices the role of a radio item", () => {
+    function ChoiceMenu(): JSX.Element {
+      const { menuProps, buildItemProps } = usePopoverMenu();
+      return (
+        <div {...menuProps} role="menu" aria-label="Choices">
+          <button type="button" {...buildItemProps("on", false, true)}>
+            on
+          </button>
+          <button type="button" {...buildItemProps("off", false, false)}>
+            off
+          </button>
+          <button type="button" {...buildItemProps("plain")}>
+            plain
+          </button>
+        </div>
+      );
+    }
+    render(<ChoiceMenu />);
+
+    expect(screen.getByRole("menuitemradio", { name: "on", checked: true })).toBeTruthy();
+    expect(screen.getByRole("menuitemradio", { name: "off", checked: false })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "plain" }).getAttribute("aria-checked")).toBeNull();
+  });
 });

@@ -6,12 +6,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import { moveMenuFocus } from "./move-menu-focus";
 
 /** Builds a menu with one item per label, adds it to the page and returns it. */
-const buildMenu = (labels: ReadonlyArray<string>, disabled: ReadonlyArray<string> = []) => {
+const buildMenu = (
+  labels: ReadonlyArray<string>,
+  disabled: ReadonlyArray<string> = [],
+  role = "menuitem",
+) => {
   const menu = document.createElement("div");
   menu.setAttribute("role", "menu");
   for (const label of labels) {
     const item = document.createElement("button");
-    item.setAttribute("role", "menuitem");
+    item.setAttribute("role", role);
     item.textContent = label;
     if (disabled.includes(label)) item.setAttribute("aria-disabled", "true");
     menu.append(item);
@@ -44,6 +48,12 @@ describe("moveMenuFocus", () => {
     const menu = buildMenu(["One", "Two", "Three"], ["Two"]);
     moveMenuFocus(menu, "ArrowDown");
     expect(moveMenuFocus(menu, "ArrowDown")?.textContent).toBe("Three");
+  });
+
+  it("steps through the choices of a group of radio items too", () => {
+    const menu = buildMenu(["One", "Two"], [], "menuitemradio");
+    expect(moveMenuFocus(menu, "ArrowDown")?.textContent).toBe("One");
+    expect(moveMenuFocus(menu, "ArrowDown")?.textContent).toBe("Two");
   });
 
   it("returns undefined when no item can take the focus", () => {

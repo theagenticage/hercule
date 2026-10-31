@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useMemo, useState, type JSX } from "react";
+import { memo, Suspense, useCallback, useEffect, useId, useMemo, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { DONE_SHELF_LIMIT, DONE_SHELF_STEP } from "@hercule/client-core";
 import { Link, useLocation, useMatch, useRouteContext } from "@tanstack/react-router";
@@ -17,6 +17,7 @@ import { SidebarIcon } from "../icons/sidebar";
 import { AssistantsSection } from "./assistants-section";
 import { DoneToastHost } from "./done-toast";
 import { FaceSwitch } from "./face-switch";
+import { LazyProjectProfileMenu } from "./lazy-project-profile-menu";
 import { decideScreenFace, type SidebarFace } from "./sidebar-face";
 import { buildSidebar, listGoMenuItems, type SectionKey } from "./sidebar-items";
 import { SidebarFoot } from "./sidebar-foot";
@@ -179,6 +180,16 @@ export const Sidebar = memo(function Sidebar({
   const toggleDoneShelf = useCallback(() => {
     setDoneShelfLimit((limit) => (limit === null ? DONE_SHELF_LIMIT : null));
   }, []);
+  // The project whose context menu is open, and where the user clicked.
+  const [projectMenu, setProjectMenu] = useState<{
+    readonly projectId: string;
+    readonly x: number;
+    readonly y: number;
+  } | null>(null);
+  const openProjectMenu = useCallback((projectId: string, x: number, y: number) => {
+    setProjectMenu({ projectId, x, y });
+  }, []);
+
   // The toast reads its store on its own, so showing, fading or dismissing a
   // toast does not draw the sidebar again.
   const { markDone, reopen } = useDoneMoves();
@@ -191,8 +202,18 @@ export const Sidebar = memo(function Sidebar({
       onToggleDoneShelf: toggleDoneShelf,
       onToggleGroup: toggleGroup,
       onShowQuiet: showQuiet,
+      onOpenProjectMenu: openProjectMenu,
     }),
-    [expandSection, collapseSection, markDone, reopen, toggleDoneShelf, toggleGroup, showQuiet],
+    [
+      expandSection,
+      collapseSection,
+      markDone,
+      reopen,
+      toggleDoneShelf,
+      toggleGroup,
+      showQuiet,
+      openProjectMenu,
+    ],
   );
 
   const { items, openGroupKey } = buildSidebar({
@@ -275,6 +296,20 @@ export const Sidebar = memo(function Sidebar({
           items.length === 0 && <p className="side-empty">No threads yet</p>
         )}
       </SidebarList>
+      {projectMenu !== null && (
+        <Suspense fallback={null}>
+          <LazyProjectProfileMenu
+            key={`${projectMenu.projectId}:${String(projectMenu.x)}:${String(projectMenu.y)}`}
+            {...projectMenu}
+            // A menu closes the moment the click that opens the next one
+            // lands, and its close can arrive after the next menu has
+            // opened. Closing clears only this menu, never the next one.
+            onClose={() => {
+              setProjectMenu((current) => (current === projectMenu ? null : current));
+            }}
+          />
+        </Suspense>
+      )}
       <DoneToastHost place="sidebar" />
       {face === "threads" && <AssistantsSection rows={assistantRows} officeOpen={officeOpen} />}
       <SidebarFoot

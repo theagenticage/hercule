@@ -9,13 +9,14 @@ import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { REMOTE_REFUSAL } from "@hercule/client-core";
-import type { Connection, Project } from "@hercule/contract";
+import type { Connection, ModelProfile, Project } from "@hercule/contract";
 import type { FolderPickOutcome } from "../../../ipc/contract";
 import {
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_GITHUB_CONNECTION,
+  FIXTURE_MODEL_PROFILE,
   FIXTURE_THREAD_IDS,
   renderApp,
   SIDEBAR_FIXTURE,
@@ -31,6 +32,18 @@ const [WEBSHOP_REPO] = SIDEBAR_FIXTURE.resources;
 const SHOP: Project = { ...WEBSHOP!, id: "01a06d02-7000-7000-8000-0000000000aa", name: "shop" };
 
 const REMOTE = "git@github.com:rogier/shop.git";
+
+const MAIN_PROFILE: ModelProfile = FIXTURE_MODEL_PROFILE;
+const QUICK_PROFILE: ModelProfile = {
+  ...FIXTURE_MODEL_PROFILE,
+  id: "01a06d02-7800-7000-8000-000000000002",
+  name: "Quick fixes",
+};
+
+/** Answers the Model Profiles read with `profiles`. */
+const holdProfiles = (profiles: readonly ModelProfile[]): Readonly<Record<string, Handler>> => ({
+  "GET /api/v1/model-profiles": { body: profiles },
+});
 
 const REPOSITORY: Extract<FolderPickOutcome, { _tag: "Repository" }> = {
   _tag: "Repository",
@@ -296,5 +309,82 @@ describe("the New project dialog", () => {
     });
     expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
     expect(readWrites(calls)).toHaveLength(0);
+  });
+
+  describe("the Model profile select", () => {
+    it("is hidden with one profile, and the project is created with none", async () => {
+      const { calls, view, router } = await pickFolder({
+        folder: REPOSITORY,
+        handlers: holdProfiles([MAIN_PROFILE]),
+      });
+
+      expect(view.queryByRole("combobox", { name: /^Model profile/ })).toBeNull();
+      await userEvent.click(view.getByRole("button", { name: "Add project" }));
+
+      await expectDraftInShop(router);
+      expect(readCalls(calls, "POST", "/api/v1/projects").map((call) => call.body)).toEqual([
+        { name: "shop" },
+      ]);
+    });
+
+    it("offers None, then each profile, with two profiles, and None sends no profile", async () => {
+      const { calls, view, router } = await pickFolder({
+        folder: REPOSITORY,
+        handlers: holdProfiles([MAIN_PROFILE, QUICK_PROFILE]),
+      });
+
+      const select = await view.findByRole<HTMLSelectElement>("combobox", {
+        name: /^Model profile/,
+      });
+      expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
+        "None",
+        "Main",
+        "Quick fixes",
+      ]);
+      expect(select.value).toBe("");
+      await userEvent.click(view.getByRole("button", { name: "Add project" }));
+
+      await expectDraftInShop(router);
+      expect(readCalls(calls, "POST", "/api/v1/projects").map((call) => call.body)).toEqual([
+        { name: "shop" },
+      ]);
+    });
+
+    it("creates the project with the profile the user picks", async () => {
+      const { calls, view, router } = await pickFolder({
+        folder: REPOSITORY,
+        handlers: holdProfiles([MAIN_PROFILE, QUICK_PROFILE]),
+      });
+
+      await userEvent.selectOptions(
+        await view.findByRole("combobox", { name: /^Model profile/ }),
+        "Quick fixes",
+      );
+      await userEvent.click(view.getByRole("button", { name: "Add project" }));
+
+      await expectDraftInShop(router);
+      expect(readCalls(calls, "POST", "/api/v1/projects").map((call) => call.body)).toEqual([
+        { name: "shop", modelProfileId: QUICK_PROFILE.id },
+      ]);
+    });
+
+    it("is also in the form that creates a project without a GitHub Connection", async () => {
+      const { calls, view, router } = await pickFolder({
+        folder: REPOSITORY,
+        connections: [],
+        handlers: holdProfiles([MAIN_PROFILE, QUICK_PROFILE]),
+      });
+
+      await userEvent.selectOptions(
+        await view.findByRole("combobox", { name: /^Model profile/ }),
+        "Main",
+      );
+      await userEvent.click(view.getByRole("button", { name: "Add project without a repository" }));
+
+      await expectDraftInShop(router);
+      expect(readCalls(calls, "POST", "/api/v1/projects").map((call) => call.body)).toEqual([
+        { name: "shop", modelProfileId: MAIN_PROFILE.id },
+      ]);
+    });
   });
 });
