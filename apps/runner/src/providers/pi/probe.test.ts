@@ -315,77 +315,26 @@ describe("the pi adapter's probe", () => {
       expect(warnings[1]).toContain("Error: could not reach pi.dev");
     });
 
-    it("starts one refresh per home while an earlier one is still running", async () => {
+    it("lets a probe start its own refresh while another of the same home is still running", async () => {
       const controlled = buildControlledRefresh(MODEL_STORE_REFRESHED);
       const { seam, runs } = buildFakePiSeam({ refresh: controlled.refresh });
       const adapter = makePiAdapter(seam);
-      const sharedHome = buildContext(createPiHome());
-      const otherHome = buildContext(createPiHome());
+      const ctx = buildContext(createPiHome());
 
       const { result } = runOnClock(
         Effect.gen(function* () {
-          const probings = yield* Effect.forEach([sharedHome, sharedHome, otherHome], (ctx) =>
+          const probings = yield* Effect.forEach([1, 2], () =>
             Effect.forkChild(adapter.probe(ctx, {})),
           );
           yield* TestClock.adjust(0);
           yield* TestClock.adjust(PAST_WAIT);
-          const probed = yield* Effect.forEach(probings, Fiber.join);
+          yield* Effect.forEach(probings, Fiber.join);
           yield* controlled.finish;
-          return probed;
-        }),
-      );
-
-      expect((await result).map((one) => one.auth.status)).toEqual(["ok", "ok", "ok"]);
-      // Two probes share the first home's refresh. The other home has its own.
-      expect(countRefreshes(runs)).toBe(2);
-    });
-
-    it.each([
-      ["ended", undefined],
-      ["failed", FAILED],
-    ])("starts a new refresh for a home whose last refresh %s", async (_ending, refresh) => {
-      const { seam, runs } = buildFakePiSeam(
-        refresh === undefined ? {} : { refresh: Effect.succeed(refresh) },
-      );
-      const adapter = makePiAdapter(seam);
-      const ctx = buildContext(createPiHome());
-
-      const { result } = runOnClock(
-        Effect.gen(function* () {
-          yield* adapter.probe(ctx, {});
-          yield* adapter.probe(ctx, {});
         }),
       );
 
       await result;
-      expect(countRefreshes(runs)).toBe(2);
-    });
-
-    it("reuses a refresh that outlasts a probe's wait, and starts a new one once it has ended", async () => {
-      const controlled = buildControlledRefresh(MODEL_STORE_REFRESHED);
-      const { seam, runs } = buildFakePiSeam({ refresh: controlled.refresh });
-      const adapter = makePiAdapter(seam);
-      const ctx = buildContext(createPiHome());
-
-      const { result } = runOnClock(
-        Effect.gen(function* () {
-          const probeAfterWait = Effect.gen(function* () {
-            const probing = yield* Effect.forkChild(adapter.probe(ctx, {}));
-            yield* TestClock.adjust(0);
-            yield* TestClock.adjust(PAST_WAIT);
-            yield* Fiber.join(probing);
-          });
-          yield* probeAfterWait;
-          yield* probeAfterWait;
-          const whileRunning = countRefreshes(runs);
-          yield* controlled.finish;
-          yield* TestClock.adjust(0);
-          yield* adapter.probe(ctx, {});
-          return whileRunning;
-        }),
-      );
-
-      expect(await result).toBe(1);
+      // pi's lock makes the two refreshes' writes take turns, so overlap is safe.
       expect(countRefreshes(runs)).toBe(2);
     });
 

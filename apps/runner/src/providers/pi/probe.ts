@@ -3,20 +3,15 @@
  * prints, whether pi finds a Z.ai key, and the models pi offers. Also builds
  * the install command that puts pi on a machine.
  *
- * The version and the key check are one-shot commands. Every pi process of
- * Hercule except the refresh runs with `--offline`, so none of them fetches
- * the model list that pi.dev publishes. The probe is the one place that does:
- * when a key is set, it first runs `pi update --models`, which stores a fresh
- * model list in the instance's home, where the offline processes read it. The
- * probe waits for the refresh only for a while, and a slower refresh still
- * runs to its end: its result is seen by the next probe or session. The
- * catalog itself needs a pi that has loaded its providers, so it is read from
- * a child process with no session, which is killed as soon as it has
- * responded.
+ * The version and the key check are one-shot commands. When a key is set, the
+ * probe first refreshes pi's stored model list with `pi update --models`; every
+ * other pi process stays `--offline` and reads that stored list. The catalog
+ * needs a pi that has loaded its providers, so it is read from a child process
+ * with no session, which is killed as soon as it has responded.
  */
-import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import {
   MAX_FACT_ITEMS,
@@ -55,15 +50,9 @@ const MODEL_STORE_REFRESH_WAIT: Duration.Duration = Duration.seconds(8);
 
 /**
  * How long a model store refresh may run before Hercule gives up on it. pi
- * aborts its own refresh after 15 seconds, so this only concerns a pi that is
- * already stuck, for example one whose child keeps its pipes open. Without it,
- * the home's entry in the in-flight map would stay forever and the home would
- * never refresh again.
- *
- * At the limit Hercule sends pi a stop signal and frees the home without
- * waiting for pi to exit. A pi that ignores the signal may therefore overlap
- * with the next refresh. That is accepted: it needs a pi that is both stuck and
- * ignores the signal, and costs at most one extra process per probe.
+ * stops its own refresh after 15 seconds, so this only reaches a stuck pi, for
+ * example one whose child keeps its pipes open. At the limit Hercule sends pi a
+ * stop signal and does not wait for it to exit.
  */
 const MODEL_STORE_REFRESH_LIMIT: Duration.Duration = Duration.seconds(30);
 
@@ -171,13 +160,11 @@ const buildCatalog = (models: ReadonlyArray<PiModel>): ReadonlyArray<ModelDescri
 
 /**
  * The environment variables the model store refresh keeps. `pi update
- * --models` refreshes the list of every provider pi finds credentials for, and
- * pi has no option to name one provider. The runner's own environment may hold
- * keys of other providers (for example `OPENROUTER_API_KEY` or AWS
- * credentials), and a refresh with those would send them to those providers,
- * while a session uses the instance's own key or none. So the refresh gets
- * this list and nothing else. The proxy and TLS variables keep pi working
- * behind a corporate proxy.
+ * --models` refreshes every provider pi finds credentials for and cannot be
+ * limited to one, while a session uses the instance's own key or none. So the
+ * refresh must not see the runner's other keys (for example `OPENROUTER_API_KEY`
+ * or AWS credentials). The proxy and TLS variables keep pi working behind a
+ * corporate proxy.
  */
 const REFRESH_ENV_VARIABLES: ReadonlySet<string> = new Set([
   "PATH",
@@ -211,80 +198,48 @@ const buildRefreshEnv = (
  * Refreshes the model list that pi stores in the instance's home, by running
  * `pi update --models`, and waits for it at most `MODEL_STORE_REFRESH_WAIT`.
  * Never fails: a refresh that fails or is not finished in time is logged as a
- * warning, and the probe goes on with the catalog pi has stored, or the one
- * bundled in its release. So a probe does not always report a fresh catalog:
- * the result of a refresh that ends after the wait is seen by the next probe
- * or session.
+ * warning, and the probe goes on with the list pi has stored, or the one
+ * bundled in its release.
  *
- * The refresh runs in a fiber of its own, and only the wait for that fiber has
- * a time limit. Interrupting the command would kill pi while it writes its
- * model file, which can leave a corrupt file that pi never repairs, or a lock
- * file that blocks every later read for 30 seconds. The fiber is detached, so
- * the probe's own deadline does not interrupt it either, and it keeps the
- * runner's logger. Nothing stops it when the runner shuts down. pi bounds the
- * refresh itself, with a timer that starts once pi has started up, and
- * `MODEL_STORE_REFRESH_LIMIT` caps the rest.
- *
- * `inFlight` holds, for each instance home with a refresh running, a signal
- * that the refresh completes when it ends. A probe that finds one waits for it
- * instead of starting another refresh. pi's lock makes writes take turns but
- * not the network fetches, so two overlapping refreshes would fetch twice, and
- * the older answer could be stored last. The entry is stored and the refresh
- * started in one uninterruptible step, so an interrupted probe can never leave
- * an entry that no refresh will complete. The refresh removes its entry when
- * it ends, not when a probe stops waiting for it. Probes of different homes
- * never wait on each other.
- *
- * The command runs with the environment `buildRefreshEnv` builds.
+ * The refresh is its own command because, in RPC mode, pi answers before its
+ * background refresh ends. It runs in a detached fiber and only the wait is
+ * bounded: interrupting pi while it writes its store can corrupt the file or
+ * leave a lock that blocks readers for 30 seconds. A refresh that ends after
+ * the wait is seen by the next probe or session. Two probes of one home close
+ * together each start a refresh. pi's lock keeps the store whole, but the
+ * refresh that ends last wins even if it fetched a little earlier, which is
+ * accepted.
  */
 const refreshModelStore = (
-  inFlight: Map<string, Deferred.Deferred<void>>,
   run: Run,
   binary: string,
   home: string,
   env: Readonly<Record<string, string | undefined>>,
 ): Effect.Effect<void> => {
-  const refreshEnv = buildRefreshEnv(env);
-  const refresh = (ended: Deferred.Deferred<void>) =>
-    Effect.suspend(() => run([binary, "update", "--models"], refreshEnv)).pipe(
-      Effect.timeoutOption(MODEL_STORE_REFRESH_LIMIT),
-      // The warnings are written here, in the fiber that ran the command, so a
-      // refresh that fails after its probe has returned is still reported.
-      Effect.flatMap(
-        Option.match({
-          onNone: () =>
-            Effect.logWarning(
-              `pi did not refresh its model list in ${home} within ${Duration.format(MODEL_STORE_REFRESH_LIMIT)}, so Hercule sent it a stop signal`,
-            ),
-          onSome: (ran) =>
-            ran.code === 0
-              ? Effect.void
-              : Effect.logWarning(
-                  `pi could not refresh its model list in ${home}: ${readComplaint(ran)}`,
-                ),
-        }),
-      ),
-      Effect.ensuring(
-        Effect.suspend(() => {
-          inFlight.delete(home);
-          return Deferred.succeed(ended, undefined);
-        }),
-      ),
-    );
-  const startOrFindRefresh = Effect.uninterruptible(
-    Effect.suspend(() => {
-      const running = inFlight.get(home);
-      if (running !== undefined) return Effect.succeed(running);
-      const ended = Deferred.makeUnsafe<void>();
-      inFlight.set(home, ended);
-      // A forked fiber inherits the uninterruptible region, and the limit above
-      // needs to interrupt the command.
-      return Effect.as(Effect.forkDetach(Effect.interruptible(refresh(ended))), ended);
-    }),
+  const refresh = Effect.suspend(() =>
+    run([binary, "update", "--models"], buildRefreshEnv(env)),
+  ).pipe(
+    Effect.timeoutOption(MODEL_STORE_REFRESH_LIMIT),
+    // The warnings are written here, in the fiber that ran the command, so a
+    // refresh that fails after its probe has returned is still reported.
+    Effect.flatMap(
+      Option.match({
+        onNone: () =>
+          Effect.logWarning(
+            `pi did not refresh its model list in ${home} within ${Duration.format(MODEL_STORE_REFRESH_LIMIT)}, so Hercule sent it a stop signal`,
+          ),
+        onSome: (ran) =>
+          ran.code === 0
+            ? Effect.void
+            : Effect.logWarning(
+                `pi could not refresh its model list in ${home}: ${readComplaint(ran)}`,
+              ),
+      }),
+    ),
   );
   return Effect.gen(function* () {
-    const ended = yield* startOrFindRefresh;
-    const finished = yield* Effect.timeoutOption(Deferred.await(ended), MODEL_STORE_REFRESH_WAIT);
+    const refreshing = yield* Effect.forkDetach(refresh);
+    const finished = yield* Effect.timeoutOption(Fiber.await(refreshing), MODEL_STORE_REFRESH_WAIT);
     if (Option.isNone(finished)) {
       yield* Effect.logWarning(
         `pi has not refreshed its model list in ${home} within ${Duration.format(MODEL_STORE_REFRESH_WAIT)}, so the probe reads the list stored so far`,
@@ -295,11 +250,10 @@ const refreshModelStore = (
 
 /**
  * Reads the model catalog from a separate pi process that saves nothing and
- * makes no network calls, so it returns the catalog pi has stored, which the
- * probe refreshes first. Fails with an error message when pi cannot be
- * started or does not respond. The process is killed as soon as it has
- * responded: left running, it would keep the user's key in its environment
- * long after anyone looked at the Fleet page.
+ * makes no network calls, so it returns the list pi has stored. Fails with an
+ * error message when pi cannot be started or does not respond. The process is
+ * killed as soon as it has responded: left running, it would keep the user's
+ * key in its environment long after anyone looked at the Fleet page.
  */
 const fetchCatalog = (
   spawn: PiSpawn,
@@ -344,9 +298,9 @@ const fetchCatalog = (
     (child) => Effect.sync(() => child.kill()),
   );
 
-export const makeProbe = (spawn: PiSpawn, run: Run) => {
-  const refreshesInFlight = new Map<string, Deferred.Deferred<void>>();
-  return (
+export const makeProbe =
+  (spawn: PiSpawn, run: Run) =>
+  (
     binary: string,
     home: string,
     env: Readonly<Record<string, string | undefined>>,
@@ -361,7 +315,7 @@ export const makeProbe = (spawn: PiSpawn, run: Run) => {
       // pi lists only the providers it has a key for, so a machine with no key
       // has no catalog to read.
       if (auth.status !== "ok") return { harnessVersion, auth, models: [] };
-      yield* refreshModelStore(refreshesInFlight, run, binary, home, env);
+      yield* refreshModelStore(run, binary, home, env);
       return yield* Effect.match(fetchCatalog(spawn, binary, env), {
         onFailure: (message) => buildFailedProbe(harnessVersion, message),
         onSuccess: (models) => ({ harnessVersion, auth, models }),
@@ -374,7 +328,6 @@ export const makeProbe = (spawn: PiSpawn, run: Run) => {
       ),
     );
   };
-};
 
 /** Builds the pi install: the vendor's install script, which cannot pin a release. */
 export const makePiInstall = (
