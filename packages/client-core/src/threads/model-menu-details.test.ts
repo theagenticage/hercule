@@ -1,29 +1,29 @@
 /**
  * Tests the details the model menu shows beside a row's name: "default" on
  * the account's default model unless it is the current one, and who is
- * logged in to an account and on what plan.
+ * signed in to an account and on what plan.
  */
 import { describe, expect, it } from "vitest";
-import type { ModelMenuInstanceRow, ModelMenuRow } from "./model-menu";
+import type { ModelMenuAccountRow, ModelMenuRow } from "./model-menu";
 import { describeAccountRow, describeModelRow } from "./model-menu-details";
 
 const SONNET: ModelMenuRow = {
-  instanceId: "claude",
+  providerAccountId: "claude",
   slug: "claude-sonnet-5",
   name: "Claude Sonnet 5",
   isDefault: true,
   current: false,
 };
 
-const ACCOUNT: ModelMenuInstanceRow = {
-  instanceId: "work",
+const ACCOUNT: ModelMenuAccountRow = {
+  providerAccountId: "work",
   harnessId: "claude-code/claude-code",
-  name: "work",
+  name: "Anthropic · work",
   identity: "work@example.com",
   planLabel: "Claude Pro",
   models: "1 model",
   dimmed: null,
-  login: null,
+  signIn: null,
   rows: [],
 };
 
@@ -39,7 +39,7 @@ describe("describeModelRow", () => {
 });
 
 describe("describeAccountRow", () => {
-  it("names who is logged in and on what plan", () => {
+  it("names who is signed in and on what plan", () => {
     expect(describeAccountRow(ACCOUNT)).toBe("work@example.com · Claude Pro");
   });
 

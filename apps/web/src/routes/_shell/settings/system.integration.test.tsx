@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ControllerInfo, ProviderInstance } from "@hercule/contract";
+import type { ControllerInfo, ProviderAccount } from "@hercule/contract";
 import {
   buildErrorBody,
   readPageText,
@@ -26,7 +26,7 @@ import {
 
 const RUNNER_ID = "01a06d02-beff-7037-9f5b-042822015952";
 
-const CODEX: ProviderInstance = {
+const CODEX: ProviderAccount = {
   id: "01a06d02-1000-7000-8000-000000000001",
   harnessId: "codex/codex",
   name: "Codex",
@@ -66,7 +66,7 @@ const CODEX: ProviderInstance = {
 };
 
 const AUTOMATIC_PICK: ControllerInfo["textGeneration"] = {
-  model: { instanceId: CODEX.id, model: "gpt-6-luna" },
+  model: { providerAccountId: CODEX.id, model: "gpt-6-luna" },
   lastFailure: null,
   unavailableReason: null,
 };
@@ -96,7 +96,7 @@ const buildController = (
         },
       },
     }),
-    "GET /api/v1/providers": { body: [CODEX] },
+    "GET /api/v1/provider-accounts": { body: [CODEX] },
     "GET /api/v1/controller": {
       body: {
         id: "01a06d02-a000-7000-8000-000000000001",
@@ -228,7 +228,7 @@ describe("Settings > System: text generation", () => {
     expect(await screen.findByRole("status")).toBeDefined();
     expect(listWrites(api)).toHaveLength(1);
     expect(listWrites(api)[0]?.body).toEqual({
-      controller: { "textGeneration.model": { instanceId: CODEX.id, model: "gpt-6" } },
+      controller: { "textGeneration.model": { providerAccountId: CODEX.id, model: "gpt-6" } },
     });
   });
 
@@ -249,9 +249,9 @@ describe("Settings > System: text generation", () => {
 
   it("shows the stored choice as selected", async () => {
     await openApp({
-      stored: { instanceId: CODEX.id, model: "gpt-6" },
+      stored: { providerAccountId: CODEX.id, model: "gpt-6" },
       textGeneration: {
-        model: { instanceId: CODEX.id, model: "gpt-6" },
+        model: { providerAccountId: CODEX.id, model: "gpt-6" },
         lastFailure: null,
         unavailableReason: null,
       },

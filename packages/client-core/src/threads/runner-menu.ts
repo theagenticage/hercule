@@ -1,9 +1,11 @@
 /**
- * Builds the composer's runner selector for the instance the model selector
+ * Builds the composer's runner selector for the account the model selector
  * has already picked. Each row shows whether that runner can host the
- * instance; the login state of other instances does not matter here.
+ * account in the thread's harness; the sign-in state of other accounts does
+ * not matter here.
  */
-import type { CapabilitySnapshot, ProviderInstance, Runner } from "@hercule/contract";
+import type { CapabilitySnapshot, ProviderAccount, Runner } from "@hercule/contract";
+import { findSnapshotOn } from "./catalog";
 
 export interface RunnerMenuRow {
   readonly runnerId: string;
@@ -29,9 +31,9 @@ const readRunnerState = (runner: Runner): RunnerMenuRow["state"] =>
 const isRetired = (runner: Runner): boolean => runner.lifecycle === "retired";
 
 /**
- * Returns why `runner` cannot host a thread of the instance whose snapshot on
+ * Returns why `runner` cannot host a thread of the account whose snapshot on
  * it is `snapshot` right now, or `null` when it can: "retired", its
- * connectivity when it is not online, "draining", or "not logged in".
+ * connectivity when it is not online, "draining", or "not signed in".
  */
 export const findDimmedReason = (
   runner: Runner,
@@ -44,24 +46,25 @@ export const findDimmedReason = (
       : runner.lifecycle === "draining"
         ? "draining"
         : snapshot?.auth.status !== "ok"
-          ? "not logged in"
+          ? "not signed in"
           : null;
 
 /**
  * Returns one row per runner that is not retired, and the default runner: the
  * runner on this Mac when it is usable, else the first usable runner, else `null`.
  * A row is dimmed, with the reason, when its runner is not online, is
- * draining, or is not logged in to the instance.
+ * draining, or the account is not signed in on it in `harnessId`.
  */
 export const buildRunnerMenu = (
   runners: readonly Runner[],
   localId: string | null,
-  instance: ProviderInstance,
+  account: ProviderAccount,
+  harnessId: string,
 ): RunnerMenu => {
   const rows = runners
     .filter((runner) => !isRetired(runner))
     .map((runner) => {
-      const snapshot = instance.snapshots.find((each) => each.runnerId === runner.id);
+      const snapshot = findSnapshotOn(account, harnessId, runner.id);
       const dimmed = findDimmedReason(runner, snapshot);
       return {
         runnerId: runner.id,

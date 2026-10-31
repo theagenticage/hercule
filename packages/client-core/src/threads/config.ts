@@ -6,8 +6,10 @@
  * the choices already made.
  */
 import type {
+  Harness,
   Project,
-  ProviderInstance,
+  Provider,
+  ProviderAccount,
   Resource,
   Runner,
   Session,
@@ -41,9 +43,12 @@ export interface ThreadConfig extends ThreadDefaults {
  * What the user has chosen since the last submission. A pick is kept even
  * while the current account, runner or model cannot honour it, and applies
  * again when it can (see `resolveThreadConfig`). The permission profile is not
- * included, because the composer has no control for it.
+ * included, because the composer has no control for it. Neither is the
+ * harness: picking an account puts the thread in that account's default
+ * harness, because a harness named for the previous account may not run this
+ * one.
  */
-export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId">>;
+export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId" | "harnessId">>;
 
 /**
  * The unsent content the composer holds for one thread: its text and the
@@ -75,7 +80,11 @@ export type ThreadKind = Thread["kind"];
  * with no project on screen passes only what it has.
  */
 export interface ThreadCatalogs {
-  readonly instances: readonly ProviderInstance[];
+  readonly accounts: readonly ProviderAccount[];
+  /** The providers, whose display names name the accounts. */
+  readonly providers: readonly Provider[];
+  /** The harnesses, whose display names and declared capabilities the composer shows. */
+  readonly harnesses: readonly Harness[];
   readonly runners: readonly Runner[];
   readonly thisMacRunnerId: string | null;
   readonly projects?: readonly Project[];
@@ -93,7 +102,8 @@ export const readThreadConfig = (thread: Thread): ThreadConfig =>
   thread.kind === "draft"
     ? thread.config
     : {
-        instanceId: thread.session.instanceId,
+        providerAccountId: thread.session.providerAccountId,
+        harnessId: thread.session.harnessId,
         model: thread.session.modelSelection.model,
         options: thread.session.modelSelection.options,
         accessMode: thread.session.accessMode,

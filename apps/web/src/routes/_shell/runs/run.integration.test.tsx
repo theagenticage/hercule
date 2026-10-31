@@ -419,7 +419,7 @@ const SIGNAL_WAITING_RUN: Run = {
 const IMPLEMENT_SESSION = buildSession({
   id: IMPLEMENT_SESSION_ID,
   permissionProfileId: "0199c0ff-aaaa-7000-8000-000000000001",
-  instanceId: "0199c0ff-bbbb-7000-8000-000000000001",
+  providerAccountId: "0199c0ff-bbbb-7000-8000-000000000001",
   runnerId: "0199c0ff-cccc-7000-8000-000000000001",
   title: `${WORKFLOW_NAME} · implement`,
   status: "idle",

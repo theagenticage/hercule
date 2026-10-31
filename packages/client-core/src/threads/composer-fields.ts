@@ -8,21 +8,23 @@
  *   running session.
  *
  * Only the model and its options can still change, and only within the
- * instance the thread was spawned on, because the session lives in that
- * instance's home, with its login.
+ * account and harness the thread was spawned on, because the session lives in
+ * that account's home for the harness, with its sign-in.
  */
 import type {
   AccessMode,
   CapabilitySnapshot,
   ModelDescriptor,
   ModelOption,
-  ProviderInstance,
+  Provider,
+  ProviderAccount,
   Runner,
   Workspace,
   WorkspaceStatus,
 } from "@hercule/contract";
 import { buildAccessModeMenu, type AccessModeMenuItem } from "./access-modes";
-import { findAccountName, buildLoginTarget, type LoginTarget } from "./catalog";
+import { buildProviderAccountName, findAccountNameIfAmbiguous } from "../provider-accounts";
+import { buildSignInTarget, type SignInTarget } from "./catalog";
 import type { ThreadCatalogs, ThreadKind } from "./config";
 import { buildRunnerMenu, findDimmedReason, type RunnerMenuRow } from "./runner-menu";
 import type { ResolvedThread } from "./resolve-thread";
@@ -53,11 +55,12 @@ export interface ModelPill {
 export interface ComposerBlocked {
   /**
    * Why the thread cannot start, as a sentence without its full stop, such
-   * as "Claude Code is not on moss". Screens show it after "Can't start yet."
+   * as "Anthropic is not signed in on moss". Screens show it after "Can't
+   * start yet."
    */
   readonly reason: string;
-  /** The login that would fix the problem, when a missing login is the problem. */
-  readonly login: LoginTarget | null;
+  /** The sign-in that would fix the problem, when a missing sign-in is the problem. */
+  readonly signIn: SignInTarget | null;
 }
 
 /** A runner the thread could be placed on, and whether it is the current one. */
@@ -153,34 +156,36 @@ const UNREADY_WORKSPACE_REASONS: Readonly<Record<Exclude<WorkspaceStatus, "ready
  * order the user can fix them:
  *
  * - the workspace it joins, if it joins one, which must be ready;
- * - a provider instance to run it with;
+ * - a Provider Account to run it with, and its harness;
  * - a runner to run it on, which must not be retired, offline or draining;
- * - a login for the instance on that runner.
+ * - a sign-in for the account on that runner.
  *
  * Only the last one can be fixed with a button from here.
  */
 const findBlocker = (
   joined: Workspace | undefined,
-  instance: ProviderInstance | undefined,
+  providers: readonly Provider[],
+  account: ProviderAccount | undefined,
   runner: Runner | undefined,
   snapshot: CapabilitySnapshot | undefined,
 ): ComposerBlocked | null => {
   if (joined !== undefined && joined.status !== "ready")
-    return { reason: joined.message ?? UNREADY_WORKSPACE_REASONS[joined.status], login: null };
-  if (instance === undefined) return { reason: "No provider instance is set up", login: null };
-  if (runner === undefined) return { reason: "No machine is connected", login: null };
-  if (runner.lifecycle === "retired") return { reason: `${runner.name} is retired`, login: null };
+    return { reason: joined.message ?? UNREADY_WORKSPACE_REASONS[joined.status], signIn: null };
+  if (account === undefined) return { reason: "No account is set up", signIn: null };
+  if (runner === undefined) return { reason: "No machine is connected", signIn: null };
+  if (runner.lifecycle === "retired") return { reason: `${runner.name} is retired`, signIn: null };
   // A runner the user picked stays the draft's runner while it is away, so
   // the draft says why it cannot start rather than moving to another runner.
   if (runner.connectivity !== "online")
-    return { reason: `${runner.name} is ${runner.connectivity}`, login: null };
-  if (runner.lifecycle === "draining") return { reason: `${runner.name} is draining`, login: null };
-  if (snapshot === undefined)
-    return { reason: `${instance.displayName} is not on ${runner.name}`, login: null };
+    return { reason: `${runner.name} is ${runner.connectivity}`, signIn: null };
+  if (runner.lifecycle === "draining")
+    return { reason: `${runner.name} is draining`, signIn: null };
+  const name = buildProviderAccountName(providers, account);
+  if (snapshot === undefined) return { reason: `${name} is not on ${runner.name}`, signIn: null };
   if (snapshot.auth.status !== "ok")
     return {
-      reason: `${instance.displayName} is on ${runner.name} but not logged in`,
-      login: buildLoginTarget(instance, runner),
+      reason: `${name} is not signed in on ${runner.name}`,
+      signIn: buildSignInTarget(providers, account, runner),
     };
   return null;
 };
@@ -198,7 +203,9 @@ export const buildComposerFields = (
   resolved: ResolvedThread,
 ): ComposerFields => {
   const { config, kind, snapshot, descriptor } = resolved;
-  const instance = catalogs.instances.find((each) => each.id === config.instanceId);
+  const account = catalogs.accounts.find((each) => each.id === config.providerAccountId);
+  const harnessId = account === undefined ? null : (config.harnessId ?? account.defaultHarnessId);
+  const harness = catalogs.harnesses.find((each) => each.id === harnessId);
   const resources = catalogs.resources ?? [];
   const workspaces = catalogs.workspaces ?? [];
   const projectId = config.projectId ?? null;
@@ -217,9 +224,9 @@ export const buildComposerFields = (
   // shown with another runner's reason would send the user to fix the wrong
   // thing.
   const menu =
-    instance === undefined
+    account === undefined || harnessId === null
       ? null
-      : buildRunnerMenu(catalogs.runners, catalogs.thisMacRunnerId, instance);
+      : buildRunnerMenu(catalogs.runners, catalogs.thisMacRunnerId, account, harnessId);
   const countHostedSessions = (runnerId: string): number =>
     (catalogs.sessions ?? []).filter(
       (session) => session.runnerId === runnerId && session.exitedAt === null,
@@ -241,7 +248,7 @@ export const buildComposerFields = (
   // Read from the runner rather than from its row, because the menu has no
   // row for a retired runner, and a draft can still refer to one.
   const dimmed =
-    instance === undefined || runner === undefined ? null : findDimmedReason(runner, snapshot);
+    account === undefined || runner === undefined ? null : findDimmedReason(runner, snapshot);
   const name = runner?.name ?? "no machine";
 
   return {
@@ -249,14 +256,17 @@ export const buildComposerFields = (
       locked: findLockedReason(kind, "access mode"),
       value: config.accessMode,
       rows:
-        instance === undefined
+        harness === undefined
           ? []
-          : buildAccessModeMenu(instance.declared.accessModes, instance.displayName),
+          : buildAccessModeMenu(harness.declared.accessModes, harness.displayName),
     },
     model: {
       pill: {
-        harnessId: instance?.harnessId ?? null,
-        account: instance === undefined ? null : findAccountName(catalogs.instances, instance),
+        harnessId,
+        account:
+          account === undefined
+            ? null
+            : findAccountNameIfAmbiguous(catalogs.accounts, catalogs.providers, account),
         // A slug the snapshot no longer offers is still the thread's model, so
         // the pill shows the slug rather than going blank.
         name: descriptor?.name ?? config.model,
@@ -302,7 +312,8 @@ export const buildComposerFields = (
             machine: name,
             runnerId: runner?.id ?? null,
           }),
-    blocked: kind === "active" ? null : findBlocker(joined, instance, runner, snapshot),
+    blocked:
+      kind === "active" ? null : findBlocker(joined, catalogs.providers, account, runner, snapshot),
   };
 };
 

@@ -3,7 +3,7 @@
  * `activityAt` stays a raw timestamp: formatting "how long ago" needs a clock,
  * and only the caller should read one.
  */
-import type { ProviderInstance, Runner, Session, ThreadRows } from "@hercule/contract";
+import type { ProviderAccount, Runner, Session, ThreadRows } from "@hercule/contract";
 import { findModelName } from "./model-name";
 import { decideThreadRowEnd, type ThreadRowEnd } from "./pose";
 import { isSettled, WORKING_STATUSES } from "./status";
@@ -70,14 +70,14 @@ export const buildThreadRow = (
 /**
  * Returns a row for each session, sorted by `compareNewestFirst`: the most
  * recently active first, and sessions active at the same moment by id. In
- * `meta` mode the second line is the model's name from `instances`; in `plain`
+ * `meta` mode the second line is the model's name from `accounts`; in `plain`
  * mode there is none.
  */
 export const buildThreadRows = (
   sessions: readonly Session[],
   mode: ThreadRows,
   runners: readonly Runner[],
-  instances: readonly ProviderInstance[] = [],
+  accounts: readonly ProviderAccount[] = [],
 ): readonly ThreadRow[] =>
   sessions
     .map((session) =>
@@ -85,7 +85,8 @@ export const buildThreadRows = (
         session,
         mode === "meta"
           ? findModelName(
-              instances.find((each) => each.id === session.instanceId),
+              accounts.find((each) => each.id === session.providerAccountId),
+              session.harnessId,
               session.modelSelection.model,
             )
           : null,

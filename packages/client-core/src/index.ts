@@ -539,7 +539,14 @@ export { matchYourWork, type YourWork } from "./your-work";
 export { describeYourWork, describeYourWorkOnRow, type YourWorkItem } from "./your-work-display";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
-export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
+export { buildProviderRows, type CredentialFieldOffer, type ProviderRow } from "./provider-rows";
+export {
+  buildProviderAccountName,
+  findAccountKind,
+  findAccountNameIfAmbiguous,
+  listAccountCredentialFields,
+  requiresSignInPerMachine,
+} from "./provider-accounts";
 export {
   decideDeviceLoginStep,
   describeDeviceLoginWait,
@@ -717,7 +724,7 @@ export {
   type ResolvedDraft,
   type ResolvedThread,
 } from "./threads/resolve-thread";
-export type { LoginTarget } from "./threads/catalog";
+export type { SignInTarget } from "./threads/catalog";
 export {
   buildComposerFields,
   buildPendingModelNote,
@@ -938,7 +945,7 @@ export {
 } from "./threads/starter-threads";
 export {
   buildDraftConfig,
-  computeInstanceDefaults,
+  computeAccountDefaults,
   computeThreadDefaults,
 } from "./threads/thread-defaults";
 export {

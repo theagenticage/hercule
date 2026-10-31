@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Connection, Profile, ProviderInstance, Runner } from "@hercule/contract";
+import type { Connection, Profile, ProviderAccount, Runner } from "@hercule/contract";
 import { buildErrorBody, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 
 const RUNNER_LOCAL: Runner = {
@@ -57,11 +57,11 @@ const buildSnapshot = (
   models: models.map((model) => ({ ...model, imageInput: { maxBytes: null }, options: [] })),
 });
 
-const buildProviderInstance = (
+const buildProviderAccount = (
   id: string,
   displayName: string,
-  snapshots: ProviderInstance["snapshots"],
-): ProviderInstance => ({
+  snapshots: ProviderAccount["snapshots"],
+): ProviderAccount => ({
   id,
   harnessId: "claude-code/claude-code",
   secretFields: [],
@@ -76,7 +76,7 @@ const buildProviderInstance = (
 });
 
 /** An instance logged in on the local runner, with two models. */
-const INSTANCE_LOCAL = buildProviderInstance(
+const ACCOUNT_LOCAL = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000001",
   "Claude Code",
   [
@@ -88,23 +88,23 @@ const INSTANCE_LOCAL = buildProviderInstance(
 );
 
 /** An instance never probed on the local runner, with one snapshot from another runner. */
-const INSTANCE_ELSEWHERE = buildProviderInstance(
+const ACCOUNT_ELSEWHERE = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000002",
   "Claude Code (work)",
   [buildSnapshot(RUNNER_OTHER.id, [{ slug: "claude-haiku-5", name: "Haiku 5" }])],
 );
 
 /** An instance never probed on any runner. */
-const INSTANCE_UNPROBED = buildProviderInstance(
+const ACCOUNT_UNPROBED = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000003",
   "Claude Code (new)",
   [],
 );
 
-const INSTANCES: readonly ProviderInstance[] = [
-  INSTANCE_LOCAL,
-  INSTANCE_ELSEWHERE,
-  INSTANCE_UNPROBED,
+const ACCOUNTS: readonly ProviderAccount[] = [
+  ACCOUNT_LOCAL,
+  ACCOUNT_ELSEWHERE,
+  ACCOUNT_UNPROBED,
 ];
 
 const PROFILE_UNRESTRICTED: Profile = {
@@ -130,7 +130,7 @@ const PROFILES: readonly Profile[] = [PROFILE_UNRESTRICTED, PROFILE_WORKER];
 const STORED_BASE = {
   "onboarding.completedSteps": ["timezone", "assistant"],
   timezone: "Europe/Amsterdam",
-  "thread.instanceId": INSTANCE_LOCAL.id,
+  "thread.providerAccountId": ACCOUNT_LOCAL.id,
   "thread.model": "claude-sonnet-5",
   "thread.accessMode": "approval-required",
   "thread.profileId": PROFILE_UNRESTRICTED.id,
@@ -152,7 +152,7 @@ const buildController = (
     "GET /api/v1/setup": { body: { complete: true } },
     "GET /api/v1/settings": { body: stored },
     "PATCH /api/v1/settings": update ?? applyPatch,
-    "GET /api/v1/providers": { body: INSTANCES },
+    "GET /api/v1/provider-accounts": { body: ACCOUNTS },
     "GET /api/v1/runners": { body: { items: [RUNNER_LOCAL, RUNNER_OTHER] } },
     "GET /api/v1/profiles": { body: { items: PROFILES } },
   };
@@ -173,15 +173,15 @@ const listWrites = (api: { readonly calls: readonly Call[] }) =>
   api.calls.filter((call) => call.method === "PATCH");
 
 describe("Settings > Threads defaults", () => {
-  it("offers the provider instances by display name, and writes thread.instanceId and thread.model together on pick", async () => {
+  it("offers the provider instances by display name, and writes thread.providerAccountId and thread.model together on pick", async () => {
     const user = userEvent.setup();
     const { api } = await openApp();
 
     const field = await screen.findByLabelText<HTMLSelectElement>("Provider instance");
     const offered = [...field.options].map((option) => option.textContent);
-    for (const each of INSTANCES) expect(offered).toContain(each.displayName);
+    for (const each of ACCOUNTS) expect(offered).toContain(each.displayName);
 
-    await user.selectOptions(field, INSTANCE_ELSEWHERE.displayName);
+    await user.selectOptions(field, ACCOUNT_ELSEWHERE.displayName);
 
     expect(await screen.findByRole("status")).toBeDefined();
     expect(listWrites(api)).toHaveLength(1);
@@ -189,21 +189,21 @@ describe("Settings > Threads defaults", () => {
     // instance does not offer. The instance's only snapshot has one model,
     // "Haiku 5", with no `isDefault`, so that model is the fallback default.
     expect(listWrites(api)[0]?.body).toEqual({
-      user: { "thread.instanceId": INSTANCE_ELSEWHERE.id, "thread.model": "claude-haiku-5" },
+      user: { "thread.providerAccountId": ACCOUNT_ELSEWHERE.id, "thread.model": "claude-haiku-5" },
     });
   });
 
-  it("writes only thread.instanceId when the newly picked instance has no snapshot to default from", async () => {
+  it("writes only thread.providerAccountId when the newly picked instance has no snapshot to default from", async () => {
     const user = userEvent.setup();
     const { api } = await openApp();
 
     const field = await screen.findByLabelText<HTMLSelectElement>("Provider instance");
-    await user.selectOptions(field, INSTANCE_UNPROBED.displayName);
+    await user.selectOptions(field, ACCOUNT_UNPROBED.displayName);
 
     expect(await screen.findByRole("status")).toBeDefined();
     expect(listWrites(api)).toHaveLength(1);
     expect(listWrites(api)[0]?.body).toEqual({
-      user: { "thread.instanceId": INSTANCE_UNPROBED.id },
+      user: { "thread.providerAccountId": ACCOUNT_UNPROBED.id },
     });
   });
 
@@ -225,11 +225,11 @@ describe("Settings > Threads defaults", () => {
 
   it("falls back to the instance's first snapshot when none is the local runner's", async () => {
     await openApp({
-      "thread.instanceId": INSTANCE_ELSEWHERE.id,
+      "thread.providerAccountId": ACCOUNT_ELSEWHERE.id,
       "thread.model": "claude-haiku-5",
     });
 
-    // INSTANCE_ELSEWHERE has no snapshot for RUNNER_LOCAL (the detected local
+    // ACCOUNT_ELSEWHERE has no snapshot for RUNNER_LOCAL (the detected local
     // runner); its one snapshot, from RUNNER_OTHER, is offered anyway.
     const field = await screen.findByLabelText<HTMLSelectElement>("Model");
     const offered = [...field.options].map((option) => option.textContent);
@@ -237,7 +237,7 @@ describe("Settings > Threads defaults", () => {
   });
 
   it("dims the model field when the picked instance has no snapshot at all", async () => {
-    await openApp({ "thread.instanceId": INSTANCE_UNPROBED.id, "thread.model": "claude-sonnet-5" });
+    await openApp({ "thread.providerAccountId": ACCOUNT_UNPROBED.id, "thread.model": "claude-sonnet-5" });
 
     expect(await screen.findByText("log in on a runner first")).toBeDefined();
     expect(screen.queryByLabelText("Model")).toBeNull();
@@ -245,7 +245,7 @@ describe("Settings > Threads defaults", () => {
 
   it("shows a stored slug the snapshot no longer offers, marked as not offered", async () => {
     await openApp({
-      "thread.instanceId": INSTANCE_LOCAL.id,
+      "thread.providerAccountId": ACCOUNT_LOCAL.id,
       "thread.model": "some-retired-slug",
     });
 

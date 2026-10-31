@@ -40,7 +40,7 @@ const DECLARED = {
 
 const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 
-const buildClaudeCodeInstance = () => ({
+const buildClaudeCodeAccount = () => ({
   id: CLAUDE_ID,
   harnessId: "claude-code/claude-code",
   name: "Claude Code",
@@ -84,7 +84,7 @@ const BASE_SESSION: Session = {
   conversationId: null,
   runId: null,
   stepId: null,
-  instanceId: CLAUDE_ID,
+  providerAccountId: CLAUDE_ID,
   runnerId: MOSS.id,
   workspaceId: null,
   projectId: null,
@@ -243,7 +243,7 @@ const buildController = (
     },
   },
   "GET /api/v1/sessions": { body: { items: sessions } },
-  "GET /api/v1/providers": { body: [buildClaudeCodeInstance()] },
+  "GET /api/v1/provider-accounts": { body: [buildClaudeCodeAccount()] },
   "GET /api/v1/runners": { body: { items: [MOSS] } },
   // The sidebar's Assistants group reads this; no test here has an assistant.
   "GET /api/v1/assistants": { body: { items: [] } },
@@ -358,7 +358,7 @@ describe("All sessions", () => {
         expect(onScreen.length).toBeGreaterThanOrEqual(1);
       });
     }
-    // "Claude Code" is the provider display name for every session's instanceId.
+    // "Claude Code" is the provider display name for every session's providerAccountId.
     expect(screen.getAllByText("Claude Code").length).toBeGreaterThanOrEqual(THREE_STATUSES.length);
   });
 

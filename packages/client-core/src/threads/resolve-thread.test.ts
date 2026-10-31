@@ -17,10 +17,12 @@ import { describe, expect, it } from "vitest";
 import type { ModelOption, Runner } from "@hercule/contract";
 import {
   BARE,
-  buildInstance,
+  buildProviderAccount,
   buildSnapshot,
-  CLAUDE_CODE_IDENTITY,
-  CODEX_IDENTITY,
+  ANTHROPIC_IDENTITY,
+  OPENAI_IDENTITY,
+  HARNESSES,
+  PROVIDERS,
 } from "../providers.testing";
 import type { ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
 import { resolveThreadConfig } from "./resolve-thread";
@@ -88,14 +90,14 @@ const GPT = {
   options: [],
 };
 
-const CLAUDE = buildInstance(CLAUDE_CODE_IDENTITY, [
+const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [
   buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS, HAIKU] }),
   buildSnapshot({ runnerId: REMOTE.id, models: [SONNET, OPUS, HAIKU] }),
   buildSnapshot({ runnerId: MOSS.id, models: [SONNET, OPUS, HAIKU] }),
 ]);
 
 /** Logged in on the remote runner only; on the local one it is installed but logged out. */
-const CODEX = buildInstance(CODEX_IDENTITY, [
+const CODEX = buildProviderAccount(OPENAI_IDENTITY, [
   buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
   buildSnapshot({
     runnerId: REMOTE.id,
@@ -104,22 +106,25 @@ const CODEX = buildInstance(CODEX_IDENTITY, [
 ]);
 
 /** Logged in on the local, remote and moss runners, each with another default model. */
-const TEAM = buildInstance({ ...CODEX_IDENTITY, id: "instance-team", name: "Team" }, [
+const TEAM = buildProviderAccount({ ...OPENAI_IDENTITY, id: "account-team", label: "Team" }, [
   buildSnapshot({ runnerId: LOCAL.id, models: [{ ...GPT, slug: "team-local" }] }),
   buildSnapshot({ runnerId: REMOTE.id, models: [{ ...GPT, slug: "team-remote" }] }),
   buildSnapshot({ runnerId: MOSS.id, models: [{ ...GPT, slug: "team-moss" }] }),
 ]);
 
 const CATALOGS: ThreadCatalogs = {
-  instances: [CLAUDE, CODEX, TEAM],
+  accounts: [CLAUDE, CODEX, TEAM],
   runners: [LOCAL, REMOTE, ISLAND, MOSS],
   thisMacRunnerId: LOCAL.id,
+  providers: PROVIDERS,
+  harnesses: HARNESSES,
   workspaces: [PRIMARY, THREAD_3F1],
 };
 
 /** What a new draft starts with: Claude's default model on the local runner, no options. */
 const BASE: ThreadConfig = {
-  instanceId: CLAUDE.id,
+  providerAccountId: CLAUDE.id,
+  harnessId: null,
   model: SONNET.slug,
   accessMode: "approval-required",
   runnerId: LOCAL.id,
@@ -137,9 +142,9 @@ const resolveDraft = (
   base: ThreadConfig = BASE,
 ) => resolveThreadConfig(catalogs, { kind: "draft", config: base }, picks);
 
-const pickModel = (model: string, instanceId: string = CLAUDE.id): ThreadChoice => ({
+const pickModel = (model: string, providerAccountId: string = CLAUDE.id): ThreadChoice => ({
   kind: "model",
-  instanceId,
+  providerAccountId,
   model,
 });
 const pickOption = (id: string, value: string | boolean): ThreadChoice => ({
@@ -227,15 +232,17 @@ describe("resolveThreadConfig: a draft's model and options", () => {
   });
 
   it("uses the default model of a picked account, read from the runner it runs on", () => {
-    const resolved = resolveDraft(applyThreadChoices({ kind: "account", instanceId: TEAM.id }));
+    const resolved = resolveDraft(
+      applyThreadChoices({ kind: "account", providerAccountId: TEAM.id }),
+    );
     expect(resolved.config).toMatchObject({
-      instanceId: TEAM.id,
+      providerAccountId: TEAM.id,
       runnerId: LOCAL.id,
       model: "team-local",
     });
     const onRemote = resolveDraft(
       applyThreadChoices(
-        { kind: "account", instanceId: TEAM.id },
+        { kind: "account", providerAccountId: TEAM.id },
         { kind: "runner", runnerId: REMOTE.id },
       ),
     );
@@ -244,10 +251,10 @@ describe("resolveThreadConfig: a draft's model and options", () => {
 
   it("drops the model pick when only the account is picked afterwards", () => {
     const resolved = resolveDraft(
-      applyThreadChoices(pickModel(OPUS.slug), { kind: "account", instanceId: CODEX.id }),
+      applyThreadChoices(pickModel(OPUS.slug), { kind: "account", providerAccountId: CODEX.id }),
     );
     expect(resolved.config).toMatchObject({
-      instanceId: CODEX.id,
+      providerAccountId: CODEX.id,
       runnerId: REMOTE.id,
       model: GPT.slug,
     });
@@ -255,7 +262,7 @@ describe("resolveThreadConfig: a draft's model and options", () => {
 
   it("keeps the draft's own model when the account picked is the draft's own", () => {
     const resolved = resolveDraft(
-      applyThreadChoices({ kind: "account", instanceId: CLAUDE.id }),
+      applyThreadChoices({ kind: "account", providerAccountId: CLAUDE.id }),
       CATALOGS,
       {
         ...BASE,
@@ -266,13 +273,16 @@ describe("resolveThreadConfig: a draft's model and options", () => {
   });
 
   it("gives an account with no snapshot anywhere no model, no options and no runner", () => {
-    const empty = buildInstance({ ...CODEX_IDENTITY, id: "instance-empty", name: "Empty" });
+    const empty = buildProviderAccount({ ...OPENAI_IDENTITY, id: "account-empty", label: "Empty" });
     const resolved = resolveDraft(
-      applyThreadChoices(pickOption("effort", "low"), { kind: "account", instanceId: empty.id }),
-      { ...CATALOGS, instances: [CLAUDE, empty] },
+      applyThreadChoices(pickOption("effort", "low"), {
+        kind: "account",
+        providerAccountId: empty.id,
+      }),
+      { ...CATALOGS, accounts: [CLAUDE, empty] },
     );
     expect(resolved.config).toMatchObject({
-      instanceId: empty.id,
+      providerAccountId: empty.id,
       model: null,
       runnerId: null,
       options: {},
@@ -302,13 +312,13 @@ describe("resolveThreadConfig: a draft's runner", () => {
     const resolved = resolveDraft(
       applyThreadChoices(
         { kind: "runner", runnerId: LOCAL.id },
-        { kind: "account", instanceId: CODEX.id },
+        { kind: "account", providerAccountId: CODEX.id },
       ),
       CATALOGS,
       base,
     );
     expect(resolved.config).toMatchObject({
-      instanceId: CODEX.id,
+      providerAccountId: CODEX.id,
       runnerId: LOCAL.id,
       model: null,
     });
@@ -319,35 +329,39 @@ describe("resolveThreadConfig: a draft's runner", () => {
     const resolved = resolveDraft(
       applyThreadChoices({ kind: "runner", runnerId: REMOTE.id }, pickModel("x", TEAM.id)),
     );
-    expect(resolved.config).toMatchObject({ instanceId: TEAM.id, runnerId: REMOTE.id, model: "x" });
+    expect(resolved.config).toMatchObject({
+      providerAccountId: TEAM.id,
+      runnerId: REMOTE.id,
+      model: "x",
+    });
   });
 
   it("uses the default runner of an account not installed on the picked runner, and the pick comes back with an account that is", () => {
     const picked = applyThreadChoices({ kind: "runner", runnerId: MOSS.id });
     // Codex has no snapshot on moss: its default runner applies instead.
-    const onCodex = applyThreadChoice(picked, { kind: "account", instanceId: CODEX.id });
+    const onCodex = applyThreadChoice(picked, { kind: "account", providerAccountId: CODEX.id });
     expect(resolveDraft(onCodex).config).toMatchObject({ runnerId: REMOTE.id, model: GPT.slug });
     // Team is installed on moss, so the pick applies again.
-    const onTeam = applyThreadChoice(onCodex, { kind: "account", instanceId: TEAM.id });
+    const onTeam = applyThreadChoice(onCodex, { kind: "account", providerAccountId: TEAM.id });
     expect(resolveDraft(onTeam).config).toMatchObject({ runnerId: MOSS.id, model: "team-moss" });
     expect(onTeam.runnerId).toBe(MOSS.id);
   });
 
   it("follows the default runner of each account while no runner is picked (Claude, Codex, Team)", () => {
-    const toCodex = applyThreadChoices({ kind: "account", instanceId: CODEX.id });
+    const toCodex = applyThreadChoices({ kind: "account", providerAccountId: CODEX.id });
     expect(resolveDraft(toCodex).config.runnerId).toBe(REMOTE.id);
-    const toTeam = applyThreadChoice(toCodex, { kind: "account", instanceId: TEAM.id });
+    const toTeam = applyThreadChoice(toCodex, { kind: "account", providerAccountId: TEAM.id });
     expect(resolveDraft(toTeam).config).toMatchObject({ runnerId: LOCAL.id, model: "team-local" });
   });
 
   it("leaves the draft with no runner when its account has no default one, and names a reference runner apart", () => {
-    const loggedOut = buildInstance(CLAUDE_CODE_IDENTITY, [
+    const loggedOut = buildProviderAccount(ANTHROPIC_IDENTITY, [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
     ]);
     const resolved = resolveDraft(
       {},
-      { ...CATALOGS, instances: [loggedOut] },
-      { ...BASE, instanceId: loggedOut.id, model: null, runnerId: null },
+      { ...CATALOGS, accounts: [loggedOut] },
+      { ...BASE, providerAccountId: loggedOut.id, model: null, runnerId: null },
     );
     expect(resolved.config.runnerId).toBeNull();
     expect(resolved).toMatchObject({ runner: undefined, diagnosticRunner: LOCAL });
@@ -386,10 +400,12 @@ describe("resolveThreadConfig: a draft's runner", () => {
     const joined = { kind: "existing", workspaceId: THREAD_3F1.id } as const;
     const workspace: ThreadChoice = { kind: "workspace", workspace: joined };
     expect(
-      resolveDraft(applyThreadChoices(workspace, { kind: "account", instanceId: TEAM.id })).config,
+      resolveDraft(applyThreadChoices(workspace, { kind: "account", providerAccountId: TEAM.id }))
+        .config,
     ).toMatchObject({ runnerId: MOSS.id, model: "team-moss" });
     expect(
-      resolveDraft(applyThreadChoices(workspace, { kind: "account", instanceId: CODEX.id })).config,
+      resolveDraft(applyThreadChoices(workspace, { kind: "account", providerAccountId: CODEX.id }))
+        .config,
     ).toMatchObject({ runnerId: MOSS.id, model: null });
   });
 });
@@ -434,7 +450,7 @@ describe("resolveThreadConfig: a thread that has started", () => {
   const buildActiveSession = (over: Partial<Parameters<typeof buildSession>[0]> = {}) =>
     buildSession({
       id: "s1",
-      instanceId: CLAUDE.id,
+      providerAccountId: CLAUDE.id,
       runnerId: LOCAL.id,
       workspaceId: THREAD_3F1.id,
       accessMode: "approval-required",
@@ -450,11 +466,11 @@ describe("resolveThreadConfig: a thread that has started", () => {
         { kind: "runner", runnerId: REMOTE.id },
         { kind: "workspace", workspace: { kind: "none" } },
         { kind: "accessMode", value: "full-access" },
-        { kind: "account", instanceId: CODEX.id },
+        { kind: "account", providerAccountId: CODEX.id },
       ),
     );
     expect(resolved.config).toMatchObject({
-      instanceId: CLAUDE.id,
+      providerAccountId: CLAUDE.id,
       runnerId: LOCAL.id,
       workspace: { kind: "existing", workspaceId: THREAD_3F1.id },
       accessMode: "approval-required",
@@ -557,5 +573,56 @@ describe("resolveThreadConfig: a thread that has started", () => {
       );
       expect(resolved.outgoing).toEqual({ model: "my-own" });
     });
+  });
+});
+
+describe("resolveThreadConfig: the harness", () => {
+  const GLM = { slug: "glm-5.3", name: "GLM 5.3", imageInput: null, options: [] };
+  /** Claude's account, with one more snapshot: its models in pi, on the local runner. */
+  const CLAUDE_IN_PI = {
+    ...CLAUDE,
+    snapshots: [
+      ...CLAUDE.snapshots,
+      buildSnapshot({ runnerId: LOCAL.id, harnessId: "pi/pi", models: [GLM] }),
+    ],
+  };
+  const catalogs = { ...CATALOGS, accounts: [CLAUDE_IN_PI, CODEX, TEAM] };
+
+  it("reads a draft's snapshot in the harness its config names", () => {
+    const resolved = resolveDraft({}, catalogs, { ...BASE, harnessId: "pi/pi", model: GLM.slug });
+
+    expect(resolved.config.harnessId).toBe("pi/pi");
+    expect(resolved.snapshot?.harnessId).toBe("pi/pi");
+    expect(resolved.descriptor?.name).toBe("GLM 5.3");
+  });
+
+  it("reads a draft in the account's default harness while its config names none", () => {
+    expect(resolveDraft({}, catalogs).snapshot?.harnessId).toBe(ANTHROPIC_IDENTITY.harnessId);
+  });
+
+  it("puts a draft in the default harness of an account picked in place of its own", () => {
+    const resolved = resolveDraft(
+      applyThreadChoices({ kind: "account", providerAccountId: CODEX.id }),
+      catalogs,
+      { ...BASE, harnessId: "pi/pi" },
+    );
+
+    expect(resolved.config.harnessId).toBeNull();
+    expect(resolved.snapshot?.harnessId).toBe(OPENAI_IDENTITY.harnessId);
+  });
+
+  it("reads a thread that has started in the harness of its Session", () => {
+    const session = buildSession({
+      id: "s1",
+      providerAccountId: CLAUDE.id,
+      harnessId: "pi/pi",
+      runnerId: LOCAL.id,
+      modelSelection: { model: GLM.slug, options: {} },
+    });
+
+    const resolved = resolveThreadConfig(catalogs, { kind: "active", session }, {});
+
+    expect(resolved.config.harnessId).toBe("pi/pi");
+    expect(resolved.descriptor?.name).toBe("GLM 5.3");
   });
 });

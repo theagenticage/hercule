@@ -1,58 +1,47 @@
 /**
- * Reads a provider instance's catalog. A catalog belongs to one instance on
- * one runner, because each runner has its own copy of the harness, with its
- * own version and login (spec 06 §3.1). So every function here takes the
- * runner the thread is placed on: the same instance can offer a model list on
- * one runner and nothing at all on another.
+ * Reads a Provider Account's catalog. A catalog belongs to one account in one
+ * harness on one runner, because each runner has its own copy of the harness,
+ * with its own version and login (spec 06 §3.1). So every function here takes
+ * the harness the thread runs in and the runner it is placed on: the same
+ * account can offer a model list on one runner and nothing at all on another.
+ *
+ * The harness a thread runs in is the one it names, else the account's
+ * `defaultHarnessId`.
  */
-import type { CapabilitySnapshot, ProviderInstance, Runner } from "@hercule/contract";
+import type { CapabilitySnapshot, Provider, ProviderAccount, Runner } from "@hercule/contract";
+import { buildProviderAccountName } from "../provider-accounts";
 
 /**
- * Returns the instance's capability snapshot on a runner, or `undefined` when
- * it has none there.
+ * Returns the account's capability snapshot in `harnessId` on a runner, or
+ * `undefined` when it has none there.
  */
 export const findSnapshotOn = (
-  instance: ProviderInstance,
+  account: Pick<ProviderAccount, "snapshots">,
+  harnessId: string,
   runnerId: string | undefined,
 ): CapabilitySnapshot | undefined =>
-  instance.snapshots.find((snapshot) => snapshot.runnerId === runnerId);
+  account.snapshots.find(
+    (snapshot) => snapshot.harnessId === harnessId && snapshot.runnerId === runnerId,
+  );
 
 /**
- * Returns the instance's account name when another instance has the same
- * harness, or `null` when it is the only one. A single account does not need
- * a name to tell it apart.
- */
-export const findAccountName = (
-  instances: readonly ProviderInstance[],
-  instance: ProviderInstance,
-): string | null =>
-  instances.filter((each) => each.harnessId === instance.harnessId).length > 1
-    ? instance.name
-    : null;
-
-/**
- * Returns the label for an instance in a menu: its account name if it needs
- * one, else the harness's display name.
- */
-export const buildInstanceLabel = (
-  instances: readonly ProviderInstance[],
-  instance: ProviderInstance,
-): string => findAccountName(instances, instance) ?? instance.displayName;
-
-/**
- * What a "Log in" action logs in to: the instance, the runner, and a label for
+ * What a "Sign in" action signs in: the account, the runner, and a label for
  * the pair. The runner is needed because a credential is stored on one runner
  * only, and the caller may be showing a different row.
  */
-export interface LoginTarget {
-  readonly instanceId: string;
+export interface SignInTarget {
+  readonly providerAccountId: string;
   readonly runnerId: string;
-  /** What the login is for, in full: `Claude Code on atlas`. */
+  /** What the sign-in is for, in full: `Anthropic · work on atlas`. */
   readonly subject: string;
 }
 
-export const buildLoginTarget = (instance: ProviderInstance, runner: Runner): LoginTarget => ({
-  instanceId: instance.id,
+export const buildSignInTarget = (
+  providers: readonly Provider[],
+  account: ProviderAccount,
+  runner: Runner,
+): SignInTarget => ({
+  providerAccountId: account.id,
   runnerId: runner.id,
-  subject: `${instance.displayName} on ${runner.name}`,
+  subject: `${buildProviderAccountName(providers, account)} on ${runner.name}`,
 });

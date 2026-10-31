@@ -2,7 +2,7 @@
  * Reads and writes the secrets table, where every secret belongs to an owner.
  *
  * Every secret value - Connection credentials, plugin secrets, runner-scoped
- * secrets, provider-instance credentials, the controller's own key material -
+ * secrets, Provider Account credentials, the controller's own key material -
  * is one row, encrypted on its own under the Master Key. The SQLite file itself
  * is not encrypted, so any copy of it, any backup and any promotion bundle is
  * useless without the key.
@@ -59,7 +59,7 @@ import {
 import { MasterKey } from "./masterKey";
 
 /** The kind of owner a secret belongs to. */
-export type SecretOwnerKind = "connection" | "plugin" | "runner" | "core" | "provider-instance";
+export type SecretOwnerKind = "connection" | "plugin" | "runner" | "core" | "provider-account";
 
 /**
  * The owning entity: its kind, and its canonical id string. `core` has no
@@ -73,10 +73,10 @@ export interface SecretOwner {
 /** The owner of the controller's own key material. */
 export const CORE_OWNER: SecretOwner = { kind: "core", id: "controller" };
 
-/** The owner a provider instance's credentials are written and read under. */
-export const buildProviderInstanceOwner = (instanceId: string): SecretOwner => ({
-  kind: "provider-instance",
-  id: instanceId,
+/** The owner a Provider Account's credentials are written and read under. */
+export const buildProviderAccountOwner = (providerAccountId: string): SecretOwner => ({
+  kind: "provider-account",
+  id: providerAccountId,
 });
 
 /**

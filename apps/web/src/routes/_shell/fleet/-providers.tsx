@@ -11,11 +11,11 @@ import {
 } from "@hercule/client-core";
 import type { RunnerDetail } from "@hercule/contract";
 import { ProviderKeyEntry, ProviderLogin } from "../../../screens/provider-login";
-import { providersQuery } from "../../../app/queries";
+import { harnessesQuery, providerAccountsQuery, providersQuery } from "../../../app/queries";
 
 /**
- * The Providers card on the runner page: one row per provider instance, with
- * its install, log-in and probe actions. An install the machine cannot do is
+ * The Providers card on the runner page: one row per Provider Account, with
+ * its install, sign-in and probe actions. An install the machine cannot do is
  * shown disabled, with the reason on the row, rather than hidden.
  */
 export function Providers({
@@ -28,15 +28,17 @@ export function Providers({
   readonly runner: RunnerDetail;
 }): JSX.Element | null {
   const queryClient = useQueryClient();
-  const instances = useQuery(providersQuery(client));
+  const accounts = useQuery(providerAccountsQuery(client));
+  const providers = useQuery(providersQuery(client));
+  const harnesses = useQuery(harnessesQuery(client));
 
   const reread = (): void => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() });
   };
 
   const probe = useMutation({
-    mutationFn: (instanceId: string) =>
-      client.runner.probe({ params: { id: runner.id }, payload: { instanceId } }),
+    mutationFn: (providerAccountId: string) =>
+      client.runner.probe({ params: { id: runner.id }, payload: { providerAccountId } }),
     onSuccess: reread,
   });
   const install = useMutation({
@@ -48,17 +50,19 @@ export function Providers({
     },
   });
 
-  if (instances.error !== null) {
+  const readError = accounts.error ?? providers.error ?? harnesses.error;
+  if (readError !== null) {
     return (
       <FormCard label="Providers">
         <p className="text-fine text-fail" role="alert">
-          {readErrorMessage(instances.error)}
+          {readErrorMessage(readError)}
         </p>
       </FormCard>
     );
   }
-  if (instances.data === undefined) return null;
-  const rows = buildProviderRows(runner, instances.data);
+  if (accounts.data === undefined || providers.data === undefined || harnesses.data === undefined)
+    return null;
+  const rows = buildProviderRows(runner, accounts.data, providers.data, harnesses.data);
 
   return (
     <FormCard label="Providers">
@@ -79,13 +83,13 @@ export function Providers({
             onInstall={() => {
               install.mutate(row.harnessId);
             }}
-            // A login ends with the controller probing the machine, so the
+            // A sign-in ends with the controller probing the machine, so the
             // new snapshot is already stored and only needs reading.
-            onLoggedIn={reread}
-            // A saved secret is not probed by itself: the stored snapshot does
+            onSignedIn={reread}
+            // A saved credential is not probed by itself: the stored snapshot does
             // not know about the new credential yet, so the machine is probed
             // again rather than the page refetching the same stale snapshot.
-            onSecretSaved={() => {
+            onCredentialSaved={() => {
               probe.mutate(row.id);
             }}
           />
@@ -110,8 +114,8 @@ function Row({
   busy,
   onProbe,
   onInstall,
-  onLoggedIn,
-  onSecretSaved,
+  onSignedIn,
+  onCredentialSaved,
 }: {
   readonly row: ProviderRow;
   readonly client: HerculeClient;
@@ -122,8 +126,8 @@ function Row({
   readonly busy: boolean;
   readonly onProbe: () => void;
   readonly onInstall: () => void;
-  readonly onLoggedIn: () => void;
-  readonly onSecretSaved: () => void;
+  readonly onSignedIn: () => void;
+  readonly onCredentialSaved: () => void;
 }): JSX.Element {
   return (
     // Grouped so a screen reader reads one provider's facts and actions as
@@ -137,7 +141,9 @@ function Row({
     >
       <div className="flex items-baseline gap-2.5 text-row">
         <b className="min-w-0 truncate font-emph text-ink">{row.name}</b>
-        <span className="font-mono text-fine text-muted">{row.version}</span>
+        <span className="font-mono text-fine text-muted">
+          {row.harnessName} {row.version}
+        </span>
         {row.verdict === null ? null : (
           <span className="rounded-control bg-attn-soft px-1.5 text-fine text-attn">
             {row.verdict}
@@ -145,7 +151,7 @@ function Row({
         )}
       </div>
       <div className="text-row text-muted">
-        {row.account} <span className="text-faint">· {row.models}</span>
+        {row.signedInAs} <span className="text-faint">· {row.models}</span>
       </div>
       <div className="-ml-2 flex flex-wrap items-center gap-1.5">
         {row.install === "none" ? null : (
@@ -153,24 +159,24 @@ function Row({
             Install
           </Button>
         )}
-        {row.logIn ? (
+        {row.signIn ? (
           <ProviderLogin
             client={client}
             live={live}
-            instanceId={row.id}
+            providerAccountId={row.id}
             runnerId={runnerId}
             subject={`${row.name} on ${runnerName}`}
-            label={row.logInLabel}
-            onLoggedIn={onLoggedIn}
+            label={row.signInLabel}
+            onSignedIn={onSignedIn}
           />
         ) : null}
-        {row.secretFields.map((field) => (
+        {row.credentialFields.map((field) => (
           <ProviderKeyEntry
             key={`${row.id}:${field.name}`}
             client={client}
-            instanceId={row.id}
+            providerAccountId={row.id}
             field={field}
-            onSaved={onSecretSaved}
+            onSaved={onCredentialSaved}
           />
         ))}
         {row.probe ? (

@@ -17,7 +17,7 @@ import {
   type NodeCardReads,
   type RunNodeCardReads,
 } from "./node-details";
-import { buildInstance, buildSnapshot, CLAUDE_CODE_IDENTITY } from "./providers.testing";
+import { buildProviderAccount, buildSnapshot, ANTHROPIC_IDENTITY } from "./providers.testing";
 import { buildSession } from "./threads/workspaces.testing";
 
 const CREATED = "2026-09-01T09:00:00.000Z";
@@ -116,10 +116,14 @@ const NIGHTLY = buildTrigger("nightly", {
 });
 
 /** The reviewer runs on Opus, with approval required; `a-coder` is not an Agent. */
-const REVIEWER: Pick<Agent, "id" | "name" | "instanceId" | "accessMode" | "model"> = {
+const REVIEWER: Pick<
+  Agent,
+  "id" | "name" | "providerAccountId" | "harnessId" | "accessMode" | "model"
+> = {
   id: "a-reviewer",
   name: "Reviewer",
-  instanceId: "instance-claude-code",
+  providerAccountId: ANTHROPIC_IDENTITY.id,
+  harnessId: null,
   accessMode: "approval-required",
   model: { model: "claude-opus-5", options: {} },
 };
@@ -128,8 +132,8 @@ const READS: NodeCardReads = {
   triggers: [NIGHTLY],
   agents: [REVIEWER],
   actions: [],
-  instances: [
-    buildInstance(CLAUDE_CODE_IDENTITY, [
+  accounts: [
+    buildProviderAccount(ANTHROPIC_IDENTITY, [
       buildSnapshot({
         models: [{ slug: "claude-opus-5", name: "Claude Opus 5", imageInput: null, options: [] }],
       }),
@@ -369,7 +373,7 @@ describe("buildRunNodeCard", () => {
     id: REVIEW_SESSION_ID,
     runId: RUN_ID,
     stepId: "review",
-    instanceId: "instance-claude-code",
+    providerAccountId: ANTHROPIC_IDENTITY.id,
     modelSelection: { model: "claude-opus-5", options: {} },
     toolCalls: 7,
     usage: { inputTokens: 30_000, outputTokens: 11_000, cacheReadTokens: 700, costUsd: 0.42 },

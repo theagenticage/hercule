@@ -7,8 +7,8 @@
  *
  * "Nothing picked" is always `null`, never an empty string. That happens when:
  *
- * - no instance exists;
- * - no runner is logged in to the picked instance;
+ * - no account exists;
+ * - no runner is signed in to the picked account;
  * - no profile has been created.
  *
  * The caller decides what to do (dim the field, disable Send); it never gets
@@ -17,12 +17,12 @@
 import type {
   AccessMode,
   Profile,
-  ProviderInstance,
+  ProviderAccount,
   Runner,
   SettingsState,
 } from "@hercule/contract";
 import type { ThreadConfig } from "./config";
-import { findDefaultInstanceId } from "./default-instance";
+import { findDefaultProviderAccountId } from "./default-provider-account";
 import { buildThreadModelField, type ThreadModelField } from "./model-field";
 import { buildRunnerMenu } from "./runner-menu";
 
@@ -30,7 +30,9 @@ const DEFAULT_PROFILE_NAME = "unrestricted";
 const DEFAULT_ACCESS_MODE: AccessMode = "approval-required";
 
 export interface ThreadDefaults {
-  readonly instanceId: string | null;
+  readonly providerAccountId: string | null;
+  /** The qualified harness id the thread runs in; `null` runs it in the account's default harness. */
+  readonly harnessId: string | null;
   readonly model: string | null;
   readonly accessMode: AccessMode;
   readonly runnerId: string | null;
@@ -45,22 +47,27 @@ const chooseDefaultModel = (field: ThreadModelField): string | null =>
   field.options.find((option) => option.isDefault)?.slug ?? field.options[0]?.slug ?? null;
 
 /**
- * Returns the slug of the model a new thread on `instance` starts with when it
- * runs on `runnerId`: the default model of the instance's snapshot on that
- * runner, else its first model, else `null`. Returns `null` too when the
- * instance has no snapshot on that runner or is not logged in there. It never
- * reads another runner's snapshot, because a catalog belongs to one instance on
- * one runner (spec 06 §3.1), and a model of another runner would show
- * `not offered on <runner>` before the user has touched anything.
+ * Returns the slug of the model a new thread on `account` starts with when it
+ * runs in `harnessId` on `runnerId`: the default model of the account's
+ * snapshot on that runner, else its first model, else `null`. Returns `null`
+ * too when the account has no snapshot on that runner or is not signed in
+ * there. It never reads another runner's snapshot, because a catalog belongs
+ * to one account in one harness on one runner (spec 06 §3.1), and a model of
+ * another runner would show `not offered on <runner>` before the user has
+ * touched anything.
  */
 export const findDefaultModel = (
-  instance: ProviderInstance,
+  account: ProviderAccount,
+  harnessId: string,
   runnerId: string | null,
 ): string | null => {
-  const snapshot = instance.snapshots.find((each) => each.runnerId === runnerId);
+  const snapshot = account.snapshots.find(
+    (each) => each.harnessId === harnessId && each.runnerId === runnerId,
+  );
   return chooseDefaultModel(
     buildThreadModelField(
       { snapshots: snapshot === undefined ? [] : [snapshot] },
+      harnessId,
       runnerId,
       undefined,
     ),
@@ -68,51 +75,64 @@ export const findDefaultModel = (
 };
 
 /**
- * Returns the runner a new thread on this instance would be placed on, and
+ * Returns the runner a new thread on this account would be placed on, and
  * the default model on that runner. The runner is resolved first, and the
  * model is read from that runner's snapshot. When no runner is usable, the
- * model comes from the instance's first snapshot, so Settings still lists
- * the models of an instance whose runners are all offline.
+ * model comes from the account's first snapshot in the harness, so Settings
+ * still lists the models of an account whose runners are all offline.
  */
-export const computeInstanceDefaults = (
-  instance: ProviderInstance,
+export const computeAccountDefaults = (
+  account: ProviderAccount,
+  harnessId: string,
   runners: readonly Runner[],
   thisMacRunnerId: string | null,
 ): { readonly runnerId: string | null; readonly model: string | null } => {
-  const runnerId = buildRunnerMenu(runners, thisMacRunnerId, instance).defaultRunnerId;
+  const runnerId = buildRunnerMenu(runners, thisMacRunnerId, account, harnessId).defaultRunnerId;
   return {
     runnerId,
-    model: chooseDefaultModel(buildThreadModelField(instance, runnerId, undefined)),
+    model: chooseDefaultModel(buildThreadModelField(account, harnessId, runnerId, undefined)),
   };
 };
 
 /** Returns the defaults for a new thread, from the user's settings and the available catalogs. */
 export const computeThreadDefaults = (
   settingsUser: SettingsState["user"],
-  instances: readonly ProviderInstance[],
+  accounts: readonly ProviderAccount[],
   runners: readonly Runner[],
   profiles: readonly Profile[],
   thisMacRunnerId: string | null,
 ): ThreadDefaults => {
-  // A stored instance id that no longer exists falls back the same way an
-  // unset one does. So there is always an instance to read a catalog from,
+  // A stored account id that no longer exists falls back the same way an
+  // unset one does. So there is always an account to read a catalog from,
   // rather than an empty field with no explanation.
-  const instance =
-    instances.find((each) => each.id === settingsUser["thread.instanceId"]) ??
-    instances.find((each) => each.id === findDefaultInstanceId(instances));
-  const forInstance =
-    instance === undefined
+  const account =
+    accounts.find((each) => each.id === settingsUser["thread.providerAccountId"]) ??
+    accounts.find((each) => each.id === findDefaultProviderAccountId(accounts));
+  // A stored harness belongs to the stored account. When the stored account
+  // is gone, the fallback account runs in its own default harness.
+  const harnessId =
+    account !== undefined && account.id === settingsUser["thread.providerAccountId"]
+      ? (settingsUser["thread.harnessId"] ?? null)
+      : null;
+  const forAccount =
+    account === undefined
       ? { runnerId: null, model: null }
-      : computeInstanceDefaults(instance, runners, thisMacRunnerId);
+      : computeAccountDefaults(
+          account,
+          harnessId ?? account.defaultHarnessId,
+          runners,
+          thisMacRunnerId,
+        );
 
   return {
-    instanceId: instance?.id ?? null,
+    providerAccountId: account?.id ?? null,
+    harnessId,
     // A stored model that the resolved runner does not offer is still the
     // user's choice. It stays picked and the model menu shows that it is not
     // offered there, rather than silently replacing it with another model.
-    model: settingsUser["thread.model"] ?? forInstance.model,
+    model: settingsUser["thread.model"] ?? forAccount.model,
     accessMode: settingsUser["thread.accessMode"] ?? DEFAULT_ACCESS_MODE,
-    runnerId: forInstance.runnerId,
+    runnerId: forAccount.runnerId,
     profileId:
       settingsUser["thread.profileId"] ??
       profiles.find((profile) => profile.name === DEFAULT_PROFILE_NAME)?.id ??
@@ -129,12 +149,12 @@ export const computeThreadDefaults = (
  * setting says, which the config carries along.
  *
  * Call it on every render rather than keeping the result, so a catalog that
- * changes while the draft is open, such as after a provider login, fills in
+ * changes while the draft is open, such as after a sign-in, fills in
  * whatever the user has not picked.
  */
 export const buildDraftConfig = ({
   settingsUser,
-  instances,
+  accounts,
   runners,
   profiles,
   thisMacRunnerId,
@@ -142,14 +162,14 @@ export const buildDraftConfig = ({
   workspaceId,
 }: {
   readonly settingsUser: SettingsState["user"];
-  readonly instances: readonly ProviderInstance[];
+  readonly accounts: readonly ProviderAccount[];
   readonly runners: readonly Runner[];
   readonly profiles: readonly Profile[];
   readonly thisMacRunnerId: string | null;
   readonly projectId: string | null;
   readonly workspaceId: string | null;
 }): ThreadConfig => ({
-  ...computeThreadDefaults(settingsUser, instances, runners, profiles, thisMacRunnerId),
+  ...computeThreadDefaults(settingsUser, accounts, runners, profiles, thisMacRunnerId),
   options: {},
   projectId,
   workspace: workspaceId === null ? null : { kind: "existing", workspaceId },

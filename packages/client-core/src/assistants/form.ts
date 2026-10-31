@@ -19,19 +19,28 @@ export const describeWhenAssistantChangesApply = (name: string): string =>
 
 /**
  * The assistant fields the settings form edits. `model` is the model's slug,
- * or `null` for the instance's default model; the form does not edit the
- * model's options.
+ * or `null` for the account's default model; the form does not edit the
+ * model's options. `harnessId` is `null` while the assistant runs in its
+ * account's default harness. The form has no control for it, but choosing
+ * another account puts it back to `null`.
  */
 export type AssistantDraft = Pick<
   Assistant,
-  "name" | "systemPrompt" | "instanceId" | "permissionProfileId" | "accessMode" | "reply"
+  | "name"
+  | "systemPrompt"
+  | "providerAccountId"
+  | "harnessId"
+  | "permissionProfileId"
+  | "accessMode"
+  | "reply"
 > & { readonly model: string | null };
 
 /** Returns the form's starting values: the assistant's stored fields. */
 export const buildAssistantDraft = (assistant: Assistant): AssistantDraft => ({
   name: assistant.name,
   systemPrompt: assistant.systemPrompt,
-  instanceId: assistant.instanceId,
+  providerAccountId: assistant.providerAccountId,
+  harnessId: assistant.harnessId,
   permissionProfileId: assistant.permissionProfileId,
   accessMode: assistant.accessMode,
   reply: assistant.reply,
@@ -78,7 +87,10 @@ export const buildAssistantUpdate = (
 ): AssistantUpdateInput => ({
   ...(draft.name !== assistant.name && { name: draft.name }),
   ...(draft.systemPrompt !== assistant.systemPrompt && { systemPrompt: draft.systemPrompt }),
-  ...(draft.instanceId !== assistant.instanceId && { instanceId: draft.instanceId }),
+  ...(draft.providerAccountId !== assistant.providerAccountId && {
+    providerAccountId: draft.providerAccountId,
+  }),
+  ...(draft.harnessId !== assistant.harnessId && { harnessId: draft.harnessId }),
   ...(draft.permissionProfileId !== assistant.permissionProfileId && {
     permissionProfileId: draft.permissionProfileId,
   }),

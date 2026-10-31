@@ -23,6 +23,7 @@ import { boot, bootWith, hashToken, buildSetupUrl, type BootOutcome } from "./bo
 import { openDatabase, runMigrations, uuidFromString, withTransaction } from "./db";
 import { migrations } from "./db/migrations/index";
 import { encryptSecretValue } from "./secrets/cipher";
+import type { SecretOwner } from "./secrets";
 import { Plugins } from "./plugins";
 import { NOTE_APPEND_ACTION_ID, notesPlugin } from "./plugins/testing";
 import { PromotionState } from "./promotion";
@@ -272,9 +273,7 @@ const buildBootPlugin = (id: string, failure?: string): Plugin => ({
       id,
       displayName: `Harness ${id}`,
       binaryName: "harness",
-      supportsMultipleInstances: true,
-      configSchema: Schema.Struct({}),
-      defaultConfig: {},
+      runs: [],
       declared: {
         steering: "native",
         fork: "native",
@@ -461,6 +460,7 @@ describe("a boot that upgrades a database with a Z.ai key", () => {
     ]);
     // A database as the previous version left it: migrated up to 94, with a pi instance and its key.
     const instance = uuidFromString("0199f0b7-0002-7000-8000-000000000000");
+    // The owner kind of the previous version, which `SecretOwner` no longer has.
     const owner = {
       kind: "provider-instance",
       id: "0199f0b7-0002-7000-8000-000000000000",
@@ -473,7 +473,12 @@ describe("a boot that upgrades a database with a Z.ai key", () => {
         const at = "2026-10-01T00:00:00.000Z";
         yield* sql`INSERT INTO provider_instances (id, provider_id, name, config, created_at, updated_at)
                    VALUES (${instance}, 'pi/pi', 'pi', '{}', ${at}, ${at})`;
-        const sealed = yield* encryptSecretValue(key, owner, "zaiApiKey", "zai-secret-value");
+        const sealed = yield* encryptSecretValue(
+          key,
+          owner as unknown as SecretOwner,
+          "zaiApiKey",
+          "zai-secret-value",
+        );
         yield* sql`INSERT INTO secrets (id, owner_kind, owner_id, name, nonce, ciphertext, created_at)
                    VALUES (x'01', ${owner.kind}, ${owner.id}, 'zaiApiKey', ${sealed.nonce},
                            ${sealed.ciphertext}, ${at})`;

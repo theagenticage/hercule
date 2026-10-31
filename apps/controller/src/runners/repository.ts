@@ -340,6 +340,25 @@ const make = Effect.gen(function* () {
         SELECT name, connectivity FROM runners WHERE lifecycle <> 'retired' ORDER BY name
       `,
 
+    /**
+     * Returns the id and the reported facts of every runner in the fleet, in
+     * the order the runners were added. A retired runner is left out: it has
+     * left the fleet. `facts` is null for a runner that has not said hello.
+     */
+    listFacts: (): Effect.Effect<
+      ReadonlyArray<{ readonly id: string; readonly facts: RunnerFacts | null }>,
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly id: Uint8Array; readonly facts: string | null }>`
+          SELECT id, facts FROM runners WHERE lifecycle <> 'retired' ORDER BY created_at, id
+        `;
+        return yield* Effect.forEach(rows, (row) => {
+          const id = uuidToString(row.id);
+          return Effect.map(decodeFacts(id, row.facts), (facts) => ({ id, facts }));
+        });
+      }),
+
     /** Returns every runner name, so a joining runner can get a free one. */
     names: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
       Effect.map(

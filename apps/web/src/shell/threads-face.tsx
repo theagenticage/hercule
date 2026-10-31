@@ -23,6 +23,8 @@ import {
   assistantsQuery,
   localRunnerQuery,
   projectsQuery,
+  harnessesQuery,
+  providerAccountsQuery,
   providersQuery,
   resourcesQuery,
   runnersQuery,
@@ -76,17 +78,21 @@ export function ThreadsFace({
   const runnersRead = useQuery(runnersQuery(client)).data;
   const runners = runnersRead?.items ?? [];
   const assistants = useQuery(assistantsQuery(client)).data?.items ?? [];
-  // The provider catalogs let a meta row show the model's display name
+  // The account catalogs let a meta row show the model's display name
   // (`Claude Sonnet 5`) instead of the slug a request uses.
-  const instancesRead = useQuery(providersQuery(client)).data;
-  const instances = instancesRead ?? [];
+  const accountsRead = useQuery(providerAccountsQuery(client)).data;
+  const accounts = accountsRead ?? [];
+  const providersRead = useQuery(providersQuery(client)).data;
+  const harnessesRead = useQuery(harnessesQuery(client)).data;
   // The empty list explains what a thread needs only while that is missing,
-  // and only once both lists have loaded, so the hint never flashes up on a
-  // fleet that already has a logged-in harness.
-  const needsLogin =
+  // and only once every list has loaded, so the hint never flashes up on a
+  // fleet that already has a signed-in account.
+  const needsSignIn =
     runnersRead !== undefined &&
-    instancesRead !== undefined &&
-    !hasLoggedInRunner(runners, instances);
+    accountsRead !== undefined &&
+    providersRead !== undefined &&
+    harnessesRead !== undefined &&
+    !hasLoggedInRunner(runners, accountsRead, providersRead, harnessesRead);
   // The runner on this browser's machine. It decides whether the project's
   // main workspace already exists where the draft would run.
   const { detectLocalRunner } = useRouteContext({ from: "/_shell" });
@@ -124,7 +130,7 @@ export function ThreadsFace({
     workspaces,
     resources,
     runners,
-    instances,
+    accounts,
     mode: rows,
     draft,
   });
@@ -182,12 +188,12 @@ export function ThreadsFace({
             {/* The last line's bottom padding matches a thread row's, so the
                 Assistants header below sits as far from this text as it would
                 from the last row of a thread group. */}
-            <p className={cn("px-2.5 pt-1 text-fine text-faint", needsLogin ? "pb-1" : "pb-[7px]")}>
+            <p className={cn("px-2.5 pt-1 text-fine text-faint", needsSignIn ? "pb-1" : "pb-[7px]")}>
               No threads yet
             </p>
-            {needsLogin ? (
+            {needsSignIn ? (
               <p className="px-2.5 pt-1 pb-[7px] text-fine text-faint">
-                A thread needs a runner with a provider login on it.
+                A thread needs a runner with a signed-in account on it.
               </p>
             ) : null}
           </>

@@ -11,7 +11,7 @@ import {
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
   controllerQuery,
-  providersQuery,
+  ensureAccountReads,
   runnerQuery,
   runnerSessionsQuery,
   settingsQuery,
@@ -29,7 +29,7 @@ export const Route = createFileRoute("/_shell/fleet/$runnerId")({
     await Promise.all([
       context.queryClient.ensureQueryData(runnerQuery(context.client, params.runnerId)),
       context.queryClient.ensureQueryData(controllerQuery(context.client)),
-      context.queryClient.ensureQueryData(providersQuery(context.client)),
+      ensureAccountReads(context.queryClient, context.client),
       context.queryClient.ensureQueryData(runnerSessionsQuery(context.client, params.runnerId)),
     ]);
   },

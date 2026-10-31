@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Assistant, ProviderInstance, Session, Workspace } from "@hercule/contract";
+import type { Assistant, ProviderAccount, Session, Workspace } from "@hercule/contract";
 import { formatAge } from "@hercule/client-core";
 import { buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
@@ -47,7 +47,7 @@ const BASE_SESSION: Session = {
   conversationId: null,
   runId: null,
   stepId: null,
-  instanceId: "01a06d02-1000-7000-8000-000000000001",
+  providerAccountId: "01a06d02-1000-7000-8000-000000000001",
   runnerId: "01a06d02-beff-7037-9f5b-042822015952",
   workspaceId: null,
   projectId: null,
@@ -628,7 +628,7 @@ const withProjects = (user: Record<string, unknown> = {}): Readonly<Record<strin
   "GET /api/v1/workspaces": { body: { items: [W_PRIMARY, W_THREAD_3F1] } },
   // What the draft route below loads; nothing here is what it asserts on.
   "GET /api/v1/runners": { body: { items: [MOSS] } },
-  "GET /api/v1/providers": { body: [] },
+  "GET /api/v1/provider-accounts": { body: [] },
   "GET /api/v1/profiles": { body: { items: [] } },
 });
 
@@ -776,7 +776,7 @@ const BASE_ASSISTANT: Assistant = {
   id: "01a06d02-a000-7000-8000-000000000001",
   name: "Ada",
   systemPrompt: "You are a helpful assistant.",
-  instanceId: BASE_SESSION.instanceId,
+  providerAccountId: BASE_SESSION.providerAccountId,
   permissionProfileId: BASE_SESSION.permissionProfileId,
   accessMode: "full-access",
   model: null,
@@ -1031,7 +1031,7 @@ describe("the Threads face's Assistants group", () => {
 });
 
 /** A Claude Code instance, logged in on moss when `loggedIn` is true and never probed otherwise. */
-const buildClaudeCode = (loggedIn: boolean): ProviderInstance => ({
+const buildClaudeCode = (loggedIn: boolean): ProviderAccount => ({
   id: "01a06d02-1000-7000-8000-000000000001",
   harnessId: "claude-code/claude-code",
   name: "Claude Code",
@@ -1076,7 +1076,7 @@ describe("the Threads face with no threads", () => {
     const routes = {
       ...buildShellRoutes(),
       "GET /api/v1/runners": { body: { items: [MOSS] } },
-      "GET /api/v1/providers": { body: [buildClaudeCode(false)] },
+      "GET /api/v1/provider-accounts": { body: [buildClaudeCode(false)] },
     };
     await renderApp({ path: "/", api: stubApi(routes).fetch, token: "held" });
 
@@ -1087,7 +1087,7 @@ describe("the Threads face with no threads", () => {
     const routes = {
       ...buildShellRoutes(),
       "GET /api/v1/runners": { body: { items: [MOSS] } },
-      "GET /api/v1/providers": { body: [buildClaudeCode(true)] },
+      "GET /api/v1/provider-accounts": { body: [buildClaudeCode(true)] },
     };
     await renderApp({ path: "/", api: stubApi(routes).fetch, token: "held" });
 

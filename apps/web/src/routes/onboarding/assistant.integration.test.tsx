@@ -20,7 +20,7 @@ const HERCULE: Assistant = {
   id: "01a06d02-a000-7000-8000-000000000001",
   name: "Hercule",
   systemPrompt: "You are a helpful assistant.",
-  instanceId: "01a06d02-1000-7000-8000-000000000001",
+  providerAccountId: "01a06d02-1000-7000-8000-000000000001",
   permissionProfileId: "01a06d02-2000-7000-8000-000000000001",
   accessMode: "full-access",
   model: null,

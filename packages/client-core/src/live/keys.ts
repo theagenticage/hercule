@@ -251,7 +251,12 @@ export const queryKeys = {
   plugins: (): LiveQueryKey => ["plugins"],
   /** Not a live topic: secret references change only through this browser's own writes. */
   secrets: (): LiveQueryKey => ["secrets"],
+  /** The Provider Accounts with their snapshots. Pushed on the `provider` topic. */
+  providerAccounts: (): LiveQueryKey => ["provider-accounts"],
+  /** Not a live topic: the providers a build registers change only with the build. */
   providers: (): LiveQueryKey => ["providers"],
+  /** Not a live topic: the harnesses a build registers change only with the build. */
+  harnesses: (): LiveQueryKey => ["harnesses"],
   controller: (): LiveQueryKey => ["controller"],
   workflows: (): LiveQueryKey => ["workflows"],
   workflow: (id?: string): LiveQueryKey => (id === undefined ? ["workflow"] : ["workflow", id]),
@@ -576,11 +581,11 @@ export const buildQueryKeys = (
   if (topic === "plugin") {
     return [queryKeys.plugins(), queryKeys.connection(), ...SIGNAL_DESCRIBE_KEYS];
   }
-  // Provider instances are read as one list (there is one per shipped
-  // harness), so the whole list is refetched whichever instance changed.
-  // The controller's own read is refetched too: whether a text generation
-  // can run now depends on which runners are logged in to which instance.
-  if (topic === "provider") return [queryKeys.providers(), queryKeys.controller()];
+  // Provider Accounts are read as one list, so the whole list is refetched
+  // whichever account changed. The controller's own read is refetched too:
+  // whether a text generation can run now depends on which runners are signed
+  // in to which account.
+  if (topic === "provider") return [queryKeys.providerAccounts(), queryKeys.controller()];
   return [];
 };
 

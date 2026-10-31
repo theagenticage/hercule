@@ -8,7 +8,7 @@
  * - the database and its migrations;
  * - the shipped defaults and the master key;
  * - the controller identity;
- * - one provider instance per shipped harness plugin;
+ * - on a fresh install only, the three default Provider Accounts;
  * - the one-time setup URL.
  *
  * Every later boot runs the same sequence. Every step is idempotent, so a
@@ -105,12 +105,12 @@ import {
   registry,
 } from "./plugins";
 import {
-  ensureProviderInstances,
-  ProviderProbes,
-  ProviderProbesLayer,
-  ProviderService,
-  ProviderServiceLayer,
-} from "./providers";
+  ProviderAccountProbes,
+  ProviderAccountProbesLayer,
+  ProviderAccountService,
+  ProviderAccountServiceLayer,
+  seedProviderAccounts,
+} from "./provider-accounts";
 import { seed } from "./seed";
 import { SessionService, SessionServiceLayer } from "./sessions";
 import { GithubSkillSources, GithubSkillSourcesLayer } from "./skills";
@@ -261,8 +261,8 @@ export type ControllerServices =
   | IngestLoops
   | ConnectionTypes
   | RunnerConnections
-  | ProviderProbes
-  | ProviderService
+  | ProviderAccountProbes
+  | ProviderAccountService
   | SessionService
   | WorkspaceService
   | WorkspaceStepActivity
@@ -366,7 +366,7 @@ export const bootWith = <A, E>(
      * the controller daemon and the sweep after a hello all use the same
      * `RunnerConnections`.
      */
-    const withFleet = ProviderProbesLayer.pipe(
+    const withFleet = ProviderAccountProbesLayer.pipe(
       Layer.provideMerge(RunnerConnectionsLayer),
       Layer.provideMerge(catalog),
     );
@@ -410,7 +410,7 @@ export const bootWith = <A, E>(
      */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
-      ProviderServiceLayer,
+      ProviderAccountServiceLayer,
       sessionService,
       ConnectionServiceWithReferencesLayer,
     ).pipe(
@@ -469,9 +469,10 @@ export const bootWith = <A, E>(
         // plugins. A plugin may have changed while the controller was stopped.
         // A failure is logged and the boot goes on.
         yield* revalidateStoredWorkflowsOrLog;
-        // After the catalog, because a provider instance is created only for
-        // a harness this build registered.
-        yield* ensureProviderInstances;
+        // After the catalog, because a default account is created only for a
+        // provider this build registered. Temporary: ticket #934 adds
+        // `providerAccount.create` and removes this seed.
+        yield* seedProviderAccounts;
       }
 
       const url = yield* ensureSetupUrl(paths, bootstrap);
@@ -514,7 +515,11 @@ export const bootWith = <A, E>(
               Effect.gen(function* () {
                 const masterKey = yield* openExistingMasterKey(options.masterKeyBackend);
                 yield* Ref.set(openedMasterKey, masterKey);
-                return yield* migrate({ backupsDir: paths.backupsDir, databaseExisted, masterKey });
+                return yield* migrate({
+                  backupsDir: paths.backupsDir,
+                  databaseExisted,
+                  ...(masterKey === undefined ? {} : { masterKey }),
+                });
               }),
             ),
           ),

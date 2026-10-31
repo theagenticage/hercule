@@ -1027,9 +1027,9 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("runner", []), [["runners"], ["runner"], ["controller"]]);
   });
 
-  it("maps a provider push to the instance list and the controller, whose text generation status follows logins", () => {
+  it("maps a provider push to the account list and the controller, whose text generation status follows sign-ins", () => {
     assert.deepStrictEqual(buildQueryKeys("provider", ["codex"]), [
-      queryKeys.providers(),
+      queryKeys.providerAccounts(),
       queryKeys.controller(),
     ]);
   });

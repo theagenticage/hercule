@@ -16,8 +16,10 @@ import {
 } from "@hercule/client-core";
 import { cn, ImageLightbox } from "@hercule/ui";
 import {
+  harnessesQuery,
   localRunnerQuery,
   projectsQuery,
+  providerAccountsQuery,
   providersQuery,
   resourcesQuery,
   runnersQuery,
@@ -31,7 +33,7 @@ import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
 import { AttachButton, PreviousButton, SendButton, StepButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
 import { Lip } from "./lip";
-import { buildLoginSlot } from "./login-slot";
+import { buildSignInSlot } from "./sign-in-slot";
 import { ModelOptionsSelector } from "./model-options-selector";
 import { ModelSelector } from "./model-selector";
 import { MessageBox } from "./message-box";
@@ -69,7 +71,9 @@ export function Composer({
 }): JSX.Element {
   const { client, live, uploads, detectLocalRunner } = useRouteContext({ from: "/_shell" });
   const queryClient = useQueryClient();
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
+  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const thisMacRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   // The catalogs the workspace menu reads. If the controller cannot return
@@ -79,7 +83,9 @@ export function Composer({
   const workspaces = useQuery(workspacesQuery(client)).data?.items ?? [];
   const sessions = useQuery(sessionsQuery(client)).data?.items ?? [];
   const catalogs = {
-    instances,
+    accounts,
+    providers,
+    harnesses,
     runners,
     thisMacRunnerId,
     projects,
@@ -104,8 +110,8 @@ export function Composer({
   const fields = model.fields;
   const { config } = model.resolved;
   const pending = buildPendingModelNote(model.resolved);
-  const login = buildLoginSlot(client, live, () => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+  const signIn = buildSignInSlot(client, live, () => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() });
   });
   // A click that opens selector B is also a click outside selector A. So a
   // close request clears the open selector only if that selector asked to close.
@@ -163,7 +169,7 @@ export function Composer({
           subject={findDraftSubject(pick, workspaces, projectId, projects)}
           lead={fields.lead}
           blocked={fields.blocked}
-          loginSlot={login}
+          signInSlot={signIn}
         />
       )}
       <div
@@ -323,7 +329,7 @@ export function Composer({
                       handleOpenChange("model", next);
                     }}
                     onChoose={model.recordThreadChoice}
-                    loginSlot={login}
+                    signInSlot={signIn}
                   />
                 </span>
               </div>

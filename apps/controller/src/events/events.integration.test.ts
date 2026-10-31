@@ -128,7 +128,7 @@ const withEvents = (
  * credential without `event.emit`. The github plugin is loaded too, because the
  * rejected call must be one that would otherwise have worked.
  */
-const HARNESS = buildHarnessDefinition("full", { token: "t" });
+const HARNESS = buildHarnessDefinition("full");
 
 const FACTS: RunnerFacts = {
   os: "darwin",

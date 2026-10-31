@@ -75,7 +75,7 @@ const buildSnapshot = (auth: Readonly<Record<string, string>>) => ({
   models: [{ slug: "default", name: "Default", options: [] }],
 });
 
-const buildClaudeCodeInstance = (snapshots: ReadonlyArray<ReturnType<typeof buildSnapshot>>) => ({
+const buildClaudeCodeAccount = (snapshots: ReadonlyArray<ReturnType<typeof buildSnapshot>>) => ({
   id: CLAUDE_ID,
   harnessId: "claude-code/claude-code",
   name: "Claude Code",
@@ -101,7 +101,7 @@ const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=challenge";
 
 const buildController = (
   runners: ReadonlyArray<Runner>,
-  instances: ReadonlyArray<ReturnType<typeof buildClaudeCodeInstance>>,
+  instances: ReadonlyArray<ReturnType<typeof buildClaudeCodeAccount>>,
   extra: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/setup": { body: { complete: true } },
@@ -122,13 +122,13 @@ const buildController = (
     },
   },
   "GET /api/v1/runners": { body: { items: runners } },
-  "GET /api/v1/providers": { body: instances },
+  "GET /api/v1/provider-accounts": { body: instances },
   ...extra,
 });
 
 const openApp = async (options: {
   readonly runners: ReadonlyArray<Runner>;
-  readonly instances: ReadonlyArray<ReturnType<typeof buildClaudeCodeInstance>>;
+  readonly instances: ReadonlyArray<ReturnType<typeof buildClaudeCodeAccount>>;
   readonly local?: string | null;
   readonly extra?: Readonly<Record<string, Handler>>;
 }) => {
@@ -158,7 +158,7 @@ const getNewThreadControl = (): HTMLElement => {
 
 describe("Sessions", () => {
   it("says a thread needs a runner when none is detected on this machine", async () => {
-    await openApp({ runners: [], instances: [buildClaudeCodeInstance([])], local: null });
+    await openApp({ runners: [], instances: [buildClaudeCodeAccount([])], local: null });
 
     await waitFor(() => {
       expect(readPageText()).toContain("No runner has been detected on this machine.");
@@ -167,7 +167,7 @@ describe("Sessions", () => {
   });
 
   it("sends the user to Fleet when the machine has no harness on it", async () => {
-    await openApp({ runners: [BARE], instances: [buildClaudeCodeInstance([])], local: BARE.id });
+    await openApp({ runners: [BARE], instances: [buildClaudeCodeAccount([])], local: BARE.id });
 
     await waitFor(() => {
       expect(readPageText()).toContain("No coding harness was found on this machine.");
@@ -182,7 +182,7 @@ describe("Sessions", () => {
   it("offers a login for an installed harness that is not logged in", async () => {
     await openApp({
       runners: [MOSS],
-      instances: [buildClaudeCodeInstance([NOT_LOGGED_IN])],
+      instances: [buildClaudeCodeAccount([NOT_LOGGED_IN])],
       local: MOSS.id,
     });
 
@@ -196,7 +196,7 @@ describe("Sessions", () => {
   it("tells a user setting up providers that background tasks use a text generation model, and links to where to change it", async () => {
     await openApp({
       runners: [MOSS],
-      instances: [buildClaudeCodeInstance([NOT_LOGGED_IN])],
+      instances: [buildClaudeCodeAccount([NOT_LOGGED_IN])],
       local: MOSS.id,
     });
 
@@ -211,7 +211,7 @@ describe("Sessions", () => {
   it("is ready once the harness on this machine is logged in", async () => {
     await openApp({
       runners: [MOSS],
-      instances: [buildClaudeCodeInstance([LOGGED_IN])],
+      instances: [buildClaudeCodeAccount([LOGGED_IN])],
       local: MOSS.id,
     });
 
@@ -225,19 +225,19 @@ describe("Sessions", () => {
 
   it("logs in from this screen, on the runner on the browser's machine", async () => {
     const user = userEvent.setup();
-    let held = [buildClaudeCodeInstance([NOT_LOGGED_IN])];
+    let held = [buildClaudeCodeAccount([NOT_LOGGED_IN])];
     const { api } = await openApp({
       runners: [MOSS],
       instances: held,
       local: MOSS.id,
       extra: {
-        "GET /api/v1/providers": () => ({ body: held }),
-        [`POST /api/v1/providers/${CLAUDE_ID}/login`]: { body: { url: AUTHORIZE_URL } },
-        [`POST /api/v1/providers/${CLAUDE_ID}/login-code`]: (call: Call) => {
+        "GET /api/v1/provider-accounts": () => ({ body: held }),
+        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in`]: { body: { url: AUTHORIZE_URL } },
+        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in-code`]: (call: Call) => {
           if ((call.body as { code: string }).code !== "the-whole-code") {
             return { status: 400, body: buildErrorBody("validation", "Invalid code.") };
           }
-          held = [buildClaudeCodeInstance([LOGGED_IN])];
+          held = [buildClaudeCodeAccount([LOGGED_IN])];
           return { body: LOGGED_IN };
         },
         // Every finished login is followed by a probe, so this screen shows
@@ -269,11 +269,11 @@ describe("Sessions", () => {
     const user = userEvent.setup();
     await openApp({
       runners: [MOSS],
-      instances: [buildClaudeCodeInstance([NOT_LOGGED_IN])],
+      instances: [buildClaudeCodeAccount([NOT_LOGGED_IN])],
       local: MOSS.id,
       extra: {
-        [`POST /api/v1/providers/${CLAUDE_ID}/login`]: { body: { url: AUTHORIZE_URL } },
-        [`POST /api/v1/providers/${CLAUDE_ID}/login-code`]: { body: LOGGED_IN },
+        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in`]: { body: { url: AUTHORIZE_URL } },
+        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in-code`]: { body: LOGGED_IN },
         [`POST /api/v1/runners/${MOSS.id}/probe`]: {
           status: 500,
           body: buildErrorBody("internal", "moss stopped answering"),
@@ -311,8 +311,8 @@ describe("Sessions > a harness that needs a key", () => {
 
   const PI_SNAPSHOT = buildSnapshot({ status: "unauthenticated" });
 
-  const buildPiInstance = (set: boolean) => ({
-    ...buildClaudeCodeInstance([PI_SNAPSHOT]),
+  const buildPiAccount = (set: boolean) => ({
+    ...buildClaudeCodeAccount([PI_SNAPSHOT]),
     id: PI_ID,
     harnessId: "pi/pi",
     name: "pi",
@@ -323,17 +323,17 @@ describe("Sessions > a harness that needs a key", () => {
 
   it("asks for the key on this screen, and shows ready once it is saved", async () => {
     const user = userEvent.setup();
-    let held = [buildPiInstance(false)];
+    let held = [buildPiAccount(false)];
     const { api } = await openApp({
       runners: [WITH_PI],
       instances: held,
       local: WITH_PI.id,
       extra: {
-        "GET /api/v1/providers": () => ({ body: held }),
+        "GET /api/v1/provider-accounts": () => ({ body: held }),
         [`PUT /api/v1/secrets/provider-instance/${PI_ID}/zaiApiKey`]: () => {
           held = [
             {
-              ...buildPiInstance(true),
+              ...buildPiAccount(true),
               snapshots: [buildSnapshot({ status: "ok", backend: "api_key" })],
             },
           ];

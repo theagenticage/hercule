@@ -1,5 +1,5 @@
 import type { JSX, ReactNode } from "react";
-import type { ComposerBlocked, DraftSubject, LoginTarget, Phrase } from "@hercule/client-core";
+import type { ComposerBlocked, DraftSubject, SignInTarget, Phrase } from "@hercule/client-core";
 import { cn } from "@hercule/ui";
 import { Phrases } from "./phrases";
 
@@ -20,14 +20,14 @@ export function DraftHero({
   subject,
   lead,
   blocked,
-  loginSlot,
+  signInSlot,
 }: {
   /** The project or workspace the thread starts in; null for a draft with neither. */
   readonly subject: DraftSubject | null;
   /** The sentence shown under the heading when nothing blocks the draft. */
   readonly lead: readonly Phrase[];
   readonly blocked: ComposerBlocked | null;
-  readonly loginSlot: (login: LoginTarget, className: string) => ReactNode;
+  readonly signInSlot: (target: SignInTarget, className: string) => ReactNode;
 }): JSX.Element {
   return (
     <div className="my-auto pt-1 pb-[42px] text-center">
@@ -55,7 +55,7 @@ export function DraftHero({
         ) : (
           <>
             <span className="font-emph text-attn">Can&apos;t start yet.</span> {blocked.reason}.{" "}
-            {blocked.login === null ? null : loginSlot(blocked.login, HERO_LOGIN)}
+            {blocked.signIn === null ? null : signInSlot(blocked.signIn, HERO_SIGN_IN)}
           </>
         )}
       </p>
@@ -63,6 +63,6 @@ export function DraftHero({
   );
 }
 
-/** Classes for the login action that clears a blocker, styled as a link inside the sentence. */
-const HERO_LOGIN =
+/** Classes for the sign-in action that clears a blocker, styled as a link inside the sentence. */
+const HERO_SIGN_IN =
   "p-0 text-row leading-normal text-ink underline decoration-line underline-offset-[3px] enabled:hover:bg-transparent";

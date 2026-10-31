@@ -4,7 +4,7 @@
  * secret is only ever a reference.
  */
 export { type SecretDecryptError } from "./cipher";
-export { readInstanceSecrets } from "./instances";
+export { API_KEY_SECRET_NAME, readProviderAccountCredential } from "./provider-account-credential";
 export {
   MasterKey,
   masterKeyLayer,
@@ -18,7 +18,7 @@ export {
 } from "./masterKey";
 export {
   CORE_OWNER,
-  buildProviderInstanceOwner,
+  buildProviderAccountOwner,
   Secrets,
   secretsLayer,
   type SecretNameError,

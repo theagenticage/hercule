@@ -57,7 +57,8 @@ export function buildSubmission(resolved: ResolvedThread, message: MessageDraft)
     input: {
       prompt: message.text,
       ...attachments,
-      ...(config.instanceId === null ? {} : { instanceId: config.instanceId }),
+      ...(config.providerAccountId === null ? {} : { providerAccountId: config.providerAccountId }),
+      ...(config.harnessId === null ? {} : { harnessId: config.harnessId }),
       ...(config.model === null ? {} : { model: config.model }),
       options: config.options,
       accessMode: config.accessMode,

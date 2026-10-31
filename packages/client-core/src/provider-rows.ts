@@ -1,37 +1,58 @@
 /**
- * Builds the provider rows of a runner. A row combines the provider instance,
- * the runner's last snapshot of it, and the adapters in the runner's build.
- * The actions a row offers follow from those, so they are decided here rather
- * than in the markup.
+ * Builds the account rows of a runner. A row combines a Provider Account, the
+ * runner's last snapshot of it in the account's default harness, and the
+ * adapters in the runner's build. The actions a row offers follow from those,
+ * so they are decided here rather than in the markup.
  */
-import type { ProviderInstance, ProviderSecretField, Runner } from "@hercule/contract";
+import type { Harness, Provider, ProviderAccount, Runner } from "@hercule/contract";
 import { describeModelCount } from "./model-count";
+import {
+  buildProviderAccountName,
+  listAccountCredentialFields,
+  requiresSignInPerMachine,
+} from "./provider-accounts";
+import type { CredentialField } from "./connection-types";
 
 /** A row's install action: offered, blocked (shown dimmed with its reason), or not shown. */
 type Install = "offered" | "blocked" | "none";
 
 /**
- * A provider's secret field, with the label of the action that asks for it. A
- * provider that uses such a field has no vendor login in the browser: the
+ * A credential field of the account's kind, with the label of the action that
+ * asks for it. An account of such a kind has no sign-in in the browser: the
  * user types the value in.
  */
-export interface SecretFieldOffer extends ProviderSecretField {
+export interface CredentialFieldOffer {
+  readonly name: string;
+  /** The field's label, such as "API key". */
+  readonly title: string;
+  /** The field's help text, or "" when the kind gives none. */
+  readonly description: string;
+  /** Whether the account is already signed in on this runner, so the field replaces a credential. */
+  readonly set: boolean;
   readonly label: string;
 }
 
 /**
- * Adds the action label. A field that is already set is labelled "Replace", because
- * the stored value cannot be read, only overwritten.
+ * Adds the action label. A field of an account that already works is labelled
+ * "Replace", because a stored value cannot be read, only overwritten.
  */
-const buildOffer = (field: ProviderSecretField): SecretFieldOffer => ({
-  ...field,
-  label: field.set ? `Replace ${field.title}` : `Enter ${field.title}`,
+const buildOffer = (field: CredentialField, signedIn: boolean): CredentialFieldOffer => ({
+  name: field.name,
+  title: field.label,
+  description: field.help ?? "",
+  set: signedIn,
+  label: signedIn ? `Replace ${field.label}` : `Enter ${field.label}`,
 });
 
 export interface ProviderRow {
+  /** The id of the Provider Account. */
   readonly id: string;
+  /** The account's default harness, which the row describes. */
   readonly harnessId: string;
+  /** The account's name, such as "Anthropic · work". */
   readonly name: string;
+  /** The display name of the account's default harness, such as "Claude Code". */
+  readonly harnessName: string;
   /**
    * Where the runner found the harness's binary, such as
    * `/opt/homebrew/bin/claude`, or `null` when the binary is not there or the
@@ -49,15 +70,16 @@ export interface ProviderRow {
   readonly version: string;
   /** How that version compares with the versions this build was tested with. */
   readonly verdict: string | null;
-  /** The account the harness is logged in with, or why it is not logged in. */
-  readonly account: string;
+  /** Who the account is signed in as, or why it is not signed in. */
+  readonly signedInAs: string;
   readonly models: string;
-  readonly loggedIn: boolean;
+  readonly signedIn: boolean;
   readonly install: Install;
-  readonly logIn: boolean;
-  readonly logInLabel: string;
-  /** The secret fields this provider signs in with instead of a browser login. */
-  readonly secretFields: ReadonlyArray<SecretFieldOffer>;
+  /** Whether the row offers `providerAccount.signIn` on this runner. */
+  readonly signIn: boolean;
+  readonly signInLabel: string;
+  /** The credential fields this account is set up with instead of a sign-in on each machine. */
+  readonly credentialFields: ReadonlyArray<CredentialFieldOffer>;
   readonly probe: boolean;
 }
 
@@ -68,10 +90,10 @@ const VERDICTS: Readonly<Record<string, string>> = {
   "above-tested-max": "above the version this build was tested with",
 };
 
-const describeAccount = (snapshot: ProviderInstance["snapshots"][number] | undefined): string => {
+const describeSignedInAs = (snapshot: ProviderAccount["snapshots"][number] | undefined): string => {
   if (snapshot === undefined) return "not probed yet";
   const { auth } = snapshot;
-  if (auth.status === "unauthenticated") return "not logged in";
+  if (auth.status === "unauthenticated") return "not signed in";
   if (auth.status === "error") return auth.message ?? "the probe failed";
   // A harness that gets its credential from the environment reports neither
   // an identity nor a plan. Rather than leave the line empty, show where the
@@ -82,44 +104,64 @@ const describeAccount = (snapshot: ProviderInstance["snapshots"][number] | undef
   return named.length === 0 ? (auth.backend ?? "signed in") : named.join(" · ");
 };
 
-/** Returns one row per provider instance, as seen on `runner`. */
+/**
+ * Returns one row per Provider Account, as seen on `runner`. An account whose
+ * default harness no registered harness matches has no row, because there is
+ * nothing to say about a harness nobody can name.
+ */
 export const buildProviderRows = (
   runner: Runner,
-  instances: ReadonlyArray<ProviderInstance>,
+  accounts: ReadonlyArray<ProviderAccount>,
+  providers: ReadonlyArray<Provider>,
+  harnesses: ReadonlyArray<Harness>,
 ): ReadonlyArray<ProviderRow> =>
-  instances.map((instance) => {
-    const snapshot = instance.snapshots.find((each) => each.runnerId === runner.id);
-    const adapter = (runner.facts?.adapters ?? []).includes(instance.harnessId);
-    // The binary name the runner reports from its `PATH` is the instance's
+  accounts.flatMap((account) => {
+    const harness = harnesses.find((each) => each.id === account.defaultHarnessId);
+    if (harness === undefined) return [];
+    const snapshot = account.snapshots.find(
+      (each) => each.harnessId === harness.id && each.runnerId === runner.id,
+    );
+    const adapter = (runner.facts?.adapters ?? []).includes(harness.id);
+    // The binary name the runner reports from its `PATH` is the harness's
     // `binaryName`, so no lookup table is needed.
     const binary = (runner.facts?.harnesses ?? []).find(
-      (each) => each.name === instance.binaryName && each.present,
+      (each) => each.name === harness.binaryName && each.present,
     );
     const present = binary !== undefined;
     // Every action runs on the runner, so an offline runner offers none.
     const reachable = runner.connectivity === "online";
     // A credential can only be entered for a harness installed on this runner,
-    // because the controller probes the runner for the instance as soon as the
+    // because the controller probes the runner for the account as soon as the
     // credential is saved.
     const usable = reachable && present && adapter;
-    return {
-      id: instance.id,
-      harnessId: instance.harnessId,
-      name: instance.displayName,
-      path: binary?.path ?? null,
-      location: binary?.path ?? (present ? "installed" : adapter ? "not installed" : NO_ADAPTER),
-      version: snapshot?.harnessVersion ?? "not reported",
-      verdict: snapshot === undefined ? null : (VERDICTS[snapshot.versionVerdict] ?? null),
-      // Without an adapter, show that instead of what a stale snapshot reported.
-      account: adapter ? describeAccount(snapshot) : NO_ADAPTER,
-      models: describeModelCount(snapshot?.models.length ?? 0),
-      loggedIn: snapshot?.auth.status === "ok",
-      install: !reachable || present ? "none" : adapter ? "offered" : "blocked",
-      // A provider whose credential is typed in has no vendor login page, so
-      // it offers the key fields instead of a login.
-      logIn: usable && instance.secretFields.length === 0,
-      logInLabel: snapshot?.auth.status === "ok" ? "Log in again" : "Log in",
-      secretFields: usable ? instance.secretFields.map(buildOffer) : [],
-      probe: reachable,
-    };
+    const signedIn = snapshot?.auth.status === "ok";
+    // An account that signs in on each machine has no credential to type. Any
+    // other has no sign-in in the browser, so it offers its fields instead.
+    const perMachine = requiresSignInPerMachine(providers, account);
+    return [
+      {
+        id: account.id,
+        harnessId: harness.id,
+        name: buildProviderAccountName(providers, account),
+        harnessName: harness.displayName,
+        path: binary?.path ?? null,
+        location: binary?.path ?? (present ? "installed" : adapter ? "not installed" : NO_ADAPTER),
+        version: snapshot?.harnessVersion ?? "not reported",
+        verdict: snapshot === undefined ? null : (VERDICTS[snapshot.versionVerdict] ?? null),
+        // Without an adapter, show that instead of what a stale snapshot reported.
+        signedInAs: adapter ? describeSignedInAs(snapshot) : NO_ADAPTER,
+        models: describeModelCount(snapshot?.models.length ?? 0),
+        signedIn,
+        install: !reachable || present ? "none" : adapter ? "offered" : "blocked",
+        signIn: usable && perMachine,
+        signInLabel: signedIn ? "Sign in again" : "Sign in",
+        credentialFields:
+          usable && !perMachine
+            ? listAccountCredentialFields(providers, account).map((field) =>
+                buildOffer(field, signedIn),
+              )
+            : [],
+        probe: reachable,
+      },
+    ];
   });

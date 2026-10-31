@@ -12,7 +12,7 @@
  */
 import type {
   Project,
-  ProviderInstance,
+  ProviderAccount,
   Resource,
   Runner,
   Session,
@@ -87,7 +87,7 @@ export const prepareSessionPresentation = ({
   workspaces,
   resources,
   runners,
-  instances,
+  accounts,
 }: {
   readonly listedSessions: readonly Session[];
   readonly openSession: Session | null;
@@ -95,7 +95,7 @@ export const prepareSessionPresentation = ({
   readonly workspaces: readonly Workspace[];
   readonly resources: readonly Resource[];
   readonly runners: readonly Runner[];
-  readonly instances: readonly ProviderInstance[];
+  readonly accounts: readonly ProviderAccount[];
 }): SessionPresentation => {
   const mergesOpenSession =
     openSession !== null &&
@@ -124,7 +124,7 @@ export const prepareSessionPresentation = ({
     workspaces,
     resources,
     runners,
-    instances,
+    accounts,
   });
   return {
     sessions,

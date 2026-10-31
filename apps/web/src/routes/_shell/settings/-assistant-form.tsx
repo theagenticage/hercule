@@ -4,6 +4,7 @@ import {
   buildAssistantDraft,
   buildAssistantUpdate,
   buildIdOptions,
+  buildProviderAccountName,
   describeWhenAssistantChangesApply,
   dropSavedEdits,
   mergeAssistantEdits,
@@ -26,6 +27,7 @@ import {
   assistantQuery,
   assistantsQuery,
   profilesQuery,
+  providerAccountsQuery,
   providersQuery,
 } from "../../../app/queries";
 import { AccessModeControl } from "../../../screens/access-mode-control";
@@ -76,7 +78,8 @@ export function AssistantForm({
   readonly onDeleted: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -155,17 +158,22 @@ export function AssistantForm({
             }}
           />
         </Row>
-        <Row label="Provider instance" htmlFor="assistant-instance">
+        <Row label="Account" htmlFor="assistant-account">
           <Select
-            id="assistant-instance"
-            value={draft.instanceId}
+            id="assistant-account"
+            value={draft.providerAccountId}
             onChange={(event) => {
-              recordEdits({ instanceId: event.target.value });
+              // A harness named for the previous account may not run this
+              // one, so the assistant goes back to the new account's default.
+              recordEdits({ providerAccountId: event.target.value, harnessId: null });
             }}
           >
             {buildIdOptions(
-              instances.map((instance) => ({ id: instance.id, label: instance.displayName })),
-              assistant.instanceId,
+              accounts.map((account) => ({
+                id: account.id,
+                label: buildProviderAccountName(providers, account),
+              })),
+              assistant.providerAccountId,
             ).map((option) => (
               <option key={option.id} value={option.id}>
                 {option.label}

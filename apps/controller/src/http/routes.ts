@@ -107,7 +107,9 @@ import { LastTextGenerationFailureLayer, TextGenerationModelsLayer } from "../te
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ResourceService, ResourceServiceLayer } from "../resources";
 import { WorkspaceService } from "../workspaces";
-import { ProviderService } from "../providers";
+import { HarnessService, HarnessServiceLayer } from "../harnesses";
+import { ProviderAccountService } from "../provider-accounts";
+import { ProviderService, ProviderServiceLayer } from "../providers";
 import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
 import { RunService, RunServiceLayer } from "../runs";
 import { Setup, SetupLayer } from "../setup";
@@ -574,9 +576,9 @@ const eventKindRoutes = HttpApiBuilder.group(api, "eventKind", (handlers) =>
 const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
   Effect.gen(function* () {
     const runners = yield* RunnerService;
-    // Two of this group's operations are about a runner's provider instances,
-    // which belong to the provider service, not the runner service.
-    const providers = yield* ProviderService;
+    // Two of this group's operations are about a runner's Provider Accounts,
+    // which belong to the provider account service, not the runner service.
+    const providerAccounts = yield* ProviderAccountService;
     // Retiring a runner does more than update its row: the sessions it hosted
     // and the workspaces it held end with it, and the runner is told.
     const retirement = yield* Retirement;
@@ -593,10 +595,10 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
       )
       .handle("refreshFacts", ({ params }) => withApiErrors(runners.refreshFacts(params.id)))
       .handle("probe", ({ params, payload }) =>
-        withApiErrors(providers.probe({ runnerId: params.id, ...payload })),
+        withApiErrors(providerAccounts.probe({ runnerId: params.id, ...payload })),
       )
       .handle("installHarness", ({ params, payload }) =>
-        withApiErrors(providers.installHarness({ runnerId: params.id, ...payload })),
+        withApiErrors(providerAccounts.installHarness({ runnerId: params.id, ...payload })),
       )
       .handle("createJoinToken", () => withApiErrors(runners.createJoinToken()))
       .handle("queryJoinTokens", () => withApiErrors(runners.queryJoinTokens()))
@@ -623,22 +625,35 @@ const pluginRoutes = HttpApiBuilder.group(api, "plugin", (handlers) =>
   }),
 );
 
+const harnessRoutes = HttpApiBuilder.group(api, "harness", (handlers) =>
+  Effect.gen(function* () {
+    const harnesses = yield* HarnessService;
+    return handlers.handle("query", () => withApiErrors(harnesses.query()));
+  }),
+);
+
 const providerRoutes = HttpApiBuilder.group(api, "provider", (handlers) =>
   Effect.gen(function* () {
     const providers = yield* ProviderService;
+    return handlers.handle("query", () => withApiErrors(providers.query()));
+  }),
+);
+
+const providerAccountRoutes = HttpApiBuilder.group(api, "providerAccount", (handlers) =>
+  Effect.gen(function* () {
+    const providerAccounts = yield* ProviderAccountService;
     return handlers
-      .handle("query", () => withApiErrors(providers.query()))
-      .handle("read", ({ params }) => withApiErrors(providers.read(params.id)))
-      .handle("create", ({ payload }) => withApiErrors(providers.create(payload)))
+      .handle("query", () => withApiErrors(providerAccounts.query()))
+      .handle("read", ({ params }) => withApiErrors(providerAccounts.read(params.id)))
       .handle("update", ({ params, payload }) =>
-        withApiErrors(providers.update({ id: params.id, ...payload })),
+        withApiErrors(providerAccounts.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => withApiErrors(providers.delete(params.id)))
-      .handle("login", ({ params, payload }) =>
-        withApiErrors(providers.login({ id: params.id, ...payload })),
+      .handle("delete", ({ params }) => withApiErrors(providerAccounts.delete(params.id)))
+      .handle("signIn", ({ params, payload }) =>
+        withApiErrors(providerAccounts.signIn({ id: params.id, ...payload })),
       )
-      .handle("submitLoginCode", ({ params, payload }) =>
-        withApiErrors(providers.submitLoginCode({ id: params.id, ...payload })),
+      .handle("submitSignInCode", ({ params, payload }) =>
+        withApiErrors(providerAccounts.submitSignInCode({ id: params.id, ...payload })),
       );
   }),
 );
@@ -875,12 +890,13 @@ const BoundOperationsDomainLayer = BoundOperationsLayer.pipe(
  * controller could boot without a layer an operation needs, and nothing would
  * show it until a request used that operation.
  *
- * Seven services are left out on purpose: `Plugins`, `ProviderService`,
- * `SessionService`, `WorkspaceService`, `RunnerConnections`,
- * `ProviderProbes` and `PromotionState`. They must be the instances the boot
- * built. A second instance would have no plugins, no connections, none of the
- * state a session's stream is coalesced in, and no promotion phase, and would
- * write over the same rows the drivers use. The handlers get them from the boot.
+ * Seven services are left out on purpose: `Plugins`,
+ * `ProviderAccountService`, `SessionService`, `WorkspaceService`,
+ * `RunnerConnections`, `ProviderAccountProbes` and `PromotionState`. They
+ * must be the instances the boot built. A second instance would have no
+ * plugins, no connections, none of the state a session's stream is coalesced
+ * in, and no promotion phase, and would write over the same rows the drivers
+ * use. The handlers get them from the boot.
  *
  * The text generation status is provided once, around the whole list, so
  * `controller.read` reads the last failure the text generation service writes.
@@ -898,6 +914,8 @@ const operationServices = Layer.mergeAll(
   // next to it.
   PromotionFleetLayer.pipe(Layer.provideMerge(PromotionTransferLayer)),
   SettingsOperationsLayer,
+  HarnessServiceLayer,
+  ProviderServiceLayer,
   // The controller daemon's profile removal uses the profile service, so the
   // profile service is provided to it rather than merged next to it.
   ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
@@ -1058,7 +1076,9 @@ export const handlerLayers = Layer.mergeAll(
   runRoutes,
   runnerRoutes,
   pluginRoutes,
+  harnessRoutes,
   providerRoutes,
+  providerAccountRoutes,
   sessionRoutes,
   inputRoutes,
   transcriptRoutes,

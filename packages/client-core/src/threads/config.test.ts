@@ -9,7 +9,8 @@ import type { ShelfItem } from "../attachments/shelf";
 import { holdsMessageContent, readThreadConfig, type ThreadConfig } from "./config";
 
 const BASE: ThreadConfig = {
-  instanceId: "i-claude",
+  providerAccountId: "a-anthropic",
+  harnessId: "claude-code/claude-code",
   model: "claude-sonnet-5",
   accessMode: "approval-required",
   runnerId: "r-local",
@@ -31,7 +32,8 @@ const SESSION: Session = {
   conversationId: null,
   runId: null,
   stepId: null,
-  instanceId: "i-claude",
+  providerAccountId: "a-anthropic",
+  harnessId: "claude-code/claude-code",
   runnerId: "r-local",
   workspaceId: "w-1",
   projectId: null,

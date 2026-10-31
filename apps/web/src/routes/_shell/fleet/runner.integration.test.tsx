@@ -69,7 +69,7 @@ interface Snapshot {
   readonly models: ReadonlyArray<{ slug: string; name: string; options: readonly never[] }>;
 }
 
-const buildProviderInstance = (
+const buildProviderAccount = (
   id: string,
   harnessId: string,
   displayName: string,
@@ -116,23 +116,23 @@ const NO_ADAPTER = buildSnapshot({
 const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 const CODEX_ID = "01a06d02-1000-7000-8000-000000000002";
 
-const buildClaudeCodeInstance = (snapshots: readonly Snapshot[]) =>
-  buildProviderInstance(CLAUDE_ID, "claude-code/claude-code", "Claude Code", "claude", snapshots);
+const buildClaudeCodeAccount = (snapshots: readonly Snapshot[]) =>
+  buildProviderAccount(CLAUDE_ID, "claude-code/claude-code", "Claude Code", "claude", snapshots);
 
-const CODEX = buildProviderInstance(CODEX_ID, "codex/codex", "Codex", "codex", [NO_ADAPTER]);
+const CODEX = buildProviderAccount(CODEX_ID, "codex/codex", "Codex", "codex", [NO_ADAPTER]);
 
-const INSTANCES = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
+const ACCOUNTS = [buildClaudeCodeAccount([LOGGED_IN]), CODEX];
 
 /** Builds a stub controller that returns its own record, `runner`, and the handlers in `extra`. */
 const buildController = (
   runner: Fixture,
   options: {
     readonly defaultRunnerId?: string | null;
-    readonly instances?: ReadonlyArray<ReturnType<typeof buildProviderInstance>>;
+    readonly instances?: ReadonlyArray<ReturnType<typeof buildProviderAccount>>;
     readonly extra?: Readonly<Record<string, Handler>>;
   } = {},
 ): Readonly<Record<string, Handler>> => ({
-  "GET /api/v1/providers": { body: options.instances ?? INSTANCES },
+  "GET /api/v1/provider-accounts": { body: options.instances ?? ACCOUNTS },
   "GET /api/v1/setup": { body: { complete: true } },
   // The shell's thread list reads this on every page; the session tests
   // override it with a real list.
@@ -161,7 +161,7 @@ const openApp = async (
   runner: Fixture,
   options: {
     readonly defaultRunnerId?: string | null;
-    readonly instances?: ReadonlyArray<ReturnType<typeof buildProviderInstance>>;
+    readonly instances?: ReadonlyArray<ReturnType<typeof buildProviderAccount>>;
     readonly extra?: Readonly<Record<string, Handler>>;
   } = {},
 ) => {
@@ -601,7 +601,7 @@ describe("Runner > providers", () => {
   it("marks a harness older than the version this build was tested with", async () => {
     await openApp(ONLINE, {
       instances: [
-        buildClaudeCodeInstance([
+        buildClaudeCodeAccount([
           buildSnapshot({
             harnessVersion: "2.0.9",
             versionVerdict: "below-floor",
@@ -628,7 +628,7 @@ describe("Runner > providers", () => {
   });
 
   it("offers to install a missing harness, and disables Install for a harness with no adapter", async () => {
-    await openApp(BARE, { instances: [buildClaudeCodeInstance([]), CODEX] });
+    await openApp(BARE, { instances: [buildClaudeCodeAccount([]), CODEX] });
 
     const claude = within(await findClaudeRow());
     expect(claude.getByRole("button", { name: /install/i }).hasAttribute("disabled")).toBe(false);
@@ -644,17 +644,17 @@ describe("Runner > providers", () => {
 
   it("logs in through the dialog and shows the account the machine then reports", async () => {
     const user = userEvent.setup();
-    let held = [buildClaudeCodeInstance([NOT_LOGGED_IN]), CODEX];
+    let held = [buildClaudeCodeAccount([NOT_LOGGED_IN]), CODEX];
     const { api } = await openApp(ONLINE, {
       instances: held,
       extra: {
-        "GET /api/v1/providers": () => ({ body: held }),
-        [`POST /api/v1/providers/${CLAUDE_ID}/login`]: { body: { url: AUTHORIZE_URL } },
-        [`POST /api/v1/providers/${CLAUDE_ID}/login-code`]: (call: Call) => {
+        "GET /api/v1/provider-accounts": () => ({ body: held }),
+        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in`]: { body: { url: AUTHORIZE_URL } },
+        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in-code`]: (call: Call) => {
           if ((call.body as { code: string }).code !== "the-whole-code") {
             return { status: 400, body: buildErrorBody("validation", INVALID) };
           }
-          held = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
+          held = [buildClaudeCodeAccount([LOGGED_IN]), CODEX];
           return { body: LOGGED_IN };
         },
       },
@@ -696,14 +696,14 @@ describe("Runner > providers", () => {
 
   it("finishes a device login by itself once the controller announces the new snapshot", async () => {
     const user = userEvent.setup();
-    let held = [buildClaudeCodeInstance([NOT_LOGGED_IN]), CODEX];
+    let held = [buildClaudeCodeAccount([NOT_LOGGED_IN]), CODEX];
     // Probed after the login started, so it is proof the login worked.
     const fresh = buildSnapshot({ probedAt: "2026-09-05T09:20:00.000Z", auth: LOGGED_IN.auth });
     const { api, live } = await openApp(ONLINE, {
       instances: held,
       extra: {
-        "GET /api/v1/providers": () => ({ body: held }),
-        [`POST /api/v1/providers/${CLAUDE_ID}/login`]: {
+        "GET /api/v1/provider-accounts": () => ({ body: held }),
+        [`POST /api/v1/provider-accounts/${CLAUDE_ID}/sign-in`]: {
           body: {
             url: AUTHORIZE_URL,
             userCode: "CH61-0FI2N",
@@ -723,7 +723,7 @@ describe("Runner > providers", () => {
     // The user finishes the login with the vendor in their browser. The
     // runner reports that the vendor's login ended, and the controller probes
     // the machine again and announces the new snapshot.
-    held = [buildClaudeCodeInstance([fresh]), CODEX];
+    held = [buildClaudeCodeAccount([fresh]), CODEX];
     act(() => {
       live.push("provider", { _tag: "invalidate", ids: [CLAUDE_ID], kind: "updated" });
     });
@@ -739,12 +739,12 @@ describe("Runner > providers", () => {
   it("probes one instance on demand and shows the result", async () => {
     const user = userEvent.setup();
     const fresh = buildSnapshot({ harnessVersion: "2.1.300", auth: LOGGED_IN.auth });
-    let held = INSTANCES;
+    let held = ACCOUNTS;
     const { api } = await openApp(ONLINE, {
       extra: {
-        "GET /api/v1/providers": () => ({ body: held }),
+        "GET /api/v1/provider-accounts": () => ({ body: held }),
         [`POST /api/v1/runners/${ONLINE.id}/probe`]: () => {
-          held = [buildClaudeCodeInstance([fresh]), CODEX];
+          held = [buildClaudeCodeAccount([fresh]), CODEX];
           return { body: fresh };
         },
       },
@@ -758,20 +758,20 @@ describe("Runner > providers", () => {
     const asked = api.calls.filter((call) => call.path.endsWith("/probe"));
     // Only that instance, not all of the machine's: the button is on its row.
     expect(asked).toHaveLength(1);
-    expect(asked[0]?.body).toEqual({ instanceId: CLAUDE_ID });
+    expect(asked[0]?.body).toEqual({ providerAccountId: CLAUDE_ID });
   });
 
   it("fetches the card again when a snapshot changes elsewhere", async () => {
-    let held = INSTANCES;
+    let held = ACCOUNTS;
     const { live } = await openApp(ONLINE, {
-      extra: { "GET /api/v1/providers": () => ({ body: held }) },
+      extra: { "GET /api/v1/provider-accounts": () => ({ body: held }) },
     });
 
     await waitFor(() => {
       expect(live.topics()).toContain("provider");
     });
     held = [
-      buildClaudeCodeInstance([buildSnapshot({ harnessVersion: "2.1.300", auth: LOGGED_IN.auth })]),
+      buildClaudeCodeAccount([buildSnapshot({ harnessVersion: "2.1.300", auth: LOGGED_IN.auth })]),
       CODEX,
     ];
     act(() => {
@@ -953,8 +953,8 @@ describe("Runner > a provider that needs a key", () => {
     models: [],
   });
 
-  const buildPiInstance = (set: boolean) => ({
-    ...buildProviderInstance(PI_ID, "pi/pi", "pi", "pi", [PI_SNAPSHOT]),
+  const buildPiAccount = (set: boolean) => ({
+    ...buildProviderAccount(PI_ID, "pi/pi", "pi", "pi", [PI_SNAPSHOT]),
     secretFields: [{ name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set }],
   });
 
@@ -970,13 +970,13 @@ describe("Runner > a provider that needs a key", () => {
 
   it("asks for the key in the plugin's own words, masked, and saves it as a secret", async () => {
     const user = userEvent.setup();
-    let held: ReadonlyArray<ReturnType<typeof buildProviderInstance>> = [buildPiInstance(false)];
+    let held: ReadonlyArray<ReturnType<typeof buildProviderAccount>> = [buildPiAccount(false)];
     const { api } = await openApp(WITH_PI, {
       instances: held,
       extra: {
-        "GET /api/v1/providers": () => ({ body: held }),
+        "GET /api/v1/provider-accounts": () => ({ body: held }),
         [SECRET_PATH]: () => {
-          held = [buildPiInstance(true)];
+          held = [buildPiAccount(true)];
           return {
             body: {
               ownerKind: "provider-instance",
@@ -1023,7 +1023,7 @@ describe("Runner > a provider that needs a key", () => {
     await waitFor(() => {
       expect(listProbeCalls()).toHaveLength(1);
     });
-    expect(listProbeCalls()[0]?.body).toEqual({ instanceId: PI_ID });
+    expect(listProbeCalls()[0]?.body).toEqual({ providerAccountId: PI_ID });
 
     // The dialog closes, and the row now shows that the key is set and
     // offers to replace it.
@@ -1040,7 +1040,7 @@ describe("Runner > a provider that needs a key", () => {
   });
 
   it("offers to replace a key that is already set", async () => {
-    await openApp(WITH_PI, { instances: [buildPiInstance(true)] });
+    await openApp(WITH_PI, { instances: [buildPiAccount(true)] });
 
     const row = within(await findPiRow());
     expect(row.getByRole("button", { name: `Replace ${KEY_TITLE}` })).toBeDefined();

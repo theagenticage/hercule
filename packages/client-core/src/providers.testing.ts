@@ -1,9 +1,16 @@
 /**
  * Test fixtures, not exported from the package index. The tests of
  * `buildProviderRows` and `decideSessionsEmptyState` use the same runner, so
- * they share these fixtures.
+ * they share these fixtures. So do the tests of every module that names or
+ * sorts Provider Accounts.
  */
-import type { ProviderInstance, Runner } from "@hercule/contract";
+import type {
+  CapabilitySnapshot,
+  Harness,
+  Provider,
+  ProviderAccount,
+  Runner,
+} from "@hercule/contract";
 
 const GIB = 1024 * 1024 * 1024;
 
@@ -47,7 +54,7 @@ export const WITH_CLAUDE: Runner = {
   },
 };
 
-const DECLARED: ProviderInstance["declared"] = {
+const DECLARED: Harness["declared"] = {
   steering: "native",
   fork: "native",
   modelSwitch: "in-session",
@@ -62,61 +69,123 @@ const DECLARED: ProviderInstance["declared"] = {
   structuredOutput: "supported",
 };
 
-/** What makes a provider instance this one: its own id, the harness it runs, and its names. */
-export interface InstanceIdentity {
+/** The providers of the shipped plugins, as `provider.query` lists them. */
+export const PROVIDERS: readonly Provider[] = [
+  {
+    id: "anthropic/anthropic",
+    displayName: "Anthropic",
+    kinds: [
+      {
+        id: "subscription-per-machine",
+        title: "Claude subscription",
+        description: "Sign in with a Claude subscription on each machine.",
+        setup: [{ kind: "harness-login" }],
+        harnesses: ["claude-code/claude-code"],
+      },
+    ],
+  },
+  {
+    id: "openai/openai",
+    displayName: "OpenAI",
+    kinds: [
+      {
+        id: "subscription-per-machine",
+        title: "ChatGPT subscription",
+        description: "Sign in with a ChatGPT subscription on each machine.",
+        setup: [{ kind: "harness-login" }],
+        harnesses: ["codex/codex"],
+      },
+    ],
+  },
+  {
+    id: "zai/zai",
+    displayName: "Z.ai",
+    kinds: [
+      {
+        id: "api-key",
+        title: "API key",
+        description: "A Z.ai API key.",
+        setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+        harnesses: ["pi/pi"],
+      },
+    ],
+  },
+];
+
+const buildHarness = (id: string, displayName: string, binaryName: string): Harness => ({
+  id,
+  displayName,
+  binaryName,
+  declared: DECLARED,
+  runners: [],
+});
+
+/** The harnesses of the shipped plugins, as `harness.query` lists them. */
+export const HARNESSES: readonly Harness[] = [
+  buildHarness("claude-code/claude-code", "Claude Code", "claude"),
+  buildHarness("codex/codex", "Codex", "codex"),
+  buildHarness("pi/pi", "pi", "pi"),
+];
+
+/** What makes a Provider Account this one: its own id, its provider and kind, its default harness and its label. */
+export interface AccountIdentity {
   readonly id: string;
+  readonly providerId: string;
+  readonly kind: string;
   readonly harnessId: string;
-  readonly binaryName: string;
-  readonly name: string;
+  readonly label: string | null;
 }
 
-export const CLAUDE_CODE_IDENTITY: InstanceIdentity = {
-  id: "instance-claude-code",
+export const ANTHROPIC_IDENTITY: AccountIdentity = {
+  id: "account-anthropic",
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
   harnessId: "claude-code/claude-code",
-  binaryName: "claude",
-  name: "Claude Code",
+  label: null,
 };
 
-export const CODEX_IDENTITY: InstanceIdentity = {
-  id: "instance-codex",
+export const OPENAI_IDENTITY: AccountIdentity = {
+  id: "account-openai",
+  providerId: "openai/openai",
+  kind: "subscription-per-machine",
   harnessId: "codex/codex",
-  binaryName: "codex",
-  name: "Codex",
+  label: null,
 };
 
-export const PI_IDENTITY: InstanceIdentity = {
-  id: "instance-pi",
+export const ZAI_IDENTITY: AccountIdentity = {
+  id: "account-zai",
+  providerId: "zai/zai",
+  kind: "api-key",
   harnessId: "pi/pi",
-  binaryName: "pi",
-  name: "pi",
+  label: null,
 };
 
 /**
- * Returns a provider instance with the given identity, an empty config and the
- * same declared capabilities for every harness. The display name equals the name.
+ * Returns a Provider Account with the given identity. Every snapshot is
+ * stamped with the account's default harness, so a test needs no harness id
+ * on its snapshots; spread the result with its own `snapshots` for an account
+ * with snapshots in another harness.
  */
-export const buildInstance = (
-  identity: InstanceIdentity,
-  snapshots: ProviderInstance["snapshots"] = [],
-): ProviderInstance => ({
+export const buildProviderAccount = (
+  identity: AccountIdentity,
+  snapshots: ReadonlyArray<CapabilitySnapshot> = [],
+): ProviderAccount => ({
   id: identity.id,
-  harnessId: identity.harnessId,
-  name: identity.name,
-  config: {},
-  displayName: identity.name,
-  binaryName: identity.binaryName,
-  declared: DECLARED,
-  secretFields: [],
-  snapshots,
+  providerId: identity.providerId,
+  kind: identity.kind,
+  label: identity.label,
+  identity: null,
+  planLabel: null,
+  defaultHarnessId: identity.harnessId,
+  snapshots: snapshots.map((snapshot) => ({ ...snapshot, harnessId: identity.harnessId })),
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
-/** Returns an instance's capability snapshot on `BARE`, logged in unless `fields` overrides it. */
-export const buildSnapshot = (
-  fields: Partial<ProviderInstance["snapshots"][number]> = {},
-): ProviderInstance["snapshots"][number] => ({
+/** Returns an account's capability snapshot on `BARE` in Claude Code, signed in unless `fields` overrides it. */
+export const buildSnapshot = (fields: Partial<CapabilitySnapshot> = {}): CapabilitySnapshot => ({
   runnerId: BARE.id,
+  harnessId: "claude-code/claude-code",
   probedAt: "2026-09-05T09:10:00.000Z",
   harnessVersion: "2.1.263",
   versionVerdict: "ok",

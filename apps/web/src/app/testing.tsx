@@ -23,6 +23,8 @@ import {
 import type { Runner } from "@hercule/contract";
 import {
   createApiStub,
+  HARNESSES,
+  PROVIDERS,
   StubSocket,
   stubWebSocketInto,
   type Call,
@@ -45,6 +47,11 @@ export { buildErrorBody, type Answer, type Call, type Handler } from "@hercule/c
  */
 const HOUSEKEEPING: Readonly<Record<string, Handler>> = {
   "POST /api/v1/auth/ws-ticket": { body: { ticket: "ws-ticket" } },
+  // The providers and harnesses are what the plugins register, so they do not
+  // vary with the account a test sets up. The accounts do: a test that needs
+  // them stubs `GET /api/v1/provider-accounts` itself.
+  "GET /api/v1/provider-accounts": { body: PROVIDERS },
+  "GET /api/v1/harnesses": { body: HARNESSES },
 };
 
 /**

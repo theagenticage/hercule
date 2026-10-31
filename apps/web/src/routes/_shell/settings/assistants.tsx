@@ -19,6 +19,7 @@ import {
   memoryDocumentQuery,
   memoryIndexQuery,
   profilesQuery,
+  providerAccountsQuery,
   providersQuery,
 } from "../../../app/queries";
 import { InPlaceQuestion } from "../../../screens/in-place-question";
@@ -33,7 +34,7 @@ import { AssistantMemory, type ChangeMemoryEdits } from "./-memory";
 
 export const Route = createFileRoute("/_shell/settings/assistants")({
   staticData: { title: "Assistants" },
-  // The form's selects read the provider instances and the permission
+  // The form's selects read the accounts, their providers and the permission
   // profiles, so both load with the list and the form never waits for them.
   // The first assistant, the one selected on arrival, also has its memory
   // index and core note loaded. A failed memory read does not fail the
@@ -42,6 +43,7 @@ export const Route = createFileRoute("/_shell/settings/assistants")({
     const { client, queryClient } = context;
     const [page] = await Promise.all([
       queryClient.ensureQueryData(assistantsQuery(client)),
+      queryClient.ensureQueryData(providerAccountsQuery(client)),
       queryClient.ensureQueryData(providersQuery(client)),
       queryClient.ensureQueryData(profilesQuery(client)),
     ]);
@@ -78,7 +80,7 @@ function Assistants(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
 
   useLiveInvalidation(live, queryClient, "assistant");
-  // The provider instance select lists the instances, so an instance added
+  // The account select lists the accounts, so an account added
   // or removed elsewhere shows without a reload.
   useLiveInvalidation(live, queryClient, "provider");
 

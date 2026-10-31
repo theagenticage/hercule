@@ -11,7 +11,8 @@
  * `controller.read`. Nothing here repeats that rule.
  */
 import type {
-  ProviderInstance,
+  Provider,
+  ProviderAccount,
   TextGenerationModel,
   TextGenerationStatus,
 } from "@hercule/contract";
@@ -32,57 +33,78 @@ export interface TextGenerationField {
   readonly selectedKey: string;
 }
 
-/** A model that text generation runs on: the instance and the model's slug. */
-type ResolvedModel = NonNullable<TextGenerationStatus["model"]>;
+/** A model from a Provider Account, as the setting stores it or the status reports it. */
+type AccountModel = Exclude<TextGenerationModel, "automatic" | "off">;
 
 /**
  * Returns the name of the model text generation runs on, such as
- * `Codex · GPT-6 Luna`. Falls back to the slug alone when the instance is
+ * `OpenAI · GPT-6 Luna`. Falls back to the slug alone when the account is
  * gone, as `describeAgent` does.
  */
 export const describeTextGenerationModel = (
-  instances: readonly ProviderInstance[],
-  model: ResolvedModel,
-): string =>
-  describeAgent(
-    instances.find((instance) => instance.id === model.instanceId),
+  providers: readonly Provider[],
+  accounts: readonly ProviderAccount[],
+  model: AccountModel,
+): string => {
+  const account = accounts.find((each) => each.id === model.providerAccountId);
+  return describeAgent(
+    providers,
+    account,
+    model.harnessId ?? account?.defaultHarnessId ?? "",
     model.model,
   );
+};
 
 /** What the select and the recap read when Automatic found no model to run on. */
 const NO_MODEL_AVAILABLE = "no model available";
 
 /**
  * Returns the recap line of the desktop's All set: the name of the model that
- * text generation runs on, such as `Codex · GPT-6 Luna`, or "no model
+ * text generation runs on, such as `OpenAI · GPT-6 Luna`, or "no model
  * available" when `status` holds none.
  */
 export const describeTextGenerationRecap = (
-  instances: readonly ProviderInstance[],
+  providers: readonly Provider[],
+  accounts: readonly ProviderAccount[],
   status: TextGenerationStatus,
 ): string =>
-  status.model === null ? NO_MODEL_AVAILABLE : describeTextGenerationModel(instances, status.model);
-
-const buildModelKey = (instanceId: string, model: string): string => `${instanceId}/${model}`;
+  status.model === null
+    ? NO_MODEL_AVAILABLE
+    : describeTextGenerationModel(providers, accounts, status.model);
 
 /**
- * Returns the model select: Automatic first, then one entry per provider
- * instance and model that is logged in on some runner, then Off. A model that
- * a harness keeps only for old sessions (`isLegacy`) is not offered, and a
- * model several runners list appears once.
+ * Returns the key of the select entry for `model`. A setting that leaves the
+ * harness out and one that names the account's default harness are the same
+ * choice, so both give the same key.
+ */
+const buildModelKey = (accounts: readonly ProviderAccount[], model: AccountModel): string =>
+  [
+    model.providerAccountId,
+    model.harnessId ??
+      accounts.find((each) => each.id === model.providerAccountId)?.defaultHarnessId ??
+      "",
+    model.model,
+  ].join("/");
+
+/**
+ * Returns the model select: Automatic first, then one entry per Provider
+ * Account and model that is signed in on some runner in the account's default
+ * harness, then Off. A model that a harness keeps only for old sessions
+ * (`isLegacy`) is not offered, and a model several runners list appears once.
  *
  * Automatic names the model it resolves to only while it is the stored
  * setting. With any other setting, `status.model` is that setting's own model,
  * so it tells nothing about what Automatic would pick.
  *
- * A stored model that no logged-in instance offers any more (the instance was
- * deleted, or logged out) stays in the list as "(not offered)". The setting
+ * A stored model that no signed-in account offers any more (the account was
+ * deleted, or signed out) stays in the list as "(not offered)". The setting
  * is the user's choice and does not silently change; the controller reports
  * the failures it causes.
  */
 export const buildTextGenerationField = (
   stored: TextGenerationModel | undefined,
-  instances: readonly ProviderInstance[],
+  providers: readonly Provider[],
+  accounts: readonly ProviderAccount[],
   status: TextGenerationStatus,
 ): TextGenerationField => {
   const setting = stored ?? "automatic";
@@ -90,31 +112,36 @@ export const buildTextGenerationField = (
   const describeAutomatic = (): string => {
     if (setting !== "automatic") return "Automatic";
     if (status.model === null) return `Automatic - ${NO_MODEL_AVAILABLE}`;
-    return `Automatic - currently ${describeTextGenerationModel(instances, status.model)}`;
+    return `Automatic - currently ${describeTextGenerationModel(providers, accounts, status.model)}`;
   };
 
-  const offered: TextGenerationChoice[] = instances.flatMap((instance) => {
+  const offered: TextGenerationChoice[] = accounts.flatMap((account) => {
     const slugs = new Set(
-      instance.snapshots
-        .filter((snapshot) => snapshot.auth.status === "ok")
+      account.snapshots
+        .filter(
+          (snapshot) =>
+            snapshot.harnessId === account.defaultHarnessId && snapshot.auth.status === "ok",
+        )
         .flatMap((snapshot) => snapshot.models)
         .filter((model) => model.isLegacy !== true)
         .map((model) => model.slug),
     );
-    return [...slugs].map((slug) => ({
-      key: buildModelKey(instance.id, slug),
-      label: describeAgent(instance, slug),
-      setting: { instanceId: instance.id, model: slug },
-    }));
+    return [...slugs].map((slug) => {
+      const choice = { providerAccountId: account.id, model: slug };
+      return {
+        key: buildModelKey(accounts, choice),
+        label: describeAgent(providers, account, account.defaultHarnessId, slug),
+        setting: choice,
+      };
+    });
   });
 
-  const selectedKey =
-    typeof setting === "string" ? setting : buildModelKey(setting.instanceId, setting.model);
+  const selectedKey = typeof setting === "string" ? setting : buildModelKey(accounts, setting);
 
   if (typeof setting === "object" && !offered.some((choice) => choice.key === selectedKey)) {
     offered.push({
       key: selectedKey,
-      label: `${describeTextGenerationModel(instances, setting)} (not offered)`,
+      label: `${describeTextGenerationModel(providers, accounts, setting)} (not offered)`,
       setting,
     });
   }

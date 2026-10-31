@@ -24,7 +24,7 @@ const api: Readonly<Record<string, Handler>> = {
   "GET /api/v1/plugins": { body: [] },
   "GET /api/v1/projects": { body: { items: [] } },
   "GET /api/v1/runners": { body: { items: [] } },
-  "GET /api/v1/providers": { body: [] },
+  "GET /api/v1/provider-accounts": { body: [] },
   "GET /api/v1/profiles": { body: { items: [] } },
   "GET /api/v1/secrets": { body: { items: [] } },
   "GET /api/v1/triggers": { body: { items: [] } },

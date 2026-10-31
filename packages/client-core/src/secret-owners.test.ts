@@ -6,6 +6,7 @@ describe("describeReadOnlySecret", () => {
   it("names what a secret is when the API refuses to write it", () => {
     expect(describeReadOnlySecret("core")).toBe("controller key");
     expect(describeReadOnlySecret("connection")).toBe("connection credential");
+    expect(describeReadOnlySecret("provider-account")).toBe("account credential");
   });
 
   it("has a note for exactly the owner kinds the user may not write", () => {

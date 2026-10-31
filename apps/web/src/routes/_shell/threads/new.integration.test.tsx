@@ -23,7 +23,7 @@ import type {
   ModelOption,
   Profile,
   Project,
-  ProviderInstance,
+  ProviderAccount,
   Resource,
   Runner,
   Session,
@@ -56,7 +56,7 @@ const RUNNER: Runner = {
   lastSeenAt: "2026-09-05T09:14:00.000Z",
 };
 
-const DECLARED: ProviderInstance["declared"] = {
+const DECLARED: ProviderAccount["declared"] = {
   steering: "native",
   fork: "native",
   modelSwitch: "in-session",
@@ -94,8 +94,8 @@ const buildSnapshot = (
   runnerId: string,
   identity: string,
   planLabel: string,
-  models: ProviderInstance["snapshots"][number]["models"],
-): ProviderInstance["snapshots"][number] => ({
+  models: ProviderAccount["snapshots"][number]["models"],
+): ProviderAccount["snapshots"][number] => ({
   runnerId,
   probedAt: "2026-09-05T09:10:00.000Z",
   harnessVersion: "2.1.263",
@@ -104,12 +104,12 @@ const buildSnapshot = (
   models,
 });
 
-const buildProviderInstance = (
+const buildProviderAccount = (
   id: string,
   name: string,
   displayName: string,
-  snapshots: ProviderInstance["snapshots"],
-): ProviderInstance => ({
+  snapshots: ProviderAccount["snapshots"],
+): ProviderAccount => ({
   id,
   harnessId: "claude-code/claude-code",
   secretFields: [],
@@ -124,7 +124,7 @@ const buildProviderInstance = (
 });
 
 /** Logged in on the one runner, two models, the default one carrying options. */
-const INSTANCE_A = buildProviderInstance(
+const ACCOUNT_A = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000001",
   "personal",
   "Claude Code",
@@ -143,7 +143,7 @@ const INSTANCE_A = buildProviderInstance(
 );
 
 /** A second account of the same harness, one model, no options. */
-const INSTANCE_B = buildProviderInstance(
+const ACCOUNT_B = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000002",
   "work",
   "Claude Code",
@@ -166,7 +166,7 @@ const INSTANCE_B = buildProviderInstance(
  * logged in on the one runner yet, so there is no snapshot at all - `buildRunnerMenu`'s only row dims "not logged in" and its
  * `defaultRunnerId` is null.
  */
-const INSTANCE_FRESH = buildProviderInstance(
+const ACCOUNT_FRESH = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000003",
   "Claude Code",
   "Claude Code",
@@ -202,7 +202,7 @@ const NEW_SESSION: Session = {
   conversationId: null,
   runId: null,
   stepId: null,
-  instanceId: INSTANCE_A.id,
+  providerAccountId: ACCOUNT_A.id,
   runnerId: RUNNER.id,
   workspaceId: null,
   projectId: null,
@@ -221,7 +221,7 @@ const NEW_SESSION: Session = {
 };
 
 const buildController = (
-  instances: readonly ProviderInstance[],
+  instances: readonly ProviderAccount[],
   user: Record<string, unknown> = {},
   extra: Readonly<Record<string, Handler>> = {},
 ): Readonly<Record<string, Handler>> => ({
@@ -232,7 +232,7 @@ const buildController = (
       user: { "onboarding.completedSteps": ["timezone", "assistant"], timezone: ZONE, ...user },
     },
   },
-  "GET /api/v1/providers": { body: instances },
+  "GET /api/v1/provider-accounts": { body: instances },
   "GET /api/v1/runners": { body: { items: [RUNNER] } },
   "GET /api/v1/profiles": { body: { items: [PROFILE_UNRESTRICTED, PROFILE_WORKER] } },
   // After a send, the app navigates to the new thread. These stubs
@@ -245,7 +245,7 @@ const buildController = (
 });
 
 const openApp = async (
-  instances: readonly ProviderInstance[] = [INSTANCE_A, INSTANCE_B],
+  instances: readonly ProviderAccount[] = [ACCOUNT_A, ACCOUNT_B],
   user: Record<string, unknown> = {},
   extra: Readonly<Record<string, Handler>> = {},
   storage: Readonly<Record<string, string>> = {},
@@ -263,7 +263,7 @@ const openApp = async (
 
 describe("Composer: draft defaults", () => {
   it("prefills from the spawn defaults when no thread.* setting is stored", async () => {
-    await openApp([INSTANCE_A]);
+    await openApp([ACCOUNT_A]);
 
     expect(screen.getByRole("heading", { name: "What should the agent do?" })).toBeDefined();
 
@@ -292,8 +292,8 @@ describe("Composer: draft defaults", () => {
   });
 
   it("prefills from the thread.* settings when they are stored", async () => {
-    await openApp([INSTANCE_A, INSTANCE_B], {
-      "thread.instanceId": INSTANCE_B.id,
+    await openApp([ACCOUNT_A, ACCOUNT_B], {
+      "thread.providerAccountId": ACCOUNT_B.id,
       "thread.model": "claude-haiku-5",
       "thread.accessMode": "auto",
       "thread.profileId": PROFILE_WORKER.id,
@@ -311,7 +311,7 @@ describe("Composer: draft defaults", () => {
 
 describe("Composer: a fresh install, nothing logged in on the one runner yet", () => {
   it("shows only the pill parts it has, with no dangling separator, when there is no model to offer", async () => {
-    await openApp([INSTANCE_FRESH]);
+    await openApp([ACCOUNT_FRESH]);
 
     // There is no model to show, and no separator is left over.
     await waitFor(() => {
@@ -320,7 +320,7 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
   });
 
   it("shows the runner's name and why it is dimmed on the runner button, not just the word Runner", async () => {
-    await openApp([INSTANCE_FRESH]);
+    await openApp([ACCOUNT_FRESH]);
 
     await waitFor(() => {
       expect(
@@ -331,7 +331,7 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
   });
 
   it("explains why the draft cannot start, and offers no Log in on a machine where the instance was never found", async () => {
-    await openApp([INSTANCE_FRESH]);
+    await openApp([ACCOUNT_FRESH]);
 
     // This instance was never probed on the only runner, so there is nothing
     // to log in to there. The screen shows only the reason.
@@ -347,7 +347,7 @@ describe("Composer: a fresh install, nothing logged in on the one runner yet", (
     // that the contract's `Id` schema rejects, and the error would be about
     // fields the user never touched.
     const user = userEvent.setup();
-    const { api } = await openApp([INSTANCE_FRESH]);
+    const { api } = await openApp([ACCOUNT_FRESH]);
 
     await user.type(screen.getByRole("textbox"), "Fix the login bug");
 
@@ -524,7 +524,7 @@ describe("Composer: sending", () => {
   it("spawns with exactly the selectors' values, navigates to the new thread, and never patches settings", async () => {
     const user = userEvent.setup();
     const { api, router } = await openApp(
-      [INSTANCE_A],
+      [ACCOUNT_A],
       {},
       {
         "POST /api/v1/sessions": { body: NEW_SESSION },
@@ -543,7 +543,7 @@ describe("Composer: sending", () => {
     );
     expect(spawn?.body).toEqual({
       prompt: "Fix the login bug",
-      instanceId: INSTANCE_A.id,
+      providerAccountId: ACCOUNT_A.id,
       model: "claude-sonnet-5",
       accessMode: "approval-required",
       runnerId: RUNNER.id,
@@ -561,7 +561,7 @@ describe("Composer: sending", () => {
   it("spawns with the model options picked in the pill", async () => {
     const user = userEvent.setup();
     const { api, router } = await openApp(
-      [INSTANCE_A],
+      [ACCOUNT_A],
       {},
       {
         "POST /api/v1/sessions": { body: NEW_SESSION },
@@ -588,7 +588,7 @@ describe("Composer: sending", () => {
     );
     expect(spawn?.body).toEqual({
       prompt: "Fix the login bug",
-      instanceId: INSTANCE_A.id,
+      providerAccountId: ACCOUNT_A.id,
       model: "claude-sonnet-5",
       accessMode: "approval-required",
       runnerId: RUNNER.id,
@@ -601,8 +601,8 @@ describe("Composer: sending", () => {
     const user = userEvent.setup();
     const cove: Runner = { ...RUNNER, id: "01a06d02-beff-7037-9f5b-042822015953", name: "cove" };
     // The second account, with two models, logged in on both machines.
-    const work = buildProviderInstance(
-      INSTANCE_B.id,
+    const work = buildProviderAccount(
+      ACCOUNT_B.id,
       "work",
       "Claude Code",
       [RUNNER.id, cove.id].map((runnerId) =>
@@ -624,7 +624,7 @@ describe("Composer: sending", () => {
       ),
     );
     const { api } = await openApp(
-      [INSTANCE_A, work],
+      [ACCOUNT_A, work],
       {},
       {
         "GET /api/v1/runners": { body: { items: [RUNNER, cove] } },
@@ -648,7 +648,7 @@ describe("Composer: sending", () => {
         (call) => call.method === "POST" && call.path === "/api/v1/sessions",
       );
       expect(spawn?.body).toMatchObject({
-        instanceId: work.id,
+        providerAccountId: work.id,
         model: "claude-opus-5",
         runnerId: cove.id,
       });
@@ -658,7 +658,7 @@ describe("Composer: sending", () => {
   it("sends on Enter, inserts a newline on Shift+Enter, and never sends on an IME's Enter", async () => {
     const user = userEvent.setup();
     const { api, router } = await openApp(
-      [INSTANCE_A],
+      [ACCOUNT_A],
       {},
       {
         "POST /api/v1/sessions": { body: NEW_SESSION },
@@ -698,7 +698,7 @@ describe("Composer: sending", () => {
   });
 
   it("leaves send disabled while the prompt is empty", async () => {
-    await openApp([INSTANCE_A]);
+    await openApp([ACCOUNT_A]);
 
     const send = screen.getByRole<HTMLButtonElement>("button", { name: /send/i });
     expect(send.disabled).toBe(true);
@@ -707,7 +707,7 @@ describe("Composer: sending", () => {
   it("shows the API's error message under the card and keeps the typed text", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(
-      [INSTANCE_A],
+      [ACCOUNT_A],
       {},
       {
         "POST /api/v1/sessions": {
@@ -732,7 +732,7 @@ describe("Composer: sending", () => {
 
 describe("Routing: /threads/new is the static route", () => {
   it("renders the composer rather than reading 'new' as a session id", async () => {
-    const { api } = await openApp([INSTANCE_A]);
+    const { api } = await openApp([ACCOUNT_A]);
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "What should the agent do?" })).toBeDefined();
@@ -758,7 +758,7 @@ describe("Routing: /threads/new is the static route", () => {
  */
 
 /** Builds a snapshot of an instance that is installed on the runner with nobody logged in. */
-const buildUnauthenticatedSnapshot = (runnerId: string): ProviderInstance["snapshots"][number] => ({
+const buildUnauthenticatedSnapshot = (runnerId: string): ProviderAccount["snapshots"][number] => ({
   runnerId,
   probedAt: "2026-09-05T09:10:00.000Z",
   harnessVersion: "2.1.263",
@@ -767,7 +767,7 @@ const buildUnauthenticatedSnapshot = (runnerId: string): ProviderInstance["snaps
   models: [],
 });
 
-const LOGGED_OUT = buildProviderInstance(
+const LOGGED_OUT = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000004",
   "Claude Code",
   "Claude Code",
@@ -775,7 +775,7 @@ const LOGGED_OUT = buildProviderInstance(
 );
 
 /** The same instance after the login in the test below has finished. */
-const LOGGED_IN: ProviderInstance = {
+const LOGGED_IN: ProviderAccount = {
   ...LOGGED_OUT,
   snapshots: [
     buildSnapshot(RUNNER.id, "rogier@example.com", "Claude Max", [
@@ -795,14 +795,14 @@ const AUTHORIZE_URL = "https://claude.ai/oauth/authorize?code=1";
 describe("Composer: a login updates the open draft", () => {
   it("blocks the draft with the login message, then uses the new model list and spawns with it", async () => {
     const user = userEvent.setup();
-    let held: readonly ProviderInstance[] = [LOGGED_OUT];
+    let held: readonly ProviderAccount[] = [LOGGED_OUT];
     const { api } = await openApp(
       [LOGGED_OUT],
       {},
       {
-        "GET /api/v1/providers": () => ({ body: held }),
-        [`POST /api/v1/providers/${LOGGED_OUT.id}/login`]: { body: { url: AUTHORIZE_URL } },
-        [`POST /api/v1/providers/${LOGGED_OUT.id}/login-code`]: () => {
+        "GET /api/v1/provider-accounts": () => ({ body: held }),
+        [`POST /api/v1/provider-accounts/${LOGGED_OUT.id}/sign-in`]: { body: { url: AUTHORIZE_URL } },
+        [`POST /api/v1/provider-accounts/${LOGGED_OUT.id}/sign-in-code`]: () => {
           held = [LOGGED_IN];
           return { body: LOGGED_IN.snapshots[0] };
         },
@@ -857,7 +857,7 @@ describe("Composer: a login updates the open draft", () => {
     });
     expect(spawn.body).toMatchObject({
       prompt: "Fix the login bug",
-      instanceId: LOGGED_OUT.id,
+      providerAccountId: LOGGED_OUT.id,
       model: "claude-sonnet-5",
       runnerId: RUNNER.id,
     });
@@ -874,7 +874,7 @@ const buildModel = (slug: string, name: string, extra: Record<string, unknown> =
 });
 
 /** With `MANY_B`: nine models across two accounts, one over the filter threshold. */
-const MANY_A = buildProviderInstance(
+const MANY_A = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000011",
   "personal",
   "Claude Code",
@@ -889,7 +889,7 @@ const MANY_A = buildProviderInstance(
   ],
 );
 
-const MANY_B = buildProviderInstance(
+const MANY_B = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000012",
   "work",
   "Claude Code",
@@ -904,7 +904,7 @@ const MANY_B = buildProviderInstance(
 );
 
 /** With `MANY_A`: eight models in total, which is not over the filter threshold. */
-const EIGHT_B: ProviderInstance = {
+const EIGHT_B: ProviderAccount = {
   ...MANY_B,
   snapshots: [
     buildSnapshot(RUNNER.id, "work@example.com", "Claude Pro", [
@@ -916,7 +916,7 @@ const EIGHT_B: ProviderInstance = {
 };
 
 /** An instance with one legacy model, which the menu hides under "older models". */
-const WITH_LEGACY = buildProviderInstance(
+const WITH_LEGACY = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000013",
   "personal",
   "Claude Code",
@@ -930,8 +930,8 @@ const WITH_LEGACY = buildProviderInstance(
 );
 
 /** A second harness with one account, so its rows never show an account name. */
-const CODEX: ProviderInstance = {
-  ...buildProviderInstance("01a06d02-1000-7000-8000-000000000014", "openai", "Codex", [
+const CODEX: ProviderAccount = {
+  ...buildProviderAccount("01a06d02-1000-7000-8000-000000000014", "openai", "Codex", [
     buildSnapshot(RUNNER.id, "rogier@openai.test", "Plus", [
       buildModel("gpt-5-codex", "GPT-5 Codex", { isDefault: true }),
     ]),
@@ -941,8 +941,8 @@ const CODEX: ProviderInstance = {
 };
 
 /** Another harness's account, which nobody has logged in to on this machine. */
-const OTHER_LOGGED_OUT: ProviderInstance = {
-  ...buildProviderInstance("01a06d02-1000-7000-8000-000000000015", "openai", "Codex", [
+const OTHER_LOGGED_OUT: ProviderAccount = {
+  ...buildProviderAccount("01a06d02-1000-7000-8000-000000000015", "openai", "Codex", [
     buildUnauthenticatedSnapshot(RUNNER.id),
   ]),
   harnessId: "codex/codex",
@@ -953,7 +953,7 @@ const RECENT_KEY = "hercule.recentModels";
 
 /** Builds the `localStorage` contents for a draft whose Recent lane already holds `pairs`. */
 const buildRecentStorage = (
-  pairs: ReadonlyArray<{ instanceId: string; model: string }>,
+  pairs: ReadonlyArray<{ providerAccountId: string; model: string }>,
 ): Record<string, string> => ({ [RECENT_KEY]: JSON.stringify(pairs) });
 
 /** Opens the model menu by clicking its pill, and returns the popover. */
@@ -999,12 +999,12 @@ describe("Composer: model menu shapes", () => {
   it("(b) lists the recent pairs newest first, and shows the account only when the harness has two", async () => {
     const user = userEvent.setup();
     await openApp(
-      [INSTANCE_A, INSTANCE_B, CODEX],
+      [ACCOUNT_A, ACCOUNT_B, CODEX],
       {},
       {},
       buildRecentStorage([
-        { instanceId: CODEX.id, model: "gpt-5-codex" },
-        { instanceId: INSTANCE_A.id, model: "claude-opus-5" },
+        { providerAccountId: CODEX.id, model: "gpt-5-codex" },
+        { providerAccountId: ACCOUNT_A.id, model: "claude-opus-5" },
       ]),
     );
 
@@ -1042,10 +1042,10 @@ describe("Composer: model menu shapes", () => {
   it("(d) shows an unauthenticated account as one dimmed row with its own Log in", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(
-      [INSTANCE_A, OTHER_LOGGED_OUT],
+      [ACCOUNT_A, OTHER_LOGGED_OUT],
       {},
       {
-        [`POST /api/v1/providers/${OTHER_LOGGED_OUT.id}/login`]: { body: { url: AUTHORIZE_URL } },
+        [`POST /api/v1/provider-accounts/${OTHER_LOGGED_OUT.id}/sign-in`]: { body: { url: AUTHORIZE_URL } },
       },
     );
 
@@ -1071,7 +1071,7 @@ describe("Composer: model menu shapes", () => {
 
   it("(e) labels the current lane with the account name when the harness has two", async () => {
     const user = userEvent.setup();
-    await openApp([INSTANCE_A, INSTANCE_B]);
+    await openApp([ACCOUNT_A, ACCOUNT_B]);
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
 
@@ -1080,7 +1080,7 @@ describe("Composer: model menu shapes", () => {
 
   it("(e) labels the current lane with the harness's name when it has one", async () => {
     const user = userEvent.setup();
-    await openApp([INSTANCE_A]);
+    await openApp([ACCOUNT_A]);
 
     const menu = await openModelMenu(user, /claude sonnet 5/i);
 
@@ -1100,7 +1100,7 @@ describe("Composer: the Recent lane is written only after a successful spawn", (
   it("writes the pair the user picked once the spawn succeeds", async () => {
     const user = userEvent.setup();
     await openApp(
-      [INSTANCE_A],
+      [ACCOUNT_A],
       {},
       { "POST /api/v1/sessions": { body: NEW_SESSION } },
       buildRecentStorage([]),
@@ -1110,7 +1110,7 @@ describe("Composer: the Recent lane is written only after a successful spawn", (
 
     await waitFor(() => {
       expect(localStorage.getItem(RECENT_KEY)).toBe(
-        JSON.stringify([{ instanceId: INSTANCE_A.id, model: "claude-opus-5" }]),
+        JSON.stringify([{ providerAccountId: ACCOUNT_A.id, model: "claude-opus-5" }]),
       );
     });
   });
@@ -1118,7 +1118,7 @@ describe("Composer: the Recent lane is written only after a successful spawn", (
   it("writes nothing when the spawn fails, because no thread was started", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(
-      [INSTANCE_A],
+      [ACCOUNT_A],
       {},
       {
         "POST /api/v1/sessions": {
@@ -1149,7 +1149,7 @@ const FAST_MODE: ModelOption = {
 };
 
 /** An instance with one model, which has a select descriptor and a boolean one. */
-const WITH_OPTIONS = buildProviderInstance(
+const WITH_OPTIONS = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000016",
   "personal",
   "Claude Code",
@@ -1194,12 +1194,12 @@ describe("Composer: the model options selector's label", () => {
 
 /**
  * An instance where `auto` is not native, so it runs as the nearest native
- * mode below it. It has a display name different from `INSTANCE_A`'s, so a
+ * mode below it. It has a display name different from `ACCOUNT_A`'s, so a
  * row that shows "Claude Code Work" must be reading this instance's
  * `displayName`.
  */
-const NO_AUTO: ProviderInstance = {
-  ...INSTANCE_A,
+const NO_AUTO: ProviderAccount = {
+  ...ACCOUNT_A,
   displayName: "Claude Code Work",
   declared: { ...DECLARED, accessModes: { ...DECLARED.accessModes, auto: "unsupported" } },
 };
@@ -1271,7 +1271,7 @@ describe("Composer: the access mode menu", () => {
  */
 describe("Draft: the header is the screen's first row", () => {
   it("shows Threads / New thread, with no … button and no shell h1", async () => {
-    await openApp([INSTANCE_A]);
+    await openApp([ACCOUNT_A]);
 
     const slash = await waitFor(() => screen.getByText("/"));
     expect(readPageText(slash.parentElement)).toBe("Threads / New thread");
@@ -1577,7 +1577,7 @@ const openDraftAt = async (
   user: Record<string, unknown> = { "thread.workspace": "primary" },
   extra: Readonly<Record<string, Handler>> = {},
 ) => {
-  const api = stubApi(buildController([INSTANCE_A], user, buildWorldRoutes(extra)));
+  const api = stubApi(buildController([ACCOUNT_A], user, buildWorldRoutes(extra)));
   const app = await renderApp({
     path,
     api: api.fetch,
@@ -1799,12 +1799,12 @@ describe("Composer: the workspace selector", () => {
 
   it("checks the clone on the machine the draft would be placed on, not on the picked one", async () => {
     const user = userEvent.setup();
-    // `INSTANCE_FRESH` is on no machine, so no runner row is selectable and
+    // `ACCOUNT_FRESH` is on no machine, so no runner row is selectable and
     // the draft picks no runner. The draft would still be placed on moss,
     // which holds webshop's main workspace. The menu must check moss;
     // otherwise it would say the repo is not cloned on a machine the user
     // never saw.
-    const api = stubApi(buildController([INSTANCE_FRESH], {}, buildWorldRoutes()));
+    const api = stubApi(buildController([ACCOUNT_FRESH], {}, buildWorldRoutes()));
     await renderApp({
       path: buildProjectDraftPath(WEBSHOP.id),
       api: api.fetch,
@@ -1914,7 +1914,7 @@ describe("Composer: the workspace selector", () => {
     );
     expect(spawn?.body).toEqual({
       prompt: "Fix the login bug",
-      instanceId: INSTANCE_A.id,
+      providerAccountId: ACCOUNT_A.id,
       model: "claude-sonnet-5",
       accessMode: "approval-required",
       runnerId: RUNNER.id,
@@ -2300,7 +2300,7 @@ describe("The New project dialog", () => {
 });
 
 /** A model that takes no images, as pi reports a text-only model. */
-const INSTANCE_TEXT_ONLY = buildProviderInstance(
+const ACCOUNT_TEXT_ONLY = buildProviderAccount(
   "01a06d02-1000-7000-8000-000000000004",
   "pi/pi",
   "pi",
@@ -2336,7 +2336,7 @@ describe("Composer: images", () => {
     const user = userEvent.setup();
     let finishSecond: (() => void) | undefined;
     const { api, router } = await openApp(
-      [INSTANCE_A],
+      [ACCOUNT_A],
       {},
       {
         "POST /api/v1/attachments": (call) =>
@@ -2384,7 +2384,7 @@ describe("Composer: images", () => {
     const user = userEvent.setup();
     let attempts = 0;
     await openApp(
-      [INSTANCE_A],
+      [ACCOUNT_A],
       {},
       {
         "POST /api/v1/attachments": () => {
@@ -2416,7 +2416,7 @@ describe("Composer: images", () => {
   it("marks the image the controller swept when a send refuses it as expired", async () => {
     const user = userEvent.setup();
     await openApp(
-      [INSTANCE_A],
+      [ACCOUNT_A],
       {},
       {
         "POST /api/v1/attachments": { status: 201, body: buildUploaded("old.png", 1) },
@@ -2450,7 +2450,7 @@ describe("Composer: images", () => {
   });
 
   it("refuses images for a model that does not accept them, and says why", async () => {
-    const { api } = await openApp([INSTANCE_TEXT_ONLY]);
+    const { api } = await openApp([ACCOUNT_TEXT_ONLY]);
 
     const attach = await screen.findByRole<HTMLButtonElement>("button", { name: "Attach images" });
     await waitFor(() => {
@@ -2468,7 +2468,7 @@ describe("Composer: images", () => {
   });
 
   it("shows the drop target while files are dragged over the card, and refuses a file that is not an image", async () => {
-    await openApp([INSTANCE_A]);
+    await openApp([ACCOUNT_A]);
     const box = screen.getByRole("textbox");
     const dataTransfer = { types: ["Files"], files: [buildImage("notes.txt", "text/plain")] };
 

@@ -11,10 +11,12 @@ import { describe, expect, it } from "vitest";
 import type { Runner, Session } from "@hercule/contract";
 import {
   BARE,
-  buildInstance,
+  buildProviderAccount,
   buildSnapshot,
-  CLAUDE_CODE_IDENTITY,
-  CODEX_IDENTITY,
+  ANTHROPIC_IDENTITY,
+  OPENAI_IDENTITY,
+  HARNESSES,
+  PROVIDERS,
 } from "../providers.testing";
 import { addFilesToShelf, markShelfItemUploaded } from "../attachments/shelf";
 import type { MessageDraft, ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
@@ -23,7 +25,13 @@ import { buildSubmission } from "./submission";
 import { applyThreadChoice } from "./thread-choice";
 import { WEBSHOP, WEBSHOP_PROJECT } from "./workspaces.testing";
 
-const NO_CATALOGS: ThreadCatalogs = { instances: [], runners: [], thisMacRunnerId: null };
+const NO_CATALOGS: ThreadCatalogs = {
+  accounts: [],
+  runners: [],
+  thisMacRunnerId: null,
+  providers: PROVIDERS,
+  harnesses: HARNESSES,
+};
 
 /** Returns the spawn request for a draft that starts from `config` and holds `picks`. */
 const buildDraftSubmission = (
@@ -42,7 +50,8 @@ const buildInputSubmission = (
 ) => buildSubmission(resolveThreadConfig(catalogs, { kind: "active", session }, picks), message);
 
 const CONFIG: ThreadConfig = {
-  instanceId: "instance-claude-code",
+  providerAccountId: "account-anthropic",
+  harnessId: null,
   model: "claude-sonnet-5",
   accessMode: "approval-required",
   runnerId: "r-local",
@@ -64,7 +73,8 @@ const SESSION: Session = {
   conversationId: null,
   runId: null,
   stepId: null,
-  instanceId: "instance-claude-code",
+  providerAccountId: "account-anthropic",
+  harnessId: "claude-code/claude-code",
   runnerId: "r-local",
   workspaceId: null,
   projectId: null,
@@ -105,14 +115,16 @@ const SONNET = {
   ],
 };
 const OPUS = { ...SONNET, slug: "claude-opus-5", name: "Claude Opus 5", isDefault: false };
-const CLAUDE = buildInstance(CLAUDE_CODE_IDENTITY, [
+const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [
   buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS] }),
   buildSnapshot({ runnerId: REMOTE.id, models: [SONNET, OPUS] }),
 ]);
 const CATALOGS: ThreadCatalogs = {
-  instances: [CLAUDE],
+  accounts: [CLAUDE],
   runners: [LOCAL, REMOTE],
   thisMacRunnerId: LOCAL.id,
+  providers: PROVIDERS,
+  harnesses: HARNESSES,
 };
 
 describe("buildSubmission: a draft thread", () => {
@@ -121,7 +133,7 @@ describe("buildSubmission: a draft thread", () => {
       kind: "spawn",
       input: {
         prompt: "ship it",
-        instanceId: "instance-claude-code",
+        providerAccountId: "account-anthropic",
         model: "claude-sonnet-5",
         options: {},
         accessMode: "approval-required",
@@ -131,33 +143,43 @@ describe("buildSubmission: a draft thread", () => {
     });
   });
 
+  it("sends the harness the draft names, and leaves it out while the account's default applies", () => {
+    const named = buildDraftSubmission(CATALOGS, { ...CONFIG, harnessId: "pi/pi" }, {}, MESSAGE);
+    expect(named).toMatchObject({
+      input: { providerAccountId: "account-anthropic", harnessId: "pi/pi" },
+    });
+
+    const unnamed = buildDraftSubmission(CATALOGS, CONFIG, {}, MESSAGE);
+    expect(unnamed.kind === "spawn" && "harnessId" in unnamed.input).toBe(false);
+  });
+
   it("sends the default runner and model of the account picked, not the draft's own", () => {
     // The draft runs Claude on the local runner. Codex is logged in on the
     // remote runner only, and the picks hold the account alone.
-    const codex = buildInstance(CODEX_IDENTITY, [
+    const codex = buildProviderAccount(OPENAI_IDENTITY, [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
       buildSnapshot({
         runnerId: REMOTE.id,
         models: [{ slug: "gpt-5", name: "GPT-5", imageInput: { maxBytes: null }, options: [] }],
       }),
     ]);
-    const catalogs = { ...CATALOGS, instances: [CLAUDE, codex] };
+    const catalogs = { ...CATALOGS, accounts: [CLAUDE, codex] };
 
     expect(
       buildDraftSubmission(
         catalogs,
         CONFIG,
-        applyThreadChoice({}, { kind: "account", instanceId: codex.id }),
+        applyThreadChoice({}, { kind: "account", providerAccountId: codex.id }),
         MESSAGE,
       ),
     ).toMatchObject({
-      input: { instanceId: codex.id, model: "gpt-5", runnerId: "r-remote", options: {} },
+      input: { providerAccountId: codex.id, model: "gpt-5", runnerId: "r-remote", options: {} },
     });
   });
 
   it("sends what the user picked: model, options, access mode and runner", () => {
     const picks = [
-      { kind: "model", instanceId: CLAUDE.id, model: OPUS.slug },
+      { kind: "model", providerAccountId: CLAUDE.id, model: OPUS.slug },
       { kind: "option", id: "effort", value: "high" },
       { kind: "accessMode", value: "full-access" },
       { kind: "runner", runnerId: REMOTE.id },
@@ -165,7 +187,7 @@ describe("buildSubmission: a draft thread", () => {
     expect(
       buildDraftSubmission(
         CATALOGS,
-        { ...CONFIG, instanceId: CLAUDE.id },
+        { ...CONFIG, providerAccountId: CLAUDE.id },
         picks.reduce(applyThreadChoice, {} as ThreadPicks),
         MESSAGE,
       ),
@@ -173,7 +195,7 @@ describe("buildSubmission: a draft thread", () => {
       kind: "spawn",
       input: {
         prompt: "ship it",
-        instanceId: CLAUDE.id,
+        providerAccountId: CLAUDE.id,
         model: OPUS.slug,
         options: { effort: "high" },
         accessMode: "full-access",
@@ -185,7 +207,7 @@ describe("buildSubmission: a draft thread", () => {
 });
 
 describe("buildSubmission: an active thread", () => {
-  const session: Session = { ...SESSION, instanceId: CLAUDE.id, runnerId: LOCAL.id };
+  const session: Session = { ...SESSION, providerAccountId: CLAUDE.id, runnerId: LOCAL.id };
 
   it("sends the text alone when nothing was picked", () => {
     expect(buildInputSubmission(CATALOGS, session, {}, MESSAGE)).toEqual({
@@ -268,7 +290,7 @@ describe("buildSubmission: the project and the workspace", () => {
       kind: "spawn",
       input: {
         prompt: "ship it",
-        instanceId: "instance-claude-code",
+        providerAccountId: "account-anthropic",
         model: "claude-sonnet-5",
         options: {},
         accessMode: "approval-required",

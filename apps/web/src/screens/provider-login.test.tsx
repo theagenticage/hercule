@@ -21,16 +21,16 @@ import { expectInDocumentOrder, readPageText, stubApi, type Handler } from "../a
 
 const BASE = "http://controller.test";
 
-const INSTANCE = "01a06d02-1000-7000-8000-000000000001";
+const ACCOUNT = "01a06d02-1000-7000-8000-000000000001";
 const RUNNER = "01a06d02-1000-7000-8000-0000000000aa";
 
 const PASTE_URL = "https://claude.ai/oauth/authorize?code=challenge";
 const DEVICE_URL = "https://auth.openai.com/codex/device";
 const USER_CODE = "CH61-0FI2N";
 
-const LOGIN = `POST /api/v1/providers/${INSTANCE}/login`;
-const LOGIN_CODE = `POST /api/v1/providers/${INSTANCE}/login-code`;
-const PROVIDERS = "GET /api/v1/providers";
+const LOGIN = `POST /api/v1/provider-accounts/${ACCOUNT}/sign-in`;
+const LOGIN_CODE = `POST /api/v1/provider-accounts/${ACCOUNT}/sign-in-code`;
+const PROVIDERS = "GET /api/v1/provider-accounts";
 
 /** The probe result the login code endpoint returns; the drawer only needs it to be valid. */
 const SNAPSHOT = {
@@ -47,7 +47,7 @@ const listSentCodes = (api: ReturnType<typeof stubApi>) =>
 
 /** Returns the Codex instance as the controller lists it, with `snapshot` as its only snapshot. */
 const buildCodex = (snapshot: object) => ({
-  id: INSTANCE,
+  id: ACCOUNT,
   harnessId: "codex/codex",
   name: "Codex",
   config: {},
@@ -110,7 +110,7 @@ const buildFakeLive = (): { live: Live; announce: (keys: readonly LiveQueryKey[]
 const openLoginPanel = async (handlers: Readonly<Record<string, Handler>>) => {
   const api = stubApi(handlers);
   const { live, announce } = buildFakeLive();
-  const onLoggedIn = vi.fn();
+  const onSignedIn = vi.fn();
   const user = userEvent.setup();
   render(
     <QueryClientProvider
@@ -119,16 +119,16 @@ const openLoginPanel = async (handlers: Readonly<Record<string, Handler>>) => {
       <ProviderLogin
         client={createClient({ baseUrl: BASE, fetch: api.fetch, token: "held" })}
         live={live}
-        instanceId={INSTANCE}
+        providerAccountId={ACCOUNT}
         runnerId={RUNNER}
         subject="Codex on moss"
         label="Log in"
-        onLoggedIn={onLoggedIn}
+        onSignedIn={onSignedIn}
       />
     </QueryClientProvider>,
   );
   await user.click(screen.getByRole("button", { name: "Log in" }));
-  return { api, user, onLoggedIn, announce };
+  return { api, user, onSignedIn, announce };
 };
 
 /** Returns the instant a code expires, `minutesFromNow` minutes from now; negative is in the past. */
@@ -153,7 +153,7 @@ const stubProviders = (before: object = LOGGED_OUT): { handler: Handler; loggedI
 describe("a login with a one-time code from the vendor", () => {
   it("shows the code, asks for no input, and closes once a fresh snapshot is logged in", async () => {
     const providers = stubProviders();
-    const { api, onLoggedIn, announce } = await openLoginPanel({
+    const { api, onSignedIn, announce } = await openLoginPanel({
       [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(15) } },
       [LOGIN_CODE]: { body: SNAPSHOT },
       [PROVIDERS]: providers.handler,
@@ -184,7 +184,7 @@ describe("a login with a one-time code from the vendor", () => {
     });
     expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
     expect(listSentCodes(api)).toEqual([]);
-    expect(onLoggedIn).not.toHaveBeenCalled();
+    expect(onSignedIn).not.toHaveBeenCalled();
 
     // An announcement while the harness is still logged out keeps the drawer open.
     const countProviderReads = () =>
@@ -205,7 +205,7 @@ describe("a login with a one-time code from the vendor", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
-    expect(onLoggedIn).toHaveBeenCalledTimes(1);
+    expect(onSignedIn).toHaveBeenCalledTimes(1);
     expect(listSentCodes(api)).toEqual([]);
   });
 
@@ -240,7 +240,7 @@ describe("a login with a one-time code from the vendor", () => {
     // Logged in before the login started: the old credential still checks as
     // logged in, so a fresh snapshot that says so proves nothing.
     const providers = stubProviders(SNAPSHOT);
-    const { onLoggedIn, announce } = await openLoginPanel({
+    const { onSignedIn, announce } = await openLoginPanel({
       [LOGIN]: { body: { url: DEVICE_URL, userCode: USER_CODE, expiresAt: buildExpiresAt(15) } },
       [PROVIDERS]: providers.handler,
     });
@@ -258,7 +258,7 @@ describe("a login with a one-time code from the vendor", () => {
       expect(screen.getByRole("status").textContent).toContain("Close this once you have.");
     });
     expect(screen.getByRole("dialog")).toBeDefined();
-    expect(onLoggedIn).not.toHaveBeenCalled();
+    expect(onSignedIn).not.toHaveBeenCalled();
   });
 
   it("says the code expired and offers to start again", async () => {

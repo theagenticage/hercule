@@ -2,7 +2,7 @@ import { Fragment, type JSX, type ReactNode } from "react";
 import {
   describeAccountRow,
   describeModelRow,
-  type LoginTarget,
+  type SignInTarget,
   type ModelMenu,
 } from "@hercule/client-core";
 import { HarnessLogo } from "@hercule/ui";
@@ -10,8 +10,8 @@ import { Lane, renderMarker, MenuRow } from "./menu";
 
 type Row = ModelMenu["current"]["rows"][number];
 
-/** Classes that make the Log in on an account's row look like the row's note, not a button. */
-const ROW_LOGIN =
+/** Classes that make the Sign in on an account's row look like the row's note, not a button. */
+const ROW_SIGN_IN =
   "p-0 text-[11px] leading-normal font-normal text-muted enabled:hover:bg-transparent";
 
 /**
@@ -27,26 +27,26 @@ export function ModelList({
   older,
   onOlder,
   onPickModel,
-  onPickInstance,
-  loginSlot,
+  onPickAccount,
+  signInSlot,
 }: {
   readonly menu: ModelMenu;
   readonly older: boolean;
   readonly onOlder: () => void;
-  readonly onPickModel: (instanceId: string, model: string) => void;
-  readonly onPickInstance: (instanceId: string) => void;
-  readonly loginSlot: (login: LoginTarget, className: string) => ReactNode;
+  readonly onPickModel: (providerAccountId: string, model: string) => void;
+  readonly onPickAccount: (providerAccountId: string) => void;
+  readonly signInSlot: (target: SignInTarget, className: string) => ReactNode;
 }): JSX.Element {
   const renderModelRow = (harnessId: string | null, row: Row): JSX.Element => (
     <MenuRow
-      key={`${row.instanceId}:${row.slug}`}
+      key={`${row.providerAccountId}:${row.slug}`}
       marker={renderMarker(harnessId === null ? null : <HarnessLogo harnessId={harnessId} />)}
       name={row.name}
       detail={describeModelRow(row)}
       note={row.current ? "✓" : undefined}
       current={row.current}
       onPick={() => {
-        onPickModel(row.instanceId, row.slug);
+        onPickModel(row.providerAccountId, row.slug);
       }}
     />
   );
@@ -56,13 +56,13 @@ export function ModelList({
       {menu.recent.length === 0 ? null : <Lane label="Recent" />}
       {menu.recent.map((row) => (
         <MenuRow
-          key={`recent:${row.instanceId}:${row.model}`}
+          key={`recent:${row.providerAccountId}:${row.model}`}
           marker={renderMarker(<HarnessLogo harnessId={row.harnessId} />)}
           name={row.name}
           detail={row.account}
           dimmed={row.dimmed}
           onPick={() => {
-            onPickModel(row.instanceId, row.model);
+            onPickModel(row.providerAccountId, row.model);
           }}
         />
       ))}
@@ -77,25 +77,25 @@ export function ModelList({
           onPick={onOlder}
         />
       )}
-      {menu.others.map((instance) =>
-        instance.dimmed !== null || instance.rows.length === 0 ? (
+      {menu.others.map((account) =>
+        account.dimmed !== null || account.rows.length === 0 ? (
           <MenuRow
-            key={instance.instanceId}
+            key={account.providerAccountId}
             className="mt-1 rounded-t-none border-t border-line-soft pt-[9px]"
-            marker={renderMarker(<HarnessLogo harnessId={instance.harnessId} />)}
-            name={instance.name}
-            detail={describeAccountRow(instance)}
-            note={instance.dimmed === null ? `${instance.models} ›` : undefined}
-            dimmed={instance.dimmed}
-            trailing={instance.login === null ? null : loginSlot(instance.login, ROW_LOGIN)}
+            marker={renderMarker(<HarnessLogo harnessId={account.harnessId} />)}
+            name={account.name}
+            detail={describeAccountRow(account)}
+            note={account.dimmed === null ? `${account.models} ›` : undefined}
+            dimmed={account.dimmed}
+            trailing={account.signIn === null ? null : signInSlot(account.signIn, ROW_SIGN_IN)}
             onPick={() => {
-              onPickInstance(instance.instanceId);
+              onPickAccount(account.providerAccountId);
             }}
           />
         ) : (
-          <Fragment key={instance.instanceId}>
-            <Lane label={instance.name} />
-            {instance.rows.map((row) => renderModelRow(instance.harnessId, row))}
+          <Fragment key={account.providerAccountId}>
+            <Lane label={account.name} />
+            {account.rows.map((row) => renderModelRow(account.harnessId, row))}
           </Fragment>
         ),
       )}

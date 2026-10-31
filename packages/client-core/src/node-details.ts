@@ -13,7 +13,7 @@
 import {
   isSchedule,
   type Agent,
-  type ProviderInstance,
+  type ProviderAccount,
   type Run,
   type Session,
   type StepRecord,
@@ -148,12 +148,12 @@ export interface NodeCardReads {
   readonly triggers: ReadonlyArray<Trigger>;
   /** The Agents, which name an agent step's Agent, and give its model and access mode when the step sets none. */
   readonly agents: ReadonlyArray<
-    Pick<Agent, "id" | "name" | "instanceId" | "accessMode" | "model">
+    Pick<Agent, "id" | "name" | "providerAccountId" | "harnessId" | "accessMode" | "model">
   >;
   /** The workflow actions, which name an action step's action. */
   readonly actions: ReadonlyArray<Pick<WorkflowAction, "id" | "displayName">>;
-  /** The provider instances, whose catalogs name each model. */
-  readonly instances: ReadonlyArray<ProviderInstance>;
+  /** The Provider Accounts, whose catalogs name each model. */
+  readonly accounts: ReadonlyArray<ProviderAccount>;
   /**
    * The workflow, or `undefined` while it is not read yet or after it was
    * deleted. The triggers of a disabled or invalid workflow do not fire, so
@@ -225,10 +225,11 @@ const formatParam = (value: unknown): string =>
  */
 const listAgentStepFacts = (
   step: Extract<Step, { kind: "agent" }>,
-  { agents, instances }: NodeCardReads,
+  { agents, accounts }: NodeCardReads,
 ): ReadonlyArray<NodeFact> => {
   const agent = agents.find((each) => each.id === step.agent);
-  const instance = instances.find((each) => each.id === agent?.instanceId);
+  const account = accounts.find((each) => each.id === agent?.providerAccountId);
+  const harnessId = agent?.harnessId ?? account?.defaultHarnessId ?? "";
   const model = step.model ?? agent?.model?.model;
   const accessMode = step.accessMode ?? agent?.accessMode;
   const outputFields = describeOutputFields(step.outputSchema);
@@ -241,7 +242,7 @@ const listAgentStepFacts = (
       : [
           buildFact(
             "Model",
-            markFromAgent(findModelName(instance, model), step.model !== undefined),
+            markFromAgent(findModelName(account, harnessId, model), step.model !== undefined),
           ),
         ]),
     ...(accessMode === undefined
@@ -553,14 +554,14 @@ const describeSessionCost = (sessions: ReadonlyArray<Session>): string | undefin
  */
 const listSessionFacts = (
   sessions: ReadonlyArray<Session>,
-  instances: ReadonlyArray<ProviderInstance>,
+  accounts: ReadonlyArray<ProviderAccount>,
 ): ReadonlyArray<NodeFact> => {
   const newest = sessions.at(-1);
   if (newest === undefined) return [];
-  const instance = instances.find((each) => each.id === newest.instanceId);
+  const account = accounts.find((each) => each.id === newest.providerAccountId);
   const cost = describeSessionCost(sessions);
   return [
-    buildFact("Model", findModelName(instance, newest.modelSelection.model)),
+    buildFact("Model", findModelName(account, newest.harnessId, newest.modelSelection.model)),
     buildFact("Tokens", describeSessionTokens(sessions)),
     buildFact("Tool calls", String(sessions.reduce((sum, session) => sum + session.toolCalls, 0))),
     ...(cost === undefined ? [] : [buildFact("Cost", cost)]),
@@ -637,7 +638,7 @@ export const buildRunNodeCard = (nodeId: string, reads: RunNodeCardReads): NodeC
     firesOn: null,
     facts: [
       ...(current === undefined ? [] : listVisitFacts(current)),
-      ...(step.kind === "agent" ? listSessionFacts(stepSessions, reads.instances) : []),
+      ...(step.kind === "agent" ? listSessionFacts(stepSessions, reads.accounts) : []),
     ],
     texts: listStepTexts(step),
     run: {

@@ -12,17 +12,17 @@ import {
   type DeviceLogin,
   type HerculeClient,
   type Live,
-  type SecretFieldOffer,
+  type CredentialFieldOffer,
   readErrorMessage,
 } from "@hercule/client-core";
 import { useLiveInvalidation } from "../app/live-invalidation";
-import { providersQuery } from "../app/queries";
+import { providerAccountsQuery } from "../app/queries";
 import { copyText } from "./clipboard";
 import { DeviceCode } from "./device-code";
 
 /**
- * The Log in button for a provider, with the drawer that walks the user
- * through the vendor's browser login. It lives in `screens/` because
+ * The Sign in button for a Provider Account, with the drawer that walks the
+ * user through the vendor's browser login. It lives in `screens/` because
  * Sessions and the runner page both offer this exact action.
  *
  * The login URL is shown rather than opened: the machine running the harness
@@ -37,53 +37,53 @@ import { DeviceCode } from "./device-code";
  * - One-time code: the vendor printed a code, the user enters it in the
  *   browser, and the browser completes the login with the vendor. Hercule has
  *   nothing to send. When the vendor's login ends, the controller probes the
- *   instance again and announces the new snapshot, and the drawer closes by
- *   itself once that snapshot shows the harness logged in. When the user
- *   logs in again, the harness was logged in before the login started, so no
+ *   account again and announces the new snapshot, and the drawer closes by
+ *   itself once that snapshot shows the account signed in. When the user
+ *   signs in again, the account was signed in before the login started, so no
  *   snapshot shows that the login ended: the drawer stays open until the
  *   user closes it.
  */
 export function ProviderLogin({
   client,
   live,
-  instanceId,
+  providerAccountId,
   runnerId,
   subject,
   label,
   variant = "quiet",
   className,
-  onLoggedIn,
+  onSignedIn,
 }: {
   readonly className?: string;
   readonly client: HerculeClient;
-  /** Delivers the instance's new snapshots, which end a device login. */
+  /** Delivers the account's new snapshots, which end a device login. */
   readonly live: Live;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
   /** The machine the credential is stored on, and the only one it works on. */
   readonly runnerId: string;
-  /** What is being logged in and on which machine, such as "Claude Code on moss". */
+  /** What is being signed in and on which machine, such as "Anthropic on moss". */
   readonly subject: string;
   readonly label: string;
   readonly variant?: ButtonVariant;
-  readonly onLoggedIn: () => void;
+  readonly onSignedIn: () => void;
 }): JSX.Element {
   const codeField = useId();
   const [code, setCode] = useState("");
 
   const start = useMutation({
-    mutationFn: () => startProviderLogin(client, instanceId, runnerId),
+    mutationFn: () => startProviderLogin(client, providerAccountId, runnerId),
   });
   const submit = useMutation({
     mutationFn: () =>
-      client.provider.submitLoginCode({
-        params: { id: instanceId },
+      client.providerAccount.submitSignInCode({
+        params: { id: providerAccountId },
         // A pasted code often has a stray space or newline, and the vendor
         // would treat it as a different code.
         payload: { runnerId, code: code.trim() },
       }),
     onSuccess: () => {
       close();
-      onLoggedIn();
+      onSignedIn();
     },
   });
 
@@ -95,12 +95,12 @@ export function ProviderLogin({
   };
 
   /**
-   * Finishes a device login once a fresh snapshot shows the harness
-   * logged in: closes the drawer and notifies the caller.
+   * Finishes a device login once a fresh snapshot shows the account
+   * signed in: closes the drawer and notifies the caller.
    */
   const finishLogin = (): void => {
     close();
-    onLoggedIn();
+    onSignedIn();
   };
 
   const url = start.data?.url;
@@ -127,7 +127,7 @@ export function ProviderLogin({
         </p>
       )}
 
-      <Drawer open={url !== undefined} onClose={close} title={`Log in to ${subject}`}>
+      <Drawer open={url !== undefined} onClose={close} title={`Sign in to ${subject}`}>
         <div className="flex flex-col gap-3.5">
           <p className="text-row text-muted">
             {deviceLogin === null
@@ -197,11 +197,11 @@ export function ProviderLogin({
             <>
               <DeviceCode code={deviceLogin.userCode} />
               <p className="text-fine text-muted">
-                If the code does not work, log in on the machine itself: forward its login port with{" "}
+                If the code does not work, sign in on the machine itself: forward its login port with{" "}
                 <code className="font-mono text-ink">ssh -L 1455:localhost:1455</code> and run{" "}
                 <code className="font-mono text-ink">codex login</code> over that connection, or
                 copy an authorized <code className="font-mono text-ink">auth.json</code> into the
-                instance&apos;s <code className="font-mono text-ink">$CODEX_HOME</code>.
+                account&apos;s <code className="font-mono text-ink">$CODEX_HOME</code>.
               </p>
               <DeviceLoginWait
                 client={client}
@@ -227,10 +227,10 @@ export function ProviderLogin({
 
 /**
  * The end of a device login: waits until a fresh snapshot shows the
- * harness logged in, then calls `onDone` once, or shows that the code
- * expired. A login of a harness that was logged in already never calls
+ * account signed in, then calls `onDone` once, or shows that the code
+ * expired. A login of an account that was signed in already never calls
  * `onDone`, and the line asks the user to close the drawer instead. It keeps
- * the instances current through the live connection while it is on screen,
+ * the accounts current through the live connection while it is on screen,
  * because the screen that hosts the login may not.
  */
 function DeviceLoginWait({
@@ -248,10 +248,10 @@ function DeviceLoginWait({
 }): JSX.Element {
   const queryClient = useQueryClient();
   useLiveInvalidation(live, queryClient, "provider");
-  const instances = useQuery(providersQuery(client)).data ?? [];
+  const accounts = useQuery(providerAccountsQuery(client)).data ?? [];
   const [now, setNow] = useState(() => Date.now());
   const minutesLeft = login.expiresAt === undefined ? null : countMinutesLeft(login.expiresAt, now);
-  const step = decideDeviceLoginStep(login, instances, minutesLeft);
+  const step = decideDeviceLoginStep(login, accounts, minutesLeft);
 
   // Draws the line again each time the code loses a minute.
   useEffect(() => {
@@ -275,7 +275,7 @@ function DeviceLoginWait({
     return (
       <>
         <p className="text-row text-fail" role="alert">
-          The code expired before the login finished.
+          The code expired before the sign-in finished.
         </p>
         <div className="-ml-2">
           <Button variant="primary" onClick={onRestart}>
@@ -289,7 +289,7 @@ function DeviceLoginWait({
   return (
     <p className="text-row text-muted" role="status">
       {step.kind === "done"
-        ? "Logged in."
+        ? "Signed in."
         : `${describeDeviceLoginWait(step)} ${step.endsByItself ? "This closes by itself once you have." : "Close this once you have."}`}
     </p>
   );
@@ -304,20 +304,20 @@ const parseSiteHost = (url: string | undefined): string => {
 };
 
 /**
- * The other way to log in: for a provider whose credential is typed in,
+ * The other way to sign in: for an account whose credential is typed in,
  * such as an API key, rather than obtained through a vendor's browser login.
- * The plugin defines the field: its title is the drawer's title and the
- * input's label, and its description explains where to get the credential. So
- * this component does not know which provider it serves.
+ * The account's kind defines the field: its label is the drawer's title and
+ * the input's label, and its help text explains where to get the credential.
+ * So this component does not know which provider it serves.
  *
- * The value is stored as a secret owned by the provider instance and is never
- * read back: the drawer can replace the stored value, never show it. The
- * caller is notified after saving, because the screen keeps showing the
- * credential as missing until the machine has been asked about it again.
+ * The value is sent with `providerAccount.update` and is never read back: the
+ * drawer can replace the stored value, never show it. The caller is notified
+ * after saving, because the screen keeps showing the credential as missing
+ * until the machine has been asked about it again.
  */
 export function ProviderKeyEntry({
   client,
-  instanceId,
+  providerAccountId,
   field,
   variant = "quiet",
   className,
@@ -325,8 +325,8 @@ export function ProviderKeyEntry({
 }: {
   readonly className?: string;
   readonly client: HerculeClient;
-  readonly instanceId: string;
-  readonly field: SecretFieldOffer;
+  readonly providerAccountId: string;
+  readonly field: CredentialFieldOffer;
   readonly variant?: ButtonVariant;
   readonly onSaved: () => void;
 }): JSX.Element {
@@ -344,17 +344,17 @@ export function ProviderKeyEntry({
 
   const save = useMutation({
     mutationFn: () =>
-      client.secret.set({
-        params: { ownerKind: "provider-instance", ownerId: instanceId, name: field.name },
+      client.providerAccount.update({
+        params: { id: providerAccountId },
         // A pasted credential often has a stray space or newline, and the
         // vendor would treat it as a different credential.
-        payload: { value: value.trim() },
+        payload: { credentials: { [field.name]: value.trim() } },
       }),
     onSuccess: () => {
       close();
-      // Refresh the providers before notifying the caller: the value is stored,
+      // Refresh the accounts before notifying the caller: the value is stored,
       // so the row should show it even if the machine cannot be reached.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() });
       onSaved();
     },
   });

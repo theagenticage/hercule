@@ -1,26 +1,26 @@
 /**
  * Tests `computeThreadDefaults`, the rule the composer and Settings > Threads
- * both use to prefill a new thread, `computeInstanceDefaults`, which resolves
+ * both use to prefill a new thread, `computeAccountDefaults`, which resolves
  * the runner first and then the model, and `buildDraftConfig`, which places
  * those defaults in a Draft Thread's project. The tests check that:
  *
  * - a stored setting always wins;
- * - a stale instance id falls back to the default instance;
+ * - a stale account id falls back to the default account;
  * - the model is read from the runner the thread would actually be placed on;
  * - nothing picked is `null`, never an empty string.
  */
 import { describe, expect, it } from "vitest";
-import type { Profile, ProviderInstance, Runner, SettingsState } from "@hercule/contract";
+import type { Profile, ProviderAccount, Runner, SettingsState } from "@hercule/contract";
 import {
   BARE,
-  buildInstance,
+  buildProviderAccount,
   buildSnapshot,
-  CLAUDE_CODE_IDENTITY,
-  CODEX_IDENTITY,
+  ANTHROPIC_IDENTITY,
+  OPENAI_IDENTITY,
 } from "../providers.testing";
 import {
   buildDraftConfig,
-  computeInstanceDefaults,
+  computeAccountDefaults,
   computeThreadDefaults,
   findDefaultModel,
 } from "./thread-defaults";
@@ -45,11 +45,11 @@ const buildProfile = (id: string, name: string): Profile => ({
 const UNRESTRICTED = buildProfile("p-unrestricted", "unrestricted");
 const WORKER = buildProfile("p-worker", "worker");
 
-/** Returns an instance logged in on `runnerId`, with the given models. */
+/** Returns a snapshot signed in on `runnerId`, with the given models. */
 const buildSnapshotOn = (
   runnerId: string,
-  models: ProviderInstance["snapshots"][number]["models"],
-): ProviderInstance["snapshots"][number] => buildSnapshot({ runnerId, models });
+  models: ProviderAccount["snapshots"][number]["models"],
+): ProviderAccount["snapshots"][number] => buildSnapshot({ runnerId, models });
 
 const SONNET = {
   slug: "claude-sonnet-5",
@@ -70,61 +70,73 @@ const NO_SETTINGS: SettingsState["user"] = {};
 
 describe("findDefaultModel", () => {
   it("returns null when no runner is given, rather than reading the first snapshot", () => {
-    const claude = buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshotOn(LOCAL.id, [SONNET])]);
+    const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshotOn(LOCAL.id, [SONNET])]);
 
-    expect(findDefaultModel(claude, null)).toBeNull();
+    expect(findDefaultModel(claude, ANTHROPIC_IDENTITY.harnessId, null)).toBeNull();
   });
 });
 
-describe("computeInstanceDefaults", () => {
+describe("computeAccountDefaults", () => {
   it("resolves the runner first and reads the model from that runner's catalog", () => {
     // The local runner is not logged in, so the thread is placed on the remote
     // runner, and the model must come from that runner's catalog, not from
     // whichever snapshot happens to be first.
-    const claude = buildInstance(CLAUDE_CODE_IDENTITY, [
+    const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [SONNET] }),
       buildSnapshotOn(REMOTE.id, [HAIKU]),
     ]);
 
-    expect(computeInstanceDefaults(claude, [LOCAL, REMOTE], LOCAL.id)).toEqual({
+    expect(
+      computeAccountDefaults(claude, ANTHROPIC_IDENTITY.harnessId, [LOCAL, REMOTE], LOCAL.id),
+    ).toEqual({
       runnerId: REMOTE.id,
       model: "claude-haiku-5",
     });
   });
 
   it("prefers the local runner and the catalog's default model", () => {
-    const claude = buildInstance(CLAUDE_CODE_IDENTITY, [
+    const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [
       buildSnapshotOn(REMOTE.id, [HAIKU]),
       buildSnapshotOn(LOCAL.id, [OPUS, SONNET]),
     ]);
 
-    expect(computeInstanceDefaults(claude, [LOCAL, REMOTE], LOCAL.id)).toEqual({
+    expect(
+      computeAccountDefaults(claude, ANTHROPIC_IDENTITY.harnessId, [LOCAL, REMOTE], LOCAL.id),
+    ).toEqual({
       runnerId: LOCAL.id,
       model: "claude-sonnet-5",
     });
   });
 
   it("falls back to the catalog's first model when none is marked default", () => {
-    const claude = buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshotOn(LOCAL.id, [OPUS, HAIKU])]);
+    const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [
+      buildSnapshotOn(LOCAL.id, [OPUS, HAIKU]),
+    ]);
 
-    expect(computeInstanceDefaults(claude, [LOCAL], LOCAL.id).model).toBe("claude-opus-5");
+    expect(
+      computeAccountDefaults(claude, ANTHROPIC_IDENTITY.harnessId, [LOCAL], LOCAL.id).model,
+    ).toBe("claude-opus-5");
   });
 
-  it("has no runner and no model when no runner is logged in to the instance", () => {
-    const claude = buildInstance(CLAUDE_CODE_IDENTITY, [
+  it("has no runner and no model when no runner is signed in to the account", () => {
+    const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [SONNET] }),
     ]);
 
-    expect(computeInstanceDefaults(claude, [LOCAL], LOCAL.id)).toEqual({
-      runnerId: null,
-      model: null,
-    });
+    expect(computeAccountDefaults(claude, ANTHROPIC_IDENTITY.harnessId, [LOCAL], LOCAL.id)).toEqual(
+      {
+        runnerId: null,
+        model: null,
+      },
+    );
   });
 });
 
 describe("computeThreadDefaults", () => {
-  const claude = buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshotOn(LOCAL.id, [SONNET, OPUS])]);
-  const codex = buildInstance(CODEX_IDENTITY, [buildSnapshotOn(LOCAL.id, [HAIKU])]);
+  const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [
+    buildSnapshotOn(LOCAL.id, [SONNET, OPUS]),
+  ]);
+  const codex = buildProviderAccount(OPENAI_IDENTITY, [buildSnapshotOn(LOCAL.id, [HAIKU])]);
 
   it("prefills from the built-in defaults when no thread setting is stored", () => {
     expect(
@@ -136,7 +148,8 @@ describe("computeThreadDefaults", () => {
         LOCAL.id,
       ),
     ).toEqual({
-      instanceId: claude.id,
+      providerAccountId: claude.id,
+      harnessId: null,
       model: "claude-sonnet-5",
       accessMode: "approval-required",
       runnerId: LOCAL.id,
@@ -146,7 +159,8 @@ describe("computeThreadDefaults", () => {
 
   it("lets every stored thread setting win over the default", () => {
     const stored: SettingsState["user"] = {
-      "thread.instanceId": codex.id,
+      "thread.providerAccountId": codex.id,
+      "thread.harnessId": OPENAI_IDENTITY.harnessId,
       "thread.model": "claude-haiku-5",
       "thread.accessMode": "full-access",
       "thread.profileId": WORKER.id,
@@ -155,7 +169,8 @@ describe("computeThreadDefaults", () => {
     expect(
       computeThreadDefaults(stored, [claude, codex], [LOCAL], [UNRESTRICTED, WORKER], LOCAL.id),
     ).toEqual({
-      instanceId: codex.id,
+      providerAccountId: codex.id,
+      harnessId: OPENAI_IDENTITY.harnessId,
       model: "claude-haiku-5",
       accessMode: "full-access",
       runnerId: LOCAL.id,
@@ -163,12 +178,46 @@ describe("computeThreadDefaults", () => {
     });
   });
 
-  it("falls back to the default instance when the stored id matches none, rather than picking nothing", () => {
-    const stale: SettingsState["user"] = { "thread.instanceId": "instance-that-went-away" };
+  it("falls back to the default account when the stored id matches none, rather than picking nothing", () => {
+    const stale: SettingsState["user"] = { "thread.providerAccountId": "account-that-went-away" };
 
     expect(
-      computeThreadDefaults(stale, [claude, codex], [LOCAL], [UNRESTRICTED], LOCAL.id).instanceId,
+      computeThreadDefaults(stale, [claude, codex], [LOCAL], [UNRESTRICTED], LOCAL.id)
+        .providerAccountId,
     ).toBe(claude.id);
+  });
+
+  it("drops the stored harness when the stored account is gone, because it belonged to that account", () => {
+    const stale: SettingsState["user"] = {
+      "thread.providerAccountId": "account-that-went-away",
+      "thread.harnessId": "pi/pi",
+    };
+
+    expect(computeThreadDefaults(stale, [claude], [LOCAL], [UNRESTRICTED], LOCAL.id)).toMatchObject(
+      { providerAccountId: claude.id, harnessId: null },
+    );
+  });
+
+  it("reads the model in the stored harness", () => {
+    const withPi = {
+      ...claude,
+      snapshots: [
+        ...claude.snapshots,
+        buildSnapshot({
+          runnerId: LOCAL.id,
+          harnessId: "pi/pi",
+          models: [{ slug: "glm-5.3", name: "GLM", imageInput: null, options: [] }],
+        }),
+      ],
+    };
+    const stored: SettingsState["user"] = {
+      "thread.providerAccountId": claude.id,
+      "thread.harnessId": "pi/pi",
+    };
+
+    expect(
+      computeThreadDefaults(stored, [withPi], [LOCAL], [UNRESTRICTED], LOCAL.id),
+    ).toMatchObject({ harnessId: "pi/pi", model: "glm-5.3" });
   });
 
   it("keeps a stored model the resolved runner does not offer, rather than silently replacing it", () => {
@@ -187,7 +236,8 @@ describe("computeThreadDefaults", () => {
 
   it("returns null for every field when there is nothing to pick", () => {
     expect(computeThreadDefaults(NO_SETTINGS, [], [], [], null)).toEqual({
-      instanceId: null,
+      providerAccountId: null,
+      harnessId: null,
       model: null,
       accessMode: "approval-required",
       runnerId: null,
@@ -197,9 +247,9 @@ describe("computeThreadDefaults", () => {
 });
 
 describe("buildDraftConfig", () => {
-  const claude = buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshotOn(LOCAL.id, [SONNET])]);
+  const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshotOn(LOCAL.id, [SONNET])]);
   const reads = {
-    instances: [claude],
+    accounts: [claude],
     runners: [LOCAL],
     profiles: [UNRESTRICTED],
     thisMacRunnerId: LOCAL.id,
@@ -214,7 +264,8 @@ describe("buildDraftConfig", () => {
         workspaceId: null,
       }),
     ).toEqual({
-      instanceId: claude.id,
+      providerAccountId: claude.id,
+      harnessId: null,
       model: "claude-sonnet-5",
       accessMode: "approval-required",
       runnerId: LOCAL.id,

@@ -1,12 +1,14 @@
 /**
- * Asks runners what each provider instance can do, and stores the results.
+ * Asks runners what each Provider Account can do in its harness, and stores
+ * the results.
  *
- * The controller starts every probe, because the config lives here and a
- * runner does not have it. Requests carry an id because several can be in
- * flight on one connection.
+ * The controller starts every probe, because the account's home, credential
+ * and model argument live here and a runner does not have them. Requests
+ * carry an id because several can be in flight on one connection.
  *
- * A sweep gathers facts rather than performing an operation: it checks no
- * grant, and the system is the actor for every row it writes.
+ * A sweep probes each account in its default harness. It gathers facts rather
+ * than performing an operation: it checks no grant, and the system is the
+ * actor for every row it writes.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -18,14 +20,20 @@ import * as Stream from "effect/Stream";
 import type * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { createNotFoundError, type CapabilitySnapshot, type NotFound } from "@hercule/contract";
+import {
+  createNotFoundError,
+  type CapabilitySnapshot,
+  type InvalidState,
+  type NotFound,
+} from "@hercule/contract";
 import { afterCommit, announce, nowIso, withTransaction } from "../db";
+import { computeVersionVerdict, findVersionFloor } from "../harnesses";
 import { PluginHost } from "../plugins";
 import { PromotionState } from "../promotion";
 import { RunnerConnections, runnerRepository } from "../runners";
-import { readInstanceSecrets, Secrets, type SecretDecryptError } from "../secrets";
-import { providerRepository, type StoredInstance } from "./repository";
-import { findVersionFloor, computeVersionVerdict } from "./version";
+import { Secrets } from "../secrets";
+import { prepareHarnessAccount } from "./harness-account";
+import { providerAccountRepository, type StoredProviderAccount } from "./repository";
 
 /**
  * The runner's own 15s probe timeout plus the round trip, so the runner's
@@ -34,8 +42,8 @@ import { findVersionFloor, computeVersionVerdict } from "./version";
 const PROBE_DEADLINE: Duration.Duration = Duration.seconds(20);
 
 /** Lets tests set a deadline short enough to wait for. */
-export const ProviderProbeDeadline = Context.Reference<Duration.Duration>(
-  "hercule/controller/providers/ProviderProbeDeadline",
+export const ProviderAccountProbeDeadline = Context.Reference<Duration.Duration>(
+  "hercule/controller/provider-accounts/ProviderAccountProbeDeadline",
   { defaultValue: (): Duration.Duration => PROBE_DEADLINE },
 );
 
@@ -45,38 +53,46 @@ export const ProviderProbeDeadline = Context.Reference<Duration.Duration>(
  */
 const PROBE_INTERVAL: Duration.Duration = Duration.hours(1);
 
-export const ProviderProbeInterval = Context.Reference<Duration.Duration>(
-  "hercule/controller/providers/ProviderProbeInterval",
+export const ProviderAccountProbeInterval = Context.Reference<Duration.Duration>(
+  "hercule/controller/provider-accounts/ProviderAccountProbeInterval",
   { defaultValue: (): Duration.Duration => PROBE_INTERVAL },
 );
 
-type StoreError = SqlError | Schema.SchemaError | SecretDecryptError;
+type StoreError = SqlError | Schema.SchemaError | InvalidState;
 
 /** A login whose end the controller waits for the runner to report. */
 interface AwaitedLogin {
   readonly runnerId: string;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
+  /** The harness the login runs in, which the probe after its end asks about. */
+  readonly harnessId: string;
   /** True once the login's `loginStart` was answered with its URL. */
   printed: boolean;
 }
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const instances = yield* providerRepository;
+  const accounts = yield* providerAccountRepository;
   const runners = yield* runnerRepository;
   const connections = yield* RunnerConnections;
-  const secrets = yield* Secrets;
-  const host = yield* PluginHost;
   const promotion = yield* PromotionState;
+  // What `prepareHarnessAccount` reads, captured here so the probes this
+  // service offers need nothing from their caller.
+  const frameServices = yield* Effect.context<SqlClient.SqlClient | PluginHost | Secrets>();
+  const prepareFrameAccount = (providerAccountId: string, harnessId: string) =>
+    Effect.provideContext(prepareHarnessAccount(providerAccountId, harnessId), frameServices);
   // A wake needs no payload, and one unread change already says that a
   // snapshot was stored, so the PubSub keeps only the latest.
   const snapshotWrites = yield* PubSub.sliding<void>(1);
 
   /**
-   * Probes one instance on one runner, stores the snapshot, and returns it.
-   * Returns `none` if the runner does not answer before the deadline. A late
-   * report is dropped rather than stored, because nothing is waiting for that
-   * request any more.
+   * Probes one account in one harness on one runner, stores the snapshot, and
+   * returns it. Returns `none` if the runner does not answer before the
+   * deadline. A late report is dropped rather than stored, because nothing is
+   * waiting for that request any more.
+   *
+   * Fails with `InvalidState` before anything is sent when the account cannot
+   * run in the harness, or its stored key does not decrypt.
    *
    * Only the store passes the promotion gate, not the wait for the runner, so
    * a freeze never waits up to a probe's deadline for its answer. While a
@@ -87,27 +103,21 @@ const make = Effect.gen(function* () {
    */
   const probeOne = (
     runnerId: string,
-    instance: StoredInstance,
-  ): Effect.Effect<Option.Option<CapabilitySnapshot>, StoreError> =>
+    providerAccountId: string,
+    harnessId: string,
+  ): Effect.Effect<Option.Option<CapabilitySnapshot>, StoreError | NotFound> =>
     Effect.gen(function* () {
       const answer = yield* connections.asked(
         runnerId,
         {
           _tag: "probeRequest",
           requestId: crypto.randomUUID(),
-          instanceId: instance.id,
-          harnessId: instance.harnessId,
-          config: instance.config,
+          harnessId,
           // Decrypted here, at send time: the probe runs the harness's own auth
           // check, which is only meaningful with the credential.
-          secrets: yield* readInstanceSecrets(
-            secrets,
-            yield* host.harnesses(),
-            instance.id,
-            instance.harnessId,
-          ),
+          harnessAccount: yield* prepareFrameAccount(providerAccountId, harnessId),
         },
-        yield* ProviderProbeDeadline,
+        yield* ProviderAccountProbeDeadline,
       );
       if (Option.isNone(answer) || answer.value._tag !== "probeReport") return Option.none();
       const result = answer.value.result;
@@ -115,20 +125,26 @@ const make = Effect.gen(function* () {
         sql,
         Effect.gen(function* () {
           const at = yield* nowIso;
-          yield* instances.recordSnapshot(instance.id, runnerId, result, at);
+          yield* accounts.recordSnapshot(providerAccountId, harnessId, runnerId, result, at);
           yield* afterCommit(() => {
             PubSub.publishUnsafe(snapshotWrites, undefined);
           });
           // No audit row: a probe result is not an event anyone reads back, so
-          // the instance's live subscribers are notified instead.
-          yield* announce({ _tag: "record", topic: "provider", id: instance.id, kind: "updated" });
+          // the account's live subscribers are notified instead.
+          yield* announce({
+            _tag: "record",
+            topic: "provider",
+            id: providerAccountId,
+            kind: "updated",
+          });
           return Option.some({
             runnerId,
+            harnessId,
             probedAt: at,
             harnessVersion: result.harnessVersion,
             versionVerdict: computeVersionVerdict(
               result.harnessVersion,
-              findVersionFloor(instance.harnessId),
+              findVersionFloor(harnessId),
             ),
             auth: result.auth,
             models: result.models,
@@ -139,50 +155,52 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Probes every instance on every given runner, concurrently. Each probe logs
-   * its own failure, so one instance deleted mid-sweep does not discard the
-   * rest of the fleet's snapshots.
+   * Probes every account, in its default harness, on every given runner,
+   * concurrently. Each probe logs its own failure, so one account deleted
+   * mid-sweep, or one that cannot run in its default harness, does not discard
+   * the rest of the fleet's snapshots.
    */
   const sweep = (
     runnerIds: ReadonlyArray<string>,
-    over: ReadonlyArray<StoredInstance>,
+    over: ReadonlyArray<StoredProviderAccount>,
   ): Effect.Effect<void> =>
     Effect.forEach(
-      runnerIds.flatMap((runnerId) => over.map((instance) => ({ runnerId, instance }))),
-      ({ runnerId, instance }) =>
-        Effect.catchCause(probeOne(runnerId, instance), (cause) =>
-          Effect.logError("A provider probe could not be recorded", cause),
+      runnerIds.flatMap((runnerId) => over.map((account) => ({ runnerId, account }))),
+      ({ runnerId, account }) =>
+        Effect.catchCause(probeOne(runnerId, account.id, account.defaultHarnessId), (cause) =>
+          Effect.logError("A provider account probe could not be recorded", cause),
         ),
       { concurrency: "unbounded", discard: true },
     );
 
   /**
    * Logs the error of a sweep that fails to start, for example because the
-   * instance list cannot be read. Nothing is waiting on the sweep, so the log
+   * account list cannot be read. Nothing is waiting on the sweep, so the log
    * is the only place the error can go.
    */
   const logSweepFailure = (swept: Effect.Effect<void, StoreError>): Effect.Effect<void> =>
     Effect.catchCause(swept, (cause) =>
-      Effect.logError("A provider sweep could not be started", cause),
+      Effect.logError("A provider account sweep could not be started", cause),
     );
 
   const sweepRunner = (runnerId: string): Effect.Effect<void> =>
-    logSweepFailure(Effect.flatMap(instances.list(), (all) => sweep([runnerId], all)));
+    logSweepFailure(Effect.flatMap(accounts.list(), (all) => sweep([runnerId], all)));
 
   /**
-   * Probes the instance with this id on the runner, stores the snapshot, and
-   * returns it. Fails with `NotFound` if no such instance exists.
+   * Probes the account in the harness on the runner, stores the snapshot, and
+   * returns it. Fails with `NotFound` if no such account exists.
    */
-  const probeInstance = (
+  const probeAccount = (
     runnerId: string,
-    instanceId: string,
+    providerAccountId: string,
+    harnessId: string,
   ): Effect.Effect<Option.Option<CapabilitySnapshot>, StoreError | NotFound> =>
     Effect.flatMap(
-      instances.one(instanceId),
+      accounts.one(providerAccountId),
       (found): Effect.Effect<Option.Option<CapabilitySnapshot>, StoreError | NotFound> =>
         Option.isNone(found)
-          ? Effect.fail(createNotFoundError("no such provider instance"))
-          : probeOne(runnerId, found.value),
+          ? Effect.fail(createNotFoundError("no such provider account"))
+          : probeOne(runnerId, providerAccountId, harnessId),
     );
 
   // The logins whose end this controller waits to hear about, keyed by runner
@@ -196,33 +214,38 @@ const make = Effect.gen(function* () {
   // The map stays small without timers. A login that has not printed its URL
   // yet leaves the map when its answer arrives or its wait runs out. A login
   // that printed its URL leaves it when it ends, or when a newer login on the
-  // same runner and instance prints its URL, because the runner stops the
-  // older login to start the newer one. So the map holds at most one printed
-  // login per runner and instance, plus the logins still starting.
+  // same runner and account in the same harness prints its URL, because the
+  // runner stops the older login to start the newer one. So the map holds at
+  // most one printed login per runner, account and harness, plus the logins
+  // still starting.
   const awaitedLoginEnds = new Map<string, AwaitedLogin>();
   const buildLoginKey = (runnerId: string, requestId: string): string => `${runnerId}:${requestId}`;
 
-  // The probes that ended logins cause, keyed by runner and instance, so at
-  // most one runs per instance on a runner.
+  // The probes that ended logins cause, keyed by runner, account and harness,
+  // so at most one runs per account in a harness on a runner.
   const probingAfterLoginEnd = new Set<string>();
   const probeAgainAfterLoginEnd = new Set<string>();
-  const buildInstanceKey = (runnerId: string, instanceId: string): string =>
-    `${runnerId}:${instanceId}`;
+  const buildAccountKey = (
+    runnerId: string,
+    providerAccountId: string,
+    harnessId: string,
+  ): string => `${runnerId}:${providerAccountId}:${harnessId}`;
 
   /**
-   * Probes the instance once, then again for as long as another login ended
-   * while the probe ran. Removes the key from `probingAfterLoginEnd` when the
-   * last probe ends, also when it fails.
+   * Probes the account in the harness once, then again for as long as another
+   * login ended while the probe ran. Removes the key from
+   * `probingAfterLoginEnd` when the last probe ends, also when it fails.
    */
   const probeUntilSettled = (
     runnerId: string,
-    instanceId: string,
+    providerAccountId: string,
+    harnessId: string,
     key: string,
   ): Effect.Effect<void, StoreError | NotFound> =>
     Effect.gen(function* () {
       do {
         probeAgainAfterLoginEnd.delete(key);
-        yield* probeInstance(runnerId, instanceId);
+        yield* probeAccount(runnerId, providerAccountId, harnessId);
       } while (probeAgainAfterLoginEnd.has(key));
     }).pipe(
       Effect.ensuring(
@@ -234,7 +257,7 @@ const make = Effect.gen(function* () {
     );
 
   return {
-    probe: probeInstance,
+    probe: probeAccount,
 
     /**
      * Emits once each time a stored snapshot commits, so a run whose
@@ -247,20 +270,22 @@ const make = Effect.gen(function* () {
 
     /**
      * Records that the login sent as the `loginStart` with this request id is
-     * starting on this runner for this instance, so that its end, if the
-     * runner reports one, is accepted. Call it before the runner is asked to
-     * start the login: the runner may report the end before the caller has
-     * read the answer.
+     * starting on this runner for this account in this harness, so that its
+     * end, if the runner reports one, is accepted. Call it before the runner
+     * is asked to start the login: the runner may report the end before the
+     * caller has read the answer.
      */
     expectLoginEnd: (
       runnerId: string,
-      instanceId: string,
+      providerAccountId: string,
+      harnessId: string,
       requestId: string,
     ): Effect.Effect<void> =>
       Effect.sync(() => {
         awaitedLoginEnds.set(buildLoginKey(runnerId, requestId), {
           runnerId,
-          instanceId,
+          providerAccountId,
+          harnessId,
           printed: false,
         });
       }),
@@ -279,7 +304,7 @@ const make = Effect.gen(function* () {
     /**
      * Records that the login sent as the `loginStart` with this request id
      * printed its URL. The runner stopped every earlier login on this runner
-     * for this instance to start this one, so the ends of those that had
+     * for this account and harness to start this one, so the ends of those that had
      * printed their URL are no longer awaited. An earlier login still waiting
      * for its URL is left alone: its own answer, a failure, removes it.
      *
@@ -289,13 +314,19 @@ const make = Effect.gen(function* () {
      */
     recordPrintedLogin: (
       runnerId: string,
-      instanceId: string,
+      providerAccountId: string,
+      harnessId: string,
       requestId: string,
       { reportsEnd }: { readonly reportsEnd: boolean },
     ): Effect.Effect<void> =>
       Effect.sync(() => {
         for (const [key, login] of awaitedLoginEnds) {
-          if (login.printed && login.runnerId === runnerId && login.instanceId === instanceId) {
+          if (
+            login.printed &&
+            login.runnerId === runnerId &&
+            login.providerAccountId === providerAccountId &&
+            login.harnessId === harnessId
+          ) {
             awaitedLoginEnds.delete(key);
           }
         }
@@ -308,7 +339,7 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Probes the login's instance on the runner after the runner reported
+     * Probes the login's account, in the login's harness, on the runner after the runner reported
      * that the device login with this request id ended. Returns when the
      * probe is stored.
      *
@@ -318,7 +349,7 @@ const make = Effect.gen(function* () {
      * login's answer came after the controller stopped waiting for it, so
      * ignoring it does not close the connection.
      *
-     * At most one probe runs per runner and instance. A login started and
+     * At most one probe runs per runner, account and harness. A login started and
      * ended while that probe runs causes exactly one more probe after it,
      * because the running probe may have read the state from before the login.
      */
@@ -335,27 +366,27 @@ const make = Effect.gen(function* () {
           ).pipe(Effect.annotateLogs({ runnerId, requestId }));
         }
         awaitedLoginEnds.delete(loginKey);
-        const { instanceId } = login;
-        const key = buildInstanceKey(runnerId, instanceId);
+        const { providerAccountId, harnessId } = login;
+        const key = buildAccountKey(runnerId, providerAccountId, harnessId);
         if (probingAfterLoginEnd.has(key)) {
           probeAgainAfterLoginEnd.add(key);
           return Effect.void;
         }
         probingAfterLoginEnd.add(key);
-        return probeUntilSettled(runnerId, instanceId, key);
+        return probeUntilSettled(runnerId, providerAccountId, harnessId, key);
       }),
 
     sweepRunner,
 
     /**
-     * Probes one instance on every connected runner. A probe runs under the
-     * instance's config, so a config change makes every runner's snapshot
-     * stale at once.
+     * Probes one account, in its default harness, on every connected runner.
+     * A probe runs with the account's credential, so a new credential makes
+     * every runner's snapshot stale at once.
      */
-    sweepInstance: (instanceId: string): Effect.Effect<void> =>
+    sweepAccount: (providerAccountId: string): Effect.Effect<void> =>
       logSweepFailure(
         Effect.gen(function* () {
-          const found = yield* instances.one(instanceId);
+          const found = yield* accounts.one(providerAccountId);
           if (Option.isNone(found)) return;
           yield* sweep(yield* runners.connected(), [found.value]);
         }),
@@ -369,14 +400,14 @@ const make = Effect.gen(function* () {
           Effect.forkChild(sweepRunner(runnerId)),
         ),
         Effect.gen(function* () {
-          const interval = yield* ProviderProbeInterval;
+          const interval = yield* ProviderAccountProbeInterval;
           while (true) {
             yield* Effect.sleep(interval);
             yield* logSweepFailure(
               Effect.gen(function* () {
                 const online = yield* runners.connected();
                 if (online.length === 0) return;
-                yield* sweep(online, yield* instances.list());
+                yield* sweep(online, yield* accounts.list());
               }),
             );
           }
@@ -387,13 +418,14 @@ const make = Effect.gen(function* () {
   };
 });
 
-/** The service that probes the fleet for provider instances and stores the snapshots. */
-export class ProviderProbes extends Context.Service<ProviderProbes, Effect.Success<typeof make>>()(
-  "hercule/controller/providers/ProviderProbes",
-) {}
+/** The service that probes the fleet for Provider Accounts and stores the snapshots. */
+export class ProviderAccountProbes extends Context.Service<
+  ProviderAccountProbes,
+  Effect.Success<typeof make>
+>()("hercule/controller/provider-accounts/ProviderAccountProbes") {}
 
-export const ProviderProbesLayer: Layer.Layer<
-  ProviderProbes,
+export const ProviderAccountProbesLayer: Layer.Layer<
+  ProviderAccountProbes,
   never,
   SqlClient.SqlClient | RunnerConnections | Secrets | PluginHost | PromotionState
-> = Layer.effect(ProviderProbes)(make);
+> = Layer.effect(ProviderAccountProbes)(make);
