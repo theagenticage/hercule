@@ -13,11 +13,15 @@ export {
   type StubSubscription,
 } from "./live/socket-stub";
 export {
+  ANTHROPIC_API_KEY_IDENTITY,
   ANTHROPIC_IDENTITY,
   HARNESSES,
+  HARNESSES_WITH_ANTHROPIC_API_KEY,
   OPENAI_IDENTITY,
   PROVIDERS,
+  PROVIDERS_WITH_ANTHROPIC_API_KEY,
   WITH_CLAUDE,
+  WITH_CLAUDE_AND_PI,
   ZAI_IDENTITY,
   buildModelProfile,
   buildProfileEntry,

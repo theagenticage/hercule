@@ -36,11 +36,7 @@ export function useOptimisticOrder(savedKeys: readonly string[]) {
     made.every((key) => savedKeys.includes(key));
   const keys = sameSet ? made : savedKeys;
 
-  const move = async (
-    key: string,
-    toIndex: number,
-    save: () => Promise<unknown>,
-  ): Promise<void> => {
+  const move = async (key: string, toIndex: number, save: () => Promise<void>): Promise<void> => {
     const from = keys.indexOf(key);
     if (from === -1 || from === Math.max(0, Math.min(toIndex, keys.length - 1))) return;
     setMade(moveKey(keys, from, toIndex));

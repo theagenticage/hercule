@@ -91,16 +91,11 @@ export function ModelProfileMenu({
 
   const save = useModelProfileUpdate(client);
 
-  /**
-   * Saves one change and resolves when the save is over, to whether it worked.
-   * It never rejects: a failure shows above the sections.
-   */
-  const change = (
-    buildChange: (profile: ModelProfile) => ModelProfileUpdateInput,
-  ): Promise<boolean> =>
+  /** Saves one change and resolves when the save is over, whether it worked or not; a failure shows above the sections. */
+  const change = (buildChange: (profile: ModelProfile) => ModelProfileUpdateInput): Promise<void> =>
     save.mutateAsync({ profileId: profile.id, buildChange }).then(
-      () => true,
-      () => false,
+      () => undefined,
+      () => undefined,
     );
   // What the user last asked for each model in the picker, until the save that
   // carries it is over. A second click before the first save is answered
@@ -250,12 +245,14 @@ export function ModelProfileMenu({
                   onMakeDefault={(entry) => {
                     void change((current) => makeDefaultModelProfileEntry(current, entry));
                   }}
-                  onMoveToHarness={(entry, harnessId) =>
-                    change((current) => moveModelProfileEntryToHarness(current, entry, harnessId))
-                  }
-                  onAlsoOfferIn={(entry, harnessId) =>
-                    change((current) => offerModelProfileEntryIn(current, entry, harnessId))
-                  }
+                  onMoveToHarness={(entry, harnessId) => {
+                    void change((current) =>
+                      moveModelProfileEntryToHarness(current, entry, harnessId),
+                    );
+                  }}
+                  onAlsoOfferIn={(entry, harnessId) => {
+                    void change((current) => offerModelProfileEntryIn(current, entry, harnessId));
+                  }}
                   onTakeOut={(entry) => {
                     void change((current) => takeOutModelProfileEntry(current, entry));
                   }}

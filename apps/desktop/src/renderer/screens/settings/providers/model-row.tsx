@@ -1,5 +1,5 @@
 import type { ComponentProps, JSX } from "react";
-import type { ModelSectionRow } from "@hercule/client-core";
+import type { ModelProfileHarnessChoice, ModelSectionRow } from "@hercule/client-core";
 import { CheckIcon } from "../../../icons/check";
 import { CloseIcon } from "../../../icons/close";
 import { GripIcon } from "../../../icons/grip";
@@ -7,6 +7,7 @@ import { MoreIcon } from "../../../icons/more";
 import { PlusIcon } from "../../../icons/plus";
 import { HarnessLogo } from "../../thread/harness-logo";
 import { usePopoverMenu } from "../../use-popover-menu";
+import { joinClassNames } from "./join-class-names";
 import "../../thread/menus.css";
 import "./models.css";
 
@@ -40,8 +41,8 @@ export function ModelRow({
   readonly profileName: string;
   readonly rowProps: ComponentProps<"li">;
   readonly onMakeDefault: () => void;
-  /** Called with the `harnessId` of the picked "Runs in" choice, other than the current one. */
-  readonly onMoveToHarness: (harnessId: string | null) => void;
+  /** Called with the picked "Runs in" choice, other than the current one. */
+  readonly onMoveToHarness: (choice: ModelProfileHarnessChoice) => void;
   /** Called with the `harnessId` of the "Also offer in" choice. */
   readonly onAlsoOfferIn: (harnessId: string | null) => void;
   readonly onTakeOut: () => void;
@@ -103,11 +104,11 @@ export function ModelRow({
                   key={choice.resolvedHarnessId}
                   type="button"
                   {...itemProps}
-                  className={[itemProps.className, "pm-choice"].filter(Boolean).join(" ")}
+                  className={joinClassNames(itemProps.className, "pm-choice")}
                   onClick={() => {
                     if (struck) return;
                     close();
-                    if (!choice.isCurrent) onMoveToHarness(choice.harnessId);
+                    if (!choice.isCurrent) onMoveToHarness(choice);
                   }}
                 >
                   <span
@@ -148,7 +149,7 @@ export function ModelRow({
         <button
           type="button"
           {...takeOutProps}
-          className={[takeOutProps.className, "pm-danger"].filter(Boolean).join(" ")}
+          className={joinClassNames(takeOutProps.className, "pm-danger")}
           onClick={() => {
             close();
             onTakeOut();

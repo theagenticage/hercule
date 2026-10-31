@@ -24,7 +24,6 @@ import type {
   ModelProfileEntry,
   ModelProfileUpdateInput,
   ResolvedModelProfileAccount,
-  ResolvedModelProfileEntry,
 } from "@hercule/contract";
 import { isSameStoredEntry } from "./profile-entries";
 
@@ -181,7 +180,7 @@ export const setModelProfileAccountHarness = (
  */
 export const moveModelProfileEntryToHarness = (
   profile: ModelProfile,
-  entry: ResolvedModelProfileEntry,
+  entry: ModelProfileEntry,
   harnessId: string | null,
 ): ModelProfileUpdateInput => {
   const input = toUpdateInput(profile);
@@ -214,7 +213,7 @@ export const moveModelProfileEntryToHarness = (
  */
 export const offerModelProfileEntryIn = (
   profile: ModelProfile,
-  entry: ResolvedModelProfileEntry,
+  entry: ModelProfileEntry,
   harnessId: string | null,
 ): ModelProfileUpdateInput => {
   const input = toUpdateInput(profile);

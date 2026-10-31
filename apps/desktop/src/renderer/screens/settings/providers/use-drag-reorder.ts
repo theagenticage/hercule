@@ -4,7 +4,7 @@ import { useRef, useState, type DragEvent, type PointerEvent } from "react";
 type DropSide = "before" | "after";
 
 /** The elements inside a draggable item that take the pointer for themselves. */
-const INTERACTIVE_SELECTOR = 'button, input, [role="menu"], [popover]';
+const CONTROL_SELECTOR = 'button, input, [role="menu"], [popover]';
 
 /**
  * Makes the items `keys` drag-reorderable, with the browser's own drag and
@@ -38,10 +38,10 @@ export function useDragReorder(
     readonly side: DropSide;
   } | null>(null);
 
-  // Where the last press landed. The browser fires `dragstart` at the draggable
-  // element itself, never at the child under the pointer, so this is the only
-  // way to tell that the drag began on a button or in a menu.
-  const pressTarget = useRef<EventTarget | null>(null);
+  // Whether the last press landed on a button, an input or a menu inside the
+  // draggable element. The browser fires `dragstart` at the draggable element
+  // itself, never at the child under the pointer, so only the press can tell.
+  const pressedOnControl = useRef(false);
 
   const readSide = (event: DragEvent<HTMLElement>): DropSide => {
     const box = event.currentTarget.getBoundingClientRect();
@@ -58,16 +58,15 @@ export function useDragReorder(
     getSourceProps: (key: string) => ({
       draggable: true as const,
       onPointerDown: (event: PointerEvent<HTMLElement>) => {
-        pressTarget.current = event.target;
+        const control =
+          event.target instanceof Element ? event.target.closest(CONTROL_SELECTOR) : null;
+        pressedOnControl.current =
+          control !== null &&
+          control !== event.currentTarget &&
+          event.currentTarget.contains(control);
       },
       onDragStart: (event: DragEvent<HTMLElement>) => {
-        const pressed = pressTarget.current instanceof Element ? pressTarget.current : null;
-        const interactive = pressed?.closest(INTERACTIVE_SELECTOR) ?? null;
-        if (
-          interactive !== null &&
-          interactive !== event.currentTarget &&
-          event.currentTarget.contains(interactive)
-        ) {
+        if (pressedOnControl.current) {
           event.preventDefault();
           return;
         }

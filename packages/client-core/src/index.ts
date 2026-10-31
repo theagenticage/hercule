@@ -789,7 +789,7 @@ export {
   listAccountModelProfiles,
   listProjectsOfModelProfile,
 } from "./model-profiles/profile-lookup";
-export { countProfileEntries } from "./model-profiles/profile-entries";
+export { countProfileEntries, formatProfileEntryKey } from "./model-profiles/profile-entries";
 export { buildModelProfileCopyName } from "./model-profiles/profile-tabs";
 export { updateModelProfile } from "./model-profiles/update-profile";
 export {

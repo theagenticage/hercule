@@ -148,10 +148,6 @@
 }
 
 /* ---------- The harness pill in a section's head, and its popover ---------- */
-/* The wrapper takes no box: the pill and the popover are the head's children. */
-.pm-hwrap {
-  display: contents;
-}
 .pm-hpill {
   display: inline-flex;
   flex: none;
@@ -220,7 +216,9 @@
   padding: 7px 8px;
   border-radius: var(--r-md);
 }
-.pm-htext {
+/* A choice's text column: the name, then the small lines under it. */
+.pm-htext,
+.pm-choice-text {
   display: grid;
   gap: 1px;
   min-width: 0;
@@ -417,11 +415,6 @@
 }
 .pm-rowmenu [role="menuitemradio"] > .pm-radio {
   margin-top: 2px;
-}
-.pm-choice-text {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
 }
 .pm-choice-note,
 .pm-choice-why {

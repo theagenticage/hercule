@@ -3,6 +3,7 @@ import type { ModelProfileHarnessChoice, SectionHarness } from "@hercule/client-
 import { ChevronRightIcon } from "../../../icons/chevron-right";
 import { HarnessLogo } from "../../thread/harness-logo";
 import { usePopoverMenu } from "../../use-popover-menu";
+import { joinClassNames } from "./join-class-names";
 import "../../thread/menus.css";
 import "./models.css";
 
@@ -52,19 +53,16 @@ export function HarnessPill({
   const changeProps = buildItemProps("change-account-harness");
   // Exactly one choice is current, so the pill always has one to read.
   const current = harness.choices.find((choice) => choice.isCurrent)!;
-  const className = [
-    "pm-hpill",
-    harness.isFixed ? "is-fixed" : "",
-    current.harnessId === null ? "" : "is-set",
-  ]
-    .filter((name) => name !== "")
-    .join(" ");
 
   return (
-    <span className="pm-hwrap">
+    <>
       <button
         type="button"
-        className={className}
+        className={joinClassNames(
+          "pm-hpill",
+          harness.isFixed && "is-fixed",
+          current.harnessId !== null && "is-set",
+        )}
         {...triggerProps}
         title={`Where ${accountName}'s models run in ${profileName}`}
       >
@@ -95,13 +93,11 @@ export function HarnessPill({
               <button
                 type="button"
                 {...item}
-                className={[
+                className={joinClassNames(
                   item.className,
                   "pm-hrow",
-                  choice.unavailableReason === null ? "" : "is-off",
-                ]
-                  .filter((name) => name !== undefined && name !== "")
-                  .join(" ")}
+                  choice.unavailableReason !== null && "is-off",
+                )}
                 onClick={() => {
                   if (choice.unavailableReason !== null) return;
                   close();
@@ -128,9 +124,7 @@ export function HarnessPill({
                 <button
                   type="button"
                   {...changeProps}
-                  className={[changeProps.className, "pm-hchange"]
-                    .filter((name) => name !== undefined)
-                    .join(" ")}
+                  className={joinClassNames(changeProps.className, "pm-hchange")}
                   onClick={() => {
                     close();
                     onChangeAccountHarness();
@@ -143,6 +137,6 @@ export function HarnessPill({
           );
         })}
       </div>
-    </span>
+    </>
   );
 }

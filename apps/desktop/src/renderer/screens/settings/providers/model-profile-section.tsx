@@ -7,10 +7,16 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import type { ModelSection, ModelSectionRow } from "@hercule/client-core";
+import {
+  formatProfileEntryKey,
+  type ModelProfileHarnessChoice,
+  type ModelSection,
+  type ModelSectionRow,
+} from "@hercule/client-core";
 import type { ResolvedModelProfileEntry } from "@hercule/contract";
 import { GripIcon } from "../../../icons/grip";
 import { HarnessPill } from "./harness-pill";
+import { joinClassNames } from "./join-class-names";
 import { ModelRow } from "./model-row";
 import { useDragReorder } from "./use-drag-reorder";
 import { useOptimisticOrder } from "./use-optimistic-order";
@@ -33,10 +39,6 @@ const readAltArrowOffset = (event: KeyboardEvent): -1 | 1 | null => {
   return event.key === "ArrowUp" ? -1 : 1;
 };
 
-/** Joins the class names that are not empty. */
-const joinClassNames = (...names: readonly string[]): string =>
-  names.filter((name) => name !== "").join(" ");
-
 /**
  * Renders one account's section of a Model Profile: its head, with the
  * provider's `mark`, the account's name and the harness pill, then its entries in order, then
@@ -47,10 +49,10 @@ const joinClassNames = (...names: readonly string[]): string =>
  * - A row drags within the section, and Alt+Up and Alt+Down move the
  *   focused row. The new order shows at once; `onMoveEntry` saves it, once
  *   when a drag drops and once for each key press, and the order the
- *   controller sends back replaces the one shown. The focus stays on the
- *   moved row after a key press, after "Runs in" moves the row to another
- *   harness, and on the row that "Also offer in" was pressed on, though the
- *   browser drops the focus of an element that its list moves or replaces.
+ *   controller sends back replaces the one shown. After a key press the
+ *   focus stays on the moved row, though the browser drops the focus of an
+ *   element that its list moves. So it does after "Runs in" moves a row to
+ *   another harness, which replaces the row: its key holds its harness.
  * - A section that waits for its account's first Model Catalog read says so
  *   and offers no "Add a model", because the read will fill the section.
  * - A section with no entry says so.
@@ -78,60 +80,39 @@ export function ModelProfileSection({
   readonly isNew: boolean;
   readonly drag: SectionDrag;
   readonly addModel: ReactNode;
-  /** Saves the move and resolves to whether it was saved; it never rejects. */
-  readonly onMoveEntry: (entry: ResolvedModelProfileEntry, toIndex: number) => Promise<boolean>;
+  readonly onMoveEntry: (entry: ResolvedModelProfileEntry, toIndex: number) => Promise<void>;
   /** Sets the harness the account's models run in; `null` follows the account's default. */
   readonly onSetHarness: (harnessId: string | null) => void;
   /** Opens the account's sheet, where its default harness is set, with the account's id and name. */
   readonly onOpenAccount: (providerAccountId: string, name: string) => void;
   readonly onMakeDefault: (entry: ResolvedModelProfileEntry) => void;
-  /** Saves the move to the harness and resolves to whether it was saved; it never rejects. */
-  readonly onMoveToHarness: (
-    entry: ResolvedModelProfileEntry,
-    harnessId: string | null,
-  ) => Promise<boolean>;
-  /** Saves the second entry and resolves to whether it was saved; it never rejects. */
-  readonly onAlsoOfferIn: (
-    entry: ResolvedModelProfileEntry,
-    harnessId: string | null,
-  ) => Promise<boolean>;
+  /** Saves the move of the model's entry to the harness `harnessId`. */
+  readonly onMoveToHarness: (entry: ResolvedModelProfileEntry, harnessId: string | null) => void;
+  /** Saves the second entry of the model, which runs in `harnessId`. */
+  readonly onAlsoOfferIn: (entry: ResolvedModelProfileEntry, harnessId: string | null) => void;
   readonly onTakeOut: (entry: ResolvedModelProfileEntry) => void;
 }): JSX.Element {
   const rowsByKey = new Map<string, ModelSectionRow>(section.rows.map((row) => [row.key, row]));
   const order = useOptimisticOrder(section.rows.map(({ key }) => key));
-  /** Moves the row at once and saves it; resolves to whether a save was made and worked. */
-  const saveMove = async (key: string, toIndex: number): Promise<boolean> => {
+  const saveMove = (key: string, toIndex: number): Promise<void> => {
     const row = rowsByKey.get(key);
-    if (row === undefined) return false;
-    let saved = false;
-    await order.move(key, toIndex, async () => {
-      saved = await onMoveEntry(row.entry, toIndex);
-    });
-    return saved;
+    if (row === undefined) return Promise.resolve();
+    return order.move(key, toIndex, () => onMoveEntry(row.entry, toIndex));
   };
   const rowDrag = useDragReorder(order.keys, (key, toIndex) => {
     // `onMoveEntry` never rejects: a failed save shows above the sections.
     void saveMove(key, toIndex);
   });
   const rowElements = useRef(new Map<string, HTMLLIElement>());
-  // The row to focus once the controller's answer arrives and the list moves
-  // it or replaces it. A row is named by its model and the harness it runs in,
-  // not by its key, because moving a row to another harness changes its key.
-  const refocus = useRef<{
-    readonly model: string;
-    readonly resolvedHarnessId: string;
-    readonly order: string;
-  } | null>(null);
+  // The row to focus once the controller's order arrives and the list moves
+  // or replaces it.
+  const refocus = useRef<{ readonly key: string; readonly order: string } | null>(null);
   const orderText = order.keys.join("\n");
 
   useLayoutEffect(() => {
     const pending = refocus.current;
     if (pending === null || pending.order === orderText) return;
-    const target = section.rows.find(
-      ({ entry }) =>
-        entry.model === pending.model && entry.resolvedHarnessId === pending.resolvedHarnessId,
-    );
-    const element = target === undefined ? undefined : rowElements.current.get(target.key);
+    const element = rowElements.current.get(pending.key);
     if (element === undefined) return;
     refocus.current = null;
     // The user may have moved on while the save ran: take the focus back only
@@ -142,34 +123,35 @@ export function ModelProfileSection({
       activeElement === document.body ||
       [...rowElements.current.values()].some((row) => row.contains(activeElement));
     if (dropped) element.focus({ preventScroll: true });
-  }, [orderText, section.rows]);
+  }, [orderText]);
 
-  /**
-   * Focuses the row of `model` in `resolvedHarnessId` once the list changes
-   * because of `save`. When `save` resolves to false nothing changes, so the
-   * focus is left alone: a later move of the list must not pull it back.
-   */
-  const refocusAfterSave = (
-    model: string,
-    resolvedHarnessId: string,
-    save: () => Promise<boolean>,
-  ): void => {
-    const pending = { model, resolvedHarnessId, order: orderText };
-    refocus.current = pending;
-    void save().then((saved) => {
-      if (!saved && refocus.current === pending) refocus.current = null;
-    });
+  const moveBy = (key: string, offset: -1 | 1): void => {
+    const to = order.keys.indexOf(key) + offset;
+    if (to < 0 || to >= order.keys.length) return;
+    refocus.current = { key, order: orderText };
+    void saveMove(key, to);
   };
 
-  const moveBy = (row: ModelSectionRow, offset: -1 | 1): void => {
-    const to = order.keys.indexOf(row.key) + offset;
-    if (to < 0 || to >= order.keys.length) return;
-    refocusAfterSave(row.entry.model, row.entry.resolvedHarnessId, () => saveMove(row.key, to));
+  /**
+   * Moves the row to the harness of `choice` and focuses it once it comes
+   * back under its new key. The key exists only if the move was saved, so a
+   * failed save leaves nothing to focus. A later move replaces the pending
+   * key, and the effect leaves the focus alone when the user has moved on.
+   */
+  const moveToHarness = (row: ModelSectionRow, choice: ModelProfileHarnessChoice): void => {
+    refocus.current = {
+      key: formatProfileEntryKey({
+        providerAccountId: row.entry.providerAccountId,
+        harnessId: choice.resolvedHarnessId,
+        model: row.entry.model,
+      }),
+      order: orderText,
+    };
+    onMoveToHarness(row.entry, choice.harnessId);
   };
 
   const rows = order.keys.flatMap((key) => rowsByKey.get(key) ?? []);
-  const buildRowProps = (row: ModelSectionRow): ComponentProps<"li"> => {
-    const { key } = row;
+  const buildRowProps = (key: string): ComponentProps<"li"> => {
     const dropSide = rowDrag.dropMark?.key === key ? rowDrag.dropMark.side : null;
     return {
       ...rowDrag.getSourceProps(key),
@@ -191,7 +173,7 @@ export function ModelProfileSection({
         const offset = readAltArrowOffset(event);
         if (offset === null) return;
         event.preventDefault();
-        moveBy(row, offset);
+        moveBy(key, offset);
       },
     };
   };
@@ -242,24 +224,15 @@ export function ModelProfileSection({
               key={row.key}
               row={row}
               profileName={profileName}
-              rowProps={buildRowProps(row)}
+              rowProps={buildRowProps(row.key)}
               onMakeDefault={() => {
                 onMakeDefault(row.entry);
               }}
-              onMoveToHarness={(harnessId) => {
-                // The row's key holds its harness, so the row comes back as a
-                // new element and the focus it had is lost.
-                const moved = row.runsIn.find((choice) => choice.harnessId === harnessId);
-                refocusAfterSave(
-                  row.entry.model,
-                  moved?.resolvedHarnessId ?? row.entry.resolvedHarnessId,
-                  () => onMoveToHarness(row.entry, harnessId),
-                );
+              onMoveToHarness={(choice) => {
+                moveToHarness(row, choice);
               }}
               onAlsoOfferIn={(harnessId) => {
-                refocusAfterSave(row.entry.model, row.entry.resolvedHarnessId, () =>
-                  onAlsoOfferIn(row.entry, harnessId),
-                );
+                onAlsoOfferIn(row.entry, harnessId);
               }}
               onTakeOut={() => {
                 onTakeOut(row.entry);

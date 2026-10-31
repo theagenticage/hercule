@@ -209,6 +209,79 @@ export const ZAI_IDENTITY: ProviderAccountIdentity = {
 };
 
 /**
+ * An Anthropic API key: unlike the shipped Claude subscription, it can run in
+ * Claude Code and in pi. Pair it with `PROVIDERS_WITH_ANTHROPIC_API_KEY` and
+ * `HARNESSES_WITH_ANTHROPIC_API_KEY`, which declare that.
+ */
+export const ANTHROPIC_API_KEY_IDENTITY: ProviderAccountIdentity = {
+  id: "account-key",
+  providerId: "anthropic/anthropic",
+  kind: "api-key",
+  harnessId: "claude-code/claude-code",
+  label: null,
+};
+
+/** `PROVIDERS` with an "api-key" kind added to Anthropic, which Claude Code and pi can run. */
+export const PROVIDERS_WITH_ANTHROPIC_API_KEY: readonly Provider[] = PROVIDERS.map((provider) =>
+  provider.id === ANTHROPIC_API_KEY_IDENTITY.providerId
+    ? {
+        ...provider,
+        kinds: [
+          ...provider.kinds,
+          {
+            id: "api-key",
+            title: "API key",
+            description: "An Anthropic API key.",
+            setup: [],
+            harnesses: ["claude-code/claude-code", "pi/pi"],
+          },
+        ],
+      }
+    : provider,
+);
+
+/**
+ * `HARNESSES` where Claude Code and pi both run Anthropic's "api-key" kind.
+ * pi lists its own models, Claude Code takes the provider's.
+ */
+export const HARNESSES_WITH_ANTHROPIC_API_KEY: readonly Harness[] = HARNESSES.map((harness) => {
+  if (harness.id === "claude-code/claude-code") {
+    const [support] = harness.runs;
+    return {
+      ...harness,
+      runs: [
+        { ...support!, kinds: [...support!.kinds, { kind: "api-key", modelArgument: "{model}" }] },
+      ],
+    };
+  }
+  if (harness.id === "pi/pi") {
+    return {
+      ...harness,
+      runs: [
+        ...harness.runs,
+        {
+          providerId: ANTHROPIC_API_KEY_IDENTITY.providerId,
+          kinds: [{ kind: "api-key", modelArgument: "anthropic/{model}" }],
+          models: "own-list" as const,
+        },
+      ],
+    };
+  }
+  return harness;
+});
+
+/** A runner with Claude Code and pi installed. */
+export const WITH_CLAUDE_AND_PI: Runner = {
+  ...WITH_CLAUDE,
+  facts: {
+    ...WITH_CLAUDE.facts!,
+    harnesses: WITH_CLAUDE.facts!.harnesses.map((binary) =>
+      binary.name === "pi" ? { ...binary, present: true } : binary,
+    ),
+  },
+};
+
+/**
  * A readiness row that may leave its harness and its state open, for
  * `buildProviderAccount` to fill in: the account's default harness, and
  * `ready`.
