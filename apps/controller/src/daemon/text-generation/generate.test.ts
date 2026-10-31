@@ -799,7 +799,15 @@ describe("the catalog models the harness does not list, on the request", () => {
   it("carries them when the harness can run any model of the provider", async () => {
     const request = await sendInHarness(WIDE);
 
-    expect(request.unlistedModels).toEqual([API_ONLY]);
+    expect(request.unlistedModels).toEqual([
+      {
+        slug: "api-only",
+        name: "API only",
+        imageInput: null,
+        contextWindow: 200_000,
+        reasoning: true,
+      },
+    ]);
   });
 
   it("leaves them off when the harness runs only the models it lists", async () => {

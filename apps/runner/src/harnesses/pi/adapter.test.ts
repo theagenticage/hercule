@@ -10,7 +10,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { AnswerNotDelivered } from "@hercule/protocol";
-import type { CatalogModel, OutputSchema, SessionSpec } from "@hercule/protocol";
+import type { UnlistedModel, OutputSchema, SessionSpec } from "@hercule/protocol";
 import type { UserMaterial } from "../index";
 import { NO_USER_MATERIAL_PATHS, PNG_BYTES, writeTestImage } from "../testing";
 import { makePiAdapter, REPROMPT } from "./adapter";
@@ -294,11 +294,10 @@ describe("launching pi for a session", () => {
 describe("declaring the models pi does not list", () => {
   const OPENROUTER = { modelArgument: "openrouter/{model}" };
   const UNLISTED_ID = "fake-vendor/fake-model:free";
-  const UNLISTED_MODEL: CatalogModel = {
+  const UNLISTED_MODEL: UnlistedModel = {
     slug: UNLISTED_ID,
     name: "Fake: Model",
     imageInput: null,
-    options: [],
     contextWindow: 65_536,
     reasoning: true,
   };
@@ -403,14 +402,39 @@ describe("declaring the models pi does not list", () => {
     expect(existsSync(join(withEmptyList.ctx.home, "models.json"))).toBe(false);
   });
 
-  it("replaces a models file that does not parse, and starts the session", async () => {
+  it("reads a models file that starts with a byte-order mark", async () => {
     const run = createDriving();
     const ctx = { ...run.ctx, ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
-    writeFileSync(join(ctx.home, "models.json"), "{ cut off");
+    writeFileSync(
+      join(ctx.home, "models.json"),
+      `\uFEFF${JSON.stringify({ providers: { zai: { models: [{ id: "kept" }] } } })}`,
+    );
 
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx));
 
-    expect(readModelsFile(ctx.home).providers.openrouter!.models).toHaveLength(1);
+    const written = readModelsFile(ctx.home);
+    expect(written.providers["zai"]!.models.map((entry) => entry.id)).toEqual(["kept"]);
+    expect(written.providers.openrouter!.models.map((entry) => entry.id)).toEqual([UNLISTED_ID]);
+  });
+
+  it("refuses to start on a models file with comments, names the file, and leaves it as it is", async () => {
+    const run = createDriving();
+    const ctx = { ...run.ctx, ...OPENROUTER, unlistedModels: [UNLISTED_MODEL] };
+    const path = join(ctx.home, "models.json");
+    const content = '{\n  // secret-looking-comment\n  "providers": {}\n}';
+    writeFileSync(path, content);
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC_ON_UNLISTED, ctx)),
+    );
+
+    expect(failed._tag).toBe("AdapterFailed");
+    expect(failed.message).toContain(path);
+    expect(failed.message).toContain("openrouter");
+    expect(failed.message).toContain("Remove its comments, or delete the file");
+    expect(failed.message).not.toContain("secret-looking-comment");
+    expect(readFileSync(path, "utf8")).toBe(content);
+    expect(run.spawns).toEqual([]);
   });
 
   it("fails the start, and spawns no pi, when the models file cannot be written", async () => {
@@ -494,8 +518,33 @@ describe("starting pi on exactly the model that was asked for", () => {
     expect(failed.message).toContain("not now");
   });
 
-  it("leaves a pi that exits at start to the report of its exit", async () => {
+  it("fails the start, with pi's own words, when pi exits while it starts", async () => {
     const run = createDriving({ dies: true });
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, run.ctx)),
+    );
+
+    expect(failed._tag).toBe("AdapterFailed");
+    expect(failed.message).toContain("stopped while it was starting");
+    expect(failed.message).toContain("pi: could not start");
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+    await settle();
+    // The failed start is the one report: the exit is not reported as well.
+    expect(filterByTag(run.seen, "session.started")).toEqual([]);
+    expect(filterByTag(run.seen, "session.exited")).toEqual([]);
+  });
+
+  it("reports the exit after the start when pi answers and then exits before the check is over", async () => {
+    const run = createDriving({
+      answers: {
+        get_state: () => {
+          // pi answers, then crashes before the adapter looks at the answer.
+          queueMicrotask(() => run.spawns[0]!.crash("pi: crashed right after loading"));
+          return { success: true, data: { model: { provider: "zai", id: "glm-5.3" } } };
+        },
+      },
+    });
 
     await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
 
@@ -503,7 +552,9 @@ describe("starting pi on exactly the model that was asked for", () => {
       "said the session ended",
       () => filterByTag(run.seen, "session.exited").length === 1,
     );
-    expect(filterByTag(run.seen, "session.exited")[0]?.message).toContain("could not start");
+    const tags = run.seen.map((event) => event._tag).filter((tag) => tag.startsWith("session."));
+    expect(tags).toEqual(["session.started", "session.exited"]);
+    expect(filterByTag(run.seen, "session.exited")[0]?.message).toContain("crashed right after");
   });
 });
 

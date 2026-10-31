@@ -402,7 +402,7 @@ describe("launching pi for a text generation", () => {
       ...buildContext(home),
       modelArgument: "openrouter/{model}",
       unlistedModels: [
-        { slug: "fake-vendor/fake-model:free", name: "Fake: Model", imageInput: null, options: [] },
+        { slug: "fake-vendor/fake-model:free", name: "Fake: Model", imageInput: null },
       ],
     };
     const outcome = Effect.runPromise(

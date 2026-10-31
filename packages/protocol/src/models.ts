@@ -2,7 +2,7 @@
  * The models of a Provider Account: what a harness probe lists, and what a
  * provider's own catalog adds to it.
  */
-import { Effect, Schema } from "effect";
+import { Effect, Schema, Struct } from "effect";
 
 import { Fact, MAX_FACT_ITEMS, Timestamp } from "./primitives";
 
@@ -111,12 +111,48 @@ export const CatalogModel = Schema.Struct({
 export type CatalogModel = Schema.Schema.Type<typeof CatalogModel>;
 
 /**
+ * The fields of a `CatalogModel` that an `UnlistedModel` keeps. The controller
+ * picks the same keys when it converts a catalog model, so the two cannot
+ * drift apart.
+ */
+export const UNLISTED_MODEL_KEYS = [
+  "slug",
+  "name",
+  "contextWindow",
+  "outputLimit",
+  "reasoning",
+  "imageInput",
+] as const;
+
+/**
+ * What a harness needs to run a model it does not list itself: the model's
+ * id and name, the numbers it needs to size a request, whether it reasons,
+ * and whether it takes images. It is the part of a `CatalogModel` that a
+ * runner reads. The rest (options, prices, maker, release date) is only for
+ * showing and filtering in the controller's clients, so it never crosses to a
+ * runner. The fields are the catalog model's own, with the same names and
+ * rules.
+ */
+export const UnlistedModel = CatalogModel.mapFields(Struct.pick(UNLISTED_MODEL_KEYS));
+
+export type UnlistedModel = Schema.Schema.Type<typeof UnlistedModel>;
+
+/**
  * The most models one Model Catalog may hold when the controller reads it from
- * a provider's API, and so the most catalog models a `SessionStart` or a
+ * a provider's API, and so the most models a `SessionStart` or a
  * `TextGenerationRequest` may carry in `unlistedModels`. OpenRouter lists about
- * 450 models, so this leaves room to grow. A catalog model with its details is
- * a few hundred bytes as JSON, so 1024 of them keep a frame well under
- * `MAX_FRAME_BYTES` (2 MiB). The catalog read keeps at most this many and says
- * so, so a frame never has to cut the list.
+ * 450 models, so this leaves room to grow. The catalog read keeps at most this
+ * many and says so, so a frame never has to cut the list.
+ *
+ * The count does not bound the frame's size, because a name may be up to
+ * `MAX_FACT_LENGTH` characters. The size is bounded where the models come from:
+ * the controller refuses a catalog read from a provider's API whose JSON
+ * encoding is over 1 MiB, and an `UnlistedModel` holds only some of the fields
+ * of the `CatalogModel` it comes from, so the list of a frame is at most that
+ * 1 MiB. That leaves the other half of `MAX_FRAME_BYTES` (2 MiB) for the rest
+ * of the frame. OpenRouter's 452 models measure about 121 kB as catalog models,
+ * and less as unlisted models. A catalog read by probing a harness arrived in a
+ * probe result, which is itself under `MAX_FRAME_BYTES`, and an unlisted model
+ * is smaller than the descriptor it comes from.
  */
 export const MAX_CATALOG_MODELS = 1024;

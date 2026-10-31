@@ -337,9 +337,17 @@ const buildModelChangeFailure = (
  */
 const STARTUP_DEADLINE: Duration.Duration = Duration.seconds(30);
 
+/** Why the check of a freshly started pi failed, as a message for the user. */
+interface StartCheckFailure {
+  /** True when pi was gone before it answered, rather than answering wrongly. */
+  readonly exited: boolean;
+  readonly message: string;
+}
+
 /**
- * Checks that a pi just spawned with `--model` runs on that model, and fails
- * with a message for the user when it runs on another one.
+ * Waits for a pi just spawned with `--model` to load, asks it which model it
+ * runs on with `get_state`, and fails with a message for the user when it runs
+ * on another one.
  *
  * `--model` is the only way to choose pi's first model, and pi reads it
  * loosely. An id that pi does not list can match another model whose id or name
@@ -351,31 +359,31 @@ const STARTUP_DEADLINE: Duration.Duration = Duration.seconds(30);
  * pi also builds a model from an unknown id on top of another model's
  * settings. That model still has the requested id, so it passes this check.
  *
- * Succeeds without a verdict when pi exits before it answers: the exit is
- * reported by the watch on pi's process, with pi's own error output.
+ * Fails with `exited: true` when pi is gone before it answers, so the caller
+ * can tell a pi that could not start from one that started on the wrong model.
+ * Treating that as success would let `session.started` follow the exit of the
+ * same pi.
  */
 const confirmStartedModel = (
   rpc: PiRpc,
   modelArgument: string,
   model: string,
-): Effect.Effect<void, string> =>
+): Effect.Effect<void, StartCheckFailure> =>
   Effect.gen(function* () {
     const provider = yield* Effect.try({
       try: () => readPiProvider(modelArgument),
-      catch: describeError,
+      catch: (error): StartCheckFailure => ({ exited: false, message: describeError(error) }),
     });
     const response = yield* rpc.send({ type: "get_state" }, STARTUP_DEADLINE).pipe(
-      // A pi that is gone has no model to check. Its exit is reported with its
-      // own error output by the watch on its process.
-      Effect.catch((failure) =>
+      Effect.mapError((failure): StartCheckFailure =>
         failure._tag === "PiExited" || failure._tag === "PiUnreachable"
-          ? Effect.succeed(undefined)
-          : Effect.fail(
-              `${PI_NAME} did not report which model it started on, so nothing was run on it: ${failure.message}`,
-            ),
+          ? { exited: true, message: `${PI_NAME} stopped while it was starting.` }
+          : {
+              exited: false,
+              message: `${PI_NAME} did not report which model it started on, so nothing was run on it: ${failure.message}`,
+            },
       ),
     );
-    if (response === undefined) return;
     const started = (response["data"] as { readonly model?: Record<string, unknown> | null } | null)
       ?.model;
     if (started?.["provider"] === provider && started["id"] === model) return;
@@ -383,9 +391,10 @@ const confirmStartedModel = (
       started === undefined || started === null
         ? "no model"
         : `${String(started["provider"])}/${String(started["id"])}`;
-    return yield* Effect.fail(
-      `${PI_NAME} started on ${actual} instead of ${provider}/${model}, so nothing was run on it. ${PI_NAME} does not list ${provider}/${model} and picked a similar model. The model may have left the provider's catalog: refresh the account's models and choose another model.`,
-    );
+    return yield* Effect.fail<StartCheckFailure>({
+      exited: false,
+      message: `${PI_NAME} started on ${actual} instead of ${provider}/${model}, so nothing was run on it. ${PI_NAME} does not list ${provider}/${model} and picked a similar model. The model may have left the provider's catalog: refresh the account's models and choose another model.`,
+    });
   });
 
 /** A session this adapter hosts, and the adapter's state for its pi processes. */
@@ -421,6 +430,17 @@ interface Held {
   readonly systemPromptFile: string | undefined;
   /** Whether `stopSession` is stopping this session. The stop then reports the exit. */
   stopping: boolean;
+  /**
+   * How the start's check of pi's model is going. While it is `checking`, an
+   * exit of pi is held back by the watch on its process, because the start
+   * decides how to report it: as a failed start when the check fails, else as
+   * an exit after `session.started`. A held-back exit is recorded as `exited`,
+   * with what pi wrote on its error output.
+   */
+  startup:
+    | { readonly _tag: "checking" }
+    | { readonly _tag: "exited"; readonly message: string }
+    | { readonly _tag: "done" };
   /** Counts Stops so an input waiting on an RPC reply cannot continue after its Stop. */
   inputGeneration: number;
 }
@@ -1445,9 +1465,14 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * Watches an agent's pi process: keeps its last stderr lines, and reports
    * them when pi exits by itself. The session's own pi exiting ends the
    * session; a subagent's pi exiting ends that subagent, and its parent gets
-   * the error as the reply.
+   * the error as the reply. While a session's start is still checking pi's
+   * model (`Held.startup`), the session's exit is recorded instead of
+   * reported.
+   *
+   * Returns a function that waits until pi's error output is read to the end
+   * and returns its last lines, joined by newlines.
    */
-  const watchChild = (held: Held, agent: RunningAgent): void => {
+  const watchChild = (held: Held, agent: RunningAgent): (() => Promise<string>) => {
     const child = agent.child;
     const complaints: Array<string> = [];
     const drained = (async () => {
@@ -1471,6 +1496,10 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
       await drained;
       const message = code === 0 ? "" : complaints.join("\n");
       if (!isSubagent(agent)) {
+        if (held.startup._tag === "checking") {
+          held.startup = { _tag: "exited", message };
+          return;
+        }
         exitSession(held.binding.sessionId, "process_exit", message);
         return;
       }
@@ -1483,6 +1512,10 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
       );
     };
     void child.exited.then(onChildGone, () => onChildGone(undefined));
+    return async () => {
+      await drained;
+      return complaints.join("\n");
+    };
   };
 
   /**
@@ -1509,8 +1542,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * Declares `models` to pi by setting them as the provider's models in the
    * `models.json` in `directory`, pi's agent directory (see
    * `replaceProviderModels`). pi reads the file when it starts. Does nothing
-   * when there are no models, or when the file already holds exactly them. Returns true when the file did not parse as JSON
-   * and was replaced. Throws when the file cannot be read or written.
+   * when there are no models, or when the file already holds exactly them.
+   * Throws when the file cannot be read or written, and when it is not a plain
+   * JSON object (a file with comments, say), because writing would drop what
+   * it holds. That message names the file and what to do, and never quotes the
+   * file's content.
    *
    * Everything here is synchronous, so two sessions of one account starting in
    * this process cannot interleave their read and write and lose each other's
@@ -1520,8 +1556,8 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     directory: string,
     modelArgument: string,
     models: HarnessRunnerContext["unlistedModels"],
-  ): boolean => {
-    if (models === undefined || models.length === 0) return false;
+  ): void => {
+    if (models === undefined || models.length === 0) return;
     const path = join(directory, "models.json");
     let existing: string | undefined;
     try {
@@ -1529,10 +1565,14 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    const update = replaceProviderModels(existing, readPiProvider(modelArgument), models);
-    if (update._tag === "unchanged") return false;
-    writeFileAtomically(path, update.text);
-    return update.replacedUnreadableFile;
+    const provider = readPiProvider(modelArgument);
+    const update = replaceProviderModels(existing, provider, models);
+    if (update._tag === "unreadable") {
+      throw new Error(
+        `${PI_NAME}'s models.json (${path}) is not a plain JSON object, so the models of ${provider} cannot be added to it without losing what it holds. Remove its comments, or delete the file.`,
+      );
+    }
+    if (update._tag === "write") writeFileAtomically(path, update.text);
   };
 
   /**
@@ -1586,19 +1626,19 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
    * Prepares the Harness Home for a session: creates the sessions
    * directory, writes the session's instructions when it has any, and declares
    * the models the start carried that pi does not list (for a fresh start, a
-   * resume and a fork alike). Returns true when `models.json` did not parse
-   * and was replaced. Throws when a write fails.
+   * resume and a fork alike). Throws when a write fails, and when
+   * `models.json` cannot take the models (see `declareUnlistedModels`).
    */
   const prepareHome = (
     ctx: HarnessRunnerContext,
     sessionId: string,
     instructions: string | undefined,
-  ): boolean => {
+  ): void => {
     mkdirSync(buildSessionsDir(ctx.home), { recursive: true, mode: 0o700 });
     if (instructions !== undefined) {
       writeFileAtomically(buildSystemPromptPath(ctx.home, sessionId), instructions);
     }
-    return declareUnlistedModels(ctx.home, ctx.modelArgument, ctx.unlistedModels);
+    declareUnlistedModels(ctx.home, ctx.modelArgument, ctx.unlistedModels);
   };
 
   const buildEnv = (
@@ -1842,7 +1882,15 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
               ),
             ),
           );
-          yield* confirmStartedModel(agent.rpc, ctx.modelArgument, spec.model);
+          yield* confirmStartedModel(agent.rpc, ctx.modelArgument, spec.model).pipe(
+            // A pi that exited is reported by the next lines: the prompt finds
+            // it gone and the watch above settles the call as failed. That
+            // report is deliberately free of pi's error output, which can
+            // hold a credential.
+            Effect.catch((failure) =>
+              failure.exited ? Effect.void : Effect.fail(failure.message),
+            ),
+          );
           yield* Effect.catch(agent.rpc.send({ type: "prompt", message: spec.input }), (error) =>
             // A pi that already exited is reported below, by the watch on its
             // exit.
@@ -1923,7 +1971,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
             attempt(() => rmSync(systemPromptFile, { force: true }));
           }
         };
-        const replacedModelsFile = yield* Effect.try({
+        yield* Effect.try({
           try: () => prepareHome(ctx, sessionId, instructions),
           catch: (error) => {
             deleteUnusedInstructions();
@@ -1932,11 +1980,6 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
             );
           },
         });
-        if (replacedModelsFile) {
-          yield* Effect.logWarning(
-            `${PI_NAME}'s models.json in ${ctx.home} did not parse, so it was replaced by the models of this session`,
-          );
-        }
         const child = yield* Effect.try({
           try: () =>
             spawnAgent(
@@ -2007,25 +2050,38 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           modelSelection: spec.modelSelection,
           systemPromptFile,
           stopping: false,
+          startup: { _tag: "checking" },
           inputGeneration: 0,
         };
         sessions.set(sessionId, held);
-        watchChild(held, root);
+        const readComplaints = watchChild(held, root);
         Effect.runFork(root.rpc.pump);
-        const wrongModel = yield* Effect.match(
+        const checkFailure = yield* Effect.match(
           confirmStartedModel(root.rpc, ctx.modelArgument, spec.modelSelection.model),
-          { onFailure: (message) => message, onSuccess: () => undefined },
+          { onFailure: (failure) => failure, onSuccess: () => undefined },
         );
-        if (wrongModel !== undefined) {
+        if (checkFailure !== undefined) {
           // pi has done nothing yet, so it is stopped without the careful
           // shutdown of `stopSession`. `stopping` keeps the watch on its
-          // process from reporting the exit of a session that never started.
+          // process from reporting the exit of a session that never started:
+          // the failed start is the one report.
           held.stopping = true;
           sessions.delete(sessionId);
           deleteUnusedInstructions();
           yield* stopChild(child);
-          return yield* Effect.fail(buildAdapterFailed(wrongModel));
+          // A pi that exited has said why on its error output. Without it the
+          // user would only learn that pi stopped.
+          const complaints = checkFailure.exited ? yield* Effect.promise(readComplaints) : "";
+          return yield* Effect.fail(
+            buildAdapterFailed(
+              complaints === ""
+                ? checkFailure.message
+                : `${checkFailure.message} ${truncateMessage(complaints)}`,
+            ),
+          );
         }
+        const exitedDuringCheck = held.startup._tag === "exited" ? held.startup : undefined;
+        held.startup = { _tag: "done" };
         // The native id goes on this event because the controller has no
         // other way to learn it: a session started after the runner's hello
         // is not listed again.
@@ -2036,6 +2092,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           at: now(),
           harnessRefs: { nativeSessionId },
         });
+        // pi answered and then exited before the check was over. The exit is
+        // reported now, after the start it follows.
+        if (exitedDuringCheck !== undefined) {
+          exitSession(sessionId, "process_exit", exitedDuringCheck.message);
+        }
         return binding;
       }),
 

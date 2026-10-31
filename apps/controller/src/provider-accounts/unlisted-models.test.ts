@@ -125,7 +125,7 @@ const withApiAccount = <A, E>(
   );
 
 describe("UnlistedModels.listUnlistedModels", () => {
-  it("returns the catalog models the harness lacks on the runner, with their details and in catalog order", async () => {
+  it("returns the catalog models the harness lacks on the runner, in catalog order and with only what a runner needs", async () => {
     const unlisted = await withApiAccount((accountId) =>
       Effect.gen(function* () {
         const runner = yield* addRunner("laptop");
@@ -134,7 +134,16 @@ describe("UnlistedModels.listUnlistedModels", () => {
       }),
     );
 
-    expect(unlisted).toEqual([catalog[1], catalog[2]]);
+    expect(unlisted).toEqual([
+      {
+        slug: "b",
+        name: "Model b",
+        imageInput: null,
+        contextWindow: 200_000,
+        reasoning: true,
+      },
+      { slug: "c", name: "Model c", imageInput: null, contextWindow: 8_000 },
+    ]);
   });
 
   it("judges by the target runner's snapshot, not another runner's", async () => {
@@ -161,7 +170,7 @@ describe("UnlistedModels.listUnlistedModels", () => {
       }),
     );
 
-    expect(unlisted).toEqual([catalog[2]]);
+    expect(unlisted.map((model) => model.slug)).toEqual(["c"]);
   });
 
   it("returns nothing for a runner with no snapshot when the catalog lacks the model the frame runs", async () => {
@@ -187,7 +196,7 @@ describe("UnlistedModels.listUnlistedModels", () => {
       }),
     );
 
-    expect(unlisted).toEqual([catalog[2]]);
+    expect(unlisted.map((model) => model.slug)).toEqual(["c"]);
   });
 
   it("returns nothing for a harness that runs only the models it lists itself", async () => {
@@ -230,6 +239,6 @@ describe("UnlistedModels.listUnlistedModels", () => {
     );
 
     expect(source).toEqual([]);
-    expect(other).toEqual([catalog[0]]);
+    expect(other.map((model) => model.slug)).toEqual(["a"]);
   });
 });

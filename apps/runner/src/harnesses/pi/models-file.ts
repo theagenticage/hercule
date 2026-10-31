@@ -10,7 +10,7 @@
  * only values that are valid, and a value that is missing or invalid is left
  * out, which gives the model pi's own default for it.
  */
-import type { CatalogModel } from "@hercule/protocol";
+import type { UnlistedModel } from "@hercule/protocol";
 
 /** What setting the models of a provider asks the caller to do. */
 export type ModelsFileUpdate =
@@ -19,9 +19,13 @@ export type ModelsFileUpdate =
       readonly _tag: "write";
       /** The complete new text of the file. */
       readonly text: string;
-      /** True when the existing text was not a JSON object, so none of it was kept. */
-      readonly replacedUnreadableFile: boolean;
-    };
+    }
+  /**
+   * The existing text is not a plain JSON object (pi also accepts comments,
+   * for one), so this module cannot add models to it without dropping what it
+   * holds. The caller must leave the file alone.
+   */
+  | { readonly _tag: "unreadable" };
 
 type JsonObject = Record<string, unknown>;
 
@@ -36,7 +40,7 @@ const isPositiveInteger = (value: number | undefined): value is number =>
  * id, the name, the kinds of input, and each of the context window, the output
  * limit and the reasoning flag that the catalog gave and pi accepts.
  */
-const buildEntry = (model: CatalogModel): JsonObject => ({
+const buildEntry = (model: UnlistedModel): JsonObject => ({
   id: model.slug,
   name: model.name,
   ...(isPositiveInteger(model.contextWindow) ? { contextWindow: model.contextWindow } : {}),
@@ -59,30 +63,36 @@ const buildEntry = (model: CatalogModel): JsonObject => ({
  *   `baseUrl`) and every other provider stay as they are.
  *
  * `existingText` is the file's current text, or undefined when there is no
- * file. Returns `unchanged` when `models` is empty or the new content equals
- * the existing content, so the caller does not rewrite a file for nothing.
- * An empty list does not clear the array: the controller sends no models for a
- * harness that lists everything itself, and a start that carries none must
- * leave the file alone. Text that does not parse as a JSON object is replaced
- * by a file holding only `models`: pi would ignore such a file anyway, and
- * `replacedUnreadableFile` lets the caller say so.
+ * file. A leading byte-order mark is ignored, and so is a text of only white
+ * space. Returns:
+ *
+ * - `unchanged` when `models` is empty or the new content equals the existing
+ *   content, so the caller does not rewrite a file for nothing. An empty list
+ *   does not clear the array: the controller sends no models for a harness
+ *   that lists everything itself, and a start that carries none must leave the
+ *   file alone.
+ * - `unreadable` when the text is not a JSON object. pi accepts comments in
+ *   the file and `JSON.parse` does not, so such a file may be fine for pi. The
+ *   caller refuses it instead of replacing it, because other providers'
+ *   overrides in it would be lost.
+ * - `write` with the new text otherwise.
  */
 export const replaceProviderModels = (
   existingText: string | undefined,
   provider: string,
-  models: ReadonlyArray<CatalogModel>,
+  models: ReadonlyArray<UnlistedModel>,
 ): ModelsFileUpdate => {
   if (models.length === 0) return { _tag: "unchanged" };
 
   let existing: JsonObject = {};
-  let replacedUnreadableFile = false;
-  if (existingText !== undefined) {
+  const content = existingText?.replace(/^\uFEFF/, "");
+  if (content !== undefined && content.trim() !== "") {
     try {
-      const parsed: unknown = JSON.parse(existingText);
-      if (isJsonObject(parsed)) existing = parsed;
-      else replacedUnreadableFile = true;
+      const parsed: unknown = JSON.parse(content);
+      if (!isJsonObject(parsed)) return { _tag: "unreadable" };
+      existing = parsed;
     } catch {
-      replacedUnreadableFile = true;
+      return { _tag: "unreadable" };
     }
   }
 
@@ -96,8 +106,6 @@ export const replaceProviderModels = (
   };
   // Compared as parsed content, not as text, so a file formatted by hand is
   // not rewritten when nothing in it changes.
-  if (!replacedUnreadableFile && JSON.stringify(result) === JSON.stringify(existing)) {
-    return { _tag: "unchanged" };
-  }
-  return { _tag: "write", text: `${JSON.stringify(result, null, 2)}\n`, replacedUnreadableFile };
+  if (JSON.stringify(result) === JSON.stringify(existing)) return { _tag: "unchanged" };
+  return { _tag: "write", text: `${JSON.stringify(result, null, 2)}\n` };
 };

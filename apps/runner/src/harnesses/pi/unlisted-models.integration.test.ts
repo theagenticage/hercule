@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
-import type { CatalogModel, HarnessEvent, SessionSpec } from "@hercule/protocol";
+import type { UnlistedModel, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { makePiAdapter, pi } from "./adapter";
 import { killProcessesHolding, runProcess, spawnPi } from "../process";
 import { buildContext, cleanupHomes, filterByTag, SPEC, waitUntil } from "./testing";
@@ -39,11 +39,10 @@ const BUDGET_MS = 60_000;
 const FIRST_ID = "fake-vendor/fake-model:free";
 const SECOND_ID = "fake-vendor/second-model:free";
 
-const buildUnlistedModel = (slug: string): CatalogModel => ({
+const buildUnlistedModel = (slug: string): UnlistedModel => ({
   slug,
   name: `Fake: ${slug}`,
   imageInput: null,
-  options: [],
   contextWindow: 32_768,
   outputLimit: 4_096,
 });
@@ -58,7 +57,7 @@ const buildSpec = (model: string): SessionSpec => ({
  * Starts the fake upstream and builds the context of an OpenRouter account in
  * a scratch home whose `openrouter` provider points at it.
  */
-const buildOpenRouterContext = (unlistedModels: ReadonlyArray<CatalogModel>) => {
+const buildOpenRouterContext = (unlistedModels: ReadonlyArray<UnlistedModel>) => {
   const upstream = startScriptedModelServer(() => ({ text: "OK" }));
   upstreams.push(upstream);
   const home = createScratchHome("pi-unlisted");

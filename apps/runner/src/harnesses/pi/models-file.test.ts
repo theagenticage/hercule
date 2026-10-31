@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { CatalogModel } from "@hercule/protocol";
+import type { UnlistedModel } from "@hercule/protocol";
 import { replaceProviderModels, type ModelsFileUpdate } from "./models-file";
 
-const buildModel = (slug: string, details: Partial<CatalogModel> = {}): CatalogModel => ({
+const buildModel = (slug: string, details: Partial<UnlistedModel> = {}): UnlistedModel => ({
   slug,
   name: `Name of ${slug}`,
   imageInput: null,
-  options: [],
   ...details,
 });
 
@@ -22,7 +21,7 @@ interface WrittenFile {
 /** Replaces the models and parses the written text, failing the test when nothing is written. */
 const replaceAndParse = (
   existing: string | undefined,
-  models: ReadonlyArray<CatalogModel>,
+  models: ReadonlyArray<UnlistedModel>,
   provider = "openrouter",
 ): WrittenFile => {
   const update = replaceProviderModels(existing, provider, models);
@@ -143,22 +142,31 @@ describe("setting the models of a provider in pi's models.json", () => {
     expect(replaceProviderModels(compact, "openrouter", models)._tag).toBe("unchanged");
   });
 
-  it("replaces a file that does not parse, and says it did", () => {
-    for (const unreadable of ["{ not json", "[1, 2]", "42", "null", ""]) {
-      const update = replaceProviderModels(unreadable, "openrouter", [buildModel("a/b")]);
-      expect(update, unreadable).toMatchObject({ _tag: "write", replacedUnreadableFile: true });
+  it("refuses a file that is not a plain JSON object, so what it holds is not lost", () => {
+    // pi accepts comments, so a file that fails here may be a good one for pi.
+    const withComment =
+      '{\n  // my own models\n  "providers": { "zai": { "baseUrl": "http://x" } }\n}';
+    for (const unreadable of ["{ not json", "[1, 2]", "42", "null", withComment]) {
+      expect(
+        replaceProviderModels(unreadable, "openrouter", [buildModel("a/b")]),
+        unreadable,
+      ).toEqual<ModelsFileUpdate>({
+        _tag: "unreadable",
+      });
     }
-    expect(replaceAndParse("{ not json", [buildModel("a/b")])).toEqual({
-      providers: { openrouter: { models: [expect.objectContaining({ id: "a/b" })] } },
-    });
   });
 
-  it("does not report a replaced file when the file was missing or readable", () => {
-    expect(replaceProviderModels(undefined, "openrouter", [buildModel("a/b")])).toMatchObject({
-      replacedUnreadableFile: false,
-    });
-    expect(replaceProviderModels("{}", "openrouter", [buildModel("a/b")])).toMatchObject({
-      replacedUnreadableFile: false,
-    });
+  it("reads a file that starts with a byte-order mark", () => {
+    const existing = `\uFEFF${JSON.stringify({ other: true, providers: { zai: { baseUrl: "http://x" } } })}`;
+    const written = replaceAndParse(existing, [buildModel("a/b")]);
+    expect(written.other).toBe(true);
+    expect(written.providers.zai).toEqual({ baseUrl: "http://x" });
+    expect(written.providers.openrouter!.models).toHaveLength(1);
+  });
+
+  it("builds a new file when the existing one holds nothing but white space", () => {
+    expect(replaceAndParse("  \n", [buildModel("a/b")]).providers.openrouter!.models).toHaveLength(
+      1,
+    );
   });
 });

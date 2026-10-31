@@ -103,7 +103,7 @@ describe("the outcome of a text generation", () => {
   });
 
   it("hands the adapter the unlisted models of the request", async () => {
-    const unlistedModels = [{ slug: "vendor/model", name: "Model", imageInput: null, options: [] }];
+    const unlistedModels = [{ slug: "vendor/model", name: "Model", imageInput: null }];
     let received: HarnessRunnerContext["unlistedModels"];
     const generate = buildGenerator(
       buildAdapter((ctx) => {

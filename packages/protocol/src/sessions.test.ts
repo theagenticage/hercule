@@ -794,29 +794,46 @@ describe("what the controller sends for a session", () => {
     expect(decode(SessionStart, { ...start, userMaterial: false })._tag).toBe("Failure");
   });
 
-  it("carries the unlisted catalog models, with or without details, up to a limit", () => {
-    // A probe's descriptor has no details, so it must be a valid catalog model
-    // as it is; a model from a provider's catalog adds details.
-    const descriptor = { slug: "acme/free", name: "Acme: Free", imageInput: null, options: [] };
+  it("carries the unlisted models with only what a harness needs, up to a limit", () => {
+    const bare = { slug: "acme/free", name: "Acme: Free", imageInput: null };
     const detailed = {
-      ...descriptor,
-      maker: "Acme",
+      ...bare,
       contextWindow: 200_000,
-      inputPrice: 0,
-      releasedAt: "2026-10-01T00:00:00.000Z",
-      tools: true,
+      outputLimit: 8_192,
+      reasoning: true,
+      imageInput: { maxBytes: null },
     };
-    const withModels = { ...start, unlistedModels: [descriptor, detailed] };
+    const withModels = { ...start, unlistedModels: [bare, detailed] };
     expect(Effect.runSync(Schema.decodeUnknownEffect(SessionStart)(withModels))).toEqual(
       withModels,
     );
     // A start without the key is a start with nothing unlisted.
     expect(decode(SessionStart, start)._tag).toBe("Success");
-    const tooMany = Array.from({ length: MAX_CATALOG_MODELS + 1 }, () => descriptor);
+    const tooMany = Array.from({ length: MAX_CATALOG_MODELS + 1 }, () => bare);
     expect(decode(SessionStart, { ...start, unlistedModels: tooMany })._tag).toBe("Failure");
     expect(
-      decode(SessionStart, { ...start, unlistedModels: [{ ...descriptor, inputPrice: -1 }] })._tag,
+      decode(SessionStart, { ...start, unlistedModels: [{ ...bare, contextWindow: 0 }] })._tag,
     ).toBe("Failure");
+  });
+
+  it("drops the catalog details of an unlisted model instead of carrying them to the runner", () => {
+    const catalogModel = {
+      slug: "acme/free",
+      name: "Acme: Free",
+      imageInput: null,
+      options: [],
+      maker: "Acme",
+      inputPrice: 0,
+      releasedAt: "2026-10-01T00:00:00.000Z",
+      tools: true,
+      isDefault: true,
+    };
+    const decoded = Effect.runSync(
+      Schema.decodeUnknownEffect(SessionStart)({ ...start, unlistedModels: [catalogModel] }),
+    );
+    expect(decoded.unlistedModels).toEqual([
+      { slug: "acme/free", name: "Acme: Free", imageInput: null },
+    ]);
   });
 
   it("rejects a Provider Account id that could escape its directory, on the spec and on the binding", () => {

@@ -8,7 +8,7 @@
  * session slot, so none of the session frames carry it.
  */
 import { Schema } from "effect";
-import { CatalogModel, MAX_CATALOG_MODELS } from "./models";
+import { MAX_CATALOG_MODELS, UnlistedModel } from "./models";
 import { OutputSchema } from "./output-schema";
 import { Fact, HarnessAccount, MAX_MESSAGE_LENGTH } from "./primitives";
 import { Usage } from "./sessions";
@@ -86,7 +86,7 @@ export const TextGenerationRequest = Schema.Struct({
    * ignores them. Absent or empty means there are none.
    */
   unlistedModels: Schema.optionalKey(
-    Schema.Array(CatalogModel).check(Schema.isMaxLength(MAX_CATALOG_MODELS)),
+    Schema.Array(UnlistedModel).check(Schema.isMaxLength(MAX_CATALOG_MODELS)),
   ),
 });
 

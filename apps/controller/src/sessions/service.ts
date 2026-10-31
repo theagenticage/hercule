@@ -35,7 +35,7 @@ import {
   type HarnessAccount,
   SubagentId,
   type ModelSelection,
-  type CatalogModel,
+  type UnlistedModel,
   type HarnessEvent,
   type QuestionAnswers,
   type SessionBinding,
@@ -368,7 +368,7 @@ export interface StartNeeds {
     harnessId: string,
     runnerId: string,
     model: string,
-  ) => Effect.Effect<ReadonlyArray<CatalogModel>, SqlError>;
+  ) => Effect.Effect<ReadonlyArray<UnlistedModel>, SqlError>;
   /**
    * Builds the session's coordination paragraph (spec 19 section 7.1), or
    * returns `undefined` when the session gets none.
@@ -2171,7 +2171,7 @@ const make = Effect.gen(function* () {
         // Likewise one list per account, harness and model: the catalog is
         // large, and the list depends on the session's model when the runner
         // has no list of its own yet.
-        const unlistedModelsByRun = new Map<string, ReadonlyArray<CatalogModel>>();
+        const unlistedModelsByRun = new Map<string, ReadonlyArray<UnlistedModel>>();
         // The loop moves past every row it reads, including rows that fail to
         // decode, so each candidate is fetched and decoded once. A runner's
         // room is for sessions that can start, not for specs that cannot.

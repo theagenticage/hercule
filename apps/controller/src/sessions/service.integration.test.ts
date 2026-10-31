@@ -23,7 +23,7 @@ import {
   SessionSpec,
   SteerRefused,
   type AdapterError,
-  type CatalogModel,
+  type UnlistedModel,
   type ModelSelection,
   type HarnessAccount,
   type HarnessEvent,
@@ -482,8 +482,8 @@ describe("SessionService.claimStarts", () => {
   });
 
   it("puts the models the harness does not list on the frame, asking once for each account, harness and model", async () => {
-    const unlisted: ReadonlyArray<CatalogModel> = [
-      { slug: "api-only", name: "API only", imageInput: null, options: [], contextWindow: 200_000 },
+    const unlisted: ReadonlyArray<UnlistedModel> = [
+      { slug: "api-only", name: "API only", imageInput: null, contextWindow: 200_000 },
     ];
     const asked: Array<ReadonlyArray<string>> = [];
     const result = await run(

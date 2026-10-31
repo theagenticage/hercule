@@ -11,11 +11,21 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { CatalogModel } from "@hercule/protocol";
+import * as Struct from "effect/Struct";
+import { UNLISTED_MODEL_KEYS, type CatalogModel, type UnlistedModel } from "@hercule/protocol";
 import { PluginHost } from "../plugins";
 import { modelCatalogRepository } from "./model-catalog-repository";
 import { providerAccountRepository } from "./repository";
 import { takesCatalogDeclarations } from "./run-descriptor";
+
+/**
+ * Returns the part of a catalog model that a runner needs to run it, which is
+ * every field of `UnlistedModel` and nothing else. The details a client shows
+ * and filters by (prices, maker, options) stay in the controller. This is the
+ * one place a catalog model becomes an `UnlistedModel`.
+ */
+const toUnlistedModel = (model: CatalogModel): UnlistedModel =>
+  Struct.pick(model, UNLISTED_MODEL_KEYS);
 
 const make = Effect.gen(function* () {
   const accounts = yield* providerAccountRepository;
@@ -25,7 +35,9 @@ const make = Effect.gen(function* () {
   return {
     /**
      * Returns the models of the account's Model Catalog that the harness's
-     * own list on the runner lacks, in the catalog's order. The caller leaves
+     * own list on the runner lacks, in the catalog's order, as the
+     * `UnlistedModel`s a runner takes (without the catalog's other details).
+     * The caller leaves
      * `unlistedModels` out of its frame when the list is empty. Reads the
      * database only, so it can run inside a transaction.
      *
@@ -56,7 +68,7 @@ const make = Effect.gen(function* () {
       harnessId: string,
       runnerId: string,
       model: string,
-    ): Effect.Effect<ReadonlyArray<CatalogModel>, SqlError> =>
+    ): Effect.Effect<ReadonlyArray<UnlistedModel>, SqlError> =>
       Effect.gen(function* () {
         const account = Option.getOrUndefined(yield* accounts.one(providerAccountId));
         if (account === undefined) return [];
@@ -69,9 +81,11 @@ const make = Effect.gen(function* () {
           providerAccountId,
           harnessId,
         )).find((snapshot) => snapshot.runnerId === runnerId && snapshot.auth.status === "ok");
-        if (ownSnapshot === undefined) return catalog.models.filter((one) => one.slug === model);
+        if (ownSnapshot === undefined) {
+          return catalog.models.filter((one) => one.slug === model).map(toUnlistedModel);
+        }
         const listed = new Set(ownSnapshot.models.map((one) => one.slug));
-        return catalog.models.filter((one) => !listed.has(one.slug));
+        return catalog.models.filter((one) => !listed.has(one.slug)).map(toUnlistedModel);
       }).pipe(Effect.catchTag("SchemaError", Effect.die)),
   };
 });

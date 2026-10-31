@@ -4977,7 +4977,7 @@ describe("the skills a start names", () => {
   it("hands the harness the unlisted models of the start frame, and none when the frame has none", async () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
-    const unlistedModels = [{ slug: "vendor/model", name: "Model", imageInput: null, options: [] }];
+    const unlistedModels = [{ slug: "vendor/model", name: "Model", imageInput: null }];
 
     await runConnected(
       fake,

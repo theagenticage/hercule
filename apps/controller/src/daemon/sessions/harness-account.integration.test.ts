@@ -552,9 +552,18 @@ describe("the catalog models a harness does not list, on a session's start frame
       const [fork] = await waitForStartFrames(arranged, child.id, 1);
       expect(resume!.spec.continue?.mode).toBe("resume");
       expect(fork!.spec.continue?.mode).toBe("fork");
-      // The runner lists `clever`, so only the model it lacks is sent.
+      // The runner lists `clever`, so only the model it lacks is sent, with
+      // what a runner needs and without the catalog's prices and maker.
       for (const frame of [start!, resume!, fork!]) {
-        expect(frame.unlistedModels).toEqual([API_ONLY_MODEL]);
+        expect(frame.unlistedModels).toEqual([
+          {
+            slug: "api-only",
+            name: "API only",
+            imageInput: null,
+            contextWindow: 200_000,
+            reasoning: true,
+          },
+        ]);
       }
 
       // The harness the catalog is read from lists what the catalog holds.
