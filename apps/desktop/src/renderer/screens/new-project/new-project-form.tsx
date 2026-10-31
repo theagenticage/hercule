@@ -73,8 +73,12 @@ export function NewProjectForm({
   const [remote, setRemote] = useState("");
   const [setupCommand, setSetupCommand] = useState("");
   const [mode, setMode] = useState<ProjectWorkspaceSelection["mode"] | null>(null);
-  // The id of the chosen Model Profile, or "" for None.
-  const [modelProfileId, setModelProfileId] = useState("");
+  // The id of the Model Profile the user chose, or "" for None. It may name a
+  // profile that was deleted since, so `modelProfileId` below is what counts.
+  const [pickedModelProfileId, setPickedModelProfileId] = useState("");
+  const modelProfileId = modelProfiles.some((profile) => profile.id === pickedModelProfileId)
+    ? pickedModelProfileId
+    : "";
   // What the last submission left: what exists, and why the rest does not.
   const [lastSubmission, setLastSubmission] = useState<NewProjectSubmission | null>(null);
 
@@ -182,7 +186,8 @@ export function NewProjectForm({
       profiles={modelProfiles}
       value={modelProfileId}
       disabled={projectId !== null}
-      onChange={setModelProfileId}
+      error={submission?.modelProfileFailure ?? null}
+      onChange={setPickedModelProfileId}
     />
   ) : null;
 

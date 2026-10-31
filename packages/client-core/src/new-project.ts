@@ -12,7 +12,7 @@ import {
 } from "@hercule/contract";
 import { readEveryPage } from "./read-every-page";
 import type { HerculeClient } from "./client";
-import { readErrorMessage } from "./errors";
+import { readErrorMessage, readValidationIssues } from "./errors";
 import { describeRemoteRefusal } from "./remote";
 
 /** The error for a project with no name. */
@@ -69,6 +69,12 @@ export interface NewProjectSubmission<
 > extends NewProjectForm<Repository> {
   /** Why the project itself was not created, or `null`. */
   readonly failure: string | null;
+  /**
+   * Why the controller refused `modelProfileId`, such as a profile that was
+   * deleted since the form listed it. Present only then; `failure` is then
+   * `null`, because the refusal belongs under the profile field.
+   */
+  readonly modelProfileFailure?: string;
 }
 
 /**
@@ -155,6 +161,16 @@ export const createProjectWithRepositories = async <Repository extends Repositor
       };
       projectId = (await client.project.create({ payload })).id;
     } catch (error) {
+      const refusal = readValidationIssues(error)?.find(
+        (issue) => issue.path[0] === "modelProfileId",
+      );
+      if (refusal !== undefined)
+        return {
+          ...form,
+          failure: null,
+          modelProfileFailure: refusal.message,
+          repositories: checked,
+        };
       return { ...form, failure: readErrorMessage(error), repositories: checked };
     }
   }

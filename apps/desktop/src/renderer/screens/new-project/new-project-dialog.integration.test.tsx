@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { REMOTE_REFUSAL } from "@hercule/client-core";
+import { queryKeys, REMOTE_REFUSAL } from "@hercule/client-core";
 import type { Connection, ModelProfile, Project } from "@hercule/contract";
 import type { FolderPickOutcome } from "../../../ipc/contract";
 import {
@@ -38,6 +38,12 @@ const QUICK_PROFILE: ModelProfile = {
   ...FIXTURE_MODEL_PROFILE,
   id: "01a06d02-7800-7000-8000-000000000002",
   name: "Quick fixes",
+};
+
+const THIRD_PROFILE: ModelProfile = {
+  ...FIXTURE_MODEL_PROFILE,
+  id: "01a06d02-7800-7000-8000-000000000003",
+  name: "Third",
 };
 
 /** Answers the Model Profiles read with `profiles`. */
@@ -385,6 +391,62 @@ describe("the New project dialog", () => {
       expect(readCalls(calls, "POST", "/api/v1/projects").map((call) => call.body)).toEqual([
         { name: "shop", modelProfileId: MAIN_PROFILE.id },
       ]);
+    });
+
+    it("sends None when the picked profile was deleted in the meantime", async () => {
+      let profiles = [MAIN_PROFILE, QUICK_PROFILE, THIRD_PROFILE];
+      const { calls, context, view, router } = await pickFolder({
+        folder: REPOSITORY,
+        handlers: { "GET /api/v1/model-profiles": () => ({ body: profiles }) },
+      });
+
+      const select = await view.findByRole<HTMLSelectElement>("combobox", {
+        name: /^Model profile/,
+      });
+      await userEvent.selectOptions(select, "Third");
+      profiles = [MAIN_PROFILE, QUICK_PROFILE];
+      await context.queryClient.invalidateQueries({ queryKey: queryKeys.modelProfiles() });
+
+      await waitFor(() => {
+        expect(select.value).toBe("");
+      });
+      await userEvent.click(view.getByRole("button", { name: "Add project" }));
+
+      await expectDraftInShop(router);
+      expect(readCalls(calls, "POST", "/api/v1/projects").map((call) => call.body)).toEqual([
+        { name: "shop" },
+      ]);
+    });
+
+    it("shows the controller's refusal of the profile under the Model profile field", async () => {
+      const reason = "no Model Profile has the id gone";
+      const { view } = await pickFolder({
+        folder: REPOSITORY,
+        handlers: {
+          ...holdProfiles([MAIN_PROFILE, QUICK_PROFILE]),
+          "POST /api/v1/projects": {
+            status: 400,
+            body: {
+              error: {
+                code: "validation",
+                message: "the request is not valid",
+                details: { issues: [{ path: ["modelProfileId"], message: reason }] },
+              },
+            },
+          },
+        },
+      });
+
+      await userEvent.selectOptions(
+        await view.findByRole("combobox", { name: /^Model profile/ }),
+        "Main",
+      );
+      await userEvent.click(view.getByRole("button", { name: "Add project" }));
+
+      const message = await view.findByText(reason);
+      const profileField = view.getByRole("combobox", { name: /^Model profile/ }).closest(".fl");
+      expect(profileField?.contains(message)).toBe(true);
+      expect(view.queryByText("the request is not valid")).toBeNull();
     });
   });
 });
