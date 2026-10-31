@@ -55,14 +55,12 @@ const findDetail = <T extends { readonly id: string }>(details: ReadonlyArray<T>
 /** What two fixture harnesses run, so a test can tell their catalog rows apart. */
 const RUNS_ALPHA: HarnessProviderSupport = {
   providerId: "vendor/vendor",
-  kinds: [{ kind: "api-key", credentialVariable: "ALPHA_KEY" }],
-  modelArgument: "{model}",
+  kinds: [{ kind: "api-key", modelArgument: "{model}", credentialVariable: "ALPHA_KEY" }],
   models: "all",
 };
 const RUNS_BETA: HarnessProviderSupport = {
   providerId: "vendor/vendor",
-  kinds: [{ kind: "api-key", credentialVariable: "BETA_KEY" }],
-  modelArgument: "beta/{model}",
+  kinds: [{ kind: "api-key", modelArgument: "beta/{model}", credentialVariable: "BETA_KEY" }],
   models: "own-list",
 };
 
@@ -481,7 +479,7 @@ describe("what a harness declares it runs", () => {
 
   it("is errored when an account kind of one provider is listed twice", async () => {
     const message = await bootAndReadError(
-      harnessWith([{ ...RUNS_ALPHA, kinds: [{ kind: "api-key" }, { kind: "api-key" }] }]),
+      harnessWith([{ ...RUNS_ALPHA, kinds: [RUNS_ALPHA.kinds[0]!, RUNS_ALPHA.kinds[0]!] }]),
     );
 
     expect(message).toContain("the account kind api-key of vendor/vendor");
@@ -489,9 +487,11 @@ describe("what a harness declares it runs", () => {
 
   it("is errored, naming the field, when the model argument does not hold {model} exactly once", async () => {
     for (const modelArgument of ["vendor/model", "{model}/{model}"]) {
-      const message = await bootAndReadError(harnessWith([{ ...RUNS_ALPHA, modelArgument }]));
+      const message = await bootAndReadError(
+        harnessWith([{ ...RUNS_ALPHA, kinds: [{ kind: "api-key", modelArgument }] }]),
+      );
 
-      expect(message, modelArgument).toContain("runs.0.modelArgument");
+      expect(message, modelArgument).toContain("runs.0.kinds.0.modelArgument");
     }
   });
 });

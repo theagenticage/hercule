@@ -105,9 +105,15 @@ importers:
       '@hercule/plugin-linear':
         specifier: workspace:*
         version: link:../../plugins/linear
+      '@hercule/plugin-minimax':
+        specifier: workspace:*
+        version: link:../../plugins/minimax
       '@hercule/plugin-openai':
         specifier: workspace:*
         version: link:../../plugins/openai
+      '@hercule/plugin-opencode':
+        specifier: workspace:*
+        version: link:../../plugins/opencode
       '@hercule/plugin-pi':
         specifier: workspace:*
         version: link:../../plugins/pi
@@ -568,7 +574,25 @@ importers:
         specifier: workspace:*
         version: link:../../packages/contract
 
+  plugins/minimax:
+    dependencies:
+      '@hercule/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.7
+        version: 4.0.7
+
   plugins/openai:
+    dependencies:
+      '@hercule/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      effect:
+        specifier: 4.0.7
+        version: 4.0.7
+
+  plugins/opencode:
     dependencies:
       '@hercule/plugin-host':
         specifier: workspace:*

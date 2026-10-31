@@ -469,8 +469,9 @@ describe("Settings > Providers", () => {
                   ...harness.runs,
                   {
                     providerId: "anthropic/anthropic",
-                    kinds: [{ kind: "subscription-per-machine" }],
-                    modelArgument: "anthropic/{model}",
+                    kinds: [
+                      { kind: "subscription-per-machine", modelArgument: "anthropic/{model}" },
+                    ],
                     models: "own-list",
                   },
                 ],

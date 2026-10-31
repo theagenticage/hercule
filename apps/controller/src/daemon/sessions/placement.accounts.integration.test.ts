@@ -31,11 +31,10 @@ const TK: HarnessDefinition = buildHarnessDefinition("tk", [
   {
     providerId: PROVIDER_ID,
     kinds: [
-      { kind: "api-key", credentialVariable: "TK_API_KEY" },
-      { kind: "subscription-token", credentialVariable: "TK_TOKEN" },
-      { kind: "subscription" },
+      { kind: "api-key", modelArgument: "{model}", credentialVariable: "TK_API_KEY" },
+      { kind: "subscription-token", modelArgument: "{model}", credentialVariable: "TK_TOKEN" },
+      { kind: "subscription", modelArgument: "{model}" },
     ],
-    modelArgument: "{model}",
     models: "all",
   },
 ]);

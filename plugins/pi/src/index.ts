@@ -33,26 +33,65 @@ const definition: HarnessDefinition = {
     disallowedTools: "native",
     structuredOutput: "supported",
   },
-  // pi runs the keys of three providers. It names a model `<provider>/<id>`,
+  // pi runs the keys of several providers. It names a model `<provider>/<id>`,
   // runs only the ones in its own list, and reads each provider's key from that
-  // provider's usual variable.
+  // provider's usual variable. OpenCode is two pi providers: `opencode-go` for
+  // a Go key and `opencode` for a Zen key, which both read the same variable.
+  // MiniMax is one pi provider (`minimax`) for both of its kinds of key.
   runs: [
     {
       providerId: "anthropic/anthropic",
-      kinds: [{ kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" }],
-      modelArgument: "anthropic/{model}",
+      kinds: [
+        {
+          kind: "api-key",
+          modelArgument: "anthropic/{model}",
+          credentialVariable: "ANTHROPIC_API_KEY",
+        },
+      ],
       models: "own-list",
     },
     {
       providerId: "openai/openai",
-      kinds: [{ kind: "api-key", credentialVariable: "OPENAI_API_KEY" }],
-      modelArgument: "openai/{model}",
+      kinds: [
+        { kind: "api-key", modelArgument: "openai/{model}", credentialVariable: "OPENAI_API_KEY" },
+      ],
       models: "own-list",
     },
     {
       providerId: "zai/zai",
-      kinds: [{ kind: "api-key", credentialVariable: "ZAI_API_KEY" }],
-      modelArgument: "zai/{model}",
+      kinds: [{ kind: "api-key", modelArgument: "zai/{model}", credentialVariable: "ZAI_API_KEY" }],
+      models: "own-list",
+    },
+    {
+      providerId: "opencode/opencode",
+      kinds: [
+        {
+          kind: "go-key",
+          modelArgument: "opencode-go/{model}",
+          credentialVariable: "OPENCODE_API_KEY",
+        },
+        {
+          kind: "zen-key",
+          modelArgument: "opencode/{model}",
+          credentialVariable: "OPENCODE_API_KEY",
+        },
+      ],
+      models: "own-list",
+    },
+    {
+      providerId: "minimax/minimax",
+      kinds: [
+        {
+          kind: "pay-as-you-go-key",
+          modelArgument: "minimax/{model}",
+          credentialVariable: "MINIMAX_API_KEY",
+        },
+        {
+          kind: "plan-key",
+          modelArgument: "minimax/{model}",
+          credentialVariable: "MINIMAX_API_KEY",
+        },
+      ],
       models: "own-list",
     },
   ],

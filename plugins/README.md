@@ -22,6 +22,8 @@ discovery, no dynamic loading and no install step. The plugins shipped so far:
 | `@hercule/plugin-anthropic` | the `anthropic/anthropic` provider |
 | `@hercule/plugin-openai` | the `openai/openai` provider |
 | `@hercule/plugin-zai` | the `zai/zai` provider |
+| `@hercule/plugin-opencode` | the `opencode/opencode` provider, with a Go key and a Zen key |
+| `@hercule/plugin-minimax` | the `minimax/minimax` provider, with a pay-as-you-go key and a plan key |
 | `@hercule/plugin-github` | the `github` connection type, the event source that polls GitHub, and the workflow actions on issues and pull requests |
 | `@hercule/plugin-sentry` | the `sentry` connection type, the event source that polls Sentry for issues, the signals for new, returning and escalating issues, and the workflow actions that resolve, archive and assign an issue |
 | `@hercule/plugin-linear` | the `linear` connection type, the event source that polls Linear for the issues you watch and your inbox, and the signals for watched issues, mentions and assignments |

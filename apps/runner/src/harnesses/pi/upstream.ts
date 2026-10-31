@@ -1,9 +1,15 @@
 /**
  * A fake model server with scripted replies, so tests can drive the real pi
  * binary without a paid key and without depending on what a real model says.
- * It implements the part of OpenAI's streaming chat-completions API that pi's
- * `openai-completions` client uses: one SSE `data:` line per chunk, and
- * `data: [DONE]` at the end.
+ * It implements two streaming APIs, so a test can run a provider on its own
+ * transport:
+ *
+ * - OpenAI's chat-completions API, as pi's `openai-completions` client uses
+ *   it: `POST <baseUrl>/chat/completions`, one SSE `data:` line per chunk,
+ *   and `data: [DONE]` at the end.
+ * - Anthropic's Messages API, as pi's `anthropic-messages` client uses it:
+ *   `POST <anthropicBaseUrl>/v1/messages`, answered with the SSE events
+ *   `message_start` to `message_stop`. It answers text replies only.
  *
  * A script chooses each reply. `startFakeModelServer` uses the default script,
  * which looks only at the request number:
@@ -74,12 +80,18 @@ export interface FakeModelRequest {
 export type FakeModelScript = (request: FakeModelRequest, asked: number) => FakeModelReply;
 
 export interface FakeModelServer {
-  /** The URL to put in a provider's `baseUrl` in `models.json`. */
+  /** The URL to put in the `baseUrl` of a provider that speaks `openai-completions`, in `models.json`. */
   readonly baseUrl: string;
+  /** The URL to put in the `baseUrl` of a provider that speaks `anthropic-messages`, in `models.json`. */
+  readonly anthropicBaseUrl: string;
   /** Returns how many completions pi has requested so far. */
   readonly asked: () => number;
   /** Returns the body of every completion request pi has sent so far, in order. */
   readonly requests: () => ReadonlyArray<string>;
+  /** Returns the `Authorization` header of every completion request so far, in order; null for a request that sent none. */
+  readonly authorizations: () => ReadonlyArray<string | null>;
+  /** Returns the `x-api-key` header of every completion request so far, in order; null for a request that sent none. */
+  readonly apiKeyHeaders: () => ReadonlyArray<string | null>;
   readonly stop: () => void;
 }
 
@@ -182,25 +194,78 @@ const formatReply = (reply: FakeModelReply, asked: number): string =>
     "data: [DONE]\n\n",
   ].join("");
 
+const formatAnthropicEvent = (type: string, fields: Record<string, unknown>): string =>
+  `event: ${type}\ndata: ${JSON.stringify({ type, ...fields })}\n\n`;
+
+/**
+ * Formats a text reply as the SSE events pi's Anthropic client reads: one
+ * text block, then the end of the turn.
+ */
+const formatAnthropicTextReply = (reply: {
+  readonly text: string;
+  readonly usage?: FakeModelUsage;
+}): string =>
+  [
+    formatAnthropicEvent("message_start", {
+      message: {
+        id: "msg_hercule",
+        type: "message",
+        role: "assistant",
+        model: "fake-model",
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: reply.usage?.promptTokens ?? 0, output_tokens: 0 },
+      },
+    }),
+    formatAnthropicEvent("content_block_start", {
+      index: 0,
+      content_block: { type: "text", text: "" },
+    }),
+    formatAnthropicEvent("content_block_delta", {
+      index: 0,
+      delta: { type: "text_delta", text: reply.text },
+    }),
+    formatAnthropicEvent("content_block_stop", { index: 0 }),
+    formatAnthropicEvent("message_delta", {
+      delta: { stop_reason: "end_turn", stop_sequence: null },
+      usage: { output_tokens: reply.usage?.completionTokens ?? 0 },
+    }),
+    formatAnthropicEvent("message_stop", {}),
+  ].join("");
+
 /** Starts a fake model server whose replies the given script chooses. */
 export const startScriptedModelServer = (script: FakeModelScript): FakeModelServer => {
   let asked = 0;
   const requests: Array<string> = [];
+  const authorizations: Array<string | null> = [];
+  const apiKeyHeaders: Array<string | null> = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch: async (request) => {
       const url = new URL(request.url);
-      if (!url.pathname.endsWith("/chat/completions")) {
+      const isAnthropic = url.pathname.endsWith("/v1/messages");
+      if (!isAnthropic && !url.pathname.endsWith("/chat/completions")) {
         return new Response(JSON.stringify({ data: [{ id: "fake-model" }] }), {
           headers: { "content-type": "application/json" },
         });
       }
       const body = await request.text();
       requests.push(body);
+      authorizations.push(request.headers.get("authorization"));
+      apiKeyHeaders.push(request.headers.get("x-api-key"));
       asked += 1;
       const reply = script(JSON.parse(body) as FakeModelRequest, asked);
-      return new Response(formatReply(reply, asked), {
+      let stream: string;
+      if (!isAnthropic) {
+        stream = formatReply(reply, asked);
+      } else if ("text" in reply) {
+        stream = formatAnthropicTextReply(reply);
+      } else {
+        return new Response("The fake Anthropic API answers text replies only", { status: 500 });
+      }
+      return new Response(stream, {
         headers: {
           "content-type": "text/event-stream",
           "cache-control": "no-cache",
@@ -211,8 +276,11 @@ export const startScriptedModelServer = (script: FakeModelScript): FakeModelServ
   });
   return {
     baseUrl: `http://127.0.0.1:${server.port}/v1`,
+    anthropicBaseUrl: `http://127.0.0.1:${server.port}`,
     asked: () => asked,
     requests: () => requests,
+    authorizations: () => authorizations,
+    apiKeyHeaders: () => apiKeyHeaders,
     stop: () => void server.stop(true),
   };
 };
@@ -249,5 +317,26 @@ export const pointAtFakeModel = (home: string, baseUrl: string): void => {
         },
       },
     }),
+  );
+};
+
+/**
+ * Writes a `models.json` that changes only the `baseUrl` of the given pi
+ * provider (pi's own provider name, such as `zai`). pi applies it to every built-in model of the provider, so the
+ * provider keeps its own models and its own transport (`openai-completions`,
+ * `anthropic-messages`), and a session reaches the fake model server through
+ * the same client code as a real one. Pass `server.baseUrl` for a model that
+ * speaks `openai-completions` and `server.anthropicBaseUrl` for one that
+ * speaks `anthropic-messages`. The file holds no key, so pi sends the one in
+ * the provider's environment variable.
+ */
+export const redirectProviderToFakeServer = (
+  home: string,
+  piProvider: string,
+  baseUrl: string,
+): void => {
+  writeFileSync(
+    join(home, "models.json"),
+    JSON.stringify({ providers: { [piProvider]: { baseUrl } } }),
   );
 };

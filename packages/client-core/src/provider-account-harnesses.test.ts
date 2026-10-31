@@ -55,11 +55,10 @@ const SHIPPED_HARNESSES: ReadonlyArray<Harness> = [
       {
         providerId: "anthropic/anthropic",
         kinds: [
-          { kind: "subscription-per-machine" },
-          { kind: "subscription-token" },
-          { kind: "api-key" },
+          { kind: "subscription-per-machine", modelArgument: "{model}" },
+          { kind: "subscription-token", modelArgument: "{model}" },
+          { kind: "api-key", modelArgument: "{model}" },
         ],
-        modelArgument: "{model}",
         models: "all",
       },
     ],
@@ -69,8 +68,10 @@ const SHIPPED_HARNESSES: ReadonlyArray<Harness> = [
     runs: [
       {
         providerId: "openai/openai",
-        kinds: [{ kind: "subscription-per-machine" }, { kind: "api-key" }],
-        modelArgument: "{model}",
+        kinds: [
+          { kind: "subscription-per-machine", modelArgument: "{model}" },
+          { kind: "api-key", modelArgument: "{model}" },
+        ],
         models: "all",
       },
     ],
@@ -80,20 +81,17 @@ const SHIPPED_HARNESSES: ReadonlyArray<Harness> = [
     runs: [
       {
         providerId: "anthropic/anthropic",
-        kinds: [{ kind: "api-key" }],
-        modelArgument: "anthropic/{model}",
+        kinds: [{ kind: "api-key", modelArgument: "anthropic/{model}" }],
         models: "own-list",
       },
       {
         providerId: "openai/openai",
-        kinds: [{ kind: "api-key" }],
-        modelArgument: "openai/{model}",
+        kinds: [{ kind: "api-key", modelArgument: "openai/{model}" }],
         models: "own-list",
       },
       {
         providerId: "zai/zai",
-        kinds: [{ kind: "api-key" }],
-        modelArgument: "zai/{model}",
+        kinds: [{ kind: "api-key", modelArgument: "zai/{model}" }],
         models: "own-list",
       },
     ],

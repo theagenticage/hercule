@@ -486,20 +486,20 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 17 added Account Usage frames and fields, which a version 16 peer cannot read. So
-  // versions 16 and 17 refuse each other at hello; this is the version 17 controller refusing a
-  // version 16 runner.
-  it("refuses a runner on protocol version 16 and says to upgrade it", async () => {
+  // Version 18 raised the most models a probe lists, which a version 17 peer cannot read. So
+  // versions 17 and 18 refuse each other at hello; this is the version 18 controller refusing a
+  // version 17 runner.
+  it("refuses a runner on protocol version 17 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dialRunnerSocket(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 16 }));
+      wire.send(buildHello({ protocolVersion: 17 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(17);
+      expect(PROTOCOL_VERSION).toBe(18);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 17 and the runner does not; " +
-          "upgrade the runner to a build that uses version 17",
+        "this controller uses runner protocol version 18 and the runner does not; " +
+          "upgrade the runner to a build that uses version 18",
       );
       expect(wire.frames).toEqual([]);
     });

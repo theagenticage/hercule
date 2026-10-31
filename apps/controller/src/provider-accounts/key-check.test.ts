@@ -75,21 +75,58 @@ describe("ProviderKeyRequests.check", () => {
     ]);
   });
 
-  it.each([401, 403])(
-    "refuses the key with Validation carrying the provider's own words on a %s",
-    async (status) => {
+  it.each([
+    {
+      name: "a 401",
+      status: 401,
+      body: { error: { type: "auth", message: "invalid  x-api-key\nsee docs" } },
+      message: "invalid x-api-key see docs",
+    },
+    {
+      name: "a 403",
+      status: 403,
+      body: { error: { type: "auth", message: "invalid  x-api-key\nsee docs" } },
+      message: "invalid x-api-key see docs",
+    },
+    // OpenCode Go's usage endpoint for a key without a Go subscription. The body
+    // is built from the source of OpenCode's route, not recorded from a live call
+    // (2026-10-31). Its top-level `type` field is one the others do not have.
+    {
+      name: "OpenCode's 403 for a key without Go",
+      status: 403,
+      body: {
+        type: "error",
+        error: { type: "EntitlementError", message: "OpenCode Go subscription required." },
+      },
+      message: "OpenCode Go subscription required.",
+    },
+    // MiniMax's answer to a bogus key, recorded live on 2026-10-31. Its error
+    // has an `http_code`, and the body a `request_id`, that the others do not.
+    {
+      name: "MiniMax's 401",
+      status: 401,
+      body: {
+        type: "error",
+        error: {
+          type: "authorized_error",
+          message:
+            "login fail: Please carry the API secret key in the 'Authorization' field of the request header (1004)",
+          http_code: "401",
+        },
+        request_id: "x",
+      },
+      message:
+        "login fail: Please carry the API secret key in the 'Authorization' field of the request header (1004)",
+    },
+  ])(
+    "refuses the key with Validation carrying the provider's own words on $name",
+    async ({ status, body, message }) => {
       const { outcome } = await checkKey(
         "sk-bad",
-        () =>
-          new Response(
-            JSON.stringify({ error: { type: "auth", message: "invalid  x-api-key\nsee docs" } }),
-            { status },
-          ),
+        () => new Response(JSON.stringify(body), { status }),
       );
 
-      expect(readFailure(outcome)).toMatchObject({
-        error: { code: "validation", message: "invalid x-api-key see docs" },
-      });
+      expect(readFailure(outcome)).toMatchObject({ error: { code: "validation", message } });
     },
   );
 

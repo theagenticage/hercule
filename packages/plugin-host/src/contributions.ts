@@ -100,31 +100,41 @@ export const QualifiedContributionId = ContributionName.check(
 );
 
 /**
+ * How a harness runs one account kind of a provider: how it names the
+ * provider's models for accounts of this kind, and where the account's
+ * credential goes.
+ */
+export const HarnessKindSupport = Schema.Struct({
+  /** The account kind's id, as the provider declares it. */
+  kind: ContributionWord,
+  /**
+   * How the harness names a model of this provider for accounts of this kind,
+   * with `{model}` standing for the provider's own model id: `{model}`, or
+   * `zai/{model}` for pi. It is per kind because a harness may run two kinds of
+   * one provider under different names, such as pi's `opencode-go/{model}` and
+   * `opencode/{model}`.
+   */
+  modelArgument: ModelArgument,
+  /**
+   * The environment variable the account's credential goes in, in the
+   * harness process only. Absent for a kind whose login lives in the
+   * Harness Home instead.
+   */
+  credentialVariable: Schema.optionalKey(CredentialVariable),
+});
+
+export type HarnessKindSupport = Schema.Schema.Type<typeof HarnessKindSupport>;
+
+/**
  * How a harness runs the models of one provider: the account kinds it can run
- * for that provider, how it names one of the provider's models, and which of
- * the account's models it can run (spec 06 section 2).
+ * for that provider, each with how it names a model, and which of the
+ * account's models it can run (spec 06 section 2).
  */
 export const HarnessProviderSupport = Schema.Struct({
   /** The qualified id of the provider, such as `anthropic/anthropic`. The provider's plugin need not be loaded. */
   providerId: QualifiedContributionId,
   /** The account kinds of that provider the harness can run. */
-  kinds: Schema.Array(
-    Schema.Struct({
-      /** The account kind's id, as the provider declares it. */
-      kind: ContributionWord,
-      /**
-       * The environment variable the account's credential goes in, in the
-       * harness process only. Absent for a kind whose login lives in the
-       * Harness Home instead.
-       */
-      credentialVariable: Schema.optionalKey(CredentialVariable),
-    }),
-  ),
-  /**
-   * How the harness names a model of this provider, with `{model}` standing
-   * for the provider's own model id: `{model}`, or `zai/{model}` for pi.
-   */
-  modelArgument: ModelArgument,
+  kinds: Schema.Array(HarnessKindSupport),
   /**
    * Which of the account's models the harness can run: `all` of them, or only
    * those in the harness's own model list for the account (`own-list`).

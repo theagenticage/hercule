@@ -32,11 +32,14 @@ describe("the Claude Code harness", () => {
       {
         providerId: "anthropic/anthropic",
         kinds: [
-          { kind: "subscription-per-machine" },
-          { kind: "subscription-token", credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN" },
-          { kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" },
+          { kind: "subscription-per-machine", modelArgument: "{model}" },
+          {
+            kind: "subscription-token",
+            modelArgument: "{model}",
+            credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN",
+          },
+          { kind: "api-key", modelArgument: "{model}", credentialVariable: "ANTHROPIC_API_KEY" },
         ],
-        modelArgument: "{model}",
         models: "all",
       },
     ]);

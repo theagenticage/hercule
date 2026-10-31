@@ -11,6 +11,8 @@ import { claudeCode } from "@hercule/plugin-claude-code";
 import { codex } from "@hercule/plugin-codex";
 import { github } from "@hercule/plugin-github";
 import { linear } from "@hercule/plugin-linear";
+import { minimax } from "@hercule/plugin-minimax";
+import { opencode } from "@hercule/plugin-opencode";
 import { openai } from "@hercule/plugin-openai";
 import { pi } from "@hercule/plugin-pi";
 import { sentry } from "@hercule/plugin-sentry";
@@ -23,6 +25,8 @@ export const registry: ReadonlyArray<Plugin> = [
   anthropic,
   openai,
   zai,
+  opencode,
+  minimax,
   github,
   sentry,
   linear,

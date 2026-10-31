@@ -398,10 +398,9 @@ describe("the default assistant of the first provider account", () => {
           {
             providerId: "keyed/keyed",
             kinds: [
-              { kind: "api-key", credentialVariable: "KEYED_API_KEY" },
-              { kind: "signed-in" },
+              { kind: "api-key", modelArgument: "{model}", credentialVariable: "KEYED_API_KEY" },
+              { kind: "signed-in", modelArgument: "{model}" },
             ],
-            modelArgument: "{model}",
             models: "all",
           },
         ]),

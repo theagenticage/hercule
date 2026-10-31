@@ -142,8 +142,9 @@ const buildMultiHarnessPlugins = (): ReadonlyArray<Plugin> => [
       buildHarnessDefinition("codex", [
         {
           providerId: FLOORED_PROVIDER_ID,
-          kinds: [{ kind: "api-key", credentialVariable: "FLOORED_API_KEY" }],
-          modelArgument: "{model}",
+          kinds: [
+            { kind: "api-key", modelArgument: "{model}", credentialVariable: "FLOORED_API_KEY" },
+          ],
           models: "own-list",
         },
       ]),
@@ -157,8 +158,9 @@ const buildMultiHarnessPlugins = (): ReadonlyArray<Plugin> => [
           buildHarnessDefinition(id, [
             {
               providerId: MULTI_PROVIDER_ID,
-              kinds: [{ kind: "api-key", credentialVariable: "MULTI_API_KEY" }],
-              modelArgument: "{model}",
+              kinds: [
+                { kind: "api-key", modelArgument: "{model}", credentialVariable: "MULTI_API_KEY" },
+              ],
               models: "own-list",
             },
           ]),

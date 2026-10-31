@@ -154,10 +154,10 @@ describe("a provider definition", () => {
 });
 
 describe("what a harness declares it runs", () => {
+  const kind = { kind: "api-key", modelArgument: "zai/{model}", credentialVariable: "ZAI_API_KEY" };
   const support = {
     providerId: "zai/zai",
-    kinds: [{ kind: "api-key", credentialVariable: "ZAI_API_KEY" }],
-    modelArgument: "zai/{model}",
+    kinds: [kind],
     models: "own-list",
   };
 
@@ -169,24 +169,48 @@ describe("what a harness declares it runs", () => {
     expect(
       accepts(HarnessProviderSupport, {
         ...support,
-        kinds: [{ kind: "subscription-per-machine" }],
+        kinds: [{ kind: "subscription-per-machine", modelArgument: "{model}" }],
       }),
     ).toBe(true);
   });
 
+  it("accepts a different model argument for each kind of one provider", () => {
+    expect(
+      accepts(HarnessProviderSupport, {
+        ...support,
+        kinds: [
+          { kind: "go-key", modelArgument: "opencode-go/{model}" },
+          { kind: "zen-key", modelArgument: "opencode/{model}" },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("refuses a kind without a model argument", () => {
+    expect(accepts(HarnessProviderSupport, { ...support, kinds: [{ kind: "api-key" }] })).toBe(
+      false,
+    );
+  });
+
   it.each([
     ["an unqualified provider id", { providerId: "zai" }],
-    ["a model argument without {model}", { modelArgument: "zai/model" }],
-    ["a model argument with {model} twice", { modelArgument: "{model}/{model}" }],
-    ["a model argument with another brace", { modelArgument: "{model}}" }],
-    ["a model argument over the wire's length", { modelArgument: `${"a".repeat(128)}{model}` }],
+    ["a model argument without {model}", { kinds: [{ ...kind, modelArgument: "zai/model" }] }],
+    [
+      "a model argument with {model} twice",
+      { kinds: [{ ...kind, modelArgument: "{model}/{model}" }] },
+    ],
+    ["a model argument with another brace", { kinds: [{ ...kind, modelArgument: "{model}}" }] }],
+    [
+      "a model argument over the wire's length",
+      { kinds: [{ ...kind, modelArgument: `${"a".repeat(128)}{model}` }] },
+    ],
     [
       "a credential variable over the wire's length",
-      { kinds: [{ kind: "api-key", credentialVariable: "A".repeat(129) }] },
+      { kinds: [{ ...kind, credentialVariable: "A".repeat(129) }] },
     ],
     [
       "a credential variable in lower case",
-      { kinds: [{ kind: "api-key", credentialVariable: "zai_key" }] },
+      { kinds: [{ ...kind, credentialVariable: "zai_key" }] },
     ],
     ["an unknown model scope", { models: "some" }],
   ])("refuses %s", (_label, change) => {
@@ -209,8 +233,7 @@ describe("a credential variable a harness declares", () => {
   ])("refuses the reserved variable %s", (variable) => {
     const support = {
       providerId: "zai/zai",
-      kinds: [{ kind: "api-key", credentialVariable: variable }],
-      modelArgument: "zai/{model}",
+      kinds: [{ kind: "api-key", modelArgument: "zai/{model}", credentialVariable: variable }],
       models: "own-list",
     };
 

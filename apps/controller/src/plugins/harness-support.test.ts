@@ -44,8 +44,11 @@ const buildHarness = (id: string, runs: HarnessDefinition["runs"]): RegisteredHa
 const ALPHA = buildHarness("alpha", [
   {
     providerId: "vendor/vendor",
-    kinds: [{ kind: "api-key", credentialVariable: "VENDOR_API_KEY" }, { kind: "subscription" }],
-    modelArgument: "vendor/{model}",
+    kinds: [
+      { kind: "api-key", modelArgument: "vendor/{model}", credentialVariable: "VENDOR_API_KEY" },
+      // A different argument from `api-key`, so a test sees each kind get its own.
+      { kind: "subscription", modelArgument: "vendor-sub/{model}" },
+    ],
     models: "own-list",
   },
 ]);
@@ -90,12 +93,16 @@ describe("decideProviderAccountHarness", () => {
     });
   });
 
-  it("returns no credential variable for a kind whose login lives in the Harness Home", () => {
+  it("returns no credential variable for a kind whose login lives in the Harness Home, and that kind's own model argument", () => {
     expect(
       decideProviderAccountHarness(PROVIDERS, HARNESSES, { ...ACCOUNT, kind: "subscription" }),
     ).toMatchObject({
       _tag: "chosen",
-      support: { credentialVariable: undefined, credentialSecretName: undefined },
+      support: {
+        modelArgument: "vendor-sub/{model}",
+        credentialVariable: undefined,
+        credentialSecretName: undefined,
+      },
     });
   });
 
@@ -117,7 +124,16 @@ describe("decideProviderAccountHarness", () => {
 
   it("refuses a harness whose runs lists the provider but not this account kind", () => {
     const keysOnly = buildHarness("alpha", [
-      { ...ALPHA.runs[0]!, kinds: [{ kind: "api-key", credentialVariable: "VENDOR_API_KEY" }] },
+      {
+        ...ALPHA.runs[0]!,
+        kinds: [
+          {
+            kind: "api-key",
+            modelArgument: "vendor/{model}",
+            credentialVariable: "VENDOR_API_KEY",
+          },
+        ],
+      },
     ]);
 
     expect(
@@ -173,20 +189,22 @@ describe("listCredentialVariables", () => {
       {
         providerId: "vendor/vendor",
         kinds: [
-          { kind: "subscription" },
-          { kind: "token", credentialVariable: "VENDOR_TOKEN" },
-          { kind: "api-key", credentialVariable: "VENDOR_API_KEY" },
+          { kind: "subscription", modelArgument: "{model}" },
+          { kind: "token", modelArgument: "{model}", credentialVariable: "VENDOR_TOKEN" },
+          { kind: "api-key", modelArgument: "{model}", credentialVariable: "VENDOR_API_KEY" },
         ],
-        modelArgument: "{model}",
         models: "all",
       },
       {
         providerId: "other/other",
         kinds: [
-          { kind: "api-key", credentialVariable: "VENDOR_API_KEY" },
-          { kind: "api-key-2", credentialVariable: "OTHER_API_KEY" },
+          { kind: "api-key", modelArgument: "other/{model}", credentialVariable: "VENDOR_API_KEY" },
+          {
+            kind: "api-key-2",
+            modelArgument: "other/{model}",
+            credentialVariable: "OTHER_API_KEY",
+          },
         ],
-        modelArgument: "other/{model}",
         models: "own-list",
       },
     ]);
@@ -205,8 +223,7 @@ describe("listCredentialVariables", () => {
         buildHarness("machine", [
           {
             providerId: "vendor/vendor",
-            kinds: [{ kind: "subscription" }],
-            modelArgument: "{model}",
+            kinds: [{ kind: "subscription", modelArgument: "{model}" }],
             models: "all",
           },
         ]),

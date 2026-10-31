@@ -155,24 +155,21 @@ export const HARNESSES: readonly Harness[] = [
   buildHarness("claude-code/claude-code", "Claude Code", "claude", [
     {
       providerId: "anthropic/anthropic",
-      kinds: [{ kind: "subscription-per-machine" }],
-      modelArgument: "{model}",
+      kinds: [{ kind: "subscription-per-machine", modelArgument: "{model}" }],
       models: "all",
     },
   ]),
   buildHarness("codex/codex", "Codex", "codex", [
     {
       providerId: "openai/openai",
-      kinds: [{ kind: "subscription-per-machine" }],
-      modelArgument: "{model}",
+      kinds: [{ kind: "subscription-per-machine", modelArgument: "{model}" }],
       models: "all",
     },
   ]),
   buildHarness("pi/pi", "pi", "pi", [
     {
       providerId: "zai/zai",
-      kinds: [{ kind: "api-key", credentialVariable: "ZAI_API_KEY" }],
-      modelArgument: "zai/{model}",
+      kinds: [{ kind: "api-key", modelArgument: "zai/{model}", credentialVariable: "ZAI_API_KEY" }],
       models: "own-list",
     },
   ]),

@@ -202,14 +202,22 @@ const startLiveSession = async (
   return live;
 };
 
-/** Lists the events the session has reported, each with the subagent it belongs to. */
+/**
+ * Lists the events the session has reported, each with the subagent it belongs
+ * to. A completed turn also shows its state and error, because a turn that
+ * failed reads very differently from one that finished.
+ */
 const describeProgress = (live: Live): string => {
   const events = live.seen
-    .map((event) =>
-      "subagentId" in event && event._tag !== "subagent.started"
-        ? `${event._tag}@${event.subagentId}`
-        : event._tag,
-    )
+    .map((event) => {
+      const tag =
+        event._tag === "turn.completed"
+          ? `${event._tag}(${event.error === undefined ? event.state : `${event.state}: ${event.error}`})`
+          : event._tag;
+      return "subagentId" in event && event._tag !== "subagent.started"
+        ? `${tag}@${event.subagentId}`
+        : tag;
+    })
     .join(", ");
   const unscripted =
     live.requestLog.unscripted.length === 0

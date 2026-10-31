@@ -27,24 +27,67 @@ const captureHarnessDefinition = (): HarnessDefinition => {
 };
 
 describe("the pi harness", () => {
-  it("runs the API keys of Anthropic, OpenAI and Z.ai, each under its provider's model argument, with its own model list", () => {
+  it("runs the keys of Anthropic, OpenAI, Z.ai, OpenCode and MiniMax, each under its provider's model argument, with its own model list", () => {
     expect(captureHarnessDefinition().runs).toEqual([
       {
         providerId: "anthropic/anthropic",
-        kinds: [{ kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" }],
-        modelArgument: "anthropic/{model}",
+        kinds: [
+          {
+            kind: "api-key",
+            modelArgument: "anthropic/{model}",
+            credentialVariable: "ANTHROPIC_API_KEY",
+          },
+        ],
         models: "own-list",
       },
       {
         providerId: "openai/openai",
-        kinds: [{ kind: "api-key", credentialVariable: "OPENAI_API_KEY" }],
-        modelArgument: "openai/{model}",
+        kinds: [
+          {
+            kind: "api-key",
+            modelArgument: "openai/{model}",
+            credentialVariable: "OPENAI_API_KEY",
+          },
+        ],
         models: "own-list",
       },
       {
         providerId: "zai/zai",
-        kinds: [{ kind: "api-key", credentialVariable: "ZAI_API_KEY" }],
-        modelArgument: "zai/{model}",
+        kinds: [
+          { kind: "api-key", modelArgument: "zai/{model}", credentialVariable: "ZAI_API_KEY" },
+        ],
+        models: "own-list",
+      },
+      {
+        providerId: "opencode/opencode",
+        kinds: [
+          {
+            kind: "go-key",
+            modelArgument: "opencode-go/{model}",
+            credentialVariable: "OPENCODE_API_KEY",
+          },
+          {
+            kind: "zen-key",
+            modelArgument: "opencode/{model}",
+            credentialVariable: "OPENCODE_API_KEY",
+          },
+        ],
+        models: "own-list",
+      },
+      {
+        providerId: "minimax/minimax",
+        kinds: [
+          {
+            kind: "pay-as-you-go-key",
+            modelArgument: "minimax/{model}",
+            credentialVariable: "MINIMAX_API_KEY",
+          },
+          {
+            kind: "plan-key",
+            modelArgument: "minimax/{model}",
+            credentialVariable: "MINIMAX_API_KEY",
+          },
+        ],
         models: "own-list",
       },
     ]);

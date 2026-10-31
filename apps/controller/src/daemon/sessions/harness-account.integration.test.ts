@@ -36,8 +36,7 @@ const KEY_VARIABLE = "KEYED_API_KEY";
 const KEYED: HarnessDefinition = buildHarnessDefinition("keyed", [
   {
     providerId: "harnesses/keyed",
-    kinds: [{ kind: "api-key", credentialVariable: KEY_VARIABLE }],
-    modelArgument: "keyed/{model}",
+    kinds: [{ kind: "api-key", modelArgument: "keyed/{model}", credentialVariable: KEY_VARIABLE }],
     models: "own-list",
   },
 ]);
@@ -46,8 +45,7 @@ const KEYED: HarnessDefinition = buildHarnessDefinition("keyed", [
 const PLAIN: HarnessDefinition = buildHarnessDefinition("plain", [
   {
     providerId: "harnesses/plain",
-    kinds: [{ kind: "subscription" }],
-    modelArgument: "{model}",
+    kinds: [{ kind: "subscription", modelArgument: "{model}" }],
     models: "all",
   },
 ]);

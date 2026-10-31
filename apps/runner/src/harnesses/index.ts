@@ -469,7 +469,7 @@ export const findAdapter = (harnessId: string): HarnessAdapter | undefined =>
  */
 export const harnessLogins = makeLogins(spawnLogin);
 
-export { PROBE_DEADLINE, buildFailedProbe } from "./probe";
+export { PROBE_DEADLINE, buildFailedProbe, limitProbeModels } from "./probe";
 
 export { removeStaleSetupTokenFolders } from "./setup-token-folder";
 

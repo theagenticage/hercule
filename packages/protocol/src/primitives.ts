@@ -18,6 +18,24 @@ export const MAX_FACT_LENGTH = 512;
 export const MAX_FACT_ITEMS = 64;
 
 /**
+ * The most models one probe may report, which is the size of the Model Catalog
+ * of one Provider Account. It is higher than `MAX_FACT_ITEMS` because a
+ * provider can list far more than 64 models: pi lists 68 for OpenCode Zen, and
+ * OpenRouter lists hundreds. A probe that cut the list at 64 would give the
+ * user an incomplete catalog.
+ *
+ * The cap is sized on the descriptors the adapters build, because the field
+ * limits alone do not bound a descriptor (its options hold up to 64 choices of
+ * two 512-character facts each). A real descriptor has a slug and a name of
+ * under 100 bytes and at most a few options with a handful of short choices,
+ * about 1 KiB as JSON. 256 of them are 256 KiB, an eighth of `MAX_FRAME_BYTES`
+ * (2 MiB), which leaves room for a descriptor of up to 8 KiB (2 MiB / 256)
+ * before the frame is too large. The runner logs how many models it dropped
+ * when a list is longer than this.
+ */
+export const MAX_PROBE_MODELS = 256;
+
+/**
  * The longest piece of free text a harness may put in an event. A `Fact` is too
  * short: an error body or a stack trace over 512 bytes would make the frame
  * undecodable, which would cost the runner its socket and every session on it.

@@ -10,7 +10,6 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { CODEX_VERSION, VERSION } from "@hercule/home/version";
 import {
-  MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   type AdapterError,
   type ModelDescriptor,
@@ -214,7 +213,6 @@ const buildCatalog = (models: ReadonlyArray<Model>): ReadonlyArray<ModelDescript
   models
     // The protocol does not allow an empty slug or name.
     .filter((model) => model.id !== "" && model.displayName !== "")
-    .slice(0, MAX_FACT_ITEMS)
     .map((model) => ({
       slug: truncateFact(model.id),
       name: truncateFact(model.displayName),

@@ -14,13 +14,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
-import {
-  MAX_FACT_ITEMS,
-  type ModelDescriptor,
-  type ModelOption,
-  type ProbeResult,
-  type SnapshotAuth,
-} from "@hercule/protocol";
+import type { ModelDescriptor, ModelOption, ProbeResult, SnapshotAuth } from "@hercule/protocol";
 import type { InstallOutcome } from "../index";
 import { makeInstall } from "../install";
 import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
@@ -138,7 +132,6 @@ const buildCatalog = (
         typeof model.name === "string" &&
         model.name !== "",
     )
-    .slice(0, MAX_FACT_ITEMS)
     .map((model) => ({
       slug: truncateFact(model.id as string),
       name: truncateFact(model.name as string),

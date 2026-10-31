@@ -21,8 +21,11 @@
  * - Anthropic · Token expires in 12 days, and Anthropic · Old token has
  *   expired. OpenAI · API holds a key OpenAI refused. OpenAI · Personal is
  *   signed in nowhere, so its card says it is signed out.
+ * - OpenCode and MiniMax are listed in the add-account sheet only: no account
+ *   uses them, so the page has no card for them.
  * - Each plugin declares the mark the shipped plugin declares: the book's
- *   brand path scaled by 2/3 onto the 16-unit grid a plugin's mark uses.
+ *   brand path scaled by 2/3 onto the 16-unit grid a plugin's mark uses. The
+ *   OpenCode and MiniMax plugins draw their own marks on that grid.
  */
 import type {
   AccountKind,
@@ -59,6 +62,18 @@ const OPENAI_MARK: PluginMark = {
 };
 const ZAI_MARK: PluginMark = {
   paths: ["M3 2.333333h10v2.2L6.6 11.466667h6.4v2.2h-10v-2.2l6.4 -6.933333H3z"],
+};
+/** OpenCode's mark, copied from OPENCODE_MARK_PATH in plugins/opencode/src/index.ts. */
+const OPENCODE_MARK: PluginMark = {
+  paths: [
+    "M10.666667 4H5.333333v8h5.333333V4zm2.666667 10.666667H2.666667V1.333333h10.666667v13.333333z",
+  ],
+};
+/** MiniMax's mark, copied from MINIMAX_MARK_PATH in plugins/minimax/src/index.ts. */
+const MINIMAX_MARK: PluginMark = {
+  paths: [
+    "M10.852 1.333333c0.770667 0 1.395333 0.618 1.395333 1.38v8.334a0.493333 0.493333 0 0 0 0.496 0.472667 0.493333 0.493333 0 0 0 0.495333 -0.472667V6.066a1.373333 1.373333 0 0 1 1.380667 -1.366A1.373333 1.373333 0 0 1 16 6.066667v4.374a0.432667 0.432667 0 0 1 -0.434667 0.43 0.432667 0.432667 0 0 1 -0.435333 -0.43V6.066667a0.508 0.508 0 0 0 -0.510667 -0.505333 0.508 0.508 0 0 0 -0.510667 0.505333v4.981333a1.358 1.358 0 0 1 -1.365333 1.350667 1.358 1.358 0 0 1 -1.365333 -1.350667v-8.333333a0.523333 0.523333 0 0 0 -0.525333 -0.502 0.523333 0.523333 0 0 0 -0.526 0.501333l-0.000667 10.602667A1.358 1.358 0 0 1 8.960667 14.666667a1.358 1.358 0 0 1 -1.365333 -1.350667V12.026667c0 -0.237333 0.194667 -0.43 0.434667 -0.43 0.24 0 0.434667 0.192667 0.434667 0.43v1.289333c0 0.175333 0.094667 0.337333 0.248 0.425333 0.153333 0.087333 0.342667 0.087333 0.496 0a0.489333 0.489333 0 0 0 0.248 -0.425333V2.713333c0 -0.762 0.624667 -1.38 1.395333 -1.38zm-3.782667 0c0.770667 0 1.395333 0.618 1.395333 1.38v7.682a0.432 0.432 0 0 1 -0.434667 0.43 0.432 0.432 0 0 1 -0.434667 -0.43V2.713333a0.523333 0.523333 0 0 0 -0.526 -0.52 0.523333 0.523333 0 0 0 -0.526 0.52v9.342a1.373333 1.373333 0 0 1 -1.38 1.365333 1.373333 1.373333 0 0 1 -1.380667 -1.365333V6.066667a0.508 0.508 0 0 0 -0.510667 -0.505333 0.508 0.508 0 0 0 -0.510667 0.505333v2.533333a1.373333 1.373333 0 0 1 -1.380667 1.366A1.373333 1.373333 0 0 1 0 8.6v-0.918667c0 -0.238 0.194667 -0.430667 0.434667 -0.430667 0.24 0 0.435333 0.193333 0.435333 0.430667V8.6c0 0.278667 0.228667 0.504667 0.510667 0.504667s0.510667 -0.226 0.510667 -0.504667V6.066a1.373333 1.373333 0 0 1 1.38 -1.365333 1.373333 1.373333 0 0 1 1.380667 1.365333v5.989333c0 0.279333 0.228667 0.505333 0.511333 0.505333 0.282 0 0.510667 -0.226 0.510667 -0.505333V2.713333c0 -0.762 0.624667 -1.38 1.395333 -1.38z",
+  ],
 };
 
 const AT = "2026-09-10T09:00:00.000Z";
@@ -145,6 +160,8 @@ export const PROVIDER_PLUGINS: ReadonlyArray<PluginDetail> = [
   buildPlugin("anthropic", "Anthropic", ANTHROPIC_MARK),
   buildPlugin("openai", "OpenAI", OPENAI_MARK),
   buildPlugin("zai", "Z.ai", ZAI_MARK),
+  buildPlugin("opencode", "OpenCode", OPENCODE_MARK),
+  buildPlugin("minimax", "MiniMax", MINIMAX_MARK),
 ];
 
 /** A Provider Account before it is given its Model Catalog facts and readiness. */
@@ -380,6 +397,38 @@ export const SPECIMEN_KINDS: Readonly<Record<string, AccountKind>> = {
     setup: [{ kind: "credentials", fields: [KEY_FIELD] }],
     harnesses: ["pi/pi"],
   },
+  opencodeGo: {
+    id: "go-key",
+    title: "Go key",
+    description:
+      "From your OpenCode Go subscription, in the OpenCode console at opencode.ai. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["pi/pi"],
+  },
+  opencodeZen: {
+    id: "zen-key",
+    title: "Zen key",
+    description:
+      "From your OpenCode Zen balance, in the OpenCode console at opencode.ai. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["pi/pi"],
+  },
+  minimaxPayAsYouGo: {
+    id: "pay-as-you-go-key",
+    title: "Pay-as-you-go key",
+    description:
+      "From the API keys page of the MiniMax platform (platform.minimax.io). A pay-as-you-go key and a plan key are not interchangeable, so pick the kind that matches your key. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["pi/pi"],
+  },
+  minimaxPlan: {
+    id: "plan-key",
+    title: "Plan key",
+    description:
+      "From your MiniMax M Plan subscription, on platform.minimax.io. A pay-as-you-go key and a plan key are not interchangeable, so pick the kind that matches your key. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["pi/pi"],
+  },
 };
 
 export const SPECIMEN_PROVIDERS: ReadonlyArray<Provider> = [
@@ -403,6 +452,20 @@ export const SPECIMEN_PROVIDERS: ReadonlyArray<Provider> = [
     displayName: "Z.ai",
     defaultHarnessId: "pi/pi",
     kinds: [SPECIMEN_KINDS.zaiKey!],
+  },
+  {
+    id: "opencode/opencode",
+    pluginId: "opencode",
+    displayName: "OpenCode",
+    defaultHarnessId: "pi/pi",
+    kinds: [SPECIMEN_KINDS.opencodeGo!, SPECIMEN_KINDS.opencodeZen!],
+  },
+  {
+    id: "minimax/minimax",
+    pluginId: "minimax",
+    displayName: "MiniMax",
+    defaultHarnessId: "pi/pi",
+    kinds: [SPECIMEN_KINDS.minimaxPayAsYouGo!, SPECIMEN_KINDS.minimaxPlan!],
   },
 ];
 
@@ -490,11 +553,15 @@ const SPECIMEN_HARNESSES: ReadonlyArray<Harness> = HARNESSES.map((harness) => {
   const extraKinds =
     harness.id === "claude-code/claude-code"
       ? [
-          { kind: "subscription-token", credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN" },
-          { kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" },
+          {
+            kind: "subscription-token",
+            modelArgument: "{model}",
+            credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN",
+          },
+          { kind: "api-key", modelArgument: "{model}", credentialVariable: "ANTHROPIC_API_KEY" },
         ]
       : harness.id === "codex/codex"
-        ? [{ kind: "api-key", credentialVariable: "OPENAI_API_KEY" }]
+        ? [{ kind: "api-key", modelArgument: "{model}", credentialVariable: "OPENAI_API_KEY" }]
         : [];
   return {
     ...harness,

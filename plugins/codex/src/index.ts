@@ -38,10 +38,9 @@ const definition: HarnessDefinition = {
     {
       providerId: "openai/openai",
       kinds: [
-        { kind: "subscription-per-machine" },
-        { kind: "api-key", credentialVariable: "OPENAI_API_KEY" },
+        { kind: "subscription-per-machine", modelArgument: "{model}" },
+        { kind: "api-key", modelArgument: "{model}", credentialVariable: "OPENAI_API_KEY" },
       ],
-      modelArgument: "{model}",
       models: "all",
     },
   ],
