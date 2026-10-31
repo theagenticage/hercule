@@ -111,10 +111,12 @@ export const CatalogModel = Schema.Struct({
 export type CatalogModel = Schema.Schema.Type<typeof CatalogModel>;
 
 /**
- * The most catalog models one `SessionStart` may carry in `unlistedModels`.
- * OpenRouter lists about 450 models, so the cap leaves room to grow. A catalog
- * model with its details is a few hundred bytes as JSON, so 1024 of them are
- * a few hundred KiB, which keeps the frame well under `MAX_FRAME_BYTES`
- * (2 MiB). The controller cuts a longer list and logs it.
+ * The most models one Model Catalog may hold when the controller reads it from
+ * a provider's API, and so the most catalog models a `SessionStart` or a
+ * `TextGenerationRequest` may carry in `unlistedModels`. OpenRouter lists about
+ * 450 models, so this leaves room to grow. A catalog model with its details is
+ * a few hundred bytes as JSON, so 1024 of them keep a frame well under
+ * `MAX_FRAME_BYTES` (2 MiB). The catalog read keeps at most this many and says
+ * so, so a frame never has to cut the list.
  */
-export const MAX_UNLISTED_MODELS = 1024;
+export const MAX_CATALOG_MODELS = 1024;

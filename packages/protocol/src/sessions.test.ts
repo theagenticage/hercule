@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
 import { AdapterError } from "./adapter-errors";
-import { MAX_UNLISTED_MODELS } from "./models";
+import { MAX_CATALOG_MODELS } from "./models";
 import { MAX_FACT_LENGTH, MAX_MESSAGE_LENGTH } from "./primitives";
 import {
   EditedFile,
@@ -812,7 +812,7 @@ describe("what the controller sends for a session", () => {
     );
     // A start without the key is a start with nothing unlisted.
     expect(decode(SessionStart, start)._tag).toBe("Success");
-    const tooMany = Array.from({ length: MAX_UNLISTED_MODELS + 1 }, () => descriptor);
+    const tooMany = Array.from({ length: MAX_CATALOG_MODELS + 1 }, () => descriptor);
     expect(decode(SessionStart, { ...start, unlistedModels: tooMany })._tag).toBe("Failure");
     expect(
       decode(SessionStart, { ...start, unlistedModels: [{ ...descriptor, inputPrice: -1 }] })._tag,

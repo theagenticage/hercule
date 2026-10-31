@@ -11,7 +11,7 @@ import { Schema, SchemaGetter } from "effect";
 
 import { AdapterError } from "./adapter-errors";
 import { AttachmentReference } from "./attachments";
-import { CatalogModel, MAX_UNLISTED_MODELS } from "./models";
+import { CatalogModel, MAX_CATALOG_MODELS } from "./models";
 import { OutputSchema } from "./output-schema";
 import { MAX_SKILLS, LibrarySkillRevision } from "./skills";
 import {
@@ -1236,7 +1236,7 @@ export const SessionStart = Schema.Struct({
    * other adapter ignores them. Absent or empty means there are none.
    */
   unlistedModels: Schema.optionalKey(
-    Schema.Array(CatalogModel).check(Schema.isMaxLength(MAX_UNLISTED_MODELS)),
+    Schema.Array(CatalogModel).check(Schema.isMaxLength(MAX_CATALOG_MODELS)),
   ),
 });
 
