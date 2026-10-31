@@ -2,9 +2,10 @@
  * The project operations of the API: `project.query`, `read`, `create`,
  * `update` and `delete`.
  *
- * A project has no behaviour of its own. It groups information: a task refers
- * to one project through `projectId`, and a resource can belong to any number
- * of projects through `project_resources`.
+ * A project has no behaviour of its own and one default, the Model Profile a
+ * new thread in it starts on. It groups information: a task refers to one
+ * project through `projectId`, and a resource can belong to any number of
+ * projects through `project_resources`.
  *
  * Every mutation writes one event in the same transaction as the row it
  * describes, so the log never records a change that was rolled back and never
@@ -56,6 +57,7 @@ import {
   type ResolvedSortKey,
 } from "../db";
 import { AuditLog } from "../events";
+import { ModelProfileLookup } from "./model-profile-lookup";
 import { projectRepository, type ProjectSortField } from "./repository";
 
 /** The input of `project.query`: the page size, cursor and sort order. */
@@ -95,12 +97,30 @@ const DEFAULT_SORT: Arr.NonEmptyReadonlyArray<ResolvedSortKey<ProjectSortField>>
 const NO_SUCH_PROJECT = "no such project";
 
 /** The fields an edit may change, in the order the event lists them. */
-const FIELDS = ["name", "description"] as const;
+const FIELDS = ["name", "description", "modelProfileId"] as const;
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const projects = yield* projectRepository;
   const audit = yield* AuditLog;
+  const modelProfiles = yield* ModelProfileLookup;
+
+  /** Fails with `Validation` on `modelProfileId` when no Model Profile has this id. */
+  const requireModelProfile = (
+    modelProfileId: string,
+  ): Effect.Effect<void, Validation | SqlError> =>
+    Effect.flatMap(modelProfiles.exists(modelProfileId), (exists) =>
+      exists
+        ? Effect.void
+        : Effect.fail(
+            createValidationError([
+              {
+                path: ["modelProfileId"],
+                message: `no Model Profile has the id ${modelProfileId}; list them with modelProfile.query`,
+              },
+            ]),
+          ),
+    );
 
   const readLiveProjectOrFail = (id: string): Effect.Effect<Project, NotFound | SqlError> =>
     Effect.flatMap(
@@ -155,9 +175,13 @@ const make = Effect.gen(function* () {
             // One clock read, inside the transaction: the row and the event
             // that records it carry the same instant.
             const at = yield* nowIso;
+            if (decoded.modelProfileId !== undefined) {
+              yield* requireModelProfile(decoded.modelProfileId);
+            }
             const project = yield* projects.insert({
               name: decoded.name,
               description: decoded.description,
+              modelProfileId: decoded.modelProfileId,
               at,
             });
             yield* audit.append({
@@ -198,10 +222,13 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             const before = yield* readLiveProjectOrFail(id);
+            if (patch.modelProfileId !== undefined && patch.modelProfileId !== null) {
+              yield* requireModelProfile(patch.modelProfileId);
+            }
 
-            // A project without a description carries no key at all, and
-            // `null` is how an edit removes the description. Both count as
-            // `null` in the diff, so the event is the same either way.
+            // A project without a description or a Model Profile carries no
+            // key at all, and `null` is how an edit removes either. Both count
+            // as `null` in the diff, so the event is the same either way.
             const changes: Record<string, ScalarChange> = {};
             const edit: Record<string, string | null> = {};
             for (const field of FIELDS) {
@@ -229,6 +256,34 @@ const make = Effect.gen(function* () {
             // exactly the row that was written.
             return yield* readLiveProjectOrFail(id);
           }),
+        );
+      }),
+
+    /**
+     * Removes a Model Profile from every project that names it, deleted
+     * projects included, and records a `project.updated` event for each
+     * project that is not deleted. The Model Profile service calls it when it
+     * deletes a profile, in the same transaction. It is not an operation and
+     * checks no grant: the caller has checked its own.
+     */
+    clearModelProfile: (modelProfileId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const at = yield* nowIso;
+        const live = yield* projects.clearModelProfile(modelProfileId, at);
+        const actor = yield* currentStamp;
+        yield* Effect.forEach(
+          live,
+          (projectId) =>
+            audit.append({
+              kind: "project.updated",
+              actor,
+              payload: {
+                projectId,
+                changes: { modelProfileId: { old: modelProfileId, new: null } },
+              },
+              at,
+            }),
+          { discard: true },
         );
       }),
 
@@ -270,5 +325,5 @@ export class ProjectService extends Context.Service<ProjectService, Effect.Succe
 export const ProjectServiceLayer: Layer.Layer<
   ProjectService,
   never,
-  SqlClient.SqlClient | AuditLog
+  SqlClient.SqlClient | AuditLog | ModelProfileLookup
 > = Layer.effect(ProjectService)(make);

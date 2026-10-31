@@ -6,8 +6,12 @@
  * resolution of each entry (its name, options and whether it can run now). It
  * also implements the `ModelProfileMembership` port that Provider Accounts
  * declares, so deleting an account and a first catalog read reach the profiles
- * without Provider Accounts importing this domain.
+ * without Provider Accounts importing this domain. It implements the
+ * `ModelProfileLookup` port that Projects declares the same way. Projects
+ * depend on nothing here, and this domain uses Projects to clear a deleted
+ * profile from the projects that name it.
  */
+export { ModelProfileLookupLayer } from "./lookup";
 export { ModelProfileMembershipLayer } from "./membership";
 export { modelProfileRepository, type StoredModelProfile } from "./repository";
 export { ModelProfileService, ModelProfileServiceLayer, type UpdateInput } from "./service";

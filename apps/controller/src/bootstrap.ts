@@ -97,7 +97,8 @@ import {
   type LocalRunnerOptions,
 } from "./runners";
 import { PluginIntake } from "./intake-settings";
-import { ModelProfileMembershipLayer } from "./model-profiles";
+import { ModelProfileLookupLayer, ModelProfileMembershipLayer } from "./model-profiles";
+import type { ModelProfileLookup } from "./projects";
 import {
   IngestLoops,
   PluginConfigsLayer,
@@ -271,6 +272,7 @@ export type ControllerServices =
   | RunnerConnections
   | HarnessAccounts
   | ModelCatalogs
+  | ModelProfileLookup
   | ProviderAccountProbes
   | ProviderAccountRunners
   | ProviderAccountProbing
@@ -354,6 +356,8 @@ export const bootWith = <A, E>(
           // Provider Accounts declares this port and cannot import the Model
           // Profiles that implement it.
           ModelProfileMembershipLayer,
+          // Projects declares this port as well, to check that a profile exists.
+          ModelProfileLookupLayer,
           JoinTokensLayer,
           PromotionTokensLayer,
           GithubSkillSourcesLayer.pipe(Layer.provide(FetchHttpClient.layer)),

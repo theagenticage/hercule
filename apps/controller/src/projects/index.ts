@@ -7,3 +7,4 @@ export {
   type UpdateInput,
 } from "./service";
 export { projectRepository } from "./repository";
+export { ModelProfileLookup } from "./model-profile-lookup";

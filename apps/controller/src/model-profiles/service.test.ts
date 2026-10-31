@@ -17,9 +17,10 @@ import {
 } from "@hercule/contract";
 import * as SqlClient from "effect/sql/SqlClient";
 import { CurrentActor, type Actor } from "../actor";
-import { mintUuid, nowIso, withTransaction } from "../db";
+import { mintUuid, nowIso, uuidFromString, withTransaction } from "../db";
 import { readEventsOfKind } from "../events/testing";
 import { ModelProfileMembership, ProviderAccountService } from "../provider-accounts";
+import { ProjectService } from "../projects";
 import {
   addAccount,
   addRunner,
@@ -1134,5 +1135,219 @@ describe("reading while an account is deleted", () => {
     );
 
     for (const outcome of outcomes) expect(outcome.sections).toBe(outcome.entries);
+  });
+});
+
+/** Adds a project that names the profile (or none) and returns its id. */
+const addProject = (name: string, modelProfileId?: string) =>
+  Effect.flatMap(ProjectService, (projects) =>
+    Effect.map(
+      projects.create({ name, ...(modelProfileId === undefined ? {} : { modelProfileId }) }),
+      (project) => project.id,
+    ),
+  );
+
+const createProfile = (name: string, copyFromId?: string) =>
+  Effect.flatMap(ModelProfileService, (profiles) =>
+    profiles.create({ name, ...(copyFromId === undefined ? {} : { copyFromId }) }),
+  );
+
+describe("modelProfile.create", () => {
+  it("creates an empty profile at revision 1 and audits it", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const created = yield* createProfile("Review");
+        const profiles = yield* ModelProfileService;
+        return {
+          created,
+          listed: yield* profiles.query(),
+          audit: yield* readEventsOfKind("modelProfile.created"),
+        };
+      }),
+    );
+
+    expect(outcome.created).toMatchObject({
+      name: "Review",
+      revision: 1,
+      accounts: [],
+      defaultEntry: null,
+      dismissedNewModels: [],
+    });
+    expect(outcome.listed.map((profile) => profile.name)).toEqual(["Main", "Review"]);
+    expect(outcome.audit).toHaveLength(1);
+    expect(outcome.audit[0]).toMatchObject({
+      actor: "user",
+      payload: { modelProfileId: outcome.created.id, name: "Review" },
+    });
+  });
+
+  it("copies the stored body as it is, and the copy is independent of the source", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const accountId = yield* addReadyKeyAccount("work");
+        const pendingId = (yield* addAccount({ kind: KEY_KIND, label: "pending" })).id;
+        const main = yield* readMain;
+        const source = yield* update(main, {
+          accounts: [
+            {
+              providerAccountId: accountId,
+              harnessId: null,
+              entries: [entry(accountId, "second"), entry(accountId, "current")],
+            },
+            // No entries: this section is still waiting for its first catalog read.
+            { providerAccountId: pendingId, harnessId: null },
+          ],
+          defaultEntry: entry(accountId, "second"),
+          dismissedNewModels: [{ providerAccountId: accountId, model: "old" }],
+        });
+        const copy = yield* createProfile("Copy", source.id);
+        const changedCopy = yield* update(copy, { defaultEntry: entry(accountId, "current") });
+        const sourceAfterCopyChange = yield* readMain;
+        const changedSource = yield* update(sourceAfterCopyChange, { name: "Renamed" });
+        const profiles = yield* ModelProfileService;
+        const copyAfterSourceChange = yield* profiles.read(copy.id);
+        return {
+          source,
+          copy,
+          changedCopy,
+          sourceAfterCopyChange,
+          changedSource,
+          copyAfterSourceChange,
+        };
+      }),
+    );
+
+    expect(outcome.copy).toMatchObject({
+      name: "Copy",
+      revision: 1,
+      accounts: outcome.source.accounts,
+      defaultEntry: outcome.source.defaultEntry,
+      dismissedNewModels: outcome.source.dismissedNewModels,
+    });
+    expect(outcome.copy.accounts[1]?.selectionPending).toBe(true);
+    expect(outcome.sourceAfterCopyChange).toEqual(outcome.source);
+    expect(outcome.copyAfterSourceChange).toEqual(outcome.changedCopy);
+    expect(outcome.changedSource.name).toBe("Renamed");
+  });
+
+  it("refuses a name another profile has with validation on name", async () => {
+    const failure = await runWithProfiles(Effect.flip(createProfile("Main")));
+
+    expect(failure).toMatchObject({
+      error: { code: "validation", details: { issues: [{ path: ["name"] }] } },
+    });
+  });
+
+  it("fails not_found when the profile to copy does not exist, and creates nothing", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const failure = yield* Effect.flip(createProfile("Copy", MISSING));
+        const profiles = yield* ModelProfileService;
+        return { failure, listed: yield* profiles.query() };
+      }),
+    );
+
+    expect(outcome.failure).toMatchObject({ error: { code: "not_found" } });
+    expect(outcome.listed.map((profile) => profile.name)).toEqual(["Main"]);
+  });
+});
+
+describe("modelProfile.delete", () => {
+  it("removes the profile and audits it", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const created = yield* createProfile("Review");
+        const profiles = yield* ModelProfileService;
+        const result = yield* profiles.delete(created.id);
+        return {
+          created,
+          result,
+          listed: yield* profiles.query(),
+          readFailure: yield* Effect.flip(profiles.read(created.id)),
+          audit: yield* readEventsOfKind("modelProfile.deleted"),
+        };
+      }),
+    );
+
+    expect(outcome.result).toEqual({});
+    expect(outcome.listed.map((profile) => profile.name)).toEqual(["Main"]);
+    expect(outcome.readFailure).toMatchObject({ error: { code: "not_found" } });
+    expect(outcome.audit).toHaveLength(1);
+    expect(outcome.audit[0]).toMatchObject({
+      actor: "user",
+      payload: { modelProfileId: outcome.created.id, name: "Review" },
+    });
+  });
+
+  it("refuses the last profile with invalid_state and keeps it", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const main = yield* readMain;
+        const profiles = yield* ModelProfileService;
+        return {
+          main,
+          failure: yield* Effect.flip(profiles.delete(main.id)),
+          listed: yield* profiles.query(),
+        };
+      }),
+    );
+
+    expect(outcome.failure).toMatchObject({
+      error: {
+        code: "invalid_state",
+        message: "This is your only Model Profile. Create another before you delete this one.",
+      },
+    });
+    expect(outcome.listed).toEqual([outcome.main]);
+  });
+
+  it("fails not_found for a profile that does not exist", async () => {
+    const failure = await runWithProfiles(
+      Effect.flatMap(ModelProfileService, (profiles) => Effect.flip(profiles.delete(MISSING))),
+    );
+
+    expect(failure).toMatchObject({ error: { code: "not_found" } });
+  });
+
+  it("clears the profile from every project that names it and records project.updated for each live one", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const doomed = yield* createProfile("Review");
+        const kept = yield* createProfile("Other");
+        const projects = yield* ProjectService;
+        const usingId = yield* addProject("Using", doomed.id);
+        const otherId = yield* addProject("Other user", kept.id);
+        const retiredId = yield* addProject("Retired", doomed.id);
+        yield* projects.delete(retiredId);
+        yield* (yield* ModelProfileService).delete(doomed.id);
+        const sql = yield* SqlClient.SqlClient;
+        return {
+          doomed,
+          kept,
+          usingId,
+          using: yield* projects.read(usingId),
+          other: yield* projects.read(otherId),
+          retiredRows: yield* sql<{ readonly model_profile_id: Uint8Array | null }>`
+            SELECT model_profile_id FROM projects WHERE id = ${uuidFromString(retiredId)}
+          `,
+          updates: yield* readEventsOfKind("project.updated"),
+        };
+      }),
+    );
+
+    expect("modelProfileId" in outcome.using).toBe(false);
+    expect(outcome.other.modelProfileId).toBe(outcome.kept.id);
+    expect(outcome.retiredRows).toEqual([{ model_profile_id: null }]);
+    const clearing = outcome.updates.filter((event) =>
+      JSON.stringify(event.payload).includes(outcome.doomed.id),
+    );
+    expect(clearing).toHaveLength(1);
+    expect(clearing[0]).toMatchObject({
+      actor: "user",
+      payload: {
+        projectId: outcome.usingId,
+        changes: { modelProfileId: { old: outcome.doomed.id, new: null } },
+      },
+    });
   });
 });

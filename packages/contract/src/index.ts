@@ -257,6 +257,7 @@ export {
   ModelProfileAccountInput,
   ResolvedModelProfileAccount,
   ModelProfileEntry,
+  ModelProfileCreateInput,
   ModelProfileUpdateInput,
   ResolvedModelProfileEntry,
 } from "./groups/model-profile";

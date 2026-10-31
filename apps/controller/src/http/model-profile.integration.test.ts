@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { completeSetup, send, withServer } from "./testing";
 
-/** Tests `modelProfile.query`, `read` and `update` over a real socket. */
+/** Tests `modelProfile.query`, `read`, `create`, `update` and `delete` over a real socket. */
 describe("model profiles over HTTP", () => {
   it("lists the profile the upgrade made, and replaces it with a write that names its revision", async () => {
     await withServer(async ({ base }) => {
@@ -43,6 +43,41 @@ describe("model profiles over HTTP", () => {
       expect(await stale.json()).toMatchObject({
         error: { code: "conflict", message: expect.stringContaining("now revision 2") as unknown },
       });
+    });
+  });
+
+  it("creates a profile, uses it in a project, and deletes it, which clears the project", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      const created = await send("POST", base, "/api/v1/model-profiles", {
+        token,
+        body: { name: "Review" },
+      });
+      expect(created.status).toBe(200);
+      const profile = (await created.json()) as { id: string };
+
+      const project = await send("POST", base, "/api/v1/projects", {
+        token,
+        body: { name: "Hercule", modelProfileId: profile.id },
+      });
+      const projectId = ((await project.json()) as { id: string }).id;
+
+      const deleted = await send("DELETE", base, `/api/v1/model-profiles/${profile.id}`, {
+        token,
+      });
+      expect(deleted.status).toBe(200);
+      const reread = await send("GET", base, `/api/v1/projects/${projectId}`, { token });
+      expect("modelProfileId" in ((await reread.json()) as object)).toBe(false);
+
+      const listed = (await (
+        await send("GET", base, "/api/v1/model-profiles", { token })
+      ).json()) as Array<{ id: string }>;
+      const last = await send("DELETE", base, `/api/v1/model-profiles/${listed[0]!.id}`, {
+        token,
+      });
+      expect(last.status).toBe(409);
+      expect(await last.json()).toMatchObject({ error: { code: "invalid_state" } });
     });
   });
 
