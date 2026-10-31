@@ -139,20 +139,19 @@ export const buildFirstRunHost = (origin: string, localRunner: Runner | null): F
 export interface ProvidersStepText {
   readonly heading: string;
   readonly subheading: string;
-  /** The rows the step lists: the harnesses found, or every harness when none was found. */
+  /** The accounts the step lists, each with its own sign-in. None until the user adds one. */
   readonly rows: readonly ProviderRow[];
 }
 
 /**
  * Builds the providers step's text from the provider rows of the controller's
- * runner, and the machine that runner is on:
+ * runner, and the machine that runs it. The step is "Add an account": it
+ * lists the accounts that exist, each with its Sign in, and the user adds
+ * another with the add-account sheet.
  *
- * - When some harnesses are on that machine, the step names them and lists
- *   them, so the user signs in to the ones they want.
- * - When none is, the step lists every harness, each with its Install.
- * - When `rows` is null, the controller's runner has not joined yet, as
- *   happens in the seconds after Hercule starts, so there is nothing to list
- *   until it does.
+ * When `rows` is null, the controller's runner has not joined yet, as happens
+ * in the seconds after Hercule starts, so the step has nothing to sign in on
+ * and says that it waits.
  */
 export const buildProvidersStepText = (
   rows: readonly ProviderRow[] | null,
@@ -165,25 +164,10 @@ export const buildProvidersStepText = (
       rows: [],
     };
   }
-  // A harness the runner found has its binary's path, or `installed` when the runner did not say where.
-  const found = rows.filter((row) => row.path !== null || row.location === "installed");
-  if (found.length === 0) {
-    return {
-      heading: "Your agents need a coding tool",
-      subheading: `Hercule drives ${formatNameList(
-        rows.map((row) => row.harnessName),
-        "or",
-      )}, and found none of them on ${host.name}. Install one and sign in to it; Hercule can install it for you.`,
-      rows,
-    };
-  }
   return {
-    heading: `${formatNameList(
-      found.map((row) => row.harnessName),
-      "and",
-    )} ${found.length === 1 ? "is" : "are"} on ${host.name}`,
-    subheading: `Sign in to the ones you want your agents to use. The sign-in runs on ${host.name} and its credential stays ${host.isThisMac ? "here" : "there"}.`,
-    rows: found,
+    heading: "Add an account",
+    subheading: `An account is how your agents pay for their models: a subscription you sign in to, or an API key. A sign-in runs on ${host.name} and stays ${host.isThisMac ? "here" : "there"}.`,
+    rows,
   };
 };
 
@@ -347,6 +331,8 @@ export const findGitHubAccount = (connections: readonly Connection[]): string | 
 
 /** What All set lists, one entry per step. */
 export interface AllSetRecap {
+  /** Whether the controller holds a Provider Account at all, signed in or not. */
+  readonly hasAccount: boolean;
   /**
    * The accounts signed in on the controller's runner, as one name list
    * ("Anthropic and OpenAI"), or null when none is.
@@ -366,6 +352,33 @@ export interface AllSetRecap {
   } | null;
 }
 
+/** What All set says and offers while no account is signed in. */
+export interface AllSetAccountOffer {
+  /** The main button's label. */
+  readonly button: string;
+  /** The line under the heading. */
+  readonly line: string;
+}
+
+/**
+ * Returns what All set offers while no account is signed in on the
+ * controller's runner: to add one when the user has none, else to sign in to
+ * one. Both buttons open the draft, whose own button is where the user adds
+ * or signs in.
+ */
+export const buildAllSetAccountOffer = (
+  recap: Pick<AllSetRecap, "hasAccount">,
+): AllSetAccountOffer =>
+  recap.hasAccount
+    ? {
+        button: "Sign in to an account",
+        line: "Agents need an account before they can take a desk. Sign in from your first thread’s draft, and it can start.",
+      }
+    : {
+        button: "Add an account",
+        line: "Agents need an account before they can take a desk. Add one from your first thread’s draft, and it can start.",
+      };
+
 /** Builds what All set lists from the first run's reads and every resource. */
 export const buildAllSetRecap = (
   reads: FirstRunReads & { readonly resources: readonly Resource[] },
@@ -378,6 +391,7 @@ export const buildAllSetRecap = (
   const project = findOldest(reads.projects);
   const repo = project === undefined ? undefined : listProjectRepos(reads.resources, project.id)[0];
   return {
+    hasAccount: reads.accounts.length > 0,
     providerNames:
       signedIn.length === 0
         ? null

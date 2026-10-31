@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CapabilitySnapshot, ProviderAccount, Runner } from "@hercule/contract";
+import { PROVIDERS } from "@hercule/client-core/testing";
 import {
   buildSidebarHandlers,
   CONTROLLER_URL,
@@ -169,6 +170,48 @@ describe("the provider sign-in dialog", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     expect(screen.queryByText("Can't start yet.")).toBeNull();
+  });
+
+  it("starts making a new token when the token of a token account expired, though its last probe found it signed in", async () => {
+    const providers = PROVIDERS.map((provider) =>
+      provider.id === "anthropic/anthropic"
+        ? {
+            ...provider,
+            kinds: [
+              {
+                id: "subscription-token",
+                title: "Claude subscription, every machine",
+                description: "A token.",
+                setup: [{ kind: "harness-login" as const, method: "create-token" as const }],
+                harnesses: ["claude-code/claude-code"],
+              },
+            ],
+          }
+        : provider,
+    );
+    const expired: ProviderAccount = {
+      ...FIXTURE_ACCOUNT,
+      kind: "subscription-token",
+      expiresAt: "2020-01-01T00:00:00.000Z",
+    };
+    const calls = stubApi({
+      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, runners: [MOSS], accounts: [expired] }),
+      "GET /api/v1/providers": { body: providers },
+      [`POST ${SIGN_IN_PATH}`]: { body: { url: "https://claude.ai/oauth/authorize?code=1" } },
+    });
+    const fake = createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" });
+    await renderApp(fake, { path: `/?project=${WEBSHOP!.id}` });
+    await screen.findByRole("textbox", { name: "Message" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+
+    const dialog = await screen.findByRole<HTMLDialogElement>("dialog", {
+      name: "Sign in to Anthropic on moss",
+    });
+    await waitFor(() => {
+      expect(readCalls(calls, SIGN_IN_PATH)).toHaveLength(1);
+    });
+    expect(within(dialog).queryByText("Signed in")).toBeNull();
   });
 
   it("says when the device code expired, and starts again on request", async () => {

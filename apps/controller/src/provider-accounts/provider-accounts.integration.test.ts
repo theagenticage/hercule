@@ -31,6 +31,7 @@ import {
   buildAccountPlugins,
   KEY_KIND,
   MACHINE_KIND,
+  TOKEN_KIND,
 } from "./testing";
 
 /** A valid id that belongs to no account. */
@@ -64,9 +65,9 @@ const listAccounts = async (base: string, token: string): Promise<ReadonlyArray<
 };
 
 /**
- * Adds an account of Acme straight into the database, as the next ticket's
- * create will. The test controller has already seeded one Acme account without
- * a label, and a provider allows only one, so every account added here needs a label.
+ * Adds an account of Acme straight into the database, without the key check
+ * and the secret that `providerAccount.create` adds. The test controller has
+ * already added one Acme account without a label, and a provider allows only one, so every account added here needs a label.
  */
 const insertAccount = async (
   sql: ServerHarness["sql"],
@@ -106,7 +107,11 @@ describe("GET /harnesses and /providers", () => {
 
       expect(harnesses.map((harness) => harness.id)).toEqual([ALPHA_HARNESS_ID, "beta/beta"]);
       expect(providers.map((provider) => provider.id)).toEqual([ACME_PROVIDER_ID]);
-      expect(providers[0]?.kinds.map((kind) => kind.id)).toEqual([KEY_KIND, MACHINE_KIND]);
+      expect(providers[0]?.kinds.map((kind) => kind.id)).toEqual([
+        KEY_KIND,
+        MACHINE_KIND,
+        TOKEN_KIND,
+      ]);
     });
   });
 

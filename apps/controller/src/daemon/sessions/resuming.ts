@@ -12,7 +12,11 @@ import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { createInvalidStateError, type InvalidState } from "@hercule/contract";
-import { isSignedIn, NO_PLACEMENT, providerAccountRepository } from "../../provider-accounts";
+import {
+  buildRunnerRefusal,
+  ProviderAccountRunners,
+  providerAccountRepository,
+} from "../../provider-accounts";
 import { DRAINING, RETIRED, runnerRepository } from "../../runners";
 import { ACCOUNT_DELETED, type StoredSession } from "../../sessions";
 import { WorkspaceService } from "../../workspaces";
@@ -53,15 +57,18 @@ const describeWorkspaceGone = (status: string): string =>
  * - its runner is retired, or is draining and takes no new sessions even
  *   though the transcript is still there;
  * - the session's Provider Account was deleted;
- * - its runner is no longer signed in to the session's account in the
- *   session's harness.
+ * - its runner can no longer run the session's account in the session's
+ *   harness: the harness is gone from it, or a subscription account is no
+ *   longer signed in on it, or the account's key is gone or its token has
+ *   expired.
  */
 export const resumable: Effect.Effect<
   (session: StoredSession) => Effect.Effect<string, InvalidState | SqlError | Schema.SchemaError>,
   never,
-  SqlClient.SqlClient | WorkspaceService
+  SqlClient.SqlClient | WorkspaceService | ProviderAccountRunners
 > = Effect.gen(function* () {
   const workspaces = yield* WorkspaceService;
+  const accountRunners = yield* ProviderAccountRunners;
   const runners = yield* runnerRepository;
   const accounts = yield* providerAccountRepository;
 
@@ -100,15 +107,11 @@ export const resumable: Effect.Effect<
       if (Option.isSome(machine) && machine.value.lifecycle !== "active") {
         return yield* Effect.fail(createInvalidStateError(DRAINING));
       }
-      // Check the snapshot of the runner that holds the native state, not of
-      // the whole fleet, because the transcript exists only on that runner.
-      const snapshot = yield* accounts.readSnapshot(
-        session.providerAccountId,
-        session.harnessId,
-        session.runnerId,
-      );
-      if (Option.isNone(snapshot) || !isSignedIn(snapshot.value)) {
-        return yield* Effect.fail(createInvalidStateError(NO_PLACEMENT));
+      // Check the runner that holds the native state, not the whole fleet,
+      // because the transcript exists only on that runner.
+      const available = yield* accountRunners.list(session.providerAccountId, session.harnessId);
+      if (!available.runnerIds.includes(session.runnerId)) {
+        return yield* Effect.fail(createInvalidStateError(buildRunnerRefusal(available)));
       }
       return session.nativeSessionId;
     });

@@ -23,15 +23,28 @@ export interface StoredProviderAccount {
   readonly kind: string;
   readonly label: string | null;
   /**
-   * Who the account is signed in as, such as an email address. Only the
-   * upgrade from the previous version sets it, from the snapshots runners
-   * reported. Ticket #934 makes the first sign-in set it.
+   * Who the account is signed in as, such as an email address. Null until
+   * a probe reports an identity for the account (or the upgrade from the
+   * previous version sets it from the snapshots runners reported). Once set, a
+   * probe that reports another person is stored as unauthenticated.
    */
   readonly identity: string | null;
   /** The plan the account is on. Set the same way as `identity`. */
   readonly planLabel: string | null;
   /** The qualified id of the harness a session uses when it names none. */
   readonly defaultHarnessId: string;
+  /**
+   * When the account's token stops working, or null. Set only for an account
+   * whose credential is a token Hercule made.
+   */
+  readonly credentialExpiresAt: string | null;
+  /**
+   * Counts the credentials the account has had: it goes up whenever a new
+   * key or token is stored and whenever a sign-in is accepted. A probe
+   * carries the number it was sent under, so an answer to a probe sent before
+   * the change is told apart from one that describes the current credential.
+   */
+  readonly credentialGeneration: number;
   /** The folder name under `providers/` that an account made by the upgrade from the previous version keeps, or null. */
   readonly legacyHomeFolder: string | null;
   /** The qualified id of the harness that folder belongs to, or null. Null exactly when the folder is. */
@@ -51,6 +64,7 @@ interface NewProviderAccount {
 /** The columns an update may set. An absent field leaves its column unchanged. */
 interface ProviderAccountEdit {
   readonly label?: string | null;
+  readonly defaultHarnessId?: string;
 }
 
 interface ProviderAccountRow {
@@ -61,6 +75,8 @@ interface ProviderAccountRow {
   readonly identity: string | null;
   readonly plan_label: string | null;
   readonly default_harness_id: string;
+  readonly credential_expires_at: string | null;
+  readonly credential_generation: number;
   readonly legacy_home_folder: string | null;
   readonly legacy_home_harness_id: string | null;
   readonly created_at: string;
@@ -69,7 +85,7 @@ interface ProviderAccountRow {
 
 const ACCOUNT_COLUMNS =
   "id, provider_id, kind, label, identity, plan_label, default_harness_id, " +
-  "legacy_home_folder, legacy_home_harness_id, created_at, updated_at";
+  "credential_expires_at, credential_generation, legacy_home_folder, legacy_home_harness_id, created_at, updated_at";
 
 const toStoredProviderAccount = (row: ProviderAccountRow): StoredProviderAccount => ({
   id: uuidToString(row.id),
@@ -79,6 +95,8 @@ const toStoredProviderAccount = (row: ProviderAccountRow): StoredProviderAccount
   identity: row.identity,
   planLabel: row.plan_label,
   defaultHarnessId: row.default_harness_id,
+  credentialExpiresAt: row.credential_expires_at,
+  credentialGeneration: row.credential_generation,
   legacyHomeFolder: row.legacy_home_folder,
   legacyHomeHarnessId: row.legacy_home_harness_id,
   createdAt: row.created_at,
@@ -110,6 +128,9 @@ interface SnapshotRow {
   readonly auth_message: string | null;
   readonly models: string;
 }
+
+/** What a snapshot says while the probe that checks a new sign-in has not answered. */
+const SIGN_IN_PENDING_MESSAGE = "Checking the sign-in…";
 
 const SNAPSHOT_COLUMNS =
   "provider_account_id, harness_id, runner_id, probed_at, harness_version, auth_status, " +
@@ -210,6 +231,8 @@ const make = Effect.gen(function* () {
           identity: null,
           planLabel: null,
           defaultHarnessId: account.defaultHarnessId,
+          credentialExpiresAt: null,
+          credentialGeneration: 0,
           legacyHomeFolder: null,
           legacyHomeHarnessId: null,
           createdAt: account.at,
@@ -220,10 +243,72 @@ const make = Effect.gen(function* () {
     update: (id: string, edit: ProviderAccountEdit, at: string): Effect.Effect<void, SqlError> => {
       const sets = [sql`updated_at = ${at}`];
       if (edit.label !== undefined) sets.push(sql`label = ${edit.label}`);
+      if (edit.defaultHarnessId !== undefined) {
+        sets.push(sql`default_harness_id = ${edit.defaultHarnessId}`);
+      }
       return Effect.asVoid(
         sql`UPDATE provider_accounts SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,
       );
     },
+
+    /**
+     * Sets when the account's token stops working. Does nothing when the
+     * account does not exist.
+     */
+    setCredentialExpiry: (
+      id: string,
+      expiresAt: string,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE provider_accounts SET credential_expires_at = ${expiresAt}, updated_at = ${at}
+        WHERE id = ${uuidFromString(id)}
+      `),
+
+    /**
+     * Clears the account's identity and plan label, so the next `ok` probe
+     * that reports an identity sets them again. Used when the account gets a
+     * new credential, which may belong to someone else. Does nothing when the
+     * account does not exist.
+     */
+    clearIdentity: (id: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE provider_accounts SET identity = NULL, plan_label = NULL, updated_at = ${at}
+        WHERE id = ${uuidFromString(id)}
+      `),
+
+    /**
+     * Adds one to the account's credential generation. Call it in the
+     * transaction that stores a new credential or accepts a sign-in, so a
+     * probe sent before it is recognised as stale. Does nothing when the
+     * account does not exist.
+     */
+    advanceCredentialGeneration: (id: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE provider_accounts
+        SET credential_generation = credential_generation + 1, updated_at = ${at}
+        WHERE id = ${uuidFromString(id)}
+      `),
+
+    /**
+     * Marks the runner's snapshot of the account in the harness as not signed
+     * in, with the message "Checking the sign-in…", and leaves its time
+     * unchanged. Placement uses only snapshots that are signed in, so the
+     * runner is not placed on until a probe stores a newer snapshot. Does
+     * nothing when there is no such snapshot.
+     */
+    markSnapshotSignInPending: (
+      providerAccountId: string,
+      harnessId: string,
+      runnerId: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE capability_snapshots
+        SET auth_status = 'unauthenticated', auth_message = ${SIGN_IN_PENDING_MESSAGE}
+        WHERE provider_account_id = ${uuidFromString(providerAccountId)}
+          AND harness_id = ${harnessId}
+          AND runner_id = ${uuidFromString(runnerId)}
+      `),
 
     /** Deletes the account. Its snapshots are deleted with it, by the foreign key. */
     delete: (id: string): Effect.Effect<void, SqlError> =>
@@ -240,6 +325,41 @@ const make = Effect.gen(function* () {
           ORDER BY provider_account_id, harness_id, runner_id
         `,
         (rows) => Effect.forEach(rows, toSnapshot),
+      ),
+
+    /**
+     * Lists which runner is signed in to which account in which harness, as
+     * one row per snapshot whose auth status is `ok`, with the identity that
+     * snapshot reported (`null` when it reported none). It reads four columns
+     * and no model list, so a caller that only needs to know where an account
+     * can run does not decode every model.
+     */
+    listSignedIn: (): Effect.Effect<
+      ReadonlyArray<{
+        readonly providerAccountId: string;
+        readonly harnessId: string;
+        readonly runnerId: string;
+        readonly identity: string | null;
+      }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{
+          readonly provider_account_id: Uint8Array;
+          readonly harness_id: string;
+          readonly runner_id: Uint8Array;
+          readonly auth_identity: string | null;
+        }>`
+          SELECT provider_account_id, harness_id, runner_id, auth_identity FROM capability_snapshots
+          WHERE auth_status = 'ok'
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            providerAccountId: uuidToString(row.provider_account_id),
+            harnessId: row.harness_id,
+            runnerId: uuidToString(row.runner_id),
+            identity: row.auth_identity,
+          })),
       ),
 
     listSnapshots: (
@@ -290,6 +410,24 @@ const make = Effect.gen(function* () {
             ? Effect.succeed(Option.none())
             : Effect.map(toSnapshot(rows[0]), Option.some),
       ),
+
+    /**
+     * Sets the account's identity and plan label, only when the account has no
+     * identity yet. It is one statement, so when two first sign-ins race, the
+     * second one changes nothing. The caller reads the account afterwards to
+     * learn which identity won.
+     */
+    setIdentityIfUnset: (
+      id: string,
+      identity: string,
+      planLabel: string | undefined,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE provider_accounts
+        SET identity = ${identity}, plan_label = ${planLabel ?? null}, updated_at = ${at}
+        WHERE id = ${uuidFromString(id)} AND identity IS NULL
+      `),
 
     /**
      * Stores a runner's probe result for an account in one harness, replacing

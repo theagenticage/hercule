@@ -597,8 +597,13 @@ export const buildQueryKeys = (
   // Provider Accounts are read as one list, so the whole list is refetched
   // whichever account changed. The controller's own read is refetched too:
   // whether a text generation can run now depends on which runners are signed
-  // in to which account.
-  if (topic === "provider") return [queryKeys.providerAccounts(), queryKeys.controller()];
+  // in to which account. The harness list is refetched too: each runner's
+  // version verdict for a harness comes from the probes, and a probe that
+  // finishes announces this topic, so a harness upgraded after a "too old"
+  // verdict must be read again to clear it.
+  if (topic === "provider") {
+    return [queryKeys.providerAccounts(), queryKeys.controller(), queryKeys.harnesses()];
+  }
   return [];
 };
 

@@ -955,6 +955,7 @@ describe("a controller asking a runner to probe a harness it has no adapter for"
       providerAccountId: "01999999-0000-7000-8000-0000000000c2",
       harnessHome: "providers/01999999-0000-7000-8000-0000000000c2",
       modelArgument: "{model}",
+      credentialVariables: [],
     },
   };
 
@@ -1161,6 +1162,7 @@ describe("session frames on one connection", () => {
       providerAccountId: ACCOUNT_ID,
       harnessHome: `providers/${ACCOUNT_ID}`,
       modelArgument: "{model}",
+      credentialVariables: [],
     },
     spec: {
       providerAccountId: ACCOUNT_ID,

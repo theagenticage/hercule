@@ -200,10 +200,10 @@ const FIXTURE_CONNECTIONS: ReadonlyArray<ConnectionFixture> = [
 ];
 
 /**
- * The accounts the launch with Settings › Providers open has, besides the
- * three a fresh controller creates: five in all. The three get an identity
- * and a plan, and two more are added with a label, so the cards draw both
- * a name with a label and a name without one.
+ * The accounts the launch with Settings › Providers open has: four. Each has
+ * an identity and a plan. The first is the Anthropic account the fleet makes,
+ * which gets them, and the other three are added, two of them with a label, so
+ * the cards draw both a name with a label and a name without one.
  */
 const FIXTURE_PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccountFixture> = [
   {
@@ -327,7 +327,7 @@ export interface ThreadFixture {
    * the controller holds the fixture's Connections for the launch, and
    * without it none (see `FIXTURE_CONNECTIONS`). With `providerAccounts`,
    * the controller holds the fixture's Provider Accounts for the launch, and
-   * without it only the three a fresh controller creates, with no identity
+   * without it only the Anthropic account the fleet makes, with no identity
    * (see `FIXTURE_PROVIDER_ACCOUNTS`). With `signalsAboutThreads`,
    * that many of the oldest open signals become signals of a plugin's event,
    * each about a thread (see `makeSignalsAboutThreads`). Fails when a thread

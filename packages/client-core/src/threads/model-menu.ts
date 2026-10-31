@@ -21,7 +21,8 @@ import {
   findProviderAccountNameIfAmbiguous,
   resolveThreadHarnessId,
 } from "../provider-accounts";
-import { buildSignInTarget, findSnapshotOn, type SignInTarget } from "./catalog";
+import { buildSignInTarget, findModelSnapshot, findSnapshotOn, type SignInTarget } from "./catalog";
+import { decideAccountReadiness } from "./account-readiness";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind } from "./config";
 import type { RecentModel } from "./recent";
 import { findReferenceRunner } from "./runner-menu";
@@ -112,7 +113,7 @@ export const buildModelMenu = (
   const findSnapshot = (account: ProviderAccount) =>
     findSnapshotOn(account, findHarnessId(account), runner?.id);
   const listModels = (account: ProviderAccount): readonly ModelDescriptor[] =>
-    findSnapshot(account)?.models ?? [];
+    findModelSnapshot(account, findHarnessId(account), runner?.id)?.models ?? [];
 
   const buildRow = (account: ProviderAccount, descriptor: ModelDescriptor): ModelMenuRow => ({
     providerAccountId: account.id,
@@ -192,14 +193,28 @@ export const buildModelMenu = (
                 .map((d) => buildRow(each, d));
         if (filter !== "" && matched.length === 0) return [];
 
+        // An account whose credential every runner uses is ready wherever the
+        // harness is, with or without a probe of it there.
+        const readiness =
+          runner === undefined
+            ? snapshot?.auth.status === "ok"
+              ? "ready"
+              : "not-signed-in"
+            : decideAccountReadiness(catalogs, each, findHarnessId(each), runner);
         const dimmed =
           view.kind === "active"
             ? ACCOUNT_FIXED
-            : snapshot === undefined
-              ? `not on ${runner?.name ?? "this machine"}`
-              : snapshot.auth.status === "ok"
-                ? null
-                : "not signed in";
+            : readiness === "ready"
+              ? null
+              : readiness === "token-missing"
+                ? "no token"
+                : readiness === "token-expired"
+                  ? "token expired"
+                  : readiness === "harness-too-old"
+                    ? "harness too old"
+                    : readiness === "harness-missing" || snapshot === undefined
+                      ? `not on ${runner?.name ?? "this machine"}`
+                      : "not signed in";
 
         return [
           {
@@ -215,7 +230,7 @@ export const buildModelMenu = (
             signIn:
               view.kind !== "active" &&
               snapshot !== undefined &&
-              snapshot.auth.status !== "ok" &&
+              readiness === "not-signed-in" &&
               runner !== undefined
                 ? buildSignInTarget(catalogs.providers, each, runner)
                 : null,

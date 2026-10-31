@@ -1,6 +1,7 @@
 export {
   buildHintId,
   CopyButton,
+  CredentialFields,
   DeviceCodeSteps,
   DoneMark,
   FormField,

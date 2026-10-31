@@ -118,6 +118,7 @@ const buildContext = (home: string): HarnessRunnerContext => ({
   binary: binary!,
   env: { PATH: process.env["PATH"] ?? "" },
   modelArgument: "{model}",
+  credentialVariables: [],
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
 });
 

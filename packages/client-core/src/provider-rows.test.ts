@@ -38,6 +38,85 @@ describe("buildProviderRows", () => {
     });
   });
 
+  it("offers the token flow, not a typed credential, to a kind that makes a token", () => {
+    const providers = PROVIDERS.map((provider) =>
+      provider.id === "anthropic/anthropic"
+        ? {
+            ...provider,
+            kinds: [
+              {
+                id: "subscription-token",
+                title: "Claude subscription, every machine",
+                description: "Sign in once.",
+                setup: [{ kind: "harness-login" as const, method: "create-token" as const }],
+                harnesses: ["claude-code/claude-code"],
+              },
+            ],
+          }
+        : provider,
+    );
+    const account = buildProviderAccount({ ...ANTHROPIC_IDENTITY, kind: "subscription-token" }, []);
+
+    const row = buildProviderRows(WITH_CLAUDE, [account], providers, HARNESSES)[0]!;
+
+    expect(row).toMatchObject({
+      signIn: true,
+      signInLabel: "Make the token",
+      credentialFields: [],
+    });
+  });
+
+  describe("a token account whose probe found it signed in", () => {
+    const tokenProviders = PROVIDERS.map((provider) =>
+      provider.id === "anthropic/anthropic"
+        ? {
+            ...provider,
+            kinds: [
+              {
+                id: "subscription-token",
+                title: "Claude subscription, every machine",
+                description: "Sign in once.",
+                setup: [{ kind: "harness-login" as const, method: "create-token" as const }],
+                harnesses: ["claude-code/claude-code"],
+              },
+            ],
+          }
+        : provider,
+    );
+    const buildTokenRow = (expiresAt: string | null) =>
+      buildProviderRows(
+        WITH_CLAUDE,
+        [
+          {
+            ...buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshot()]),
+            kind: "subscription-token",
+            expiresAt,
+          },
+        ],
+        tokenProviders,
+        HARNESSES,
+      )[0]!;
+
+    it("is signed in while the token lasts", () => {
+      expect(buildTokenRow("2999-01-01T00:00:00.000Z")).toMatchObject({
+        signedIn: true,
+        signInLabel: "Make a new token",
+      });
+    });
+
+    it("is not signed in once the token expired, so the row offers to make a new one", () => {
+      expect(buildTokenRow("2020-01-01T00:00:00.000Z")).toMatchObject({
+        signedIn: false,
+        signIn: true,
+        signInLabel: "Make the token",
+      });
+    });
+
+    it("is not signed in while no token was made", () => {
+      expect(buildTokenRow(null).signedIn).toBe(false);
+    });
+  });
+
   it("names a labelled account by its provider and label", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,

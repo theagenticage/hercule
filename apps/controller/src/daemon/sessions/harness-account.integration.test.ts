@@ -67,9 +67,14 @@ const buildPlugins = (): ReadonlyArray<Plugin> => [
             title: "API key",
             description: "A key for Keyed.",
             setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+            keyCheck: {
+              url: "https://api.keyed.test/v1/models",
+              headers: { authorization: "Bearer {apiKey}" },
+            },
             harnesses: ["harnesses/keyed"],
           },
         ],
+        defaultHarnessId: "harnesses/keyed",
       },
       {
         id: "plain",
@@ -79,10 +84,11 @@ const buildPlugins = (): ReadonlyArray<Plugin> => [
             id: "subscription",
             title: "Subscription",
             description: "A plan signed in on each machine.",
-            setup: [{ kind: "harness-login" }],
+            setup: [{ kind: "harness-login", method: "sign-in" }],
             harnesses: ["harnesses/plain"],
           },
         ],
+        defaultHarnessId: "harnesses/plain",
       },
     ],
   }).plugin,
@@ -180,17 +186,19 @@ describe("the harness account a frame carries to a runner", () => {
         providerAccountId: keyed,
         harnessHome: `providers/homes/${keyed}/harnesses/keyed`,
         modelArgument: "keyed/{model}",
+        credentialVariables: [KEY_VARIABLE],
         credential: { variable: KEY_VARIABLE, value: KEY_VALUE },
       });
     });
   });
 
-  it("sends the variable alone when the key has not been entered, so the runner removes it, and no credential for a harness that has none", async () => {
+  it("lists the variables the harness declares on every probe, so the runner removes them, and sends no credential for a harness that has none", async () => {
     await withFleet(async (arranged) => {
       const keyed = await probeNow(arranged, findProviderAccountId(arranged, "harnesses/keyed"));
       const plain = await probeNow(arranged, findProviderAccountId(arranged, "harnesses/plain"));
 
-      expect(keyed.harnessAccount.credential).toEqual({ variable: KEY_VARIABLE });
+      expect(keyed.harnessAccount.credentialVariables).toEqual([KEY_VARIABLE]);
+      expect(plain.harnessAccount.credentialVariables).toEqual([]);
       expect("credential" in plain.harnessAccount).toBe(false);
     });
   });

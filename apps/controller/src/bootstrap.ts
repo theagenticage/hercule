@@ -45,12 +45,14 @@ import {
   ConnectionServiceWithReferencesLayer,
   IngestExecutorLayer,
   OpenSignalsLayer,
+  ProviderAccountProbingLayer,
   revalidateStoredWorkflowsOrLog,
   RunServiceReferenceLayer,
   DiscussionInputsReferenceLayer,
   SessionEditObserverLayer,
   SessionObserverLayer,
   WorkflowValidityObserversLayer,
+  type ProviderAccountProbing,
   type RunServiceReference,
   type DiscussionInputsReference,
 } from "./daemon";
@@ -109,9 +111,11 @@ import {
   HarnessAccountsLayer,
   ProviderAccountProbes,
   ProviderAccountProbesLayer,
+  ProviderAccountRunners,
+  ProviderAccountRunnersLayer,
   ProviderAccountService,
   ProviderAccountServiceLayer,
-  seedProviderAccounts,
+  ProviderKeyCheckLayer,
 } from "./provider-accounts";
 import { seed } from "./seed";
 import { readSetupComplete } from "./setup";
@@ -262,6 +266,8 @@ export type ControllerServices =
   | RunnerConnections
   | HarnessAccounts
   | ProviderAccountProbes
+  | ProviderAccountRunners
+  | ProviderAccountProbing
   | ProviderAccountService
   | SessionService
   | WorkspaceService
@@ -330,6 +336,7 @@ export const bootWith = <A, E>(
           JoinTokensLayer,
           PromotionTokensLayer,
           GithubSkillSourcesLayer.pipe(Layer.provide(FetchHttpClient.layer)),
+          ProviderKeyCheckLayer.pipe(Layer.provide(FetchHttpClient.layer)),
           PromotionStateLayer.pipe(
             Layer.provide(Layer.mergeAll(controllerIdentityLayer, AuditLogLayer)),
           ),
@@ -362,11 +369,14 @@ export const bootWith = <A, E>(
     );
 
     /**
-     * One connection map and one probe driver per process: the socket route,
-     * the controller daemon and the sweep after a hello all use the same
-     * `RunnerConnections`.
+     * One connection map and one set of awaited device logins per process:
+     * the socket route, the controller daemon and the sweep after a hello all
+     * use the same `RunnerConnections`, and the sign-in operations and the
+     * inbound driver use the same `ProviderAccountProbing`.
      */
-    const withFleet = ProviderAccountProbesLayer.pipe(
+    const withFleet = ProviderAccountProbingLayer.pipe(
+      Layer.provideMerge(ProviderAccountProbesLayer),
+      Layer.provideMerge(ProviderAccountRunnersLayer),
       Layer.provideMerge(HarnessAccountsLayer),
       Layer.provideMerge(RunnerConnectionsLayer),
       Layer.provideMerge(catalog),
@@ -470,10 +480,6 @@ export const bootWith = <A, E>(
         // plugins. A plugin may have changed while the controller was stopped.
         // A failure is logged and the boot goes on.
         yield* revalidateStoredWorkflowsOrLog;
-        // After the catalog, because a default account is created only for a
-        // provider this build registered. Temporary: ticket #934 adds
-        // `providerAccount.create` and removes this seed.
-        yield* seedProviderAccounts(yield* readSetupComplete);
       }
 
       const url = yield* ensureSetupUrl(paths, bootstrap);

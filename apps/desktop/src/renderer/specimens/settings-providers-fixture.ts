@@ -16,7 +16,7 @@
  * - Each plugin declares the mark the shipped plugin declares: the book's
  *   brand path scaled by 2/3 onto the 16-unit grid a plugin's mark uses.
  */
-import type { PluginMark, ProviderAccount, Runner } from "@hercule/contract";
+import type { AccountKind, PluginMark, Provider, ProviderAccount, Runner } from "@hercule/contract";
 import { buildRunner } from "@hercule/client-core/threads/testing";
 import { SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { ProvidersSettingsRecords, SidebarRecords } from "./shell-page";
@@ -99,6 +99,7 @@ export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
     identity: "rogier@acme.com",
     planLabel: "Max",
     defaultHarnessId: "claude-code/claude-code",
+    expiresAt: null,
     snapshots: [
       buildSnapshot(STUDIO_MAC, "claude-code/claude-code", "rogier@acme.com", "Max"),
       buildSnapshot(ATLAS, "claude-code/claude-code", "rogier@acme.com", "Max"),
@@ -115,6 +116,7 @@ export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
     identity: "rogier@work.example",
     planLabel: "Team",
     defaultHarnessId: "claude-code/claude-code",
+    expiresAt: null,
     snapshots: [
       buildSnapshot(STUDIO_MAC, "claude-code/claude-code", "rogier@work.example", "Team"),
       buildSnapshot(ATLAS, "claude-code/claude-code", null),
@@ -130,6 +132,7 @@ export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
     identity: "rogier@acme.com",
     planLabel: "Pro",
     defaultHarnessId: "codex/codex",
+    expiresAt: null,
     snapshots: [buildSnapshot(STUDIO_MAC, "codex/codex", "rogier@acme.com", "Pro")],
     createdAt: AT,
     updatedAt: AT,
@@ -142,6 +145,7 @@ export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
     identity: null,
     planLabel: null,
     defaultHarnessId: "codex/codex",
+    expiresAt: null,
     snapshots: [],
     createdAt: AT,
     updatedAt: AT,
@@ -154,9 +158,89 @@ export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
     identity: null,
     planLabel: null,
     defaultHarnessId: "pi/pi",
+    expiresAt: null,
     snapshots: [],
     createdAt: AT,
     updatedAt: AT,
+  },
+];
+
+/** The kinds the add-account specimens draw, one of each way an account gets its credential. */
+const KEY_FIELD = {
+  name: "apiKey",
+  label: "API key",
+  help: "Create one in the Z.ai console, under API keys.",
+};
+
+export const SPECIMEN_KINDS: Readonly<Record<string, AccountKind>> = {
+  token: {
+    id: "subscription-token",
+    title: "Claude subscription, every machine",
+    description:
+      "Sign in once and every machine uses it, also the ones you add later. The token lasts a year.",
+    setup: [{ kind: "harness-login", method: "create-token" }],
+    harnesses: ["claude-code/claude-code"],
+  },
+  perMachine: {
+    id: "subscription-per-machine",
+    title: "Claude subscription, signed in on each machine",
+    description: "Sign in on every machine you want to use it on. Nothing is shared between them.",
+    setup: [{ kind: "harness-login", method: "sign-in" }],
+    harnesses: ["claude-code/claude-code"],
+  },
+  anthropicKey: {
+    id: "api-key",
+    title: "API key",
+    description: "Pay per use with a key from the Anthropic console.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["claude-code/claude-code", "pi/pi"],
+  },
+  openaiPerMachine: {
+    id: "subscription-per-machine",
+    title: "ChatGPT subscription, signed in on each machine",
+    description:
+      "Uses your ChatGPT plan through Codex. You sign in to Codex once on each machine that runs it.",
+    setup: [{ kind: "harness-login", method: "sign-in" }],
+    harnesses: ["codex/codex"],
+  },
+  openaiKey: {
+    id: "api-key",
+    title: "API key",
+    description:
+      "From the OpenAI platform. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["codex/codex", "pi/pi"],
+  },
+  zaiKey: {
+    id: "api-key",
+    title: "API key",
+    description: "A Z.ai API key.",
+    setup: [{ kind: "credentials", fields: [KEY_FIELD] }],
+    harnesses: ["pi/pi"],
+  },
+};
+
+export const SPECIMEN_PROVIDERS: ReadonlyArray<Provider> = [
+  {
+    id: "anthropic/anthropic",
+    pluginId: "anthropic",
+    displayName: "Anthropic",
+    defaultHarnessId: "claude-code/claude-code",
+    kinds: [SPECIMEN_KINDS.token!, SPECIMEN_KINDS.perMachine!, SPECIMEN_KINDS.anthropicKey!],
+  },
+  {
+    id: "openai/openai",
+    pluginId: "openai",
+    displayName: "OpenAI",
+    defaultHarnessId: "codex/codex",
+    kinds: [SPECIMEN_KINDS.openaiPerMachine!, SPECIMEN_KINDS.openaiKey!],
+  },
+  {
+    id: "zai/zai",
+    pluginId: "zai",
+    displayName: "Z.ai",
+    defaultHarnessId: "pi/pi",
+    kinds: [SPECIMEN_KINDS.zaiKey!],
   },
 ];
 
@@ -180,4 +264,19 @@ export const PROVIDERS_SIDEBAR_RECORDS: SidebarRecords = {
 /** What the section reads besides the sidebar's lists: which machine is this Mac. */
 export const PROVIDERS_SETTINGS_RECORDS: ProvidersSettingsRecords = {
   thisMacRunnerId: STUDIO_MAC.id,
+  providers: SPECIMEN_PROVIDERS,
+  controllerRunnerId: STUDIO_MAC.id,
+  createdAccount: {
+    id: "01a06d02-8000-7000-8000-0000000000c2",
+    providerId: "anthropic/anthropic",
+    kind: "subscription-per-machine",
+    label: "Home",
+    identity: null,
+    planLabel: null,
+    defaultHarnessId: "claude-code/claude-code",
+    expiresAt: null,
+    snapshots: [],
+    createdAt: AT,
+    updatedAt: AT,
+  },
 };

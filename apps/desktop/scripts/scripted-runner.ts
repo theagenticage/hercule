@@ -53,6 +53,11 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Schema } from "effect";
+import {
+  CLAUDE_CODE_VERSION,
+  CODEX_VERSION,
+  PI_VERSION,
+} from "../../../packages/home/src/version.ts";
 import { pollUntil } from "./poll.ts";
 import type {
   ATTACHMENTS_CAPABILITY,
@@ -126,8 +131,7 @@ const MODEL_OPTIONS: ReadonlyArray<ModelOption> = [
  * A signed-in report with two models, so a test can pick a model other than
  * the default, and options on both, so it can pick an option.
  */
-const PROBE_RESULT: ProbeResult = {
-  harnessVersion: "1.0.0",
+const PROBE_RESULT: Omit<ProbeResult, "harnessVersion"> = {
   auth: { status: "ok" },
   models: [
     {
@@ -147,11 +151,21 @@ const PROBE_RESULT: ProbeResult = {
 };
 
 /** The report of a probe after `setSignedIn(false)`: the harness holds no login and lists no models. */
-const SIGNED_OUT_PROBE_RESULT: ProbeResult = {
-  harnessVersion: "1.0.0",
+const SIGNED_OUT_PROBE_RESULT: Omit<ProbeResult, "harnessVersion"> = {
   auth: { status: "unauthenticated" },
   models: [],
 };
+
+/**
+ * The version each harness reports: the floor this build pins for it, which
+ * is the oldest version placement accepts. A harness with no pinned floor
+ * reports any version.
+ */
+const HARNESS_VERSIONS: ReadonlyMap<string, string> = new Map([
+  ["claude-code/claude-code", CLAUDE_CODE_VERSION],
+  ["codex/codex", CODEX_VERSION],
+  ["pi/pi", PI_VERSION],
+]);
 
 /** The sign-in page a login start reports. Nothing serves it, and no test opens it. */
 const SIGN_IN_URL = "https://sign-in.scripted-runner.invalid/authorize";
@@ -1149,7 +1163,10 @@ export async function enlistScriptedRunner(
           _tag: "probeReport",
           requestId: frame.requestId,
           providerAccountId: frame.harnessAccount.providerAccountId,
-          result: signedIn ? PROBE_RESULT : SIGNED_OUT_PROBE_RESULT,
+          result: {
+            ...(signedIn ? PROBE_RESULT : SIGNED_OUT_PROBE_RESULT),
+            harnessVersion: HARNESS_VERSIONS.get(frame.harnessId) ?? "1.0.0",
+          },
         });
       case "loginStart":
         return send({ _tag: "loginUrl", requestId: frame.requestId, url: SIGN_IN_URL });
@@ -1314,7 +1331,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 15 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 16 satisfies typeof PROTOCOL_VERSION,
             capabilities: [
               "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,

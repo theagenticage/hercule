@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { Suspense, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -15,7 +15,10 @@ import {
   providersQuery,
   runnersQuery,
 } from "../../../../app/queries";
+import { PlusIcon } from "../../../../icons/plus";
 import { ProviderAccountCard, ProviderMark } from "../../../../screens/settings/providers";
+import { LazyAddProviderAccount } from "../../../../screens/settings/providers/lazy-add-provider-account";
+import { SettingsHeaderActions } from "../../../../screens/settings/settings-frame";
 import { OpenedProviderAccountSheet } from "./-provider-account-sheet";
 
 /**
@@ -34,7 +37,8 @@ interface OpenSheet {
  * in the order the accounts were added. A card shows the provider's mark, the
  * account's name, who is signed in and the plan, and either the machines the
  * account is signed in on or "Every machine". A click on a card opens the
- * account's sheet (spec 17 §Settings, Providers).
+ * account's sheet, and the header's Add an account opens the sheet that adds
+ * one (spec 17 §Settings, Providers).
  *
  * Everything the section reads, the accounts, the providers, the harnesses,
  * the runners and the plugins, is a shell read that the live connection
@@ -68,6 +72,7 @@ function Providers(): JSX.Element {
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const [sheet, setSheet] = useState<OpenSheet | null>(null);
+  const [adding, setAdding] = useState(false);
   // A sheet closes only itself: a late close of a sheet the user left must
   // not close the one opened since.
   const closeSheet = (closing: OpenSheet): void => {
@@ -75,43 +80,62 @@ function Providers(): JSX.Element {
   };
   const sheetProviderAccount = accounts.find(({ id }) => id === sheet?.providerAccountId);
 
-  if (accounts.length === 0) {
-    return <p className="pa-empty">No accounts yet.</p>;
-  }
   return (
     <>
-      <section className="set-sec provider-accounts">
-        <h2>Accounts</h2>
-        <p className="pa-lead">Who pays for the models in your menu.</p>
-        {sheet !== null && sheetProviderAccount === undefined && (
-          <p className="set-note" role="status">
-            {`${sheet.name} was deleted elsewhere, so its sheet closed.`}
-          </p>
-        )}
-        <div className="pa-cards">
-          {accounts.map((account) => {
-            const name = buildProviderAccountName(providers, account);
-            return (
-              <ProviderAccountCard
-                key={account.id}
-                mark={
-                  <ProviderMark
-                    pluginId={findProviderPluginId(providers, account)}
-                    plugins={plugins}
-                    size={15}
-                  />
-                }
-                name={name}
-                identity={describeProviderAccountIdentity(providers, account)}
-                machines={listProviderAccountMachines(account, runners, providers, harnesses)}
-                onOpen={() => {
-                  setSheet({ providerAccountId: account.id, name });
-                }}
-              />
-            );
-          })}
-        </div>
-      </section>
+      <SettingsHeaderActions>
+        <button type="button" className="btn btn--sm" onClick={() => setAdding(true)}>
+          <PlusIcon size={14} />
+          Add an account
+        </button>
+      </SettingsHeaderActions>
+      {accounts.length === 0 ? (
+        <p className="pa-empty">No accounts yet. Add one to give your agents models.</p>
+      ) : (
+        <section className="set-sec provider-accounts">
+          <h2>Accounts</h2>
+          <p className="pa-lead">Who pays for the models in your menu.</p>
+          {sheet !== null && sheetProviderAccount === undefined && (
+            <p className="set-note" role="status">
+              {`${sheet.name} was deleted elsewhere, so its sheet closed.`}
+            </p>
+          )}
+          <div className="pa-cards">
+            {accounts.map((account) => {
+              const name = buildProviderAccountName(providers, account);
+              return (
+                <ProviderAccountCard
+                  key={account.id}
+                  mark={
+                    <ProviderMark
+                      pluginId={findProviderPluginId(providers, account)}
+                      plugins={plugins}
+                      size={15}
+                    />
+                  }
+                  name={name}
+                  identity={describeProviderAccountIdentity(providers, account)}
+                  machines={listProviderAccountMachines(account, runners, providers, harnesses)}
+                  onOpen={() => {
+                    setSheet({ providerAccountId: account.id, name });
+                  }}
+                />
+              );
+            })}
+          </div>
+        </section>
+      )}
+      {adding && (
+        // Without its own boundary, the sheet's load would suspend the page behind it.
+        <Suspense fallback={null}>
+          <LazyAddProviderAccount
+            client={client}
+            signInMachines="all"
+            onClose={() => {
+              setAdding(false);
+            }}
+          />
+        </Suspense>
+      )}
       {sheet !== null && sheetProviderAccount !== undefined && (
         <OpenedProviderAccountSheet
           account={sheetProviderAccount}

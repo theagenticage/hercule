@@ -89,6 +89,20 @@ const prepareTool = (): HarnessRunnerContext["herculeTool"] => {
   return tool;
 };
 
+/**
+ * Writes an executable into `folder` that runs the real Claude Code with
+ * `ANTHROPIC_BASE_URL` set to `mockUrl`, and returns its path. The adapter
+ * removes that variable from the environment it builds, so a test cannot
+ * point the CLI at a mock server through the context's `env`.
+ */
+const buildClaudeThatCallsMock = (folder: string, mockUrl: string): string => {
+  const path = join(folder, "claude-that-calls-mock");
+  writeFileSync(path, `#!/bin/sh\nANTHROPIC_BASE_URL='${mockUrl}' exec '${binary!}' "$@"\n`, {
+    mode: 0o755,
+  });
+  return path;
+};
+
 const readInstalledVersion = async (path: string): Promise<string> => {
   const child = Bun.spawn([path, "--version"], { stdout: "pipe", stderr: "ignore" });
   const printed = await new Response(child.stdout).text();
@@ -108,8 +122,13 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
         attachmentUploader: NO_CONTROLLER_UPLOADER,
         home: createTemporaryHome(),
         binary: binary!,
-        env: { PATH: process.env["PATH"] ?? "" },
+        env: {
+          PATH: process.env["PATH"] ?? "",
+          // The runner's own shell holds a sign-in the account must not use.
+          ANTHROPIC_AUTH_TOKEN: "sk-ant-not-a-real-token",
+        },
         modelArgument: "{model}",
+        credentialVariables: [],
         herculeTool: prepareTool(),
       };
 
@@ -201,6 +220,7 @@ const authed =
             binary,
             env: process.env,
             modelArgument: "{model}",
+            credentialVariables: [],
             herculeTool: prepareTool(),
           }),
         )
@@ -321,6 +341,7 @@ const buildContext = (
       : { ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"] }),
   },
   modelArgument: "{model}",
+  credentialVariables: [],
   herculeTool,
 });
 
@@ -800,6 +821,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
         ANTHROPIC_API_KEY: "sk-ant-placeholder",
       },
       modelArgument: "{model}",
+      credentialVariables: [],
       herculeTool: prepareTool(),
       ...(session.thread ? { userMaterial: NO_USER_MATERIAL_PATHS, librarySkillsFolder } : {}),
       ...(repository === undefined
@@ -993,6 +1015,7 @@ describe.skipIf(binary === undefined)("the workspace root in a real Claude Code 
         ANTHROPIC_API_KEY: "sk-ant-placeholder",
       },
       modelArgument: "{model}",
+      credentialVariables: [],
       herculeTool: prepareTool(),
       repositorySkillsFolders,
     };
@@ -1264,14 +1287,14 @@ describe.skipIf(binary === undefined)(
         editMarks: null,
         attachmentUploader: NO_CONTROLLER_UPLOADER,
         home,
-        binary: binary!,
+        binary: buildClaudeThatCallsMock(root, mock.url),
         env: {
           PATH: process.env["PATH"] ?? "",
           HOME: userHome,
           ANTHROPIC_API_KEY: "sk-ant-placeholder",
-          ANTHROPIC_BASE_URL: mock.url,
         },
         modelArgument: "{model}",
+        credentialVariables: [],
         herculeTool: prepareTool(),
         sessionSkillsFolder: join(root, "session-skills"),
         ...(listCheckouts ? { checkoutPaths: [web, join(workspaceRoot, "api")] } : {}),
@@ -1424,14 +1447,14 @@ describe.skipIf(binary === undefined)("full-access in a real Claude Code session
       editMarks: null,
       attachmentUploader: NO_CONTROLLER_UPLOADER,
       home: join(root, "harness-home"),
-      binary: binary!,
+      binary: buildClaudeThatCallsMock(root, mock.url),
       env: {
         PATH: process.env["PATH"] ?? "",
         HOME: userHome,
         ANTHROPIC_API_KEY: "sk-ant-placeholder",
-        ANTHROPIC_BASE_URL: mock.url,
       },
       modelArgument: "{model}",
+      credentialVariables: [],
       herculeTool: prepareTool(),
     };
     mkdirSync(context.home);
@@ -1768,6 +1791,7 @@ const replayFixture = async (
         binary: "/usr/local/bin/claude",
         env: { PATH: "/usr/bin" },
         modelArgument: "{model}",
+        credentialVariables: [],
         herculeTool: {
           orientation: "",
           skill: "",
@@ -2335,6 +2359,7 @@ describe.skipIf(binary === undefined)(
             ANTHROPIC_API_KEY: "sk-ant-placeholder",
           },
           modelArgument: "{model}",
+          credentialVariables: [],
           herculeTool: prepareTool(),
           repositorySkillsFolders: [pluginFolder],
         };

@@ -12,7 +12,13 @@
  * A device login reads nothing back, so no request is waiting when it ends.
  * Its end is reported instead, through `attachConnection`, so the controller can probe
  * the account and learn whether the user finished it in the browser.
+ *
+ * A terminal login runs its command in a pseudo-terminal, because the vendor
+ * draws a text UI that prints nothing on plain pipes. The runner reads the
+ * screen that UI draws (see `TerminalScreen`), not its raw output. A login
+ * that makes a token returns the token in its success result.
  */
+import { rmSync } from "node:fs";
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -23,10 +29,13 @@ import {
   MAX_FACT_LENGTH,
   type LoginEnded,
   type LoginFailed,
+  type LoginMethod,
   type LoginResult,
   type LoginUrl,
 } from "@hercule/protocol";
 import type { HarnessAdapter, HarnessRunnerContext } from "./index";
+import { STOP_GRACE } from "./process";
+import { TerminalScreen } from "./terminal-screen";
 import { truncateFact } from "./text";
 
 export interface LoginChild {
@@ -38,9 +47,22 @@ export interface LoginChild {
   readonly exited: Promise<number>;
 }
 
+/** How a login process is started, beyond its command and environment. */
+export interface LoginSpawnOptions {
+  /** The directory the process runs in. Left out, it runs in the runner's own. */
+  readonly cwd?: string;
+  /**
+   * The size of the pseudo-terminal to run the process in. Left out, the
+   * process gets plain pipes. A process in a terminal has one output stream,
+   * which `LoginChild.stdout` carries, and `stderr` is empty.
+   */
+  readonly terminal?: { readonly cols: number; readonly rows: number };
+}
+
 export type LoginSpawn = (
   command: ReadonlyArray<string>,
   env: Readonly<Record<string, string | undefined>>,
+  options?: LoginSpawnOptions,
 ) => LoginChild;
 
 export interface LoginCommand {
@@ -51,6 +73,39 @@ export interface LoginCommand {
    * browser. Such a login reads nothing back: it ends when its child does.
    */
   readonly userCode?: RegExp;
+  /**
+   * Runs the command in a pseudo-terminal of this size, and reads the screen
+   * it draws instead of lines. Width matters: a text UI wraps its lines at the
+   * width of the terminal, so a wide one keeps a URL or token on one line.
+   *
+   * A terminal login writes the code followed by Enter. A vendor UI that shows
+   * a rejected code starts a new sign-in with a new URL when the user presses
+   * Enter, so the URL already shown is useless afterwards. A rejected code
+   * therefore ends the login (see `refusal`).
+   */
+  readonly terminal?: { readonly cols: number; readonly rows: number };
+  /**
+   * A folder made for this login alone. It is the command's working directory,
+   * and the runner removes it when the login ends, however it ends: the
+   * command exiting, being killed, or failing to start.
+   */
+  readonly scratchFolder?: string;
+  /**
+   * For a terminal login: matches a screen line where the vendor says it
+   * refused the pasted code. Such a line ends the login with a failed result.
+   * Only a line that appeared or changed after the code was written is
+   * tested, so it can be worded to match the vendor's own refusal and need not
+   * avoid every other message the vendor draws.
+   */
+  readonly refusal?: RegExp;
+  /**
+   * Set by a login that makes a token. Matches the token as it appears on the
+   * screen; the first match is returned in the success result. Matches are
+   * also removed from every message the login reports, so a token never
+   * reaches a log or the controller's error text. It must not match
+   * whitespace, and it should not have the `g` flag.
+   */
+  readonly tokenPattern?: RegExp;
 }
 
 /** The login frames minus the request id, which belongs to the connection. */
@@ -122,6 +177,31 @@ const AUTHORIZE = /https:\/\/\S+/;
 
 const MAX_TRANSCRIPT = 4096;
 
+/**
+ * Reads the output of a terminal login into `screen`. After each chunk it
+ * calls `onScreen` with the lines the cursor has moved past. A line the
+ * program is still writing is not passed: a URL cut in the middle by the
+ * chunk boundary is not the URL. When the output ends, every line is passed,
+ * because nothing more will be written to the last one.
+ */
+const readScreen = async (
+  stream: AsyncIterable<string>,
+  screen: TerminalScreen,
+  onScreen: (lines: ReadonlyArray<string>) => void,
+): Promise<void> => {
+  for await (const chunk of stream) {
+    screen.feed(chunk);
+    onScreen(screen.readFinishedLines());
+  }
+  onScreen(screen.readLines());
+};
+
+/** Returns `text` with every token the command's `tokenPattern` matches replaced by a placeholder. */
+const removeToken = (command: LoginCommand, text: string): string =>
+  command.tokenPattern === undefined
+    ? text
+    : text.replace(new RegExp(command.tokenPattern.source, "g"), "[token removed]");
+
 interface Printed {
   readonly url: string;
   readonly userCode: string | undefined;
@@ -145,7 +225,20 @@ interface Held {
   readonly abandon: () => void;
   /** Resolves with the child's next complaint, and never when it ends first. */
   readonly nextComplaint: () => Promise<string>;
+  /** What the child showed, ending with the latest. A token the command printed is removed. */
   readonly transcript: () => string;
+  /** Resolves once everything the child printed has been read. */
+  readonly finished: Promise<void>;
+  /** Whether the child runs in a pseudo-terminal, which takes Enter, not a newline, to end a line. */
+  readonly terminal: boolean;
+  /** Whether the login makes a token, which the success result must then carry. */
+  readonly makesToken: boolean;
+  /** Returns the token on the screen, or `undefined` when there is none. */
+  readonly readToken: () => string | undefined;
+  /** Removes the login's scratch folder, if it has one. Safe to call more than once. */
+  readonly removeScratchFolder: () => void;
+  /** Resolves once the child has exited and its scratch folder is removed. */
+  readonly cleanedUp: Promise<void>;
   /**
    * When a device login's code stops being valid, in milliseconds on this
    * machine's clock. Undefined for a login that reads a code back, so it also
@@ -172,6 +265,7 @@ export interface Logins {
     providerAccountId: string,
     adapter: HarnessAdapter,
     ctx: HarnessRunnerContext,
+    method: LoginMethod,
   ) => Effect.Effect<LoginAnswer>;
   readonly submit: (providerAccountId: string, code: string) => Effect.Effect<LoginAnswer>;
   /**
@@ -247,9 +341,32 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
     command: LoginCommand,
   ): Effect.Effect<Held> =>
     Effect.gen(function* () {
-      const child = spawn(command.command, command.env);
+      const removeScratchFolder = (): void => {
+        if (command.scratchFolder === undefined) return;
+        try {
+          rmSync(command.scratchFolder, { recursive: true, force: true });
+        } catch {
+          // Nothing else can be done about a folder that will not go away, and
+          // the login's own result matters more than its leftovers.
+        }
+      };
+      const child = yield* Effect.sync(() =>
+        spawn(command.command, command.env, {
+          ...(command.scratchFolder === undefined ? {} : { cwd: command.scratchFolder }),
+          ...(command.terminal === undefined ? {} : { terminal: command.terminal }),
+        }),
+      ).pipe(Effect.onError(() => Effect.sync(removeScratchFolder)));
+      // Remove the folder only once the child is gone: a child that is still
+      // running could write into it again.
+      const cleanedUp = child.exited.then(removeScratchFolder, removeScratchFolder);
       const pattern = command.userCode;
+      const screen =
+        command.terminal === undefined ? undefined : new TerminalScreen(command.terminal.cols);
       const complaints: Array<(line: string) => void> = [];
+      // The screen's lines when the code was written. The refusal is a line
+      // that is not among them, so a warning the vendor drew before it asked
+      // for the code cannot refuse the code.
+      let linesBeforeCode = new Set<string>();
       let transcript = "";
       let url: string | undefined;
       let userCode: string | undefined;
@@ -266,7 +383,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         url === undefined || (pattern !== undefined && userCode === undefined)
           ? undefined
           : { url, userCode };
-      const spent = readLines(child.stdout, (line) => {
+      const scanLine = (line: string): void => {
         if (pattern !== undefined && userCode === undefined) {
           const code = pattern.exec(line);
           if (code !== null) userCode = code[0];
@@ -277,7 +394,28 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         }
         const found = buildPrinted();
         if (found !== undefined) settle(found);
-      }).catch(() => undefined);
+      };
+      const readToken = (): string | undefined => {
+        if (command.tokenPattern === undefined || screen === undefined) return undefined;
+        for (const line of screen.readLines()) {
+          const match = command.tokenPattern.exec(line);
+          if (match !== null) return match[0];
+        }
+        return undefined;
+      };
+      const spent = (
+        screen === undefined
+          ? readLines(child.stdout, scanLine)
+          : readScreen(child.stdout, screen, (lines) => {
+              for (const line of lines) scanLine(line);
+              if (command.refusal === undefined || complaints.length === 0) return;
+              const refused = lines.find(
+                (line) => !linesBeforeCode.has(line) && command.refusal!.test(line),
+              );
+              if (refused === undefined) return;
+              for (const waiting of complaints.splice(0)) waiting(removeToken(command, refused));
+            })
+      ).catch(() => undefined);
       // Treat the end of stdout, not the process exit, as the end of the
       // output: a child that exits right after printing its code has still
       // printed both.
@@ -301,9 +439,26 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         printed,
         nextComplaint: () =>
           new Promise<string>((resolve) => {
+            linesBeforeCode = new Set(screen?.readLines());
             complaints.push(resolve);
           }),
-        transcript: () => transcript,
+        transcript: () =>
+          removeToken(
+            command,
+            screen === undefined
+              ? transcript
+              : screen
+                  .readLines()
+                  .filter((line) => line.trim() !== "")
+                  .join("\n")
+                  .slice(-MAX_TRANSCRIPT),
+          ),
+        finished: spent,
+        terminal: screen !== undefined,
+        makesToken: command.tokenPattern !== undefined,
+        readToken,
+        removeScratchFolder,
+        cleanedUp,
         expiresAt:
           pattern === undefined
             ? undefined
@@ -331,7 +486,7 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
     });
 
   return {
-    start: (requestId, providerAccountId, adapter, ctx) =>
+    start: (requestId, providerAccountId, adapter, ctx, method) =>
       Effect.gen(function* () {
         if (adapter.login === undefined) {
           return buildLoginFailed(
@@ -341,15 +496,19 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
         if (ctx.binary === undefined) {
           return buildLoginFailed(`no ${adapter.binaryName} on this machine`);
         }
+        // The hook may make a scratch folder, so nothing that can fail runs
+        // between it and `openLogin`, which removes the folder if the spawn fails.
+        const command = adapter.login(ctx, ctx.binary, method);
+        if (command === undefined) {
+          return buildLoginFailed(
+            `The harness ${adapter.harnessId} cannot ${method === "create-token" ? "create a token" : "sign in"} in this runner build`,
+          );
+        }
         // A pasted code only works with the URL of the child that printed it,
         // so only one login per Provider Account can be waiting.
         const previous = held.get(providerAccountId);
         if (previous !== undefined) yield* stopLogin(providerAccountId, previous);
-        const login = yield* openLogin(
-          requestId,
-          providerAccountId,
-          adapter.login(ctx, ctx.binary),
-        );
+        const login = yield* openLogin(requestId, providerAccountId, command);
         const printed = yield* Effect.promise(() => login.printed);
         if (printed === undefined) {
           yield* stopLogin(providerAccountId, login);
@@ -408,9 +567,10 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
           );
         yield* armExpiry(providerAccountId, login);
         yield* Effect.sync(() => {
-          // Add a newline: the vendor reads a whole line, and without it the
-          // child would wait forever for a code it already has.
-          login.child.write(`${code}\n`);
+          // End the line: the vendor reads a whole line, and without it the
+          // child would wait forever for a code it already has. A terminal's
+          // Enter key sends a carriage return.
+          login.child.write(`${code}${login.terminal ? "\r" : "\n"}`);
         });
         const ended = Effect.promise(() => login.child.exited);
         const outcome = yield* Effect.promise(() =>
@@ -419,6 +579,15 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
             login.child.exited.then((exit) => ({ exit })),
           ]),
         );
+        if ("complaint" in outcome && login.terminal) {
+          // The vendor's own screen answers a refused code with a new sign-in
+          // and a new URL, so the URL the user holds is dead.
+          yield* stopLogin(providerAccountId, login);
+          const reason = truncateFact(outcome.complaint.trim()).replace(/[.\s]+$/, "");
+          return buildLoginFailed(
+            `${reason}. This sign-in cannot take another code; start it again for a new link.`,
+          );
+        }
         if ("complaint" in outcome) {
           // The vendor also writes to stderr as it exits, so a stderr line only
           // means the code was rejected if the child is still running after the
@@ -430,31 +599,62 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
             return { _tag: "loginResult", ok: false, message: truncateFact(outcome.complaint) };
           }
           yield* forgetLogin(providerAccountId, login);
-          return buildLoginResult(after.value, login.transcript());
+          return yield* finishLogin(login, after.value);
         }
         yield* forgetLogin(providerAccountId, login);
-        return buildLoginResult(outcome.exit, login.transcript());
+        return yield* finishLogin(login, outcome.exit);
       }),
 
     // Suspend, so the map is read when shutdown runs rather than when this
     // object is built, which is before any login exists.
-    stopAll: Effect.suspend(() =>
-      Effect.forEach(
-        [...held],
+    stopAll: Effect.suspend(() => {
+      const entries = [...held];
+      const logins = entries.map(([, login]) => login);
+      return Effect.forEach(
+        entries,
         ([providerAccountId, login]) => stopLogin(providerAccountId, login),
         {
           discard: true,
         },
-      ),
-    ),
+      ).pipe(
+        // The runner is about to exit, and a folder whose removal is still
+        // waiting on a child's exit would be left behind.
+        Effect.andThen(
+          Effect.timeoutOption(
+            Effect.promise(() => Promise.all(logins.map((login) => login.cleanedUp))),
+            STOP_GRACE,
+          ),
+        ),
+        Effect.andThen(Effect.sync(() => logins.forEach((login) => login.removeScratchFolder()))),
+      );
+    }),
   };
 };
 
-const buildLoginResult = (exit: number, transcript: string): LoginAnswer =>
-  exit === 0
-    ? { _tag: "loginResult", ok: true }
-    : {
+/**
+ * Returns the answer for a login whose child has exited. A non-zero exit fails
+ * with the end of what the child showed. A login that makes a token also needs
+ * the token on the screen: an exit without one is a failure, because the
+ * controller would otherwise store nothing and report the account signed in.
+ */
+const finishLogin = (login: Held, exit: number): Effect.Effect<LoginAnswer> =>
+  Effect.gen(function* () {
+    if (exit !== 0) {
+      return {
         _tag: "loginResult",
         ok: false,
-        message: readTail(transcript, "the login ended without finishing"),
+        message: readTail(login.transcript(), "the login ended without finishing"),
       };
+    }
+    if (!login.makesToken) return { _tag: "loginResult", ok: true };
+    // The token is the last thing the child prints, so read it only once the
+    // output has ended. The wait is bounded because a pipe may stay open.
+    yield* Effect.timeoutOption(
+      Effect.promise(() => login.finished),
+      COMPLAINT_GRACE,
+    );
+    const token = login.readToken();
+    return token === undefined
+      ? { _tag: "loginResult", ok: false, message: "the login finished without printing a token" }
+      : { _tag: "loginResult", ok: true, token };
+  });

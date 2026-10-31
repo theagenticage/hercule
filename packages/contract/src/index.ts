@@ -232,6 +232,7 @@ export {
   ModelDescriptor,
   ModelOption,
   ProviderAccount,
+  ProviderAccountCreateInput,
   ProviderAccountSignInCodeInput,
   ProviderAccountSignInInput,
   ProviderAccountSignInStarted,

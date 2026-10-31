@@ -22,6 +22,7 @@ describe("provider.query", () => {
       id: ACME_PROVIDER_ID,
       pluginId: "acme",
       displayName: "Acme",
+      defaultHarnessId: "alpha/alpha",
     });
     expect(
       providers[0]?.kinds.map((kind) => [
@@ -32,6 +33,7 @@ describe("provider.query", () => {
     ).toEqual([
       ["api-key", ["credentials"], ["alpha/alpha", "beta/beta"]],
       ["subscription", ["harness-login"], ["alpha/alpha"]],
+      ["subscription-token", ["harness-login"], ["alpha/alpha"]],
     ]);
   });
 });

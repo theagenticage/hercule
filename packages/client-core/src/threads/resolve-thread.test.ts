@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 import type { ModelOption, Runner } from "@hercule/contract";
 import {
-  BARE,
+  WITH_AGENTS,
   buildProviderAccount,
   buildSnapshot,
   ANTHROPIC_IDENTITY,
@@ -37,7 +37,7 @@ import {
 } from "./workspaces.testing";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
-  ...BARE,
+  ...WITH_AGENTS,
   ...overrides,
 });
 
@@ -306,7 +306,7 @@ describe("resolveThreadConfig: a draft's runner", () => {
     expect(resolved).toMatchObject({ kind: "draft", runner: offline, diagnosticRunner: undefined });
   });
 
-  it("keeps a picked runner on which the new account is installed but signed out", () => {
+  it("keeps a picked runner on which the new account is installed but signed out, and reads its models from a runner where it is signed in", () => {
     // Codex has a signed-out snapshot on the local runner. The remote one is picked first.
     const base = { ...BASE, runnerId: REMOTE.id };
     const resolved = resolveDraft(
@@ -320,7 +320,7 @@ describe("resolveThreadConfig: a draft's runner", () => {
     expect(resolved.config).toMatchObject({
       providerAccountId: CODEX.id,
       runnerId: LOCAL.id,
-      model: null,
+      model: "gpt-5",
     });
     expect(resolved.snapshot?.auth.status).toBe("unauthenticated");
   });
@@ -396,7 +396,7 @@ describe("resolveThreadConfig: a draft's runner", () => {
     expect(resolveDraft(noRunnerPicked).config.runnerId).toBe(LOCAL.id);
   });
 
-  it("reads the model from the joined workspace's runner, and gives none when the account is not installed there", () => {
+  it("reads the model from the joined workspace's runner, and from another runner's list when the account has none there", () => {
     const joined = { kind: "existing", workspaceId: THREAD_3F1.id } as const;
     const workspace: ThreadChoice = { kind: "workspace", workspace: joined };
     expect(
@@ -406,7 +406,7 @@ describe("resolveThreadConfig: a draft's runner", () => {
     expect(
       resolveDraft(applyThreadChoices(workspace, { kind: "account", providerAccountId: CODEX.id }))
         .config,
-    ).toMatchObject({ runnerId: MOSS.id, model: null });
+    ).toMatchObject({ runnerId: MOSS.id, model: "gpt-5" });
   });
 });
 
@@ -478,10 +478,11 @@ describe("resolveThreadConfig: a thread that has started", () => {
     expect(resolved).toMatchObject({ kind: "active", sessionId: "s1", runner: LOCAL });
   });
 
-  it("runs on the Session's runner even when the catalogs do not list the account there", () => {
+  it("runs on the Session's runner even when the catalogs do not list the account there, and reads the model's descriptor from another runner's list", () => {
     const resolved = resolveActive({}, { runnerId: ISLAND.id });
     expect(resolved.config.runnerId).toBe(ISLAND.id);
-    expect(resolved).toMatchObject({ snapshot: undefined, descriptor: undefined });
+    expect(resolved.snapshot).toBeUndefined();
+    expect(resolved.descriptor?.slug).toBe(SONNET.slug);
   });
 
   it("changes nothing when nothing is picked", () => {
@@ -520,12 +521,12 @@ describe("resolveThreadConfig: a thread that has started", () => {
       expect(resolved.outgoing).toEqual({});
     });
 
-    it("keeps the stored options when the account has no snapshot on the Session's runner", () => {
+    it("offers the options of another runner's list when the account has no snapshot on the Session's runner", () => {
       const resolved = resolveActive(applyThreadChoices(pickOption("effort", "low")), {
         runnerId: ISLAND.id,
       });
-      expect(resolved.config.options).toEqual({ effort: "high" });
-      expect(resolved.outgoing).toEqual({});
+      expect(resolved.config.options).toEqual({ effort: "low" });
+      expect(resolved.outgoing).toEqual({ options: { effort: "low" } });
     });
 
     it("sends no model when the picked model is the Session's own", () => {

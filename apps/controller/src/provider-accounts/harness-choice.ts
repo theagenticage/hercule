@@ -1,10 +1,7 @@
 /**
  * Checks that a Provider Account can run in a harness and returns the harness
- * definition, and checks from a runner's stored snapshot whether the runner is
- * signed in to the account.
- *
- * Opening and forking a session and saving an Agent all need the first, so it
- * is defined once here rather than in each caller.
+ * definition. Opening and forking a session and saving an Agent all need it,
+ * so it is defined once here rather than in each caller.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -12,14 +9,7 @@ import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { createValidationError, type Validation } from "@hercule/contract";
 import { decideProviderAccountHarness, PluginHost, type RegisteredHarness } from "../plugins";
-import { providerAccountRepository, type StoredSnapshot } from "./repository";
-
-/**
- * The error message when no runner can take a session on this account,
- * because none is signed in to it.
- */
-export const NO_PLACEMENT =
-  "no connected runner is signed in to that provider account; sign in on a machine first";
+import { providerAccountRepository } from "./repository";
 
 /** The harness a Provider Account runs in. */
 interface ResolvedProviderAccountHarness {
@@ -27,13 +17,6 @@ interface ResolvedProviderAccountHarness {
   readonly harnessId: string;
   readonly definition: RegisteredHarness;
 }
-
-/**
- * Checks whether a runner's stored capability snapshot shows it is signed in
- * to the account, which means it can run the account. Reads the stored
- * snapshot and never probes the runner.
- */
-export const isSignedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.status === "ok";
 
 /**
  * Resolves an account id, and a harness id (left out or `null`: the account's

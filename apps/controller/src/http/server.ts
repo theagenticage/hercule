@@ -98,6 +98,7 @@ import {
   Arrival,
   Inbound,
   Pipeline,
+  ProbeDriver,
   forwardTargetChanges,
   PromotionFleetRouteLayer,
   Provisioning,
@@ -114,7 +115,6 @@ import {
 import { stopWrites } from "../db";
 import { PromotionState, PromotionTransferRouteLayer } from "../promotion";
 import { LiveSocketLayer } from "../live";
-import { ProviderAccountProbes } from "../provider-accounts";
 import {
   RunnerAttachmentRoutesLayer,
   RunnerJoinRouteLayer,
@@ -439,7 +439,7 @@ export const serve = (bundle: WebBundle | undefined) =>
     // Forked before the listener binds, and the arrivals stream replays the
     // rest, so no runner's hello is missed. The probe driver also runs on a
     // timer, because logins expire and harnesses are upgraded outside Hercule.
-    yield* Effect.forkScoped(Effect.flatMap(ProviderAccountProbes, (probes) => probes.driving));
+    yield* Effect.forkScoped(Effect.flatMap(ProbeDriver, (driver) => driver.driving));
     // A runner that connects is sent the work owed to it: its pending
     // provisioning and its running workspace steps. Forked before the
     // listener binds, like the probe driver, so no arrival is missed.

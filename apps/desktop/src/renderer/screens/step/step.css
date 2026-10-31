@@ -15,6 +15,13 @@
   gap: 10px;
   margin-top: 26px;
 }
+/* Add an account, under the rows the step lists; 24px below the text when there are none, as the rows are. */
+.st-add {
+  margin-top: 12px;
+}
+.st-add--first {
+  margin-top: 24px;
+}
 .st-note {
   display: flex;
   gap: 9px;
@@ -216,4 +223,12 @@
 }
 .warn .btn {
   margin-top: 8px;
+}
+
+/* ---------- Credential fields ---------- */
+/* A masked field for each credential, 16px apart as the labelled fields of a
+   step's form are. */
+.credential-fields {
+  display: grid;
+  gap: 16px;
 }

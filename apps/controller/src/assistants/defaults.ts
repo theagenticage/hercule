@@ -10,6 +10,9 @@
 import type { AccessMode, DisallowedTool } from "@hercule/protocol";
 import type { AssistantReply, Heartbeat, Rotation } from "@hercule/contract";
 
+/** The name of the assistant created when none exists yet. */
+export const DEFAULT_ASSISTANT_NAME = "Hercule";
+
 /** The name of the shipped permission profile an assistant's sessions run under. */
 export const DEFAULT_PROFILE_NAME = "assistant";
 

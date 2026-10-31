@@ -2,10 +2,10 @@
  * Writes Provider Accounts straight into a stopped controller's database, for
  * the desktop end-to-end tests and the perf script.
  *
- * The API cannot make the accounts they need: `providerAccount.create` does
- * not exist yet, a fresh install only gets its three default accounts, and no
- * operation sets the identity and plan an account shows on its card. The
- * module runs on plain Node, like the perf script.
+ * The API cannot make the accounts they need: `providerAccount.create` takes
+ * a key the provider accepts, or a sign-in on a real machine, and no
+ * operation sets the identity and plan an account shows on its card. A fresh
+ * install has no account. The module runs on plain Node, like the perf script.
  */
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
@@ -47,8 +47,8 @@ function buildProviderAccountId(at: number): Buffer {
  * created a millisecond after the one before, so the new accounts list in the
  * order given and after the old ones.
  *
- * Nothing is deleted: the accounts a fresh install seeds stay, because
- * assistants and settings may already name them. The controller must be
+ * Nothing is deleted: assistants and settings may already name an account
+ * that is there. The controller must be
  * stopped, because it holds its database locked while it runs. Fails when the
  * write fails.
  */
@@ -92,19 +92,24 @@ export function writeProviderAccounts(
 }
 
 /**
- * Puts the accounts of the controller whose Hercule Home is `home` back as a
- * fresh install makes them: the accounts that have a label are deleted, with
- * their Capability Snapshots, and every account loses its identity and plan.
- * It undoes `writeProviderAccounts`, for a measurement that wants the
- * accounts only in some launches. The controller must be stopped, as for
+ * Puts the accounts of the controller whose Hercule Home is `home` back as the
+ * fleet leaves them (`connectFleet` in `fleet.ts` makes one unlabelled
+ * Anthropic account, which every thread it spawns runs on): that account stays,
+ * every other account is deleted, with its Capability Snapshots, and the
+ * account that stays loses its identity and plan. It undoes
+ * `writeProviderAccounts`, for a measurement that wants the accounts only in
+ * some launches. The controller must be stopped, as for
  * `writeProviderAccounts`. Fails when the write fails, which includes an
- * account with a label that a session or an Agent still uses.
+ * account that a session or an Agent still uses and that is not the one that
+ * stays.
  */
 export function resetProviderAccounts(home: string): void {
   const database = new DatabaseSync(join(home, "data", "hercule.db"));
   try {
     database.exec("BEGIN");
-    database.exec("DELETE FROM provider_accounts WHERE label IS NOT NULL");
+    database.exec(
+      "DELETE FROM provider_accounts WHERE NOT (provider_id = 'anthropic/anthropic' AND label IS NULL)",
+    );
     database.exec("UPDATE provider_accounts SET identity = NULL, plan_label = NULL");
     database.exec("COMMIT");
   } finally {

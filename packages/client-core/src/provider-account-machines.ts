@@ -5,8 +5,8 @@
  * account sheet's Machines section both read these, so they cannot disagree.
  */
 import type { Harness, Provider, ProviderAccount, Runner } from "@hercule/contract";
-import { findDefaultHarnessSnapshot, requiresSignInPerMachine } from "./provider-accounts";
-import { buildProviderRows } from "./provider-rows";
+import { findDefaultHarnessSnapshot, signsInPerMachine } from "./provider-accounts";
+import { buildProviderRows, type ProviderRow } from "./provider-rows";
 
 /**
  * The one action a machine offers for an account that is not signed in there:
@@ -39,19 +39,21 @@ export interface ProviderAccountMachine {
 }
 
 /**
- * Decides the action of a machine on which the account is not signed in. The
- * runner row says whether the machine is connected and can sign in or install.
+ * Decides the action of a machine on which the account is not signed in.
+ * `offer` says whether the machine is connected and can sign in or install
+ * (a `ProviderRow` says so); without one, the machine's build has no adapter
+ * for the harness.
  */
-const decideAction = (
+export const decideMachineAction = (
   runner: Runner,
-  row: ReturnType<typeof buildProviderRows>[number] | undefined,
+  offer: Pick<ProviderRow, "signIn" | "install"> | undefined,
   harnessName: string,
 ): ProviderAccountMachineAction => {
   if (runner.connectivity !== "online") {
     return { kind: "offline", reason: `${runner.name} is offline.` };
   }
-  if (row?.signIn === true) return { kind: "sign-in", reason: null };
-  if (row?.install === "offered") return { kind: "install", reason: null };
+  if (offer?.signIn === true) return { kind: "sign-in", reason: null };
+  if (offer?.install === "offered") return { kind: "install", reason: null };
   return {
     kind: "unavailable",
     reason: `${runner.name} runs a Hercule build that cannot run ${harnessName}.`,
@@ -61,7 +63,7 @@ const decideAction = (
 /**
  * Returns one entry for each runner that is not retired, in the order of
  * `runners`, for an account that signs in on each machine
- * (`requiresSignInPerMachine`). Returns `null` for any other account, whose
+ * (`signsInPerMachine`). Returns `null` for any other account, whose
  * credential every machine uses, and for one whose default harness is not
  * registered. A retired runner is gone for good, so it holds no sign-in the
  * user could act on.
@@ -72,10 +74,9 @@ export const listProviderAccountMachines = (
   providers: ReadonlyArray<Provider>,
   harnesses: ReadonlyArray<Harness>,
 ): ReadonlyArray<ProviderAccountMachine> | null => {
-  if (!requiresSignInPerMachine(harnesses, account)) return null;
-  const harnessName =
-    harnesses.find(({ id }) => id === account.defaultHarnessId)?.displayName ??
-    account.defaultHarnessId;
+  const harness = harnesses.find(({ id }) => id === account.defaultHarnessId);
+  if (harness === undefined || !signsInPerMachine(providers, account)) return null;
+  const harnessName = harness.displayName;
   return runners
     .filter((runner) => runner.lifecycle !== "retired")
     .map((runner) => {
@@ -87,7 +88,7 @@ export const listProviderAccountMachines = (
         runnerName: runner.name,
         signedIn,
         identity: signedIn ? (auth.identity ?? null) : null,
-        action: signedIn ? null : decideAction(runner, row, harnessName),
+        action: signedIn ? null : decideMachineAction(runner, row, harnessName),
       };
     });
 };

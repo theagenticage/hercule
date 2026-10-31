@@ -4,6 +4,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { withTransaction } from "../db";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { HarnessAccounts } from "./harness-account";
+import { providerAccountRepository } from "./repository";
 import {
   addAccount,
   ALPHA_HARNESS_ID,
@@ -12,6 +13,7 @@ import {
   KEY_KIND,
   MACHINE_KIND,
   runWithAccounts,
+  TOKEN_KIND,
 } from "./testing";
 
 const prepareHarnessAccount = (providerAccountId: string, harnessId: string) =>
@@ -45,23 +47,28 @@ describe("HarnessAccounts.prepare", () => {
       providerAccountId: account.id,
       harnessHome: `providers/homes/${account.id}/alpha/alpha`,
       modelArgument: "acme/{model}",
+      credentialVariables: ["ACME_API_KEY"],
       credential: { variable: "ACME_API_KEY", value: "sk-secret" },
     });
   });
 
-  it("sends the variable alone when the key account has no key stored, so the runner removes its own", async () => {
-    const prepared = await runWithAccounts(
+  it("fails InvalidState when the key account has no key stored, so the harness never falls back to another login", async () => {
+    const failure = await runWithAccounts(
       Effect.gen(function* () {
-        const added = yield* addAccount({ kind: KEY_KIND });
-        return yield* prepareHarnessAccount(added.id, ALPHA_HARNESS_ID);
+        const added = yield* addAccount({ kind: KEY_KIND, label: "work" });
+        return yield* Effect.flip(prepareHarnessAccount(added.id, ALPHA_HARNESS_ID));
       }),
     );
 
-    expect(prepared.credential).toEqual({ variable: "ACME_API_KEY" });
-    expect(prepared.credential).not.toHaveProperty("value");
+    expect(failure).toMatchObject({
+      error: {
+        code: "invalid_state",
+        message: "Acme · work has no key. Add one in Settings › Providers.",
+      },
+    });
   });
 
-  it("sends no credential for a per-machine account, even when a key is stored under its id", async () => {
+  it("sends the harness's credential variables, and no credential, for a per-machine account", async () => {
     const prepared = await runWithAccounts(
       Effect.gen(function* () {
         const added = yield* addAccount({ kind: MACHINE_KIND });
@@ -70,13 +77,14 @@ describe("HarnessAccounts.prepare", () => {
       }),
     );
 
+    expect(prepared.credentialVariables).toEqual(["ACME_API_KEY"]);
     expect(prepared).not.toHaveProperty("credential");
   });
 
   it("sends the legacy folder for the harness the account's old login belonged to", async () => {
     const prepared = await runWithAccounts(
       Effect.gen(function* () {
-        const added = yield* addAccount({ kind: KEY_KIND });
+        const added = yield* addAccount({ kind: MACHINE_KIND });
         yield* giveLegacyHome(added.id, "0199e0e7-aaaa-7000-8000-000000000002", ALPHA_HARNESS_ID);
         return yield* prepareHarnessAccount(added.id, ALPHA_HARNESS_ID);
       }),
@@ -88,7 +96,7 @@ describe("HarnessAccounts.prepare", () => {
   it("sends a derived home for a harness other than the legacy one", async () => {
     const { id, prepared } = await runWithAccounts(
       Effect.gen(function* () {
-        const added = yield* addAccount({ kind: KEY_KIND });
+        const added = yield* addAccount({ kind: MACHINE_KIND });
         // The legacy folder belongs to beta, so alpha's home is derived.
         yield* giveLegacyHome(added.id, "0199e0e7-aaaa-7000-8000-000000000002", BETA_HARNESS_ID);
         return { id: added.id, prepared: yield* prepareHarnessAccount(added.id, ALPHA_HARNESS_ID) };
@@ -179,5 +187,143 @@ describe("HarnessAccounts.prepare", () => {
         ) as unknown,
       },
     });
+  });
+});
+
+describe("HarnessAccounts.prepare for a token account", () => {
+  /** Adds a token account with a stored token that expires at `expiresAt`. */
+  const addTokenAccount = (expiresAt: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const secrets = yield* Secrets;
+      const accounts = yield* providerAccountRepository;
+      const added = yield* addAccount({ kind: TOKEN_KIND });
+      yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          yield* secrets.set(buildProviderAccountOwner(added.id), "token", Redacted.make("tok-1"));
+          yield* accounts.setCredentialExpiry(added.id, expiresAt, "2026-10-31T00:00:00.000Z");
+        }),
+      );
+      return added.id;
+    });
+
+  it("sends the stored token as the credential while it has not expired", async () => {
+    const prepared = await runWithAccounts(
+      Effect.gen(function* () {
+        const id = yield* addTokenAccount("2999-01-01T00:00:00.000Z");
+        return yield* prepareHarnessAccount(id, ALPHA_HARNESS_ID);
+      }),
+    );
+
+    expect(prepared.credential).toEqual({ variable: "ACME_API_KEY", value: "tok-1" });
+  });
+
+  it("fails InvalidState, with the date, for a token past its expiry", async () => {
+    const failure = await runWithAccounts(
+      Effect.gen(function* () {
+        const id = yield* addTokenAccount("2020-03-04T05:06:07.000Z");
+        return yield* Effect.flip(prepareHarnessAccount(id, ALPHA_HARNESS_ID));
+      }),
+    );
+
+    expect(failure).toMatchObject({
+      error: {
+        code: "invalid_state",
+        message: "Acme's token expired on 2020-03-04. Make a new one in Settings › Providers.",
+      },
+    });
+  });
+
+  it("fails InvalidState, asking for a token and not a key, when none is stored", async () => {
+    const failure = await runWithAccounts(
+      Effect.gen(function* () {
+        const added = yield* addAccount({ kind: TOKEN_KIND });
+        return yield* Effect.flip(prepareHarnessAccount(added.id, ALPHA_HARNESS_ID));
+      }),
+    );
+
+    expect(failure).toMatchObject({
+      error: { message: "Acme has no token. Make one in Settings › Providers." },
+    });
+  });
+});
+
+describe("HarnessAccounts.prepare for a token that does not decrypt", () => {
+  it("asks for a new token, not for a key through `update`, which a token account refuses", async () => {
+    const failure = await runWithAccounts(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const secrets = yield* Secrets;
+        const added = yield* addAccount({ kind: TOKEN_KIND });
+        yield* withTransaction(
+          sql,
+          secrets.set(buildProviderAccountOwner(added.id), "token", Redacted.make("tok-1")),
+        );
+        yield* withTransaction(
+          sql,
+          sql`UPDATE secrets SET ciphertext = randomblob(length(ciphertext))`,
+        );
+        return yield* Effect.flip(prepareHarnessAccount(added.id, ALPHA_HARNESS_ID));
+      }),
+    );
+
+    expect(failure).toMatchObject({
+      error: {
+        code: "invalid_state",
+        message:
+          "the token stored for Acme could not be decrypted; make a new one in Settings › Providers",
+      },
+    });
+  });
+});
+
+describe("HarnessAccounts.prepareSignIn", () => {
+  it("sends no credential for a token account that has none or whose token expired, and never the old token", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const secrets = yield* Secrets;
+        const accounts = yield* providerAccountRepository;
+        const harnessAccounts = yield* HarnessAccounts;
+        const added = yield* addAccount({ kind: TOKEN_KIND });
+        const withoutToken = yield* harnessAccounts.prepareSignIn(added.id, ALPHA_HARNESS_ID);
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* secrets.set(buildProviderAccountOwner(added.id), "token", Redacted.make("old"));
+            yield* accounts.setCredentialExpiry(
+              added.id,
+              "2020-01-01T00:00:00.000Z",
+              "2026-10-31T00:00:00.000Z",
+            );
+          }),
+        );
+        const withExpiredToken = yield* harnessAccounts.prepareSignIn(added.id, ALPHA_HARNESS_ID);
+        return { withoutToken, withExpiredToken };
+      }),
+    );
+
+    for (const frame of [outcome.withoutToken, outcome.withExpiredToken]) {
+      expect(frame.credentialVariables).toEqual(["ACME_API_KEY"]);
+      expect(frame).not.toHaveProperty("credential");
+    }
+  });
+
+  it("sends no credential for a key account either, and still refuses a pair that cannot run", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const harnessAccounts = yield* HarnessAccounts;
+        const added = yield* addAccount({ kind: KEY_KIND });
+        yield* storeKey(added.id, "sk-secret");
+        return {
+          frame: yield* harnessAccounts.prepareSignIn(added.id, ALPHA_HARNESS_ID),
+          refused: yield* Effect.flip(harnessAccounts.prepareSignIn(added.id, BETA_HARNESS_ID)),
+        };
+      }),
+    );
+
+    expect(outcome.frame).not.toHaveProperty("credential");
+    expect(outcome.refused).toMatchObject({ error: { code: "invalid_state" } });
   });
 });

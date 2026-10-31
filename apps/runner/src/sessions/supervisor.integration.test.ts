@@ -135,6 +135,7 @@ const START: SessionStart = {
     providerAccountId: ACCOUNT_ID,
     harnessHome: HARNESS_HOME,
     modelArgument: "{model}",
+    credentialVariables: [],
   },
   spec: SPEC,
   token: "a-session-token",

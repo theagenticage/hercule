@@ -75,6 +75,7 @@ const start = {
     providerAccountId: "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c73",
     harnessHome: "providers/homes/0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c73/claude-code/claude-code",
     modelArgument: "{model}",
+    credentialVariables: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
   },
   spec,
   /** The session's own credential for the public API, created for each start. */

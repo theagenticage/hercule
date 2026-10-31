@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import type { Runner, Session } from "@hercule/contract";
 import {
-  BARE,
+  WITH_AGENTS,
   buildProviderAccount,
   buildSnapshot,
   ANTHROPIC_IDENTITY,
@@ -94,8 +94,8 @@ const SESSION: Session = {
 
 const MESSAGE = { text: "ship it", attachments: [] };
 
-const LOCAL: Runner = { ...BARE, id: "r-local" };
-const REMOTE: Runner = { ...BARE, id: "r-remote" };
+const LOCAL: Runner = { ...WITH_AGENTS, id: "r-local" };
+const REMOTE: Runner = { ...WITH_AGENTS, id: "r-remote" };
 const SONNET = {
   slug: "claude-sonnet-5",
   name: "Claude Sonnet 5",

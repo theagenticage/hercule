@@ -81,7 +81,13 @@ export {
   type WorkflowStepAction,
 } from "./contributions";
 
-export { AccountKind, AccountSetupStep, HarnessLoginStep, ProviderDefinition } from "./providers";
+export {
+  AccountKind,
+  AccountSetupStep,
+  HarnessLoginStep,
+  KeyCheck,
+  ProviderDefinition,
+} from "./providers";
 
 export { checkEmittedEvent } from "./check-event";
 

@@ -17,6 +17,7 @@ import {
   MIN_PASSWORD_LENGTH,
   type Connection,
   type Project,
+  type ProviderAccount,
 } from "@hercule/contract";
 import type {
   ControllerUrlSaveOutcome,
@@ -438,6 +439,97 @@ describe("the first run's steps", () => {
     });
   });
 
+  describe("Add an account", () => {
+    /** moss with Claude Code installed and its adapter in the runner's build. */
+    const MOSS_WITH_CLAUDE = {
+      ...MOSS!,
+      facts: {
+        os: "darwin",
+        arch: "arm64",
+        totalMemoryBytes: 64 * 1024 ** 3,
+        docker: true,
+        toolchains: [],
+        harnesses: [{ name: "claude", present: true, path: "/opt/homebrew/bin/claude" }],
+        adapters: ["claude-code/claude-code"],
+        identityPort: 4939,
+      },
+    };
+    const ACCOUNTS_PATH = "/api/v1/provider-accounts";
+
+    it("asks to add an account when there is none, and lists no row", async () => {
+      await openSignedIn({
+        handlers: {
+          "GET /api/v1/controller": { body: buildControllerInfo(MOSS!.id) },
+          "GET /api/v1/runners": { body: { items: [MOSS_WITH_CLAUDE] } },
+          "GET /api/v1/provider-accounts": { body: [] },
+        },
+      });
+
+      expect(readHeading()).toBe("Add an account");
+      expect(document.querySelector(".hx")).toBeNull();
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Continue" }).disabled).toBe(
+        true,
+      );
+      expect(screen.getByRole("button", { name: "Do this later" })).toBeTruthy();
+    });
+
+    it("adds an account on the controller's runner alone, and lists it with its sign-in", async () => {
+      const user = userEvent.setup();
+      const stored: ProviderAccount[] = [];
+      const created: ProviderAccount = {
+        ...FIXTURE_ACCOUNT,
+        id: "01a06d02-8000-7000-8000-0000000000c9",
+        snapshots: [],
+        identity: null,
+        planLabel: null,
+      };
+      const { calls } = await openSignedIn({
+        handlers: {
+          "GET /api/v1/controller": { body: buildControllerInfo(MOSS!.id) },
+          // A second runner would be a second machine in the sheet, if the first run offered it.
+          "GET /api/v1/runners": {
+            body: {
+              items: [
+                MOSS_WITH_CLAUDE,
+                { ...MOSS_WITH_CLAUDE, id: "01a06d02-beff-7037-9f5b-0000000000a1", name: "atlas" },
+              ],
+            },
+          },
+          "GET /api/v1/provider-accounts": () => ({ body: stored }),
+          [`POST ${ACCOUNTS_PATH}`]: () => {
+            stored.push(created);
+            return { body: created };
+          },
+          [`POST ${ACCOUNTS_PATH}/${created.id}/sign-in`]: {
+            body: { url: "https://claude.ai/oauth/authorize?code=1" },
+          },
+        },
+      });
+
+      await user.click(screen.getByRole("button", { name: "Add an account" }));
+      const sheet = await screen.findByRole("dialog", { name: "Add an account" });
+      await user.click(within(sheet).getByRole("button", { name: /Anthropic/ }));
+      // Anthropic has one kind, and no account yet to tell this one from: the
+      // machine is the first question, and it is the controller's runner alone.
+      const machines = await within(sheet).findAllByRole("radio");
+      expect(
+        machines.map((machine) => machine.closest("label")?.querySelector("b")?.textContent),
+      ).toEqual(["moss"]);
+      await user.click(within(sheet).getByRole("button", { name: "Sign in" }));
+
+      const login = await screen.findByRole("dialog", { name: /^Sign in to Anthropic on moss$/ });
+      expect(await within(login).findByRole("textbox", { name: "Code" })).toBeTruthy();
+      expect(readCalls(calls, "POST", ACCOUNTS_PATH).map((call) => call.body)).toEqual([
+        { providerId: "anthropic/anthropic", kind: "subscription-per-machine" },
+      ]);
+      // The account is on the step behind the dialogs, with its own Sign in.
+      await waitFor(() => {
+        // The first list is the step's, the second the sign-in dialog's.
+        expect(document.querySelector(".hx .hx-name b")?.textContent).toBe("Anthropic");
+      });
+    });
+  });
+
   it("puts the providers off on Do this later, and marks them so in the ladder", async () => {
     const user = userEvent.setup();
     const { fake } = await openSignedIn();
@@ -784,7 +876,7 @@ describe("the first run's steps", () => {
           "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
         },
       });
-      await user.click(screen.getByRole("button", { name: "Sign in to an account" }));
+      await user.click(screen.getByRole("button", { name: "Add an account" }));
       await waitFor(() => {
         expect(router.state.location.href).toBe(`/?project=${WEBSHOP!.id}`);
       });
@@ -810,20 +902,20 @@ describe("the first run's steps", () => {
           "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
         },
       });
-      await user.click(screen.getByRole("button", { name: "Sign in to an account" }));
+      await user.click(screen.getByRole("button", { name: "Add an account" }));
       expect(await screen.findByText("settings are down")).toBeTruthy();
       expect(fake.firstRunWrites).toEqual([]);
       expect(router.state.location.pathname).toBe("/first-run");
 
       failSettings = false;
-      await user.click(screen.getByRole("button", { name: "Sign in to an account" }));
+      await user.click(screen.getByRole("button", { name: "Add an account" }));
       await waitFor(() => {
         expect(router.state.location.href).toBe(`/?project=${WEBSHOP!.id}`);
       });
       expect(fake.firstRunWrites).toEqual([null]);
     });
 
-    it("offers a sign-in to an account, and Do it now, for a step put off", async () => {
+    it("offers to add an account, and Do it now, for a step put off", async () => {
       const user = userEvent.setup();
       const { fake, router } = await openSignedIn({
         firstRun: { putOff: ["providers", "github"] },
@@ -837,7 +929,7 @@ describe("the first run's steps", () => {
       // The step stays put off until the user acts on it again.
       expect(fake.firstRunWrites).toEqual([]);
       await user.click(screen.getByRole("button", { name: "Do this later" }));
-      await user.click(await screen.findByRole("button", { name: "Sign in to an account" }));
+      await user.click(await screen.findByRole("button", { name: "Add an account" }));
       await waitFor(() => {
         expect(router.state.location.href).toBe(`/?project=${WEBSHOP!.id}`);
       });

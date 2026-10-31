@@ -67,6 +67,13 @@ import {
   PermissionRequests,
   PermissionRequestsLayer,
   PlacementLayer,
+  FactsRefresh,
+  FactsRefreshLayer,
+  HarnessInstall,
+  HarnessInstallLayer,
+  ProbeDriverLayer,
+  ProviderAccountRunnerOperations,
+  ProviderAccountRunnerOperationsLayer,
   SessionSkills,
   SessionSkillsLayer,
   ProfileRemoval,
@@ -576,9 +583,12 @@ const eventKindRoutes = HttpApiBuilder.group(api, "eventKind", (handlers) =>
 const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
   Effect.gen(function* () {
     const runners = yield* RunnerService;
-    // Two of this group's operations are about a runner's Provider Accounts,
-    // which belong to the provider account service, not the runner service.
-    const providerAccounts = yield* ProviderAccountService;
+    // Probing is about a Provider Account, and the frame it sends goes out
+    // from the controller daemon, like the install of a harness and the
+    // request for a runner's facts.
+    const providerAccountOperations = yield* ProviderAccountRunnerOperations;
+    const harnessInstall = yield* HarnessInstall;
+    const factsRefresh = yield* FactsRefresh;
     // Retiring a runner does more than update its row: the sessions it hosted
     // and the workspaces it held end with it, and the runner is told.
     const retirement = yield* Retirement;
@@ -593,12 +603,12 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
       .handle("retire", ({ params, payload }) =>
         withApiErrors(retirement.retireRunner({ id: params.id, ...payload })),
       )
-      .handle("refreshFacts", ({ params }) => withApiErrors(runners.refreshFacts(params.id)))
+      .handle("refreshFacts", ({ params }) => withApiErrors(factsRefresh.refreshFacts(params.id)))
       .handle("probe", ({ params, payload }) =>
-        withApiErrors(providerAccounts.probe({ runnerId: params.id, ...payload })),
+        withApiErrors(providerAccountOperations.probe({ runnerId: params.id, ...payload })),
       )
       .handle("installHarness", ({ params, payload }) =>
-        withApiErrors(providerAccounts.installHarness({ runnerId: params.id, ...payload })),
+        withApiErrors(harnessInstall.installHarness({ runnerId: params.id, ...payload })),
       )
       .handle("createJoinToken", () => withApiErrors(runners.createJoinToken()))
       .handle("queryJoinTokens", () => withApiErrors(runners.queryJoinTokens()))
@@ -642,18 +652,22 @@ const providerRoutes = HttpApiBuilder.group(api, "provider", (handlers) =>
 const providerAccountRoutes = HttpApiBuilder.group(api, "providerAccount", (handlers) =>
   Effect.gen(function* () {
     const providerAccounts = yield* ProviderAccountService;
+    // Signing in sends a frame to a runner, and a new key or token has the
+    // account probed again, so the controller daemon runs those.
+    const operations = yield* ProviderAccountRunnerOperations;
     return handlers
       .handle("query", () => withApiErrors(providerAccounts.query()))
       .handle("read", ({ params }) => withApiErrors(providerAccounts.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(operations.create(payload)))
       .handle("update", ({ params, payload }) =>
-        withApiErrors(providerAccounts.update({ id: params.id, ...payload })),
+        withApiErrors(operations.update({ id: params.id, ...payload })),
       )
       .handle("delete", ({ params }) => withApiErrors(providerAccounts.delete(params.id)))
       .handle("signIn", ({ params, payload }) =>
-        withApiErrors(providerAccounts.signIn({ id: params.id, ...payload })),
+        withApiErrors(operations.signIn({ id: params.id, ...payload })),
       )
       .handle("submitSignInCode", ({ params, payload }) =>
-        withApiErrors(providerAccounts.submitSignInCode({ id: params.id, ...payload })),
+        withApiErrors(operations.submitSignInCode({ id: params.id, ...payload })),
       );
   }),
 );
@@ -890,13 +904,14 @@ const BoundOperationsDomainLayer = BoundOperationsLayer.pipe(
  * controller could boot without a layer an operation needs, and nothing would
  * show it until a request used that operation.
  *
- * Seven services are left out on purpose: `Plugins`,
+ * Eight services are left out on purpose: `Plugins`,
  * `ProviderAccountService`, `SessionService`, `WorkspaceService`,
- * `RunnerConnections`, `ProviderAccountProbes` and `PromotionState`. They
- * must be the instances the boot built. A second instance would have no
- * plugins, no connections, none of the state a session's stream is coalesced
- * in, and no promotion phase, and would write over the same rows the drivers
- * use. The handlers get them from the boot.
+ * `RunnerConnections`, `ProviderAccountProbes`, `ProviderAccountProbing` and
+ * `PromotionState`. They must be the instances the boot built. A second
+ * instance would have no plugins, no connections, none of the state a
+ * session's stream is coalesced in, none of the device logins being waited
+ * for, and no promotion phase, and would write over the same rows the
+ * drivers use. The handlers get them from the boot.
  *
  * The text generation status is provided once, around the whole list, so
  * `controller.read` reads the last failure the text generation service writes.
@@ -937,10 +952,14 @@ const operationServices = Layer.mergeAll(
   // A runner that connects is sent the workspace steps still running on it,
   // and wakes the runs waiting for a runner.
   ArrivalLayer.pipe(Layer.provide(RunDomainLayer)),
+  // The probe driver sweeps a runner that connects, and the fleet on a timer.
+  ProbeDriverLayer,
+  HarnessInstallLayer,
+  FactsRefreshLayer,
   RunnerJoinLayer,
   // The inbound driver uses both dispatch and `Live`, placement uses dispatch,
   // and matched inputs are delivered through `Live` too. Setup creates the
-  // first assistant. So those are provided to the group rather than merged
+  // first assistant, and so does the creation of the first account. So those are provided to the group rather than merged
   // next to it, each above what it uses:
   //
   // - an assistant's create makes its conversation;
@@ -978,6 +997,8 @@ const operationServices = Layer.mergeAll(
     IgnoreRuleDomainLayer,
     DiscussionInputsReferenceFill,
     SetupLayer,
+    // Creating an account creates the default assistant when none exists.
+    ProviderAccountRunnerOperationsLayer,
     // The events service reads the registered event kinds from the plugins
     // domain. The plugins domain appends to the event log, so the events
     // domain cannot import it; the two are wired together here, where the

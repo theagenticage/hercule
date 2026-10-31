@@ -5,6 +5,7 @@ import {
   buildProviderAccountName,
   describeProviderAccountIdentity,
   findProviderPluginId,
+  listProviderAccountHarnessChoices,
   listProviderAccountMachines,
   queryKeys,
   readErrorMessage,
@@ -22,7 +23,9 @@ import {
 } from "../../../../app/queries";
 import { useSavedRecordField } from "../../../../app/saved-record-field";
 import { ProviderLoginDialog } from "../../../../screens/provider-login";
+import { HarnessLogo } from "../../../../screens/thread/harness-logo";
 import {
+  HarnessChoiceList,
   ProviderAccountNameField,
   ProviderAccountSheet,
   ProviderAccountSheetSection,
@@ -55,6 +58,23 @@ function useSavedProviderAccountLabel(client: HerculeClient, account: ProviderAc
 }
 
 /**
+ * Returns the default harness field of the account `account`: it saves on
+ * every pick through `providerAccount.update`. The controller refuses a
+ * harness the account cannot run in, and its message becomes `error`.
+ */
+function useSavedProviderAccountDefaultHarness(client: HerculeClient, account: ProviderAccount) {
+  return useSavedRecordField<ProviderAccount, string, string, ProviderAccountUpdateInput>({
+    listKey: providerAccountsQuery(client).queryKey,
+    id: account.id,
+    stored: account.defaultHarnessId,
+    applyChange: (_shown, change) => change,
+    buildPayload: (latest, change) =>
+      change === latest.defaultHarnessId ? {} : { defaultHarnessId: change },
+    update: (id, payload) => client.providerAccount.update({ params: { id }, payload }),
+  });
+}
+
+/**
  * Renders the sheet of the Provider Account `account` over the Providers
  * page (spec 17 §Settings, Providers):
  *
@@ -62,6 +82,8 @@ function useSavedProviderAccountLabel(client: HerculeClient, account: ProviderAc
  * - Machines, for an account that signs in on each machine: whether it is
  *   signed in on each runner and as whom, Sign in where it is not (the login
  *   dialog of the first run), and Install where the runner lacks the harness;
+ * - Default harness: every harness, one radio each, with the ones the account
+ *   cannot run in struck through and their reason under them;
  * - Delete, which asks first.
  *
  * The page passes the account from the cached list, which the `provider`
@@ -88,6 +110,7 @@ export function OpenedProviderAccountSheet({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const label = useSavedProviderAccountLabel(client, account);
   const draft = useTextDraft(label.value, label.save);
+  const defaultHarness = useSavedProviderAccountDefaultHarness(client, account);
   const install = useMutation({
     mutationFn: (machine: ProviderAccountMachine) =>
       client.runner.installHarness({
@@ -167,6 +190,21 @@ export function OpenedProviderAccountSheet({
             ))}
           </ProviderAccountSheetSection>
         )}
+        <ProviderAccountSheetSection heading="Default harness">
+          <HarnessChoiceList
+            choices={listProviderAccountHarnessChoices(account, providers, harnesses, runners).map(
+              (choice) => ({
+                harnessId: choice.harnessId,
+                name: choice.harnessName,
+                mark: <HarnessLogo harnessId={choice.harnessId} size={13} />,
+                unavailableReason: choice.unavailableReason,
+              }),
+            )}
+            selectedId={defaultHarness.value}
+            onPick={defaultHarness.save}
+            error={defaultHarness.error}
+          />
+        </ProviderAccountSheetSection>
         <ProviderAccountSheetSection heading={`Delete ${name}`}>
           <button
             type="button"
@@ -179,6 +217,7 @@ export function OpenedProviderAccountSheet({
       </ProviderAccountSheet>
       {loginRunnerId !== null && (
         <ProviderLoginDialog
+          client={client}
           providerAccountId={account.id}
           runnerId={loginRunnerId}
           onClose={() => setLoginRunnerId(null)}

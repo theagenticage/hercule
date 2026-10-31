@@ -5,10 +5,13 @@ import { Schema } from "effect";
  * declares another version is refused at load, rather than run against an API
  * it does not know.
  *
- * Version 3 changes `HarnessDefinition` (it declares the providers it runs and
- * no longer has a config schema) and adds `ProviderDefinition`.
+ * - Version 3 changed `HarnessDefinition` (it declares the providers it runs and
+ *   no longer has a config schema) and added `ProviderDefinition`.
+ * - Version 4 made `defaultHarnessId` and the `method` of a `harness-login`
+ *   step required, and added the `keyCheck` of an account kind. A plugin built
+ *   against version 3 declares neither, so the host refuses it at load.
  */
-export const HOST_API = 3;
+export const HOST_API = 4;
 
 /**
  * The named parts of the host API a plugin may request. Only some of them are

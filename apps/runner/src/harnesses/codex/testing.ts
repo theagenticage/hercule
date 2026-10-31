@@ -44,6 +44,7 @@ export const buildContext = (home: string, cwd: string | null = null): HarnessRu
   binary: "/usr/local/bin/codex",
   env: { PATH: "/usr/local/bin:/usr/bin", HERCULE_RUNNER: "runner-1" },
   modelArgument: "{model}",
+  credentialVariables: [],
   // The runner resolves this once, at start. A test that depends on it sets
   // its own value.
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },

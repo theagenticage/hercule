@@ -1071,6 +1071,7 @@ export const FIXTURE_ACCOUNT: ProviderAccount = {
   identity: "rogier@example.com",
   planLabel: "Claude Max",
   defaultHarnessId: "claude-code/claude-code",
+  expiresAt: null,
   snapshots: [
     {
       runnerId: WORLD.MOSS.id,

@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { withTransaction } from "../db";
-import { isSignedIn, resolveProviderAccountHarness } from "./harness-choice";
-import type { StoredSnapshot } from "./repository";
+import { resolveProviderAccountHarness } from "./harness-choice";
 import {
   addAccount,
   addRunner,
@@ -13,7 +12,6 @@ import {
   KEY_KIND,
   MACHINE_KIND,
   runWithAccounts,
-  SIGNED_IN,
 } from "./testing";
 
 const MISSING = "0199e0e7-9999-7000-8000-000000000000";
@@ -106,23 +104,5 @@ describe("resolveProviderAccountHarness", () => {
     expect(failure).toMatchObject({
       error: { code: "validation", details: { issues: [{ path: ["harnessId"] }] } },
     });
-  });
-});
-
-describe("isSignedIn", () => {
-  const snapshot = (status: "ok" | "unauthenticated" | "error"): StoredSnapshot => ({
-    providerAccountId: "a",
-    harnessId: ALPHA_HARNESS_ID,
-    runnerId: "r",
-    probedAt: "2026-10-31T00:00:00.000Z",
-    harnessVersion: null,
-    auth: { ...SIGNED_IN.auth, status },
-    models: [],
-  });
-
-  it("is true only for a snapshot whose auth is ok", () => {
-    expect(isSignedIn(snapshot("ok"))).toBe(true);
-    expect(isSignedIn(snapshot("unauthenticated"))).toBe(false);
-    expect(isSignedIn(snapshot("error"))).toBe(false);
   });
 });

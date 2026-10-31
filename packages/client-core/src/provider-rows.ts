@@ -8,9 +8,11 @@ import type { Harness, Provider, ProviderAccount, Runner } from "@hercule/contra
 import { describeModelCount } from "./model-count";
 import {
   buildProviderAccountName,
+  decideStoredCredentialState,
   findDefaultHarnessSnapshot,
+  findHarnessLoginMethod,
   listProviderAccountCredentialFields,
-  requiresSignInPerMachine,
+  type HarnessLoginMethod,
 } from "./provider-accounts";
 import type { CredentialField } from "./connection-types";
 
@@ -105,6 +107,43 @@ const describeSignedInAs = (snapshot: ProviderAccount["snapshots"][number] | und
   return named.length === 0 ? (auth.backend ?? "signed in") : named.join(" · ");
 };
 
+/** Returns the label of the button that starts the login of a kind with `loginMethod`. */
+const describeSignInLabel = (loginMethod: HarnessLoginMethod | null, signedIn: boolean): string =>
+  loginMethod === "create-token"
+    ? signedIn
+      ? "Make a new token"
+      : "Make the token"
+    : signedIn
+      ? "Sign in again"
+      : "Sign in";
+
+/** What a runner has of a harness. */
+export interface HarnessOnRunner {
+  /** Whether the runner's build has an adapter that can drive the harness. */
+  readonly adapter: boolean;
+  /** The harness's binary as the runner found it on its `PATH`, or `undefined` when it is not there. */
+  readonly binary: NonNullable<Runner["facts"]>["harnesses"][number] | undefined;
+  /** Whether the runner found the harness's binary. */
+  readonly present: boolean;
+  /** Whether the runner is connected. Every action runs on the runner, so an offline one offers none. */
+  readonly reachable: boolean;
+}
+
+/** Returns what `runner` has of `harness`, from the runner's facts. */
+export const describeHarnessOnRunner = (runner: Runner, harness: Harness): HarnessOnRunner => {
+  // The binary name the runner reports from its `PATH` is the harness's
+  // `binaryName`, so no lookup table is needed.
+  const binary = (runner.facts?.harnesses ?? []).find(
+    (each) => each.name === harness.binaryName && each.present,
+  );
+  return {
+    adapter: (runner.facts?.adapters ?? []).includes(harness.id),
+    binary,
+    present: binary !== undefined,
+    reachable: runner.connectivity === "online",
+  };
+};
+
 /**
  * Returns one row per Provider Account, as seen on `runner`. An account whose
  * default harness no registered harness matches has no row, because there is
@@ -120,23 +159,21 @@ export const buildProviderRows = (
     const harness = harnesses.find((each) => each.id === account.defaultHarnessId);
     if (harness === undefined) return [];
     const snapshot = findDefaultHarnessSnapshot(account, runner.id);
-    const adapter = (runner.facts?.adapters ?? []).includes(harness.id);
-    // The binary name the runner reports from its `PATH` is the harness's
-    // `binaryName`, so no lookup table is needed.
-    const binary = (runner.facts?.harnesses ?? []).find(
-      (each) => each.name === harness.binaryName && each.present,
-    );
-    const present = binary !== undefined;
-    // Every action runs on the runner, so an offline runner offers none.
-    const reachable = runner.connectivity === "online";
+    const { adapter, binary, present, reachable } = describeHarnessOnRunner(runner, harness);
     // A credential can only be entered for a harness installed on this runner,
     // because the controller probes the runner for the account as soon as the
     // credential is saved.
     const usable = reachable && present && adapter;
-    const signedIn = snapshot?.auth.status === "ok";
-    // An account that signs in on each machine has no credential to type. Any
-    // other has no sign-in in the browser, so it offers its fields instead.
-    const perMachine = requiresSignInPerMachine(harnesses, account);
+    // A token that is missing or expired signs nothing in, whatever the last
+    // probe found, so the row offers to make a new one.
+    const credential = decideStoredCredentialState(providers, account);
+    const signedIn =
+      snapshot?.auth.status === "ok" &&
+      credential !== "token-missing" &&
+      credential !== "token-expired";
+    // An account whose kind has a harness login gets its credential from that
+    // login. Any other has nothing to sign in to, so it offers its fields.
+    const loginMethod = findHarnessLoginMethod(providers, account);
     return [
       {
         id: account.id,
@@ -152,10 +189,10 @@ export const buildProviderRows = (
         models: describeModelCount(snapshot?.models.length ?? 0),
         signedIn,
         install: !reachable || present ? "none" : adapter ? "offered" : "blocked",
-        signIn: usable && perMachine,
-        signInLabel: signedIn ? "Sign in again" : "Sign in",
+        signIn: usable && loginMethod !== null,
+        signInLabel: describeSignInLabel(loginMethod, signedIn),
         credentialFields:
-          usable && !perMachine
+          usable && loginMethod === null
             ? listProviderAccountCredentialFields(providers, account).map((field) =>
                 buildOffer(field, signedIn),
               )

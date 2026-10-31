@@ -12,8 +12,8 @@ export {
   type RunningIngest,
 } from "./ingest";
 export type { RegisteredHarness } from "./harnesses";
-export { decideProviderAccountHarness } from "./harness-support";
-export { API_KEY_SECRET_NAME, type RegisteredProvider } from "./providers";
+export { decideProviderAccountHarness, listCredentialVariables } from "./harness-support";
+export { findCredentialSecretName, type RegisteredProvider } from "./providers";
 export { IngestExecutor } from "./ingest-executor";
 export { deriveCatalogJsonSchema } from "./json-schema";
 export { OpenSignals } from "./open-signals";

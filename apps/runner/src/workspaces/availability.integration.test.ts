@@ -77,6 +77,7 @@ const refuseSessionPlacement = async (
       providerAccountId: ACCOUNT_ID,
       harnessHome: `providers/${ACCOUNT_ID}`,
       modelArgument: "{model}",
+      credentialVariables: [],
     },
     token: "fixture-token",
     spec: {

@@ -46,7 +46,8 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
 
 /** The refusal placement gives when no runner can take the session. */
 const NO_RUNNER =
-  "no connected runner is signed in to that provider account; sign in on a machine first";
+  "no connected runner can take a session on Provider full in Harness full right now; " +
+  "every machine that can run it is offline, draining or reserved";
 
 /** The refusal for any actor but the user (AD-6). */
 const OWNER_ONLY =

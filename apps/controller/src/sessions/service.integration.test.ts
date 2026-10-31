@@ -341,6 +341,7 @@ const buildHarnessAccountFor = (providerAccountId: string): HarnessAccount => ({
   providerAccountId,
   harnessHome: `providers/${providerAccountId}`,
   modelArgument: "{model}",
+  credentialVariables: ["AN_API_KEY"],
   credential: { variable: "AN_API_KEY", value: "a-key" },
 });
 
@@ -367,6 +368,7 @@ const claimStarting = (
       sessions.claimStarts(runnerId, room, {
         readGithubAccount: () => Effect.succeed(undefined),
         readGitIdentity: () => Effect.succeed(undefined),
+        requireAccountRunnable: () => Effect.void,
         prepareHarnessAccount: prepareAccount,
         buildCoordination: () => Effect.succeed(coordination),
         runner: { name: "a runner", negotiatedCapabilities: [] },
@@ -499,6 +501,7 @@ describe("SessionService.claimStarts", () => {
             sessions.claimStarts(runnerId, 2, {
               readGithubAccount: () => Effect.succeed(undefined),
               readGitIdentity: () => Effect.succeed(undefined),
+              requireAccountRunnable: () => Effect.void,
               prepareHarnessAccount: (id) =>
                 id === refusedAccountId ? Effect.fail(refusal) : prepareAccount(id),
               buildCoordination: () => Effect.succeed(undefined),
@@ -533,6 +536,69 @@ describe("SessionService.claimStarts", () => {
       expect(JSON.stringify(result.exitRows)).toContain(refusal.error.message);
       expect(result.inputRows).toEqual([{ status: "cancelled", reason: refusal.error.message }]);
     }
+  });
+
+  it("ends a queued session, with the reason, when its account can no longer run on the runner", async () => {
+    // Queued under the rule of that moment: a sign-in or a harness may have
+    // gone before the runner has room. The check runs once per account and
+    // harness, however many sessions are queued.
+    const reason = "Anthropic · work is not signed in on that machine";
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const lostAccountId = mintId();
+        const fineAccountId = mintId();
+        const lost = yield* insertQueuedSession(runnerId, {
+          providerAccountId: lostAccountId,
+          spec: buildSpec(lostAccountId, "clever"),
+        });
+        const lostToo = yield* insertQueuedSession(runnerId, {
+          providerAccountId: lostAccountId,
+          spec: buildSpec(lostAccountId, "clever"),
+        });
+        const fine = yield* insertQueuedSession(runnerId, {
+          providerAccountId: fineAccountId,
+          spec: buildSpec(fineAccountId, "clever"),
+        });
+        const asked: Array<string> = [];
+        const claimed = yield* withTransaction(
+          sql,
+          sessions.claimStarts(runnerId, 3, {
+            readGithubAccount: () => Effect.succeed(undefined),
+            readGitIdentity: () => Effect.succeed(undefined),
+            requireAccountRunnable: (id) => {
+              asked.push(id);
+              return id === lostAccountId
+                ? Effect.fail(createInvalidStateError(reason))
+                : Effect.void;
+            },
+            prepareHarnessAccount: prepareAccount,
+            buildCoordination: () => Effect.succeed(undefined),
+            runner: { name: "a runner", negotiatedCapabilities: [] },
+            localRunnerId: undefined,
+          }),
+        );
+        const inputRows = yield* sql<{ readonly status: string; readonly reason: string | null }>`
+          SELECT status, reason FROM session_inputs WHERE session_id = ${uuidFromString(lost)}
+        `;
+        return {
+          claimed: claimed.map((claim) => claim.sessionId),
+          asked,
+          fine,
+          lostStatus: yield* readStatus(lost),
+          lostTooStatus: yield* readStatus(lostToo),
+          inputRows,
+        };
+      }),
+    );
+
+    expect(result.claimed).toEqual([result.fine]);
+    expect(result.lostStatus).toBe("exited");
+    expect(result.lostTooStatus).toBe("exited");
+    expect(result.asked).toHaveLength(2);
+    expect(result.inputRows).toEqual([{ status: "cancelled", reason }]);
   });
 
   it("adds the coordination paragraph to the spec the frame carries", async () => {
@@ -826,6 +892,7 @@ describe("SessionService.claimStarts", () => {
             sessions.claimStarts(runnerId, 1, {
               readGithubAccount: accounts.readGithubAccount,
               readGitIdentity: accounts.readGitIdentity,
+              requireAccountRunnable: () => Effect.void,
               prepareHarnessAccount: prepareAccount,
               buildCoordination: () => Effect.succeed(undefined),
               runner: { name: "a runner", negotiatedCapabilities: [] },

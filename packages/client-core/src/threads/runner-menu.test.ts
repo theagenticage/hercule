@@ -8,19 +8,46 @@ import type { Runner } from "@hercule/contract";
 import { findReferenceRunner, buildRunnerMenu } from "./runner-menu";
 import {
   BARE,
+  WITH_AGENTS,
   buildProviderAccount,
   buildSnapshot,
   ANTHROPIC_IDENTITY,
+  ZAI_IDENTITY,
+  HARNESSES,
+  PROVIDERS,
 } from "../providers.testing";
+
+const CATALOGS = { providers: PROVIDERS, harnesses: HARNESSES };
 
 const HARNESS = ANTHROPIC_IDENTITY.harnessId;
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
-  ...BARE,
+  ...WITH_AGENTS,
   ...overrides,
 });
 
 describe("buildRunnerMenu", () => {
+  it("does not dim a runner that has the harness for an account that works everywhere, whatever probes it holds", () => {
+    const zai = buildProviderAccount(ZAI_IDENTITY, []);
+    const withPi = buildRunner({
+      id: "r-pi",
+      facts: {
+        ...BARE.facts!,
+        harnesses: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
+        adapters: ["pi/pi"],
+      },
+    });
+    const without = buildRunner({ id: "r-bare" });
+
+    const menu = buildRunnerMenu([without, withPi], null, zai, "pi/pi", CATALOGS);
+
+    expect(menu.rows.map((row) => [row.runnerId, row.dimmed])).toEqual([
+      ["r-bare", "not installed"],
+      ["r-pi", null],
+    ]);
+    expect(menu.defaultRunnerId).toBe("r-pi");
+  });
+
   it("dims an offline or unreachable runner for that reason first, even when it is also draining and not signed in", () => {
     const claude = buildProviderAccount(ANTHROPIC_IDENTITY, []); // signed in nowhere
 
@@ -30,7 +57,9 @@ describe("buildRunnerMenu", () => {
       connectivity: "offline",
       lifecycle: "draining",
     });
-    expect(buildRunnerMenu([offlineDraining], null, claude, HARNESS).rows[0]).toMatchObject({
+    expect(
+      buildRunnerMenu([offlineDraining], null, claude, HARNESS, CATALOGS).rows[0],
+    ).toMatchObject({
       dimmed: "offline",
     });
 
@@ -40,7 +69,7 @@ describe("buildRunnerMenu", () => {
       connectivity: "unreachable",
       lifecycle: "active",
     });
-    expect(buildRunnerMenu([unreachable], null, claude, HARNESS).rows[0]).toMatchObject({
+    expect(buildRunnerMenu([unreachable], null, claude, HARNESS, CATALOGS).rows[0]).toMatchObject({
       dimmed: "unreachable",
     });
   });
@@ -54,6 +83,7 @@ describe("buildRunnerMenu", () => {
         null,
         claude,
         HARNESS,
+        CATALOGS,
       ).rows[0],
     ).toMatchObject({ state: "online" });
 
@@ -63,6 +93,7 @@ describe("buildRunnerMenu", () => {
         null,
         claude,
         HARNESS,
+        CATALOGS,
       ).rows[0],
     ).toMatchObject({ state: "draining" });
   });
@@ -73,7 +104,7 @@ describe("buildRunnerMenu", () => {
       buildSnapshot({ runnerId: "r-gone" }),
     ]);
 
-    const menu = buildRunnerMenu([retired], "r-gone", claude, HARNESS);
+    const menu = buildRunnerMenu([retired], "r-gone", claude, HARNESS, CATALOGS);
 
     expect(menu.rows).toEqual([]);
     expect(menu.defaultRunnerId).toBeNull();
@@ -93,7 +124,7 @@ describe("buildRunnerMenu", () => {
       }),
     ]);
 
-    const menu = buildRunnerMenu([draining], null, claude, HARNESS);
+    const menu = buildRunnerMenu([draining], null, claude, HARNESS, CATALOGS);
 
     expect(menu.rows[0]).toMatchObject({
       dimmed: "draining",
@@ -111,22 +142,56 @@ describe("buildRunnerMenu", () => {
     });
     const claude = buildProviderAccount(ANTHROPIC_IDENTITY, []); // no snapshot for r-active
 
-    const menu = buildRunnerMenu([active], null, claude, HARNESS);
+    const menu = buildRunnerMenu([active], null, claude, HARNESS, CATALOGS);
 
     expect(menu.rows[0]).toMatchObject({ dimmed: "not signed in" });
   });
 
   it("reads the snapshot of the harness the thread runs in, not another harness's", () => {
-    const active = buildRunner({ id: "r-active", name: "active-box" });
+    const active = buildRunner({
+      id: "r-active",
+      name: "active-box",
+      facts: {
+        ...WITH_AGENTS.facts!,
+        harnesses: [
+          ...WITH_AGENTS.facts!.harnesses,
+          { name: "pi", present: true, path: "/usr/local/bin/pi" },
+        ],
+        adapters: [...WITH_AGENTS.facts!.adapters, "pi/pi"],
+      },
+    });
     const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [
       buildSnapshot({ runnerId: "r-active" }),
     ]);
 
-    expect(buildRunnerMenu([active], null, claude, HARNESS).rows[0]).toMatchObject({
+    expect(buildRunnerMenu([active], null, claude, HARNESS, CATALOGS).rows[0]).toMatchObject({
       dimmed: null,
     });
-    expect(buildRunnerMenu([active], null, claude, "pi/pi").rows[0]).toMatchObject({
+    expect(buildRunnerMenu([active], null, claude, "pi/pi", CATALOGS).rows[0]).toMatchObject({
       dimmed: "not signed in",
+    });
+  });
+
+  it("dims a runner whose harness is older than this build supports", () => {
+    const old = buildRunner({ id: "r-old", name: "old-box" });
+    const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshot({ runnerId: "r-old" })]);
+    const catalogs = {
+      providers: PROVIDERS,
+      harnesses: HARNESSES.map((harness) => ({
+        ...harness,
+        runners: [
+          {
+            runnerId: "r-old",
+            installed: true,
+            version: "0.0.1",
+            versionVerdict: "below-floor" as const,
+          },
+        ],
+      })),
+    };
+
+    expect(buildRunnerMenu([old], null, claude, HARNESS, catalogs).rows[0]).toMatchObject({
+      dimmed: "harness too old",
     });
   });
 
@@ -138,7 +203,7 @@ describe("buildRunnerMenu", () => {
       buildSnapshot({ runnerId: "r-b" }),
     ]);
 
-    const menu = buildRunnerMenu([a, b], "r-b", claude, HARNESS);
+    const menu = buildRunnerMenu([a, b], "r-b", claude, HARNESS, CATALOGS);
 
     expect(menu.rows.map((row) => ({ id: row.runnerId, isLocal: row.isLocal }))).toEqual([
       { id: "r-a", isLocal: false },
@@ -154,7 +219,7 @@ describe("buildRunnerMenu", () => {
       buildSnapshot({ runnerId: "r-b" }),
     ]);
 
-    expect(buildRunnerMenu([a, b], "r-b", claude, HARNESS).defaultRunnerId).toBe("r-b");
+    expect(buildRunnerMenu([a, b], "r-b", claude, HARNESS, CATALOGS).defaultRunnerId).toBe("r-b");
   });
 
   it("defaults to the first not-dimmed row when localId is absent or matches no runner", () => {
@@ -162,10 +227,12 @@ describe("buildRunnerMenu", () => {
     const ok = buildRunner({ id: "r-b", name: "b", connectivity: "online", lifecycle: "active" });
     const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshot({ runnerId: "r-b" })]);
 
-    expect(buildRunnerMenu([dimmed, ok], null, claude, HARNESS).defaultRunnerId).toBe("r-b");
-    expect(buildRunnerMenu([dimmed, ok], "not-a-runner-id", claude, HARNESS).defaultRunnerId).toBe(
+    expect(buildRunnerMenu([dimmed, ok], null, claude, HARNESS, CATALOGS).defaultRunnerId).toBe(
       "r-b",
     );
+    expect(
+      buildRunnerMenu([dimmed, ok], "not-a-runner-id", claude, HARNESS, CATALOGS).defaultRunnerId,
+    ).toBe("r-b");
   });
 
   it("falls through to the first not-dimmed row when the local runner is itself dimmed", () => {
@@ -173,9 +240,9 @@ describe("buildRunnerMenu", () => {
     const ok = buildRunner({ id: "r-b", name: "b", connectivity: "online", lifecycle: "active" });
     const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshot({ runnerId: "r-b" })]);
 
-    expect(buildRunnerMenu([localDimmed, ok], "r-local", claude, HARNESS).defaultRunnerId).toBe(
-      "r-b",
-    );
+    expect(
+      buildRunnerMenu([localDimmed, ok], "r-local", claude, HARNESS, CATALOGS).defaultRunnerId,
+    ).toBe("r-b");
   });
 
   it("has no default runner when every row is dimmed", () => {
@@ -188,7 +255,9 @@ describe("buildRunnerMenu", () => {
     });
     const claude = buildProviderAccount(ANTHROPIC_IDENTITY, []);
 
-    expect(buildRunnerMenu([offline, draining], null, claude, HARNESS).defaultRunnerId).toBeNull();
+    expect(
+      buildRunnerMenu([offline, draining], null, claude, HARNESS, CATALOGS).defaultRunnerId,
+    ).toBeNull();
   });
 });
 

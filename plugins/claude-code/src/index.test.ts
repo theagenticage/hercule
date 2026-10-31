@@ -27,11 +27,15 @@ const captureHarnessDefinition = (): HarnessDefinition => {
 };
 
 describe("the Claude Code harness", () => {
-  it("runs a Claude subscription signed in on the machine, with every model under its own id", () => {
+  it("runs every Anthropic kind, with every model under its own id, and hands a token or key over in its own variable", () => {
     expect(captureHarnessDefinition().runs).toEqual([
       {
         providerId: "anthropic/anthropic",
-        kinds: [{ kind: "subscription-per-machine" }],
+        kinds: [
+          { kind: "subscription-per-machine" },
+          { kind: "subscription-token", credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN" },
+          { kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" },
+        ],
         modelArgument: "{model}",
         models: "all",
       },

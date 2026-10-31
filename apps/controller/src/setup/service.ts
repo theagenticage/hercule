@@ -16,9 +16,11 @@
  * Every check happens inside that one transaction, so concurrent calls with
  * the same token create one user rather than one each.
  *
- * The default assistant, `Hercule`, is created in that same transaction, so a
- * finished setup always has an assistant to talk to. It is created from its
- * name alone, like any other, and stamped with the new user.
+ * The default assistant, `Hercule`, is created in that same transaction when
+ * a Provider Account exists for it to run on, and stamped with the new user.
+ * A fresh install has no account, so setup then finishes without an assistant,
+ * and the creation of the first account makes it (see
+ * `ProviderAccountRunnerOperations.create`).
  *
  * The onboarding steps beyond the timezone are the web app's, not setup's.
  */
@@ -45,9 +47,6 @@ import { AuditLog } from "../events";
 import type { GrantsError } from "../permissions";
 import { Settings, validateTimezone, type SettingError } from "../settings";
 import { hashPassword, PasswordCost, Users } from "../users";
-
-/** The name of the assistant setup creates. */
-const DEFAULT_ASSISTANT_NAME = "Hercule";
 
 /** The input of `setup.complete`. */
 export interface CompleteInput {
@@ -103,13 +102,13 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Creates the user and the default assistant, marks setup complete and
-     * returns a bearer token, so the caller is logged in when this returns.
-     * The transport gate verifies the setup token before this runs. Fails
-     * with `InvalidState` when setup is already complete, or when there is no
-     * Provider Account for the assistant to run on, and with `Validation`
-     * when the timezone is not an IANA zone name. Every failure writes
-     * nothing, so setup can be tried again.
+     * Creates the user, and the default assistant when a Provider Account
+     * exists for it to run on, marks setup complete and returns a bearer
+     * token, so the caller is logged in when this returns. The transport gate
+     * verifies the setup token before this runs. Fails with `InvalidState`
+     * when setup is already complete, and with `Validation` when the timezone
+     * is not an IANA zone name. Every failure writes nothing, so setup can be
+     * tried again.
      */
     complete: (
       input: CompleteInput,
@@ -155,7 +154,7 @@ const make = Effect.gen(function* () {
             const login = yield* credentials.issueLoginToken(user.id, tokenHash);
             // No request credential exists yet, so the new user acts through
             // the login token just issued.
-            yield* assistants.create({ name: DEFAULT_ASSISTANT_NAME }).pipe(
+            yield* assistants.createDefaultIfNone().pipe(
               Effect.provideService(CurrentActor, {
                 _tag: "user",
                 userId: user.id,

@@ -22,6 +22,7 @@ import { buildWorkspaceActionCapability, WORKSPACE_LIFECYCLE_CAPABILITY } from "
 import { SessionTokensLayer } from "../permissions";
 import { EventKindCatalogLayer, PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
 import { buildPluginStack, USER } from "../plugins/testing";
+import { ProviderAccountRunnersLayer } from "../provider-accounts";
 import { resourceRepository } from "../resources";
 import { SettingsLayer } from "../settings";
 import { TaskServiceLayer } from "../tasks";
@@ -148,6 +149,7 @@ const runTest = <A, E>(
         generate: () => Effect.die("these tests run no text generation step"),
       }),
     ),
+    Layer.provideMerge(ProviderAccountRunnersLayer),
     Layer.provideMerge(buildPluginStack()),
   );
   return Effect.runPromise(

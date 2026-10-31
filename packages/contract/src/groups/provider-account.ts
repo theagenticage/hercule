@@ -6,8 +6,8 @@
  *
  * The record shows who is signed in and what each runner last learned about
  * the account in each harness (its Capability Snapshots). It never shows a
- * credential: a key is written with `providerAccount.update` and never read
- * back.
+ * credential: a key is written with `providerAccount.create` or
+ * `providerAccount.update` and never read back.
  */
 import { Schema } from "effect";
 import { ModelDescriptor, SnapshotAuth } from "@hercule/protocol";
@@ -63,6 +63,12 @@ export const ProviderAccount = Schema.Struct({
   planLabel: Schema.NullOr(Schema.String),
   /** The qualified id of the harness a session uses when it names none. */
   defaultHarnessId: Schema.String,
+  /**
+   * When the account's token stops working. Set only for a kind whose
+   * credential is a token Hercule minted (a Claude subscription token); `null`
+   * for every other kind.
+   */
+  expiresAt: Schema.NullOr(Timestamp),
   snapshots: Schema.Array(CapabilitySnapshot),
   createdAt: Timestamp,
   updatedAt: Timestamp,
@@ -71,13 +77,36 @@ export const ProviderAccount = Schema.Struct({
 export type ProviderAccount = Schema.Schema.Type<typeof ProviderAccount>;
 
 /**
+ * The payload of `providerAccount.create`. `kind` is one of the Provider's
+ * Account Kinds. `credentials` holds the fields of the kind's `credentials`
+ * setup step, such as `apiKey`: required for a kind that has that step and
+ * refused for one that has not. A kind that signs in through its harness is
+ * created without credentials and then signed in with `providerAccount.signIn`.
+ * `defaultHarnessId` is the qualified id of the harness a session uses when it
+ * names none; left out, it is the Provider's own harness, even when that
+ * harness is installed on no runner yet. When given, it is refused when the
+ * account cannot run in that harness and also when no runner has it installed.
+ */
+export const ProviderAccountCreateInput = Schema.Struct({
+  providerId: Schema.String,
+  kind: Schema.String,
+  label: Schema.optionalKey(ProviderAccountLabel),
+  defaultHarnessId: Schema.optionalKey(Schema.String),
+  credentials: Schema.optionalKey(Schema.Record(Schema.String, SecretValue)),
+});
+
+export type ProviderAccountCreateInput = Schema.Schema.Type<typeof ProviderAccountCreateInput>;
+
+/**
  * The payload of `providerAccount.update`. A field left out is not changed;
- * `label: null` removes the label. `credentials` holds the fields of the
+ * `label: null` removes the label. `defaultHarnessId` is the qualified id of
+ * a harness the account can run in. `credentials` holds the fields of the
  * kind's `credentials` setup step, such as `apiKey`, and replaces the stored
  * ones.
  */
 export const ProviderAccountUpdateInput = Schema.Struct({
   label: Schema.optionalKey(Schema.NullOr(ProviderAccountLabel)),
+  defaultHarnessId: Schema.optionalKey(Schema.String),
   credentials: Schema.optionalKey(Schema.Record(Schema.String, SecretValue)),
 });
 
@@ -140,11 +169,16 @@ export const providerAccount = HttpApiGroup.make("providerAccount")
       success: ProviderAccount,
       error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
+    HttpApiEndpoint.post("create", "/provider-accounts", {
+      payload: ProviderAccountCreateInput,
+      success: ProviderAccount,
+      error: [Unauthenticated, Forbidden, Validation, Conflict, InvalidState, Internal],
+    }),
     HttpApiEndpoint.patch("update", "/provider-accounts/:id", {
       params: { id: Id },
       payload: ProviderAccountUpdateInput,
       success: ProviderAccount,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Conflict, InvalidState, Internal],
     }),
     HttpApiEndpoint.delete("delete", "/provider-accounts/:id", {
       params: { id: Id },

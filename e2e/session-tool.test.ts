@@ -48,7 +48,7 @@ import {
 } from "../scripts/controller-process";
 import {
   readApiKey,
-  readClaudeAccount,
+  ensureClaudeAccount,
   CLAUDE_CODE,
   parseJsonOutputOrFail,
   lendCredential,
@@ -59,7 +59,6 @@ import {
   readSession,
   createTemporaryHome,
   waitForTranscriptTag,
-  type ProviderAccount,
   type Session,
   type Snapshot,
   type TemporaryHome,
@@ -128,8 +127,6 @@ const waitForOwnRunner = async (): Promise<string> => {
     await Bun.sleep(500);
   }
 };
-
-const findClaudeAccount = (): Promise<ProviderAccount> => readClaudeAccount({ url, apiKey });
 
 /**
  * Probes the account in Claude Code until a machine reports that the copied login works, and
@@ -225,7 +222,7 @@ describe.skipIf(!wanted)("an agent reaching Hercule from inside a session", () =
       }
 
       const runnerId = await waitForOwnRunner();
-      const account = await findClaudeAccount();
+      const account = await ensureClaudeAccount({ url, apiKey });
       if (LENT_CREDENTIALS !== undefined) lendCredential(state.home, account.id, CLAUDE_CODE);
       const snapshot = await waitForLoggedInSnapshot(runnerId, account.id);
 

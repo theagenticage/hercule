@@ -158,7 +158,7 @@ describe("the new-thread screen", () => {
         totalMemoryBytes: 1024,
         docker: false,
         toolchains: [],
-        harnesses: [],
+        harnesses: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
         adapters: ["claude-code/claude-code"],
         identityPort,
       },
@@ -190,6 +190,26 @@ describe("the new-thread screen", () => {
     expect(readLip()).toBe("No workspace" + "studio");
   });
 
+  it("opens the add-account sheet from Add an account when the user has no account", async () => {
+    await openDraft(`/?project=${WEBSHOP.id}`, {
+      "GET /api/v1/provider-accounts": { body: [] },
+      "GET /api/v1/controller": {
+        body: {
+          id: "01a06d02-7800-7000-8000-000000000001",
+          publicKey: "controller-key",
+          version: "0.4.2",
+          defaultRunnerId: null,
+          localRunnerId: null,
+          textGeneration: { model: null, lastFailure: null, unavailableReason: null },
+        },
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Add an account" }));
+
+    expect(await screen.findByRole("dialog", { name: "Add an account" })).toBeTruthy();
+  });
+
   it("says why the draft cannot start, sends nothing, and starts once the reason is gone", async () => {
     let accounts: readonly ProviderAccount[] = [];
     const { calls, field, live } = await openDraft(`/?project=${WEBSHOP.id}`, {
@@ -197,7 +217,7 @@ describe("the new-thread screen", () => {
     });
 
     expect(screen.getByText("Can't start yet.").parentElement?.textContent).toBe(
-      "Can't start yet. No account is set up.",
+      "Can't start yet. No account is set up. Add an account",
     );
     const send = screen.getByRole("button", { name: "Start thread" });
     expect(send.getAttribute("aria-disabled")).toBe("true");

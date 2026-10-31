@@ -7,10 +7,16 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
+import { withTransaction } from "../db";
 import { inTransaction } from "../db/testing";
 import { PluginHost } from "../plugins";
 import { buildPluginStack } from "../plugins/testing";
-import { providerAccountRepository, type StoredProviderAccount } from "../provider-accounts";
+import {
+  ProviderAccountRunnersLayer,
+  providerAccountRepository,
+  type StoredProviderAccount,
+} from "../provider-accounts";
+import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { Settings, SettingsLayer } from "../settings";
 import { TextGenerationModels, TextGenerationModelsLayer } from "./models";
 import {
@@ -23,6 +29,7 @@ import {
 } from "./testing";
 
 const layer = TextGenerationModelsLayer.pipe(
+  Layer.provideMerge(ProviderAccountRunnersLayer),
   Layer.provideMerge(SettingsLayer),
   Layer.provideMerge(buildPluginStack()),
 );
@@ -47,16 +54,17 @@ const run = <A>(
   ) => Effect.Effect<
     A,
     unknown,
-    Settings | TextGenerationModels | SqlClient.SqlClient | PluginHost
+    Settings | TextGenerationModels | SqlClient.SqlClient | PluginHost | Secrets
   >,
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
       yield* Effect.flatMap(PluginHost, (host) => host.boot(buildTextGenerationPlugins()));
       return yield* arrange({
-        openai: yield* addFixtureAccount("openai"),
-        zai: yield* addFixtureAccount("zai"),
-        anthropic: yield* addFixtureAccount("anthropic"),
+        // Added in this order, a day apart, which is the order `automatic` walks.
+        openai: yield* addFixtureAccount("openai", null, "2026-10-01T00:00:00.000Z"),
+        zai: yield* addFixtureAccount("zai", null, "2026-10-02T00:00:00.000Z"),
+        anthropic: yield* addFixtureAccount("anthropic", null, "2026-10-03T00:00:00.000Z"),
         addRunner: (traits) => Effect.orDie(addTextGenerationRunner(traits)),
         snapshot: (account, runner, result) =>
           Effect.orDie(addSnapshot(account.id, account.defaultHarnessId, runner, result)),
@@ -67,7 +75,7 @@ const run = <A>(
 const resolve = Effect.flatMap(TextGenerationModels, (models) => models.resolve());
 
 describe("automatic", () => {
-  it("picks the first provider, in the fixed order, whose suggested model a signed-in runner offers", async () => {
+  it("picks the oldest account whose provider's suggested model its model list holds", async () => {
     const target = await run(({ openai, zai, anthropic, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const runner = yield* addRunner();
@@ -87,7 +95,74 @@ describe("automatic", () => {
     });
   });
 
-  it("takes the oldest account of the provider that is signed in, and skips an older one that is not", async () => {
+  it("picks the oldest account whatever its provider, not a fixed order of providers", async () => {
+    const target = await run(({ openai, anthropic, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const runner = yield* addRunner();
+        const oldest = yield* Effect.orDie(
+          addFixtureAccount("anthropic", "first", "2026-09-01T00:00:00.000Z"),
+        );
+        yield* snapshot(oldest, runner, probed("ok", "haiku"));
+        yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
+        yield* snapshot(anthropic, runner, probed("ok", "haiku"));
+        return yield* resolve.pipe(Effect.orDie);
+      }),
+    );
+
+    expect(target).toMatchObject({
+      _tag: "resolved",
+      providerAccountId: expect.any(String) as unknown,
+      providerAccountName: "Anthropic · first",
+    });
+  });
+
+  it("skips an older key account whose key is gone and takes the next account", async () => {
+    const target = await run(({ openai, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const runner = yield* addRunner();
+        const secrets = yield* Secrets;
+        const keyless = yield* Effect.orDie(
+          addFixtureAccount("zai", "keyless", "2026-09-01T00:00:00.000Z"),
+        );
+        yield* snapshot(keyless, runner, probed("ok", "glm-5.3-flash"));
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(
+          sql,
+          secrets.delete(buildProviderAccountOwner(keyless.id), "apiKey"),
+        ).pipe(Effect.orDie);
+        yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
+        return yield* resolve.pipe(Effect.orDie);
+      }),
+    );
+
+    expect(target).toMatchObject({ _tag: "resolved", harnessId: "codex/codex" });
+  });
+
+  it("skips an account whose harness is older than this build supports on every runner", async () => {
+    const target = await run(({ openai, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const runner = yield* addRunner();
+        yield* snapshot(openai, runner, { ...probed("ok", "gpt-6-luna"), harnessVersion: "0.0.1" });
+        return yield* resolve.pipe(Effect.orDie);
+      }),
+    );
+
+    expect(target._tag).toBe("unresolved");
+  });
+
+  it("skips an account whose harness is installed on no runner", async () => {
+    const target = await run(({ openai, addRunner, snapshot }) =>
+      Effect.gen(function* () {
+        const bare = yield* addRunner({ harnessesInstalled: false });
+        yield* snapshot(openai, bare, probed("ok", "gpt-6-luna"));
+        return yield* resolve.pipe(Effect.orDie);
+      }),
+    );
+
+    expect(target._tag).toBe("unresolved");
+  });
+
+  it("takes the oldest account that is signed in, and skips an older one that is not", async () => {
     const target = await Effect.runPromise(
       Effect.gen(function* () {
         yield* Effect.flatMap(PluginHost, (host) => host.boot(buildTextGenerationPlugins()));
@@ -118,22 +193,22 @@ describe("automatic", () => {
     });
   });
 
-  it("skips a sign-in that expired and a snapshot on a reserved runner", async () => {
-    const target = await run(({ openai, zai, anthropic, addRunner, snapshot }) =>
+  it("skips a sign-in that expired, and runs a key account on an open runner using the models a reserved runner reported", async () => {
+    const target = await run(({ openai, zai, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const open = yield* addRunner();
         const reserved = yield* addRunner({ reserved: true });
         yield* snapshot(openai, open, probed("unauthenticated", "gpt-6-luna"));
         yield* snapshot(zai, reserved, probed("ok", "glm-5.3-flash"));
-        yield* snapshot(anthropic, open, probed("ok", "haiku"));
-        return yield* resolve.pipe(Effect.orDie);
+        return [yield* resolve.pipe(Effect.orDie), open] as const;
       }),
     );
 
-    expect(target).toMatchObject({
+    expect(target[0]).toMatchObject({
       _tag: "resolved",
-      harnessId: "claude-code/claude-code",
-      model: "haiku",
+      harnessId: "pi/pi",
+      model: "glm-5.3-flash",
+      runnerIds: [target[1]],
     });
   });
 
@@ -219,11 +294,11 @@ describe("automatic", () => {
 
     expect(target).toMatchObject({
       _tag: "unresolved",
-      message: expect.stringContaining("sign in to an account that offers") as unknown,
+      message: expect.stringContaining("add an account that offers") as unknown,
     });
   });
 
-  it("reads the accounts, the snapshots and the runners once, however many accounts there are", async () => {
+  it("reads each table a fixed number of times, however many accounts there are", async () => {
     const statements: Array<string> = [];
     const countStatements: Statement.Transformer = (statement) =>
       Effect.sync(() => {
@@ -234,11 +309,11 @@ describe("automatic", () => {
     const target = await run(({ openai, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const runner = yield* addRunner();
-        // Six accounts of the first provider, none with the suggested model,
-        // so every one is looked at before the last one is taken.
+        // Five older accounts of the first provider, none with the suggested
+        // model, so every one is looked at before the last one is taken.
         for (const label of ["a", "b", "c", "d", "e"]) {
           const other = yield* Effect.orDie(
-            addFixtureAccount("openai", label, "2026-10-02T00:00:00.000Z"),
+            addFixtureAccount("openai", label, "2026-09-01T00:00:00.000Z"),
           );
           yield* snapshot(other, runner, probed("ok", "other"));
         }
@@ -257,9 +332,13 @@ describe("automatic", () => {
     });
     const reading = (table: string): number =>
       statements.filter((text) => new RegExp(`FROM ${table}\\b`).test(text)).length;
-    expect(reading("provider_accounts")).toBe(1);
-    expect(reading("capability_snapshots")).toBe(1);
-    expect(reading("runners")).toBe(1);
+    // Each count is a constant: `automatic` lists the accounts to find its
+    // candidates and `ProviderAccountRunners` lists them again; the snapshots
+    // are read for the versions, for the sign-ins and for the models; the
+    // runners for their facts and for the placement candidates.
+    expect(reading("provider_accounts")).toBe(2);
+    expect(reading("capability_snapshots")).toBe(3);
+    expect(reading("runners")).toBe(2);
   });
 
   it("is what an unset setting means", async () => {
@@ -295,8 +374,8 @@ describe("off", () => {
 });
 
 describe("a chosen account and model", () => {
-  it("is returned as it is, with no runner, when no runner offers the model", async () => {
-    const target = await run(({ zai, addRunner, snapshot }) =>
+  it("is returned as it is, on the runners that can run the account, even when no model list holds the model", async () => {
+    const [target, runnerId] = await run(({ zai, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const settings = yield* Settings;
         const runner = yield* addRunner();
@@ -307,7 +386,7 @@ describe("a chosen account and model", () => {
             model: "not-in-any-catalog",
           }),
         );
-        return yield* resolve.pipe(Effect.orDie);
+        return [yield* resolve.pipe(Effect.orDie), runner] as const;
       }),
     );
 
@@ -316,7 +395,7 @@ describe("a chosen account and model", () => {
       providerAccountName: "Z.ai",
       harnessId: "pi/pi",
       model: "not-in-any-catalog",
-      runnerIds: [],
+      runnerIds: [runnerId],
     });
   });
 
@@ -348,7 +427,7 @@ describe("a chosen account and model", () => {
     expect(targets.named).toMatchObject({ _tag: "resolved", harnessId: "codex/codex" });
   });
 
-  it("lists only the runners that can take the call and list the model", async () => {
+  it("lists the runners that can take the call and run the account, whatever their own model lists hold", async () => {
     const [target, expected] = await run(({ zai, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const settings = yield* Settings;
@@ -366,7 +445,7 @@ describe("a chosen account and model", () => {
             model: "glm-5.3-flash",
           }),
         );
-        return [yield* resolve.pipe(Effect.orDie), [offers]] as const;
+        return [yield* resolve.pipe(Effect.orDie), [offers, lacksModel]] as const;
       }),
     );
 

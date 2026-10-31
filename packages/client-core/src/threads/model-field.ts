@@ -1,8 +1,9 @@
 /**
  * Builds the model field of Settings > Threads: the models of the picked
  * account in the harness a thread runs in, read from the snapshot of the
- * runner a new thread would be placed on when there is one, and from the
- * account's first snapshot in that harness otherwise. The composer's model
+ * runner a new thread would be placed on when it is signed in, and from the
+ * most recently probed signed-in snapshot on any runner otherwise
+ * (`findModelSnapshot`). The composer's model
  * menu reads the catalog per runner in the same way (`model-menu.ts`).
  *
  * A stored model slug that the snapshot no longer offers stays in the list,
@@ -10,6 +11,7 @@
  * then does not silently disappear from the field.
  */
 import type { ProviderAccount } from "@hercule/contract";
+import { findModelSnapshot } from "./catalog";
 
 export interface ThreadModelFieldOption {
   readonly slug: string;
@@ -31,15 +33,10 @@ export const buildThreadModelField = (
   runnerId: string | null,
   current: string | undefined,
 ): ThreadModelField => {
-  const inHarness = account.snapshots.filter((each) => each.harnessId === harnessId);
-  const snapshot =
-    (runnerId === null ? undefined : inHarness.find((each) => each.runnerId === runnerId)) ??
-    inHarness[0];
-
   // A probe that is not signed in still reports a catalog (the harness returns
-  // its cached list), so having a snapshot does not mean "signed in". The model
-  // menu checks `auth.status` for the same reason.
-  if (snapshot === undefined || snapshot.auth.status !== "ok") {
+  // its cached list), so only a signed-in snapshot counts.
+  const snapshot = findModelSnapshot(account, harnessId, runnerId);
+  if (snapshot === undefined) {
     return { dimmed: "sign in on a runner first", options: [] };
   }
 

@@ -23,6 +23,7 @@ const make = Effect.gen(function* () {
           id: definition.id,
           pluginId: definition.pluginId,
           displayName: definition.displayName,
+          defaultHarnessId: definition.defaultHarnessId,
           kinds: definition.kinds,
         }));
       }),

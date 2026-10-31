@@ -40,7 +40,12 @@ describe("the Z.ai provider", () => {
     expect(kind.setup).toEqual([
       { kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] },
     ]);
+    expect(kind.keyCheck).toEqual({
+      url: "https://api.z.ai/api/coding/paas/v4/models",
+      headers: { authorization: "Bearer {apiKey}" },
+    });
     expect(kind.harnesses).toEqual(["pi/pi"]);
+    expect(definition.defaultHarnessId).toBe("pi/pi");
     // The key is a paid credential: the description tells the user where it is kept.
     expect(kind.description).toContain("Coding Plan");
   });

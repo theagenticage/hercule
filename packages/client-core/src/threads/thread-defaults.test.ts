@@ -12,13 +12,17 @@
 import { describe, expect, it } from "vitest";
 import type { Profile, ProviderAccount, Runner, SettingsState } from "@hercule/contract";
 import {
-  BARE,
+  WITH_AGENTS,
   buildProviderAccount,
   buildSnapshot,
   ANTHROPIC_IDENTITY,
+  HARNESSES,
   OPENAI_IDENTITY,
+  PROVIDERS,
   type SnapshotDraft,
 } from "../providers.testing";
+
+const CATALOGS = { providers: PROVIDERS, harnesses: HARNESSES };
 import {
   buildDraftConfig,
   computeProviderAccountDefaults,
@@ -27,7 +31,7 @@ import {
 } from "./thread-defaults";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
-  ...BARE,
+  ...WITH_AGENTS,
   ...overrides,
 });
 
@@ -70,10 +74,40 @@ const HAIKU = {
 const NO_SETTINGS: SettingsState["user"] = {};
 
 describe("findDefaultModel", () => {
-  it("returns null when no runner is given, rather than reading the first snapshot", () => {
-    const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshotOn(LOCAL.id, [SONNET])]);
+  it("reads the list of the given runner first", () => {
+    const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [
+      buildSnapshotOn(LOCAL.id, [SONNET]),
+      buildSnapshotOn(REMOTE.id, [HAIKU]),
+    ]);
 
-    expect(findDefaultModel(claude, ANTHROPIC_IDENTITY.harnessId, null)).toBeNull();
+    expect(findDefaultModel(claude, ANTHROPIC_IDENTITY.harnessId, REMOTE.id)).toBe(
+      "claude-haiku-5",
+    );
+  });
+
+  it("reads the most recently probed signed-in list when the runner has none, or none is given", () => {
+    const older = buildSnapshotOn(LOCAL.id, [SONNET]);
+    const newer = {
+      ...buildSnapshotOn(REMOTE.id, [HAIKU]),
+      probedAt: "2026-09-06T09:10:00.000Z",
+    };
+    const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [older, newer]);
+
+    expect(findDefaultModel(claude, ANTHROPIC_IDENTITY.harnessId, "r-never-probed")).toBe(
+      "claude-haiku-5",
+    );
+    expect(findDefaultModel(claude, ANTHROPIC_IDENTITY.harnessId, null)).toBe("claude-haiku-5");
+  });
+
+  it("ignores a runner's own list when it is signed out there, and returns null when no runner is signed in", () => {
+    const signedOut = buildSnapshot({
+      runnerId: LOCAL.id,
+      auth: { status: "unauthenticated" },
+      models: [SONNET],
+    });
+    const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [signedOut]);
+
+    expect(findDefaultModel(claude, ANTHROPIC_IDENTITY.harnessId, LOCAL.id)).toBeNull();
   });
 });
 
@@ -93,6 +127,7 @@ describe("computeProviderAccountDefaults", () => {
         ANTHROPIC_IDENTITY.harnessId,
         [LOCAL, REMOTE],
         LOCAL.id,
+        CATALOGS,
       ),
     ).toEqual({
       runnerId: REMOTE.id,
@@ -112,6 +147,7 @@ describe("computeProviderAccountDefaults", () => {
         ANTHROPIC_IDENTITY.harnessId,
         [LOCAL, REMOTE],
         LOCAL.id,
+        CATALOGS,
       ),
     ).toEqual({
       runnerId: LOCAL.id,
@@ -125,7 +161,13 @@ describe("computeProviderAccountDefaults", () => {
     ]);
 
     expect(
-      computeProviderAccountDefaults(claude, ANTHROPIC_IDENTITY.harnessId, [LOCAL], LOCAL.id).model,
+      computeProviderAccountDefaults(
+        claude,
+        ANTHROPIC_IDENTITY.harnessId,
+        [LOCAL],
+        LOCAL.id,
+        CATALOGS,
+      ).model,
     ).toBe("claude-opus-5");
   });
 
@@ -135,7 +177,13 @@ describe("computeProviderAccountDefaults", () => {
     ]);
 
     expect(
-      computeProviderAccountDefaults(claude, ANTHROPIC_IDENTITY.harnessId, [LOCAL], LOCAL.id),
+      computeProviderAccountDefaults(
+        claude,
+        ANTHROPIC_IDENTITY.harnessId,
+        [LOCAL],
+        LOCAL.id,
+        CATALOGS,
+      ),
     ).toEqual({
       runnerId: null,
       model: null,
@@ -157,6 +205,7 @@ describe("computeThreadDefaults", () => {
         [LOCAL],
         [UNRESTRICTED, WORKER],
         LOCAL.id,
+        CATALOGS,
       ),
     ).toEqual({
       providerAccountId: claude.id,
@@ -178,7 +227,14 @@ describe("computeThreadDefaults", () => {
     };
 
     expect(
-      computeThreadDefaults(stored, [claude, codex], [LOCAL], [UNRESTRICTED, WORKER], LOCAL.id),
+      computeThreadDefaults(
+        stored,
+        [claude, codex],
+        [LOCAL],
+        [UNRESTRICTED, WORKER],
+        LOCAL.id,
+        CATALOGS,
+      ),
     ).toEqual({
       providerAccountId: codex.id,
       harnessId: OPENAI_IDENTITY.harnessId,
@@ -193,7 +249,7 @@ describe("computeThreadDefaults", () => {
     const stale: SettingsState["user"] = { "thread.providerAccountId": "account-that-went-away" };
 
     expect(
-      computeThreadDefaults(stale, [claude, codex], [LOCAL], [UNRESTRICTED], LOCAL.id)
+      computeThreadDefaults(stale, [claude, codex], [LOCAL], [UNRESTRICTED], LOCAL.id, CATALOGS)
         .providerAccountId,
     ).toBe(claude.id);
   });
@@ -204,9 +260,9 @@ describe("computeThreadDefaults", () => {
       "thread.harnessId": "pi/pi",
     };
 
-    expect(computeThreadDefaults(stale, [claude], [LOCAL], [UNRESTRICTED], LOCAL.id)).toMatchObject(
-      { providerAccountId: claude.id, harnessId: null },
-    );
+    expect(
+      computeThreadDefaults(stale, [claude], [LOCAL], [UNRESTRICTED], LOCAL.id, CATALOGS),
+    ).toMatchObject({ providerAccountId: claude.id, harnessId: null });
   });
 
   it("drops the stored model when the stored account is gone, and uses the fallback account's default model", () => {
@@ -215,9 +271,9 @@ describe("computeThreadDefaults", () => {
       "thread.model": "model-of-the-deleted-account",
     };
 
-    expect(computeThreadDefaults(stale, [claude], [LOCAL], [UNRESTRICTED], LOCAL.id)).toMatchObject(
-      { providerAccountId: claude.id, model: "claude-sonnet-5" },
-    );
+    expect(
+      computeThreadDefaults(stale, [claude], [LOCAL], [UNRESTRICTED], LOCAL.id, CATALOGS),
+    ).toMatchObject({ providerAccountId: claude.id, model: "claude-sonnet-5" });
   });
 
   it("reads the model in the stored harness", () => {
@@ -238,26 +294,26 @@ describe("computeThreadDefaults", () => {
     };
 
     expect(
-      computeThreadDefaults(stored, [withPi], [LOCAL], [UNRESTRICTED], LOCAL.id),
+      computeThreadDefaults(stored, [withPi], [LOCAL], [UNRESTRICTED], LOCAL.id, CATALOGS),
     ).toMatchObject({ harnessId: "pi/pi", model: "glm-5.3" });
   });
 
   it("keeps a stored model the resolved runner does not offer, rather than silently replacing it", () => {
     const stored: SettingsState["user"] = { "thread.model": "claude-haiku-5" };
 
-    expect(computeThreadDefaults(stored, [claude], [LOCAL], [UNRESTRICTED], LOCAL.id).model).toBe(
-      "claude-haiku-5",
-    );
+    expect(
+      computeThreadDefaults(stored, [claude], [LOCAL], [UNRESTRICTED], LOCAL.id, CATALOGS).model,
+    ).toBe("claude-haiku-5");
   });
 
   it("takes the first profile when none is named unrestricted", () => {
     expect(
-      computeThreadDefaults(NO_SETTINGS, [claude], [LOCAL], [WORKER], LOCAL.id).profileId,
+      computeThreadDefaults(NO_SETTINGS, [claude], [LOCAL], [WORKER], LOCAL.id, CATALOGS).profileId,
     ).toBe(WORKER.id);
   });
 
   it("returns null for every field when there is nothing to pick", () => {
-    expect(computeThreadDefaults(NO_SETTINGS, [], [], [], null)).toEqual({
+    expect(computeThreadDefaults(NO_SETTINGS, [], [], [], null, CATALOGS)).toEqual({
       providerAccountId: null,
       harnessId: null,
       model: null,
@@ -275,6 +331,7 @@ describe("buildDraftConfig", () => {
     runners: [LOCAL],
     profiles: [UNRESTRICTED],
     thisMacRunnerId: LOCAL.id,
+    catalogs: CATALOGS,
   };
 
   it("starts a draft in its project from the defaults, joining no workspace, with the stored workspace setting", () => {

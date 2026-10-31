@@ -374,6 +374,7 @@ export const resolveSessionContext = (
           // the adapter puts the credential in the environment of the harness
           // process only.
           modelArgument: frame.harnessAccount.modelArgument,
+          credentialVariables: frame.harnessAccount.credentialVariables,
           ...(frame.harnessAccount.credential === undefined
             ? {}
             : { credential: frame.harnessAccount.credential }),

@@ -299,27 +299,64 @@ export async function waitForEnrolledRunner(options: {
 export const CLAUDE_CODE = "claude-code/claude-code";
 
 /**
- * Returns the Provider Account whose default harness is `harnessId`, which a
- * fresh controller creates for itself (one each for Claude Code, Codex and pi).
+ * The Provider and account kind that `ensureAccountOfHarness` creates for each
+ * harness. Claude Code and Codex get a subscription that signs in on each
+ * machine, which is created without credentials. pi runs on a Z.ai key, which
+ * the controller checks with Z.ai, so it needs `ZAI_API_KEY` and a network.
  */
-export async function readAccountOfHarness(options: {
+const ACCOUNT_KIND_OF_HARNESS: Readonly<
+  Record<string, { readonly providerId: string; readonly kind: string }>
+> = {
+  "claude-code/claude-code": {
+    providerId: "anthropic/anthropic",
+    kind: "subscription-per-machine",
+  },
+  "codex/codex": { providerId: "openai/openai", kind: "subscription-per-machine" },
+  "pi/pi": { providerId: "zai/zai", kind: "api-key" },
+};
+
+/**
+ * Returns the Provider Account whose default harness is `harnessId`. A fresh
+ * controller has no account, so when there is none this creates one with
+ * `providerAccount.create`, over HTTP so a key is never on a command line.
+ */
+export async function ensureAccountOfHarness(options: {
   readonly url: string;
   readonly apiKey: string;
   readonly harnessId: string;
 }): Promise<ProviderAccount> {
-  const found = (await listProviderAccounts(options)).find(
+  const existing = (await listProviderAccounts(options)).find(
     (one) => one.defaultHarnessId === options.harnessId,
   );
-  if (found === undefined) throw new Error(`no ${options.harnessId} Provider Account was seeded`);
-  return found;
+  if (existing !== undefined) return existing;
+  const made = ACCOUNT_KIND_OF_HARNESS[options.harnessId];
+  if (made === undefined) {
+    throw new Error(`the e2e harness knows no account kind to create for ${options.harnessId}`);
+  }
+  if (made.kind === "api-key" && ZAI_API_KEY === undefined) {
+    throw new Error(`a ${options.harnessId} account needs ZAI_API_KEY on the environment`);
+  }
+  const response = await fetch(`${options.url}/api/v1/provider-accounts`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      ...made,
+      ...(made.kind === "api-key" ? { credentials: { apiKey: ZAI_API_KEY } } : {}),
+    }),
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`POST /api/v1/provider-accounts returned ${String(response.status)}: ${body}`);
+  }
+  return JSON.parse(body) as ProviderAccount;
 }
 
-/** Returns the Claude Code Provider Account the controller creates for itself. */
-export function readClaudeAccount(options: {
+/** Returns the Claude Code Provider Account, creating it when the controller has none. */
+export function ensureClaudeAccount(options: {
   readonly url: string;
   readonly apiKey: string;
 }): Promise<ProviderAccount> {
-  return readAccountOfHarness({ ...options, harnessId: CLAUDE_CODE });
+  return ensureAccountOfHarness({ ...options, harnessId: CLAUDE_CODE });
 }
 
 /**
@@ -376,7 +413,7 @@ export interface LoggedInAccount {
 
 /**
  * Prepares everything a live session needs before it can be spawned: the
- * enrolled runner, the Claude Code account, the copied credential when the
+ * enrolled runner, the Claude Code account (created when there is none), the copied credential when the
  * caller named one, and a probe that confirms the login works.
  */
 export async function prepareLoggedInAccount(options: {
@@ -386,7 +423,7 @@ export async function prepareLoggedInAccount(options: {
   readonly apiKey: string;
 }): Promise<LoggedInAccount> {
   const runnerId = await waitForEnrolledRunner(options);
-  const account = await readClaudeAccount(options);
+  const account = await ensureClaudeAccount(options);
   if (LENT_CREDENTIALS !== undefined) lendCredential(options.home, account.id, CLAUDE_CODE);
   const snapshot = await probeUntilLoggedIn({
     ...options,
@@ -803,7 +840,7 @@ export async function prepareHarness(
   },
 ): Promise<PreparedHarness> {
   const { home, binary, url, apiKey, runnerId, runnerHome } = options;
-  const account = await readAccountOfHarness({ url, apiKey, harnessId: harness.harnessId });
+  const account = await ensureAccountOfHarness({ url, apiKey, harnessId: harness.harnessId });
   await harness.lendLogin({ runnerHome, url, apiKey }, account.id);
   const snapshot = await probeUntilLoggedIn({
     home,

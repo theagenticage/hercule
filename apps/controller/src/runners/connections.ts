@@ -216,7 +216,13 @@ export type FleetTraffic =
       readonly runnerId: string;
       readonly ended: LoginEnded;
     }
-  | { readonly _tag: "placementsChanged"; readonly runnerId: string };
+  | { readonly _tag: "placementsChanged"; readonly runnerId: string }
+  /**
+   * A facts report changed which harnesses the runner has: a binary appeared,
+   * disappeared or moved, or the runner build's adapter list changed. The
+   * controller daemon probes the runner's accounts again.
+   */
+  | { readonly _tag: "harnessesChanged"; readonly runnerId: string };
 
 /** A runner's answer to a `Request`, matched to it by the id `readAnswerKey` reads. */
 export type Answer =
@@ -247,6 +253,26 @@ const readAnswerKey = (frame: Request | Answer): string =>
  * work, because a runner could send an answer with that word as its id.
  */
 const FACTS_KEY = "";
+
+/**
+ * Returns whether the two facts differ in the harnesses they list: any
+ * harness binary's presence or path, or the adapter list. Facts that differ in
+ * anything else (memory, toolchains) return false. A runner without earlier
+ * facts counts as changed.
+ */
+const hasHarnessSetChanged = (before: RunnerFacts | null, after: RunnerFacts): boolean => {
+  if (before === null) return true;
+  const describeBinaries = (facts: RunnerFacts): string =>
+    JSON.stringify(
+      facts.harnesses
+        .map((binary) => [binary.name, binary.present, binary.path ?? null])
+        .toSorted((left, right) => String(left[0]).localeCompare(String(right[0]))),
+    );
+  return (
+    describeBinaries(before) !== describeBinaries(after) ||
+    JSON.stringify(before.adapters.toSorted()) !== JSON.stringify(after.adapters.toSorted())
+  );
+};
 
 /**
  * How many recent arrivals a late subscriber still receives. One is enough for
@@ -884,7 +910,9 @@ const make = Effect.gen(function* () {
     /**
      * Stores a runner's facts report and wakes the callers of
      * `refreshedFacts`. A report from a replaced connection is ignored, so an
-     * old connection cannot overwrite the current one's facts.
+     * old connection cannot overwrite the current one's facts. A report that
+     * changes which harnesses the runner has also publishes `harnessesChanged`;
+     * one that changes nothing about harnesses publishes nothing.
      *
      * Skipped while a promotion freezes the controller, and once it is
      * sealed, and then wakes nobody: a caller of `refreshedFacts` gets
@@ -903,20 +931,26 @@ const make = Effect.gen(function* () {
           const recorded = yield* withTransaction(
             sql,
             Effect.gen(function* () {
-              if (reachable.get(id)?.connection !== connection) return false;
-              yield* runners.recordFacts(id, facts, yield* nowIso);
+              if (reachable.get(id)?.connection !== connection) return undefined;
+              const previous = yield* runners.recordFacts(id, facts, yield* nowIso);
               // No audit entry: what a runner has installed is not an event anyone
               // reads back, so clients watching the fleet are notified instead.
               yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
-              return true;
+              return { harnessesChanged: hasHarnessSetChanged(previous, facts) };
             }),
           );
           // After the commit, so a woken caller reads the new facts rather than
           // the old ones. The connection is checked again in case the runner
           // reconnected in between: callers on the new connection are waiting
           // for its own report, which has not arrived yet.
-          const held = recorded ? reachable.get(id) : undefined;
+          const held = recorded === undefined ? undefined : reachable.get(id);
           if (held?.connection === connection) wakeWaiters(held, FACTS_KEY, FACTS_REPORTED);
+          // Published after the commit, so the sweep it starts reads the new
+          // facts. The sweep is the controller daemon's: this domain sends no
+          // probes.
+          if (recorded?.harnessesChanged === true) {
+            yield* publish(id, connection, { _tag: "harnessesChanged", runnerId: id });
+          }
         }),
       ),
 

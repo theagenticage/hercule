@@ -26,7 +26,12 @@ import type { SqlError } from "effect/sql/SqlError";
 import { ConnectionTypes } from "../../connections";
 import { withTransaction } from "../../db";
 import { PromotionState } from "../../promotion";
-import { HarnessAccounts } from "../../provider-accounts";
+import { createInvalidStateError } from "@hercule/contract";
+import {
+  buildRunnerRefusal,
+  HarnessAccounts,
+  ProviderAccountRunners,
+} from "../../provider-accounts";
 import { Secrets } from "../../secrets";
 import { LocalRunnerId, RunnerConnections, runnerRepository } from "../../runners";
 import { SessionService, type StartRequest } from "../../sessions";
@@ -41,6 +46,7 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const accounts = yield* githubAccounts;
   const harnessAccounts = yield* HarnessAccounts;
+  const accountRunners = yield* ProviderAccountRunners;
   const localRunnerId = yield* LocalRunnerId;
   const promotion = yield* PromotionState;
   // Each start waits for the runner's answer on a fiber of its own, owned by
@@ -143,6 +149,15 @@ const make = Effect.gen(function* () {
               return yield* sessions.claimStarts(runnerId, room, {
                 readGithubAccount: accounts.readGithubAccount,
                 readGitIdentity: accounts.readGitIdentity,
+                requireAccountRunnable: (providerAccountId, harnessId) =>
+                  Effect.gen(function* () {
+                    const available = yield* accountRunners.list(providerAccountId, harnessId);
+                    if (!available.runnerIds.includes(runnerId)) {
+                      return yield* Effect.fail(
+                        createInvalidStateError(buildRunnerRefusal(available)),
+                      );
+                    }
+                  }),
                 prepareHarnessAccount: harnessAccounts.prepare,
                 buildCoordination: (sessionId) =>
                   Effect.provideService(
@@ -183,6 +198,7 @@ export const DispatchLayer: Layer.Layer<
   | RunnerConnections
   | Secrets
   | HarnessAccounts
+  | ProviderAccountRunners
   | LocalRunnerId
   | PromotionState
 > = Layer.effect(Dispatch)(make);

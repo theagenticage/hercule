@@ -5,7 +5,7 @@
  *
  * This catches migrations that are correct on an empty database but fail on
  * real data. The fixture is one representative conversation of several owner
- * turns, one named Provider Instance, one session with a few persisted
+ * turns, the three Provider Accounts the edge boot seeds, one session with a few persisted
  * turns and the audit entry of its creation, the timezone first-run setup
  * persisted, a project name and a repository remote, two user settings that
  * migration 60 deletes, the shipped permission profiles, which migration 65
@@ -40,30 +40,29 @@
  * transcript search. The runner row is written beside the real runner because
  * that one reports fresh facts as soon as it reconnects.
  *
- * Migration 95 turns each Provider Instance into a Provider Account (spec 04
- * "Provider account rows", spec 06 section 19). The fixture holds the three
- * instances the edge boot seeds (`Claude Code`, `Codex` and `pi`) and one
- * Claude Code instance named `work`, so the label rule has a typed name to
- * keep. pi has a real encrypted Z.ai key, set through the edge binary's secret
- * API. Besides the session of the conversation, the database holds a session
- * on Codex without a native session id, an exited Claude Code thread with a
- * native session id, an Agent on Codex, an assistant on the oldest instance,
- * a `textGeneration.model` choice that names pi, the user's `thread.instanceId`,
- * and the snapshots that two runners reported, which decide the identity of
- * each account. After the upgrade the test checks:
+ * The edge binary already ran migration 95, so its database holds Provider
+ * Accounts (spec 04 "Provider account rows"). The edge boot seeds one account
+ * per vendor (Anthropic, OpenAI and Z.ai) and has no way to add another, so
+ * the fixture labels the Anthropic account `work`, gives it the person the
+ * stand-in `claude` also reports, and stores a real encrypted Z.ai key on the
+ * Z.ai account through `provider-account update`. Besides the session of the
+ * conversation, the database holds a session on OpenAI without a native
+ * session id, an exited Anthropic thread with a native session id, an Agent on
+ * OpenAI, the assistant on the oldest account, a `textGeneration.model` choice
+ * that names Z.ai, the user's `thread.providerAccountId`, and the snapshots
+ * that two runners reported. After the upgrade the test checks:
  *
- * - the accounts read as Anthropic, Anthropic · work, OpenAI and Z.ai, with
- *   the ids of their instances, the identity the snapshots agreed on, and no
- *   identity where they disagreed;
+ * - the accounts are exactly the ones the edge binary had (the upgraded
+ *   binary seeds none), with the same label, identity, kind and default
+ *   harness, the snapshots of the runner that never reconnects, and
+ *   `expiresAt: null`, which migration 96 adds;
  * - sessions read back with an account and a harness; the Agent, the assistant,
- *   `textGeneration.model` and the thread default read back with an account and
- *   no harness, which means the account's default;
- * - the Z.ai key reaches the runner decrypted, in the account's original
- *   home: a stand-in `pi` on the controller's PATH records the key and the
- *   home it was run in when the account is probed;
- * - the exited Claude Code thread resumes in its original home
- *   (`providers/<instance id>`) with its native session id: a stand-in
- *   `claude` records its config directory and arguments.
+ *   `textGeneration.model` and the thread default read back as they were;
+ * - the Z.ai key reaches the runner decrypted, in the account's home: a
+ *   stand-in `pi` on the controller's PATH records the key and the home it was
+ *   run in when the account is probed;
+ * - the exited Anthropic thread resumes in its home with its native session
+ *   id: a stand-in `claude` records its config directory and arguments.
  *
  * It is not a matrix of session states or harness behaviour.
  *
@@ -115,8 +114,8 @@ const TURNS = [
   "What should we do next?",
 ] as const;
 
-/** The name of the Claude Code instance the fixture adds. A typed name becomes the account's label. */
-const PROVIDER_NAME = "work";
+/** The label the fixture gives the Anthropic account. */
+const ACCOUNT_LABEL = "work";
 const PROJECT_NAME = "test-project";
 const REPO_REMOTE = "https://github.com/example/repo";
 
@@ -382,15 +381,8 @@ interface SeededInput {
   readonly attachments: ReadonlyArray<{ readonly id: string }>;
 }
 
-/** A Provider Instance as the edge binary prints it. */
-interface EdgeInstance {
-  readonly id: string;
-  readonly harnessId: string;
-  readonly name: string;
-}
-
-/** A Provider Account as the upgraded binary prints it. */
-interface UpgradedAccount {
+/** A Provider Account as either binary prints it. `expiresAt` exists from migration 96 on. */
+interface ListedAccount {
   readonly id: string;
   readonly providerId: string;
   readonly kind: string;
@@ -398,6 +390,7 @@ interface UpgradedAccount {
   readonly identity: string | null;
   readonly planLabel: string | null;
   readonly defaultHarnessId: string;
+  readonly expiresAt?: string | null;
   readonly snapshots: ReadonlyArray<{
     readonly runnerId: string;
     readonly harnessId: string;
@@ -405,22 +398,15 @@ interface UpgradedAccount {
   }>;
 }
 
-/** A Provider as the upgraded binary prints it. */
-interface UpgradedProvider {
-  readonly id: string;
-  readonly displayName: string;
-}
-
 /** An Agent or assistant as either binary prints it. */
 interface SeededAgent {
   readonly id: string;
   readonly name: string;
-  readonly instanceId?: string;
-  readonly providerAccountId?: string;
-  readonly harnessId?: string | null;
+  readonly providerAccountId: string;
+  readonly harnessId: string | null;
 }
 
-/** The harness ids of the three instances the edge boot seeds. */
+/** The harness ids of the three accounts the edge boot seeds. */
 const QUALIFIED_HARNESS_IDS = ["claude-code/claude-code", "codex/codex", "pi/pi"] as const;
 
 /** The native session id in the seeded session's `session.started` event. */
@@ -595,6 +581,16 @@ function uuidBlob(id: string): Buffer {
 }
 
 /**
+ * Returns the folders, under the runner's storage directory, of the home a
+ * seeded account uses for one harness (spec 06 section 9.1). Only an account
+ * made by migration 95 keeps an older folder; the accounts of the edge boot do
+ * not.
+ */
+function accountHome(providerAccountId: string, harnessId: string): ReadonlyArray<string> {
+  return ["providers", "homes", providerAccountId, ...harnessId.split("/")];
+}
+
+/**
  * Writes one exited session, a few transcript turns with the
  * `SEEDED_TOOL_CALLS` tool calls among their items, and the audit entry of
  * the session's creation by `SESSION_CREATOR` into the database the edge
@@ -605,14 +601,15 @@ function persistRepresentativeSession(options: {
   readonly home: string;
   readonly conversationId: string;
   readonly agentId: string;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
+  readonly harnessId: string;
   readonly runnerId: string;
   readonly permissionProfileId: string;
 }): string {
   const sessionId = Bun.randomUUIDv7();
   const at = new Date().toISOString();
   const spec = JSON.stringify({
-    instanceId: options.instanceId,
+    providerAccountId: options.providerAccountId,
     workspaceId: null,
     modelSelection: { model: "sonnet", options: {} },
     accessMode: "auto",
@@ -700,10 +697,10 @@ function persistRepresentativeSession(options: {
       .query(
         `INSERT INTO sessions (
            id, title, permission_profile_id, agent_id, conversation_id,
-           instance_id, runner_id, requested_access_mode, access_mode,
+           provider_account_id, harness_id, runner_id, requested_access_mode, access_mode,
            spec, model_selection, status, created_at, started_at, exited_at,
            last_activity_at, native_session_id, exit_reason
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', 'auto', ?, ?, 'exited', ?, ?, ?, ?, ?, 'stopped')`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'auto', 'auto', ?, ?, 'exited', ?, ?, ?, ?, ?, 'stopped')`,
       )
       .run(
         uuidBlob(sessionId),
@@ -711,7 +708,8 @@ function persistRepresentativeSession(options: {
         uuidBlob(options.permissionProfileId),
         uuidBlob(options.agentId),
         uuidBlob(options.conversationId),
-        uuidBlob(options.instanceId),
+        uuidBlob(options.providerAccountId),
+        options.harnessId,
         uuidBlob(options.runnerId),
         spec,
         JSON.stringify({ model: "sonnet", options: {} }),
@@ -752,7 +750,7 @@ function persistRepresentativeSession(options: {
 /** The Z.ai key the fixture stores as pi's `zaiApiKey`. The upgrade must hand it to a runner unchanged. */
 const ZAI_API_KEY = "zai-upgrade-fixture-key-7d41";
 
-/** The person, and the plan, that every snapshot of the `work` instance reports. */
+/** The person, and the plan, that the labelled Anthropic account is signed in as. */
 const WORK_IDENTITY = { identity: "ada@example.com", planLabel: "Max" } as const;
 
 /** The native session id of the exited Claude Code thread that the upgraded binary resumes. */
@@ -760,14 +758,15 @@ const RESUMABLE_NATIVE_SESSION_ID = "upgrade-fixture-resumable";
 
 /**
  * Writes one exited Thread (a session with no Agent and no conversation) on
- * the Provider Instance `instanceId` into the database the edge binary
- * created, with the `session.started` and `session.exited` events a real one
+ * the Provider Account `providerAccountId`, in `harnessId`, into the database
+ * the edge binary created, with the `session.started` and `session.exited` events a real one
  * leaves. A session with no `nativeSessionId` never reported a harness-native
  * session, so it cannot be resumed. Returns the new session's id.
  */
 function persistThreadSession(options: {
   readonly home: string;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
+  readonly harnessId: string;
   readonly runnerId: string;
   readonly permissionProfileId: string;
   readonly title: string;
@@ -776,7 +775,7 @@ function persistThreadSession(options: {
   const sessionId = Bun.randomUUIDv7();
   const at = new Date().toISOString();
   const spec = JSON.stringify({
-    instanceId: options.instanceId,
+    providerAccountId: options.providerAccountId,
     workspaceId: null,
     modelSelection: { model: "sonnet", options: {} },
     accessMode: "auto",
@@ -799,16 +798,17 @@ function persistThreadSession(options: {
     database
       .query(
         `INSERT INTO sessions (
-           id, title, permission_profile_id, instance_id, runner_id,
+           id, title, permission_profile_id, provider_account_id, harness_id, runner_id,
            requested_access_mode, access_mode, spec, model_selection, status,
            created_at, started_at, exited_at, last_activity_at, native_session_id, exit_reason
-         ) VALUES (?, ?, ?, ?, ?, 'auto', 'auto', ?, ?, 'exited', ?, ?, ?, ?, ?, 'stopped')`,
+         ) VALUES (?, ?, ?, ?, ?, ?, 'auto', 'auto', ?, ?, 'exited', ?, ?, ?, ?, ?, 'stopped')`,
       )
       .run(
         uuidBlob(sessionId),
         options.title,
         uuidBlob(options.permissionProfileId),
-        uuidBlob(options.instanceId),
+        uuidBlob(options.providerAccountId),
+        options.harnessId,
         uuidBlob(options.runnerId),
         spec,
         JSON.stringify({ model: "sonnet", options: {} }),
@@ -831,9 +831,10 @@ function persistThreadSession(options: {
   return sessionId;
 }
 
-/** What one runner reported for one instance: who was signed in, or `null` when no one. */
+/** What one runner reported for one account in one harness: who was signed in, or `null` when no one. */
 interface SeededSnapshot {
-  readonly instanceId: string;
+  readonly providerAccountId: string;
+  readonly harnessId: string;
   readonly runnerId: string;
   readonly person: { readonly identity: string; readonly planLabel: string | null } | null;
   readonly harnessVersion: string | null;
@@ -843,21 +844,22 @@ interface SeededSnapshot {
 
 /**
  * Writes the snapshots the runners reported into the database the edge binary
- * created. A snapshot the edge binary already stored for the same instance and
- * runner is replaced, because the pair is the table's key.
+ * created. A snapshot the edge binary already stored for the same account,
+ * harness and runner is replaced, because the three are the table's key.
  */
 function persistSnapshots(home: string, snapshots: ReadonlyArray<SeededSnapshot>): void {
   const database = new Database(join(home, "data", "hercule.db"));
   try {
     const insert = database.query(
       `INSERT OR REPLACE INTO capability_snapshots
-         (instance_id, runner_id, probed_at, harness_version, auth_status, auth_identity,
+         (provider_account_id, harness_id, runner_id, probed_at, harness_version, auth_status, auth_identity,
           auth_plan_label, auth_backend, auth_message, models)
-       VALUES (?, ?, ?, ?, 'ok', ?, ?, NULL, NULL, '[]')`,
+       VALUES (?, ?, ?, ?, ?, 'ok', ?, ?, NULL, NULL, '[]')`,
     );
     for (const snapshot of snapshots) {
       insert.run(
-        uuidBlob(snapshot.instanceId),
+        uuidBlob(snapshot.providerAccountId),
+        snapshot.harnessId,
         uuidBlob(snapshot.runnerId),
         new Date(Date.now() - snapshot.minutesAgo * 60_000).toISOString(),
         snapshot.harnessVersion,
@@ -865,6 +867,25 @@ function persistSnapshots(home: string, snapshots: ReadonlyArray<SeededSnapshot>
         snapshot.person?.planLabel ?? null,
       );
     }
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Stores who is signed in on an account, as a probe that found one signed-in
+ * person would have, into the database the edge binary created.
+ */
+function persistAccountIdentity(
+  home: string,
+  providerAccountId: string,
+  person: typeof WORK_IDENTITY,
+): void {
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    database
+      .query("UPDATE provider_accounts SET identity = ?, plan_label = ? WHERE id = ?")
+      .run(person.identity, person.planLabel, uuidBlob(providerAccountId));
   } finally {
     database.close();
   }
@@ -1311,57 +1332,39 @@ describe("upgrading from the previous edge release", () => {
 
       const runnerId = await waitForEnrolledRunner(edge);
 
-      const createdProvider = expectJson<EdgeInstance>(
-        await runCli(
-          [
-            "provider",
-            "create",
-            "--harness",
-            "claude-code/claude-code",
-            "--name",
-            PROVIDER_NAME,
-            "--json",
-          ],
-          { ...edge, stdin: "{}" },
-        ),
+      const edgeAccounts = readListedItems<ListedAccount>(
+        await runCli(["provider-account", "list", "--json"], edge),
       );
-      expect(createdProvider.harnessId).toBe("claude-code/claude-code");
-      expect(createdProvider.name).toBe(PROVIDER_NAME);
-
-      const edgeInstances = readListedItems<EdgeInstance>(
-        await runCli(["provider", "list", "--json"], edge),
-      );
-      // The edge boot seeds one instance per harness, beside the one created here.
-      expect(new Set(edgeInstances.map((instance) => instance.harnessId))).toEqual(
+      // The edge boot seeds one account per vendor and offers no way to add one.
+      expect(new Set(edgeAccounts.map((account) => account.defaultHarnessId))).toEqual(
         new Set(QUALIFIED_HARNESS_IDS),
       );
-      expect(edgeInstances.some((row) => row.id === createdProvider.id)).toBe(true);
-      const findSeededInstance = (harnessId: string, name: string): EdgeInstance => {
-        const found = edgeInstances.find(
-          (instance) => instance.harnessId === harnessId && instance.name === name,
-        );
-        if (found === undefined) throw new Error(`the edge boot seeded no ${name} instance`);
+      const findSeededAccount = (providerId: string): ListedAccount => {
+        const found = edgeAccounts.find((account) => account.providerId === providerId);
+        if (found === undefined) throw new Error(`the edge boot seeded no ${providerId} account`);
         return found;
       };
-      const claudeInstance = findSeededInstance("claude-code/claude-code", "Claude Code");
-      const codexInstance = findSeededInstance("codex/codex", "Codex");
-      const piInstance = findSeededInstance("pi/pi", "pi");
+      const claudeAccount = findSeededAccount("anthropic/anthropic");
+      const codexAccount = findSeededAccount("openai/openai");
+      const piAccount = findSeededAccount("zai/zai");
 
-      // The Z.ai key is stored the way the edge binary stores any secret field
-      // of an instance: encrypted under the Master Key, owned by the instance.
-      // Over HTTP, so the key is never on a command line.
-      const secretResponse = await fetch(
-        `${controller.url}/api/v1/secrets/provider-instance/${piInstance.id}/zaiApiKey`,
-        {
-          method: "PUT",
-          headers: {
-            authorization: `Bearer ${readApiKey(home)}`,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ value: ZAI_API_KEY }),
-        },
+      // The label is the one thing a user changes on the Anthropic account here.
+      const labelled = expectJson<ListedAccount>(
+        await runCli(
+          ["provider-account", "update", claudeAccount.id, "--label", ACCOUNT_LABEL, "--json"],
+          edge,
+        ),
       );
-      expect(secretResponse.status, await secretResponse.text()).toBeLessThan(300);
+      expect(labelled.label).toBe(ACCOUNT_LABEL);
+
+      // The Z.ai key is stored the way the edge binary stores any credential
+      // of an account: encrypted under the Master Key, owned by the account.
+      // On stdin, so the key is never on a command line.
+      const keyStored = await runCli(
+        ["provider-account", "update", piAccount.id, "--credentials-stdin", "--json"],
+        { ...edge, stdin: JSON.stringify({ apiKey: ZAI_API_KEY }) },
+      );
+      expect(keyStored.code, `${keyStored.stdout}\n${keyStored.stderr}`).toBe(0);
 
       const profiles = readListedItems<SeededProfile>(
         await runCli(["profile", "list", "--json"], edge),
@@ -1399,11 +1402,12 @@ describe("upgrading from the previous edge release", () => {
         ),
       );
       expect(resource.remote).toBe(REPO_REMOTE);
-      const assistant = expectJson<{ id: string; mainConversationId: string; instanceId: string }>(
+      const assistant = expectJson<SeededAgent & { mainConversationId: string }>(
         await runCli(["assistant", "create", "--name", "upgrade-assistant", "--json"], edge),
       );
-      // Left to choose, the assistant takes the oldest instance.
-      expect(assistant.instanceId).toBe(claudeInstance.id);
+      // Left to choose, the assistant takes the oldest account.
+      expect(assistant.providerAccountId).toBe(claudeAccount.id);
+      expect(assistant.harnessId).toBeNull();
 
       const agent = expectJson<SeededAgent>(
         await runCli(
@@ -1412,8 +1416,8 @@ describe("upgrading from the previous edge release", () => {
             "create",
             "--name",
             "upgrade-agent",
-            "--instance",
-            codexInstance.id,
+            "--account",
+            codexAccount.id,
             "--profile",
             unrestricted.id,
             "--json",
@@ -1421,11 +1425,11 @@ describe("upgrading from the previous edge release", () => {
           { ...edge, stdin: "You review the upgrade fixture." },
         ),
       );
-      expect(agent.instanceId).toBe(codexInstance.id);
+      expect(agent.providerAccountId).toBe(codexAccount.id);
 
-      // An explicit Text Generation model on pi, and the thread default on the
-      // `work` instance.
-      const textGenerationModel = { instanceId: piInstance.id, model: "glm-5.3-flash" };
+      // An explicit Text Generation model on Z.ai, and the thread default on
+      // the labelled Anthropic account.
+      const textGenerationModel = { providerAccountId: piAccount.id, model: "glm-5.3-flash" };
       expectJson(
         await runCli(
           [
@@ -1434,7 +1438,7 @@ describe("upgrading from the previous edge release", () => {
             "--controller",
             JSON.stringify({ "textGeneration.model": textGenerationModel }),
             "--user",
-            JSON.stringify({ "thread.instanceId": createdProvider.id }),
+            JSON.stringify({ "thread.providerAccountId": claudeAccount.id }),
             "--json",
           ],
           edge,
@@ -1549,7 +1553,8 @@ describe("upgrading from the previous edge release", () => {
         home,
         conversationId: assistant.mainConversationId,
         agentId: assistant.id,
-        instanceId: createdProvider.id,
+        providerAccountId: claudeAccount.id,
+        harnessId: "claude-code/claude-code",
         runnerId,
         permissionProfileId: unrestricted.id,
       });
@@ -1557,7 +1562,8 @@ describe("upgrading from the previous edge release", () => {
       // Claude Code thread that did, which the upgraded binary resumes.
       const codexSessionId = persistThreadSession({
         home,
-        instanceId: codexInstance.id,
+        providerAccountId: codexAccount.id,
+        harnessId: "codex/codex",
         runnerId,
         permissionProfileId: unrestricted.id,
         title: "Codex thread without a native session",
@@ -1565,7 +1571,8 @@ describe("upgrading from the previous edge release", () => {
       });
       const resumableSessionId = persistThreadSession({
         home,
-        instanceId: createdProvider.id,
+        providerAccountId: claudeAccount.id,
+        harnessId: "claude-code/claude-code",
         runnerId,
         permissionProfileId: unrestricted.id,
         title: "Claude Code thread to resume",
@@ -1604,31 +1611,34 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
-      const edgeSession = expectJson<SeededSession & { readonly instanceId: string }>(
+      const edgeSession = expectJson<UpgradedSession>(
         await runCli(["session", "read", sessionId, "--json"], edge),
       );
-      expect(edgeSession.instanceId).toBe(createdProvider.id);
+      expect(edgeSession).toMatchObject({
+        providerAccountId: claudeAccount.id,
+        harnessId: "claude-code/claude-code",
+      });
       const seededSession = summarizeSession(edgeSession);
       expect(seededSession).toMatchObject({
         id: sessionId,
         conversationId: assistant.mainConversationId,
         agentId: assistant.id,
       });
-      for (const [id, instanceId] of [
-        [codexSessionId, codexInstance.id],
-        [resumableSessionId, createdProvider.id],
+      for (const [id, providerAccountId, harnessId] of [
+        [codexSessionId, codexAccount.id, "codex/codex"],
+        [resumableSessionId, claudeAccount.id, "claude-code/claude-code"],
       ] as const) {
-        const thread = expectJson<{ readonly instanceId: string; readonly status: string }>(
+        const thread = expectJson<UpgradedSession>(
           await runCli(["session", "read", id, "--json"], edge),
         );
-        expect(thread).toMatchObject({ instanceId, status: "exited" });
+        expect(thread).toMatchObject({ providerAccountId, harnessId, status: "exited" });
       }
       const edgeSettings = expectJson<{
         controller: Record<string, unknown>;
         user: Record<string, unknown>;
       }>(await runCli(["settings", "read", "--json"], edge));
       expect(edgeSettings.controller["textGeneration.model"]).toEqual(textGenerationModel);
-      expect(edgeSettings.user["thread.instanceId"]).toBe(createdProvider.id);
+      expect(edgeSettings.user["thread.providerAccountId"]).toBe(claudeAccount.id);
       const seededTranscript = (await readTranscript({ ...edge, id: sessionId })).map(summarizeRow);
       expect(
         seededTranscript.length,
@@ -1657,7 +1667,7 @@ describe("upgrading from the previous edge release", () => {
       console.log(
         `Seeded conversation ${assistant.mainConversationId}: ${String(seededMessages.length)} messages ` +
           `(${seededMessages.map((m) => m.senderRole).join(", ")}), ` +
-          `instance ${createdProvider.id} (${createdProvider.name}), ` +
+          `account ${claudeAccount.id} (${ACCOUNT_LABEL}), ` +
           `session ${sessionId} with ${String(seededTranscript.length)} transcript rows`,
       );
 
@@ -1666,34 +1676,22 @@ describe("upgrading from the previous edge release", () => {
 
       // Written only now, with the edge controller stopped for the last time:
       // it probes every account again when its runner connects, and that
-      // replaces the snapshots of the real runner. The identity of an account
-      // comes from the snapshots of all runners. Both runners name the same
-      // person for `work`, and two different people for Codex, so Codex gets
-      // none.
+      // replaces the snapshots of the real runner and could set the identity.
+      // The runner that never connects keeps its snapshots, and the labelled
+      // account keeps the person the fixture signed in on it.
+      persistAccountIdentity(home, claudeAccount.id, WORK_IDENTITY);
       persistSnapshots(home, [
         {
-          instanceId: createdProvider.id,
-          runnerId,
-          person: WORK_IDENTITY,
-          harnessVersion: CLAUDE_CODE_VERSION,
-          minutesAgo: 5,
-        },
-        {
-          instanceId: createdProvider.id,
+          providerAccountId: claudeAccount.id,
+          harnessId: "claude-code/claude-code",
           runnerId: SEEDED_RUNNER_ID,
           person: WORK_IDENTITY,
           harnessVersion: CLAUDE_CODE_VERSION,
           minutesAgo: 60,
         },
         {
-          instanceId: codexInstance.id,
-          runnerId,
-          person: { identity: "grace@example.com", planLabel: "Plus" },
-          harnessVersion: null,
-          minutesAgo: 5,
-        },
-        {
-          instanceId: codexInstance.id,
+          providerAccountId: codexAccount.id,
+          harnessId: "codex/codex",
           runnerId: SEEDED_RUNNER_ID,
           person: { identity: "linus@example.com", planLabel: "Pro" },
           harnessVersion: null,
@@ -1744,55 +1742,33 @@ describe("upgrading from the previous edge release", () => {
       );
       expect(readResource).toMatchObject({ id: resource.id, remote: REPO_REMOTE });
 
-      // Each instance is now an account with the same id (spec 06 section 19).
-      // The name a person sees is the Provider's name, then the label after a
-      // middle dot when there is one.
-      const upgradedProviders = readListedItems<UpgradedProvider>(
-        await runCli(["provider", "list", "--json"], upgraded),
-      );
-      const displayName = (account: UpgradedAccount): string => {
-        const provider = upgradedProviders.find((one) => one.id === account.providerId);
-        if (provider === undefined) throw new Error(`no provider ${account.providerId}`);
-        return account.label === null
-          ? provider.displayName
-          : `${provider.displayName} · ${account.label}`;
-      };
-      const upgradedAccounts = readListedItems<UpgradedAccount>(
+      const upgradedAccounts = readListedItems<ListedAccount>(
         await runCli(["provider-account", "list", "--json"], upgraded),
       );
-      // No account is added, such as by the fresh-install seed, and none is lost.
+      // No account is added, such as by a fresh-install seed, and none is lost.
       expect(upgradedAccounts.map((account) => account.id).sort()).toEqual(
-        edgeInstances.map((instance) => instance.id).sort(),
+        edgeAccounts.map((account) => account.id).sort(),
       );
-      const upgradedAccountNames = new Map(
-        upgradedAccounts.map((account) => [account.id, displayName(account)]),
-      );
-      expect(upgradedAccountNames.get(claudeInstance.id)).toBe("Anthropic");
-      expect(upgradedAccountNames.get(createdProvider.id)).toBe("Anthropic · work");
-      expect(upgradedAccountNames.get(codexInstance.id)).toBe("OpenAI");
-      expect(upgradedAccountNames.get(piInstance.id)).toBe("Z.ai");
-      const findAccount = (id: string): UpgradedAccount => {
+      const findAccount = (id: string): ListedAccount => {
         const found = upgradedAccounts.find((account) => account.id === id);
         if (found === undefined) throw new Error(`no account ${id}`);
         return found;
       };
-      expect(findAccount(claudeInstance.id)).toMatchObject({
+      // Migration 96 adds `expiresAt`: no account of the edge binary has an
+      // expiry, so every one reads `null` (and not a missing field).
+      for (const account of upgradedAccounts) {
+        expect(account, `account ${account.id}`).toHaveProperty("expiresAt", null);
+      }
+      // The person on the labelled account is the one the fixture stored, and
+      // the stand-in `claude` reports the same one when the runner probes it.
+      expect(findAccount(claudeAccount.id)).toMatchObject({
         providerId: "anthropic/anthropic",
         kind: "subscription-per-machine",
-        label: null,
-        identity: null,
-        defaultHarnessId: "claude-code/claude-code",
-      });
-      // Both runners named the same person for `work`, so the account has them
-      // and their plan. The two runners named different people for Codex.
-      expect(findAccount(createdProvider.id)).toMatchObject({
-        providerId: "anthropic/anthropic",
-        kind: "subscription-per-machine",
-        label: PROVIDER_NAME,
+        label: ACCOUNT_LABEL,
         ...WORK_IDENTITY,
         defaultHarnessId: "claude-code/claude-code",
       });
-      expect(findAccount(codexInstance.id)).toMatchObject({
+      expect(findAccount(codexAccount.id)).toMatchObject({
         providerId: "openai/openai",
         kind: "subscription-per-machine",
         label: null,
@@ -1800,29 +1776,28 @@ describe("upgrading from the previous edge release", () => {
         planLabel: null,
         defaultHarnessId: "codex/codex",
       });
-      expect(findAccount(piInstance.id)).toMatchObject({
+      expect(findAccount(piAccount.id)).toMatchObject({
         providerId: "zai/zai",
         kind: "api-key",
         label: null,
         identity: null,
         defaultHarnessId: "pi/pi",
       });
-      // The snapshots are keyed by harness as well now, and keep their runner.
+      // The snapshot of the runner that never reconnected is kept, keyed by its harness.
       expect(
-        findAccount(codexInstance.id).snapshots.map((snapshot) => [
+        findAccount(codexAccount.id).snapshots.map((snapshot) => [
           snapshot.runnerId,
           snapshot.harnessId,
         ]),
-      ).toEqual(
-        expect.arrayContaining([
-          [runnerId, "codex/codex"],
-          [SEEDED_RUNNER_ID, "codex/codex"],
-        ]),
+      ).toEqual(expect.arrayContaining([[SEEDED_RUNNER_ID, "codex/codex"]]));
+      const readAccount = expectJson<ListedAccount>(
+        await runCli(["provider-account", "read", claudeAccount.id, "--json"], upgraded),
       );
-      const readAccount = expectJson<UpgradedAccount>(
-        await runCli(["provider-account", "read", createdProvider.id, "--json"], upgraded),
-      );
-      expect(readAccount).toMatchObject({ id: createdProvider.id, label: PROVIDER_NAME });
+      expect(readAccount).toMatchObject({
+        id: claudeAccount.id,
+        label: ACCOUNT_LABEL,
+        expiresAt: null,
+      });
 
       // The stored facts of a runner that has not reconnected: `providers`
       // is now `harnesses` with the same binaries, the adapters are
@@ -1839,41 +1814,34 @@ describe("upgrading from the previous edge release", () => {
       expect(upgradedFacts).toEqual(expectedFacts);
       expect(new Set(upgradedAdapters)).toEqual(new Set(expectedAdapters));
 
-      // An Agent and an assistant name their account and leave the harness to
-      // the account's default, which is the harness they ran in. A concrete
-      // harness would stop them from ever moving to another account.
+      // An Agent and an assistant keep their account and the harness choice
+      // they had: none, which is the account's default.
       const readAssistant = expectJson<SeededAgent & { mainConversationId: string }>(
         await runCli(["assistant", "read", assistant.id, "--json"], upgraded),
       );
       expect(readAssistant.mainConversationId).toBe(assistant.mainConversationId);
       expect(readAssistant).toMatchObject({
-        providerAccountId: claudeInstance.id,
+        providerAccountId: claudeAccount.id,
         harnessId: null,
       });
-      expect(readAssistant).not.toHaveProperty("instanceId");
       const readAgent = expectJson<SeededAgent>(
         await runCli(["agent", "read", agent.id, "--json"], upgraded),
       );
       expect(readAgent).toMatchObject({
         id: agent.id,
         name: "upgrade-agent",
-        providerAccountId: codexInstance.id,
+        providerAccountId: codexAccount.id,
         harnessId: null,
       });
-      expect(readAgent).not.toHaveProperty("instanceId");
 
-      // The Text Generation choice and the thread default follow.
+      // The Text Generation choice and the thread default are as they were.
       const upgradedSettings = expectJson<{
         controller: Record<string, unknown>;
         user: Record<string, unknown>;
       }>(await runCli(["settings", "read", "--json"], upgraded));
-      expect(upgradedSettings.controller["textGeneration.model"]).toEqual({
-        providerAccountId: piInstance.id,
-        model: textGenerationModel.model,
-      });
-      expect(upgradedSettings.user["thread.providerAccountId"]).toBe(createdProvider.id);
+      expect(upgradedSettings.controller["textGeneration.model"]).toEqual(textGenerationModel);
+      expect(upgradedSettings.user["thread.providerAccountId"]).toBe(claudeAccount.id);
       expect(upgradedSettings.user).not.toHaveProperty(["thread.harnessId"]);
-      expect(upgradedSettings.user).not.toHaveProperty(["thread.instanceId"]);
 
       const readConversation = expectJson<{ id: string; assistantId: string }>(
         await runCli(["conversation", "read", assistant.mainConversationId, "--json"], upgraded),
@@ -1905,13 +1873,12 @@ describe("upgrading from the previous edge release", () => {
       );
       expect(summarizeSession(upgradedSession)).toEqual(seededSession);
       expect(upgradedSession).toMatchObject({
-        providerAccountId: createdProvider.id,
+        providerAccountId: claudeAccount.id,
         harnessId: "claude-code/claude-code",
       });
-      expect(upgradedSession).not.toHaveProperty("instanceId");
       for (const [id, providerAccountId, harnessId] of [
-        [codexSessionId, codexInstance.id, "codex/codex"],
-        [resumableSessionId, createdProvider.id, "claude-code/claude-code"],
+        [codexSessionId, codexAccount.id, "codex/codex"],
+        [resumableSessionId, claudeAccount.id, "claude-code/claude-code"],
       ] as const) {
         expect(
           expectJson<UpgradedSession>(await runCli(["session", "read", id, "--json"], upgraded)),
@@ -2075,14 +2042,14 @@ describe("upgrading from the previous edge release", () => {
         );
       }
 
-      // The Z.ai key was encrypted under the instance and is now encrypted
-      // under the account. Probing the account makes the controller decrypt it
-      // and hand it to the runner, which puts it in the environment of `pi`.
-      // The stand-in records it, with the home it ran in, which is still the
-      // folder the instance used.
+      // The Z.ai key was encrypted under the account by the edge binary, and
+      // the upgraded one must still decrypt it. Probing the account makes the
+      // controller decrypt it and hand it to the runner, which puts it in the
+      // environment of `pi`. The stand-in records it, with the home it ran in,
+      // which is still the account's home.
       const storageDir = readRunnerStorageDir(home);
       const probedZai = await runCli(
-        ["runner", "probe", runnerId, "--account", piInstance.id, "--json"],
+        ["runner", "probe", runnerId, "--account", piAccount.id, "--json"],
         upgraded,
       );
       expect(probedZai.code, `${probedZai.stdout}\n${probedZai.stderr}`).toBe(0);
@@ -2092,11 +2059,13 @@ describe("upgrading from the previous edge release", () => {
       for (const line of piRecorded) {
         if (line.startsWith("ZAI_API_KEY=")) expect(line).toBe(`ZAI_API_KEY=${ZAI_API_KEY}`);
         else
-          expect(line).toBe(`PI_CODING_AGENT_DIR=${join(storageDir, "providers", piInstance.id)}`);
+          expect(line).toBe(
+            `PI_CODING_AGENT_DIR=${join(storageDir, ...accountHome(piAccount.id, "pi/pi"))}`,
+          );
       }
 
-      // The exited Claude Code thread resumes in the folder its instance used,
-      // with the native session id it reported. Sending it an input resumes it.
+      // The exited Claude Code thread resumes in its account's home, with the
+      // native session id it reported. Sending it an input resumes it.
       expect(
         readRecord(standIns.claudeRecord),
         "nothing should have resumed a session yet",
@@ -2119,7 +2088,7 @@ describe("upgrading from the previous edge release", () => {
         );
       });
       expect(claudeRecorded).toContain(
-        `CLAUDE_CONFIG_DIR=${join(storageDir, "providers", createdProvider.id)}`,
+        `CLAUDE_CONFIG_DIR=${join(storageDir, ...accountHome(claudeAccount.id, "claude-code/claude-code"))}`,
       );
       expect(claudeRecorded).toContain(`ARG=--resume=${RESUMABLE_NATIVE_SESSION_ID}`);
 
@@ -2253,45 +2222,25 @@ describe("upgrading from the previous edge release", () => {
         }
       }
 
-      // What the migration kept on disk: every account keeps its instance's
-      // folder for the harness it ran (spec 04 "Provider account rows"), the
-      // Z.ai key moved to the account's `apiKey` and nothing is left under
-      // the old owner kind, and the old table is gone.
+      // What stayed on disk: the Z.ai key is still the account's `apiKey` and
+      // nothing else is stored under an account owner, and the new column is
+      // empty on every row.
       const accountReader = new Database(join(home, "data", "hercule.db"), { readonly: true });
       try {
-        const legacy = accountReader
-          .query(
-            `SELECT hex(id) AS id, legacy_home_folder, legacy_home_harness_id, default_harness_id
-             FROM provider_accounts ORDER BY id`,
-          )
-          .all() as ReadonlyArray<{
-          readonly id: string;
-          readonly legacy_home_folder: string;
-          readonly legacy_home_harness_id: string;
-          readonly default_harness_id: string;
-        }>;
-        expect(legacy).toHaveLength(edgeInstances.length);
-        for (const row of legacy) {
-          expect(row.legacy_home_folder).toBe(
-            edgeInstances.find((one) => uuidBlob(one.id).toString("hex").toUpperCase() === row.id)
-              ?.id,
-          );
-          expect(row.legacy_home_harness_id).toBe(row.default_harness_id);
-        }
         expect(
           accountReader
             .query(
               "SELECT owner_kind, owner_id, name FROM secrets WHERE owner_kind LIKE 'provider-%'",
             )
             .all(),
-        ).toEqual([{ owner_kind: "provider-account", owner_id: piInstance.id, name: "apiKey" }]);
+        ).toEqual([{ owner_kind: "provider-account", owner_id: piAccount.id, name: "apiKey" }]);
         expect(
           accountReader
             .query(
-              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_instances'",
+              "SELECT count(*) AS count FROM provider_accounts WHERE credential_expires_at IS NOT NULL",
             )
-            .all(),
-        ).toEqual([]);
+            .get(),
+        ).toEqual({ count: 0 });
       } finally {
         accountReader.close();
       }

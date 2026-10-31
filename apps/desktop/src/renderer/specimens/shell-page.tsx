@@ -68,6 +68,7 @@ import type {
   PluginDetail,
   Profile,
   Project,
+  Provider,
   ProviderAccount,
   Resource,
   Runner,
@@ -387,6 +388,12 @@ export interface ConnectionsSettingsRecords {
 export interface ProvidersSettingsRecords {
   /** The id of the runner on this Mac, which the account sheet draws as a laptop. */
   readonly thisMacRunnerId: string;
+  /** The providers, with every kind of account each offers, which the add-account sheet draws. */
+  readonly providers: ReadonlyArray<Provider>;
+  /** The id of the runner on the machine that runs the controller, which the add-account sheet puts first. */
+  readonly controllerRunnerId: string;
+  /** The account `providerAccount.create` answers with. */
+  readonly createdAccount: ProviderAccount;
 }
 
 /**
@@ -686,6 +693,15 @@ const seedQueryCache = (
       localRunnerQuery(REFUSING_BRIDGE, records.runners).queryKey,
       providersSettings.thisMacRunnerId,
     );
+    queryClient.setQueryData(providersQuery(client).queryKey, providersSettings.providers);
+    queryClient.setQueryData(controllerQuery(client).queryKey, {
+      id: "01a06d02-7800-7000-8000-000000000001",
+      publicKey: "controller-key",
+      version: "0.4.2",
+      defaultRunnerId: null,
+      localRunnerId: providersSettings.controllerRunnerId,
+      textGeneration: { model: null, lastFailure: null, unavailableReason: null },
+    });
   }
   if (intakeSettings !== undefined) {
     queryClient.setQueryData(ignoreRulesQuery(client).queryKey, intakeSettings.ignoreRules);
@@ -1275,12 +1291,23 @@ async function mountShellSpecimen(
 ): Promise<void> {
   applySheetAppearance();
   const answerMove = screens.intake?.answerMove;
+  const created = screens.providersSettings?.createdAccount;
   const client = createClient({
     baseUrl: CONTROLLER_URL,
     fetch:
-      answerMove === undefined
-        ? refuseRequest
-        : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init)),
+      created !== undefined
+        ? // The add-account sheet creates an account, and the page then reads the list again.
+          (url, init) =>
+            init?.method === "POST" && url.endsWith("/api/v1/provider-accounts")
+              ? Promise.resolve(
+                  new Response(JSON.stringify(created), {
+                    headers: { "content-type": "application/json" },
+                  }),
+                )
+              : refuseRequest(url, init)
+        : answerMove === undefined
+          ? refuseRequest
+          : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init)),
   });
   const queryClient = createQueryClient();
   seedQueryCache(queryClient, client, records, screens);

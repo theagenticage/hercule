@@ -25,6 +25,7 @@ import type { ThreadConfig } from "./config";
 import { resolveThreadHarnessId } from "../provider-accounts";
 import { findDefaultProviderAccountId } from "./default-provider-account";
 import { buildThreadModelField, type ThreadModelField } from "./model-field";
+import type { AccountCatalogs } from "./account-readiness";
 import { buildRunnerMenu } from "./runner-menu";
 
 const DEFAULT_PROFILE_NAME = "unrestricted";
@@ -49,31 +50,18 @@ const chooseDefaultModel = (field: ThreadModelField): string | null =>
 
 /**
  * Returns the slug of the model a new thread on `account` starts with when it
- * runs in `harnessId` on `runnerId`: the default model of the account's
- * snapshot on that runner, else its first model, else `null`. Returns `null`
- * too when the account has no snapshot on that runner or is not signed in
- * there. It never reads another runner's snapshot, because a catalog belongs
- * to one account in one harness on one runner (spec 06 §3.1), and a model of
- * another runner would show `not offered on <runner>` before the user has
- * touched anything.
+ * runs in `harnessId` on `runnerId`: the default model of the model list
+ * `findModelSnapshot` picks, else its first model, else `null` when the
+ * account is signed in on no runner in that harness. A runner without its own
+ * signed-in snapshot reads the newest list from another runner, as the
+ * controller does.
  */
 export const findDefaultModel = (
   account: ProviderAccount,
   harnessId: string,
   runnerId: string | null,
-): string | null => {
-  const snapshot = account.snapshots.find(
-    (each) => each.harnessId === harnessId && each.runnerId === runnerId,
-  );
-  return chooseDefaultModel(
-    buildThreadModelField(
-      { snapshots: snapshot === undefined ? [] : [snapshot] },
-      harnessId,
-      runnerId,
-      undefined,
-    ),
-  );
-};
+): string | null =>
+  chooseDefaultModel(buildThreadModelField(account, harnessId, runnerId, undefined));
 
 /**
  * Returns the runner a new thread on this account would be placed on, and
@@ -87,8 +75,15 @@ export const computeProviderAccountDefaults = (
   harnessId: string,
   runners: readonly Runner[],
   thisMacRunnerId: string | null,
+  catalogs: AccountCatalogs,
 ): { readonly runnerId: string | null; readonly model: string | null } => {
-  const runnerId = buildRunnerMenu(runners, thisMacRunnerId, account, harnessId).defaultRunnerId;
+  const runnerId = buildRunnerMenu(
+    runners,
+    thisMacRunnerId,
+    account,
+    harnessId,
+    catalogs,
+  ).defaultRunnerId;
   return {
     runnerId,
     model: chooseDefaultModel(buildThreadModelField(account, harnessId, runnerId, undefined)),
@@ -102,6 +97,7 @@ export const computeThreadDefaults = (
   runners: readonly Runner[],
   profiles: readonly Profile[],
   thisMacRunnerId: string | null,
+  catalogs: AccountCatalogs,
 ): ThreadDefaults => {
   // A stored account id that no longer exists (dangling) falls back the same
   // way an unset one does. So there is always an account to read a catalog
@@ -122,6 +118,7 @@ export const computeThreadDefaults = (
           resolveThreadHarnessId(account, harnessId),
           runners,
           thisMacRunnerId,
+          catalogs,
         );
 
   return {
@@ -163,6 +160,7 @@ export const buildDraftConfig = ({
   runners,
   profiles,
   thisMacRunnerId,
+  catalogs,
   projectId,
   workspaceId,
 }: {
@@ -171,10 +169,11 @@ export const buildDraftConfig = ({
   readonly runners: readonly Runner[];
   readonly profiles: readonly Profile[];
   readonly thisMacRunnerId: string | null;
+  readonly catalogs: AccountCatalogs;
   readonly projectId: string | null;
   readonly workspaceId: string | null;
 }): ThreadConfig => ({
-  ...computeThreadDefaults(settingsUser, accounts, runners, profiles, thisMacRunnerId),
+  ...computeThreadDefaults(settingsUser, accounts, runners, profiles, thisMacRunnerId, catalogs),
   options: {},
   projectId,
   workspace: workspaceId === null ? null : { kind: "existing", workspaceId },

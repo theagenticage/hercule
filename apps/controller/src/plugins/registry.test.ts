@@ -55,7 +55,11 @@ const SHIPPED = [
       runs: [
         {
           providerId: "anthropic/anthropic",
-          kinds: [{ kind: "subscription-per-machine" }],
+          kinds: [
+            { kind: "subscription-per-machine" },
+            { kind: "subscription-token", credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN" },
+            { kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" },
+          ],
           modelArgument: "{model}",
           models: "all",
         },
@@ -86,7 +90,10 @@ const SHIPPED = [
       runs: [
         {
           providerId: "openai/openai",
-          kinds: [{ kind: "subscription-per-machine" }],
+          kinds: [
+            { kind: "subscription-per-machine" },
+            { kind: "api-key", credentialVariable: "OPENAI_API_KEY" },
+          ],
           modelArgument: "{model}",
           models: "all",
         },
@@ -116,6 +123,18 @@ const SHIPPED = [
       },
       runs: [
         {
+          providerId: "anthropic/anthropic",
+          kinds: [{ kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" }],
+          modelArgument: "anthropic/{model}",
+          models: "own-list",
+        },
+        {
+          providerId: "openai/openai",
+          kinds: [{ kind: "api-key", credentialVariable: "OPENAI_API_KEY" }],
+          modelArgument: "openai/{model}",
+          models: "own-list",
+        },
+        {
           providerId: "zai/zai",
           kinds: [{ kind: "api-key", credentialVariable: "ZAI_API_KEY" }],
           modelArgument: "zai/{model}",
@@ -140,10 +159,31 @@ const SHIPPED_PROVIDERS = [
           title: "Claude subscription, signed in on each machine",
           description:
             "Uses your Claude Pro or Max plan. You sign in to Claude Code once on each machine that runs it.",
-          setup: [{ kind: "harness-login" }],
+          setup: [{ kind: "harness-login", method: "sign-in" }],
           harnesses: ["claude-code/claude-code"],
         },
+        {
+          id: "subscription-token",
+          title: "Claude subscription, every machine",
+          description:
+            "Uses your Claude Pro or Max plan. Hercule makes a token with Claude Code once, keeps it on the controller, and it works on every machine. It lasts a year.",
+          setup: [{ kind: "harness-login", method: "create-token" }],
+          harnesses: ["claude-code/claude-code"],
+        },
+        {
+          id: "api-key",
+          title: "API key",
+          description:
+            "From the Anthropic Console. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+          setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+          keyCheck: {
+            url: "https://api.anthropic.com/v1/models",
+            headers: { "x-api-key": "{apiKey}", "anthropic-version": "2023-06-01" },
+          },
+          harnesses: ["claude-code/claude-code", "pi/pi"],
+        },
       ],
+      defaultHarnessId: "claude-code/claude-code",
       suggestedTextGenerationModel: "haiku",
     },
   },
@@ -159,10 +199,23 @@ const SHIPPED_PROVIDERS = [
           title: "ChatGPT subscription, signed in on each machine",
           description:
             "Uses your ChatGPT plan through Codex. You sign in to Codex once on each machine that runs it.",
-          setup: [{ kind: "harness-login" }],
+          setup: [{ kind: "harness-login", method: "sign-in" }],
           harnesses: ["codex/codex"],
         },
+        {
+          id: "api-key",
+          title: "API key",
+          description:
+            "From the OpenAI platform. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+          setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+          keyCheck: {
+            url: "https://api.openai.com/v1/models",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
+          harnesses: ["codex/codex", "pi/pi"],
+        },
       ],
+      defaultHarnessId: "codex/codex",
       suggestedTextGenerationModel: "gpt-6-luna",
     },
   },
@@ -179,9 +232,14 @@ const SHIPPED_PROVIDERS = [
           description:
             "From your Z.ai Coding Plan subscription. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
           setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+          keyCheck: {
+            url: "https://api.z.ai/api/coding/paas/v4/models",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
           harnesses: ["pi/pi"],
         },
       ],
+      defaultHarnessId: "pi/pi",
       suggestedTextGenerationModel: "glm-5.3-flash",
     },
   },

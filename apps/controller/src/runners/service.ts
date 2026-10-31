@@ -11,7 +11,6 @@
  * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -53,9 +52,8 @@ import {
 } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
-import { requireOnline } from "./adapters";
 import { JoinTokens } from "./join-tokens";
-import { RunnerFactsDeadline, RunnerConnections } from "./connections";
+import { RunnerConnections } from "./connections";
 import { runnerRepository, type RunnerEdit } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -177,7 +175,6 @@ const make = Effect.gen(function* () {
   const joinTokens = yield* JoinTokens;
   const settings = yield* Settings;
   const audit = yield* AuditLog;
-
   const connections = yield* RunnerConnections;
 
   const readRunner = readRunnerOrFail(runners);
@@ -450,27 +447,6 @@ const make = Effect.gen(function* () {
             return { ...(yield* readRunner(id)), at };
           }),
         );
-      }),
-
-    /**
-     * Asks the runner to report its facts now, and returns the updated runner.
-     * Fails with `InvalidState` when the runner is not connected or does not
-     * report in time. The runner reports by itself only hourly, and only when
-     * something changed, so this is the only way to see a newly installed
-     * harness CLI without waiting up to an hour.
-     */
-    refreshFacts: (id: Id): Effect.Effect<RunnerDetail, Exclude<MoveError, Validation>> =>
-      Effect.gen(function* () {
-        yield* requireGrant("runner.refreshFacts");
-        const before = yield* readRunner(id);
-        yield* requireOnline(before);
-        if (!(yield* connections.refreshedFacts(id))) {
-          const waited = Duration.format(yield* RunnerFactsDeadline);
-          return yield* Effect.fail(
-            createInvalidStateError(`that runner did not report its facts within ${waited}`),
-          );
-        }
-        return yield* readRunner(id);
       }),
 
     /**

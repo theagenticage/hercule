@@ -3,7 +3,7 @@ import type { HarnessDefinition, ProviderDefinition } from "@hercule/plugin-host
 import type { RegisteredHarness } from "./harnesses";
 import type { RegisteredProvider } from "./providers";
 import { buildHarnessDefinition } from "./testing";
-import { decideProviderAccountHarness } from "./harness-support";
+import { decideProviderAccountHarness, listCredentialVariables } from "./harness-support";
 
 const PROVIDER: RegisteredProvider = {
   id: "vendor/vendor",
@@ -15,16 +15,18 @@ const PROVIDER: RegisteredProvider = {
       title: "API key",
       description: "A key.",
       setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      keyCheck: { url: "https://api.example.com/v1/models", headers: {} },
       harnesses: ["alpha/alpha", "beta/beta"],
     },
     {
       id: "subscription",
       title: "Subscription",
       description: "A plan.",
-      setup: [{ kind: "harness-login" }],
+      setup: [{ kind: "harness-login", method: "sign-in" }],
       harnesses: ["alpha/alpha"],
     },
   ],
+  defaultHarnessId: "alpha/alpha",
 } satisfies ProviderDefinition & { id: string; pluginId: string };
 
 const buildHarness = (id: string, runs: HarnessDefinition["runs"]): RegisteredHarness => ({
@@ -56,7 +58,11 @@ describe("decideProviderAccountHarness", () => {
     expect(decideProviderAccountHarness(PROVIDERS, HARNESSES, ACCOUNT)).toEqual({
       _tag: "chosen",
       harness: ALPHA,
-      support: { modelArgument: "vendor/{model}", credentialVariable: "VENDOR_API_KEY" },
+      support: {
+        modelArgument: "vendor/{model}",
+        credentialVariable: "VENDOR_API_KEY",
+        credentialSecretName: "apiKey",
+      },
     });
   });
 
@@ -78,7 +84,10 @@ describe("decideProviderAccountHarness", () => {
   it("returns no credential variable for a kind whose login lives in the Harness Home", () => {
     expect(
       decideProviderAccountHarness(PROVIDERS, HARNESSES, { ...ACCOUNT, kind: "subscription" }),
-    ).toMatchObject({ _tag: "chosen", support: { credentialVariable: undefined } });
+    ).toMatchObject({
+      _tag: "chosen",
+      support: { credentialVariable: undefined, credentialSecretName: undefined },
+    });
   });
 
   it("refuses a harness the provider's kind does not list, saying the provider does not allow it", () => {
@@ -146,5 +155,53 @@ describe("decideProviderAccountHarness", () => {
       field: "providerAccountId",
       reason: expect.stringContaining("no account kind token") as unknown,
     });
+  });
+});
+
+describe("listCredentialVariables", () => {
+  it("returns every credential variable of the harness across its providers and kinds, each once", () => {
+    const harness = buildHarness("multi", [
+      {
+        providerId: "vendor/vendor",
+        kinds: [
+          { kind: "subscription" },
+          { kind: "token", credentialVariable: "VENDOR_TOKEN" },
+          { kind: "api-key", credentialVariable: "VENDOR_API_KEY" },
+        ],
+        modelArgument: "{model}",
+        models: "all",
+      },
+      {
+        providerId: "other/other",
+        kinds: [
+          { kind: "api-key", credentialVariable: "VENDOR_API_KEY" },
+          { kind: "api-key-2", credentialVariable: "OTHER_API_KEY" },
+        ],
+        modelArgument: "other/{model}",
+        models: "own-list",
+      },
+    ]);
+
+    expect(listCredentialVariables(harness)).toEqual([
+      "VENDOR_TOKEN",
+      "VENDOR_API_KEY",
+      "OTHER_API_KEY",
+    ]);
+  });
+
+  it("returns nothing for a harness whose accounts all sign in on the machine", () => {
+    expect(listCredentialVariables(BETA)).toEqual([]);
+    expect(
+      listCredentialVariables(
+        buildHarness("machine", [
+          {
+            providerId: "vendor/vendor",
+            kinds: [{ kind: "subscription" }],
+            modelArgument: "{model}",
+            models: "all",
+          },
+        ]),
+      ),
+    ).toEqual([]);
   });
 });

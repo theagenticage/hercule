@@ -29,13 +29,18 @@ const definition: HarnessDefinition = {
     disallowedTools: "native",
     structuredOutput: "supported",
   },
-  // The login of a Claude subscription lives in the Harness Home, so the
-  // kind has no credential variable, and Claude Code accepts every model the
-  // account lists under its own id.
+  // The login of a per-machine Claude subscription lives in the Harness Home,
+  // so that kind has no credential variable. A subscription token and an API
+  // key are each handed over in a variable of their own. Claude Code accepts
+  // every model the account lists under its own id.
   runs: [
     {
       providerId: "anthropic/anthropic",
-      kinds: [{ kind: "subscription-per-machine" }],
+      kinds: [
+        { kind: "subscription-per-machine" },
+        { kind: "subscription-token", credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN" },
+        { kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" },
+      ],
       modelArgument: "{model}",
       models: "all",
     },

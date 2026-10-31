@@ -1,12 +1,14 @@
 /**
  * Tests Settings > Providers: one card per Provider Account with its mark,
  * name, identity line and machine pips, the reads the section makes as it
- * opens, the account sheet, renaming an account, a delete the controller
- * refuses, a delete it accepts, and a sign-in started from a machine's row.
+ * opens, the account sheet, renaming an account, choosing its default
+ * harness, a delete the controller refuses, a delete it accepts, and a
+ * sign-in started from a machine's row.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HARNESSES, PROVIDERS } from "@hercule/client-core/testing";
 import type { ProviderAccount, Runner } from "@hercule/contract";
 import { forgetLastSettingsSection } from "../../../../app/last-settings-section";
 import {
@@ -85,6 +87,7 @@ const ZAI: ProviderAccount = {
   identity: null,
   planLabel: null,
   defaultHarnessId: "pi/pi",
+  expiresAt: null,
   snapshots: [],
   createdAt: PERSONAL.createdAt,
   updatedAt: PERSONAL.updatedAt,
@@ -183,7 +186,7 @@ describe("Settings > Providers", () => {
   it("says there is no account yet, in one line", async () => {
     await openProviders({ accounts: [] });
 
-    expect(screen.getByText("No accounts yet.")).toBeTruthy();
+    expect(screen.getByText("No accounts yet. Add one to give your agents models.")).toBeTruthy();
     expect(document.querySelector(".pa-card")).toBeNull();
   });
 
@@ -401,6 +404,128 @@ describe("Settings > Providers", () => {
       ).toEqual([
         [`/api/v1/runners/${ATLAS.id}/install-harness`, { harnessId: PERSONAL.defaultHarnessId }],
       ]);
+    });
+  });
+
+  it("strikes through the harnesses the account cannot run in, with the reason under each", async () => {
+    await openProviders();
+
+    const sheet = await openSheet("Z.ai");
+
+    const group = within(sheet).getByRole("radiogroup", { name: "Default harness" });
+    const radio = (name: string) => within(group).getByRole<HTMLInputElement>("radio", { name });
+    // Z.ai allows its key only in pi; and pi is installed on no machine.
+    expect(radio("Claude Code").disabled).toBe(true);
+    expect(radio("Claude Code").getAttribute("aria-describedby")).not.toBeNull();
+    expect(group.textContent).toContain("Z.ai allows an API key only in pi");
+    expect(radio("pi").disabled).toBe(true);
+    expect(radio("pi").checked).toBe(true);
+    expect(group.textContent).toContain("pi is on no machine");
+    expect(
+      within(sheet).getByText(
+        "Every profile runs this account\u2019s models here, unless the account\u2019s line in a profile picks another.",
+      ),
+    ).toBeTruthy();
+  });
+
+  describe("choosing the default harness", () => {
+    /** moss also has pi, and Anthropic lets its subscription run in pi. */
+    const withPi = (): Readonly<Record<string, Handler>> => ({
+      "GET /api/v1/providers": {
+        body: PROVIDERS.map((provider) =>
+          provider.id === "anthropic/anthropic"
+            ? {
+                ...provider,
+                kinds: provider.kinds.map((kind) => ({
+                  ...kind,
+                  harnesses: ["claude-code/claude-code", "pi/pi"],
+                })),
+              }
+            : provider,
+        ),
+      },
+      "GET /api/v1/harnesses": {
+        body: HARNESSES.map((harness) =>
+          harness.id === "pi/pi"
+            ? {
+                ...harness,
+                runs: [
+                  ...harness.runs,
+                  {
+                    providerId: "anthropic/anthropic",
+                    kinds: [{ kind: "subscription-per-machine" }],
+                    modelArgument: "anthropic/{model}",
+                    models: "own-list",
+                  },
+                ],
+              }
+            : harness,
+        ),
+      },
+    });
+    const MOSS_WITH_PI: Runner = {
+      ...MOSS,
+      facts: {
+        ...MOSS.facts!,
+        harnesses: [...MOSS.facts!.harnesses, { name: "pi", present: true, path: "/bin/pi" }],
+      },
+    };
+
+    it("saves the harness the user picks, and the radio follows", async () => {
+      let stored: ProviderAccount[] = [PERSONAL];
+      const { calls } = await openProviders({
+        accounts: stored,
+        runners: [MOSS_WITH_PI],
+        handlers: {
+          ...withPi(),
+          "GET /api/v1/provider-accounts": () => ({ body: stored }),
+          [`PATCH ${accountPath(PERSONAL)}`]: (call) => {
+            const { defaultHarnessId } = call.body as { defaultHarnessId: string };
+            stored = [{ ...PERSONAL, defaultHarnessId }];
+            return { body: stored[0] };
+          },
+        },
+      });
+      const sheet = await openSheet("Anthropic · personal");
+
+      const pi = within(sheet).getByRole<HTMLInputElement>("radio", { name: "pi" });
+      expect(pi.disabled).toBe(false);
+      expect(
+        within(sheet).getByRole<HTMLInputElement>("radio", { name: "Claude Code" }).checked,
+      ).toBe(true);
+      await userEvent.click(pi);
+
+      await waitFor(() => {
+        expect(pi.checked).toBe(true);
+      });
+      expect(calls.filter((call) => call.method === "PATCH").map((call) => call.body)).toEqual([
+        { defaultHarnessId: "pi/pi" },
+      ]);
+    });
+
+    it("shows the controller's message when it refuses the harness, and keeps the old one", async () => {
+      await openProviders({
+        runners: [MOSS_WITH_PI],
+        handlers: {
+          ...withPi(),
+          [`PATCH ${accountPath(PERSONAL)}`]: {
+            status: 400,
+            body: buildErrorBody("validation", "pi cannot run this account: no machine has it."),
+          },
+        },
+      });
+      const sheet = await openSheet("Anthropic · personal");
+
+      await userEvent.click(within(sheet).getByRole("radio", { name: "pi" }));
+
+      expect((await within(sheet).findByRole("alert")).textContent).toContain(
+        "pi cannot run this account: no machine has it.",
+      );
+      await waitFor(() => {
+        expect(
+          within(sheet).getByRole<HTMLInputElement>("radio", { name: "Claude Code" }).checked,
+        ).toBe(true);
+      });
     });
   });
 });

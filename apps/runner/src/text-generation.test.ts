@@ -35,6 +35,7 @@ const REQUEST: TextGenerationRequest = {
     providerAccountId: "account-1",
     harnessHome: "providers/account-1",
     modelArgument: "{model}",
+    credentialVariables: [],
   },
   spec: {
     model: "fake-model",
@@ -70,6 +71,7 @@ const buildContext = (binary: string | undefined): HarnessRunnerContext => ({
   binary,
   env: {},
   modelArgument: "{model}",
+  credentialVariables: [],
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(scratchDir, "claude-plugin") },
 });
 

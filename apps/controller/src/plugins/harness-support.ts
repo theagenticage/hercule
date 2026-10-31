@@ -1,5 +1,21 @@
 import type { RegisteredHarness } from "./harnesses";
-import type { RegisteredProvider } from "./providers";
+import { findCredentialSecretName, type RegisteredProvider } from "./providers";
+
+/**
+ * Returns every environment variable the harness reads a credential from,
+ * across all the providers and account kinds it runs, each once. The runner
+ * removes all of them from the harness's environment, so a key in the
+ * runner's own environment never stands in for an account's login.
+ */
+export const listCredentialVariables = (harness: RegisteredHarness): ReadonlyArray<string> => [
+  ...new Set(
+    harness.runs.flatMap((support) =>
+      support.kinds.flatMap(({ credentialVariable }) =>
+        credentialVariable === undefined ? [] : [credentialVariable],
+      ),
+    ),
+  ),
+];
 
 /** How a harness runs a Provider Account: the entry of the harness's `runs` that covers the account's provider and kind. */
 interface HarnessSupport {
@@ -7,6 +23,8 @@ interface HarnessSupport {
   readonly modelArgument: string;
   /** The environment variable the account's key goes in, or absent when the login is in the Harness Home. */
   readonly credentialVariable: string | undefined;
+  /** The name of the Secret that holds the account's credential, or absent when the login is in the Harness Home. */
+  readonly credentialSecretName: string | undefined;
 }
 
 /** The harness a Provider Account runs in, and how that harness runs it. */
@@ -100,6 +118,7 @@ export const decideProviderAccountHarness = (
     support: {
       modelArgument: support.modelArgument,
       credentialVariable: supportedKind.credentialVariable,
+      credentialSecretName: findCredentialSecretName(kind),
     },
   };
 };

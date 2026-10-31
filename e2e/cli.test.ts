@@ -247,16 +247,45 @@ interface AssistantRow {
 }
 
 describe("assistants through the binary", () => {
-  it("lists the default assistant, then a created one after it, each with its account and reply mode", async () => {
-    const first = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
+  it("has no assistant on a fresh install, and a sign-in Provider Account creates none", async () => {
+    const before = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
       items: ReadonlyArray<AssistantRow>;
     };
-    expect(first.items.map((assistant) => assistant.name)).toEqual(["Hercule"]);
+    expect(before.items).toEqual([]);
 
-    const created = expectJsonOutput(
-      await runLoggedInCli(["assistant", "create", "--name", "Ada", "--json"]),
-    ) as AssistantRow;
-    expect(created.name).toBe("Ada");
+    // A subscription that signs in on each machine is created with no
+    // credentials, so the controller checks no key with a real provider.
+    // The default assistant waits for the first account that is ready, and a
+    // sign-in account is ready only after its first successful sign-in, which
+    // needs a real provider. So neither account makes an assistant here.
+    for (const provider of ["anthropic/anthropic", "openai/openai"]) {
+      expectJsonOutput(
+        await runLoggedInCli([
+          "provider-account",
+          "create",
+          "--provider",
+          provider,
+          "--kind",
+          "subscription-per-machine",
+          "--json",
+        ]),
+      );
+      const after = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
+        items: ReadonlyArray<AssistantRow>;
+      };
+      expect(after.items, provider).toEqual([]);
+    }
+  }, 60_000);
+
+  it("lists assistants oldest first, each with its account and reply mode", async () => {
+    // No default assistant exists without a ready account, so both are created
+    // here. They run on the oldest account that can run an assistant.
+    for (const name of ["Hercule", "Ada"]) {
+      const created = expectJsonOutput(
+        await runLoggedInCli(["assistant", "create", "--name", name, "--json"]),
+      ) as AssistantRow;
+      expect(created.name).toBe(name);
+    }
 
     const second = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
       items: ReadonlyArray<AssistantRow>;
@@ -284,7 +313,7 @@ describe("assistants through the binary", () => {
     }
   }, 60_000);
 
-  it("reads the default assistant with its reply mode", async () => {
+  it("reads an assistant with its reply mode", async () => {
     const listed = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
       items: ReadonlyArray<AssistantRow>;
     };

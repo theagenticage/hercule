@@ -9,6 +9,7 @@ import type {
   ApprovalDecision,
   ExitReason,
   HarnessCredential,
+  LoginMethod,
   ProbeResult,
   TextGenerationOutcome,
   TextGenerationSpec,
@@ -58,10 +59,17 @@ export interface HarnessRunnerContext {
    */
   readonly modelArgument: string;
   /**
+   * Every variable the harness reads a key or token from, for any account. The
+   * adapter removes all of them from the harness process's environment
+   * (`applyCredential`), so a key in the runner's own environment never stands
+   * in for the account's login.
+   */
+  readonly credentialVariables: ReadonlyArray<string>;
+  /**
    * The variable the harness reads the account's key or token from, and the
-   * key, sent inline on the frame that requested this operation. `value` is
-   * absent when the account has no key stored. The whole field is absent for
-   * an account whose login is in the Harness Home. The key stays in this
+   * key, sent inline on the frame that requested this operation. The field is
+   * absent for an account that has no key or token stored, such as one whose
+   * login is in the Harness Home. The key stays in this
    * process's memory only while the operation runs. It is never written to
    * disk, never logged, and never added to `env` here: the adapter applies it
    * to the environment of the harness process only (`applyCredential`).
@@ -253,8 +261,18 @@ export interface HarnessAdapter {
   readonly install?: (
     env: Readonly<Record<string, string | undefined>>,
   ) => Effect.Effect<InstallOutcome>;
-  /** Takes the binary separately, because a login needs a machine that already has the harness. */
-  readonly login?: (ctx: HarnessRunnerContext, binary: string) => LoginCommand;
+  /**
+   * Returns the command that makes the login `method` for the account in `ctx`,
+   * or `undefined` when this harness has no such login. Takes the binary
+   * separately, because a login needs a machine that already has the harness.
+   * The command may name a scratch folder it made; the caller must then
+   * start the command, which removes the folder when the login ends.
+   */
+  readonly login?: (
+    ctx: HarnessRunnerContext,
+    binary: string,
+    method: LoginMethod,
+  ) => LoginCommand | undefined;
 
   /**
    * Makes one text generation: a single model call with the spec's
@@ -414,6 +432,8 @@ export const findAdapter = (harnessId: string): HarnessAdapter | undefined =>
 export const harnessLogins = makeLogins(spawnLogin);
 
 export { PROBE_DEADLINE, buildFailedProbe } from "./probe";
+
+export { removeStaleSetupTokenFolders } from "./setup-token-folder";
 
 export { CLAUDE_CODE, CODEX, PI };
 

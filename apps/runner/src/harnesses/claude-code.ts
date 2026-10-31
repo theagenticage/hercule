@@ -7,7 +7,9 @@
  * page. The adapter uses only the account's own Harness Home, never the
  * user's `~/.claude`.
  */
+import { mkdtempSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -39,6 +41,7 @@ import {
   type ApprovalDecision,
   type DisallowedTool,
   type ExitReason,
+  type LoginMethod,
   type ModelDescriptor,
   type ModelOption,
   type OpenRequest,
@@ -106,6 +109,7 @@ import type {
 import { makeInstall } from "./install";
 import { PROBE_DEADLINE, buildFailedProbe } from "./probe";
 import type { LoginCommand } from "./login";
+import { SETUP_TOKEN_FOLDER_PREFIX } from "./setup-token-folder";
 import { runProcess, type Run } from "./process";
 import { describeErrorAsFact, truncateFact, truncateMessage } from "./text";
 import { captureUnknownItemReporter } from "./message-reporting";
@@ -354,21 +358,108 @@ const buildAuth = (account: Account): ProbeResult["auth"] => {
 };
 
 /**
+ * The variables, beyond the credential variables the account's kind declares,
+ * that make Claude Code sign in or pick a backend by itself. Whatever the
+ * runner's own shell holds in them would stand in for the account, or send its
+ * traffic somewhere else:
+ *
+ * - `ANTHROPIC_AUTH_TOKEN` is used in preference to both the key and the
+ *   subscription token;
+ * - `ANTHROPIC_BASE_URL` points the CLI at another server;
+ * - `CLAUDE_CODE_USE_BEDROCK` and `CLAUDE_CODE_USE_VERTEX` switch it to another
+ *   vendor's login.
+ *
+ * Only this adapter knows them, so the controller's list of an account's
+ * credential variables does not include them.
+ */
+const AMBIENT_AUTH_VARIABLES = [
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+] as const;
+
+/**
  * Returns the environment for the CLI, pointed at the account's Harness Home,
- * with the account's credential when it has one. `HOME` is not changed,
+ * with the account's credential when it has one and none of the ambient
+ * sign-in variables (`AMBIENT_AUTH_VARIABLES`). `HOME` is not changed,
  * because overriding it makes the CLI report the login of a different account.
  */
 const buildEnv = (ctx: HarnessRunnerContext): Record<string, string | undefined> =>
   applyCredential(
     {
-      ...ctx.env,
+      ...removeAmbientAuth(ctx.env),
       CLAUDE_CONFIG_DIR: ctx.home,
       // Without this, the harness could update itself during a probe and install
       // a version nobody chose, while the probe is reporting which version it has.
       DISABLE_AUTOUPDATER: "1",
     },
-    ctx.credential,
+    ctx,
   );
+
+/** Returns a copy of `env` without the variables in `AMBIENT_AUTH_VARIABLES`. */
+const removeAmbientAuth = (
+  env: Readonly<Record<string, string | undefined>>,
+): Record<string, string | undefined> => {
+  const kept = { ...env };
+  for (const variable of AMBIENT_AUTH_VARIABLES) delete kept[variable];
+  return kept;
+};
+
+/**
+ * The terminal `claude setup-token` runs in. It is wide so that its text UI
+ * never wraps the sign-in URL or the token, and tall enough that the UI never
+ * fills the screen, which would make it clear the screen on every repaint.
+ */
+const SETUP_TOKEN_TERMINAL = { cols: 1000, rows: 60 } as const;
+
+/**
+ * Matches the long-lived token `claude setup-token` prints: `sk-ant-oat`, a
+ * two-digit version, and URL-safe characters. The prefix is the one the CLI
+ * itself tests for.
+ */
+const SETUP_TOKEN_PATTERN = /sk-ant-oat\d{2}-[A-Za-z0-9_-]+/;
+
+/**
+ * Matches the line where `claude setup-token` reports a refused code, such as
+ * "OAuth error: Invalid code. Please make sure the full code was copied". It
+ * holds the CLI's own words and nothing broader: the CLI also draws warnings
+ * such as "Failed to open browser", which are not a refusal.
+ */
+const SETUP_TOKEN_REFUSAL = /OAuth error|Invalid code/i;
+
+/**
+ * Returns the command that makes a long-lived subscription token with
+ * `claude setup-token`. The command draws a text UI, which prints nothing on
+ * plain pipes, so it runs in a pseudo-terminal.
+ *
+ * It runs in a new folder of its own, used as the working directory and as
+ * `CLAUDE_CONFIG_DIR`. The token is returned to the controller and is not
+ * kept on this machine, so nothing of this login belongs in the account's
+ * Harness Home. The runner removes the folder when the login ends.
+ *
+ * The environment holds none of the account's credential variables: a token
+ * or key already in it would be the account the CLI signs in as, not the one
+ * the user is making.
+ */
+const buildTokenLoginCommand = (ctx: HarnessRunnerContext, binary: string): LoginCommand => {
+  const scratchFolder = mkdtempSync(join(tmpdir(), SETUP_TOKEN_FOLDER_PREFIX));
+  return {
+    command: [binary, "setup-token"],
+    env: {
+      ...applyCredential(removeAmbientAuth(ctx.env), {
+        credentialVariables: ctx.credentialVariables,
+      }),
+      CLAUDE_CONFIG_DIR: scratchFolder,
+      DISABLE_AUTOUPDATER: "1",
+      BROWSER: "false",
+    },
+    terminal: SETUP_TOKEN_TERMINAL,
+    scratchFolder,
+    refusal: SETUP_TOKEN_REFUSAL,
+    tokenPattern: SETUP_TOKEN_PATTERN,
+  };
+};
 
 /**
  * Returns the SDK options for a probe. The user's own settings and MCP servers
@@ -1813,14 +1904,19 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
     },
 
     /**
-     * Returns the login command. `BROWSER` is set to a command that fails on
-     * purpose: if a browser opened, the CLI would switch to a `localhost`
-     * callback, which a browser on another machine cannot reach.
+     * Returns the login command for `method`.
+     *
+     * `BROWSER` is set to a command that fails on purpose in both: if a
+     * browser opened, the CLI would switch to a `localhost` callback, which a
+     * browser on another machine cannot reach.
      */
-    login: (ctx: HarnessRunnerContext, binary: string): LoginCommand => ({
-      command: [binary, "auth", "login"],
-      env: { ...buildEnv(ctx), BROWSER: "false" },
-    }),
+    login: (ctx: HarnessRunnerContext, binary: string, method: LoginMethod): LoginCommand =>
+      method === "sign-in"
+        ? {
+            command: [binary, "auth", "login"],
+            env: { ...buildEnv(ctx), BROWSER: "false" },
+          }
+        : buildTokenLoginCommand(ctx, binary),
 
     /**
      * Installs the CLI version this build's SDK expects. The install script

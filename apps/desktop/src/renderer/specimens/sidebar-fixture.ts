@@ -245,6 +245,7 @@ export const buildSpecimenProviderAccount = (
   identity: null,
   planLabel: null,
   defaultHarnessId: harnessId,
+  expiresAt: null,
   snapshots: [
     {
       runnerId: STUDIO_MAC.id,

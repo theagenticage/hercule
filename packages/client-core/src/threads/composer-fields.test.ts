@@ -23,11 +23,13 @@ import type {
 } from "@hercule/contract";
 import {
   BARE,
+  WITH_AGENTS,
   buildProviderAccount,
   buildSnapshot,
   ANTHROPIC_IDENTITY,
   HARNESSES,
   PROVIDERS,
+  ZAI_IDENTITY,
 } from "../providers.testing";
 import {
   buildComposerFields,
@@ -40,7 +42,7 @@ import { resolveThreadConfig } from "./resolve-thread";
 import { joinPhraseText } from "./workspaces";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
-  ...BARE,
+  ...WITH_AGENTS,
   ...overrides,
 });
 
@@ -120,6 +122,49 @@ const composeActive = (catalogs: ThreadCatalogs, session: Session, picks: Thread
   buildComposerFields(catalogs, resolveThreadConfig(catalogs, { kind: "active", session }, picks));
 
 describe("buildComposerFields", () => {
+  describe("an account that works on every machine", () => {
+    const WITH_PI = buildRunner({
+      id: "r-pi",
+      name: "pi-box",
+      facts: {
+        ...BARE.facts!,
+        harnesses: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
+        adapters: ["pi/pi"],
+      },
+    });
+    const draftOn = (runner: Runner, account: ProviderAccount) =>
+      composeDraft(
+        { ...buildCatalogs([account]), runners: [runner], thisMacRunnerId: runner.id },
+        buildConfig({ providerAccountId: account.id, runnerId: runner.id, model: null }),
+      );
+
+    it("lets a draft start though the last probe on its runner failed, and offers no sign-in", () => {
+      const failed = buildProviderAccount(ZAI_IDENTITY, [
+        buildSnapshot({ runnerId: WITH_PI.id, auth: { status: "error", message: "timed out" } }),
+      ]);
+
+      const fields = draftOn(WITH_PI, failed);
+
+      expect(fields.blocked).toBeNull();
+      expect(fields.machine.label).toBe("pi-box");
+    });
+
+    it("lets a draft start with no probe stored on its runner", () => {
+      expect(draftOn(WITH_PI, buildProviderAccount(ZAI_IDENTITY, [])).blocked).toBeNull();
+    });
+
+    it("blocks a draft on a runner without the harness, with no sign-in to offer", () => {
+      const fields = draftOn(LOCAL, buildProviderAccount(ZAI_IDENTITY, []));
+
+      expect(fields.blocked).toEqual({
+        reason: "Z.ai is not on moss",
+        signIn: null,
+        addAccount: false,
+      });
+      expect(fields.machine.label).toBe("moss · not installed");
+    });
+  });
+
   it("locks the access mode, the workspace and the runner on an active thread", () => {
     const fields = composeActive(buildCatalogs([CLAUDE]), {
       ...buildThread("s1", "A thread"),
@@ -154,7 +199,12 @@ describe("buildComposerFields", () => {
       buildConfig({ providerAccountId: null, model: null, runnerId: null }),
     );
 
-    expect(fields.blocked).toMatchObject({ reason: "No account is set up" });
+    // Nothing to sign in to: the one fix is a new account.
+    expect(fields.blocked).toEqual({
+      reason: "No account is set up",
+      signIn: null,
+      addAccount: true,
+    });
   });
 
   it("blocks a draft when no runner is connected", () => {
@@ -169,7 +219,11 @@ describe("buildComposerFields", () => {
       buildConfig({ runnerId: null }),
     );
 
-    expect(fields.blocked).toEqual({ reason: "No machine is connected", signIn: null });
+    expect(fields.blocked).toEqual({
+      reason: "No machine is connected",
+      signIn: null,
+      addAccount: false,
+    });
   });
 
   it("blocks a draft whose only runner is retired, as if no runner were connected", () => {
@@ -185,7 +239,11 @@ describe("buildComposerFields", () => {
       buildConfig({ runnerId: null }),
     );
 
-    expect(fields.blocked).toEqual({ reason: "No machine is connected", signIn: null });
+    expect(fields.blocked).toEqual({
+      reason: "No machine is connected",
+      signIn: null,
+      addAccount: false,
+    });
     expect(fields.machine.label).toBe("no machine");
   });
 
@@ -195,7 +253,11 @@ describe("buildComposerFields", () => {
       buildConfig({ providerAccountId: NOT_HERE.id, model: null, runnerId: null }),
     );
 
-    expect(fields.blocked).toEqual({ reason: "Anthropic is not on moss", signIn: null });
+    expect(fields.blocked).toEqual({
+      reason: "Anthropic is not on moss",
+      signIn: null,
+      addAccount: false,
+    });
   });
 
   it("blocks a draft whose account is not signed in, naming the runner and including the sign-in target", () => {
@@ -211,6 +273,7 @@ describe("buildComposerFields", () => {
         runnerId: LOCAL.id,
         subject: "Anthropic on moss",
       },
+      addAccount: false,
     });
   });
 
@@ -323,7 +386,7 @@ describe("buildComposerFields: the runner", () => {
       buildConfig({ runnerId: retired.id }),
     );
 
-    expect(fields.blocked).toEqual({ reason: "moss is retired", signIn: null });
+    expect(fields.blocked).toEqual({ reason: "moss is retired", signIn: null, addAccount: false });
     expect(fields.machine.label).toBe("moss · retired");
   });
 
@@ -367,7 +430,7 @@ describe("buildComposerFields: a runner the user picked", () => {
 
     expect(fields.machine.runnerId).toBe(COVE.id);
     expect(fields.machine.label).toBe(`cove · ${state}`);
-    expect(fields.blocked).toEqual({ reason: `cove is ${state}`, signIn: null });
+    expect(fields.blocked).toEqual({ reason: `cove is ${state}`, signIn: null, addAccount: false });
   });
 
   it("stays the runner when the account picked is installed there but signed out, and offers the sign-in", () => {
@@ -388,6 +451,7 @@ describe("buildComposerFields: a runner the user picked", () => {
         runnerId: COVE.id,
         subject: "Anthropic on cove",
       },
+      addAccount: false,
     });
   });
 
@@ -789,7 +853,7 @@ describe("buildComposerFields: the runner of a joined workspace", () => {
       }),
     );
 
-    expect(fields.blocked).toEqual({ reason, signIn: null });
+    expect(fields.blocked).toEqual({ reason, signIn: null, addAccount: false });
   });
 
   it("names the runner on an active thread, locked because the thread started", () => {
@@ -951,5 +1015,35 @@ describe("describeMachineRow", () => {
 
   it("returns an empty line for a plain machine", () => {
     expect(describeMachineRow(ROW)).toBe("");
+  });
+});
+
+describe("buildComposerFields: models of an account that works on every machine", () => {
+  const WITH_PI = buildRunner({
+    id: "r-pi",
+    name: "pi-box",
+    facts: {
+      ...BARE.facts!,
+      harnesses: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
+      adapters: ["pi/pi"],
+    },
+  });
+
+  it("offers a model's options from another runner's signed-in list when this runner was never probed", () => {
+    const zai = buildProviderAccount(ZAI_IDENTITY, [
+      buildSnapshot({
+        runnerId: "r-elsewhere",
+        harnessId: "pi/pi",
+        models: [SONNET],
+      }),
+    ]);
+    const fields = composeDraft(
+      { ...buildCatalogs([zai]), runners: [WITH_PI], thisMacRunnerId: WITH_PI.id },
+      buildConfig({ providerAccountId: zai.id, runnerId: WITH_PI.id, model: SONNET.slug }),
+    );
+
+    expect(fields.blocked).toBeNull();
+    expect(fields.options?.map((option) => option.id)).toEqual(["effort"]);
+    expect(fields.model.modelName).toBe("Claude Sonnet 5");
   });
 });

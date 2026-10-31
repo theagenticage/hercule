@@ -6,9 +6,10 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Option, Redacted } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { uuidFromString } from "../db";
+import { uuidFromString, withTransaction } from "../db";
 import { readEventsOfKind } from "../events/testing";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
+import { providerAccountRepository } from "./repository";
 import { ProviderAccountService } from "./service";
 import {
   ACME_PROVIDER_ID,
@@ -19,10 +20,13 @@ import {
   addSnapshot,
   addUserWithThreadDefault,
   ALPHA_HARNESS_ID,
+  BETA_HARNESS_ID,
+  buildFakeProviderApi,
   KEY_KIND,
   MACHINE_KIND,
   runWithAccounts,
   setTextGenerationModel,
+  TOKEN_KIND,
 } from "./testing";
 
 const MISSING = "0199e0e7-9999-7000-8000-000000000000";
@@ -37,6 +41,24 @@ const readSecretNames = (accountId: string) =>
       (held.get(accountId) ?? []).map((ref) => ref.name),
     ),
   );
+
+/** Pins the account to a person, as the first `ok` probe that reports an identity does. */
+const pinIdentity = (accountId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const accounts = yield* providerAccountRepository;
+    yield* withTransaction(
+      sql,
+      accounts.setIdentityIfUnset(accountId, "old@work.com", "Max", "2026-10-31T00:00:00.000Z"),
+    );
+  });
+
+/** Reads how many credentials the account has had, which a probe is judged against. */
+const readCredentialGeneration = (accountId: string) =>
+  Effect.gen(function* () {
+    const accounts = yield* providerAccountRepository;
+    return Option.getOrThrow(yield* accounts.one(accountId)).credentialGeneration;
+  });
 
 describe("providerAccount.query and read", () => {
   it("lists accounts oldest first, with their snapshots, and none of the stored home fields", async () => {
@@ -485,48 +507,477 @@ describe("providerAccount.delete", () => {
   });
 });
 
-describe("providerAccount.signIn", () => {
-  it("is refused with InvalidState for a key account, which has nothing to sign in to", async () => {
-    const failure = await runWithAccounts(
+/** A provider API that refuses every key, with the words a real one uses. */
+const refusingProvider = () =>
+  buildFakeProviderApi(
+    () =>
+      new Response(JSON.stringify({ error: { message: "invalid x-api-key" } }), { status: 401 }),
+  );
+
+const readStoredSecret = (accountId: string, name: string) =>
+  Effect.gen(function* () {
+    const secrets = yield* Secrets;
+    return Option.map(
+      yield* secrets.get(buildProviderAccountOwner(accountId), name),
+      Redacted.value,
+    );
+  });
+
+const countAccounts = Effect.flatMap(SqlClient.SqlClient, (sql) =>
+  Effect.map(
+    sql<{ readonly n: number }>`SELECT count(*) AS n FROM provider_accounts`,
+    (rows) => rows[0]?.n,
+  ),
+);
+
+describe("providerAccount.create", () => {
+  it("checks the key, then stores the account, its key as a Secret and an audit entry without the key", async () => {
+    const provider = buildFakeProviderApi();
+    const outcome = await runWithAccounts(
       Effect.gen(function* () {
-        const added = yield* addAccount({ kind: KEY_KIND });
-        const runner = yield* addRunner("laptop");
-        return yield* withService((service) =>
-          Effect.flip(service.signIn({ id: added.id, runnerId: runner })),
+        const created = yield* withService((service) =>
+          service.create({
+            providerId: ACME_PROVIDER_ID,
+            kind: KEY_KIND,
+            credentials: { apiKey: "sk-secret-value" },
+          }),
         );
+        return {
+          created,
+          stored: yield* readStoredSecret(created.id, "apiKey"),
+          audit: yield* readEventsOfKind("providerAccount.created"),
+        };
+      }),
+      provider.client,
+    );
+
+    expect(provider.requests).toHaveLength(1);
+    expect(provider.requests[0]?.headers["authorization"]).toBe("Bearer sk-secret-value");
+    expect(outcome.created).toMatchObject({
+      providerId: ACME_PROVIDER_ID,
+      kind: KEY_KIND,
+      label: null,
+      defaultHarnessId: ALPHA_HARNESS_ID,
+      expiresAt: null,
+      snapshots: [],
+    });
+    expect(outcome.stored).toEqual(Option.some("sk-secret-value"));
+    expect(outcome.audit).toHaveLength(1);
+    expect(outcome.audit[0]).toMatchObject({
+      actor: "user",
+      payload: { providerAccountId: outcome.created.id, kind: KEY_KIND },
+    });
+    expect(JSON.stringify(outcome.audit)).not.toContain("sk-secret-value");
+    expect(JSON.stringify(outcome.created)).not.toContain("sk-secret-value");
+  });
+
+  it("stores nothing when the provider refuses the key: no row, no Secret, no audit entry", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const failure = yield* withService((service) =>
+          Effect.flip(
+            service.create({
+              providerId: ACME_PROVIDER_ID,
+              kind: KEY_KIND,
+              credentials: { apiKey: "sk-bad" },
+            }),
+          ),
+        );
+        const sql = yield* SqlClient.SqlClient;
+        const secrets = yield* sql<{ readonly n: number }>`SELECT count(*) AS n FROM secrets`;
+        return {
+          failure,
+          accounts: yield* countAccounts,
+          secrets: secrets[0]?.n,
+          audit: yield* readEventsOfKind("providerAccount.created"),
+        };
+      }),
+      refusingProvider().client,
+    );
+
+    expect(outcome.failure).toMatchObject({
+      error: { code: "validation", message: "invalid x-api-key" },
+    });
+    expect(outcome.accounts).toBe(0);
+    expect(outcome.secrets).toBe(0);
+    expect(outcome.audit).toEqual([]);
+  });
+
+  it.each([
+    ["cannot be reached", () => "unreachable" as const],
+    ["answers HTTP 500", () => new Response("down", { status: 500 })],
+  ])("fails InvalidState and stores nothing when the provider %s", async (_name, answer) => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const failure = yield* withService((service) =>
+          Effect.flip(
+            service.create({
+              providerId: ACME_PROVIDER_ID,
+              kind: KEY_KIND,
+              credentials: { apiKey: "sk-1" },
+            }),
+          ),
+        );
+        return { failure, accounts: yield* countAccounts };
+      }),
+      buildFakeProviderApi(answer).client,
+    );
+
+    expect(outcome.failure).toMatchObject({ error: { code: "invalid_state" } });
+    expect(outcome.accounts).toBe(0);
+  });
+
+  it.each([MACHINE_KIND, TOKEN_KIND])(
+    "creates a %s account with no credentials, sends no check and stores no Secret",
+    async (kind) => {
+      const provider = buildFakeProviderApi();
+      const outcome = await runWithAccounts(
+        Effect.gen(function* () {
+          const created = yield* withService((service) =>
+            service.create({ providerId: ACME_PROVIDER_ID, kind }),
+          );
+          return { created, names: yield* readSecretNames(created.id) };
+        }),
+        provider.client,
+      );
+
+      expect(outcome.created).toMatchObject({ kind, defaultHarnessId: ALPHA_HARNESS_ID });
+      expect(outcome.names).toEqual([]);
+      expect(provider.requests).toEqual([]);
+    },
+  );
+
+  it("refuses credentials for a kind that signs in, and creates nothing", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const failure = yield* withService((service) =>
+          Effect.flip(
+            service.create({
+              providerId: ACME_PROVIDER_ID,
+              kind: TOKEN_KIND,
+              credentials: { apiKey: "pasted" },
+            }),
+          ),
+        );
+        return { failure, accounts: yield* countAccounts };
       }),
     );
 
-    expect(failure).toMatchObject({
+    expect(outcome.failure).toMatchObject({ error: { code: "validation" } });
+    expect(JSON.stringify(outcome.failure)).toContain("Make a new token");
+    expect(outcome.accounts).toBe(0);
+  });
+
+  it("requires the key for a key kind, and a known provider and kind", async () => {
+    const failures = await runWithAccounts(
+      Effect.gen(function* () {
+        const create = (input: Parameters<ProviderAccountService["Service"]["create"]>[0]) =>
+          withService((service) => Effect.flip(service.create(input)));
+        return {
+          noKey: yield* create({ providerId: ACME_PROVIDER_ID, kind: KEY_KIND }),
+          badProvider: yield* create({ providerId: "nobody/nobody", kind: KEY_KIND }),
+          badKind: yield* create({ providerId: ACME_PROVIDER_ID, kind: "gold" }),
+        };
+      }),
+    );
+
+    expect(failures.noKey).toMatchObject({ error: { code: "validation" } });
+    expect(JSON.stringify(failures.noKey)).toContain("apiKey");
+    expect(JSON.stringify(failures.badProvider)).toContain("providerId");
+    expect(JSON.stringify(failures.badKind)).toContain("api-key");
+  });
+
+  it("asks for a label when the provider already has an account, and refuses one that is taken", async () => {
+    const failures = await runWithAccounts(
+      Effect.gen(function* () {
+        const create = (label?: string) =>
+          withService((service) =>
+            Effect.flip(
+              service.create({
+                providerId: ACME_PROVIDER_ID,
+                kind: MACHINE_KIND,
+                ...(label === undefined ? {} : { label }),
+              }),
+            ),
+          );
+        yield* addAccount({ kind: MACHINE_KIND });
+        const unlabelled = yield* create();
+        yield* withService((service) =>
+          service.create({ providerId: ACME_PROVIDER_ID, kind: MACHINE_KIND, label: "work" }),
+        );
+        return { unlabelled, taken: yield* create("work") };
+      }),
+    );
+
+    expect(failures.unlabelled).toMatchObject({
       error: {
-        code: "invalid_state",
-        message: expect.stringContaining("no sign-in step") as unknown,
+        code: "validation",
+        details: { issues: [{ message: "Give this one a name, so you can tell them apart." }] },
       },
+    });
+    expect(failures.taken).toMatchObject({
+      error: { code: "conflict", message: expect.stringContaining('"work"') as unknown },
     });
   });
 
-  it("fails NotFound for an account that does not exist", async () => {
-    const failure = await runWithAccounts(
+  it("refuses a labelled key before it is checked when the label is taken, so no request is sent", async () => {
+    const provider = buildFakeProviderApi();
+    await runWithAccounts(
       Effect.gen(function* () {
-        const runner = yield* addRunner("laptop");
-        return yield* withService((service) =>
-          Effect.flip(service.signIn({ id: MISSING, runnerId: runner })),
+        yield* addAccount({ label: "work" });
+        const failure = yield* withService((service) =>
+          Effect.flip(
+            service.create({
+              providerId: ACME_PROVIDER_ID,
+              kind: KEY_KIND,
+              label: "work",
+              credentials: { apiKey: "sk-1" },
+            }),
+          ),
         );
+        expect(failure).toMatchObject({ error: { code: "conflict" } });
       }),
+      provider.client,
     );
 
-    expect(failure).toMatchObject({ error: { code: "not_found" } });
+    expect(provider.requests).toEqual([]);
+  });
+
+  describe("defaultHarnessId", () => {
+    const createWith = (defaultHarnessId: string) =>
+      withService((service) =>
+        service.create({
+          providerId: ACME_PROVIDER_ID,
+          kind: KEY_KIND,
+          credentials: { apiKey: "sk-1" },
+          defaultHarnessId,
+        }),
+      );
+
+    it("is refused when the harness is installed on no runner", async () => {
+      const failure = await runWithAccounts(Effect.flip(createWith(ALPHA_HARNESS_ID)));
+
+      expect(failure).toMatchObject({
+        error: { code: "validation", details: { issues: [{ path: ["defaultHarnessId"] }] } },
+      });
+      expect(JSON.stringify(failure)).toContain("not installed on any connected machine");
+    });
+
+    it("is accepted when a runner has the harness", async () => {
+      const created = await runWithAccounts(
+        Effect.gen(function* () {
+          yield* addRunner("laptop");
+          return yield* createWith(ALPHA_HARNESS_ID);
+        }),
+      );
+
+      expect(created.defaultHarnessId).toBe(ALPHA_HARNESS_ID);
+    });
+
+    it("is refused when the account cannot run in the harness, with the reason", async () => {
+      const failure = await runWithAccounts(
+        Effect.gen(function* () {
+          yield* addRunner("laptop");
+          return yield* Effect.flip(createWith(BETA_HARNESS_ID));
+        }),
+      );
+
+      expect(JSON.stringify(failure)).toContain("cannot run Acme API key accounts");
+    });
   });
 });
 
-describe("providerAccount.submitSignInCode", () => {
-  it("is refused with InvalidState for a key account, before the runner is asked", async () => {
-    const failure = await runWithAccounts(
+describe("providerAccount.update with a key or a default harness", () => {
+  it("changes nothing at all when the replacement key is refused: label, harness and key stay", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        yield* addRunner("laptop");
+        const added = yield* addAccount({
+          kind: KEY_KIND,
+          label: "old",
+          defaultHarnessId: BETA_HARNESS_ID,
+        });
+        yield* withService((service) =>
+          service.update({ id: added.id, credentials: { apiKey: "sk-old" } }),
+        );
+        const failure = yield* withService((service) =>
+          Effect.flip(
+            service.update({
+              id: added.id,
+              label: "new",
+              defaultHarnessId: ALPHA_HARNESS_ID,
+              credentials: { apiKey: "sk-new" },
+            }),
+          ),
+        );
+        return {
+          failure,
+          account: yield* withService((service) => service.read(added.id)),
+          key: yield* readStoredSecret(added.id, "apiKey"),
+          audit: yield* readEventsOfKind("providerAccount.updated"),
+        };
+      }),
+      // The first update's key passes, the second is refused.
+      (() => {
+        let calls = 0;
+        return buildFakeProviderApi(() => {
+          calls += 1;
+          return calls === 1
+            ? new Response("{}")
+            : new Response(JSON.stringify({ error: { message: "invalid x-api-key" } }), {
+                status: 401,
+              });
+        }).client;
+      })(),
+    );
+
+    expect(outcome.failure).toMatchObject({ error: { code: "validation" } });
+    expect(outcome.account).toMatchObject({ label: "old", defaultHarnessId: BETA_HARNESS_ID });
+    expect(outcome.key).toEqual(Option.some("sk-old"));
+    expect(outcome.audit).toHaveLength(1);
+  });
+
+  it("checks a replacement key before storing it, and stores it when the provider accepts", async () => {
+    const provider = buildFakeProviderApi();
+    const key = await runWithAccounts(
       Effect.gen(function* () {
         const added = yield* addAccount({ kind: KEY_KIND });
-        const runner = yield* addRunner("laptop");
+        yield* withService((service) =>
+          service.update({ id: added.id, credentials: { apiKey: "sk-new" } }),
+        );
+        return yield* readStoredSecret(added.id, "apiKey");
+      }),
+      provider.client,
+    );
+
+    expect(provider.requests.map((request) => request.headers["authorization"])).toEqual([
+      "Bearer sk-new",
+    ]);
+    expect(key).toEqual(Option.some("sk-new"));
+  });
+
+  it("clears the account's identity and plan when the key is replaced, so a key from another person can be probed ok", async () => {
+    const account = await runWithAccounts(
+      Effect.gen(function* () {
+        const added = yield* addAccount({ kind: KEY_KIND });
+        yield* pinIdentity(added.id);
+        yield* withService((service) =>
+          service.update({ id: added.id, credentials: { apiKey: "sk-new" } }),
+        );
+        return yield* withService((service) => service.read(added.id));
+      }),
+      buildFakeProviderApi().client,
+    );
+
+    expect(account).toMatchObject({ identity: null, planLabel: null });
+  });
+
+  it("advances the credential generation when the key is replaced, and not for a label change", async () => {
+    const generations = await runWithAccounts(
+      Effect.gen(function* () {
+        const added = yield* addAccount({ kind: KEY_KIND });
+        const start = yield* readCredentialGeneration(added.id);
+        yield* withService((service) => service.update({ id: added.id, label: "work" }));
+        const afterLabel = yield* readCredentialGeneration(added.id);
+        yield* withService((service) =>
+          service.update({ id: added.id, credentials: { apiKey: "sk-new" } }),
+        );
+        return [start, afterLabel, yield* readCredentialGeneration(added.id)];
+      }),
+      buildFakeProviderApi().client,
+    );
+
+    expect(generations).toEqual([0, 0, 1]);
+  });
+
+  it("keeps the identity when the update changes only the label", async () => {
+    const account = await runWithAccounts(
+      Effect.gen(function* () {
+        const added = yield* addAccount({ kind: KEY_KIND });
+        yield* pinIdentity(added.id);
+        return yield* withService((service) => service.update({ id: added.id, label: "work" }));
+      }),
+    );
+
+    expect(account).toMatchObject({ identity: "old@work.com", planLabel: "Max" });
+  });
+
+  it("changes the default harness to one the account can run in that a runner has", async () => {
+    const updated = await runWithAccounts(
+      Effect.gen(function* () {
+        yield* addRunner("laptop");
+        const added = yield* addAccount({ kind: KEY_KIND, defaultHarnessId: BETA_HARNESS_ID });
         return yield* withService((service) =>
-          Effect.flip(service.submitSignInCode({ id: added.id, runnerId: runner, code: "abc" })),
+          service.update({ id: added.id, defaultHarnessId: ALPHA_HARNESS_ID }),
+        );
+      }),
+    );
+
+    expect(updated.defaultHarnessId).toBe(ALPHA_HARNESS_ID);
+  });
+
+  it("refuses a default harness no runner has, and one the account cannot run in", async () => {
+    const failures = await runWithAccounts(
+      Effect.gen(function* () {
+        const added = yield* addAccount({ kind: KEY_KIND });
+        const notInstalled = yield* withService((service) =>
+          Effect.flip(service.update({ id: added.id, defaultHarnessId: ALPHA_HARNESS_ID })),
+        );
+        yield* addRunner("laptop");
+        const cannotRun = yield* withService((service) =>
+          Effect.flip(service.update({ id: added.id, defaultHarnessId: BETA_HARNESS_ID })),
+        );
+        return { notInstalled, cannotRun };
+      }),
+    );
+
+    expect(JSON.stringify(failures.notInstalled)).toContain(
+      "not installed on any connected machine",
+    );
+    expect(JSON.stringify(failures.cannotRun)).toContain("cannot run Acme API key accounts");
+  });
+
+  it("refuses credentials for a token account and points at making a new token", async () => {
+    const failure = await runWithAccounts(
+      Effect.gen(function* () {
+        const added = yield* addAccount({ kind: TOKEN_KIND });
+        return yield* withService((service) =>
+          Effect.flip(service.update({ id: added.id, credentials: { apiKey: "pasted" } })),
+        );
+      }),
+    );
+
+    expect(failure).toMatchObject({ error: { code: "validation" } });
+    expect(JSON.stringify(failure)).toContain("Make a new token");
+  });
+});
+
+describe("sign-in: prepareSignIn and acceptSignIn", () => {
+  it("prepares the harness, the login method and a frame account without a credential", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const runner = yield* addRunner("laptop");
+        const machine = yield* addAccount({ kind: MACHINE_KIND });
+        const token = yield* addAccount({ kind: TOKEN_KIND, label: "tok" });
+        return {
+          machine: yield* withService((service) => service.prepareSignIn(machine.id, runner)),
+          token: yield* withService((service) => service.prepareSignIn(token.id, runner)),
+        };
+      }),
+    );
+
+    expect(outcome.machine).toMatchObject({ harnessId: ALPHA_HARNESS_ID, method: "sign-in" });
+    expect(outcome.token).toMatchObject({ harnessId: ALPHA_HARNESS_ID, method: "create-token" });
+    expect(outcome.token.harnessAccount).not.toHaveProperty("credential");
+  });
+
+  it("is refused for a key account, which has nothing to sign in to", async () => {
+    const failure = await runWithAccounts(
+      Effect.gen(function* () {
+        const runner = yield* addRunner("laptop");
+        const added = yield* addAccount({ kind: KEY_KIND });
+        return yield* withService((service) =>
+          Effect.flip(service.prepareSignIn(added.id, runner)),
         );
       }),
     );
@@ -539,12 +990,111 @@ describe("providerAccount.submitSignInCode", () => {
     });
   });
 
-  it("fails NotFound for an account that does not exist", async () => {
+  it("stores a made token as the account's Secret with an expiry a year away, and audits without it", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const runner = yield* addRunner("laptop");
+        const added = yield* addAccount({ kind: TOKEN_KIND });
+        yield* withService((service) =>
+          service.acceptSignIn(added.id, runner, ALPHA_HARNESS_ID, "tok-secret"),
+        );
+        return {
+          account: yield* withService((service) => service.read(added.id)),
+          stored: yield* readStoredSecret(added.id, "token"),
+          audit: yield* readEventsOfKind("providerAccount.signedIn"),
+        };
+      }),
+    );
+
+    expect(outcome.stored).toEqual(Option.some("tok-secret"));
+    const days = (Date.parse(outcome.account.expiresAt ?? "") - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(364);
+    expect(days).toBeLessThan(367);
+    expect(outcome.audit).toHaveLength(1);
+    expect(JSON.stringify(outcome)).not.toContain("tok-secret".concat("x"));
+    expect(JSON.stringify(outcome.audit)).not.toContain("tok-secret");
+    expect(JSON.stringify(outcome.account)).not.toContain("tok-secret");
+  });
+
+  it("clears the identity when a new token is stored, and keeps it for a sign-in that makes no token", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const runner = yield* addRunner("laptop");
+        const token = yield* addAccount({ kind: TOKEN_KIND });
+        const machine = yield* addAccount({ kind: MACHINE_KIND, label: "m" });
+        yield* pinIdentity(token.id);
+        yield* pinIdentity(machine.id);
+        yield* withService((service) =>
+          service.acceptSignIn(token.id, runner, ALPHA_HARNESS_ID, "tok-new"),
+        );
+        yield* withService((service) =>
+          service.acceptSignIn(machine.id, runner, ALPHA_HARNESS_ID, undefined),
+        );
+        return {
+          token: yield* withService((service) => service.read(token.id)),
+          machine: yield* withService((service) => service.read(machine.id)),
+        };
+      }),
+    );
+
+    expect(outcome.token).toMatchObject({ identity: null, planLabel: null });
+    expect(outcome.machine).toMatchObject({ identity: "old@work.com", planLabel: "Max" });
+  });
+
+  it("advances the credential generation for every accepted sign-in, with a token or without", async () => {
+    const generations = await runWithAccounts(
+      Effect.gen(function* () {
+        const runner = yield* addRunner("laptop");
+        const token = yield* addAccount({ kind: TOKEN_KIND });
+        const machine = yield* addAccount({ kind: MACHINE_KIND, label: "m" });
+        yield* withService((service) =>
+          service.acceptSignIn(token.id, runner, ALPHA_HARNESS_ID, "tok-new"),
+        );
+        yield* withService((service) =>
+          service.acceptSignIn(machine.id, runner, ALPHA_HARNESS_ID, undefined),
+        );
+        return [
+          yield* readCredentialGeneration(token.id),
+          yield* readCredentialGeneration(machine.id),
+        ];
+      }),
+    );
+
+    expect(generations).toEqual([1, 1]);
+  });
+
+  it("refuses a missing or empty token from a token flow, and records the plain sign-in without one", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const runner = yield* addRunner("laptop");
+        const token = yield* addAccount({ kind: TOKEN_KIND });
+        const machine = yield* addAccount({ kind: MACHINE_KIND, label: "m" });
+        const accept = (id: string, value: string | undefined) =>
+          withService((service) => service.acceptSignIn(id, runner, ALPHA_HARNESS_ID, value));
+        const missing = yield* Effect.flip(accept(token.id, undefined));
+        const empty = yield* Effect.flip(accept(token.id, ""));
+        yield* accept(machine.id, undefined);
+        return {
+          missing,
+          empty,
+          audit: yield* readEventsOfKind("providerAccount.signedIn"),
+          names: yield* readSecretNames(token.id),
+        };
+      }),
+    );
+
+    expect(outcome.missing).toMatchObject({ error: { code: "invalid_state" } });
+    expect(outcome.empty).toMatchObject({ error: { code: "invalid_state" } });
+    expect(outcome.names).toEqual([]);
+    expect(outcome.audit).toHaveLength(1);
+  });
+
+  it("fails NotFound when the account was deleted meanwhile", async () => {
     const failure = await runWithAccounts(
       Effect.gen(function* () {
         const runner = yield* addRunner("laptop");
         return yield* withService((service) =>
-          Effect.flip(service.submitSignInCode({ id: MISSING, runnerId: runner, code: "abc" })),
+          Effect.flip(service.acceptSignIn(MISSING, runner, ALPHA_HARNESS_ID, "tok")),
         );
       }),
     );

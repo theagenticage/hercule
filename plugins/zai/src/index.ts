@@ -28,9 +28,16 @@ const definition: ProviderDefinition = {
       description:
         "From your Z.ai Coding Plan subscription. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
       setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      // A refused key answers 401. That a valid key answers 2xx here is not yet
+      // confirmed with a real key.
+      keyCheck: {
+        url: "https://api.z.ai/api/coding/paas/v4/models",
+        headers: { authorization: "Bearer {apiKey}" },
+      },
       harnesses: ["pi/pi"],
     },
   ],
+  defaultHarnessId: "pi/pi",
   // The slug as pi's own model list shows it (`pi --list-models` prints
   // `glm-5.3-flash` under the `zai` provider).
   suggestedTextGenerationModel: "glm-5.3-flash",

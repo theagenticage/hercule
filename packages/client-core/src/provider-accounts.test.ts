@@ -1,13 +1,11 @@
 /**
  * Tests what a client says about a Provider Account: its name
  * (`buildProviderAccountName`, `findProviderAccountNameIfAmbiguous`), and how it signs
- * in (`requiresSignInPerMachine`, `listProviderAccountCredentialFields`).
+ * in (`signsInPerMachine`, `listProviderAccountCredentialFields`).
  */
 import { describe, expect, it } from "vitest";
-import type { Harness } from "@hercule/contract";
 import {
   ANTHROPIC_IDENTITY,
-  HARNESSES,
   OPENAI_IDENTITY,
   PROVIDERS,
   ZAI_IDENTITY,
@@ -18,12 +16,13 @@ import {
   buildProviderAccountName,
   describeProviderAccountIdentity,
   findDefaultHarnessSnapshot,
+  findHarnessLoginMethod,
   findProviderAccountKind,
   findProviderAccountNameIfAmbiguous,
   findProviderPluginId,
   listProviderAccountCredentialFields,
   listSignedInDefaultHarnessSnapshots,
-  requiresSignInPerMachine,
+  signsInPerMachine,
   resolveThreadHarnessId,
 } from "./provider-accounts";
 
@@ -78,44 +77,63 @@ describe("findProviderAccountKind", () => {
   });
 });
 
-describe("requiresSignInPerMachine", () => {
-  /** A kind with a harness-login step, whose harness keeps a token the controller holds: it works on every machine. */
-  const TOKEN_HARNESS: Harness = {
-    ...HARNESSES[0]!,
-    runs: [
-      {
-        providerId: "anthropic/anthropic",
-        kinds: [{ kind: "subscription-token", credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN" }],
-        modelArgument: "{model}",
-        models: "all",
-      },
-    ],
-  };
-  const TOKEN_ACCOUNT = { ...ANTHROPIC, kind: "subscription-token" };
+const TOKEN_PROVIDERS = PROVIDERS.map((provider) =>
+  provider.id === "anthropic/anthropic"
+    ? {
+        ...provider,
+        kinds: [
+          ...provider.kinds,
+          {
+            id: "subscription-token",
+            title: "Claude subscription, every machine",
+            description: "Sign in once.",
+            setup: [{ kind: "harness-login" as const, method: "create-token" as const }],
+            harnesses: ["claude-code/claude-code"],
+          },
+        ],
+      }
+    : provider,
+);
 
-  it("is true for a kind whose harness declares no credential variable, so its login is in the Harness Home", () => {
-    expect(requiresSignInPerMachine(HARNESSES, ANTHROPIC)).toBe(true);
-    expect(requiresSignInPerMachine(HARNESSES, OPENAI)).toBe(true);
+describe("signsInPerMachine", () => {
+  it("is true for a kind whose harness login is a sign-in, kept in the Harness Home of each machine", () => {
+    expect(signsInPerMachine(PROVIDERS, ANTHROPIC)).toBe(true);
+    expect(signsInPerMachine(PROVIDERS, OPENAI)).toBe(true);
   });
 
-  it("is false for a kind with a harness-login step whose harness declares a credential variable", () => {
-    expect(requiresSignInPerMachine([TOKEN_HARNESS], TOKEN_ACCOUNT)).toBe(false);
+  it("is false for a harness-login kind that makes a token, which every machine uses", () => {
+    expect(signsInPerMachine(TOKEN_PROVIDERS, { ...ANTHROPIC, kind: "subscription-token" })).toBe(
+      false,
+    );
   });
 
   it("is false for a key kind", () => {
-    expect(requiresSignInPerMachine(HARNESSES, ZAI)).toBe(false);
+    expect(signsInPerMachine(PROVIDERS, ZAI)).toBe(false);
   });
 
-  it("reads the harness the call names instead of the account's default", () => {
-    const named = { ...ANTHROPIC, defaultHarnessId: "pi/pi" };
+  it("is false when the provider no longer declares the account's kind", () => {
+    expect(signsInPerMachine([], ANTHROPIC)).toBe(false);
+    expect(signsInPerMachine(PROVIDERS, { ...ANTHROPIC, kind: "gone" })).toBe(false);
+  });
+});
 
-    expect(requiresSignInPerMachine(HARNESSES, named)).toBe(false);
-    expect(requiresSignInPerMachine(HARNESSES, named, "claude-code/claude-code")).toBe(true);
+describe("findHarnessLoginMethod", () => {
+  it("names the method of a kind that signs in through its harness", () => {
+    expect(findHarnessLoginMethod(PROVIDERS, ANTHROPIC)).toBe("sign-in");
+    expect(
+      findHarnessLoginMethod(TOKEN_PROVIDERS, {
+        providerId: ANTHROPIC.providerId,
+        kind: "subscription-token",
+      }),
+    ).toBe("create-token");
   });
 
-  it("is false when no registered harness declares the account's provider and kind", () => {
-    expect(requiresSignInPerMachine([], ANTHROPIC)).toBe(false);
-    expect(requiresSignInPerMachine(HARNESSES, { ...ANTHROPIC, kind: "gone" })).toBe(false);
+  it("returns null for a kind whose user types the credential in", () => {
+    expect(findHarnessLoginMethod(PROVIDERS, buildProviderAccount(ZAI_IDENTITY))).toBeNull();
+  });
+
+  it("returns null when the provider is no longer registered", () => {
+    expect(findHarnessLoginMethod([], ANTHROPIC)).toBeNull();
   });
 });
 

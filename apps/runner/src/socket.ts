@@ -439,6 +439,7 @@ export const connect = (
         binary: findBinaryPath(adapter.binaryName),
         env: process.env,
         modelArgument: harnessAccount.modelArgument,
+        credentialVariables: harnessAccount.credentialVariables,
         ...(harnessAccount.credential === undefined
           ? {}
           : { credential: harnessAccount.credential }),
@@ -678,6 +679,7 @@ export const connect = (
               // A login is the harness writing its own credential on this
               // machine. The login command never reads the account's key.
               buildContext(adapter, request.harnessAccount),
+              request.method,
             );
       });
 

@@ -208,10 +208,8 @@ export const ModelArgument = Schema.String.check(
 
 /**
  * The environment variable a harness reads the key or token of an account
- * from, and the key itself. The controller sends it whenever the harness
- * declares a variable for the account's kind. `value` is left out when the
- * account has no key stored, so the runner removes the variable from the
- * harness's environment instead of letting a key of the runner's own stand in.
+ * from, and the key itself. The controller sends it only when the account has
+ * a key or token stored.
  *
  * The controller decrypts the value as it builds the frame, so the plaintext
  * exists on the wire and in the runner's memory for that one operation and
@@ -219,9 +217,7 @@ export const ModelArgument = Schema.String.check(
  */
 export const HarnessCredential = Schema.Struct({
   variable: CredentialVariable,
-  value: Schema.optionalKey(
-    Schema.String.check(Schema.isBetweenLength(1, MAX_SECRET_VALUE_LENGTH)),
-  ),
+  value: Schema.String.check(Schema.isBetweenLength(1, MAX_SECRET_VALUE_LENGTH)),
 });
 
 export type HarnessCredential = Schema.Schema.Type<typeof HarnessCredential>;
@@ -234,9 +230,14 @@ export type HarnessCredential = Schema.Schema.Type<typeof HarnessCredential>;
  *
  * - `modelArgument` is the harness's form of the model argument, with
  *   exactly one `{model}` standing for the model id (`{model}`, `zai/{model}`).
- * - `credential` is absent for an account whose harness declares no variable
- *   for its kind, such as a per-machine account whose login is in the Harness
- *   Home.
+ * - `credentialVariables` is every variable the harness reads a credential
+ *   from, for any account kind and any provider it runs. It lists each name
+ *   once. The runner removes all of them from the harness's environment, so a
+ *   key in the runner's own environment never stands in for the account's
+ *   login. Every frame that runs a harness carries it, also for a per-machine
+ *   account that has no credential.
+ * - `credential` is present only when the account has a key or token stored.
+ *   Its variable is one of `credentialVariables`.
  *
  * The account id inside `harnessHome` must equal `providerAccountId`. Without
  * that, a frame could point one account's harness at the folder, login and
@@ -246,6 +247,10 @@ export const HarnessAccount = Schema.Struct({
   providerAccountId: ProviderAccountId,
   harnessHome: HarnessHome,
   modelArgument: ModelArgument,
+  credentialVariables: Schema.Array(CredentialVariable).check(
+    Schema.isMaxLength(MAX_FACT_ITEMS),
+    Schema.isUnique({ message: "credentialVariables lists each variable once." }),
+  ),
   credential: Schema.optionalKey(HarnessCredential),
 }).check(
   Schema.makeFilter((account) => {
@@ -256,6 +261,12 @@ export const HarnessAccount = Schema.Struct({
       ? undefined
       : `harnessHome ${account.harnessHome} belongs to Provider Account ${homeAccountId}, not ${account.providerAccountId}`;
   }),
+  Schema.makeFilter((account) =>
+    account.credential === undefined ||
+    account.credentialVariables.includes(account.credential.variable)
+      ? undefined
+      : `credential.variable ${account.credential.variable} is not one of credentialVariables`,
+  ),
 );
 
 export type HarnessAccount = Schema.Schema.Type<typeof HarnessAccount>;

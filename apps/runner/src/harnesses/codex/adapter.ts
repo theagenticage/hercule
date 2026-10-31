@@ -22,6 +22,7 @@ import type {
   AccessMode,
   ApprovalDecision,
   ExitReason,
+  LoginMethod,
   ModelSelection,
   ProbeResult,
   HarnessEvent,
@@ -510,6 +511,48 @@ const buildThreadHomeOverrides = (ctx: HarnessRunnerContext): ReadonlyArray<stri
 };
 
 /**
+ * The id of the model provider Codex is given for an account with an API key.
+ * Codex's app-server ignores `OPENAI_API_KEY` and `CODEX_API_KEY` in its
+ * environment, and takes a key only through a model provider that names the
+ * variable to read it from. The provider is defined on the command line, so it
+ * never reaches `config.toml` or `auth.json` in the Harness Home.
+ */
+const API_KEY_PROVIDER_ID = "openai_api_key";
+
+/**
+ * Returns the `-c` arguments that make Codex call the OpenAI API with the
+ * account's key, or none for an account with no key, which signs in with
+ * ChatGPT. The key itself is not an argument: the provider names the
+ * environment variable that holds it (`applyCredential` sets it), because an
+ * argument is visible to every process on the machine.
+ *
+ * The provider uses the Responses API, as Codex's built-in OpenAI provider
+ * does, and no websocket, which a custom provider does not support. A session,
+ * a probe and a text generation all start their app-server with these
+ * arguments.
+ */
+export const buildApiKeyOverrides = (
+  ctx: Pick<HarnessRunnerContext, "credential">,
+): ReadonlyArray<string> => {
+  if (ctx.credential === undefined) return [];
+  const provider = `model_providers.${API_KEY_PROVIDER_ID}`;
+  return [
+    "-c",
+    `model_provider=${JSON.stringify(API_KEY_PROVIDER_ID)}`,
+    "-c",
+    `${provider}.name=${JSON.stringify("OpenAI API key")}`,
+    "-c",
+    `${provider}.base_url=${JSON.stringify("https://api.openai.com/v1")}`,
+    "-c",
+    `${provider}.env_key=${JSON.stringify(ctx.credential.variable)}`,
+    "-c",
+    `${provider}.wire_api=${JSON.stringify("responses")}`,
+    "-c",
+    `${provider}.supports_websockets=false`,
+  ];
+};
+
+/**
  * Builds the developer instructions for one thread. A Codex thread accepts only
  * one set of instructions, so the parts are joined with a blank line between
  * them, in this order:
@@ -793,7 +836,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           ? {}
           : { [SESSION_MARKS_DIR_VARIABLE]: ctx.editMarks.sessionMarksDir }),
       },
-      ctx.credential,
+      ctx,
     );
   };
 
@@ -905,7 +948,14 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           ),
       });
       return yield* Effect.try({
-        try: () => startHost(env, binary, sessionId, overrides, textGeneration),
+        try: () =>
+          startHost(
+            env,
+            binary,
+            sessionId,
+            [...buildApiKeyOverrides(ctx), ...overrides],
+            textGeneration,
+          ),
         catch: (error) =>
           // Codex is spawned with no working directory, so `ENOENT` means the
           // binary is missing or its interpreter is.
@@ -1979,11 +2029,14 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
      * account's own home directories, like a session does, so the credential
      * is saved where the app-server looks for it.
      */
-    login: (ctx: HarnessRunnerContext, binary: string): LoginCommand => ({
-      command: [binary, "login", "--device-auth"],
-      env: prepareEnv(ctx),
-      userCode: USER_CODE,
-    }),
+    login: (ctx: HarnessRunnerContext, binary: string, method: LoginMethod) =>
+      method === "sign-in"
+        ? ({
+            command: [binary, "login", "--device-auth"],
+            env: prepareEnv(ctx),
+            userCode: USER_CODE,
+          } satisfies LoginCommand)
+        : undefined,
 
     install: makeCodexInstall(seam.run),
   };

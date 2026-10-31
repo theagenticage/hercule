@@ -4,8 +4,7 @@
  *
  * - the wire to runners: it is the only module that sends frames to runners
  *   and the only one that handles what they report, passing each result to
- *   the domain that owns it. The providers domain is the last exception: it
- *   still sends its own frames, and issue #209 moves it under the same rule;
+ *   the domain that owns it;
  * - the fibers behind the ports domains declare, such as the runs domain's
  *   Run Executor and the plugins domain's Ingest Executor;
  * - the loops that run for the life of the controller, and boot;
@@ -24,7 +23,11 @@
  * - `workspaces/`: provisioning and disposing workspaces, and the sweep that
  *   removes the ones nothing needs any more;
  * - `runners/`: sending a runner that connects the work owed to it, handling
- *   what runners report, and retiring a runner;
+ *   what runners report, asking a runner for its facts or to install a
+ *   harness, and retiring a runner;
+ * - `provider-accounts/`: probing the accounts on the runners and keeping their
+ *   snapshots fresh, and the operations that sign an account in on a runner or
+ *   probe it;
  * - `discussions/`: sending a session the Discussion Input that tells it
  *   what it has not been told about its Discussions yet, and recording
  *   the files sessions edit so that sessions that edited one file meet in a
@@ -100,8 +103,23 @@ export {
 } from "./permissions";
 export { thawExpiredFreezes } from "./promotion";
 export {
+  ProbeDriver,
+  ProbeDriverLayer,
+  ProviderAccountProbeDeadline,
+  ProviderAccountProbeInterval,
+  ProviderAccountProbing,
+  ProviderAccountProbingLayer,
+  ProviderAccountRunnerOperations,
+  ProviderAccountRunnerOperationsLayer,
+  ProviderAccountSignInDeadline,
+} from "./provider-accounts";
+export {
   Arrival,
   ArrivalLayer,
+  FactsRefresh,
+  FactsRefreshLayer,
+  HarnessInstall,
+  HarnessInstallLayer,
   Inbound,
   InboundLayer,
   PromotionFleet,

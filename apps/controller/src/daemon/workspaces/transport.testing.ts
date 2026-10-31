@@ -23,21 +23,36 @@ const controllerRoot = resolve(import.meta.dirname, "../..");
 // left at its default: it only sets the origin of the setup URL, and the
 // tests read just the token from that URL.
 //
-// The Anthropic plugin is loaded beside Claude Code because the fresh-install
-// seed makes the account that setup's default assistant runs on from the
-// providers the registry has.
+// The Anthropic plugin is loaded beside Claude Code because setup's default
+// assistant needs a Provider Account to run on, and a fresh install has none.
+// The process adds a Claude subscription account before it serves, as a
+// user's first-run step does (it holds no key, so no key check is involved).
 const controllerCode = `
   import { Effect } from "effect";
   import * as HttpServer from "effect/http/HttpServer";
   import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
   import { anthropic } from "@hercule/plugin-anthropic";
   import { claudeCode } from "@hercule/plugin-claude-code";
+  import * as SqlClient from "effect/sql/SqlClient";
+  import { nowIso, withTransaction } from ${JSON.stringify(join(controllerRoot, "db/index.ts"))};
+  import { providerAccountRepository } from ${JSON.stringify(join(controllerRoot, "provider-accounts/index.ts"))};
   import { bootWith } from ${JSON.stringify(join(controllerRoot, "bootstrap.ts"))};
   import { operationLayers, bodyLimits, serve } from ${JSON.stringify(join(controllerRoot, "http/index.ts"))};
   await Effect.runPromise(bootWith({
     argv: [], env: process.env,
     masterKeyBackend: "file", plugins: [anthropic, claudeCode]
   }, () => Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const accounts = yield* providerAccountRepository;
+    if (!(yield* accounts.hasAny())) {
+      yield* withTransaction(sql, accounts.insert({
+        providerId: "anthropic/anthropic",
+        kind: "subscription-per-machine",
+        label: null,
+        defaultHarnessId: "claude-code/claude-code",
+        at: yield* nowIso,
+      }));
+    }
     yield* serve(undefined);
     const { address } = yield* HttpServer.HttpServer;
     if (address._tag === "UnixPathAddress") throw new Error("expected a TCP address");
@@ -128,7 +143,7 @@ export const connectProofRunner = async (
           _tag: "probeReport",
           requestId: frame.requestId,
           providerAccountId: frame.harnessAccount.providerAccountId,
-          result: { harnessVersion: "1.0.0", auth: { status: "ok" }, models: MODELS },
+          result: { harnessVersion: "99.0.0", auth: { status: "ok" }, models: MODELS },
         });
         break;
       case "workspaceInspect":
