@@ -1254,10 +1254,10 @@ describe("modelProfile.create", () => {
 
     expect(outcome.count).toBe(MAX_MODEL_PROFILES);
     expect(outcome.failure).toMatchObject({
-      error: { code: "invalid_state", message: expect.stringContaining("32 Model Profiles") },
-    });
-    expect(outcome.failure).toMatchObject({
-      error: { message: expect.stringContaining("Delete one") },
+      error: {
+        code: "invalid_state",
+        message: expect.stringMatching(/32 Model Profiles.*Delete one/) as unknown,
+      },
     });
     expect(outcome.again.name).toBe("One too many");
   });
