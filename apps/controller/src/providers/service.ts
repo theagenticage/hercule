@@ -277,6 +277,12 @@ const make = Effect.gen(function* () {
       });
     });
 
+  /**
+   * Returns the definition of the registered harness with this qualified id.
+   * Fails with `Validation` when no plugin registered it, and the message
+   * lists the ids that are registered, so a caller who wrote a bare name such
+   * as `codex` sees the qualified one to use.
+   */
   const readHarnessDefinitionOrFail = (
     id: string,
   ): Effect.Effect<HarnessDefinition, Validation | SqlError> =>
@@ -285,7 +291,10 @@ const make = Effect.gen(function* () {
       return definition === undefined
         ? Effect.fail(
             createValidationError([
-              { path: ["harnessId"], message: `no plugin registered the harness ${id}` },
+              {
+                path: ["harnessId"],
+                message: `no plugin registered the harness ${id}; the registered harnesses are ${[...known.keys()].join(", ")}`,
+              },
             ]),
           )
         : Effect.succeed(definition);
@@ -503,6 +512,9 @@ const make = Effect.gen(function* () {
           decodeInstall(input),
           createDecodeValidationError,
         );
+        // The registry is checked first: an id no plugin registered gets the
+        // list of registered ids, not a message about the runner's build.
+        yield* readHarnessDefinitionOrFail(harnessId);
         yield* validateRunnerCanDrive(runnerId, harnessId, "harnessId");
         const answer = yield* connections.asked(
           runnerId,

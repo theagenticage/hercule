@@ -98,11 +98,14 @@ const CODEX = buildInstance("codex/codex", "Codex", [
 ]);
 
 /** Logged in on the local, remote and moss runners, each with another default model. */
-const TEAM = buildInstance("team", "Team", [
-  buildSnapshot({ runnerId: LOCAL.id, models: [{ ...GPT, slug: "team-local" }] }),
-  buildSnapshot({ runnerId: REMOTE.id, models: [{ ...GPT, slug: "team-remote" }] }),
-  buildSnapshot({ runnerId: MOSS.id, models: [{ ...GPT, slug: "team-moss" }] }),
-]);
+const TEAM = {
+  ...buildInstance("codex/codex", "Team", [
+    buildSnapshot({ runnerId: LOCAL.id, models: [{ ...GPT, slug: "team-local" }] }),
+    buildSnapshot({ runnerId: REMOTE.id, models: [{ ...GPT, slug: "team-remote" }] }),
+    buildSnapshot({ runnerId: MOSS.id, models: [{ ...GPT, slug: "team-moss" }] }),
+  ]),
+  id: "instance-team",
+};
 
 const CATALOGS: ThreadCatalogs = {
   instances: [CLAUDE, CODEX, TEAM],
@@ -260,7 +263,7 @@ describe("resolveThreadConfig: a draft's model and options", () => {
   });
 
   it("gives an account with no snapshot anywhere no model, no options and no runner", () => {
-    const empty = buildInstance("empty", "Empty", []);
+    const empty = { ...buildInstance("codex/codex", "Empty", []), id: "instance-empty" };
     const resolved = resolveDraft(
       applyThreadChoices(pickOption("effort", "low"), { kind: "account", instanceId: empty.id }),
       { ...CATALOGS, instances: [CLAUDE, empty] },

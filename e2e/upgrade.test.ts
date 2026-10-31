@@ -34,11 +34,13 @@
  * the edge binary stored: the fixture holds the three Provider Instances the
  * edge boot seeds (`claude-code`, `codex` and `pi`) beside the one created
  * here, a runner row with the facts as the edge binary stored them (a
- * `providers` list and bare `adapters`), and a `session.started` event of
- * the session whose `providerRefs` key the migration renames. After the
+ * `providers` list and bare `adapters`), and a `session.started` event and
+ * a user-message row of the session, whose `providerRefs` key the migration
+ * renames. After the
  * upgrade the instances read with qualified harness ids, and none is added
  * by the boot's default instances, the runner's facts read with `harnesses`
- * and qualified `adapters`, and the event reads with `harnessRefs`. The
+ * and qualified `adapters`, and both rows read with `harnessRefs`, the
+ * user message still being found by the transcript search. The
  * runner row is written beside the real runner because that one reports
  * fresh facts as soon as it reconnects. An edge database that already ran
  * migration 94 is seeded in the new spelling instead (`--harness`, qualified
@@ -383,6 +385,13 @@ const QUALIFIED_HARNESS_IDS = ["claude-code/claude-code", "codex/codex", "pi/pi"
 /** The native session id in the seeded session's `session.started` event. */
 const SEEDED_NATIVE_SESSION_ID = "upgrade-fixture-native";
 
+/**
+ * The text of the seeded user-message row. Codex and pi store `providerRefs`
+ * on such a row, and the transcript search indexes its text, so the search
+ * must still find it after migration 94 rewrites the row.
+ */
+const SEEDED_USER_MESSAGE = "Please recap the quarterly roadmap handshake.";
+
 /** The runner row the fixture writes beside the real one. It never connects. */
 const SEEDED_RUNNER_ID = "0199e0e7-0000-7000-8000-0000000009a1";
 
@@ -654,6 +663,17 @@ function persistRepresentativeSession(options: {
     );
   }
   events.push(
+    {
+      _tag: "item.started",
+      eventId: "user-message",
+      sessionId,
+      at,
+      turnId: "user-turn",
+      itemId: "user-message",
+      kind: "user_message",
+      detail: { text: SEEDED_USER_MESSAGE },
+      [options.refsKey]: { nativeSessionId: SEEDED_NATIVE_SESSION_ID },
+    },
     {
       _tag: "item.started",
       eventId: "subagent-read",
@@ -1080,6 +1100,11 @@ describe("upgrading from the previous edge release", () => {
 
       // The edge database exists now, and a reader does not block the
       // running controller. Migration 94 changed how the CLI spells a harness.
+      // Once the edge release contains migration 94, delete every branch that
+      // spells the old names: this guard, the `--provider` flag, `providerId`
+      // in `EdgeProvider`, `EDGE_HARNESS_IDS`, `summarizeEdgeProvider`'s
+      // qualifying of a bare id, `SEEDED_RUNNER_FACTS_BEFORE`, and the
+      // `providerRefs` spelling of `refsKey`.
       const edgeQualified = readMigrationVersion(home) >= QUALIFIED_HARNESS_IDS_MIGRATION;
       const createdProvider = expectJson<EdgeProvider>(
         await runCli(
@@ -1409,7 +1434,14 @@ describe("upgrading from the previous edge release", () => {
       const upgradedRunner = expectJson<{ facts: unknown }>(
         await runCli(["runner", "read", SEEDED_RUNNER_ID, "--json"], upgraded),
       );
-      expect(upgradedRunner.facts).toEqual(SEEDED_RUNNER_FACTS_AFTER);
+      // The order of `adapters` is not promised and nothing reads it, so the
+      // list is compared as a set and the other fields as they are.
+      const { adapters: upgradedAdapters, ...upgradedFacts } = upgradedRunner.facts as {
+        readonly adapters: ReadonlyArray<string>;
+      };
+      const { adapters: expectedAdapters, ...expectedFacts } = SEEDED_RUNNER_FACTS_AFTER;
+      expect(upgradedFacts).toEqual(expectedFacts);
+      expect(new Set(upgradedAdapters)).toEqual(new Set(expectedAdapters));
 
       const readAssistant = expectJson<{ id: string; mainConversationId: string }>(
         await runCli(["assistant", "read", assistant.id, "--json"], upgraded),
@@ -1459,13 +1491,19 @@ describe("upgrading from the previous edge release", () => {
       );
       expect(upgradedTranscript).toEqual(seededTranscript);
       // Migration 94 renames `providerRefs` on stored events and keeps its value.
-      const upgradedStart = (await readTranscript({ ...upgraded, id: sessionId })).find(
-        (row) => row.event._tag === "session.started",
-      );
+      const upgradedRows = await readTranscript({ ...upgraded, id: sessionId });
+      const upgradedStart = upgradedRows.find((row) => row.event._tag === "session.started");
       expect(upgradedStart?.event).toMatchObject({
         harnessRefs: { nativeSessionId: SEEDED_NATIVE_SESSION_ID },
       });
       expect(upgradedStart?.event).not.toHaveProperty("providerRefs");
+      // The same rename on a user message, which is also a search-indexed row.
+      const upgradedUserMessage = upgradedRows.find((row) => row.event["kind"] === "user_message");
+      expect(upgradedUserMessage?.event).toMatchObject({
+        detail: { text: SEEDED_USER_MESSAGE },
+        harnessRefs: { nativeSessionId: SEEDED_NATIVE_SESSION_ID },
+      });
+      expect(upgradedUserMessage?.event).not.toHaveProperty("providerRefs");
 
       const upgradedInputs = readListedItems<SeededInput>(
         await runCli(["input", "list", sessionId, "--json"], upgraded),
@@ -1535,6 +1573,14 @@ describe("upgrading from the previous edge release", () => {
         ),
       );
       expect(passages).toMatchObject([{ sessionId, excerpt: TURNS[1] }]);
+      // The user message that migration 94 rewrote is found by its text too.
+      const rewrittenPassages = readListedItems<{ sessionId: string; excerpt: string }>(
+        await runCli(
+          ["transcript", "list", "--text", "handshake", "--session", sessionId, "--json"],
+          upgraded,
+        ),
+      );
+      expect(rewrittenPassages).toMatchObject([{ sessionId, excerpt: SEEDED_USER_MESSAGE }]);
 
       // A trigger paused before migration 74 reads as paused manually, and
       // each trigger's spawn bound comes from its source or the default.

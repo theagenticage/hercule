@@ -17,6 +17,7 @@ const buildInstance = (
   harnessId: string,
   name: string,
   displayName: string,
+  binaryName: string,
   auth: ProviderInstance["snapshots"][number]["auth"] | null,
 ): ProviderInstance => ({
   id,
@@ -24,7 +25,7 @@ const buildInstance = (
   name,
   config: {},
   displayName,
-  binaryName: harnessId.slice(harnessId.indexOf("/") + 1),
+  binaryName,
   declared: {} as ProviderInstance["declared"],
   secretFields: [],
   snapshots:
@@ -63,7 +64,14 @@ const LOGGED_IN = { status: "ok", identity: "rogier@example.com" } as const;
 describe("buildAssistantProviderField", () => {
   it("offers each instance's default model, then its catalog, named after the instance", () => {
     const instances = [
-      buildInstance(PERSONAL, "claude-code/claude-code", "personal", "Claude Code", LOGGED_IN),
+      buildInstance(
+        PERSONAL,
+        "claude-code/claude-code",
+        "personal",
+        "Claude Code",
+        "claude",
+        LOGGED_IN,
+      ),
     ];
 
     const field = buildAssistantProviderField(instances, { instanceId: PERSONAL, model: null });
@@ -85,8 +93,15 @@ describe("buildAssistantProviderField", () => {
 
   it("names two instances of one harness by their account names", () => {
     const instances = [
-      buildInstance(PERSONAL, "claude-code/claude-code", "personal", "Claude Code", LOGGED_IN),
-      buildInstance(WORK, "claude-code/claude-code", "work", "Claude Code", LOGGED_IN),
+      buildInstance(
+        PERSONAL,
+        "claude-code/claude-code",
+        "personal",
+        "Claude Code",
+        "claude",
+        LOGGED_IN,
+      ),
+      buildInstance(WORK, "claude-code/claude-code", "work", "Claude Code", "claude", LOGGED_IN),
     ];
 
     const field = buildAssistantProviderField(instances, { instanceId: WORK, model: null });
@@ -96,7 +111,7 @@ describe("buildAssistantProviderField", () => {
 
   it("offers only the default model of an instance that is not logged in", () => {
     const instances = [
-      buildInstance(CODEX, "codex/codex", "codex", "Codex", { status: "unauthenticated" }),
+      buildInstance(CODEX, "codex/codex", "codex", "Codex", "codex", { status: "unauthenticated" }),
     ];
 
     const field = buildAssistantProviderField(instances, { instanceId: CODEX, model: null });
@@ -109,7 +124,14 @@ describe("buildAssistantProviderField", () => {
 
   it("keeps the assistant's model when the catalog no longer offers it", () => {
     const instances = [
-      buildInstance(PERSONAL, "claude-code/claude-code", "personal", "Claude Code", LOGGED_IN),
+      buildInstance(
+        PERSONAL,
+        "claude-code/claude-code",
+        "personal",
+        "Claude Code",
+        "claude",
+        LOGGED_IN,
+      ),
     ];
 
     const field = buildAssistantProviderField(instances, {
@@ -126,7 +148,7 @@ describe("buildAssistantProviderField", () => {
 
   it("keeps the assistant's model on an instance that is not logged in", () => {
     const instances = [
-      buildInstance(CODEX, "codex/codex", "codex", "Codex", { status: "unauthenticated" }),
+      buildInstance(CODEX, "codex/codex", "codex", "Codex", "codex", { status: "unauthenticated" }),
     ];
 
     const field = buildAssistantProviderField(instances, { instanceId: CODEX, model: "gpt-6" });
@@ -139,8 +161,15 @@ describe("buildAssistantProviderField", () => {
 
   it("does not add the assistant's model to another instance's group", () => {
     const instances = [
-      buildInstance(PERSONAL, "claude-code/claude-code", "personal", "Claude Code", LOGGED_IN),
-      buildInstance(CODEX, "codex/codex", "codex", "Codex", { status: "unauthenticated" }),
+      buildInstance(
+        PERSONAL,
+        "claude-code/claude-code",
+        "personal",
+        "Claude Code",
+        "claude",
+        LOGGED_IN,
+      ),
+      buildInstance(CODEX, "codex/codex", "codex", "Codex", "codex", { status: "unauthenticated" }),
     ];
 
     const field = buildAssistantProviderField(instances, {
@@ -155,7 +184,14 @@ describe("buildAssistantProviderField", () => {
     "adds a deleted instance as a last group holding only the assistant's choice, model %s",
     (model) => {
       const instances = [
-        buildInstance(PERSONAL, "claude-code/claude-code", "personal", "Claude Code", LOGGED_IN),
+        buildInstance(
+          PERSONAL,
+          "claude-code/claude-code",
+          "personal",
+          "Claude Code",
+          "claude",
+          LOGGED_IN,
+        ),
       ];
 
       const field = buildAssistantProviderField(instances, { instanceId: WORK, model });

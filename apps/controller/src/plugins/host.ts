@@ -25,6 +25,7 @@ import {
   ConnectionValidationFailed,
   decodeAgainst,
   HOST_API,
+  MAX_CONTRIBUTION_NAME_LENGTH,
   PluginError,
   PluginManifest,
   HarnessDefinition,
@@ -411,6 +412,16 @@ const buildRegistrationHost = (
               // The id the catalog, the stored rows and every lookup use, built
               // like a connection type's. Nothing splits it again.
               const harnessId = `${manifest.id}/${decoded.id}`;
+              // The word alone passed the limit, but the qualified id is stored
+              // in a column with the same limit. Refusing here refuses this
+              // plugin; a row the database rejects would stop the whole boot.
+              if (harnessId.length > MAX_CONTRIBUTION_NAME_LENGTH) {
+                return yield* Effect.fail(
+                  new PluginError({
+                    message: `the harness id ${harnessId} is ${String(harnessId.length)} characters long, and the limit is ${String(MAX_CONTRIBUTION_NAME_LENGTH)}. The id is the plugin id, a "/" and the harness's own id, so shorten the harness's id.`,
+                  }),
+                );
+              }
               if (listChoiceFields(decoded.configSchema).length > 0) {
                 return yield* Effect.fail(
                   new PluginError({

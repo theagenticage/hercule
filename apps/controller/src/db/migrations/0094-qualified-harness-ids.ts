@@ -27,6 +27,10 @@
  * `providerRefs`, so the statement first filters with a plain text search for
  * the key, and only then checks that the key is top-level (a payload may hold
  * the same word deeper down, and that stays as it is).
+ *
+ * The rewrite fires no trigger on `session_stream` (migration 0063 only has
+ * an `AFTER INSERT` one), and it leaves the text the transcript search
+ * indexes (`detail.text` and `delta`) unchanged, so the index needs no rebuild.
  */
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";

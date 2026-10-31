@@ -164,6 +164,8 @@ describe("a plugin built against another host API version", () => {
 describe("a plugin the host cannot load", () => {
   it("gets the refused status for an unimplemented capability and for a config schema no form can render", async () => {
     const channels = createPluginFixture({ id: "channels-plugin", capabilities: ["channels"] });
+    // `providers` is a valid capability name that no host implements yet.
+    const providers = createPluginFixture({ id: "providers-plugin", capabilities: ["providers"] });
     const nested = createPluginFixture({
       id: "nested-plugin",
       configSchema: Schema.Struct({ server: Schema.Struct({ host: Schema.String }) }),
@@ -172,8 +174,9 @@ describe("a plugin the host cannot load", () => {
     const statuses = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
-        yield* host.boot([channels.plugin, nested.plugin]);
+        yield* host.boot([channels.plugin, providers.plugin, nested.plugin]);
         return {
+          providers: yield* host.status("providers-plugin"),
           channels: yield* host.status("channels-plugin"),
           nested: yield* host.status("nested-plugin"),
         };
@@ -183,6 +186,11 @@ describe("a plugin the host cannot load", () => {
     expect(Option.getOrNull(statuses.channels)).toEqual({
       _tag: "refused",
       reason: { kind: "unimplementedCapability", capability: "channels" },
+    });
+
+    expect(Option.getOrNull(statuses.providers)).toEqual({
+      _tag: "refused",
+      reason: { kind: "unimplementedCapability", capability: "providers" },
     });
 
     const nestedStatus = Option.getOrNull(statuses.nested) as {
@@ -359,6 +367,41 @@ describe("a plugin whose register fails", () => {
 
     expect(detail.status._tag).toBe("errored");
     expect(detail.contributions).toEqual([]);
+  });
+
+  it("accepts a qualified harness id of exactly the longest allowed length and refuses one character more", async () => {
+    // "boundary/" is 9 characters, so a 119 character word makes a 128
+    // character id, the length of the column that stores it.
+    const fits = createPluginFixture({
+      id: "boundary",
+      definitions: [{ ...buildHarnessDefinition("a".repeat(119)), displayName: "Fits" }],
+    });
+    const tooLong = createPluginFixture({
+      id: "overlong",
+      definitions: [{ ...buildHarnessDefinition("a".repeat(120)), displayName: "Too long" }],
+    });
+    const other = createPluginFixture({ id: "other" });
+
+    const { statuses, harnessIds, contributions } = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([fits.plugin, tooLong.plugin, other.plugin]);
+        const details = yield* Effect.flatMap(Plugins, (plugins) => plugins.query());
+        return {
+          statuses: details.map((detail) => detail.status),
+          harnessIds: (yield* host.harnesses()).map((definition) => definition.id),
+          contributions: details.map((detail) => detail.contributions.length),
+        };
+      }),
+    );
+
+    expect(statuses.map((status) => status._tag)).toEqual(["active", "errored", "active"]);
+    const refusal = statuses[1];
+    expect(refusal?._tag === "errored" ? refusal.message : "").toContain(
+      "129 characters long, and the limit is 128",
+    );
+    expect(harnessIds).toEqual([`boundary/${"a".repeat(119)}`, "other/other"]);
+    expect(contributions).toEqual([1, 0, 1]);
   });
 
   it("is errored when its contribution has a key the host does not know", async () => {

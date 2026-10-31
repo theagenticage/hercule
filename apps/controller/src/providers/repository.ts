@@ -45,6 +45,8 @@ interface InstanceRow {
   readonly updated_at: string;
 }
 
+// The column keeps its old name `provider_id` while its value is the qualified
+// harness id, because a later change replaces this table.
 const INSTANCE_COLUMNS = "id, provider_id, name, config, created_at, updated_at";
 
 /**

@@ -151,7 +151,7 @@ describe("controller.read text generation", () => {
           sql,
           Effect.gen(function* () {
             const inserted = yield* instances.insert({
-              harnessId: "codex",
+              harnessId: "codex/codex",
               name: "Codex",
               config: {},
               at: yield* nowIso,

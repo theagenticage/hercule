@@ -62,20 +62,31 @@ const DECLARED: ProviderInstance["declared"] = {
   structuredOutput: "supported",
 };
 
+/** The instance id and the binary's name of each harness a test builds an instance for. */
+const HARNESSES: Record<string, { readonly instanceId: string; readonly binaryName: string }> = {
+  "claude-code/claude-code": { instanceId: "instance-claude-code", binaryName: "claude" },
+  "codex/codex": { instanceId: "instance-codex", binaryName: "codex" },
+  "pi/pi": { instanceId: "instance-pi", binaryName: "pi" },
+};
+
+/**
+ * Returns a provider instance of the harness `harnessId`, a qualified id such as
+ * `claude-code/claude-code`. Throws for an id not in `HARNESSES`, so a stale or bare id fails the test.
+ */
 export const buildInstance = (
   harnessId: string,
   displayName: string,
   snapshots: ProviderInstance["snapshots"] = [],
 ): ProviderInstance => {
-  // A qualified harness id is `<plugin>/<harness>`; the harness's own name is the binary's.
-  const harnessName = harnessId.slice(harnessId.indexOf("/") + 1);
+  const harness = HARNESSES[harnessId];
+  if (harness === undefined) throw new Error(`No test harness registered for "${harnessId}"`);
   return {
-    id: `instance-${harnessName}`,
+    id: harness.instanceId,
     harnessId,
     name: displayName,
     config: {},
     displayName,
-    binaryName: harnessName === "claude-code" ? "claude" : harnessName,
+    binaryName: harness.binaryName,
     declared: DECLARED,
     secretFields: [],
     snapshots,

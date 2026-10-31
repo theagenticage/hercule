@@ -15,6 +15,9 @@ export const HOST_API = 2;
  */
 export const PLUGIN_CAPABILITIES = [
   "harnesses",
+  // The model provider's registration point. No host implements it yet, so a
+  // manifest that asks for it is refused at load with the name.
+  "providers",
   "channels",
   "event-sources",
   "workflow-actions",

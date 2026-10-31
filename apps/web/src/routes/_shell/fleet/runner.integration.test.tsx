@@ -73,6 +73,7 @@ const buildProviderInstance = (
   id: string,
   harnessId: string,
   displayName: string,
+  binaryName: string,
   snapshots: readonly Snapshot[],
 ) => ({
   id,
@@ -80,10 +81,7 @@ const buildProviderInstance = (
   name: displayName,
   config: {},
   displayName,
-  binaryName:
-    harnessId === "claude-code/claude-code"
-      ? "claude"
-      : harnessId.slice(harnessId.indexOf("/") + 1),
+  binaryName,
   declared: DECLARED,
   secretFields: [] as ReadonlyArray<ProviderSecretField>,
   snapshots,
@@ -119,9 +117,9 @@ const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 const CODEX_ID = "01a06d02-1000-7000-8000-000000000002";
 
 const buildClaudeCodeInstance = (snapshots: readonly Snapshot[]) =>
-  buildProviderInstance(CLAUDE_ID, "claude-code/claude-code", "Claude Code", snapshots);
+  buildProviderInstance(CLAUDE_ID, "claude-code/claude-code", "Claude Code", "claude", snapshots);
 
-const CODEX = buildProviderInstance(CODEX_ID, "codex/codex", "Codex", [NO_ADAPTER]);
+const CODEX = buildProviderInstance(CODEX_ID, "codex/codex", "Codex", "codex", [NO_ADAPTER]);
 
 const INSTANCES = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
 
@@ -956,7 +954,7 @@ describe("Runner > a provider that needs a key", () => {
   });
 
   const buildPiInstance = (set: boolean) => ({
-    ...buildProviderInstance(PI_ID, "pi/pi", "pi", [PI_SNAPSHOT]),
+    ...buildProviderInstance(PI_ID, "pi/pi", "pi", "pi", [PI_SNAPSHOT]),
     secretFields: [{ name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set }],
   });
 

@@ -263,7 +263,25 @@ describe("the writes on /providers", () => {
       );
 
       expect(rejected.error.code).toBe("validation");
+      expect(JSON.stringify(rejected.error.details)).toContain(
+        "no plugin registered the harness gamma/gamma; the registered harnesses are alpha/alpha, beta/beta",
+      );
       expect(filterByHarness(await listInstances(base, token), "gamma/gamma")).toEqual([]);
+    });
+  });
+
+  it("names the qualified ids when a create uses a bare harness name", async () => {
+    await withProviders(async ({ base }) => {
+      const token = await completeSetup(base);
+
+      const rejected = await readApiError(
+        await createInstance(base, token, { harnessId: "alpha", name: "bare", config: {} }),
+        400,
+      );
+
+      expect(JSON.stringify(rejected.error.details)).toContain(
+        "no plugin registered the harness alpha; the registered harnesses are alpha/alpha, beta/beta",
+      );
     });
   });
 

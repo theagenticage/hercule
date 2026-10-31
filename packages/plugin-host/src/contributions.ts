@@ -61,9 +61,12 @@ export const ContributionWord = ContributionName.check(
 
 /**
  * A harness's static self-description, which is all a harness plugin
- * contributes. `id` is the unqualified word; the host builds the qualified id
- * (`claude-code/claude-code`) at registration. `defaultConfig` is a value
- * rather than a function, because a function cannot be stored in the catalog.
+ * contributes. The plugin declares `id` as a bare word (`claude-code`), which
+ * may not contain a `/`. At registration the host replaces it with the
+ * qualified id (`claude-code/claude-code`), so every definition the controller
+ * hands out, such as `host.harnesses()`, carries the qualified id.
+ * `defaultConfig` is a value rather than a function, because a function cannot
+ * be stored in the catalog.
  */
 export const HarnessDefinition = Schema.Struct({
   id: ContributionWord,

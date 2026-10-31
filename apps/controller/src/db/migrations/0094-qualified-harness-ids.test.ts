@@ -163,7 +163,15 @@ describe("the qualified harness ids migration", () => {
 
   it("renames `providers` to `harnesses` in a runner's facts, qualifies its adapters, and keeps every other field", async () => {
     const { runners } = await seedAndMigrate();
-    expect(runners.get("with-facts")).toEqual(NEW_FACTS);
+    // The order of `adapters` is not promised, and nothing reads it: the
+    // controller only checks whether the list includes an id. So the list is
+    // compared sorted, and the other fields as they are.
+    const { adapters: migratedAdapters, ...migratedRest } = runners.get("with-facts") as {
+      readonly adapters: ReadonlyArray<string>;
+    };
+    const { adapters: expectedAdapters, ...expectedRest } = NEW_FACTS;
+    expect(migratedRest).toEqual(expectedRest);
+    expect([...migratedAdapters].sort()).toEqual([...expectedAdapters].sort());
   });
 
   it("leaves a runner that never reported facts without facts", async () => {

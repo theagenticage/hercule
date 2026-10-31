@@ -2133,6 +2133,37 @@ describe("installing a harness on a runner", () => {
     });
   });
 
+  it("names the registered harnesses when an install uses a bare harness name, whatever the runner's build", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential, { facts: BARE });
+      try {
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+
+        const response = await installHarness(harness.base, token, joined.runnerId, "claude-code");
+        expect(response.status, await response.clone().text()).toBe(400);
+        const refusal = (await response.json()) as {
+          error: { code: string; details?: unknown };
+        };
+        expect(refusal.error.code).toBe("validation");
+        // The refusal is about the id, not about the runner's build.
+        const details = JSON.stringify(refusal.error.details);
+        expect(details).toContain("no plugin registered the harness claude-code;");
+        expect(details).toContain("claude-code/claude-code");
+        expect(details).not.toContain("runner build");
+        expect(wire.frames.filter((frame) => frame._tag === "installRequest")).toEqual([]);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
   it("rejects installing on a runner that is not online", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);

@@ -69,7 +69,7 @@ const start = {
   requestId: "0199e0e7-0000-7000-8000-00000000000d",
   sessionId: SESSION_ID,
   input: { text: "fix the login bug" },
-  harnessId: "claude-code",
+  harnessId: "claude-code/claude-code",
   config: {},
   /** `{}` rather than absent, for an instance with no credential stored. */
   secrets: {},

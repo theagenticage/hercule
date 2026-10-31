@@ -2447,7 +2447,7 @@ export const CLI = {
   },
   "provider.create": {
     command: "provider create",
-    help: "Opens a Provider Instance: one account of one harness, with its own provider home on every runner. The config is a JSON object validated against the harness's own schema. Log the new instance in on a machine with `hercule provider login`.",
+    help: "Opens a Provider Instance: one account of one harness, with its own harness home on every runner. The config is a JSON object validated against the harness's own schema. Log the new instance in on a machine with `hercule provider login`.",
     examples: [{ args: ["--harness", "claude-code/claude-code", "--name", "work"], stdin: "{}" }],
     fields: {
       harnessId: {

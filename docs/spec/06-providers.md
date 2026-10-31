@@ -29,7 +29,7 @@ The runner never sees Hercule domain state and the controller never sees runner 
 
 ```ts
 interface HarnessDefinition {
-  id: string                                  // qualified (ADR 0034): "claude-code/claude-code" | "codex/codex" | "pi/pi"
+  id: string                                  // the plugin declares a bare word ("claude-code", no "/"); the host mints the qualified id (ADR 0034): "claude-code/claude-code" | "codex/codex" | "pi/pi"
   displayName: string
   supportsMultipleInstances: boolean          // multi-account via config-dir isolation
   configSchema: Schema                        // per-instance logical settings, in Effect Schema: env, model defaults - never paths (§2.1)
@@ -80,7 +80,7 @@ pi's `auto` is unsupported because `auto` means a harness-side reviewer judges r
 
 ```ts
 interface HarnessDefinition {
-  id: string                          // qualified (ADR 0034): "claude-code/claude-code", "codex/codex", "pi/pi"
+  id: string                          // the plugin declares a bare word ("claude-code", no "/"); the host mints the qualified id (ADR 0034): "claude-code/claude-code", "codex/codex", "pi/pi"
   displayName: string
   binaryName: string                  // the executable on a runner's PATH, as Runner Facts name it
   declared: DeclaredCapabilities      // unchanged, table above

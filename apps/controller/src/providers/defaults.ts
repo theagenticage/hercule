@@ -23,7 +23,7 @@ export const ensureProviderInstances: Effect.Effect<
   const host = yield* PluginHost;
   const audit = yield* AuditLog;
   const registered = yield* host.harnesses();
-  // A map, so two plugins that register the same harness still get one instance.
+  // Keyed by harness id, so the ids that already have an instance are removed by key.
   const missing = new Map(registered.map((definition) => [definition.id, definition]));
   for (const harnessId of yield* instances.harnessesWithInstance()) missing.delete(harnessId);
   if (missing.size === 0) return;
