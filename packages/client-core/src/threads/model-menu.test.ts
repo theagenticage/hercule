@@ -57,7 +57,7 @@ const withModels = (
   ...base,
   id,
   label,
-  snapshots: [buildSnapshot({ runnerId: LOCAL.id, models })],
+  snapshots: [buildSnapshot({ runnerId: LOCAL.id, harnessId: base.defaultHarnessId, models })],
 });
 
 /** An unlabelled Anthropic account. */

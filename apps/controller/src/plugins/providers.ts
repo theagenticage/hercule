@@ -1,6 +1,5 @@
 import { Effect, Schema } from "effect";
 import { PluginError, ProviderDefinition, type PluginManifest } from "@hercule/plugin-host";
-import { API_KEY_SECRET_NAME } from "../secrets";
 import { toPluginError } from "./errors";
 import { mintQualifiedId } from "./qualified-id";
 import type { NewContribution } from "./repository";
@@ -17,6 +16,13 @@ export type RegisteredProvider = Omit<ProviderDefinition, "id"> & {
   /** The id of the plugin that registered the provider. Read it here; never split it off `id`. */
   readonly pluginId: string;
 };
+
+/**
+ * The name a key account's key is stored under. Every key kind has one
+ * `credentials` field of this name (spec 06 section 15.2), and the secret
+ * migration of an old Z.ai key writes it under the same name.
+ */
+export const API_KEY_SECRET_NAME = "apiKey";
 
 /** The name of the provider extension point in the catalog. */
 const PROVIDER = "provider";

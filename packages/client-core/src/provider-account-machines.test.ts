@@ -109,16 +109,13 @@ describe("listProviderAccountMachines", () => {
     ).toMatchObject({ kind: "unavailable" });
   });
 
-  it("gives the unavailable action for an account whose default harness no plugin registers", () => {
+  it("returns null for an account whose default harness no plugin registers, because nothing says where its login lives", () => {
     const account = {
       ...buildProviderAccount(ANTHROPIC_IDENTITY, []),
       defaultHarnessId: "gone/gone",
     };
 
-    expect(list(account, [WITH_CLAUDE])[0]?.action).toEqual({
-      kind: "unavailable",
-      reason: "moss runs a Hercule build that cannot run gone/gone.",
-    });
+    expect(listProviderAccountMachines(account, [WITH_CLAUDE], PROVIDERS, HARNESSES)).toBeNull();
   });
 
   it("returns null for an account that does not sign in on each machine", () => {

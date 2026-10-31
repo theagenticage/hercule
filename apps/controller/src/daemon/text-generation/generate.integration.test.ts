@@ -49,7 +49,11 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  harnesses: [
+    { name: "codex", present: true, path: "/usr/local/bin/codex" },
+    { name: "pi", present: true, path: "/usr/local/bin/pi" },
+    { name: "claude", present: true, path: "/usr/local/bin/claude" },
+  ],
   adapters: ["codex/codex", "pi/pi", "claude-code/claude-code"],
   identityPort: 4939,
 };
@@ -64,7 +68,7 @@ const buildModels = (...slugs: ReadonlyArray<string>): ReadonlyArray<ModelDescri
   }));
 
 /** Every suggested model, so `automatic` picks codex. */
-const ALL_MODELS = buildModels("codex-mini", "pi-small", "haiku");
+const ALL_MODELS = buildModels("gpt-6-luna", "glm-5.3-flash", "haiku");
 
 vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
 
@@ -192,7 +196,7 @@ describe("a text generation that succeeds", () => {
           modelArgument: "{model}",
         },
         spec: {
-          model: "codex-mini",
+          model: "gpt-6-luna",
           instructions: SECRET_INSTRUCTIONS,
           input: SECRET_INPUT,
           outputSchema: TITLE_SCHEMA,
@@ -232,7 +236,7 @@ describe("a text generation that succeeds", () => {
         caller: "core:sessions",
         providerAccountId: findProviderAccountId(arranged, "codex/codex"),
         harnessId: "codex/codex",
-        model: "codex-mini",
+        model: "gpt-6-luna",
         runnerId: arranged.runnerId,
         durationMs: expect.any(Number) as unknown,
         usage: { inputTokens: 12, outputTokens: 3 },
@@ -292,14 +296,14 @@ describe("the last failure after the model setting changes", () => {
       }));
       await generate(arranged);
       expect(await readStatus(arranged)).toMatchObject({
-        model: { providerAccountId: codex, harnessId: "codex/codex", model: "codex-mini" },
+        model: { providerAccountId: codex, harnessId: "codex/codex", model: "gpt-6-luna" },
         lastFailure: { message: "codex went wrong" },
       });
 
       await logOutAccount(arranged, codex);
 
       expect(await readStatus(arranged)).toEqual({
-        model: { providerAccountId: pi, harnessId: "pi/pi", model: "pi-small" },
+        model: { providerAccountId: pi, harnessId: "pi/pi", model: "glm-5.3-flash" },
         unavailableReason: null,
         lastFailure: null,
       });
@@ -437,7 +441,7 @@ describe("the model automatic chooses", () => {
       expect((await readStatus(arranged)).model).toEqual({
         providerAccountId: findProviderAccountId(arranged, "codex/codex"),
         harnessId: "codex/codex",
-        model: "codex-mini",
+        model: "gpt-6-luna",
       });
     });
     await withFleet(
@@ -445,10 +449,10 @@ describe("the model automatic chooses", () => {
         expect((await readStatus(arranged)).model).toEqual({
           providerAccountId: findProviderAccountId(arranged, "pi/pi"),
           harnessId: "pi/pi",
-          model: "pi-small",
+          model: "glm-5.3-flash",
         });
       },
-      { models: buildModels("pi-small", "haiku") },
+      { models: buildModels("glm-5.3-flash", "haiku") },
     );
     await withFleet(
       async (arranged) => {
@@ -479,7 +483,7 @@ describe("the model automatic chooses", () => {
       expect(result).toEqual({ ok: true, value: { title: TITLE } });
       expect(requestsOn(arranged)[0]).toMatchObject({
         harnessId: "pi/pi",
-        spec: { model: "pi-small" },
+        spec: { model: "glm-5.3-flash" },
       });
     });
   });
@@ -512,7 +516,7 @@ describe("the model automatic chooses", () => {
           expect((await readStatus(arranged)).model).toEqual({
             providerAccountId: findProviderAccountId(arranged, "pi/pi"),
             harnessId: "pi/pi",
-            model: "pi-small",
+            model: "glm-5.3-flash",
           });
           const result = await generate(arranged);
 
@@ -609,9 +613,9 @@ describe("a chosen account that was deleted", () => {
     await withFleet(async (arranged) => {
       answerOk(arranged);
       const pi = findProviderAccountId(arranged, "pi/pi");
-      expect((await setModel(arranged, { providerAccountId: pi, model: "pi-small" })).status).toBe(
-        200,
-      );
+      expect(
+        (await setModel(arranged, { providerAccountId: pi, model: "glm-5.3-flash" })).status,
+      ).toBe(200);
       await Effect.runPromise(
         withTransaction(
           arranged.harness.sql,
@@ -911,7 +915,7 @@ describe("the key a call sends", () => {
       async (arranged) => {
         const pi = findProviderAccountId(arranged, "pi/pi");
         expect(
-          (await setModel(arranged, { providerAccountId: pi, model: "pi-small" })).status,
+          (await setModel(arranged, { providerAccountId: pi, model: "glm-5.3-flash" })).status,
         ).toBe(200);
         await storeKey(arranged, pi, "the-old-key");
         // No runner answers, so the first ten calls hold every slot.
@@ -1023,9 +1027,9 @@ describe("an error nobody expected", () => {
       // sends anything. With the table gone, that read fails in a way no
       // caller can act on.
       const pi = findProviderAccountId(arranged, "pi/pi");
-      expect((await setModel(arranged, { providerAccountId: pi, model: "pi-small" })).status).toBe(
-        200,
-      );
+      expect(
+        (await setModel(arranged, { providerAccountId: pi, model: "glm-5.3-flash" })).status,
+      ).toBe(200);
       await Effect.runPromise(
         withTransaction(
           arranged.harness.sql,

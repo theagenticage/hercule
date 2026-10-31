@@ -3,7 +3,13 @@
  * how it signs in. Every screen reads these from here, so no two screens name
  * the same account differently.
  */
-import type { AccountKind, CapabilitySnapshot, Provider, ProviderAccount } from "@hercule/contract";
+import type {
+  AccountKind,
+  CapabilitySnapshot,
+  Harness,
+  Provider,
+  ProviderAccount,
+} from "@hercule/contract";
 import type { CredentialField } from "./connection-types";
 
 /** The part of an account that decides its name. */
@@ -94,18 +100,28 @@ export const findProviderAccountKind = (
     ?.kinds.find((kind) => kind.id === account.kind);
 
 /**
- * Checks whether the account signs in on each machine: its kind has a
- * `harness-login` setup step. Such an account is signed in on a runner by
- * `providerAccount.signIn`; any other kind has a credential the controller
- * keeps and every runner uses.
+ * Checks whether the account has a login on each machine: the harness that
+ * runs it keeps the login in its Harness Home, because the harness declares no
+ * `credentialVariable` for the account's kind (spec 06 section 2). Such an
+ * account is signed in on a runner by `providerAccount.signIn`. Any other
+ * account has a credential the controller keeps and every machine uses, however
+ * the user obtains it.
+ *
+ * The harness is the one named by `harnessId`, or the account's default
+ * harness. Returns `false` when that harness is not registered or does not
+ * declare the account's provider and kind.
  */
 export const requiresSignInPerMachine = (
-  providers: readonly Provider[],
-  account: Pick<ProviderAccount, "providerId" | "kind">,
-): boolean =>
-  findProviderAccountKind(providers, account)?.setup.some(
-    (step) => step.kind === "harness-login",
-  ) ?? false;
+  harnesses: readonly Harness[],
+  account: Pick<ProviderAccount, "providerId" | "kind" | "defaultHarnessId">,
+  harnessId?: string | null,
+): boolean => {
+  const kind = harnesses
+    .find((harness) => harness.id === resolveThreadHarnessId(account, harnessId))
+    ?.runs.find((support) => support.providerId === account.providerId)
+    ?.kinds.find((each) => each.kind === account.kind);
+  return kind !== undefined && kind.credentialVariable === undefined;
+};
 
 /**
  * Returns the fields the user types in to set the account's credential, from

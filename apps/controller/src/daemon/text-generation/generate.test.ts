@@ -55,7 +55,7 @@ const TARGET: TextGenerationTarget = {
   providerAccountId: ACCOUNT_ID,
   providerAccountName: "OpenAI",
   harnessId: "codex/codex",
-  model: "codex-mini",
+  model: "gpt-6-luna",
   runnerIds: ["runner-1"],
 };
 
@@ -230,7 +230,7 @@ describe("the request sent to the runner", () => {
         harnessHome: `providers/homes/${ACCOUNT_ID}/codex/codex`,
         modelArgument: "{model}",
       },
-      spec: { model: "codex-mini" },
+      spec: { model: "gpt-6-luna" },
     });
   });
 
@@ -476,7 +476,7 @@ describe("a call that queues for a slot", () => {
 
     expect(result.exit).toEqual(Exit.succeed({ title: "Fix it" }));
     expect(result.requests.map((request) => request.spec.model)).toEqual([
-      ...Array.from({ length: PERMITS }, () => "codex-mini"),
+      ...Array.from({ length: PERMITS }, () => "gpt-6-luna"),
       "codex-max",
     ]);
   });

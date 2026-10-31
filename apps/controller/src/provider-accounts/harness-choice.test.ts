@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
+import * as SqlClient from "effect/sql/SqlClient";
+import { withTransaction } from "../db";
 import { isSignedIn, resolveProviderAccountHarness } from "./harness-choice";
 import type { StoredSnapshot } from "./repository";
 import {
@@ -17,27 +19,34 @@ import {
 const MISSING = "0199e0e7-9999-7000-8000-000000000000";
 
 describe("resolveProviderAccountHarness", () => {
-  it("returns the account, the default harness and only the snapshots of that harness", async () => {
+  it("returns the account's default harness and its definition", async () => {
+    const resolved = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ kind: KEY_KIND });
+        return yield* resolveProviderAccountHarness(account.id);
+      }),
+    );
+
+    expect(resolved.harnessId).toBe(ALPHA_HARNESS_ID);
+    expect(resolved.definition.id).toBe(ALPHA_HARNESS_ID);
+  });
+
+  it("does not read the account's snapshots, so one that cannot be decoded blocks nothing", async () => {
     const resolved = await runWithAccounts(
       Effect.gen(function* () {
         const account = yield* addAccount({ kind: KEY_KIND });
         const laptop = yield* addRunner("laptop");
         yield* addSnapshot(account.id, ALPHA_HARNESS_ID, laptop);
-        // A snapshot in another harness is not this pair's.
-        yield* addSnapshot(account.id, BETA_HARNESS_ID, laptop);
-        return { account, laptop, resolved: yield* resolveProviderAccountHarness(account.id) };
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(
+          sql,
+          sql`UPDATE capability_snapshots SET models = '"not a model list"'`,
+        );
+        return yield* resolveProviderAccountHarness(account.id);
       }),
     );
 
-    expect(resolved.resolved.account).toEqual(resolved.account);
-    expect(resolved.resolved.harnessId).toBe(ALPHA_HARNESS_ID);
-    expect(resolved.resolved.definition.id).toBe(ALPHA_HARNESS_ID);
-    expect(resolved.resolved.snapshots.map((snapshot) => snapshot.runnerId)).toEqual([
-      resolved.laptop,
-    ]);
-    expect(resolved.resolved.snapshots.map((snapshot) => snapshot.harnessId)).toEqual([
-      ALPHA_HARNESS_ID,
-    ]);
+    expect(resolved.harnessId).toBe(ALPHA_HARNESS_ID);
   });
 
   it("treats a null harness as the account's default", async () => {

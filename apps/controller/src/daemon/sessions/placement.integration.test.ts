@@ -21,11 +21,14 @@ import {
 } from "@hercule/protocol";
 import { nowIso, uuidFromString, withTransaction } from "../../db";
 import { del, get, post, send } from "../../http/testing";
-import { buildHarnessDefinition, createPluginFixture } from "../../plugins/testing";
+import {
+  buildHarnessDefinition,
+  buildPluginWithProviderPerHarness,
+  createPluginFixture,
+} from "../../plugins/testing";
 import { providerAccountRepository } from "../../provider-accounts";
 import {
   spawnThreadUnder,
-  buildFleetPlugin,
   findProviderAccountId,
   listFrames,
   listInputs,
@@ -86,7 +89,7 @@ const DELTA = buildHarnessDefinition("delta", [MULTI_RUN]);
 const EPSILON = buildHarnessDefinition("epsilon", [MULTI_RUN]);
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  buildFleetPlugin("harnesses", [ALPHA, BETA, GAMMA]),
+  buildPluginWithProviderPerHarness("harnesses", [ALPHA, BETA, GAMMA]),
   // One provider that two harnesses run, so one account can be placed in either.
   createPluginFixture({
     id: "multi",

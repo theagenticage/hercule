@@ -197,7 +197,7 @@ const make = Effect.gen(function* () {
       // A stored row that no longer decodes is corruption, not a state the
       // caller can act on.
       const snapshots = yield* accounts
-        .listSnapshots(account.id)
+        .listHarnessSnapshots(account.id, choice.harness.id)
         .pipe(Effect.catchTag("SchemaError", Effect.die));
       return {
         _tag: "resolved",
@@ -205,11 +205,7 @@ const make = Effect.gen(function* () {
         providerAccountName,
         harnessId: choice.harness.id,
         model,
-        runnerIds: listRunnersOffering(
-          yield* readCapableRunnerIds,
-          snapshots.filter((one) => one.harnessId === choice.harness.id),
-          model,
-        ),
+        runnerIds: listRunnersOffering(yield* readCapableRunnerIds, snapshots, model),
       } as const;
     });
 

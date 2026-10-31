@@ -23,9 +23,8 @@ import {
   type ServerHarness,
 } from "../http/testing";
 import { nowIso, uuidFromString, withTransaction } from "../db";
-import { buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import { providerAccountRepository } from "../provider-accounts";
-import { buildFleetPlugin } from "../sessions/testing";
 
 /** Three harnesses, in the order the shipped plugin registry lists the harnesses. */
 const HARNESSES: ReadonlyArray<HarnessDefinition> = [
@@ -91,7 +90,7 @@ const withAssistants = (body: (arranged: Arranged) => Promise<void>): Promise<vo
       const token = await completeSetup(harness.base);
       await body({ harness, token });
     },
-    { plugins: [buildFleetPlugin("harnesses", HARNESSES)] },
+    { plugins: [buildPluginWithProviderPerHarness("harnesses", HARNESSES)] },
   );
 
 const requestCreate = (arranged: Arranged, fields: Record<string, unknown>): Promise<Response> =>

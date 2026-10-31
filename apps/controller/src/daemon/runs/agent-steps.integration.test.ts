@@ -28,7 +28,7 @@ import { send } from "../../http/testing";
 import { inputRepository } from "../../sessions";
 import { Live } from "../sessions";
 import { WORKSPACE_ACTION_IDS } from "../../plugins";
-import { buildHarnessDefinition } from "../../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../../plugins/testing";
 import {
   buildCreateStep,
   findStepRecords,
@@ -40,7 +40,6 @@ import {
 import {
   at,
   carriesInput,
-  buildFleetPlugin,
   findProviderAccountId,
   listInputs,
   listFrames,
@@ -117,7 +116,10 @@ const withAgentStepFleet = (
     Partial<Pick<FleetOptions, "plugins">> = {},
 ): Promise<void> =>
   withFleet(body, {
-    plugins: [buildFleetPlugin("harnesses", [buildHarnessDefinition("test")]), ...plugins],
+    plugins: [
+      buildPluginWithProviderPerHarness("harnesses", [buildHarnessDefinition("test")]),
+      ...plugins,
+    ],
     facts: FACTS,
     models: MODELS,
     ...options,

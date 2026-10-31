@@ -58,7 +58,7 @@ import type {
 import { nowIso, withTransaction } from "../db";
 import { PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
 import { providerAccountRepository } from "../provider-accounts";
-import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   completeSetup,
   get,
@@ -360,53 +360,6 @@ const waitForEveryAccountProbed = async (
     const accounts = (await response.json()) as ReadonlyArray<ProviderAccount>;
     return accounts.every((account) => account.snapshots.length === 1) ? accounts : undefined;
   });
-
-/**
- * Builds the plugin a fleet test registers its harnesses with. Each harness
- * gets a provider of its own, with one account kind (`subscription`, signed in
- * on each machine) that only that harness runs, so `withFleet` can give every
- * harness one account that runs in it, as a real controller has an account
- * for each harness a user can sign in to. A harness that already lists what it
- * runs keeps its own `runs`.
- */
-export const buildFleetPlugin = (
-  pluginId: string,
-  definitions: ReadonlyArray<HarnessDefinition>,
-): Plugin =>
-  createPluginFixture({
-    id: pluginId,
-    capabilities: ["harnesses", "providers"],
-    definitions: definitions.map((definition) => ({
-      ...definition,
-      runs:
-        definition.runs.length > 0
-          ? definition.runs
-          : [
-              {
-                providerId: `${pluginId}/${definition.id}`,
-                kinds: [{ kind: FLEET_ACCOUNT_KIND }],
-                modelArgument: "{model}",
-                models: "all",
-              },
-            ],
-    })),
-    providers: definitions.map((definition) => ({
-      id: definition.id,
-      displayName: `Provider ${definition.id}`,
-      kinds: [
-        {
-          id: FLEET_ACCOUNT_KIND,
-          title: "Subscription",
-          description: "A plan signed in on each machine.",
-          setup: [{ kind: "harness-login" }],
-          harnesses: [`${pluginId}/${definition.id}`],
-        },
-      ],
-    })),
-  }).plugin;
-
-/** The account kind of the providers `buildFleetPlugin` registers. */
-const FLEET_ACCOUNT_KIND = "subscription";
 
 /**
  * Gives every registered harness one Provider Account that runs in it (as its
@@ -717,7 +670,7 @@ export const withAgentFleet = (
 ): Promise<void> =>
   withFleet(body, {
     plugins: [
-      buildFleetPlugin("harnesses", [
+      buildPluginWithProviderPerHarness("harnesses", [
         { ...AGENT_HARNESS, declared: { ...AGENT_HARNESS.declared, steering } },
       ]),
       ...plugins,

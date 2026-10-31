@@ -64,7 +64,7 @@ import {
 import type { Plugin } from "@hercule/plugin-host";
 import { readEvent } from "../events/testing";
 import { buildRunnerSocketUrl } from "../runners/testing";
-import { buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   collectMessages,
   collectPushes,
@@ -90,7 +90,6 @@ import {
   reportEvent,
   spawnSessionOrFail,
   waitUntil,
-  buildFleetPlugin,
   withAgentFleet,
   withFleet,
   type Arranged,
@@ -1375,7 +1374,7 @@ const SESSION_TOPIC_MODELS = [
 ];
 
 const buildSessionTopicPlugins = (): ReadonlyArray<Plugin> => [
-  buildFleetPlugin("session-topics", [buildHarnessDefinition("session-topic")]),
+  buildPluginWithProviderPerHarness("session-topics", [buildHarnessDefinition("session-topic")]),
 ];
 
 const withSessionTopicFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>

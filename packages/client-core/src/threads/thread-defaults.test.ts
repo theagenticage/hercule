@@ -17,6 +17,7 @@ import {
   buildSnapshot,
   ANTHROPIC_IDENTITY,
   OPENAI_IDENTITY,
+  type SnapshotDraft,
 } from "../providers.testing";
 import {
   buildDraftConfig,
@@ -49,7 +50,7 @@ const WORKER = buildProfile("p-worker", "worker");
 const buildSnapshotOn = (
   runnerId: string,
   models: ProviderAccount["snapshots"][number]["models"],
-): ProviderAccount["snapshots"][number] => buildSnapshot({ runnerId, models });
+): SnapshotDraft => buildSnapshot({ runnerId, models });
 
 const SONNET = {
   slug: "claude-sonnet-5",

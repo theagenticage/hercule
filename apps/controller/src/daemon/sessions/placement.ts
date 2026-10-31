@@ -513,9 +513,13 @@ const make = Effect.gen(function* () {
     InvalidState | Validation | SqlError | Schema.SchemaError
   > =>
     Effect.gen(function* () {
-      const { harnessId, definition, snapshots } = yield* resolveHarnessChoice(
+      const { harnessId, definition } = yield* resolveHarnessChoice(
         request.providerAccountId,
         request.harnessId,
+      );
+      const snapshots = yield* providerAccounts.listHarnessSnapshots(
+        request.providerAccountId,
+        harnessId,
       );
       const hosting = yield* request.runnerId === undefined
         ? choosePlacement(snapshots)

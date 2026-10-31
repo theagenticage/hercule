@@ -115,19 +115,46 @@ export const PROVIDERS: readonly Provider[] = [
   },
 ];
 
-const buildHarness = (id: string, displayName: string, binaryName: string): Harness => ({
+const buildHarness = (
+  id: string,
+  displayName: string,
+  binaryName: string,
+  runs: Harness["runs"],
+): Harness => ({
   id,
   displayName,
   binaryName,
   declared: DECLARED,
+  runs,
   runners: [],
 });
 
 /** The harnesses of the shipped plugins, as `harness.query` lists them. */
 export const HARNESSES: readonly Harness[] = [
-  buildHarness("claude-code/claude-code", "Claude Code", "claude"),
-  buildHarness("codex/codex", "Codex", "codex"),
-  buildHarness("pi/pi", "pi", "pi"),
+  buildHarness("claude-code/claude-code", "Claude Code", "claude", [
+    {
+      providerId: "anthropic/anthropic",
+      kinds: [{ kind: "subscription-per-machine" }],
+      modelArgument: "{model}",
+      models: "all",
+    },
+  ]),
+  buildHarness("codex/codex", "Codex", "codex", [
+    {
+      providerId: "openai/openai",
+      kinds: [{ kind: "subscription-per-machine" }],
+      modelArgument: "{model}",
+      models: "all",
+    },
+  ]),
+  buildHarness("pi/pi", "pi", "pi", [
+    {
+      providerId: "zai/zai",
+      kinds: [{ kind: "api-key", credentialVariable: "ZAI_API_KEY" }],
+      modelArgument: "zai/{model}",
+      models: "own-list",
+    },
+  ]),
 ];
 
 /** What makes a Provider Account this one: its own id, its provider and kind, its default harness and its label. */
@@ -164,14 +191,14 @@ export const ZAI_IDENTITY: ProviderAccountIdentity = {
 };
 
 /**
- * Returns a Provider Account with the given identity. Every snapshot is
- * stamped with the account's default harness, so a test needs no harness id
- * on its snapshots; spread the result with its own `snapshots` for an account
- * with snapshots in another harness.
+ * Returns a Provider Account with the given identity. A snapshot built
+ * without a harness id (`harnessId: undefined`) is stamped with the account's
+ * default harness; a snapshot that names a harness keeps it, so an account can
+ * hold snapshots in several harnesses.
  */
 export const buildProviderAccount = (
   identity: ProviderAccountIdentity,
-  snapshots: ReadonlyArray<CapabilitySnapshot> = [],
+  snapshots: ReadonlyArray<SnapshotDraft> = [],
 ): ProviderAccount => ({
   id: identity.id,
   providerId: identity.providerId,
@@ -180,19 +207,35 @@ export const buildProviderAccount = (
   identity: null,
   planLabel: null,
   defaultHarnessId: identity.harnessId,
-  snapshots: snapshots.map((snapshot) => ({ ...snapshot, harnessId: identity.harnessId })),
+  snapshots: snapshots.map((snapshot) => ({
+    ...snapshot,
+    harnessId: snapshot.harnessId ?? identity.harnessId,
+  })),
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
-/** Returns an account's capability snapshot on `BARE` in Claude Code, signed in unless `fields` overrides it. */
-export const buildSnapshot = (fields: Partial<CapabilitySnapshot> = {}): CapabilitySnapshot => ({
-  runnerId: BARE.id,
-  harnessId: "claude-code/claude-code",
-  probedAt: "2026-09-05T09:10:00.000Z",
-  harnessVersion: "2.1.263",
-  versionVerdict: "ok",
-  auth: { status: "ok", identity: "rogier@example.com", planLabel: "Claude Max" },
-  models: [{ slug: "default", name: "Default", imageInput: { maxBytes: null }, options: [] }],
-  ...fields,
-});
+/** A capability snapshot that may leave its harness open, for `buildProviderAccount` to fill in. */
+export type SnapshotDraft = Omit<CapabilitySnapshot, "harnessId"> & { readonly harnessId?: string };
+
+/**
+ * Returns an account's capability snapshot on `BARE`, signed in unless
+ * `fields` overrides it. A snapshot that names its harness in `fields` is a
+ * complete `CapabilitySnapshot`. Otherwise it is a draft, and
+ * `buildProviderAccount` stamps the account's default harness on it.
+ */
+export function buildSnapshot(
+  fields: Partial<CapabilitySnapshot> & { readonly harnessId: string },
+): CapabilitySnapshot;
+export function buildSnapshot(fields?: Partial<CapabilitySnapshot>): SnapshotDraft;
+export function buildSnapshot(fields: Partial<CapabilitySnapshot> = {}): SnapshotDraft {
+  return {
+    runnerId: BARE.id,
+    probedAt: "2026-09-05T09:10:00.000Z",
+    harnessVersion: "2.1.263",
+    versionVerdict: "ok",
+    auth: { status: "ok", identity: "rogier@example.com", planLabel: "Claude Max" },
+    models: [{ slug: "default", name: "Default", imageInput: { maxBytes: null }, options: [] }],
+    ...fields,
+  };
+}

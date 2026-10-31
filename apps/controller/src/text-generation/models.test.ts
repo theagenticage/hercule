@@ -72,7 +72,7 @@ describe("automatic", () => {
       Effect.gen(function* () {
         const runner = yield* addRunner();
         yield* snapshot(openai, runner, probed("ok", "something-else"));
-        yield* snapshot(zai, runner, probed("ok", "pi-small"));
+        yield* snapshot(zai, runner, probed("ok", "glm-5.3-flash"));
         yield* snapshot(anthropic, runner, probed("ok", "haiku"));
         return yield* resolve.pipe(Effect.orDie);
       }),
@@ -82,7 +82,7 @@ describe("automatic", () => {
       _tag: "resolved",
       providerAccountName: "Z.ai",
       harnessId: "pi/pi",
-      model: "pi-small",
+      model: "glm-5.3-flash",
       runnerIds: [expect.any(String) as unknown],
     });
   });
@@ -103,10 +103,10 @@ describe("automatic", () => {
           signedOut.id,
           signedOut.defaultHarnessId,
           runner,
-          probed("unauthenticated", "codex-mini"),
+          probed("unauthenticated", "gpt-6-luna"),
         );
-        yield* addSnapshot(newer.id, newer.defaultHarnessId, runner, probed("ok", "codex-mini"));
-        yield* addSnapshot(older.id, older.defaultHarnessId, runner, probed("ok", "codex-mini"));
+        yield* addSnapshot(newer.id, newer.defaultHarnessId, runner, probed("ok", "gpt-6-luna"));
+        yield* addSnapshot(older.id, older.defaultHarnessId, runner, probed("ok", "gpt-6-luna"));
         return { target: yield* resolve, olderId: older.id };
       }).pipe(Effect.orDie, Effect.provide(layer)),
     );
@@ -123,8 +123,8 @@ describe("automatic", () => {
       Effect.gen(function* () {
         const open = yield* addRunner();
         const reserved = yield* addRunner({ reserved: true });
-        yield* snapshot(openai, open, probed("unauthenticated", "codex-mini"));
-        yield* snapshot(zai, reserved, probed("ok", "pi-small"));
+        yield* snapshot(openai, open, probed("unauthenticated", "gpt-6-luna"));
+        yield* snapshot(zai, reserved, probed("ok", "glm-5.3-flash"));
         yield* snapshot(anthropic, open, probed("ok", "haiku"));
         return yield* resolve.pipe(Effect.orDie);
       }),
@@ -142,8 +142,8 @@ describe("automatic", () => {
       Effect.gen(function* () {
         const offline = yield* addRunner({ online: false });
         const online = yield* addRunner();
-        yield* snapshot(openai, offline, probed("ok", "codex-mini"));
-        yield* snapshot(zai, online, probed("ok", "pi-small"));
+        yield* snapshot(openai, offline, probed("ok", "gpt-6-luna"));
+        yield* snapshot(zai, online, probed("ok", "glm-5.3-flash"));
         return yield* resolve.pipe(Effect.orDie);
       }),
     );
@@ -156,8 +156,8 @@ describe("automatic", () => {
       Effect.gen(function* () {
         const old = yield* addRunner({ capable: false });
         const current = yield* addRunner();
-        yield* snapshot(openai, old, probed("ok", "codex-mini"));
-        yield* snapshot(zai, current, probed("ok", "pi-small"));
+        yield* snapshot(openai, old, probed("ok", "gpt-6-luna"));
+        yield* snapshot(zai, current, probed("ok", "glm-5.3-flash"));
         return yield* resolve.pipe(Effect.orDie);
       }),
     );
@@ -172,7 +172,7 @@ describe("automatic", () => {
         const second = yield* addRunner();
         const offline = yield* addRunner({ online: false });
         for (const runner of [first, second, offline]) {
-          yield* snapshot(openai, runner, probed("ok", "codex-mini"));
+          yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
         }
         return [yield* resolve.pipe(Effect.orDie), [first, second]] as const;
       }),
@@ -187,12 +187,12 @@ describe("automatic", () => {
     const keys = await run(({ openai, zai, addRunner, snapshot }) =>
       Effect.gen(function* () {
         const runner = yield* addRunner();
-        yield* snapshot(openai, runner, probed("ok", "codex-mini"));
-        yield* snapshot(zai, runner, probed("ok", "pi-small"));
+        yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
+        yield* snapshot(zai, runner, probed("ok", "glm-5.3-flash"));
         const withOpenai = yield* resolve.pipe(Effect.orDie);
-        yield* snapshot(openai, runner, probed("unauthenticated", "codex-mini"));
+        yield* snapshot(openai, runner, probed("unauthenticated", "gpt-6-luna"));
         const withZai = yield* resolve.pipe(Effect.orDie);
-        yield* snapshot(zai, runner, probed("unauthenticated", "pi-small"));
+        yield* snapshot(zai, runner, probed("unauthenticated", "glm-5.3-flash"));
         const withNothing = yield* resolve.pipe(Effect.orDie);
         const again = yield* resolve.pipe(Effect.orDie);
         return {
@@ -242,7 +242,7 @@ describe("automatic", () => {
           );
           yield* snapshot(other, runner, probed("ok", "other"));
         }
-        yield* snapshot(openai, runner, probed("ok", "codex-mini"));
+        yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
         return yield* Effect.provideService(
           resolve.pipe(Effect.orDie),
           Statement.CurrentTransformer,
@@ -268,7 +268,7 @@ describe("automatic", () => {
         const settings = yield* Settings;
         yield* inTransaction(settings.set("textGeneration.model", "automatic"));
         const runner = yield* addRunner();
-        yield* snapshot(openai, runner, probed("ok", "codex-mini"));
+        yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
         return yield* resolve.pipe(Effect.orDie);
       }),
     );
@@ -300,7 +300,7 @@ describe("a chosen account and model", () => {
       Effect.gen(function* () {
         const settings = yield* Settings;
         const runner = yield* addRunner();
-        yield* snapshot(zai, runner, probed("ok", "pi-small"));
+        yield* snapshot(zai, runner, probed("ok", "glm-5.3-flash"));
         yield* inTransaction(
           settings.set("textGeneration.model", {
             providerAccountId: zai.id,
@@ -325,11 +325,11 @@ describe("a chosen account and model", () => {
       Effect.gen(function* () {
         const settings = yield* Settings;
         const runner = yield* addRunner();
-        yield* snapshot(openai, runner, probed("ok", "codex-mini"));
+        yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
         yield* inTransaction(
           settings.set("textGeneration.model", {
             providerAccountId: openai.id,
-            model: "codex-mini",
+            model: "gpt-6-luna",
           }),
         );
         const byDefault = yield* resolve.pipe(Effect.orDie);
@@ -337,7 +337,7 @@ describe("a chosen account and model", () => {
           settings.set("textGeneration.model", {
             providerAccountId: openai.id,
             harnessId: "codex/codex",
-            model: "codex-mini",
+            model: "gpt-6-luna",
           }),
         );
         return { byDefault, named: yield* resolve.pipe(Effect.orDie) };
@@ -356,12 +356,15 @@ describe("a chosen account and model", () => {
         const lacksModel = yield* addRunner();
         const offline = yield* addRunner({ online: false });
         const old = yield* addRunner({ capable: false });
-        yield* snapshot(zai, offers, probed("ok", "pi-small"));
+        yield* snapshot(zai, offers, probed("ok", "glm-5.3-flash"));
         yield* snapshot(zai, lacksModel, probed("ok", "pi-large"));
-        yield* snapshot(zai, offline, probed("ok", "pi-small"));
-        yield* snapshot(zai, old, probed("ok", "pi-small"));
+        yield* snapshot(zai, offline, probed("ok", "glm-5.3-flash"));
+        yield* snapshot(zai, old, probed("ok", "glm-5.3-flash"));
         yield* inTransaction(
-          settings.set("textGeneration.model", { providerAccountId: zai.id, model: "pi-small" }),
+          settings.set("textGeneration.model", {
+            providerAccountId: zai.id,
+            model: "glm-5.3-flash",
+          }),
         );
         return [yield* resolve.pipe(Effect.orDie), [offers]] as const;
       }),
@@ -375,12 +378,12 @@ describe("a chosen account and model", () => {
       Effect.gen(function* () {
         const settings = yield* Settings;
         const runner = yield* addRunner();
-        yield* snapshot(openai, runner, probed("ok", "codex-mini"));
+        yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
         yield* inTransaction(
           settings.set("textGeneration.model", {
             providerAccountId: openai.id,
             harnessId: "pi/pi",
-            model: "codex-mini",
+            model: "gpt-6-luna",
           }),
         );
         return yield* resolve.pipe(Effect.orDie);
@@ -399,9 +402,12 @@ describe("a chosen account and model", () => {
         const settings = yield* Settings;
         const accounts = yield* providerAccountRepository;
         const runner = yield* addRunner();
-        yield* snapshot(openai, runner, probed("ok", "codex-mini"));
+        yield* snapshot(openai, runner, probed("ok", "gpt-6-luna"));
         yield* inTransaction(
-          settings.set("textGeneration.model", { providerAccountId: zai.id, model: "pi-small" }),
+          settings.set("textGeneration.model", {
+            providerAccountId: zai.id,
+            model: "glm-5.3-flash",
+          }),
         );
         yield* inTransaction(accounts.delete(zai.id)).pipe(Effect.orDie);
         return yield* resolve.pipe(Effect.orDie);

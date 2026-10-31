@@ -28,7 +28,7 @@ import { github } from "@hercule/plugin-github";
 import { withTransaction } from "../db";
 import { appendIngestedEvent } from "../events";
 import { get, post, TEST_HARNESS_ID, type ServerHarness } from "../http/testing";
-import { buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   spawnThreadWithGrants,
   at,
@@ -40,7 +40,6 @@ import {
   waitForStartFrames,
   readSessionToken,
   waitUntil,
-  buildFleetPlugin,
   withFleet as sharedWithFleet,
   type SpawnedThread,
   type Arranged,
@@ -108,7 +107,7 @@ export const MODELS: ReadonlyArray<ModelDescriptor> = [
 ];
 
 export const buildPlugins = (): ReadonlyArray<Plugin> => [
-  buildFleetPlugin("harnesses", [HARNESS]),
+  buildPluginWithProviderPerHarness("harnesses", [HARNESS]),
   github,
 ];
 

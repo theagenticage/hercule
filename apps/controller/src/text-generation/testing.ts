@@ -1,8 +1,7 @@
 /**
  * Fixtures for tests that run text generation on a real database and the real
- * plugin host: the three providers and three harnesses `automatic` chooses
- * between, named like the shipped ones so their qualified ids are the ones
- * `AUTOMATIC_PROVIDER_ORDER` lists.
+ * plugin host. The plugins are the shipped ones, so a test sees the providers,
+ * harnesses and suggested models `automatic` chooses between in production:
  *
  * - `openai/openai` (subscription per machine), run by `codex/codex`;
  * - `zai/zai` (API key), run by `pi/pi`;
@@ -11,10 +10,15 @@
  */
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { HarnessProviderSupport, Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import { anthropic } from "@hercule/plugin-anthropic";
+import { claudeCode } from "@hercule/plugin-claude-code";
+import { codex } from "@hercule/plugin-codex";
+import { openai } from "@hercule/plugin-openai";
+import { pi } from "@hercule/plugin-pi";
+import { zai } from "@hercule/plugin-zai";
+import type { Plugin } from "@hercule/plugin-host";
 import { TEXT_GENERATION_CAPABILITY, type ProbeResult } from "@hercule/protocol";
 import { nowIso, uuidFromString, withTransaction } from "../db";
-import { buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
 import { providerAccountRepository, type StoredProviderAccount } from "../provider-accounts";
 import { runnerRepository } from "../runners";
 import { hashToken } from "../credentials";
@@ -22,10 +26,9 @@ import { hashToken } from "../credentials";
 export const SUBSCRIPTION_KIND = "subscription-per-machine";
 export const API_KEY_KIND = "api-key";
 
-/** One provider of the fixtures: its plugin id, the harness that runs it, its kind and suggested model. */
+/** One shipped provider: its qualified id, the harness that runs it, its account kind and suggested model. */
 interface FixtureProvider {
   readonly id: string;
-  readonly displayName: string;
   readonly harnessId: string;
   readonly kind: string;
   readonly suggestedModel: string;
@@ -35,81 +38,32 @@ export const FIXTURE_PROVIDERS: Readonly<Record<"openai" | "zai" | "anthropic", 
   {
     openai: {
       id: "openai/openai",
-      displayName: "OpenAI",
       harnessId: "codex/codex",
       kind: SUBSCRIPTION_KIND,
-      suggestedModel: "codex-mini",
+      suggestedModel: "gpt-6-luna",
     },
     zai: {
       id: "zai/zai",
-      displayName: "Z.ai",
       harnessId: "pi/pi",
       kind: API_KEY_KIND,
-      suggestedModel: "pi-small",
+      suggestedModel: "glm-5.3-flash",
     },
     anthropic: {
       id: "anthropic/anthropic",
-      displayName: "Anthropic",
       harnessId: "claude-code/claude-code",
       kind: SUBSCRIPTION_KIND,
       suggestedModel: "haiku",
     },
   };
 
-const buildProvider = (provider: FixtureProvider): ProviderDefinition => ({
-  id: provider.id.split("/")[1]!,
-  displayName: provider.displayName,
-  kinds: [
-    provider.kind === API_KEY_KIND
-      ? {
-          id: API_KEY_KIND,
-          title: "API key",
-          description: "A key.",
-          setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
-          harnesses: [provider.harnessId],
-        }
-      : {
-          id: SUBSCRIPTION_KIND,
-          title: "Subscription",
-          description: "A plan signed in on each machine.",
-          setup: [{ kind: "harness-login" }],
-          harnesses: [provider.harnessId],
-        },
-  ],
-  suggestedTextGenerationModel: provider.suggestedModel,
-});
-
-const buildRuns = (provider: FixtureProvider): ReadonlyArray<HarnessProviderSupport> => [
-  {
-    providerId: provider.id,
-    kinds: [
-      provider.kind === API_KEY_KIND
-        ? { kind: API_KEY_KIND, credentialVariable: "ZAI_API_KEY" }
-        : { kind: SUBSCRIPTION_KIND },
-    ],
-    modelArgument: provider.kind === API_KEY_KIND ? "zai/{model}" : "{model}",
-    models: provider.kind === API_KEY_KIND ? "own-list" : "all",
-  },
-];
-
-/** Returns the plugins to boot: each provider's plugin, then each harness's plugin. */
+/** Returns the plugins to boot: the three shipped providers and the three harnesses that run them. */
 export const buildTextGenerationPlugins = (): ReadonlyArray<Plugin> => [
-  ...Object.values(FIXTURE_PROVIDERS).map(
-    (provider) =>
-      createPluginFixture({
-        id: provider.id.split("/")[0]!,
-        capabilities: ["providers"],
-        definitions: [],
-        providers: [buildProvider(provider)],
-      }).plugin,
-  ),
-  ...Object.values(FIXTURE_PROVIDERS).map((provider) => {
-    const [pluginId, word] = provider.harnessId.split("/") as [string, string];
-    return createPluginFixture({
-      id: pluginId,
-      definitions: [buildHarnessDefinition(word, buildRuns(provider))],
-    }).plugin;
-  }),
+  anthropic,
+  openai,
+  zai,
+  claudeCode,
+  codex,
+  pi,
 ];
 
 /**

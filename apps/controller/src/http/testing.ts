@@ -90,7 +90,7 @@ import {
 } from "../secrets";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
-import { buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   providerAccountRepository,
   ProviderAccountProbeDeadline,
@@ -238,14 +238,8 @@ const buildServices = (
     ),
   );
 
-/** The qualified id of the provider the plugin a test controller adds registers. */
-export const TEST_PROVIDER_ID = "test/test";
-
-/** The qualified id of the harness that provider's accounts run in. */
+/** The qualified id of the harness the test controller adds, and of its provider. */
 export const TEST_HARNESS_ID = "test/test";
-
-/** The account kind of the test provider: a subscription signed in on each machine. */
-export const TEST_ACCOUNT_KIND = "subscription-per-machine";
 
 /**
  * Returns the plugins a test controller boots: the test's own, plus a plugin
@@ -257,38 +251,7 @@ export const TEST_ACCOUNT_KIND = "subscription-per-machine";
 const buildPluginRegistry = (plugins: ReadonlyArray<Plugin>): ReadonlyArray<Plugin> =>
   plugins.some((plugin) => plugin.manifest.capabilities.includes("providers"))
     ? plugins
-    : [
-        ...plugins,
-        createPluginFixture({
-          id: "test",
-          capabilities: ["harnesses", "providers"],
-          definitions: [
-            buildHarnessDefinition("test", [
-              {
-                providerId: TEST_PROVIDER_ID,
-                kinds: [{ kind: TEST_ACCOUNT_KIND }],
-                modelArgument: "{model}",
-                models: "all",
-              },
-            ]),
-          ],
-          providers: [
-            {
-              id: "test",
-              displayName: "Test",
-              kinds: [
-                {
-                  id: TEST_ACCOUNT_KIND,
-                  title: "Subscription",
-                  description: "A subscription signed in on each machine.",
-                  setup: [{ kind: "harness-login" }],
-                  harnesses: [TEST_HARNESS_ID],
-                },
-              ],
-            },
-          ],
-        }).plugin,
-      ];
+    : [...plugins, buildPluginWithProviderPerHarness("test", [buildHarnessDefinition("test")])];
 
 /**
  * Gives a test controller one account when the shipped defaults created none,

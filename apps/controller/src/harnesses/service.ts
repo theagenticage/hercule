@@ -42,6 +42,7 @@ const make = Effect.gen(function* () {
           displayName: definition.displayName,
           binaryName: definition.binaryName,
           declared: definition.declared,
+          runs: definition.runs,
           runners: fleet.map(({ id: runnerId, facts }) => {
             const installed =
               facts?.harnesses.some(

@@ -65,7 +65,7 @@ import {
 } from "../http/testing";
 import { Live } from "../daemon";
 import { UUID_PATTERN, withTransaction } from "../db";
-import { buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import { importTestSkill } from "../skills/testing";
 import { sessionRepository } from "./repository";
 import {
@@ -78,7 +78,6 @@ import {
   reportEvent,
   reportTurnCompleted,
   reportTurnStarted,
-  buildFleetPlugin,
   findProviderAccountId,
   spawnSession,
   spawnSessionOrFail,
@@ -135,7 +134,7 @@ const BARE: HarnessDefinition = {
 };
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  buildFleetPlugin("harnesses", [FULL, LIMITED, BARE]),
+  buildPluginWithProviderPerHarness("harnesses", [FULL, LIMITED, BARE]),
 ];
 
 const FACTS: RunnerFacts = {

@@ -25,9 +25,13 @@ import {
   type ServerHarness,
   type ServerOptions,
 } from "../http/testing";
-import { buildHarnessDefinition, IDLE_FEEDS, IDLE_INGEST_OPEN } from "../plugins/testing";
+import {
+  buildHarnessDefinition,
+  buildPluginWithProviderPerHarness,
+  IDLE_FEEDS,
+  IDLE_INGEST_OPEN,
+} from "../plugins/testing";
 import { withTransaction } from "../db";
-import { buildFleetPlugin } from "../sessions/testing";
 import type { DeclaredTrigger } from "./repository";
 import type { WorkflowPage } from "./service";
 
@@ -148,7 +152,7 @@ export const withSetUpController = (
     {
       ...timings,
       plugins: [
-        buildFleetPlugin("harnesses", [AGENT_HARNESS]),
+        buildPluginWithProviderPerHarness("harnesses", [AGENT_HARNESS]),
         localGithubPlugin,
         ...additionalPlugins,
       ],

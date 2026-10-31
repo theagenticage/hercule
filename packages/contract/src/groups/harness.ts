@@ -6,7 +6,7 @@
  * models are Provider Accounts, in `provider-account.ts`.
  */
 import { Schema } from "effect";
-import { DeclaredCapabilities } from "@hercule/plugin-host";
+import { DeclaredCapabilities, HarnessProviderSupport } from "@hercule/plugin-host";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { Forbidden, Internal, Unauthenticated } from "../errors";
@@ -44,6 +44,12 @@ export const Harness = Schema.Struct({
   /** The harness's executable name on a machine's `PATH`, which is how Runner Facts refer to it. */
   binaryName: Schema.String,
   declared: DeclaredCapabilities,
+  /**
+   * The providers, and the account kinds of each, that the harness runs. A
+   * kind with no `credentialVariable` is one whose login lives in the Harness
+   * Home of each machine.
+   */
+  runs: Schema.Array(HarnessProviderSupport),
   /** One entry per runner the controller knows, in the order the runners were added. */
   runners: Schema.Array(HarnessOnRunner),
 });

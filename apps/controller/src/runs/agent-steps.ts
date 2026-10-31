@@ -182,18 +182,17 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
         // not decode is a bug.
         const account = yield* providerAccounts.one(agent.value.providerAccountId);
         const harnessId = agent.value.harnessId ?? Option.getOrUndefined(account)?.defaultHarnessId;
-        const snapshots = yield* Effect.catchTag(
-          providerAccounts.listSnapshots(agent.value.providerAccountId),
-          "SchemaError",
-          Effect.die,
-        );
+        const snapshots =
+          harnessId === undefined
+            ? []
+            : yield* Effect.catchTag(
+                providerAccounts.listHarnessSnapshots(agent.value.providerAccountId, harnessId),
+                "SchemaError",
+                Effect.die,
+              );
         return {
           agentName: agent.value.name,
-          runnerIds: new Set(
-            snapshots
-              .filter((snapshot) => snapshot.harnessId === harnessId && isSignedIn(snapshot))
-              .map((snapshot) => snapshot.runnerId),
-          ),
+          runnerIds: new Set(snapshots.filter(isSignedIn).map((snapshot) => snapshot.runnerId)),
         };
       });
 

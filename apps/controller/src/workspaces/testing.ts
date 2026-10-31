@@ -23,14 +23,13 @@ import {
 } from "@hercule/plugin-host";
 import { withTransaction } from "../db";
 import { get, post, TEST_HARNESS_ID } from "../http/testing";
-import { buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   reportEvent,
   spawnSessionOrFail,
   waitForFrames,
   waitForStartFrames,
   waitUntil,
-  buildFleetPlugin,
   withFleet as withRunnerFleet,
   type Arranged,
   type Wire,
@@ -75,7 +74,7 @@ export const withFleet = (
 ): Promise<void> =>
   withRunnerFleet(body, {
     plugins: [
-      buildFleetPlugin("harnesses", [buildHarnessDefinition("test")]),
+      buildPluginWithProviderPerHarness("harnesses", [buildHarnessDefinition("test")]),
       ...(options.plugins ?? []),
     ],
     facts: FACTS,

@@ -40,9 +40,7 @@ export interface ProviderAccountMachine {
 
 /**
  * Decides the action of a machine on which the account is not signed in. The
- * runner row says whether the machine is connected and can sign in or install;
- * it is missing when no registered harness matches the account's default
- * harness.
+ * runner row says whether the machine is connected and can sign in or install.
  */
 const decideAction = (
   runner: Runner,
@@ -62,9 +60,11 @@ const decideAction = (
 
 /**
  * Returns one entry for each runner that is not retired, in the order of
- * `runners`, for an account that signs in on each machine. Returns `null`
- * for any other account, whose credential every machine uses. A retired
- * runner is gone for good, so it holds no sign-in the user could act on.
+ * `runners`, for an account that signs in on each machine
+ * (`requiresSignInPerMachine`). Returns `null` for any other account, whose
+ * credential every machine uses, and for one whose default harness is not
+ * registered. A retired runner is gone for good, so it holds no sign-in the
+ * user could act on.
  */
 export const listProviderAccountMachines = (
   account: ProviderAccount,
@@ -72,7 +72,7 @@ export const listProviderAccountMachines = (
   providers: ReadonlyArray<Provider>,
   harnesses: ReadonlyArray<Harness>,
 ): ReadonlyArray<ProviderAccountMachine> | null => {
-  if (!requiresSignInPerMachine(providers, account)) return null;
+  if (!requiresSignInPerMachine(harnesses, account)) return null;
   const harnessName =
     harnesses.find(({ id }) => id === account.defaultHarnessId)?.displayName ??
     account.defaultHarnessId;

@@ -4,7 +4,6 @@
  * secret is only ever a reference.
  */
 export { type SecretDecryptError } from "./cipher";
-export { API_KEY_SECRET_NAME, readProviderAccountCredential } from "./provider-account-credential";
 export {
   MasterKey,
   masterKeyLayer,

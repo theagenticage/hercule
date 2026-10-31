@@ -28,10 +28,10 @@ import {
 } from "@hercule/contract";
 import type { RunnerFacts } from "@hercule/protocol";
 import { afterCommit, announce, nowIso, withTransaction } from "../db";
-import { computeVersionVerdict, findVersionFloor } from "../harnesses";
 import { PromotionState } from "../promotion";
 import { RunnerConnections, runnerRepository } from "../runners";
 import { PluginHost, type RegisteredHarness } from "../plugins";
+import { describeSnapshot } from "./describe-snapshot";
 import { HarnessAccounts } from "./harness-account";
 import { providerAccountRepository, type StoredProviderAccount } from "./repository";
 
@@ -171,18 +171,17 @@ const make = Effect.gen(function* () {
             id: providerAccountId,
             kind: "updated",
           });
-          return Option.some({
-            runnerId,
-            harnessId,
-            probedAt: at,
-            harnessVersion: result.harnessVersion,
-            versionVerdict: computeVersionVerdict(
-              result.harnessVersion,
-              findVersionFloor(harnessId),
-            ),
-            auth: result.auth,
-            models: result.models,
-          });
+          return Option.some(
+            describeSnapshot({
+              providerAccountId,
+              runnerId,
+              harnessId,
+              probedAt: at,
+              harnessVersion: result.harnessVersion,
+              auth: result.auth,
+              models: result.models,
+            }),
+          );
         }),
       );
       return yield* promotion.whenServingOr(store, () => Effect.succeed(Option.none()));

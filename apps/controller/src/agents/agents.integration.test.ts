@@ -17,9 +17,8 @@ import type { ModelDescriptor, RunnerFacts } from "@hercule/protocol";
 import type { Agent as AgentRecord, Assistant, Session } from "@hercule/contract";
 import { withTransaction } from "../db";
 import { del, get, post, readErrorBody, send } from "../http/testing";
-import { buildHarnessDefinition } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
-  buildFleetPlugin,
   findProviderAccountId,
   spawnThreadUnder,
   at,
@@ -50,7 +49,7 @@ const CODEX: HarnessDefinition = {
 };
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  buildFleetPlugin("harnesses", [CLAUDE, CODEX, PI]),
+  buildPluginWithProviderPerHarness("harnesses", [CLAUDE, CODEX, PI]),
 ];
 
 const FACTS: RunnerFacts = {

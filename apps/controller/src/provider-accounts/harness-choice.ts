@@ -1,23 +1,18 @@
 /**
- * Resolves a Provider Account and a harness to the account's row and the
- * harness definition behind it, and checks from a runner's stored snapshot
- * whether the runner is signed in to the account.
+ * Checks that a Provider Account can run in a harness and returns the harness
+ * definition, and checks from a runner's stored snapshot whether the runner is
+ * signed in to the account.
  *
- * Opening, forking and steering a session all need both, so they are defined
- * once here rather than in each caller.
+ * Opening and forking a session and saving an Agent all need the first, so it
+ * is defined once here rather than in each caller.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { createValidationError, type Validation } from "@hercule/contract";
 import { decideProviderAccountHarness, PluginHost, type RegisteredHarness } from "../plugins";
-import {
-  providerAccountRepository,
-  type StoredProviderAccount,
-  type StoredSnapshot,
-} from "./repository";
+import { providerAccountRepository, type StoredSnapshot } from "./repository";
 
 /**
  * The error message when no runner can take a session on this account,
@@ -26,13 +21,11 @@ import {
 export const NO_PLACEMENT =
   "no connected runner is signed in to that provider account; sign in on a machine first";
 
-/** A Provider Account in one harness: the row, the harness definition, and the snapshots of that pair, one per runner. */
+/** The harness a Provider Account runs in. */
 interface ResolvedProviderAccountHarness {
-  readonly account: StoredProviderAccount;
   /** The qualified id of the harness: the one asked for, or else the account's default. */
   readonly harnessId: string;
   readonly definition: RegisteredHarness;
-  readonly snapshots: ReadonlyArray<StoredSnapshot>;
 }
 
 /**
@@ -44,8 +37,9 @@ export const isSignedIn = (snapshot: StoredSnapshot): boolean => snapshot.auth.s
 
 /**
  * Resolves an account id, and a harness id (left out or `null`: the account's
- * default harness), to the account, the harness definition and the stored
- * snapshots of the account in that harness.
+ * default harness), to the harness's id and definition. It reads no
+ * snapshots: a caller that places a session lists them with
+ * `providerAccountRepository.listHarnessSnapshots`.
  *
  * Fails with a `Validation` error when:
  *
@@ -61,7 +55,7 @@ export const resolveProviderAccountHarness = (
   harnessId?: string | null,
 ): Effect.Effect<
   ResolvedProviderAccountHarness,
-  Validation | SqlError | Schema.SchemaError,
+  Validation | SqlError,
   SqlClient.SqlClient | PluginHost
 > =>
   Effect.gen(function* () {
@@ -75,11 +69,10 @@ export const resolveProviderAccountHarness = (
         ]),
       );
     }
-    const account = found.value;
     const choice = decideProviderAccountHarness(
       yield* host.providers(),
       yield* host.harnesses(),
-      account,
+      found.value,
       harnessId,
     );
     if (choice._tag === "refused") {
@@ -87,11 +80,5 @@ export const resolveProviderAccountHarness = (
         createValidationError([{ path: [choice.field], message: choice.reason }]),
       );
     }
-    const snapshots = yield* accounts.listSnapshots(providerAccountId);
-    return {
-      account,
-      harnessId: choice.harness.id,
-      definition: choice.harness,
-      snapshots: snapshots.filter((snapshot) => snapshot.harnessId === choice.harness.id),
-    };
+    return { harnessId: choice.harness.id, definition: choice.harness };
   });

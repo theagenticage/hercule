@@ -50,7 +50,6 @@ import {
 import { currentStamp, requireGrant } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { computeVersionVerdict, findVersionFloor } from "../harnesses";
 import { PluginHost, type RegisteredHarness, type RegisteredProvider } from "../plugins";
 import {
   NO_SUCH_RUNNER,
@@ -62,6 +61,7 @@ import {
 } from "../runners";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
 import type { Settings } from "../settings";
+import { describeSnapshot } from "./describe-snapshot";
 import { HarnessAccounts } from "./harness-account";
 import { ProviderAccountProbeDeadline, ProviderAccountProbes } from "./probes";
 import {
@@ -216,18 +216,7 @@ const make = Effect.gen(function* () {
     defaultHarnessId: stored.defaultHarnessId,
     snapshots: snapshots
       .filter((snapshot) => snapshot.providerAccountId === stored.id)
-      .map((snapshot) => ({
-        runnerId: snapshot.runnerId,
-        harnessId: snapshot.harnessId,
-        probedAt: snapshot.probedAt,
-        harnessVersion: snapshot.harnessVersion,
-        versionVerdict: computeVersionVerdict(
-          snapshot.harnessVersion,
-          findVersionFloor(snapshot.harnessId),
-        ),
-        auth: snapshot.auth,
-        models: snapshot.models,
-      })),
+      .map(describeSnapshot),
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
   });

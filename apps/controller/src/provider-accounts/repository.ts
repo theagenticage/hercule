@@ -254,6 +254,21 @@ const make = Effect.gen(function* () {
         (rows) => Effect.forEach(rows, toSnapshot),
       ),
 
+    /** Lists the snapshots of the account in one harness, one per runner, ordered by runner. */
+    listHarnessSnapshots: (
+      providerAccountId: string,
+      harnessId: string,
+    ): Effect.Effect<ReadonlyArray<StoredSnapshot>, SqlError | Schema.SchemaError> =>
+      Effect.flatMap(
+        sql<SnapshotRow>`
+          SELECT ${sql.literal(SNAPSHOT_COLUMNS)} FROM capability_snapshots
+          WHERE provider_account_id = ${uuidFromString(providerAccountId)}
+            AND harness_id = ${harnessId}
+          ORDER BY runner_id
+        `,
+        (rows) => Effect.forEach(rows, toSnapshot),
+      ),
+
     /**
      * Returns the snapshot one runner reported for the account in one harness,
      * or `none` when that runner has not reported one.

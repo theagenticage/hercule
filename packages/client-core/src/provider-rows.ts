@@ -136,7 +136,7 @@ export const buildProviderRows = (
     const signedIn = snapshot?.auth.status === "ok";
     // An account that signs in on each machine has no credential to type. Any
     // other has no sign-in in the browser, so it offers its fields instead.
-    const perMachine = requiresSignInPerMachine(providers, account);
+    const perMachine = requiresSignInPerMachine(harnesses, account);
     return [
       {
         id: account.id,

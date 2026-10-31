@@ -4,8 +4,10 @@
  * in (`requiresSignInPerMachine`, `listProviderAccountCredentialFields`).
  */
 import { describe, expect, it } from "vitest";
+import type { Harness } from "@hercule/contract";
 import {
   ANTHROPIC_IDENTITY,
+  HARNESSES,
   OPENAI_IDENTITY,
   PROVIDERS,
   ZAI_IDENTITY,
@@ -77,17 +79,43 @@ describe("findProviderAccountKind", () => {
 });
 
 describe("requiresSignInPerMachine", () => {
-  it("is true for a kind whose setup has a harness-login step", () => {
-    expect(requiresSignInPerMachine(PROVIDERS, ANTHROPIC)).toBe(true);
-    expect(requiresSignInPerMachine(PROVIDERS, OPENAI)).toBe(true);
+  /** A kind with a harness-login step, whose harness keeps a token the controller holds: it works on every machine. */
+  const TOKEN_HARNESS: Harness = {
+    ...HARNESSES[0]!,
+    runs: [
+      {
+        providerId: "anthropic/anthropic",
+        kinds: [{ kind: "subscription-token", credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN" }],
+        modelArgument: "{model}",
+        models: "all",
+      },
+    ],
+  };
+  const TOKEN_ACCOUNT = { ...ANTHROPIC, kind: "subscription-token" };
+
+  it("is true for a kind whose harness declares no credential variable, so its login is in the Harness Home", () => {
+    expect(requiresSignInPerMachine(HARNESSES, ANTHROPIC)).toBe(true);
+    expect(requiresSignInPerMachine(HARNESSES, OPENAI)).toBe(true);
   });
 
-  it("is false for a kind that types its credential in", () => {
-    expect(requiresSignInPerMachine(PROVIDERS, ZAI)).toBe(false);
+  it("is false for a kind with a harness-login step whose harness declares a credential variable", () => {
+    expect(requiresSignInPerMachine([TOKEN_HARNESS], TOKEN_ACCOUNT)).toBe(false);
   });
 
-  it("is false when the kind is unknown, because nothing says it signs in on each machine", () => {
+  it("is false for a key kind", () => {
+    expect(requiresSignInPerMachine(HARNESSES, ZAI)).toBe(false);
+  });
+
+  it("reads the harness the call names instead of the account's default", () => {
+    const named = { ...ANTHROPIC, defaultHarnessId: "pi/pi" };
+
+    expect(requiresSignInPerMachine(HARNESSES, named)).toBe(false);
+    expect(requiresSignInPerMachine(HARNESSES, named, "claude-code/claude-code")).toBe(true);
+  });
+
+  it("is false when no registered harness declares the account's provider and kind", () => {
     expect(requiresSignInPerMachine([], ANTHROPIC)).toBe(false);
+    expect(requiresSignInPerMachine(HARNESSES, { ...ANTHROPIC, kind: "gone" })).toBe(false);
   });
 });
 
@@ -141,8 +169,12 @@ describe("resolveThreadHarnessId", () => {
 });
 
 describe("the snapshots of an account's default harness", () => {
-  const onMoss = buildSnapshot({ runnerId: "moss" });
-  const onAtlas = buildSnapshot({ runnerId: "atlas", auth: { status: "unauthenticated" } });
+  const onMoss = buildSnapshot({ runnerId: "moss", harnessId: ANTHROPIC.defaultHarnessId });
+  const onAtlas = buildSnapshot({
+    runnerId: "atlas",
+    harnessId: ANTHROPIC.defaultHarnessId,
+    auth: { status: "unauthenticated" },
+  });
   const otherHarness = buildSnapshot({ runnerId: "moss", harnessId: "pi/pi" });
   const account = {
     ...ANTHROPIC,
