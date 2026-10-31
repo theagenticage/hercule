@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { HarnessDefinition } from "@hercule/plugin-host";
+import type { RegisteredHarness } from "../plugins";
 import { buildHarnessDefinition } from "../plugins/testing";
 import { listUnenforcedFields } from "./enforcement";
 
-const ENFORCING: HarnessDefinition = buildHarnessDefinition("claude");
+const ENFORCING: RegisteredHarness = buildHarnessDefinition("claude");
 
-const IGNORING: HarnessDefinition = {
+const IGNORING: RegisteredHarness = {
   ...buildHarnessDefinition("codex"),
   declared: { ...ENFORCING.declared, disallowedTools: "unsupported" },
 };
 
-const CATALOG: ReadonlyArray<HarnessDefinition> = [ENFORCING, IGNORING];
+const CATALOG: ReadonlyArray<RegisteredHarness> = [ENFORCING, IGNORING];
 
 describe("listUnenforcedFields", () => {
   it("returns disallowedTools when the harness stores the list but does not enforce it", () => {

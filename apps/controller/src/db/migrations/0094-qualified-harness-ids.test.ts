@@ -4,7 +4,7 @@
  * Instances and in a runner's facts, a stored event's `providerRefs` key is
  * renamed `harnessRefs`, and everything else in those rows stays as it was.
  */
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { TestDatabaseWriter } from "../testing";
@@ -150,8 +150,15 @@ const seedAndMigrate = (): Promise<Migrated> =>
   );
 
 describe("the qualified harness ids migration", () => {
-  it("qualifies the three bare ids on Provider Instances and leaves any other id", async () => {
-    const { instances } = await seedAndMigrate();
+  // Seeding and migrating is the slow part and the tests only read the result,
+  // so it runs once.
+  let migrated: Migrated;
+  beforeAll(async () => {
+    migrated = await seedAndMigrate();
+  });
+
+  it("qualifies the three bare ids on Provider Instances and leaves any other id", () => {
+    const { instances } = migrated;
     expect(instances.map((row) => [row.name, row.provider_id])).toEqual([
       ["claude", "claude-code/claude-code"],
       ["codex", "codex/codex"],
@@ -161,8 +168,8 @@ describe("the qualified harness ids migration", () => {
     ]);
   });
 
-  it("renames `providers` to `harnesses` in a runner's facts, qualifies its adapters, and keeps every other field", async () => {
-    const { runners } = await seedAndMigrate();
+  it("renames `providers` to `harnesses` in a runner's facts, qualifies its adapters, and keeps every other field", () => {
+    const { runners } = migrated;
     // The order of `adapters` is not promised, and nothing reads it: the
     // controller only checks whether the list includes an id. So the list is
     // compared sorted, and the other fields as they are.
@@ -174,13 +181,13 @@ describe("the qualified harness ids migration", () => {
     expect([...migratedAdapters].sort()).toEqual([...expectedAdapters].sort());
   });
 
-  it("leaves a runner that never reported facts without facts", async () => {
-    const { runners } = await seedAndMigrate();
+  it("leaves a runner that never reported facts without facts", () => {
+    const { runners } = migrated;
     expect(runners.get("never-connected")).toBeNull();
   });
 
-  it("renames a top-level `providerRefs` and keeps its value", async () => {
-    const { events } = await seedAndMigrate();
+  it("renames a top-level `providerRefs` and keeps its value", () => {
+    const { events } = migrated;
     expect(events.get("1")).toEqual({
       _tag: "session.started",
       eventId: "e1",
@@ -193,8 +200,8 @@ describe("the qualified harness ids migration", () => {
     });
   });
 
-  it("leaves events without the key and a key nested inside a payload as they were", async () => {
-    const { events } = await seedAndMigrate();
+  it("leaves events without the key and a key nested inside a payload as they were", () => {
+    const { events } = migrated;
     expect(events.get("2")).toEqual(EVENTS.plain);
     expect(events.get("3")).toEqual(EVENTS.nested);
   });

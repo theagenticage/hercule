@@ -62,38 +62,55 @@ const DECLARED: ProviderInstance["declared"] = {
   structuredOutput: "supported",
 };
 
-/** The instance id and the binary's name of each harness a test builds an instance for. */
-const HARNESSES: Record<string, { readonly instanceId: string; readonly binaryName: string }> = {
-  "claude-code/claude-code": { instanceId: "instance-claude-code", binaryName: "claude" },
-  "codex/codex": { instanceId: "instance-codex", binaryName: "codex" },
-  "pi/pi": { instanceId: "instance-pi", binaryName: "pi" },
+/** What makes a provider instance this one: its own id, the harness it runs, and its names. */
+export interface InstanceIdentity {
+  readonly id: string;
+  readonly harnessId: string;
+  readonly binaryName: string;
+  readonly name: string;
+}
+
+export const CLAUDE_CODE_IDENTITY: InstanceIdentity = {
+  id: "instance-claude-code",
+  harnessId: "claude-code/claude-code",
+  binaryName: "claude",
+  name: "Claude Code",
+};
+
+export const CODEX_IDENTITY: InstanceIdentity = {
+  id: "instance-codex",
+  harnessId: "codex/codex",
+  binaryName: "codex",
+  name: "Codex",
+};
+
+export const PI_IDENTITY: InstanceIdentity = {
+  id: "instance-pi",
+  harnessId: "pi/pi",
+  binaryName: "pi",
+  name: "pi",
 };
 
 /**
- * Returns a provider instance of the harness `harnessId`, a qualified id such as
- * `claude-code/claude-code`. Throws for an id not in `HARNESSES`, so a stale or bare id fails the test.
+ * Returns a provider instance with the given identity, an empty config and the
+ * same declared capabilities for every harness. The display name equals the name.
  */
 export const buildInstance = (
-  harnessId: string,
-  displayName: string,
+  identity: InstanceIdentity,
   snapshots: ProviderInstance["snapshots"] = [],
-): ProviderInstance => {
-  const harness = HARNESSES[harnessId];
-  if (harness === undefined) throw new Error(`No test harness registered for "${harnessId}"`);
-  return {
-    id: harness.instanceId,
-    harnessId,
-    name: displayName,
-    config: {},
-    displayName,
-    binaryName: harness.binaryName,
-    declared: DECLARED,
-    secretFields: [],
-    snapshots,
-    createdAt: "2026-09-05T09:00:00.000Z",
-    updatedAt: "2026-09-05T09:00:00.000Z",
-  };
-};
+): ProviderInstance => ({
+  id: identity.id,
+  harnessId: identity.harnessId,
+  name: identity.name,
+  config: {},
+  displayName: identity.name,
+  binaryName: identity.binaryName,
+  declared: DECLARED,
+  secretFields: [],
+  snapshots,
+  createdAt: "2026-09-05T09:00:00.000Z",
+  updatedAt: "2026-09-05T09:00:00.000Z",
+});
 
 /** Returns an instance's capability snapshot on `BARE`, logged in unless `fields` overrides it. */
 export const buildSnapshot = (

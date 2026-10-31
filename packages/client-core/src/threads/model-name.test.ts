@@ -3,11 +3,11 @@
  * which name a thread's model from its instance's catalogs.
  */
 import { describe, expect, it } from "vitest";
-import { buildInstance, buildSnapshot } from "../providers.testing";
+import { buildInstance, buildSnapshot, CLAUDE_CODE_IDENTITY } from "../providers.testing";
 import { describeAgent, findModelName } from "./model-name";
 
 /** An instance with a catalog on two runners; only the second lists Opus. */
-const CLAUDE = buildInstance("claude-code/claude-code", "Claude Code", [
+const CLAUDE = buildInstance(CLAUDE_CODE_IDENTITY, [
   buildSnapshot({
     runnerId: "atlas",
     models: [{ slug: "default", name: "Default", imageInput: { maxBytes: null }, options: [] }],

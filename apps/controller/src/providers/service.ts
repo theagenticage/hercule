@@ -20,12 +20,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import {
-  decodeAgainst,
-  listSecretFields,
-  excludeSecretFields,
-  type HarnessDefinition,
-} from "@hercule/plugin-host";
+import { decodeAgainst, listSecretFields, excludeSecretFields } from "@hercule/plugin-host";
 import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hercule/protocol";
 import {
   createInvalidStateError,
@@ -50,7 +45,7 @@ import {
 import { currentStamp, requireGrant } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { PluginHost } from "../plugins";
+import { PluginHost, type RegisteredHarness } from "../plugins";
 import {
   buildProviderInstanceOwner,
   Secrets,
@@ -167,7 +162,7 @@ const describeLoginFailure = (answer: LoginAnswer): string =>
  * name.
  */
 const readConfig = (
-  definition: HarnessDefinition,
+  definition: RegisteredHarness,
   config: Schema.Json,
 ): Effect.Effect<void, Validation> =>
   Effect.asVoid(
@@ -199,7 +194,7 @@ const make = Effect.gen(function* () {
    * never what it is.
    */
   const listInstanceSecretFields = (
-    definition: HarnessDefinition,
+    definition: RegisteredHarness,
     stored: ReadonlyArray<SecretNameRef>,
   ): ProviderInstance["secretFields"] =>
     listSecretFields(definition.configSchema).map((field) => ({
@@ -209,7 +204,7 @@ const make = Effect.gen(function* () {
 
   const buildProviderInstance = (
     stored: StoredInstance,
-    definition: HarnessDefinition,
+    definition: RegisteredHarness,
     snapshots: ReadonlyArray<StoredSnapshot>,
     held: ReadonlyArray<SecretNameRef>,
   ): ProviderInstance => ({
@@ -285,7 +280,7 @@ const make = Effect.gen(function* () {
    */
   const readHarnessDefinitionOrFail = (
     id: string,
-  ): Effect.Effect<HarnessDefinition, Validation | SqlError> =>
+  ): Effect.Effect<RegisteredHarness, Validation | SqlError> =>
     Effect.flatMap(definitions, (known) => {
       const definition = known.get(id);
       return definition === undefined

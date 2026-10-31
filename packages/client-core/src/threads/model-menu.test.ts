@@ -6,7 +6,14 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance, Runner } from "@hercule/contract";
-import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
+import {
+  BARE,
+  buildInstance,
+  buildSnapshot,
+  CLAUDE_CODE_IDENTITY,
+  CODEX_IDENTITY,
+  PI_IDENTITY,
+} from "../providers.testing";
 import type { ThreadConfig } from "./config";
 import { buildModelMenu } from "./model-menu";
 
@@ -53,7 +60,7 @@ const withModels = (
 
 /** The only instance of its harness; its own name differs from the harness's. */
 const CLAUDE: ProviderInstance = {
-  ...buildInstance("claude-code/claude-code", "Claude Code", [
+  ...buildInstance(CLAUDE_CODE_IDENTITY, [
     buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS, LEGACY] }),
   ]),
   name: "default",
@@ -62,7 +69,7 @@ const CLAUDE: ProviderInstance = {
 const WORK = withModels(CLAUDE, "instance-claude-work", "work", [SONNET, OPUS, LEGACY]);
 const PERSONAL = withModels(CLAUDE, "instance-claude-personal", "personal", [OPUS]);
 
-const CODEX = buildInstance("codex/codex", "Codex", [
+const CODEX = buildInstance(CODEX_IDENTITY, [
   buildSnapshot({
     runnerId: LOCAL.id,
     auth: { status: "ok", identity: "rogier@example.com", planLabel: "Pro" },
@@ -70,12 +77,12 @@ const CODEX = buildInstance("codex/codex", "Codex", [
   }),
 ]);
 
-const CODEX_OUT = buildInstance("codex/codex", "Codex", [
+const CODEX_OUT = buildInstance(CODEX_IDENTITY, [
   buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
 ]);
 
 /** Found on no runner: it has no snapshot for any runner. */
-const PI = buildInstance("pi/pi", "pi", []);
+const PI = buildInstance(PI_IDENTITY, []);
 
 const buildCatalogs = (instances: readonly ProviderInstance[]) => ({
   instances,

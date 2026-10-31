@@ -21,7 +21,7 @@ import type {
   Session,
   Workspace,
 } from "@hercule/contract";
-import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
+import { BARE, buildInstance, buildSnapshot, CLAUDE_CODE_IDENTITY } from "../providers.testing";
 import {
   buildComposerFields,
   buildPendingModelNote,
@@ -64,7 +64,7 @@ const HAIKU = {
   options: [],
 };
 
-const CLAUDE = buildInstance("claude-code/claude-code", "Claude Code", [
+const CLAUDE = buildInstance(CLAUDE_CODE_IDENTITY, [
   buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, HAIKU] }),
 ]);
 
@@ -79,9 +79,9 @@ const WORK = buildNamedInstance("instance-claude-work", "work");
 const PERSONAL = buildNamedInstance("instance-claude-personal", "personal");
 
 /** Probed on no runner: the instance exists, but it has no catalog. */
-const NOT_HERE = buildInstance("claude-code/claude-code", "Claude Code", []);
+const NOT_HERE = buildInstance(CLAUDE_CODE_IDENTITY, []);
 
-const LOGGED_OUT = buildInstance("claude-code/claude-code", "Claude Code", [
+const LOGGED_OUT = buildInstance(CLAUDE_CODE_IDENTITY, [
   buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
 ]);
 
@@ -202,7 +202,7 @@ describe("buildComposerFields", () => {
   it("says whether the selected model takes images, and fails closed on a model it cannot find", () => {
     const TEXT_ONLY = { slug: "glm-5.3", name: "GLM 5.3", imageInput: null, options: [] };
     const catalogs = buildCatalogs([
-      buildInstance("claude-code/claude-code", "Claude Code", [
+      buildInstance(CLAUDE_CODE_IDENTITY, [
         buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, TEXT_ONLY] }),
       ]),
     ]);
@@ -313,7 +313,7 @@ describe("buildComposerFields: a runner the user picked", () => {
     thisMacRunnerId: LOCAL.id,
   });
   const onCove: ThreadPicks = { runnerId: COVE.id };
-  const INSTALLED = buildInstance("claude-code/claude-code", "Claude Code", [
+  const INSTALLED = buildInstance(CLAUDE_CODE_IDENTITY, [
     buildSnapshot({ runnerId: LOCAL.id, models: [SONNET] }),
     buildSnapshot({ runnerId: COVE.id, models: [SONNET] }),
   ]);
@@ -331,7 +331,7 @@ describe("buildComposerFields: a runner the user picked", () => {
   });
 
   it("stays the runner when the account picked is installed there but logged out, and offers the login", () => {
-    const loggedOutOnCove = buildInstance("claude-code/claude-code", "Claude Code", [
+    const loggedOutOnCove = buildInstance(CLAUDE_CODE_IDENTITY, [
       buildSnapshot({ runnerId: LOCAL.id, models: [SONNET] }),
       buildSnapshot({ runnerId: COVE.id, auth: { status: "unauthenticated" }, models: [] }),
     ]);
@@ -348,7 +348,7 @@ describe("buildComposerFields: a runner the user picked", () => {
   });
 
   it("gives way to the account's default runner when the account is not installed on the picked one", () => {
-    const onLocalOnly = buildInstance("claude-code/claude-code", "Claude Code", [
+    const onLocalOnly = buildInstance(CLAUDE_CODE_IDENTITY, [
       buildSnapshot({ runnerId: LOCAL.id, models: [SONNET] }),
     ]);
     const fields = composeDraft(both(onLocalOnly), buildConfig(), onCove);

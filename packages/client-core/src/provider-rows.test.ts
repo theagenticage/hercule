@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance, Runner } from "@hercule/contract";
 import { buildProviderRows } from "./provider-rows";
-import { buildInstance, buildSnapshot, WITH_CLAUDE } from "./providers.testing";
+import {
+  buildInstance,
+  buildSnapshot,
+  CLAUDE_CODE_IDENTITY,
+  CODEX_IDENTITY,
+  PI_IDENTITY,
+  WITH_CLAUDE,
+} from "./providers.testing";
 
 const buildProviderRow = (runner: Runner, one: ProviderInstance) =>
   buildProviderRows(runner, [one])[0]!;
@@ -10,7 +17,7 @@ describe("buildProviderRows", () => {
   it("shows a logged-in harness's account and what it offers", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
-      buildInstance("claude-code/claude-code", "Claude Code", [buildSnapshot()]),
+      buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshot()]),
     );
 
     expect(row).toMatchObject({
@@ -31,9 +38,7 @@ describe("buildProviderRows", () => {
     // works, but there is no account name, and an empty line looks like a fault.
     const row = buildProviderRow(
       WITH_CLAUDE,
-      buildInstance("claude-code/claude-code", "Claude Code", [
-        buildSnapshot({ auth: { status: "ok" } }),
-      ]),
+      buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshot({ auth: { status: "ok" } })]),
     );
 
     expect(row.account).toBe("signed in");
@@ -42,7 +47,7 @@ describe("buildProviderRows", () => {
   it("shows the token source when the harness reports one", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
-      buildInstance("claude-code/claude-code", "Claude Code", [
+      buildInstance(CLAUDE_CODE_IDENTITY, [
         buildSnapshot({ auth: { status: "ok", backend: "ANTHROPIC_API_KEY" } }),
       ]),
     );
@@ -53,7 +58,7 @@ describe("buildProviderRows", () => {
   it("flags a version this build was not tested with", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
-      buildInstance("claude-code/claude-code", "Claude Code", [
+      buildInstance(CLAUDE_CODE_IDENTITY, [
         buildSnapshot({ harnessVersion: "2.0.9", versionVerdict: "below-floor" }),
       ]),
     );
@@ -62,7 +67,7 @@ describe("buildProviderRows", () => {
   });
 
   it("offers the install, and no login, for a harness that is not installed on the runner", () => {
-    const row = buildProviderRow(WITH_CLAUDE, buildInstance("codex/codex", "Codex", []));
+    const row = buildProviderRow(WITH_CLAUDE, buildInstance(CODEX_IDENTITY, []));
 
     expect(row).toMatchObject({ install: "blocked", logIn: false, version: "not reported" });
     expect(row.account).toBe("no adapter in this runner build");
@@ -71,7 +76,7 @@ describe("buildProviderRows", () => {
   it("offers no action on an offline runner", () => {
     const row = buildProviderRow(
       { ...WITH_CLAUDE, connectivity: "offline" },
-      buildInstance("claude-code/claude-code", "Claude Code", [buildSnapshot()]),
+      buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshot()]),
     );
 
     expect(row).toMatchObject({ install: "none", logIn: false, probe: false });
@@ -91,8 +96,7 @@ describe("buildProviderRows for a provider with a secret field", () => {
   };
 
   const buildKeyedInstance = (set: boolean): ProviderInstance => ({
-    ...buildInstance("pi/pi", "pi", [buildSnapshot({ auth: { status: "unauthenticated" } })]),
-    binaryName: "pi",
+    ...buildInstance(PI_IDENTITY, [buildSnapshot({ auth: { status: "unauthenticated" } })]),
     secretFields: [{ ...FIELD, set }],
   });
 

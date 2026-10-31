@@ -17,7 +17,7 @@ import {
   type NodeCardReads,
   type RunNodeCardReads,
 } from "./node-details";
-import { buildInstance, buildSnapshot } from "./providers.testing";
+import { buildInstance, buildSnapshot, CLAUDE_CODE_IDENTITY } from "./providers.testing";
 import { buildSession } from "./threads/workspaces.testing";
 
 const CREATED = "2026-09-01T09:00:00.000Z";
@@ -129,7 +129,7 @@ const READS: NodeCardReads = {
   agents: [REVIEWER],
   actions: [],
   instances: [
-    buildInstance("claude-code/claude-code", "Claude Code", [
+    buildInstance(CLAUDE_CODE_IDENTITY, [
       buildSnapshot({
         models: [{ slug: "claude-opus-5", name: "Claude Opus 5", imageInput: null, options: [] }],
       }),

@@ -8,7 +8,7 @@
  * harness's declaration every time, so once an adapter learns to enforce a
  * field, a binary with that adapter stops listing it.
  */
-import type { HarnessDefinition } from "@hercule/plugin-host";
+import type { RegisteredHarness } from "../plugins";
 import type { UnenforcedSpecField } from "@hercule/contract";
 import type { DisallowedTool } from "@hercule/protocol";
 
@@ -26,7 +26,7 @@ import type { DisallowedTool } from "@hercule/protocol";
  * so the two can never disagree about what a harness enforces.
  */
 export const listUnenforcedFields = (
-  definitions: ReadonlyArray<HarnessDefinition>,
+  definitions: ReadonlyArray<RegisteredHarness>,
   harnessId: string | null,
   disallowedTools: ReadonlyArray<DisallowedTool>,
 ): ReadonlyArray<UnenforcedSpecField> => {

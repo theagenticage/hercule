@@ -10,9 +10,8 @@ import * as Option from "effect/Option";
 import type * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { HarnessDefinition } from "@hercule/plugin-host";
 import { createValidationError, type Validation } from "@hercule/contract";
-import { PluginHost } from "../plugins";
+import { PluginHost, type RegisteredHarness } from "../plugins";
 import { providerRepository, type StoredSnapshot } from "./repository";
 
 /**
@@ -24,7 +23,7 @@ export const NO_PLACEMENT =
 
 /** A provider instance's harness definition and its stored snapshots, one per runner. */
 export interface Resolved {
-  readonly definition: HarnessDefinition;
+  readonly definition: RegisteredHarness;
   readonly snapshots: ReadonlyArray<StoredSnapshot>;
 }
 

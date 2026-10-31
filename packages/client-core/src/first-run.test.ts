@@ -16,7 +16,15 @@ import {
   type FirstRunReads,
 } from "./first-run";
 import { buildProviderRows } from "./provider-rows";
-import { BARE, buildInstance, buildSnapshot, WITH_CLAUDE } from "./providers.testing";
+import {
+  BARE,
+  buildInstance,
+  buildSnapshot,
+  CLAUDE_CODE_IDENTITY,
+  CODEX_IDENTITY,
+  PI_IDENTITY,
+  WITH_CLAUDE,
+} from "./providers.testing";
 import { buildProject, buildRepo } from "./threads/workspaces.testing";
 
 const GITHUB: Connection = {
@@ -33,7 +41,7 @@ const GITHUB: Connection = {
   updatedAt: "2026-09-05T09:00:00.000Z",
 };
 
-const LOGGED_IN = buildInstance("claude-code/claude-code", "Claude", [buildSnapshot()]);
+const LOGGED_IN = buildInstance({ ...CLAUDE_CODE_IDENTITY, name: "Claude" }, [buildSnapshot()]);
 
 /** Reads with nothing done yet. */
 const NOTHING: FirstRunReads = {
@@ -75,7 +83,7 @@ describe("findDoneSteps", () => {
   });
 
   it("counts only a login on the controller's local runner", () => {
-    const elsewhere = buildInstance("claude-code/claude-code", "Claude", [
+    const elsewhere = buildInstance({ ...CLAUDE_CODE_IDENTITY, name: "Claude" }, [
       buildSnapshot({ runnerId: "01a06d02-beff-7037-9f5b-000000000000" }),
     ]);
 
@@ -84,7 +92,7 @@ describe("findDoneSteps", () => {
   });
 
   it("does not count a login that failed", () => {
-    const loggedOut = buildInstance("claude-code/claude-code", "Claude", [
+    const loggedOut = buildInstance({ ...CLAUDE_CODE_IDENTITY, name: "Claude" }, [
       buildSnapshot({ auth: { status: "unauthenticated" } }),
     ]);
 
@@ -312,9 +320,9 @@ describe("buildFirstRunHost", () => {
 
 describe("buildProvidersStepText", () => {
   const INSTANCES = [
-    buildInstance("claude-code/claude-code", "Claude Code"),
-    buildInstance("codex/codex", "Codex"),
-    buildInstance("pi/pi", "pi"),
+    buildInstance(CLAUDE_CODE_IDENTITY),
+    buildInstance(CODEX_IDENTITY),
+    buildInstance(PI_IDENTITY),
   ];
   const THIS_MAC = { name: "this Mac", isThisMac: true };
 
@@ -431,7 +439,7 @@ describe("buildAllSetRecap", () => {
   it("leaves everything empty when nothing is logged in and the project has no repository", () => {
     const recap = buildAllSetRecap({
       ...EVERYTHING,
-      instances: [buildInstance("claude-code/claude-code", "Claude Code")],
+      instances: [buildInstance(CLAUDE_CODE_IDENTITY)],
       connections: [],
       resources: [],
     });

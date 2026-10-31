@@ -11,6 +11,7 @@ export {
   IngestLoopsLayer,
   type RunningIngest,
 } from "./ingest";
+export type { RegisteredHarness } from "./harnesses";
 export { IngestExecutor } from "./ingest-executor";
 export { deriveCatalogJsonSchema } from "./json-schema";
 export { OpenSignals } from "./open-signals";

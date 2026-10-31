@@ -68,6 +68,7 @@ import {
   type RegisteredConnectionType,
 } from "../connections";
 import { toPluginError, describeFieldIssues } from "./errors";
+import type { RegisteredHarness } from "./harnesses";
 import {
   registerEventSourceContribution,
   type RegisteredEventKind,
@@ -397,7 +398,7 @@ const inspectManifest = (
 const buildRegistrationHost = (
   manifest: PluginManifest,
   declared: Array<NewContribution>,
-  live: Array<HarnessDefinition>,
+  live: Array<RegisteredHarness>,
   types: Array<Omit<RegisteredConnectionType, "feeds">>,
   kinds: Map<string, RegisteredEventKind>,
   sources: Array<RegisteredEventSource>,
@@ -585,7 +586,7 @@ const make = Effect.gen(function* () {
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Not guarded by `gate`, unlike everything else here: registration has no
   // side effects and runs only at boot, so this does not change after boot.
-  const harnesses = yield* Ref.make<ReadonlyArray<HarnessDefinition>>([]);
+  const harnesses = yield* Ref.make<ReadonlyArray<RegisteredHarness>>([]);
   /** Every event kind this boot registered, by name. Set at boot, like the harnesses. */
   const eventKinds = yield* Ref.make<ReadonlyMap<string, RegisteredEventKind>>(new Map());
   /** Every event source this boot registered, in registry order. Set at boot, like the harnesses. */
@@ -770,7 +771,7 @@ const make = Effect.gen(function* () {
     plugin: Plugin,
     manifest: PluginManifest,
     declared: Array<NewContribution>,
-    live: Array<HarnessDefinition>,
+    live: Array<RegisteredHarness>,
     types: Array<Omit<RegisteredConnectionType, "feeds">>,
     kinds: Map<string, RegisteredEventKind>,
     sources: Array<RegisteredEventSource>,
@@ -936,7 +937,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const booted = new Map<string, Entry>();
         const catalog: Array<NewContribution> = [];
-        const registeredHarnesses: Array<HarnessDefinition> = [];
+        const registeredHarnesses: Array<RegisteredHarness> = [];
         const registeredTypes: Array<RegisteredConnectionType> = [];
         const registeredKinds = new Map<string, RegisteredEventKind>();
         const registeredSources: Array<RegisteredEventSource> = [];
@@ -988,7 +989,7 @@ const make = Effect.gen(function* () {
           }
 
           const declared: Array<NewContribution> = [];
-          const live: Array<HarnessDefinition> = [];
+          const live: Array<RegisteredHarness> = [];
           // A plugin may register a type's event source before or after the
           // type itself, so each type gets its feeds once the pass is over.
           const types: Array<Omit<RegisteredConnectionType, "feeds">> = [];
@@ -1066,7 +1067,7 @@ const make = Effect.gen(function* () {
       Effect.map(Ref.get(entries), (booted) => [...booted.values()].map(toLoadedPlugin)),
 
     /** Returns every harness this boot registered, in registry order. */
-    harnesses: (): Effect.Effect<ReadonlyArray<HarnessDefinition>> => Ref.get(harnesses),
+    harnesses: (): Effect.Effect<ReadonlyArray<RegisteredHarness>> => Ref.get(harnesses),
 
     /** Returns every event kind this boot registered, by name. */
     eventKinds: (): Effect.Effect<ReadonlyMap<string, RegisteredEventKind>> => Ref.get(eventKinds),

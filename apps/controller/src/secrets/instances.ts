@@ -9,7 +9,8 @@
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import type { SqlError } from "effect/sql/SqlError";
-import { listSecretFields, type HarnessDefinition } from "@hercule/plugin-host";
+import { listSecretFields } from "@hercule/plugin-host";
+import type { RegisteredHarness } from "../plugins";
 import type { SecretDecryptError } from "./cipher";
 import { buildProviderInstanceOwner, Secrets } from "./repository";
 
@@ -26,7 +27,7 @@ import { buildProviderInstanceOwner, Secrets } from "./repository";
  */
 export const readInstanceSecrets = (
   secrets: Secrets["Service"],
-  definitions: ReadonlyArray<HarnessDefinition>,
+  definitions: ReadonlyArray<RegisteredHarness>,
   instanceId: string,
   harnessId: string,
 ): Effect.Effect<Record<string, string>, SqlError | SecretDecryptError> => {
