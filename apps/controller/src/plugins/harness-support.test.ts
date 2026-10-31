@@ -28,6 +28,8 @@ const PROVIDER: RegisteredProvider = {
   ],
   defaultHarnessId: "alpha/alpha",
   parseUsageBody: {},
+  catalogSource: { kind: "harness-probe", harnessId: "alpha/alpha" },
+  defaultSelection: "current-models",
 } satisfies ProviderDefinition & {
   id: string;
   pluginId: string;

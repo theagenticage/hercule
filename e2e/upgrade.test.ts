@@ -67,6 +67,15 @@
  * - the exited Anthropic thread resumes in its home with its native session
  *   id: a stand-in `claude` records its config directory and arguments.
  *
+ * Migration 100 creates the Model Profile "Main" holding every account, in the
+ * order the accounts were added, with each section still waiting for its
+ * account's first Model Catalog read. The stand-in harnesses wait for a gate
+ * file before they answer anything, so the runner of the upgraded controller
+ * cannot read a catalog before the test has read the profile exactly as the
+ * migration left it: revision 1, no entries, no default entry. Once the gate
+ * opens, the first catalog reads fill the sections of the accounts the
+ * stand-ins can sign in.
+ *
  * It is not a matrix of session states or harness behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
@@ -212,6 +221,15 @@ const SKILL_GRANTS_BY_PROFILE: Readonly<Record<string, ReadonlyArray<string>>> =
   unrestricted: ["skill.read"],
   worker: [],
 };
+
+/**
+ * The migration that creates the Model Profile "Main", holding every account
+ * with a pending Default Selection.
+ */
+const MODEL_PROFILE_MIGRATION = 100;
+
+/** The name of the profile that migration creates. */
+const MAIN_MODEL_PROFILE = "Main";
 
 /** The migration that sorts the fields of each signal's stored `match` by name. */
 const SORTED_MATCH_MIGRATION = 73;
@@ -399,6 +417,21 @@ interface ListedAccount {
     readonly harnessId: string;
     readonly auth: { readonly status: string };
   }>;
+}
+
+/** A Model Profile as `hercule model-profile list` prints it. Only the parts the upgrade check reads. */
+interface ListedModelProfile {
+  readonly name: string;
+  readonly revision: number;
+  readonly accounts: ReadonlyArray<{
+    readonly providerAccountId: string;
+    readonly harnessId: string | null;
+    readonly resolvedHarnessId: string;
+    readonly selectionPending: boolean;
+    readonly entries: ReadonlyArray<unknown>;
+  }>;
+  readonly defaultEntry: unknown;
+  readonly dismissedNewModels: ReadonlyArray<unknown>;
 }
 
 /** An Agent or assistant as either binary prints it. */
@@ -965,6 +998,12 @@ async function persistZaiAccount(home: string, apiKey: string): Promise<string> 
 interface StandIns {
   /** The folder to put in front of the `PATH`. */
   readonly folder: string;
+  /**
+   * A file the stand-ins wait for before they answer anything. They give up
+   * waiting after a minute, so a test that fails before it creates the file
+   * leaves no process behind.
+   */
+  readonly gate: string;
   /** Where the stand-in `pi` appends the key and the home of every `auth check`. */
   readonly piRecord: string;
   /** Where the stand-in `claude` appends the config directory and arguments of every session start. */
@@ -982,13 +1021,23 @@ interface StandIns {
  *   probe reports a signed-in `WORK_IDENTITY`. Any other start is a session:
  *   it records `CLAUDE_CONFIG_DIR` and its arguments (which hold `--resume=<id>`)
  *   and then reads its input until it closes.
+ * - `codex` fails, so a machine that has a real, signed-in Codex cannot
+ *   answer for the OpenAI account.
+ *
+ * Every stand-in waits for `StandIns.gate` first.
  */
 function writeStandIns(folder: string): StandIns {
   mkdirSync(folder, { recursive: true });
   const piRecord = join(folder, "pi.record");
   const claudeRecord = join(folder, "claude.record");
+  const gate = join(folder, "gate");
+  const waitForGate = [
+    "waited=0",
+    `while [ ! -e '${gate}' ] && [ "$waited" -lt 600 ]; do sleep 0.1; waited=$((waited + 1)); done`,
+  ];
   const pi = [
     "#!/bin/sh",
+    ...waitForGate,
     'case "$1" in',
     `  --version) echo "${PI_VERSION}" ;;`,
     "  auth)",
@@ -1004,6 +1053,7 @@ function writeStandIns(folder: string): StandIns {
   ].join("\n");
   const claude = [
     "#!/bin/sh",
+    ...waitForGate,
     `if [ "$1" = "--version" ]; then echo "${CLAUDE_CODE_VERSION} (Claude Code)"; exit 0; fi`,
     "read -r first",
     `id=$(printf '%s' "$first" | sed -n 's/.*"request_id":"\\([^"]*\\)".*/\\1/p')`,
@@ -1018,10 +1068,13 @@ function writeStandIns(folder: string): StandIns {
     "",
   ].join("\n");
   writeFileSync(join(folder, "pi"), pi, { mode: 0o755 });
+  const codex = ["#!/bin/sh", ...waitForGate, "exit 1", ""].join("\n");
   writeFileSync(join(folder, "claude"), claude, { mode: 0o755 });
+  writeFileSync(join(folder, "codex"), codex, { mode: 0o755 });
   chmodSync(join(folder, "pi"), 0o755);
   chmodSync(join(folder, "claude"), 0o755);
-  return { folder, piRecord, claudeRecord };
+  chmodSync(join(folder, "codex"), 0o755);
+  return { folder, gate, piRecord, claudeRecord };
 }
 
 /** Returns the lines a stand-in has recorded so far, none when it was never run. */
@@ -1798,6 +1851,36 @@ describe("upgrading from the previous edge release", () => {
 
       expectJson(await runCli(["controller", "read", "--json"], upgraded));
 
+      // Migration 100 made the profile "Main". The stand-ins have answered
+      // nothing yet, so no catalog was read and the profile is as the
+      // migration left it. The accounts are listed in the order they were
+      // added.
+      if (edgeVersion < MODEL_PROFILE_MIGRATION) {
+        const profiles = readListedItems<ListedModelProfile>(
+          await runCli(["model-profile", "list", "--json"], upgraded),
+        );
+        expect(profiles.map((profile) => profile.name)).toEqual([MAIN_MODEL_PROFILE]);
+        const main = profiles[0]!;
+        expect(main.revision).toBe(1);
+        expect(main.defaultEntry).toBeNull();
+        expect(main.dismissedNewModels).toEqual([]);
+        expect(main.accounts).toEqual(
+          edgeAccounts.map((account) => ({
+            providerAccountId: account.id,
+            harnessId: null,
+            resolvedHarnessId: account.defaultHarnessId,
+            selectionPending: true,
+            entries: [],
+          })),
+        );
+      } else {
+        console.log(
+          `Skipping the Model Profile fixture: the edge database already ran migration ${String(MODEL_PROFILE_MIGRATION)}.`,
+        );
+      }
+      // From here the runner may probe, which reads the catalogs.
+      writeFileSync(standIns.gate, "");
+
       const readSettings = expectJson<{ user: Record<string, unknown> }>(
         await runCli(["settings", "read", "--json"], upgraded),
       );
@@ -2173,6 +2256,28 @@ describe("upgrading from the previous edge release", () => {
         `CLAUDE_CONFIG_DIR=${join(storageDir, ...accountHome(claudeAccount.id, "claude-code/claude-code"))}`,
       );
       expect(claudeRecorded).toContain(`ARG=--resume=${RESUMABLE_NATIVE_SESSION_ID}`);
+
+      // The first catalog reads, which the open gate let the runner make,
+      // fill the sections of the two accounts a stand-in can sign in. Both
+      // stand-ins list no models, so the sections are filled with none. The
+      // OpenAI account has no Codex that works, so its section keeps waiting.
+      if (edgeVersion < MODEL_PROFILE_MIGRATION) {
+        const pendingByAccount = async () => {
+          const [main] = readListedItems<ListedModelProfile>(
+            await runCli(["model-profile", "list", "--json"], upgraded),
+          );
+          return new Map(
+            main!.accounts.map((section) => [section.providerAccountId, section.selectionPending]),
+          );
+        };
+        await expect.poll(pendingByAccount, { timeout: 60_000 }).toEqual(
+          new Map([
+            [claudeAccount.id, false],
+            [codexAccount.id, true],
+            [piAccount.id, false],
+          ]),
+        );
+      }
 
       expect(await controller.stop()).toBe(0);
       controller = undefined;

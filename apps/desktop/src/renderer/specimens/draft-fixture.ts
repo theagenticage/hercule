@@ -31,18 +31,31 @@
  *
  * Everything else is the sidebar specimen's (sidebar-fixture.ts).
  */
-import type { ThreadPicks } from "@hercule/client-core";
+import type { RecentModel, ThreadPicks } from "@hercule/client-core";
 import {
   GITHUB_CONNECTION_TYPE,
   type Connection,
+  type ModelProfile,
+  type ProviderAccount,
   type Resource,
   type Task,
   type TaskPriority,
   type Workspace,
 } from "@hercule/contract";
 import { buildCheckout, buildRepo, buildWorkspace } from "@hercule/client-core/threads/testing";
+import { PROVIDER_PLUGINS } from "./settings-providers-fixture";
 import type { DraftScreenRecords, SidebarRecords } from "./shell-page";
-import { CLAUDE_OPUS, SPECIMEN_NOW, SPECIMEN_RECORDS, STUDIO_MAC } from "./sidebar-fixture";
+import {
+  buildSpecimenProfileSection,
+  CLAUDE_OPUS,
+  CLAUDE_SONNET,
+  GPT,
+  SPECIMEN_MODEL_PROFILE,
+  SPECIMEN_NOW,
+  SPECIMEN_RECORDS,
+  STUDIO_MAC,
+  type SpecimenModel,
+} from "./sidebar-fixture";
 
 /** webshop's one repo. */
 const WEBSHOP_REPO: Resource = buildRepo(
@@ -119,12 +132,59 @@ const DRAFT_PICKS: ThreadPicks = {
   options: { effort: "high" },
 };
 
+/** A second Codex model, so the OpenAI lane of the model menu holds more than one row. */
+const GPT_MINI: SpecimenModel = { ...GPT, slug: "gpt-5.4-mini", name: "GPT-5.4 mini" };
+
+/**
+ * The accounts of the draft's model menu: Claude Code signed in on
+ * studio-mac, and Codex not, so the OpenAI lane is dimmed with its reason and
+ * a Sign in link.
+ */
+const DRAFT_ACCOUNTS: ReadonlyArray<ProviderAccount> = SPECIMEN_RECORDS.accounts.map((account) =>
+  account.id === GPT.providerAccountId
+    ? {
+        ...account,
+        readiness: [{ harnessId: GPT.harnessId, runnerId: STUDIO_MAC.id, state: "not-signed-in" }],
+      }
+    : account,
+);
+
+/**
+ * The user's Model Profile as the draft's model menu draws it: Opus 5.5 and
+ * Sonnet 5 from Anthropic, and the two Codex models, which cannot run until
+ * the account is signed in.
+ */
+const DRAFT_MODEL_PROFILE: ModelProfile = {
+  ...SPECIMEN_MODEL_PROFILE,
+  accounts: [
+    buildSpecimenProfileSection([CLAUDE_OPUS, CLAUDE_SONNET]),
+    {
+      ...buildSpecimenProfileSection([GPT, GPT_MINI]),
+      entries: buildSpecimenProfileSection([GPT, GPT_MINI]).entries.map((entry) => ({
+        ...entry,
+        problem: {
+          reason: "not-signed-in" as const,
+          message: "Sign in to Codex on studio-mac.",
+        },
+      })),
+    },
+  ],
+};
+
+/** The entries the user picked lately, oldest first: Sonnet 5, then Opus 5.5, which the draft now has picked. */
+const DRAFT_RECENT: ReadonlyArray<RecentModel> = [CLAUDE_SONNET, CLAUDE_OPUS].map((model) => ({
+  providerAccountId: model.providerAccountId,
+  harnessId: model.harnessId,
+  model: model.slug,
+}));
+
 /** The Draft Thread in webshop, as the draft screen reads it. */
 export const WEBSHOP_DRAFT: DraftScreenRecords = {
   projectId: "p-webshop",
   startTasks: START_TASKS.map(buildOpenTask),
   connections: [],
   picks: DRAFT_PICKS,
+  recent: DRAFT_RECENT,
   skillsPreview: { runnerId: STUDIO_MAC.id, resourceId: [WEBSHOP_REPO.id] },
 };
 
@@ -166,6 +226,9 @@ const FIRST_NO_REPO_DRAFT: DraftScreenRecords = {
 /** Every list the shell reads: the sidebar specimen's, with webshop's repo and its main workspace. */
 export const DRAFT_PAGE_RECORDS: SidebarRecords = {
   ...SPECIMEN_RECORDS,
+  accounts: DRAFT_ACCOUNTS,
+  modelProfiles: [DRAFT_MODEL_PROFILE],
+  plugins: PROVIDER_PLUGINS,
   resources: [WEBSHOP_REPO],
   workspaces: [WEBSHOP_MAIN_WORKSPACE],
 };

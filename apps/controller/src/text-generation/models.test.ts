@@ -1,7 +1,7 @@
 /**
  * Tests how the `textGeneration.model` setting resolves to a Provider
  * Account, a harness and a model, on a real database with stored snapshots
- * and no runner connected.
+ * and Model Catalogs and no runner connected.
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
@@ -12,15 +12,18 @@ import { inTransaction } from "../db/testing";
 import { PluginHost } from "../plugins";
 import { buildPluginStack } from "../plugins/testing";
 import {
+  ModelCatalogsLayer,
   ProviderAccountRunnersLayer,
   providerAccountRepository,
   type StoredProviderAccount,
 } from "../provider-accounts";
+import { inertMembership } from "../provider-accounts/testing";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { Settings, SettingsLayer } from "../settings";
 import { AccountUsageLayer } from "../usage";
 import { TextGenerationModels, TextGenerationModelsLayer } from "./models";
 import {
+  addCatalog,
   addFixtureAccount,
   addSnapshot,
   addTextGenerationRunner,
@@ -30,6 +33,8 @@ import {
 } from "./testing";
 
 const layer = TextGenerationModelsLayer.pipe(
+  Layer.provideMerge(ModelCatalogsLayer),
+  Layer.provideMerge(inertMembership),
   Layer.provideMerge(ProviderAccountRunnersLayer),
   Layer.provideMerge(AccountUsageLayer),
   Layer.provideMerge(SettingsLayer),
@@ -42,7 +47,11 @@ interface Fleet {
   readonly zai: StoredProviderAccount;
   readonly anthropic: StoredProviderAccount;
   readonly addRunner: (traits?: RunnerTraits) => Effect.Effect<string, never, SqlClient.SqlClient>;
-  /** Stores a snapshot of an account in its own default harness. */
+  /**
+   * Stores a snapshot of an account in its own default harness. A snapshot
+   * that finds the account signed in is also the account's Model Catalog
+   * read, listing the same models.
+   */
   readonly snapshot: (
     account: StoredProviderAccount,
     runner: string,
@@ -69,7 +78,12 @@ const run = <A>(
         anthropic: yield* addFixtureAccount("anthropic", null, "2026-10-03T00:00:00.000Z"),
         addRunner: (traits) => Effect.orDie(addTextGenerationRunner(traits)),
         snapshot: (account, runner, result) =>
-          Effect.orDie(addSnapshot(account.id, account.defaultHarnessId, runner, result)),
+          Effect.orDie(
+            Effect.gen(function* () {
+              yield* addSnapshot(account.id, account.defaultHarnessId, runner, result);
+              if (result.auth.status === "ok") yield* addCatalog(account.id, result);
+            }),
+          ),
       });
     }).pipe(Effect.orDie, Effect.provide(layer)),
   );
@@ -95,6 +109,25 @@ describe("automatic", () => {
       model: "glm-5.3-flash",
       runnerIds: [expect.any(String) as unknown],
     });
+  });
+
+  it("looks the suggested model up in the Model Catalog, not in the snapshots", async () => {
+    const [fromSnapshot, fromCatalog] = await run(({ openai, zai, addRunner }) =>
+      Effect.gen(function* () {
+        const runner = yield* addRunner();
+        // The harness lists the model on the runner, but the catalog was never read.
+        yield* Effect.orDie(
+          addSnapshot(openai.id, openai.defaultHarnessId, runner, probed("ok", "gpt-6-luna")),
+        );
+        const beforeRead = yield* resolve.pipe(Effect.orDie);
+        // The catalog lists a model that no snapshot has.
+        yield* Effect.orDie(addCatalog(zai.id, probed("ok", "glm-5.3-flash")));
+        return [beforeRead, yield* resolve.pipe(Effect.orDie)] as const;
+      }),
+    );
+
+    expect(fromSnapshot._tag).toBe("unresolved");
+    expect(fromCatalog).toMatchObject({ _tag: "resolved", harnessId: "pi/pi" });
   });
 
   it("picks the oldest account whatever its provider, not a fixed order of providers", async () => {
@@ -182,8 +215,15 @@ describe("automatic", () => {
           runner,
           probed("unauthenticated", "gpt-6-luna"),
         );
-        yield* addSnapshot(newer.id, newer.defaultHarnessId, runner, probed("ok", "gpt-6-luna"));
-        yield* addSnapshot(older.id, older.defaultHarnessId, runner, probed("ok", "gpt-6-luna"));
+        for (const account of [newer, older]) {
+          yield* addSnapshot(
+            account.id,
+            account.defaultHarnessId,
+            runner,
+            probed("ok", "gpt-6-luna"),
+          );
+          yield* addCatalog(account.id, probed("ok", "gpt-6-luna"));
+        }
         return { target: yield* resolve, olderId: older.id };
       }).pipe(Effect.orDie, Effect.provide(layer)),
     );
@@ -269,7 +309,12 @@ describe("automatic", () => {
         const withOpenai = yield* resolve.pipe(Effect.orDie);
         yield* snapshot(openai, runner, probed("unauthenticated", "gpt-6-luna"));
         const withZai = yield* resolve.pipe(Effect.orDie);
-        yield* snapshot(zai, runner, probed("unauthenticated", "glm-5.3-flash"));
+        // A key account stays usable whatever its snapshots say, so its key goes instead.
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(
+          sql,
+          (yield* Secrets).delete(buildProviderAccountOwner(zai.id), "apiKey"),
+        ).pipe(Effect.orDie);
         const withNothing = yield* resolve.pipe(Effect.orDie);
         const again = yield* resolve.pipe(Effect.orDie);
         return {
@@ -335,11 +380,12 @@ describe("automatic", () => {
     const reading = (table: string): number =>
       statements.filter((text) => new RegExp(`FROM ${table}\\b`).test(text)).length;
     // Each count is a constant: `automatic` lists the accounts to find its
-    // candidates and `ProviderAccountRunners` lists them again; the snapshots
-    // are read for the versions, for the sign-ins and for the models; the
-    // runners for their facts and for the placement candidates.
-    expect(reading("provider_accounts")).toBe(2);
-    expect(reading("capability_snapshots")).toBe(3);
+    // candidates, `ProviderAccountRunners` lists them again, and the catalogs
+    // are listed beside the accounts; the snapshots are read for the versions
+    // and for the sign-ins; the runners for their facts and for the placement
+    // candidates.
+    expect(reading("provider_accounts")).toBe(3);
+    expect(reading("capability_snapshots")).toBe(2);
     expect(reading("runners")).toBe(2);
   });
 

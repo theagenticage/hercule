@@ -39,6 +39,8 @@ const providerDefinition: ProviderDefinition = {
     },
   ],
   defaultHarnessId: "fixture/fixture",
+  catalogSource: { kind: "harness-probe", harnessId: "fixture/fixture" },
+  defaultSelection: "current-models",
 };
 
 describe("registerHarness", () => {

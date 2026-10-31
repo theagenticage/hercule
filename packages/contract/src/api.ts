@@ -23,6 +23,7 @@ import { plugin } from "./groups/plugin";
 import { profile } from "./groups/profile";
 import { harness } from "./groups/harness";
 import { provider } from "./groups/provider";
+import { modelProfile } from "./groups/model-profile";
 import { providerAccount } from "./groups/provider-account";
 import { notification } from "./groups/notification";
 import { permission } from "./groups/permission";
@@ -79,6 +80,7 @@ export const api = HttpApi.make("hercule")
     harness,
     provider,
     providerAccount,
+    modelProfile,
     connection,
     agent,
     assistant,

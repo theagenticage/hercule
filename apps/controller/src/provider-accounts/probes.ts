@@ -33,6 +33,7 @@ import { decideProviderAccountHarness, PluginHost } from "../plugins";
 import { Secrets } from "../secrets";
 import { AccountUsage } from "../usage";
 import { describeSnapshot } from "./describe-snapshot";
+import { ModelCatalogs } from "./model-catalogs";
 import { providerAccountRepository, type StoredProviderAccount } from "./repository";
 import { decideHarnessOnRunner, findCredentialProblem, isIdentityCompatible } from "./runnability";
 
@@ -90,10 +91,11 @@ export interface ProbeStamp {
  * What came of handing a probe's answer to be stored:
  *
  * - `stored`: the snapshot as stored.
- * - `superseded`: the answer was out of date (the account got a new
+ * - `superseded`: the snapshot was out of date (the account got a new
  *   credential or a sign-in after the probe was sent, or a newer probe of the
- *   pair was already stored), so nothing was written. It says nothing about
- *   the account as it is now.
+ *   pair was already stored), so it was not written. It says nothing about
+ *   the account as it is now. A probe sent as a catalog read can still have
+ *   been recorded as one: see `recordProbe`.
  * - `unanswered`: nothing was stored, because the runner did not answer in
  *   time or the controller is sealed after a promotion.
  */
@@ -110,6 +112,7 @@ const make = Effect.gen(function* () {
   const host = yield* PluginHost;
   const secrets = yield* Secrets;
   const accountUsage = yield* AccountUsage;
+  const catalogs = yield* ModelCatalogs;
   // A wake needs no payload, and one unread change already says that a
   // snapshot was stored, so the PubSub keeps only the latest.
   const snapshotWrites = yield* PubSub.sliding<void>(1);
@@ -235,22 +238,31 @@ const make = Effect.gen(function* () {
      * while the runner was answering, because a snapshot cannot be stored for
      * an account that is gone.
      *
+     * With `readsCatalog`, the probe was sent as a read of the account's Model
+     * Catalog, and its result, judged for identity as below, is handed to
+     * `ModelCatalogs.recordCatalogRead` in the same transaction. Every other
+     * probe leaves the catalog alone. The catalog read and the snapshot are
+     * accepted separately:
+     *
+     * - A result sent with an older credential than the account has now is
+     *   neither stored as a snapshot nor as a read. It describes the old
+     *   credential, and it must not pin the old person as the account's
+     *   identity before the new credential's own probe answers.
+     * - A result sent before the stored snapshot's `probedAt` is stale as a
+     *   snapshot, because two probes of one pair can be in flight together and
+     *   the slower one can answer last. It is still a valid read, and the
+     *   catalog decides on its own whether a newer read of it was stored
+     *   already. Without this, an ordinary probe sent after a forced read
+     *   would swallow the read.
+     *
      * `stamp.sentAt` is when the controller sent the probe, and it becomes
      * the snapshot's `probedAt`, because the runner looked at the account's
-     * state some time after that and before it answered. Two probes of one
-     * pair can be in flight together, and the slower one can answer last. A
-     * result sent before the stored snapshot's `probedAt` is therefore stale.
+     * state some time after that and before it answered.
      *
-     * A result is also stale when the account got a new credential or a
-     * sign-in after the probe was sent (`stamp.credentialGeneration` is below
-     * the account's). It describes the old credential, and it must not pin
-     * the old person as the account's identity before the new credential's
-     * own probe answers.
-     *
-     * For a stale result nothing is written (it does not set the account's
-     * identity either) and the outcome is `superseded`. The stored snapshot is
-     * not returned in its place: it may describe a different sign-in than the
-     * one the caller wants checked.
+     * For a stale snapshot nothing is written to the snapshots, and it does
+     * not set the account's identity either. The outcome is `superseded`. The
+     * stored snapshot is not returned in its place: it may describe a
+     * different sign-in than the one the caller wants checked.
      *
      * One account is one person. An `ok` result that carries an identity sets
      * the account's identity and plan label when the account has none yet.
@@ -279,6 +291,7 @@ const make = Effect.gen(function* () {
       harnessId: string,
       result: ProbeResult,
       stamp: ProbeStamp,
+      { readsCatalog }: { readonly readsCatalog: boolean } = { readsCatalog: false },
     ): Effect.Effect<ProbeOutcome, StoreError | NotFound> => {
       const { sentAt } = stamp;
       const store: Effect.Effect<ProbeOutcome, StoreError | NotFound> = withTransaction(
@@ -288,11 +301,18 @@ const make = Effect.gen(function* () {
           if (Option.isNone(found)) {
             return yield* Effect.fail(createNotFoundError(NO_SUCH_PROVIDER_ACCOUNT));
           }
+          if (found.value.credentialGeneration > stamp.credentialGeneration) {
+            return { _tag: "superseded" } as const;
+          }
           const stored = yield* accounts.readSnapshot(providerAccountId, harnessId, runnerId);
-          if (
-            found.value.credentialGeneration > stamp.credentialGeneration ||
-            (Option.isSome(stored) && Date.parse(stored.value.probedAt) > Date.parse(sentAt))
-          ) {
+          if (Option.isSome(stored) && Date.parse(stored.value.probedAt) > Date.parse(sentAt)) {
+            if (readsCatalog) {
+              yield* catalogs.recordCatalogRead(
+                providerAccountId,
+                { _tag: "probed", result: judgeIdentity(result, found.value.identity) },
+                stamp,
+              );
+            }
             return { _tag: "superseded" } as const;
           }
           let accountIdentity = found.value.identity;
@@ -320,6 +340,13 @@ const make = Effect.gen(function* () {
             judged.usage.length > 0
           ) {
             yield* accountUsage.record(providerAccountId, judged.usage, { source: "read" });
+          }
+          if (readsCatalog) {
+            yield* catalogs.recordCatalogRead(
+              providerAccountId,
+              { _tag: "probed", result: judged },
+              stamp,
+            );
           }
           yield* afterCommit(() => {
             PubSub.publishUnsafe(snapshotWrites, undefined);
@@ -357,6 +384,45 @@ const make = Effect.gen(function* () {
      * the snapshots it missed.
      */
     snapshotChanges: Stream.fromPubSub(snapshotWrites),
+
+    /**
+     * Returns the earliest time after `afterMillis` (epoch milliseconds) at
+     * which a stored token expires, or `none` when no token expires later. The
+     * controller daemon wakes at that time, because nothing else changes when
+     * a token expires: the account stops being ready by the clock alone.
+     */
+    findNextTokenExpiry: (afterMillis: number): Effect.Effect<Option.Option<number>, SqlError> =>
+      Effect.map(accounts.list(), (all) => {
+        const later = all.flatMap((account) =>
+          account.credentialExpiresAt === null ? [] : [Date.parse(account.credentialExpiresAt)],
+        );
+        const next = later.filter((at) => at > afterMillis);
+        return next.length === 0 ? Option.none() : Option.some(Math.min(...next));
+      }),
+
+    /**
+     * Announces on the `provider` live topic every account whose token
+     * expired after `sinceMillis` and up to `untilMillis` (epoch milliseconds,
+     * the end included), so a client that shows the account as ready reads it
+     * again and sees `token-expired`. The caller passes the end of its last
+     * call as the next `sinceMillis`, which announces each expiry once.
+     */
+    announceExpiredTokens: (
+      sinceMillis: number,
+      untilMillis: number,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.flatMap(accounts.list(), (all) =>
+        Effect.forEach(
+          all.filter((account) => {
+            if (account.credentialExpiresAt === null) return false;
+            const at = Date.parse(account.credentialExpiresAt);
+            return at > sinceMillis && at <= untilMillis;
+          }),
+          (account) =>
+            announce({ _tag: "record", topic: "provider", id: account.id, kind: "updated" }),
+          { discard: true },
+        ),
+      ),
 
     /** Lists the pairs to probe on one runner: every account and harness that runner could run. */
     listPairsOnRunner: (runnerId: string): Effect.Effect<ReadonlyArray<ProbePair>, StoreError> =>
@@ -396,5 +462,5 @@ export class ProviderAccountProbes extends Context.Service<
 export const ProviderAccountProbesLayer: Layer.Layer<
   ProviderAccountProbes,
   never,
-  SqlClient.SqlClient | PluginHost | PromotionState | Secrets | AccountUsage
+  SqlClient.SqlClient | PluginHost | PromotionState | Secrets | AccountUsage | ModelCatalogs
 > = Layer.effect(ProviderAccountProbes)(make);

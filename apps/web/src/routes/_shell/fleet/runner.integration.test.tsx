@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { formatAge, formatStamp } from "@hercule/client-core";
 import type { ProviderAccount, Session } from "@hercule/contract";
 import {
+  buildCatalogFields,
   buildErrorBody,
   expectInDocumentOrder,
   readCurrentNavItems,
@@ -64,6 +65,7 @@ const buildProviderAccount = (
   usage: [],
   failure: null,
   snapshots,
+  ...buildCatalogFields(snapshots),
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
 });

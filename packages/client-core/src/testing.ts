@@ -18,6 +18,9 @@ export {
   OPENAI_IDENTITY,
   PROVIDERS,
   ZAI_IDENTITY,
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
   buildProviderAccount,
   type ProviderAccountIdentity,
 } from "./providers.testing";

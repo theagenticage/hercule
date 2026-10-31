@@ -206,6 +206,11 @@ const COMMANDS: Record<string, string> = {
   "providerAccount.delete": "provider-account delete",
   "providerAccount.signIn": "provider-account sign-in",
   "providerAccount.submitSignInCode": "provider-account submit-sign-in-code",
+  "providerAccount.readCatalog": "provider-account read-catalog",
+  "providerAccount.refresh": "provider-account refresh",
+  "modelProfile.query": "model-profile list",
+  "modelProfile.read": "model-profile read",
+  "modelProfile.update": "model-profile update",
 
   "connection.query": "connection list",
   "connection.read": "connection read",
@@ -405,6 +410,11 @@ const RESOLVES: Record<string, string> = {
   "providerAccount.delete id": "providerAccount.query",
   "providerAccount.signIn id": "providerAccount.query",
   "providerAccount.submitSignInCode id": "providerAccount.query",
+  "providerAccount.readCatalog id": "providerAccount.query",
+  "providerAccount.refresh id": "providerAccount.query",
+
+  "modelProfile.read id": "modelProfile.query",
+  "modelProfile.update id": "modelProfile.query",
 
   "connection.read id": "connection.query",
   "connection.update id": "connection.query",

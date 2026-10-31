@@ -20,6 +20,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_ACCOUNT,
+  FIXTURE_MODEL_PROFILE,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -95,6 +96,10 @@ const buildCreated = (
   usage: [],
   failure: null,
   snapshots: [],
+  modelCount: 0,
+  catalogReadAt: null,
+  catalogError: null,
+  readiness: [],
   createdAt: PERSONAL.createdAt,
   updatedAt: PERSONAL.updatedAt,
 });
@@ -203,6 +208,154 @@ describe("Settings > Providers, Add an account", () => {
         .map((call) => call.body),
     ).toEqual([{ providerId: "zai/zai", kind: "api-key", credentials: { apiKey: "zai-key-123" } }]);
     expect(await screen.findByRole("button", { name: /^Z\.ai/ })).toBeTruthy();
+  });
+
+  it("puts a new key account in the profile with its Default Selection, and its section flashes", async () => {
+    const stored: ProviderAccount[] = [PERSONAL];
+    const created = buildCreated(
+      "01a06d02-8000-7000-8000-0000000000c1",
+      "zai/zai",
+      "api-key",
+      null,
+      "pi/pi",
+    );
+    const { calls } = await openProviders({
+      stored,
+      handlers: {
+        [`POST ${ACCOUNTS_PATH}`]: () => {
+          stored.push(created);
+          return { body: created };
+        },
+        "GET /api/v1/model-profiles": { body: [FIXTURE_MODEL_PROFILE] },
+        [`PATCH /api/v1/model-profiles/${FIXTURE_MODEL_PROFILE.id}`]: {
+          body: {
+            ...FIXTURE_MODEL_PROFILE,
+            revision: 2,
+            accounts: [
+              ...FIXTURE_MODEL_PROFILE.accounts,
+              {
+                providerAccountId: created.id,
+                harnessId: null,
+                resolvedHarnessId: created.defaultHarnessId,
+                selectionPending: true,
+                entries: [],
+              },
+            ],
+          },
+        },
+      },
+    });
+    const sheet = await openSheet();
+    await userEvent.click(within(sheet).getByRole("button", { name: "Z.ai" }));
+    const keyStep = await screen.findByRole("dialog", { name: "Add Z.ai" });
+    await userEvent.type(within(keyStep).getByLabelText("API key"), "zai-key-123");
+
+    await userEvent.click(within(keyStep).getByRole("button", { name: "Done" }));
+
+    const section = await screen.findByRole("region", { name: "Z.ai" });
+    expect(section.className).toContain("is-fresh");
+    expect(within(section).getByText("Reading models…")).toBeTruthy();
+    const updates = calls.filter((call) => call.method === "PATCH");
+    expect(updates).toHaveLength(1);
+    const body = updates[0]!.body as {
+      expectedRevision: number;
+      accounts: Array<{ providerAccountId: string; entries?: unknown }>;
+    };
+    expect(body.expectedRevision).toBe(1);
+    expect(body.accounts.map(({ providerAccountId }) => providerAccountId)).toEqual([
+      PERSONAL.id,
+      created.id,
+    ]);
+    // The new account is sent with no entries, which gives it its Default Selection.
+    expect("entries" in body.accounts[0]!).toBe(true);
+    expect("entries" in body.accounts[1]!).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("stays open with the controller's message when the account cannot join the profile, and Done tries again without making the account twice", async () => {
+    const stored: ProviderAccount[] = [PERSONAL];
+    const created = buildCreated(
+      "01a06d02-8000-7000-8000-0000000000c1",
+      "zai/zai",
+      "api-key",
+      null,
+      "pi/pi",
+    );
+    let refuse = true;
+    const { calls } = await openProviders({
+      stored,
+      handlers: {
+        [`POST ${ACCOUNTS_PATH}`]: () => {
+          stored.push(created);
+          return { body: created };
+        },
+        "GET /api/v1/model-profiles": { body: [FIXTURE_MODEL_PROFILE] },
+        [`PATCH /api/v1/model-profiles/${FIXTURE_MODEL_PROFILE.id}`]: () =>
+          refuse
+            ? { status: 400, body: buildErrorBody("validation", "The profile is full.") }
+            : { body: { ...FIXTURE_MODEL_PROFILE, revision: 2 } },
+      },
+    });
+    const sheet = await openSheet();
+    await userEvent.click(within(sheet).getByRole("button", { name: "Z.ai" }));
+    const keyStep = await screen.findByRole("dialog", { name: "Add Z.ai" });
+    await userEvent.type(within(keyStep).getByLabelText("API key"), "zai-key-123");
+
+    await userEvent.click(within(keyStep).getByRole("button", { name: "Done" }));
+
+    expect((await within(keyStep).findByRole("alert")).textContent).toContain(
+      "The profile is full.",
+    );
+    refuse = false;
+    await userEvent.click(within(keyStep).getByRole("button", { name: "Done" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(
+      calls.filter((call) => call.method === "POST" && call.path === ACCOUNTS_PATH),
+    ).toHaveLength(1);
+    expect(calls.filter((call) => call.method === "PATCH")).toHaveLength(2);
+  });
+
+  it("closes the sheet and keeps a key account that could not join the profile, even when the join fails again", async () => {
+    const stored: ProviderAccount[] = [PERSONAL];
+    const created = buildCreated(
+      "01a06d02-8000-7000-8000-0000000000c1",
+      "zai/zai",
+      "api-key",
+      null,
+      "pi/pi",
+    );
+    const { calls } = await openProviders({
+      stored,
+      handlers: {
+        [`POST ${ACCOUNTS_PATH}`]: () => {
+          stored.push(created);
+          return { body: created };
+        },
+        "GET /api/v1/model-profiles": { body: [FIXTURE_MODEL_PROFILE] },
+        [`PATCH /api/v1/model-profiles/${FIXTURE_MODEL_PROFILE.id}`]: () => ({
+          status: 400,
+          body: buildErrorBody("validation", "The profile is full."),
+        }),
+      },
+    });
+    const sheet = await openSheet();
+    await userEvent.click(within(sheet).getByRole("button", { name: "Z.ai" }));
+    const keyStep = await screen.findByRole("dialog", { name: "Add Z.ai" });
+    await userEvent.type(within(keyStep).getByLabelText("API key"), "zai-key-123");
+    await userEvent.click(within(keyStep).getByRole("button", { name: "Done" }));
+    await within(keyStep).findByRole("alert");
+    expect(within(keyStep).queryByRole("button", { name: "Discard" })).toBeNull();
+
+    await userEvent.click(within(keyStep).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(calls.filter((call) => call.method === "DELETE")).toEqual([]);
+    expect(calls.filter((call) => call.method === "PATCH")).toHaveLength(2);
   });
 
   it("shows the controller's refusal of a key under the key's field, not in the sheet, and keeps the typed key", async () => {

@@ -7,7 +7,8 @@ import { withTransaction } from "../db";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { PluginHost } from "../plugins";
 import { buildPluginStack } from "../plugins/testing";
-import { ProviderAccountRunnersLayer } from "../provider-accounts";
+import { ModelCatalogsLayer, ProviderAccountRunnersLayer } from "../provider-accounts";
+import { inertMembership } from "../provider-accounts/testing";
 import { LocalRunnerId } from "../runners";
 import { Secrets } from "../secrets";
 import { Settings, SettingsLayer } from "../settings";
@@ -30,6 +31,8 @@ const USER: Actor = {
 const buildStack = () =>
   ControllerLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(TextGenerationModelsLayer, LastTextGenerationFailureLayer)),
+    Layer.provideMerge(ModelCatalogsLayer),
+    Layer.provideMerge(inertMembership),
     Layer.provideMerge(ProviderAccountRunnersLayer),
     Layer.provideMerge(AccountUsageLayer),
     Layer.provideMerge(Layer.mergeAll(controllerIdentityLayer, SettingsLayer)),

@@ -60,6 +60,12 @@ describe("the OpenAI provider", () => {
     expect(captureProviderDefinition().defaultHarnessId).toBe("codex/codex");
   });
 
+  it("reads its Model Catalog from Codex and brings the current models into a profile", () => {
+    const definition = captureProviderDefinition();
+    expect(definition.catalogSource).toEqual({ kind: "harness-probe", harnessId: "codex/codex" });
+    expect(definition.defaultSelection).toBe("current-models");
+  });
+
   it("suggests gpt-6-luna for text generation", () => {
     expect(captureProviderDefinition().suggestedTextGenerationModel).toBe("gpt-6-luna");
   });

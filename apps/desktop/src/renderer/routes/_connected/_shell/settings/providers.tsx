@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
 import {
   harnessesQuery,
+  modelProfilesQuery,
   pluginsQuery,
   providerAccountsQuery,
   providersQuery,
@@ -15,6 +16,7 @@ import { SettingsHeaderActions } from "../../../../screens/settings/settings-fra
 import { AccountCard } from "./-account-card";
 import type { CredentialFix } from "./-fix-account-dialog";
 import { LazyFixAccountDialog } from "./-lazy-fix-account-dialog";
+import { ModelsSection } from "./-models-section";
 import { OpenedProviderAccountSheet } from "./-provider-account-sheet";
 
 /**
@@ -41,15 +43,16 @@ interface FixingAccount {
  * account is signed in on or "Every machine", then its usage or, when it needs
  * the user, its state and the button that fixes it. A click on a card opens the
  * account's sheet, and the header's Add an account opens the sheet that adds
- * one (spec 17 §Settings, Providers).
+ * one. Under the cards is the Models section, the Model Profile's menu
+ * (spec 17 §Settings, Providers).
  *
- * Everything the section reads, the accounts, the providers, the harnesses,
- * the runners and the plugins, is a shell read that the live connection
- * keeps current: the `provider` topic for the accounts, which the shell
- * holds, so opening the section sends no request and the section holds no
- * subscription of its own. The loader only makes sure the cache holds them.
- * Each card reads the lists it draws from, and the page reads only the
- * accounts.
+ * Everything the section reads, the accounts, the profiles, the providers,
+ * the harnesses, the runners and the plugins, is a shell read that the live
+ * connection keeps current: the `provider` topic for the accounts and the
+ * profiles, which the shell holds, so opening the section sends no request
+ * and the section holds no subscription of its own. The loader only makes sure
+ * the cache holds them. Each card reads the lists it draws from, and the page
+ * reads only the accounts.
  */
 export const Route = createFileRoute("/_connected/_shell/settings/providers")({
   staticData: { title: "Providers" },
@@ -57,6 +60,7 @@ export const Route = createFileRoute("/_connected/_shell/settings/providers")({
     const { client } = controller;
     await Promise.all([
       queryClient.ensureQueryData(providerAccountsQuery(client)),
+      queryClient.ensureQueryData(modelProfilesQuery(client)),
       queryClient.ensureQueryData(providersQuery(client)),
       queryClient.ensureQueryData(harnessesQuery(client)),
       queryClient.ensureQueryData(runnersQuery(client)),
@@ -75,6 +79,8 @@ function Providers(): JSX.Element {
   const [sheet, setSheet] = useState<OpenSheet | null>(null);
   const [adding, setAdding] = useState(false);
   const [fixing, setFixing] = useState<FixingAccount | null>(null);
+  // The account the add-account sheet just put in the profile, whose section flashes once.
+  const [addedProviderAccountId, setAddedProviderAccountId] = useState<string | null>(null);
   // A sheet closes only itself: a late close of a sheet the user left must
   // not close the one opened since.
   const closeSheet = (closing: OpenSheet): void => {
@@ -94,31 +100,34 @@ function Providers(): JSX.Element {
       {accounts.length === 0 ? (
         <p className="pa-empty">No accounts yet. Add one to give your agents models.</p>
       ) : (
-        <section className="set-sec provider-accounts">
-          <h2>Accounts</h2>
-          <p className="pa-lead">Who pays for the models in your menu.</p>
-          {sheet !== null && sheetProviderAccount === undefined && (
-            <p className="set-note" role="status">
-              {`${sheet.name} was deleted elsewhere, so its sheet closed.`}
-            </p>
-          )}
-          <div className="pa-cards">
-            {accounts.map((account) => (
-              <AccountCard
-                key={account.id}
-                account={account}
-                onOpen={(providerAccountId, name) => {
-                  setSheet({ providerAccountId, name });
-                }}
-                onFix={(providerAccountId, name, fix) => {
-                  // Signing in is done in the sheet's Machines section.
-                  if (fix.kind === "sign-in") setSheet({ providerAccountId, name });
-                  else setFixing({ providerAccountId, fix });
-                }}
-              />
-            ))}
-          </div>
-        </section>
+        <>
+          <section className="set-sec provider-accounts">
+            <h2>Accounts</h2>
+            <p className="pa-lead">Who pays for the models in your menu.</p>
+            {sheet !== null && sheetProviderAccount === undefined && (
+              <p className="set-note" role="status">
+                {`${sheet.name} was deleted elsewhere, so its sheet closed.`}
+              </p>
+            )}
+            <div className="pa-cards">
+              {accounts.map((account) => (
+                <AccountCard
+                  key={account.id}
+                  account={account}
+                  onOpen={(providerAccountId, name) => {
+                    setSheet({ providerAccountId, name });
+                  }}
+                  onFix={(providerAccountId, name, fix) => {
+                    // Signing in is done in the sheet's Machines section.
+                    if (fix.kind === "sign-in") setSheet({ providerAccountId, name });
+                    else setFixing({ providerAccountId, fix });
+                  }}
+                />
+              ))}
+            </div>
+          </section>
+          <ModelsSection client={client} flashProviderAccountId={addedProviderAccountId} />
+        </>
       )}
       {adding && (
         // Without its own boundary, the sheet's load would suspend the page behind it.
@@ -126,6 +135,9 @@ function Providers(): JSX.Element {
           <LazyAddProviderAccount
             client={client}
             signInMachines="all"
+            onAdded={(account) => {
+              setAddedProviderAccountId(account.id);
+            }}
             onClose={() => {
               setAdding(false);
             }}

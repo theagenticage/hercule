@@ -24,16 +24,25 @@
  * - Each plugin declares the mark the shipped plugin declares: the book's
  *   brand path scaled by 2/3 onto the 16-unit grid a plugin's mark uses.
  */
-import { HARNESSES } from "@hercule/client-core/testing";
 import type {
   AccountKind,
   Harness,
+  ModelCatalog,
+  ModelProfile,
+  PluginDetail,
   PluginMark,
   Provider,
   ProviderAccount,
   Runner,
 } from "@hercule/contract";
 import { buildRunner } from "@hercule/client-core/threads/testing";
+import {
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
+  HARNESSES,
+  type ProviderAccountIdentity,
+} from "@hercule/client-core/testing";
 import { SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { ProvidersSettingsRecords, SidebarRecords } from "./shell-page";
 import { buildPlugin } from "./plugins-fixture";
@@ -131,154 +140,192 @@ const buildSnapshot = (
   models: [],
 });
 
-/** The five accounts, in the order they were added. */
-export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
-  {
-    id: "a-anthropic",
-    providerId: "anthropic/anthropic",
-    kind: "subscription-per-machine",
-    label: null,
-    identity: "rogier@acme.com",
-    planLabel: "Max",
-    defaultHarnessId: "claude-code/claude-code",
-    expiresAt: null,
-    usage: [buildWindow("five-hour", 61, inHours(3)), buildWindow("weekly", 38, inDays(3))],
-    failure: null,
-    snapshots: [
-      buildSnapshot(STUDIO_MAC, "claude-code/claude-code", "rogier@acme.com", "Max"),
-      buildSnapshot(ATLAS, "claude-code/claude-code", "rogier@acme.com", "Max"),
-      buildSnapshot(MOSS, "claude-code/claude-code", null),
-    ],
-    createdAt: AT,
-    updatedAt: AT,
-  },
-  {
-    id: "a-anthropic-work",
-    providerId: "anthropic/anthropic",
-    kind: "subscription-per-machine",
-    label: "Work",
-    identity: "rogier@work.example",
-    planLabel: "Team",
-    defaultHarnessId: "claude-code/claude-code",
-    expiresAt: null,
-    usage: [buildWindow("five-hour", 85, inHours(1)), buildWindow("weekly", 41, inDays(2))],
-    failure: null,
-    snapshots: [
-      buildSnapshot(STUDIO_MAC, "claude-code/claude-code", "rogier@work.example", "Team"),
-      buildSnapshot(ATLAS, "claude-code/claude-code", null),
-    ],
-    createdAt: AT,
-    updatedAt: AT,
-  },
-  {
-    id: "a-openai",
-    providerId: "openai/openai",
-    kind: "subscription-per-machine",
-    label: null,
-    identity: "rogier@acme.com",
-    planLabel: "Pro",
-    defaultHarnessId: "codex/codex",
-    expiresAt: null,
-    usage: [buildWindow("five-hour", 100, inHours(2), true), buildWindow("weekly", 72, inDays(4))],
-    failure: null,
-    snapshots: [buildSnapshot(STUDIO_MAC, "codex/codex", "rogier@acme.com", "Pro")],
-    createdAt: AT,
-    updatedAt: AT,
-  },
-  {
-    id: "a-openai-personal",
-    providerId: "openai/openai",
-    kind: "subscription-per-machine",
-    label: "Personal",
-    identity: null,
-    planLabel: null,
-    defaultHarnessId: "codex/codex",
-    expiresAt: null,
-    usage: [],
-    failure: null,
-    snapshots: [],
-    createdAt: AT,
-    updatedAt: AT,
-  },
-  {
-    id: "a-zai",
-    providerId: "zai/zai",
-    kind: "api-key",
-    label: "Coding plan for the platform team",
-    identity: null,
-    planLabel: null,
-    defaultHarnessId: "pi/pi",
-    expiresAt: null,
-    usage: [],
-    failure: null,
-    snapshots: [],
-    createdAt: AT,
-    updatedAt: AT,
-  },
-  {
-    id: "a-openai-team",
-    providerId: "openai/openai",
-    kind: "subscription-per-machine",
-    label: "Team",
-    identity: "rogier@platform.example",
-    planLabel: "Business",
-    defaultHarnessId: "codex/codex",
-    expiresAt: null,
-    usage: [
-      buildWindow("weekly", 54, inDays(5)),
-      { kind: "credit", remaining: 1240, limit: 2000, takenAt: minutesAgo(8), source: "read" },
-    ],
-    failure: null,
-    snapshots: [buildSnapshot(STUDIO_MAC, "codex/codex", "rogier@platform.example", "Business")],
-    createdAt: AT,
-    updatedAt: AT,
-  },
-  {
-    id: "a-anthropic-token",
-    providerId: "anthropic/anthropic",
-    kind: "subscription-token",
-    label: "Token",
-    identity: "rogier@acme.com",
-    planLabel: "Max",
-    defaultHarnessId: "claude-code/claude-code",
-    expiresAt: inDays(12),
-    usage: [],
-    failure: null,
-    snapshots: [],
-    createdAt: AT,
-    updatedAt: AT,
-  },
-  {
-    id: "a-anthropic-old-token",
-    providerId: "anthropic/anthropic",
-    kind: "subscription-token",
-    label: "Old token",
-    identity: "rogier@acme.com",
-    planLabel: "Max",
-    defaultHarnessId: "claude-code/claude-code",
-    expiresAt: inDays(-3),
-    usage: [],
-    failure: null,
-    snapshots: [],
-    createdAt: AT,
-    updatedAt: AT,
-  },
-  {
-    id: "a-openai-api",
-    providerId: "openai/openai",
-    kind: "api-key",
-    label: "API",
-    identity: null,
-    planLabel: null,
-    defaultHarnessId: "codex/codex",
-    expiresAt: null,
-    usage: [],
-    failure: { message: "Incorrect API key provided.", failedAt: minutesAgo(40) },
-    snapshots: [],
-    createdAt: AT,
-    updatedAt: AT,
-  },
+/** The plugins that register the Providers, with the marks the accounts and the model menu draw. */
+export const PROVIDER_PLUGINS: ReadonlyArray<PluginDetail> = [
+  buildPlugin("anthropic", "Anthropic", ANTHROPIC_MARK),
+  buildPlugin("openai", "OpenAI", OPENAI_MARK),
+  buildPlugin("zai", "Z.ai", ZAI_MARK),
 ];
+
+/** A Provider Account before it is given its Model Catalog facts and readiness. */
+type AccountWithoutCatalog = Omit<
+  ProviderAccount,
+  "modelCount" | "catalogReadAt" | "catalogError" | "readiness"
+>;
+
+/**
+ * Returns `account` with its Model Catalog facts and readiness. A signed-in
+ * snapshot is a ready account on its runner and any other snapshot is not
+ * signed in; an account that has been signed in has read its catalog.
+ */
+const withCatalog = (account: AccountWithoutCatalog): ProviderAccount => {
+  const signedIn = account.snapshots.some((snapshot) => snapshot.auth.status === "ok");
+  return {
+    ...account,
+    modelCount: signedIn ? 4 : 0,
+    catalogReadAt: signedIn ? AT : null,
+    catalogError: null,
+    readiness: account.snapshots.map((snapshot) => ({
+      harnessId: snapshot.harnessId,
+      runnerId: snapshot.runnerId,
+      state: snapshot.auth.status === "ok" ? "ready" : "not-signed-in",
+    })),
+  };
+};
+
+/** The nine accounts, in the order they were added. */
+export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = (
+  [
+    {
+      id: "01a06d02-8000-7000-8000-000000000a01",
+      providerId: "anthropic/anthropic",
+      kind: "subscription-per-machine",
+      label: null,
+      identity: "rogier@acme.com",
+      planLabel: "Max",
+      defaultHarnessId: "claude-code/claude-code",
+      expiresAt: null,
+      usage: [buildWindow("five-hour", 61, inHours(3)), buildWindow("weekly", 38, inDays(3))],
+      failure: null,
+      snapshots: [
+        buildSnapshot(STUDIO_MAC, "claude-code/claude-code", "rogier@acme.com", "Max"),
+        buildSnapshot(ATLAS, "claude-code/claude-code", "rogier@acme.com", "Max"),
+        buildSnapshot(MOSS, "claude-code/claude-code", null),
+      ],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a02",
+      providerId: "anthropic/anthropic",
+      kind: "subscription-per-machine",
+      label: "Work",
+      identity: "rogier@work.example",
+      planLabel: "Team",
+      defaultHarnessId: "claude-code/claude-code",
+      expiresAt: null,
+      usage: [buildWindow("five-hour", 85, inHours(1)), buildWindow("weekly", 41, inDays(2))],
+      failure: null,
+      snapshots: [
+        buildSnapshot(STUDIO_MAC, "claude-code/claude-code", "rogier@work.example", "Team"),
+        buildSnapshot(ATLAS, "claude-code/claude-code", null),
+      ],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a03",
+      providerId: "openai/openai",
+      kind: "subscription-per-machine",
+      label: null,
+      identity: "rogier@acme.com",
+      planLabel: "Pro",
+      defaultHarnessId: "codex/codex",
+      expiresAt: null,
+      usage: [
+        buildWindow("five-hour", 100, inHours(2), true),
+        buildWindow("weekly", 72, inDays(4)),
+      ],
+      failure: null,
+      snapshots: [buildSnapshot(STUDIO_MAC, "codex/codex", "rogier@acme.com", "Pro")],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a04",
+      providerId: "openai/openai",
+      kind: "subscription-per-machine",
+      label: "Personal",
+      identity: null,
+      planLabel: null,
+      defaultHarnessId: "codex/codex",
+      expiresAt: null,
+      usage: [],
+      failure: null,
+      snapshots: [],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a05",
+      providerId: "zai/zai",
+      kind: "api-key",
+      label: "Coding plan for the platform team",
+      identity: null,
+      planLabel: null,
+      defaultHarnessId: "pi/pi",
+      expiresAt: null,
+      usage: [],
+      failure: null,
+      snapshots: [],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a06",
+      providerId: "openai/openai",
+      kind: "subscription-per-machine",
+      label: "Team",
+      identity: "rogier@platform.example",
+      planLabel: "Business",
+      defaultHarnessId: "codex/codex",
+      expiresAt: null,
+      usage: [
+        buildWindow("weekly", 54, inDays(5)),
+        { kind: "credit", remaining: 1240, limit: 2000, takenAt: minutesAgo(8), source: "read" },
+      ],
+      failure: null,
+      snapshots: [buildSnapshot(STUDIO_MAC, "codex/codex", "rogier@platform.example", "Business")],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a07",
+      providerId: "anthropic/anthropic",
+      kind: "subscription-token",
+      label: "Token",
+      identity: "rogier@acme.com",
+      planLabel: "Max",
+      defaultHarnessId: "claude-code/claude-code",
+      expiresAt: inDays(12),
+      usage: [],
+      failure: null,
+      snapshots: [],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a08",
+      providerId: "anthropic/anthropic",
+      kind: "subscription-token",
+      label: "Old token",
+      identity: "rogier@acme.com",
+      planLabel: "Max",
+      defaultHarnessId: "claude-code/claude-code",
+      expiresAt: inDays(-3),
+      usage: [],
+      failure: null,
+      snapshots: [],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a09",
+      providerId: "openai/openai",
+      kind: "api-key",
+      label: "API",
+      identity: null,
+      planLabel: null,
+      defaultHarnessId: "codex/codex",
+      expiresAt: null,
+      usage: [],
+      failure: { message: "Incorrect API key provided.", failedAt: minutesAgo(40) },
+      snapshots: [],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+  ] satisfies ReadonlyArray<AccountWithoutCatalog>
+).map(withCatalog);
 
 /** The kinds the add-account specimens draw, one of each way an account gets its credential. */
 const KEY_FIELD = {
@@ -359,6 +406,80 @@ export const SPECIMEN_PROVIDERS: ReadonlyArray<Provider> = [
   },
 ];
 
+/** The identity the model profile's builders need of one of the accounts above. */
+const identityOf = (id: string): ProviderAccountIdentity => {
+  const account = PROVIDER_ACCOUNTS.find((each) => each.id === id)!;
+  return {
+    id,
+    providerId: account.providerId,
+    kind: account.kind,
+    harnessId: account.defaultHarnessId,
+    label: account.label,
+  };
+};
+const ANTHROPIC = identityOf("01a06d02-8000-7000-8000-000000000a01");
+const ANTHROPIC_WORK = identityOf("01a06d02-8000-7000-8000-000000000a02");
+const OPENAI = identityOf("01a06d02-8000-7000-8000-000000000a03");
+const OPENAI_PERSONAL = identityOf("01a06d02-8000-7000-8000-000000000a04");
+
+/**
+ * The one Model Profile, "Main": Anthropic with Opus 5.5 as the profile's
+ * default; Anthropic's Work account with one model; OpenAI with a model that
+ * also runs in pi; and OpenAI's Personal account, which has not read its
+ * catalog yet, so its section waits.
+ */
+export const PROVIDER_MODEL_PROFILES: ReadonlyArray<ModelProfile> = [
+  buildModelProfile(
+    [
+      buildProfileSection(ANTHROPIC, [
+        buildProfileEntry(ANTHROPIC, "opus-5-5", { name: "Opus 5.5" }),
+        buildProfileEntry(ANTHROPIC, "fable-5-1", { name: "Fable 5.1" }),
+        buildProfileEntry(ANTHROPIC, "sonnet-5-5", { name: "Sonnet 5.5" }),
+        buildProfileEntry(ANTHROPIC, "haiku-5-5", { name: "Haiku 5.5" }),
+      ]),
+      buildProfileSection(ANTHROPIC_WORK, [
+        buildProfileEntry(ANTHROPIC_WORK, "opus-4-8", { name: "Opus 4.8" }),
+      ]),
+      buildProfileSection(OPENAI, [
+        buildProfileEntry(OPENAI, "gpt-6-1-sol", { name: "GPT-6.1 Sol" }),
+        buildProfileEntry(OPENAI, "gpt-6-luna", { name: "GPT-6 Luna" }),
+        buildProfileEntry(OPENAI, "gpt-6-1-sol", {
+          name: "GPT-6.1 Sol",
+          harnessId: "pi/pi",
+          resolvedHarnessId: "pi/pi",
+        }),
+      ]),
+      buildProfileSection(OPENAI_PERSONAL, "pending"),
+    ],
+    {
+      id: "01a06d02-8000-7000-8000-000000000b01",
+      revision: 6,
+      defaultEntry: { providerAccountId: ANTHROPIC.id, model: "opus-5-5", harnessId: null },
+    },
+  ),
+];
+
+/** What Anthropic's catalog holds, which its picker lists: the profile's four models, and an older one. */
+export const ANTHROPIC_CATALOG: ModelCatalog = {
+  providerAccountId: ANTHROPIC.id,
+  readAt: AT,
+  error: null,
+  models: [
+    ["opus-5-5", "Opus 5.5"],
+    ["fable-5-1", "Fable 5.1"],
+    ["sonnet-5-5", "Sonnet 5.5"],
+    ["haiku-5-5", "Haiku 5.5"],
+    ["opus-4-8", "Opus 4.8"],
+  ].map(([slug, name]) => ({
+    slug: slug!,
+    name: name!,
+    ...(slug === "opus-4-8" ? { isLegacy: true } : {}),
+    imageInput: null,
+    options: [],
+    firstSeenAt: AT,
+  })),
+};
+
 /**
  * The shared harnesses, with the kinds this page's accounts use added: Claude
  * Code runs Anthropic's token and key, and Codex runs OpenAI's key. Without
@@ -391,11 +512,8 @@ export const PROVIDERS_SIDEBAR_RECORDS: SidebarRecords = {
   threads: SPECIMEN_RECORDS.threads.slice(0, 4),
   runners: [STUDIO_MAC, ATLAS, MOSS, OLD_BOX],
   accounts: PROVIDER_ACCOUNTS,
-  plugins: [
-    buildPlugin("anthropic", "Anthropic", ANTHROPIC_MARK),
-    buildPlugin("openai", "OpenAI", OPENAI_MARK),
-    buildPlugin("zai", "Z.ai", ZAI_MARK),
-  ],
+  modelProfiles: PROVIDER_MODEL_PROFILES,
+  plugins: PROVIDER_PLUGINS,
 };
 
 /** What the section reads besides the sidebar's lists: which machine is this Mac. */
@@ -404,7 +522,8 @@ export const PROVIDERS_SETTINGS_RECORDS: ProvidersSettingsRecords = {
   providers: SPECIMEN_PROVIDERS,
   harnesses: SPECIMEN_HARNESSES,
   controllerRunnerId: STUDIO_MAC.id,
-  createdAccount: {
+  catalog: ANTHROPIC_CATALOG,
+  createdAccount: withCatalog({
     id: "01a06d02-8000-7000-8000-0000000000c2",
     providerId: "anthropic/anthropic",
     kind: "subscription-per-machine",
@@ -418,5 +537,5 @@ export const PROVIDERS_SETTINGS_RECORDS: ProvidersSettingsRecords = {
     snapshots: [],
     createdAt: AT,
     updatedAt: AT,
-  },
+  }),
 };

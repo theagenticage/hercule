@@ -1,104 +1,101 @@
 import { Fragment, type JSX, type ReactNode } from "react";
 import {
-  describeProviderAccountRow,
   describeModelRow,
-  type SignInTarget,
   type ModelMenu,
+  type ModelMenuRow,
+  type SignInTarget,
+  type ThreadChoice,
 } from "@hercule/client-core";
 import { HarnessLogo } from "@hercule/ui";
-import { Lane, renderMarker, MenuRow } from "./menu";
+import { Lane, MenuFoot, MenuRow, renderMarker } from "./menu";
 
-type Row = ModelMenu["current"]["rows"][number];
-
-/** Classes that make the Sign in on an account's row look like the row's note, not a button. */
+/** Classes that make the Sign in on a dimmed row look like the row's note, not a button. */
 const ROW_SIGN_IN =
   "p-0 text-[11px] leading-normal font-normal text-muted enabled:hover:bg-transparent";
 
 /**
- * The list in the model menu, below the filter. It shows, in order:
+ * The list in the model menu, below the filter. `buildModelMenu` decides what
+ * it holds; this component only draws it.
  *
- * - Recent: the models picked most recently;
- * - the account in use, with its older models collapsed;
- * - every other account, as one row that says why it cannot be picked, or as
- *   a lane of its own when the filter matches models in it.
+ * A draft shows the profile's Recent entries, then one lane per Provider
+ * Account with its entries. A running thread shows one flat list and the line
+ * that tells the user other models start a new thread. An entry that cannot
+ * run stays in the list, dimmed, with its reason at the right and, when
+ * signing in would fix it, a Sign in on the row.
  */
 export function ModelList({
   menu,
-  older,
-  onOlder,
-  onPickModel,
-  onPickProviderAccount,
+  renderProviderMark,
+  onChoose,
   signInSlot,
 }: {
   readonly menu: ModelMenu;
-  readonly older: boolean;
-  readonly onOlder: () => void;
-  readonly onPickModel: (providerAccountId: string, model: string) => void;
-  readonly onPickProviderAccount: (providerAccountId: string) => void;
+  /** Draws the mark of a Provider, which marks the lanes of its accounts. */
+  readonly renderProviderMark: (providerId: string) => ReactNode;
+  readonly onChoose: (choice: ThreadChoice) => void;
   readonly signInSlot: (target: SignInTarget, className: string) => ReactNode;
 }): JSX.Element {
-  const renderModelRow = (harnessId: string | null, row: Row): JSX.Element => (
-    <MenuRow
-      key={`${row.providerAccountId}:${row.slug}`}
-      marker={renderMarker(harnessId === null ? null : <HarnessLogo harnessId={harnessId} />)}
-      name={row.name}
-      detail={describeModelRow(row)}
-      note={row.current ? "✓" : undefined}
-      current={row.current}
-      onPick={() => {
-        onPickModel(row.providerAccountId, row.slug);
-      }}
-    />
-  );
+  const renderRow = (
+    row: ModelMenuRow,
+    key: string,
+    options: { readonly account?: string | null; readonly showCheck: boolean },
+  ): JSX.Element => {
+    const detail = [options.account ?? null, describeModelRow(row)]
+      .filter((part) => part !== null)
+      .join(" · ");
+    return (
+      <MenuRow
+        key={key}
+        marker={renderMarker(<HarnessLogo harnessId={row.harnessId} />)}
+        name={row.name}
+        detail={detail}
+        note={options.showCheck && row.isCurrent ? "✓" : undefined}
+        current={options.showCheck && row.isCurrent}
+        dimmed={row.problem?.message ?? null}
+        trailing={row.problem?.signIn == null ? null : signInSlot(row.problem.signIn, ROW_SIGN_IN)}
+        onPick={() => {
+          onChoose({
+            kind: "model",
+            providerAccountId: row.providerAccountId,
+            harnessId: row.harnessId,
+            model: row.model,
+          });
+        }}
+      />
+    );
+  };
+  const buildRowKey = (row: ModelMenuRow): string =>
+    `${row.providerAccountId}:${row.harnessId}:${row.model}`;
 
+  const emptyNote =
+    menu.empty === null ? null : <p className="px-2 py-1.5 text-meta text-faint">{menu.empty}</p>;
+  if (menu.kind === "active") {
+    return (
+      <>
+        {emptyNote}
+        {menu.rows.map((row) => renderRow(row, buildRowKey(row), { showCheck: true }))}
+        <MenuFoot>{menu.note}</MenuFoot>
+      </>
+    );
+  }
+
+  const { profile } = menu;
+  if (profile === null || emptyNote !== null) return <>{emptyNote}</>;
   return (
     <>
-      {menu.recent.length === 0 ? null : <Lane label="Recent" />}
-      {menu.recent.map((row) => (
-        <MenuRow
-          key={`recent:${row.providerAccountId}:${row.model}`}
-          marker={renderMarker(<HarnessLogo harnessId={row.harnessId} />)}
-          name={row.name}
-          detail={row.account}
-          dimmed={row.dimmed}
-          onPick={() => {
-            onPickModel(row.providerAccountId, row.model);
-          }}
-        />
+      {profile.recent.length === 0 ? null : <Lane label="Recent" />}
+      {profile.recent.map((row) =>
+        renderRow(row, `recent:${buildRowKey(row)}`, { account: row.account, showCheck: false }),
+      )}
+      {profile.lanes.map((lane) => (
+        <Fragment key={lane.providerAccountId}>
+          <Lane label={lane.name} logo={renderProviderMark(lane.providerId)} />
+          {lane.note === null ? null : (
+            <p className="py-1.5 pr-2 pl-8 text-meta text-faint">{lane.note}</p>
+          )}
+          {lane.rows.map((row) => renderRow(row, buildRowKey(row), { showCheck: true }))}
+        </Fragment>
       ))}
-      {menu.current.label === null ? null : <Lane label={menu.current.label} />}
-      {menu.current.rows.map((row) => renderModelRow(menu.current.harnessId, row))}
-      {menu.current.older.length === 0 ? null : older ? (
-        menu.current.older.map((row) => renderModelRow(menu.current.harnessId, row))
-      ) : (
-        <MenuRow
-          marker={renderMarker(null)}
-          name={<span className="text-faint">older models ({menu.current.older.length}) ›</span>}
-          onPick={onOlder}
-        />
-      )}
-      {menu.others.map((account) =>
-        account.dimmed !== null || account.rows.length === 0 ? (
-          <MenuRow
-            key={account.providerAccountId}
-            className="mt-1 rounded-t-none border-t border-line-soft pt-[9px]"
-            marker={renderMarker(<HarnessLogo harnessId={account.harnessId} />)}
-            name={account.name}
-            detail={describeProviderAccountRow(account)}
-            note={account.dimmed === null ? `${account.models} ›` : undefined}
-            dimmed={account.dimmed}
-            trailing={account.signIn === null ? null : signInSlot(account.signIn, ROW_SIGN_IN)}
-            onPick={() => {
-              onPickProviderAccount(account.providerAccountId);
-            }}
-          />
-        ) : (
-          <Fragment key={account.providerAccountId}>
-            <Lane label={account.name} />
-            {account.rows.map((row) => renderModelRow(account.harnessId, row))}
-          </Fragment>
-        ),
-      )}
     </>
   );
 }

@@ -14,10 +14,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { createClient, queryKeys, type Live, type LiveQueryKey } from "@hercule/client-core";
 import { OPENAI_IDENTITY, buildProviderAccount } from "@hercule/client-core/testing";
 import type { CapabilitySnapshot } from "@hercule/contract";
+import { useLiveInvalidation } from "../app/live-invalidation";
 import { ProviderLogin } from "./provider-login";
 import { expectInDocumentOrder, readPageText, stubApi, type Handler } from "../app/testing";
 
@@ -85,6 +87,12 @@ const buildFakeLive = (): { live: Live; announce: (keys: readonly LiveQueryKey[]
   };
 };
 
+/** Stands in for the shell, which holds the `provider` topic on every screen. */
+function ShellStandIn({ live, children }: { live: Live; children: ReactNode }): ReactNode {
+  useLiveInvalidation(live, useQueryClient(), "provider");
+  return children;
+}
+
 /** Renders the Sign in button and clicks it to start a sign-in. */
 const openLoginPanel = async (handlers: Readonly<Record<string, Handler>>) => {
   const api = stubApi(handlers);
@@ -95,15 +103,16 @@ const openLoginPanel = async (handlers: Readonly<Record<string, Handler>>) => {
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      <ProviderLogin
-        client={createClient({ baseUrl: BASE, fetch: api.fetch, token: "held" })}
-        live={live}
-        providerAccountId={ACCOUNT}
-        runnerId={RUNNER}
-        subject="Codex on moss"
-        label="Sign in"
-        onSignedIn={onSignedIn}
-      />
+      <ShellStandIn live={live}>
+        <ProviderLogin
+          client={createClient({ baseUrl: BASE, fetch: api.fetch, token: "held" })}
+          providerAccountId={ACCOUNT}
+          runnerId={RUNNER}
+          subject="Codex on moss"
+          label="Sign in"
+          onSignedIn={onSignedIn}
+        />
+      </ShellStandIn>
     </QueryClientProvider>,
   );
   await user.click(screen.getByRole("button", { name: "Sign in" }));

@@ -7,6 +7,7 @@ import { buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
   buildErrorBody,
   expectInDocumentOrder,
+  buildCatalogFields,
   readCurrentNavItems,
   renderApp,
   stubApi,
@@ -1033,18 +1034,8 @@ describe("the Threads face's Assistants group", () => {
 });
 
 /** An Anthropic account, signed in on moss when `signedIn` is true and never probed otherwise. */
-const buildClaudeCode = (signedIn: boolean): ProviderAccount => ({
-  id: "01a06d02-1000-7000-8000-000000000001",
-  providerId: "anthropic/anthropic",
-  kind: "subscription-per-machine",
-  label: null,
-  identity: null,
-  planLabel: null,
-  defaultHarnessId: "claude-code/claude-code",
-  expiresAt: null,
-  usage: [],
-  failure: null,
-  snapshots: signedIn
+const buildClaudeCode = (signedIn: boolean): ProviderAccount => {
+  const snapshots: ProviderAccount["snapshots"] = signedIn
     ? [
         {
           runnerId: MOSS.id,
@@ -1056,10 +1047,24 @@ const buildClaudeCode = (signedIn: boolean): ProviderAccount => ({
           models: [],
         },
       ]
-    : [],
-  createdAt: "2026-09-05T09:00:00.000Z",
-  updatedAt: "2026-09-05T09:00:00.000Z",
-});
+    : [];
+  return {
+    id: "01a06d02-1000-7000-8000-000000000001",
+    providerId: "anthropic/anthropic",
+    kind: "subscription-per-machine",
+    label: null,
+    identity: null,
+    planLabel: null,
+    defaultHarnessId: "claude-code/claude-code",
+    expiresAt: null,
+    usage: [],
+    failure: null,
+    snapshots,
+    ...buildCatalogFields(snapshots),
+    createdAt: "2026-09-05T09:00:00.000Z",
+    updatedAt: "2026-09-05T09:00:00.000Z",
+  };
+};
 
 describe("the Threads face with no threads", () => {
   const HINT = "A thread needs a runner with a signed-in account on it.";

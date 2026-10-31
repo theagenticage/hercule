@@ -52,6 +52,7 @@ import {
 } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
+import { announceProviderRunnerChange } from "./announce-provider-change";
 import { JoinTokens } from "./join-tokens";
 import { RunnerConnections } from "./connections";
 import { runnerRepository, type RunnerEdit } from "./repository";
@@ -205,6 +206,7 @@ const make = Effect.gen(function* () {
             return yield* Effect.fail(createInvalidStateError(move.refusal));
           }
           yield* runners.setLifecycle(id, move.to, at);
+          yield* announceProviderRunnerChange(id);
           yield* audit.append({
             kind: move.kind,
             actor: yield* currentStamp,
@@ -432,6 +434,7 @@ const make = Effect.gen(function* () {
               }
             }
             yield* runners.setLifecycle(id, "retired", at);
+            yield* announceProviderRunnerChange(id);
             // A default that cannot take work is worse than no default. The
             // default is cleared, and the audit entry records that, rather
             // than promoting a runner nobody chose.

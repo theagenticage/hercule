@@ -4,6 +4,7 @@ import {
   setWorkspaceStartingRevision,
   type DraftView,
   type RecentModel,
+  type SignInTarget,
   type ThreadChoice,
 } from "@hercule/client-core";
 import { BranchIcon } from "../../icons/branch";
@@ -108,10 +109,12 @@ export function DraftComposer({
   notice,
   attachments,
   skills,
+  runnerId,
   readRecent,
   fieldRef,
   onTextChange,
   onChoose,
+  onSignIn,
   onSubmit,
   onOpenWorkspaceMenu,
 }: {
@@ -125,11 +128,19 @@ export function DraftComposer({
   readonly attachments: ComposerAttachments;
   /** The skills the draft would have, which the message field offers. */
   readonly skills: ComposerSkills;
+  /**
+   * The machine the user picked, or the one the workspace it joins decides;
+   * `null` while any machine will do. The model menu dims an entry by this
+   * machine, not by the one the draft would be placed on by default.
+   */
+  readonly runnerId: string | null;
   /** Returns the models the user picked lately, which the model menu offers first. */
   readonly readRecent: () => readonly RecentModel[];
   readonly fieldRef: Ref<HTMLElement>;
   readonly onTextChange: (text: string) => void;
   readonly onChoose: (choice: ThreadChoice) => void;
+  /** Opens the sign-in a dimmed entry of the model menu offers. */
+  readonly onSignIn: (target: SignInTarget) => void;
   readonly onSubmit: () => void;
   readonly onOpenWorkspaceMenu: () => void;
 }): JSX.Element {
@@ -191,9 +202,11 @@ export function DraftComposer({
             catalogs={catalogs}
             config={config}
             kind="draft"
+            runnerId={runnerId}
             disabled={false}
             readRecent={readRecent}
             onChoose={onChoose}
+            onSignIn={onSignIn}
           />
         }
         fieldRef={fieldRef}

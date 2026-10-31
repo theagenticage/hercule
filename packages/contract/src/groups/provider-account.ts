@@ -69,6 +69,48 @@ export const AccountUsageReading = Schema.Union([
 
 export type AccountUsageReading = Schema.Schema.Type<typeof AccountUsageReading>;
 
+/**
+ * Why a harness cannot run an account on a runner, or `ready` when it can.
+ *
+ * - `ready`: a session for the account can start there.
+ * - `not-signed-in`: the account needs a login on that machine (or the login
+ *   there belongs to someone else), or the vendor refused the stored key.
+ * - `credential-missing`: the controller holds no key or token for the account.
+ * - `token-expired`: the account's token has passed its expiry.
+ * - `harness-missing`: the harness is not installed on the runner.
+ * - `harness-too-old`: the harness is installed but below the lowest version
+ *   Hercule supports.
+ *
+ * Whether the runner is online or draining is not part of the state: a client
+ * reads that from the runner.
+ */
+export const ProviderAccountReadinessState = Schema.Literals([
+  "ready",
+  "not-signed-in",
+  "credential-missing",
+  "token-expired",
+  "harness-missing",
+  "harness-too-old",
+]);
+
+export type ProviderAccountReadinessState = Schema.Schema.Type<
+  typeof ProviderAccountReadinessState
+>;
+
+/**
+ * Whether one account can run in one harness on one runner. The controller
+ * works this out on every read of the account from the same rule that places
+ * sessions, so a client looks the row up and never re-derives it.
+ */
+export const ProviderAccountReadiness = Schema.Struct({
+  /** The qualified id of the harness. */
+  harnessId: Schema.String,
+  runnerId: Id,
+  state: ProviderAccountReadinessState,
+});
+
+export type ProviderAccountReadiness = Schema.Schema.Type<typeof ProviderAccountReadiness>;
+
 export const ProviderAccount = Schema.Struct({
   id: Id,
   /** The qualified id of the Provider, such as `anthropic/anthropic`. */
@@ -104,11 +146,55 @@ export const ProviderAccount = Schema.Struct({
    */
   failure: Schema.NullOr(Schema.Struct({ message: Schema.String, failedAt: Timestamp })),
   snapshots: Schema.Array(CapabilitySnapshot),
+  /** How many models the account's stored Model Catalog holds; 0 before the first read. */
+  modelCount: Schema.Int,
+  /** When the Model Catalog was last read successfully; `null` before the first read. */
+  catalogReadAt: Schema.NullOr(Timestamp),
+  /**
+   * Why the last read of the Model Catalog failed, in words a user can act
+   * on; `null` when the last read succeeded or none has run. A failed read
+   * keeps the models of the last good one.
+   */
+  catalogError: Schema.NullOr(Schema.String),
+  /**
+   * One row for each harness the account may run in (its kind lists the
+   * harness and the harness runs the Provider) on each runner that is not
+   * retired.
+   */
+  readiness: Schema.Array(ProviderAccountReadiness),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
 
 export type ProviderAccount = Schema.Schema.Type<typeof ProviderAccount>;
+
+/**
+ * One model of an account's Model Catalog: what the harness reports for the
+ * model, and when Hercule first saw it. `firstSeenAt` is kept when a model
+ * leaves the catalog and returns, so it never moves later.
+ */
+export const ModelCatalogItem = Schema.Struct({
+  ...ModelDescriptor.fields,
+  firstSeenAt: Timestamp,
+});
+
+export type ModelCatalogItem = Schema.Schema.Type<typeof ModelCatalogItem>;
+
+/**
+ * The models a Provider Account offers, as the controller last read them from
+ * the Provider's catalog source. It is stored, so reading it fetches nothing.
+ */
+export const ModelCatalog = Schema.Struct({
+  providerAccountId: Id,
+  /** The models of the last good read, in the order the source listed them; empty before the first read. */
+  models: Schema.Array(ModelCatalogItem),
+  /** When the last successful read ended; `null` before the first one. */
+  readAt: Schema.NullOr(Timestamp),
+  /** Why the last read failed; `null` when it succeeded or none has run. */
+  error: Schema.NullOr(Schema.String),
+});
+
+export type ModelCatalog = Schema.Schema.Type<typeof ModelCatalog>;
 
 /**
  * The payload of `providerAccount.create`. `kind` is one of the Provider's
@@ -230,6 +316,16 @@ export const providerAccount = HttpApiGroup.make("providerAccount")
       payload: ProviderAccountSignInCodeInput,
       success: ProviderAccount,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.get("readCatalog", "/provider-accounts/:id/catalog", {
+      params: { id: Id },
+      success: ModelCatalog,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
+    }),
+    HttpApiEndpoint.post("refresh", "/provider-accounts/:id/refresh", {
+      params: { id: Id },
+      success: ProviderAccount,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, Internal],
     }),
   )
   .middleware(Authenticated);

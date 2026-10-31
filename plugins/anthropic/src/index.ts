@@ -62,6 +62,8 @@ const definition: ProviderDefinition = {
     },
   ],
   defaultHarnessId: "claude-code/claude-code",
+  catalogSource: { kind: "harness-probe", harnessId: "claude-code/claude-code" },
+  defaultSelection: "current-models",
   // The model list reports this alias, and it follows the newest Haiku.
   suggestedTextGenerationModel: "haiku",
 };

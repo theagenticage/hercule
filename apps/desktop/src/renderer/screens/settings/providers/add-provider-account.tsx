@@ -13,6 +13,7 @@
 import { useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
+  addModelProfileAccount,
   asksForAccountLabel,
   buildProviderAccountCreateInput,
   buildProviderAccountName,
@@ -24,6 +25,7 @@ import {
   queryKeys,
   readConfigIssues,
   readErrorMessage,
+  updateModelProfile,
   type AddAccountDraft,
   type HerculeClient,
 } from "@hercule/client-core";
@@ -31,6 +33,7 @@ import type { ProviderAccount, ProviderAccountCreateInput } from "@hercule/contr
 import {
   controllerQuery,
   harnessesQuery,
+  modelProfilesQuery,
   pluginsQuery,
   providerAccountsQuery,
   providersQuery,
@@ -75,18 +78,27 @@ type Stage =
  * controller the account is added to. It is passed in because the first run
  * renders this outside the routes that hold a saved controller.
  *
- * `onClose` is called once the sheet is gone: after Done, after a close that
- * keeps nothing, and after a discard. The caller then unmounts it. The new
- * account reaches the page through the accounts read, which this refreshes and
- * the `provider` live topic keeps current.
+ * An account that stays is added to the first Model Profile, the only one
+ * there is until profiles can be made, with its provider's Default Selection
+ * (`modelProfile.update`), so its models reach the composer's menu. The sheet
+ * stays open, with the controller's message, when that write fails, and Done
+ * tries it again without making the account twice.
+ *
+ * `onAdded` is called with the account once it stays and is in the profile,
+ * just before `onClose`. `onClose` is called once the sheet is gone: after
+ * Done, after a close that keeps nothing, and after a discard. The caller then
+ * unmounts it. The new account reaches the page through the accounts read,
+ * which this refreshes and the `provider` live topic keeps current.
  */
 export function AddProviderAccount({
   client,
   signInMachines,
+  onAdded,
   onClose,
 }: {
   readonly client: HerculeClient;
   readonly signInMachines: "controller" | "all";
+  readonly onAdded?: (account: ProviderAccount) => void;
   readonly onClose: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
@@ -134,6 +146,22 @@ export function AddProviderAccount({
         queryClient.invalidateQueries({ queryKey: queryKeys.harnesses() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() }),
       ]),
+  });
+  const addToProfile = useMutation({
+    mutationFn: async (account: ProviderAccount) => {
+      const [profile] = await queryClient.ensureQueryData(modelProfilesQuery(client));
+      if (profile === undefined) return;
+      const saved = await updateModelProfile(client, profile, (current) =>
+        addModelProfileAccount(current, account.id),
+      );
+      queryClient.setQueryData(modelProfilesQuery(client).queryKey, (list) =>
+        list?.map((each) => (each.id === saved.id ? saved : each)),
+      );
+    },
+    // The dialog closed to start the write; it opens again to say it failed.
+    onError: () => {
+      dialogRef.current?.showModal();
+    },
   });
   const discard = useMutation({
     // An account already gone is as good as deleted.
@@ -198,6 +226,31 @@ export function AddProviderAccount({
     create.reset();
     setKindId(id);
     setDraft((current) => ({ ...current, credentials: {} }));
+  };
+
+  /** Puts `account`, which stays, in the profile, then tells the caller and closes. */
+  const keepAccount = (account: ProviderAccount): void => {
+    addToProfile.mutate(account, {
+      onSuccess: () => {
+        onAdded?.(account);
+        onClose();
+      },
+    });
+  };
+
+  /**
+   * Tries once to put `account`, which stays, in the profile, and closes the
+   * sheet whether that works or not, so a failing profile never traps the user.
+   * An account that did not join stays out of the profile; it can be added later.
+   */
+  const closeKeepingAccount = (account: ProviderAccount): void => {
+    addToProfile.mutate(account, {
+      onSuccess: () => {
+        onAdded?.(account);
+        onClose();
+      },
+      onError: onClose,
+    });
   };
 
   /** Creates the account from what the user typed, then calls `afterCreate` with it. */
@@ -325,7 +378,14 @@ export function AddProviderAccount({
             busy: create.isPending || install.isPending,
             onPress: pressSignIn,
           }
-        : { label: "Done", disabled: false, busy: false, onPress: onClose };
+        : {
+            label: addToProfile.isPending ? "Adding…" : "Done",
+            disabled: false,
+            busy: addToProfile.isPending,
+            onPress: () => {
+              if (created !== undefined) keepAccount(created);
+            },
+          };
   } else {
     body =
       step.kind === "credentials"
@@ -350,13 +410,22 @@ export function AddProviderAccount({
             onChange: (label) => changeDraft({ label }),
           };
     primary = {
-      label: create.isPending ? creatingLabel : step.submit === "create" ? "Done" : "Continue",
+      label: addToProfile.isPending
+        ? "Adding…"
+        : create.isPending
+          ? creatingLabel
+          : step.submit === "create"
+            ? "Done"
+            : "Continue",
       disabled: !isAddAccountStepFilled(step, draft),
-      busy: create.isPending,
+      busy: create.isPending || addToProfile.isPending,
       onPress: () => {
         const showNext = (): void => goTo({ at: "step", index: stepIndex + 1 });
         if (step.submit === "next") showNext();
-        else createAccount(step.submit === "create" ? onClose : showNext);
+        else if (step.submit !== "create") createAccount(showNext);
+        // A key account that was made but could not join the profile is not made again.
+        else if (created !== undefined) keepAccount(created);
+        else createAccount(keepAccount);
       },
     };
   }
@@ -373,11 +442,15 @@ export function AddProviderAccount({
           : provider !== null && offersKindChoice(provider)
             ? { at: "kind" }
             : { at: "provider" };
-  // The account stays only once it works. A key account works when it is
-  // created, and `onClose` has already run then.
-  const hasUnfinishedAccount = created !== undefined && signedInRunnerId === null;
+  // An account is unfinished when its kind has a sign-in step that has not
+  // succeeded yet. A kind without one (a key account) works once it is created,
+  // so closing the sheet after its profile write failed keeps it.
+  const hasUnfinishedAccount =
+    created !== undefined && signInStep !== undefined && signedInRunnerId === null;
   const failure =
-    (create.error !== null && createIssues.rest ? create.error : null) ?? install.error;
+    (create.error !== null && createIssues.rest ? create.error : null) ??
+    install.error ??
+    addToProfile.error;
   const error =
     discard.error === null
       ? failure === null
@@ -404,6 +477,8 @@ export function AddProviderAccount({
         primary={primary}
         onClose={() => {
           if (hasUnfinishedAccount) discard.mutate(created);
+          // The account stays, whichever way the sheet closes.
+          else if (created !== undefined) closeKeepingAccount(created);
           else onClose();
         }}
       />

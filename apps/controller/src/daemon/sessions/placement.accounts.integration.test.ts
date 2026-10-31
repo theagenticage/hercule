@@ -77,6 +77,8 @@ const buildPlugins = (): ReadonlyArray<Plugin> => [
           },
         ],
         defaultHarnessId: HARNESS_ID,
+        catalogSource: { kind: "harness-probe", harnessId: HARNESS_ID },
+        defaultSelection: "current-models",
       },
     ],
   }).plugin,

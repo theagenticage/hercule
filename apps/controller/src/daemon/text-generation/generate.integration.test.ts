@@ -807,9 +807,16 @@ describe("which runner makes the call", () => {
     );
   });
 
-  it("fails with unavailable when no runner is signed in", async () => {
+  it("fails with unavailable when no runner is signed in and no key is stored", async () => {
     await withFleet(async (arranged) => {
       await logOut(arranged, arranged.runnerId);
+      // A key account needs no sign-in, so its key goes too.
+      await Effect.runPromise(
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`DELETE FROM secrets WHERE owner_kind = 'provider-account'`,
+        ).pipe(Effect.orDie),
+      );
 
       const result = await generate(arranged);
 

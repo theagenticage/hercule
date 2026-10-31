@@ -86,6 +86,7 @@ const WORK: ProviderAccount = {
   identity: null,
   planLabel: null,
   snapshots: [],
+  readiness: [],
 };
 /** Z.ai, an API key every machine uses. */
 const ZAI: ProviderAccount = {
@@ -100,6 +101,10 @@ const ZAI: ProviderAccount = {
   usage: [],
   failure: null,
   snapshots: [],
+  modelCount: 0,
+  catalogReadAt: null,
+  catalogError: null,
+  readiness: [],
   createdAt: PERSONAL.createdAt,
   updatedAt: PERSONAL.updatedAt,
 };

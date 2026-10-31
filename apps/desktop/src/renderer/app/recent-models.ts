@@ -1,5 +1,5 @@
 /**
- * The Recent list: the last three (Provider Account, model) pairs the user picked,
+ * The Recent list: the last three (Provider Account, harness, model) entries the user picked,
  * which the model menu shows first.
  *
  * The list is kept in `localStorage`, one entry per controller URL, because

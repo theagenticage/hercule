@@ -1,14 +1,18 @@
 import type { JSX } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
 import {
   buildOptionsLabel,
   type ModelPill,
   type RecentModel,
+  type SignInTarget,
   type ThreadCatalogs,
   type ThreadChoice,
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
 import type { ModelOption } from "@hercule/contract";
+import { pluginsQuery } from "../../app/queries";
 import { SlidersIcon } from "../../icons/sliders";
 import { ComposerMenu } from "./composer-menu";
 import { ModelMenu } from "./model-menu";
@@ -70,29 +74,41 @@ export function OptionsPick({
  * logo, the account and the model, as a trigger that opens the model menu,
  * see `ModelMenu`.
  *
- * `pill` is what the trigger shows, and `catalogs`, `config` and `kind` are
- * what the menu is built from. `readRecent` returns the Recent list, which
- * the menu reads when it opens. `onChoose` receives the choice a row makes,
- * and the menu then closes. `disabled` leaves the trigger drawn but unable to
- * open the menu.
+ * `pill` is what the trigger shows, and `catalogs`, `config`, `kind` and
+ * `runnerId` are what the menu is built from; `runnerId` is the machine a
+ * Draft Thread is bound to, or `null` while any machine will do. `readRecent`
+ * returns the Recent list, which the menu reads when it opens. `onChoose`
+ * receives the choice a row makes, and the menu then closes. `onSignIn`, when
+ * given, puts a Sign in link on a row that signing in would fix, and the menu
+ * closes before it is called. `disabled` leaves the trigger drawn but unable
+ * to open the menu.
+ *
+ * The menu reads nothing when it opens: the profiles, the accounts and the
+ * plugins are the shell's reads, already in the cache.
  */
 export function ModelPick({
   pill,
   catalogs,
   config,
   kind,
+  runnerId,
   disabled,
   readRecent,
   onChoose,
+  onSignIn,
 }: {
   readonly pill: ModelPill;
   readonly catalogs: ThreadCatalogs;
   readonly config: ThreadConfig;
   readonly kind: ThreadKind;
+  readonly runnerId: string | null;
   readonly disabled: boolean;
   readonly readRecent: () => readonly RecentModel[];
   readonly onChoose: (choice: ThreadChoice) => void;
+  readonly onSignIn?: ((target: SignInTarget) => void) | undefined;
 }): JSX.Element {
+  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   return (
     <ComposerMenu
       label="Model"
@@ -111,13 +127,23 @@ export function ModelPick({
       {(close) => (
         <ModelMenu
           catalogs={catalogs}
+          plugins={plugins}
           config={config}
           kind={kind}
+          runnerId={runnerId}
           readRecent={readRecent}
           onChoose={(choice) => {
             onChoose(choice);
             close();
           }}
+          onSignIn={
+            onSignIn === undefined
+              ? undefined
+              : (target) => {
+                  close();
+                  onSignIn(target);
+                }
+          }
         />
       )}
     </ComposerMenu>

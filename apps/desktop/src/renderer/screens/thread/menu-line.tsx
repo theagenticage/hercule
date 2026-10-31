@@ -13,9 +13,15 @@ import { ChevronRightIcon } from "../../icons/chevron-right";
  *   should know before picking the row.
  * - `chevron` ends the row with a chevron, for a row that stands for more
  *   than one choice, such as an account and its models.
+ * - `multiple` marks a row that is one of several that can be on at once, such
+ *   as a model in a list of models to hold. It reports its state as pressed
+ *   rather than as the current choice.
  * - `inert` draws the row faded and not as a button, for a row that cannot
  *   be picked. Its reason is in `note` or `sub`, because a row is "dimmed
  *   with the reason, never hidden" (spec 14 §The composer).
+ * - `action` is a link at the right of an inert row that fixes the reason,
+ *   such as Sign in. It stays at full strength while the rest of the row is
+ *   faded. Only an inert row has one.
  */
 export function MenuLine({
   glyph = null,
@@ -26,7 +32,9 @@ export function MenuLine({
   note = null,
   current,
   chevron = false,
+  multiple = false,
   inert = false,
+  action = null,
   onPick,
 }: {
   readonly glyph?: ReactNode;
@@ -37,7 +45,9 @@ export function MenuLine({
   readonly note?: ReactNode;
   readonly current: boolean;
   readonly chevron?: boolean;
+  readonly multiple?: boolean;
   readonly inert?: boolean;
+  readonly action?: { readonly label: string; readonly onAct: () => void } | null;
   readonly onPick: () => void;
 }): JSX.Element {
   const body = (
@@ -54,9 +64,26 @@ export function MenuLine({
       {chevron ? <ChevronRightIcon size={13} /> : null}
     </>
   );
-  if (inert) return <div className="line line--dimmed">{body}</div>;
+  if (inert) {
+    return (
+      <div className={action === null ? "line line--dimmed" : "line line--dimmed line--acting"}>
+        {body}
+        {action === null ? null : (
+          <button type="button" className="link line-action" onClick={action.onAct}>
+            {action.label}
+          </button>
+        )}
+      </div>
+    );
+  }
   return (
-    <button type="button" className="line" aria-current={current || undefined} onClick={onPick}>
+    <button
+      type="button"
+      className="line"
+      aria-current={multiple ? undefined : current || undefined}
+      aria-pressed={multiple ? current : undefined}
+      onClick={onPick}
+    >
       {body}
     </button>
   );

@@ -37,6 +37,7 @@ import {
   type MemoryDocument,
   type MemoryWriteInput,
   type ModelOption,
+  type ModelProfile,
   type MutableLiveTopic,
   type OpenRequest,
   type PluginDetail,
@@ -579,6 +580,11 @@ export interface SidebarRecords {
   readonly resources: readonly Resource[];
   readonly runners: readonly Runner[];
   readonly accounts: readonly ProviderAccount[];
+  /**
+   * The Model Profiles, whose entries the composer's model menu lists and
+   * names its models from. None when absent.
+   */
+  readonly modelProfiles?: readonly ModelProfile[];
   /** The signed-in user's name. */
   readonly username: string;
   /** The assistants, each with the current session of its main conversation. None when absent. */
@@ -741,6 +747,7 @@ export const buildSidebarHandlers = (
   "GET /api/v1/resources": { body: { items: records.resources } },
   "GET /api/v1/runners": { body: { items: records.runners } },
   "GET /api/v1/provider-accounts": { body: records.accounts },
+  "GET /api/v1/model-profiles": { body: records.modelProfiles ?? [] },
   // The providers and harnesses are what the plugins register, so they do not
   // vary with the accounts a test sets up.
   "GET /api/v1/providers": { body: PROVIDERS },
@@ -1061,7 +1068,8 @@ export const EFFORT_OPTION: ModelOption = {
  * model, and an older one. Both current models offer `EFFORT_OPTION`.
  *
  * `SIDEBAR_FIXTURE` leaves it out, so its threads show their model's slug. A
- * test that needs model names adds it to the accounts.
+ * test that needs model names adds it to the accounts, and
+ * `FIXTURE_MODEL_PROFILE` to the model profiles.
  */
 export const FIXTURE_ACCOUNT: ProviderAccount = {
   id: ACCOUNT_ID,
@@ -1074,6 +1082,10 @@ export const FIXTURE_ACCOUNT: ProviderAccount = {
   expiresAt: null,
   usage: [],
   failure: null,
+  modelCount: 3,
+  catalogReadAt: "2026-09-10T08:00:00.000Z",
+  catalogError: null,
+  readiness: [{ harnessId: "claude-code/claude-code", runnerId: WORLD.MOSS.id, state: "ready" }],
   snapshots: [
     {
       runnerId: WORLD.MOSS.id,
@@ -1106,6 +1118,42 @@ export const FIXTURE_ACCOUNT: ProviderAccount = {
       ],
     },
   ],
+  createdAt: "2026-09-08T09:00:00.000Z",
+  updatedAt: "2026-09-08T09:00:00.000Z",
+};
+
+/**
+ * The Model Profile "Main" for `FIXTURE_ACCOUNT`: its two current models in
+ * the order of the account's catalog (the Default Selection leaves out the
+ * legacy one), the fixture turns' model first and the default. Every entry
+ * can run on moss.
+ */
+export const FIXTURE_MODEL_PROFILE: ModelProfile = {
+  id: "01a06d02-7800-7000-8000-000000000001",
+  name: "Main",
+  revision: 1,
+  accounts: [
+    {
+      providerAccountId: ACCOUNT_ID,
+      harnessId: null,
+      resolvedHarnessId: "claude-code/claude-code",
+      selectionPending: false,
+      entries: FIXTURE_ACCOUNT.snapshots[0]!.models.filter((model) => model.isLegacy !== true).map(
+        (model) => ({
+          providerAccountId: ACCOUNT_ID,
+          model: model.slug,
+          harnessId: null,
+          resolvedHarnessId: "claude-code/claude-code",
+          name: model.name,
+          options: model.options,
+          imageInput: model.imageInput,
+          problem: null,
+        }),
+      ),
+    },
+  ],
+  defaultEntry: { providerAccountId: ACCOUNT_ID, model: "claude-sonnet-5", harnessId: null },
+  dismissedNewModels: [],
   createdAt: "2026-09-08T09:00:00.000Z",
   updatedAt: "2026-09-08T09:00:00.000Z",
 };

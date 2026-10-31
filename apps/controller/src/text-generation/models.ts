@@ -11,16 +11,17 @@
  * - `automatic` (the default when the setting is unset): the oldest account
  *   (in the order they were added) that can run in its default harness on a
  *   runner that could make the call, and whose provider names a suggested
- *   text generation model that the account's model list holds. Choosing the
- *   model is visible, not hidden: Settings shows what `automatic` resolves
- *   to.
+ *   text generation model that the account's Model Catalog holds. Choosing
+ *   the model is visible, not hidden: Settings shows what `automatic`
+ *   resolves to.
  *
  * A runner could make the call when it is placeable (online, active, not
  * reserved), has negotiated the text generation capability, and can run the
  * account in the harness (`ProviderAccountRunners`). Which model to offer is a
  * question about the account, not about a runner: `automatic` picks a model
- * that the account's model list holds (`findModels`, from the newest snapshot
- * of any runner), and the runner choice then ignores models.
+ * that the account's stored Model Catalog holds, and the runner choice then
+ * ignores models. A catalog that was never read holds none, so an account is
+ * skipped until its first read ends.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -32,7 +33,7 @@ import { TEXT_GENERATION_CAPABILITY } from "@hercule/protocol";
 import { decideProviderAccountHarness, PluginHost } from "../plugins";
 import {
   describeProviderAccount,
-  findModels,
+  ModelCatalogs,
   ProviderAccountRunners,
   providerAccountRepository,
   type StoredProviderAccount,
@@ -128,6 +129,7 @@ const canTakeTextGeneration = (candidate: PlacementCandidate): boolean =>
 const make = Effect.gen(function* () {
   const settings = yield* Settings;
   const accounts = yield* providerAccountRepository;
+  const catalogs = yield* ModelCatalogs;
   const runners = yield* runnerRepository;
   const accountRunners = yield* ProviderAccountRunners;
   const host = yield* PluginHost;
@@ -187,11 +189,11 @@ const make = Effect.gen(function* () {
   /**
    * Finds the first account, oldest first, whose default harness this build
    * carries and can run it, whose provider names a suggested model that the
-   * account lists, and that can run now on a runner able to make the call.
-   * An account that cannot run in its default harness, as
+   * account's Model Catalog holds, and that can run now on a runner able to
+   * make the call. An account that cannot run in its default harness, as
    * `decideProviderAccountHarness` decides, is skipped.
    *
-   * Reads the accounts, the snapshots and the runners once, then decides in
+   * Reads the accounts, the catalogs and the runners once, then decides in
    * memory, so the number of queries does not grow with the number of
    * accounts.
    */
@@ -210,20 +212,14 @@ const make = Effect.gen(function* () {
     const available = yield* accountRunners.listMany(
       candidates.map(({ account, harnessId }) => ({ providerAccountId: account.id, harnessId })),
     );
-    // A stored row that no longer decodes is corruption, not a state the
-    // caller can act on.
-    const snapshots = yield* accounts
-      .listAllSnapshots()
-      .pipe(Effect.catchTag("SchemaError", Effect.die));
+    const stored = yield* catalogs.listCatalogs();
     const capable = yield* readCapableRunnerIds;
     for (const [index, { account, harnessId, model }] of candidates.entries()) {
-      const offered = findModels(
-        snapshots.filter(
-          (one) => one.providerAccountId === account.id && one.harnessId === harnessId,
-        ),
-      ).some((one) => one.slug === model);
+      const offered = stored
+        .find((one) => one.providerAccountId === account.id)
+        ?.models.some((one) => one.slug === model);
       const runnerIds = filterCapableRunners(available[index]!.runnerIds, capable);
-      if (!offered || runnerIds.length === 0) continue;
+      if (offered !== true || runnerIds.length === 0) continue;
       return {
         _tag: "resolved",
         providerAccountId: account.id,
@@ -279,5 +275,5 @@ export class TextGenerationModels extends Context.Service<
 export const TextGenerationModelsLayer: Layer.Layer<
   TextGenerationModels,
   never,
-  SqlClient.SqlClient | Settings | PluginHost | ProviderAccountRunners
+  SqlClient.SqlClient | Settings | PluginHost | ProviderAccountRunners | ModelCatalogs
 > = Layer.effect(TextGenerationModels)(make);

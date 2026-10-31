@@ -1,16 +1,15 @@
 /**
- * Tests `pushRecent(recent, pair)`, which keeps the last three (account,
- * model) pairs the user picked, newest first; `buildRecentModel`, which
- * decides which pair a successful submission adds, from the picks the
- * submission was sent with and the thread it resolved to; and `parseRecentModels`,
- * which reads that list back from the JSON text a client stored.
+ * Tests `pushRecent(recent, entry)`, which keeps the last three entries
+ * (account, harness, model) the user picked, newest first; `buildRecentModel`,
+ * which decides which entry a successful submission adds, from the picks the
+ * submission was sent with and the thread it resolved to; and
+ * `parseRecentModels`, which reads that list back from the JSON text a client
+ * stored.
  */
 import { describe, expect, it } from "vitest";
 import {
-  BARE,
+  ANTHROPIC_IDENTITY,
   buildProviderAccount,
-  buildSnapshot,
-  OPENAI_IDENTITY,
   HARNESSES,
   PROVIDERS,
 } from "../providers.testing";
@@ -21,6 +20,8 @@ import { applyThreadChoice } from "./thread-choice";
 
 const WORK = "account-anthropic-work";
 const PERSONAL = "account-anthropic-personal";
+const CLAUDE = "claude-code/claude-code";
+const PI = "pi/pi";
 const SONNET = "claude-sonnet-5";
 const OPUS = "claude-opus-5";
 const HAIKU = "claude-haiku-5";
@@ -35,23 +36,29 @@ describe("buildRecentModel", () => {
     profileId: null,
     options: {},
   };
-  const NO_CATALOGS: ThreadCatalogs = {
-    accounts: [],
+  const CATALOGS: ThreadCatalogs = {
+    accounts: [
+      buildProviderAccount({ ...ANTHROPIC_IDENTITY, id: WORK }),
+      buildProviderAccount({ ...ANTHROPIC_IDENTITY, id: PERSONAL }),
+    ],
     runners: [],
     thisMacRunnerId: null,
     providers: PROVIDERS,
     harnesses: HARNESSES,
+    modelProfiles: [],
   };
   const resolveDraftThread = (picks: ThreadPicks, config: ThreadConfig = BASE) =>
-    resolveThreadConfig(NO_CATALOGS, { kind: "draft", config }, picks);
+    resolveThreadConfig(CATALOGS, { kind: "draft", config }, picks);
 
-  it("adds the model the user picked, with the account and model the thread resolved to", () => {
+  it("adds the entry the user picked, with the account, harness and model the thread resolved to", () => {
     const picks = applyThreadChoice(
       { options: { effort: "high" } },
-      { kind: "model", providerAccountId: PERSONAL, model: OPUS },
+      { kind: "model", providerAccountId: PERSONAL, harnessId: PI, model: OPUS },
     );
-    expect(buildRecentModel(picks, resolveDraftThread(picks))).toEqual({
+    const resolved = resolveDraftThread(picks, { ...BASE, providerAccountId: PERSONAL });
+    expect(buildRecentModel(picks, resolved)).toEqual({
       providerAccountId: PERSONAL,
+      harnessId: PI,
       model: OPUS,
     });
   });
@@ -63,28 +70,6 @@ describe("buildRecentModel", () => {
     expect(buildRecentModel(picks, resolveDraftThread(picks))).toBeNull();
   });
 
-  it("adds nothing for an account choice alone, whose default model is not a pick", () => {
-    const runner = { ...BARE, id: "r-moss" };
-    const codex = buildProviderAccount(OPENAI_IDENTITY, [
-      buildSnapshot({
-        runnerId: runner.id,
-        models: [{ slug: "gpt-5", name: "GPT-5", imageInput: null, isDefault: true, options: [] }],
-      }),
-    ]);
-    const catalogs: ThreadCatalogs = {
-      accounts: [codex],
-      runners: [runner],
-      thisMacRunnerId: runner.id,
-      providers: PROVIDERS,
-      harnesses: HARNESSES,
-    };
-    const account = applyThreadChoice({}, { kind: "account", providerAccountId: codex.id });
-    const resolved = resolveThreadConfig(catalogs, { kind: "draft", config: BASE }, account);
-
-    expect(resolved.config.model).toBe("gpt-5");
-    expect(buildRecentModel(account, resolved)).toBeNull();
-  });
-
   it("adds nothing for a thread with no account", () => {
     const picks: ThreadPicks = { model: OPUS };
     expect(
@@ -94,89 +79,72 @@ describe("buildRecentModel", () => {
 });
 
 describe("pushRecent", () => {
+  const SONNET_ENTRY = { providerAccountId: WORK, harnessId: CLAUDE, model: SONNET };
+  const OPUS_ENTRY = { providerAccountId: WORK, harnessId: CLAUDE, model: OPUS };
+  const HAIKU_ENTRY = { providerAccountId: WORK, harnessId: CLAUDE, model: HAIKU };
+
   it("starts the list with the first pick", () => {
-    expect(pushRecent([], { providerAccountId: WORK, model: SONNET })).toEqual([
-      { providerAccountId: WORK, model: SONNET },
-    ]);
+    expect(pushRecent([], SONNET_ENTRY)).toEqual([SONNET_ENTRY]);
   });
 
-  it("puts the newest pair first", () => {
-    expect(
-      pushRecent([{ providerAccountId: WORK, model: SONNET }], {
-        providerAccountId: WORK,
-        model: OPUS,
-      }),
-    ).toEqual([
-      { providerAccountId: WORK, model: OPUS },
-      { providerAccountId: WORK, model: SONNET },
-    ]);
+  it("puts the newest entry first", () => {
+    expect(pushRecent([SONNET_ENTRY], OPUS_ENTRY)).toEqual([OPUS_ENTRY, SONNET_ENTRY]);
   });
 
-  it("moves a pair that is already in the list to the front rather than adding it twice", () => {
-    expect(
-      pushRecent(
-        [
-          { providerAccountId: WORK, model: SONNET },
-          { providerAccountId: WORK, model: OPUS },
-        ],
-        { providerAccountId: WORK, model: OPUS },
-      ),
-    ).toEqual([
-      { providerAccountId: WORK, model: OPUS },
-      { providerAccountId: WORK, model: SONNET },
-    ]);
+  it("moves an entry that is already in the list to the front rather than adding it twice", () => {
+    expect(pushRecent([SONNET_ENTRY, OPUS_ENTRY], OPUS_ENTRY)).toEqual([OPUS_ENTRY, SONNET_ENTRY]);
   });
 
-  it("treats the same model on another account as another pair", () => {
-    expect(
-      pushRecent([{ providerAccountId: WORK, model: SONNET }], {
-        providerAccountId: PERSONAL,
-        model: SONNET,
-      }),
-    ).toEqual([
-      { providerAccountId: PERSONAL, model: SONNET },
-      { providerAccountId: WORK, model: SONNET },
-    ]);
+  it("treats the same model on another account as another entry", () => {
+    const personal = { ...SONNET_ENTRY, providerAccountId: PERSONAL };
+    expect(pushRecent([SONNET_ENTRY], personal)).toEqual([personal, SONNET_ENTRY]);
+  });
+
+  it("treats the same model in another harness as another entry", () => {
+    const inPi = { ...SONNET_ENTRY, harnessId: PI };
+    expect(pushRecent([SONNET_ENTRY], inPi)).toEqual([inPi, SONNET_ENTRY]);
   });
 
   it("caps the list at three, dropping the oldest", () => {
-    expect(
-      pushRecent(
-        [
-          { providerAccountId: WORK, model: SONNET },
-          { providerAccountId: WORK, model: OPUS },
-          { providerAccountId: WORK, model: HAIKU },
-        ],
-        { providerAccountId: PERSONAL, model: SONNET },
-      ),
-    ).toEqual([
-      { providerAccountId: PERSONAL, model: SONNET },
-      { providerAccountId: WORK, model: SONNET },
-      { providerAccountId: WORK, model: OPUS },
+    const personal = { ...SONNET_ENTRY, providerAccountId: PERSONAL };
+    expect(pushRecent([SONNET_ENTRY, OPUS_ENTRY, HAIKU_ENTRY], personal)).toEqual([
+      personal,
+      SONNET_ENTRY,
+      OPUS_ENTRY,
     ]);
   });
 });
 
 describe("parseRecentModels", () => {
-  it("reads the stored pairs in their order", () => {
+  it("reads the stored entries in their order", () => {
     const stored = JSON.stringify([
-      { providerAccountId: WORK, model: OPUS },
-      { providerAccountId: PERSONAL, model: SONNET },
+      { providerAccountId: WORK, harnessId: CLAUDE, model: OPUS },
+      { providerAccountId: PERSONAL, harnessId: PI, model: SONNET },
     ]);
     expect(parseRecentModels(stored)).toEqual([
-      { providerAccountId: WORK, model: OPUS },
-      { providerAccountId: PERSONAL, model: SONNET },
+      { providerAccountId: WORK, harnessId: CLAUDE, model: OPUS },
+      { providerAccountId: PERSONAL, harnessId: PI, model: SONNET },
     ]);
   });
 
   it("reads the key instanceId of a list stored before Provider Accounts as providerAccountId", () => {
     const stored = JSON.stringify([
-      { instanceId: WORK, model: OPUS },
-      { providerAccountId: PERSONAL, model: SONNET },
+      { instanceId: WORK, harnessId: CLAUDE, model: OPUS },
+      { providerAccountId: PERSONAL, harnessId: CLAUDE, model: SONNET },
     ]);
     expect(parseRecentModels(stored)).toEqual([
+      { providerAccountId: WORK, harnessId: CLAUDE, model: OPUS },
+      { providerAccountId: PERSONAL, harnessId: CLAUDE, model: SONNET },
+    ]);
+  });
+
+  it("drops an entry stored without a harness, and keeps the others", () => {
+    const stored = JSON.stringify([
       { providerAccountId: WORK, model: OPUS },
-      { providerAccountId: PERSONAL, model: SONNET },
+      { providerAccountId: PERSONAL, harnessId: CLAUDE, model: SONNET },
+    ]);
+    expect(parseRecentModels(stored)).toEqual([
+      { providerAccountId: PERSONAL, harnessId: CLAUDE, model: SONNET },
     ]);
   });
 
@@ -188,24 +156,26 @@ describe("parseRecentModels", () => {
     expect(parseRecentModels("[{providerAccountId")).toEqual([]);
   });
 
-  it("reads JSON that is not a list of pairs as an empty list", () => {
+  it("reads JSON that is not a list of entries as an empty list", () => {
     expect(parseRecentModels(JSON.stringify({ providerAccountId: WORK, model: OPUS }))).toEqual([]);
     expect(parseRecentModels(JSON.stringify([{ providerAccountId: WORK }]))).toEqual([]);
-    expect(parseRecentModels(JSON.stringify([{ model: OPUS }]))).toEqual([]);
-    expect(parseRecentModels(JSON.stringify([{ providerAccountId: WORK, model: 3 }]))).toEqual([]);
+    expect(parseRecentModels(JSON.stringify([{ harnessId: CLAUDE, model: OPUS }]))).toEqual([]);
+    expect(
+      parseRecentModels(JSON.stringify([{ providerAccountId: WORK, harnessId: CLAUDE, model: 3 }])),
+    ).toEqual([]);
   });
 
-  it("keeps only the three newest pairs of a longer stored list", () => {
+  it("keeps only the three newest entries of a longer stored list", () => {
     const stored = JSON.stringify([
-      { providerAccountId: WORK, model: OPUS },
-      { providerAccountId: WORK, model: SONNET },
-      { providerAccountId: WORK, model: HAIKU },
-      { providerAccountId: PERSONAL, model: OPUS },
+      { providerAccountId: WORK, harnessId: CLAUDE, model: OPUS },
+      { providerAccountId: WORK, harnessId: CLAUDE, model: SONNET },
+      { providerAccountId: WORK, harnessId: CLAUDE, model: HAIKU },
+      { providerAccountId: PERSONAL, harnessId: CLAUDE, model: OPUS },
     ]);
     expect(parseRecentModels(stored)).toEqual([
-      { providerAccountId: WORK, model: OPUS },
-      { providerAccountId: WORK, model: SONNET },
-      { providerAccountId: WORK, model: HAIKU },
+      { providerAccountId: WORK, harnessId: CLAUDE, model: OPUS },
+      { providerAccountId: WORK, harnessId: CLAUDE, model: SONNET },
+      { providerAccountId: WORK, harnessId: CLAUDE, model: HAIKU },
     ]);
   });
 });

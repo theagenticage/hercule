@@ -20,7 +20,7 @@ import {
   type FetchLike,
   type Live,
 } from "@hercule/client-core";
-import type { Runner } from "@hercule/contract";
+import type { ModelProfile, ProviderAccount, Runner } from "@hercule/contract";
 import {
   createApiStub,
   HARNESSES,
@@ -52,6 +52,11 @@ const HOUSEKEEPING: Readonly<Record<string, Handler>> = {
   // them stubs `GET /api/v1/provider-accounts` itself.
   "GET /api/v1/providers": { body: PROVIDERS },
   "GET /api/v1/harnesses": { body: HARNESSES },
+  // The plugins' marks draw the providers beside the accounts' names.
+  "GET /api/v1/plugins": { body: [] },
+  // The shell's loader reads the Model Profiles on every screen. A test that
+  // draws them stubs `GET /api/v1/model-profiles` itself.
+  "GET /api/v1/model-profiles": { body: [] },
 };
 
 /**
@@ -217,6 +222,95 @@ export const fakeMainScrollGeometry = (): FakeScrollGeometry => {
         Object.defineProperty(Element.prototype, key, original);
       Object.defineProperty(Element.prototype, "scrollTo", originalScrollTo);
     },
+  };
+};
+
+/**
+ * Returns the fields the controller adds to a Provider Account beyond its
+ * identity and snapshots: the size of its Model Catalog and the rows that say
+ * where it can run. A fixture spreads it after `snapshots`, so each snapshot
+ * that found the account signed in makes it `ready` for that runner and
+ * harness, and each other snapshot makes it `not-signed-in`.
+ */
+export const buildCatalogFields = (
+  snapshots: ProviderAccount["snapshots"],
+): Pick<ProviderAccount, "modelCount" | "catalogReadAt" | "catalogError" | "readiness"> => {
+  const signedIn = snapshots.filter((snapshot) => snapshot.auth.status === "ok");
+  return {
+    modelCount: Math.max(0, ...signedIn.map((snapshot) => snapshot.models.length)),
+    catalogReadAt: signedIn[0]?.probedAt ?? null,
+    catalogError: null,
+    readiness: snapshots.map((snapshot) => ({
+      harnessId: snapshot.harnessId,
+      runnerId: snapshot.runnerId,
+      state: snapshot.auth.status === "ok" ? "ready" : "not-signed-in",
+    })),
+  };
+};
+
+/**
+ * Returns the Model Profile "Main" as the controller would build it for
+ * `accounts`: one section per account, in order, holding the models of the
+ * account's first snapshot in its default harness that signed in, except the
+ * legacy ones. An account with no such snapshot has not had its first Model
+ * Catalog read, so its section is still pending. An entry whose account is
+ * `ready` on no runner cannot run, with the reason `not-signed-in`. The
+ * profile's default entry is the first model any section marks `isDefault`.
+ */
+export const buildMainProfile = (accounts: readonly ProviderAccount[]): ModelProfile => {
+  const sections = accounts.map((account) => {
+    const snapshot = account.snapshots.find(
+      (each) => each.harnessId === account.defaultHarnessId && each.auth.status === "ok",
+    );
+    if (snapshot === undefined) {
+      return {
+        providerAccountId: account.id,
+        harnessId: null,
+        resolvedHarnessId: account.defaultHarnessId,
+        selectionPending: true,
+        entries: [],
+      };
+    }
+    const runnable = account.readiness.some((row) => row.state === "ready");
+    const entries = snapshot.models
+      .filter((model) => model.isLegacy !== true)
+      .map((model) => ({
+        providerAccountId: account.id,
+        model: model.slug,
+        harnessId: null,
+        resolvedHarnessId: account.defaultHarnessId,
+        name: model.name,
+        options: model.options,
+        imageInput: model.imageInput,
+        problem: runnable ? null : { reason: "not-signed-in" as const, message: "not signed in" },
+      }));
+    return {
+      providerAccountId: account.id,
+      harnessId: null,
+      resolvedHarnessId: account.defaultHarnessId,
+      selectionPending: false,
+      entries,
+    };
+  });
+  const defaultAccount = accounts.find((account) =>
+    account.snapshots.some((snapshot) => snapshot.models.some((model) => model.isDefault === true)),
+  );
+  const defaultModel = defaultAccount?.snapshots
+    .flatMap((snapshot) => snapshot.models)
+    .find((model) => model.isDefault === true);
+  const defaultEntry: ModelProfile["defaultEntry"] =
+    defaultAccount === undefined || defaultModel === undefined
+      ? null
+      : { providerAccountId: defaultAccount.id, model: defaultModel.slug, harnessId: null };
+  return {
+    id: "01a06d02-4900-7000-8000-000000000001",
+    name: "Main",
+    revision: 1,
+    accounts: sections,
+    defaultEntry,
+    dismissedNewModels: [],
+    createdAt: "2026-09-05T09:00:00.000Z",
+    updatedAt: "2026-09-05T09:00:00.000Z",
   };
 };
 

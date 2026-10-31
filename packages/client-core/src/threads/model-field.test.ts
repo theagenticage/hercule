@@ -1,162 +1,137 @@
 /**
- * Tests `buildThreadModelField(account, harnessId, runnerId, current)`, which
- * builds the model field of Settings > Threads: the picked account's models in
- * the harness a thread runs in, from the snapshot of the runner a new thread
- * would be placed on when it is signed in there, else from the most recently
- * probed signed-in snapshot of any runner.
+ * Tests `buildThreadModelField(catalogs, current)`, the model field of
+ * Settings > Threads: the entries of the open Model Profile, as the composer's
+ * model menu lists them, with the stored default selected and kept on the list
+ * when no profile holds it.
  */
 import { describe, expect, it } from "vitest";
-import type { ProviderAccount } from "@hercule/contract";
+import {
+  ANTHROPIC_IDENTITY,
+  HARNESSES,
+  OPENAI_IDENTITY,
+  PROVIDERS,
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
+  buildProviderAccount,
+} from "../providers.testing";
+import type { ThreadCatalogs } from "./config";
 import { buildThreadModelField } from "./model-field";
 
-const HARNESS = "claude-code/claude-code";
-const LOCAL = "01a06d02-beff-7037-9f5b-042822015952";
-const OTHER = "01a06d02-beff-7037-9f5b-042822015953";
+const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY);
+const CODEX = buildProviderAccount(OPENAI_IDENTITY);
 
-const buildSnapshot = (
-  runnerId: string,
-  models: ProviderAccount["snapshots"][number]["models"],
-): ProviderAccount["snapshots"][number] => ({
-  runnerId,
-  harnessId: HARNESS,
-  probedAt: "2026-09-05T09:14:00.000Z",
-  harnessVersion: "2.1.263",
-  versionVerdict: "ok",
-  auth: { status: "ok", identity: "rogier@example.com", planLabel: "Claude Max" },
-  models,
+const SONNET = buildProfileEntry(ANTHROPIC_IDENTITY, "claude-sonnet-5", { name: "Sonnet 5" });
+const OPUS = buildProfileEntry(ANTHROPIC_IDENTITY, "claude-opus-5", { name: "Opus 5" });
+const GPT = buildProfileEntry(OPENAI_IDENTITY, "gpt-6", { name: "GPT-6" });
+const GPT_IN_PI = buildProfileEntry(OPENAI_IDENTITY, "gpt-6", {
+  name: "GPT-6",
+  harnessId: "pi/pi",
+  resolvedHarnessId: "pi/pi",
 });
 
-const MODELS = [
-  { slug: "claude-sonnet-5", name: "Sonnet 5", imageInput: { maxBytes: null }, options: [] },
-  {
-    slug: "claude-opus-5",
-    name: "Opus 5",
-    imageInput: { maxBytes: null },
-    isDefault: true,
-    options: [],
-  },
-];
+const MAIN = buildModelProfile([
+  buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS]),
+  buildProfileSection(OPENAI_IDENTITY, [GPT, GPT_IN_PI]),
+]);
+
+const buildCatalogs = (modelProfiles: ThreadCatalogs["modelProfiles"]): ThreadCatalogs => ({
+  accounts: [CLAUDE, CODEX],
+  runners: [],
+  thisMacRunnerId: null,
+  providers: PROVIDERS,
+  harnesses: HARNESSES,
+  modelProfiles,
+});
+
+const STORED = { providerAccountId: CLAUDE.id, harnessId: null, model: "claude-opus-5" };
 
 describe("buildThreadModelField", () => {
-  it("offers the models of the local runner's snapshot when there is one", () => {
-    const account: Pick<ProviderAccount, "snapshots"> = {
-      snapshots: [
-        buildSnapshot(OTHER, [
-          { slug: "claude-haiku-5", name: "Haiku 5", imageInput: { maxBytes: null }, options: [] },
-        ]),
-        buildSnapshot(LOCAL, MODELS),
-      ],
-    };
-
-    const field = buildThreadModelField(account, HARNESS, LOCAL, "claude-sonnet-5");
+  it("lists every entry of the open profile with its account and harness, and selects the stored one", () => {
+    const field = buildThreadModelField(buildCatalogs([MAIN]), STORED);
 
     expect(field.dimmed).toBeNull();
-    expect(field.options.map((option) => option.slug)).toEqual([
-      "claude-sonnet-5",
-      "claude-opus-5",
+    expect(
+      field.options.map((option) => [option.label, option.harnessId, option.model, option.missing]),
+    ).toEqual([
+      ["Anthropic · Sonnet 5", "claude-code/claude-code", "claude-sonnet-5", false],
+      ["Anthropic · Opus 5", "claude-code/claude-code", "claude-opus-5", false],
+      ["OpenAI · GPT-6", "codex/codex", "gpt-6", false],
+      ["OpenAI · GPT-6 · in pi", "pi/pi", "gpt-6", false],
     ]);
-    expect(field.options.find((option) => option.slug === "claude-opus-5")?.isDefault).toBe(true);
+    expect(field.options.find((option) => option.key === field.selectedKey)?.label).toBe(
+      "Anthropic · Opus 5",
+    );
   });
 
-  it("falls back to another runner's snapshot when none is from the local runner", () => {
-    const account: Pick<ProviderAccount, "snapshots"> = {
-      snapshots: [buildSnapshot(OTHER, MODELS)],
-    };
+  it("gives one model offered in two harnesses two keys", () => {
+    const field = buildThreadModelField(buildCatalogs([MAIN]), STORED);
 
-    const field = buildThreadModelField(account, HARNESS, LOCAL, undefined);
-
-    expect(field.dimmed).toBeNull();
-    expect(field.options.map((option) => option.slug)).toEqual([
-      "claude-sonnet-5",
-      "claude-opus-5",
-    ]);
+    expect(new Set(field.options.map((option) => option.key)).size).toBe(4);
   });
 
-  it("falls back to a snapshot of any runner when no local runner is detected at all", () => {
-    const account: Pick<ProviderAccount, "snapshots"> = {
-      snapshots: [buildSnapshot(OTHER, MODELS)],
-    };
+  it("selects the entry of the stored harness, and reads a stored null as the account's default harness", () => {
+    const inPi = buildThreadModelField(buildCatalogs([MAIN]), {
+      providerAccountId: CODEX.id,
+      harnessId: "pi/pi",
+      model: "gpt-6",
+    });
+    const byDefault = buildThreadModelField(buildCatalogs([MAIN]), {
+      providerAccountId: CODEX.id,
+      harnessId: null,
+      model: "gpt-6",
+    });
 
-    const field = buildThreadModelField(account, HARNESS, null, undefined);
-
-    expect(field.options.map((option) => option.slug)).toEqual([
-      "claude-sonnet-5",
-      "claude-opus-5",
-    ]);
+    expect(inPi.options.find((option) => option.key === inPi.selectedKey)?.harnessId).toBe("pi/pi");
+    expect(
+      byDefault.options.find((option) => option.key === byDefault.selectedKey)?.harnessId,
+    ).toBe("codex/codex");
   });
 
-  it("reads the most recently probed signed-in list when the runner's own snapshot is signed out", () => {
-    const account: Pick<ProviderAccount, "snapshots"> = {
-      snapshots: [
-        { ...buildSnapshot(LOCAL, []), auth: { status: "unauthenticated" } },
-        { ...buildSnapshot(OTHER, [MODELS[0]!]), probedAt: "2026-09-01T00:00:00.000Z" },
-        { ...buildSnapshot("01a06d02-beff-7037-9f5b-042822015954", MODELS) },
-      ],
-    };
+  it("keeps a stored default that no profile holds on the list, marked as missing", () => {
+    const field = buildThreadModelField(buildCatalogs([MAIN]), {
+      ...STORED,
+      model: "claude-haiku-5",
+    });
 
-    const field = buildThreadModelField(account, HARNESS, LOCAL, undefined);
-
-    expect(field.options.map((option) => option.slug)).toEqual([
-      "claude-sonnet-5",
-      "claude-opus-5",
-    ]);
-  });
-
-  it("is dimmed with no options when the account has no snapshot", () => {
-    const account: Pick<ProviderAccount, "snapshots"> = { snapshots: [] };
-
-    const field = buildThreadModelField(account, HARNESS, LOCAL, "claude-sonnet-5");
-
-    expect(field.dimmed).toBe("sign in on a runner first");
-    expect(field.options).toEqual([]);
-  });
-
-  it("ignores the snapshots of another harness", () => {
-    const account: Pick<ProviderAccount, "snapshots"> = {
-      snapshots: [{ ...buildSnapshot(LOCAL, MODELS), harnessId: "pi/pi" }],
-    };
-
-    const field = buildThreadModelField(account, HARNESS, LOCAL, undefined);
-
-    expect(field.dimmed).toBe("sign in on a runner first");
-  });
-
-  it("is dimmed when the snapshot exists but is not signed in", () => {
-    const account: Pick<ProviderAccount, "snapshots"> = {
-      snapshots: [{ ...buildSnapshot(LOCAL, MODELS), auth: { status: "unauthenticated" } }],
-    };
-
-    const field = buildThreadModelField(account, HARNESS, LOCAL, undefined);
-
-    expect(field.dimmed).toBe("sign in on a runner first");
-    expect(field.options).toEqual([]);
-  });
-
-  it("keeps a stored slug the snapshot does not offer, marked as missing", () => {
-    const account: Pick<ProviderAccount, "snapshots"> = {
-      snapshots: [buildSnapshot(LOCAL, MODELS)],
-    };
-
-    const field = buildThreadModelField(account, HARNESS, LOCAL, "some-retired-slug");
-
-    const retired = field.options.find((option) => option.slug === "some-retired-slug");
-    expect(retired).toEqual({
-      slug: "some-retired-slug",
-      name: "some-retired-slug",
-      isDefault: false,
+    expect(field.options.at(-1)).toMatchObject({
+      label: "Anthropic · claude-haiku-5",
+      harnessId: "claude-code/claude-code",
+      model: "claude-haiku-5",
       missing: true,
     });
-    expect(field.options).toHaveLength(3);
+    expect(field.selectedKey).toBe(field.options.at(-1)!.key);
   });
 
-  it("adds nothing extra when the stored slug is unset or already offered", () => {
-    const account: Pick<ProviderAccount, "snapshots"> = {
-      snapshots: [buildSnapshot(LOCAL, MODELS)],
+  it("carries the reason an entry cannot run", () => {
+    const broken = {
+      ...SONNET,
+      problem: { reason: "token-expired" as const, message: "controller words" },
     };
+    const profile = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [broken, OPUS])]);
 
-    expect(buildThreadModelField(account, HARNESS, LOCAL, undefined).options).toHaveLength(2);
-    expect(buildThreadModelField(account, HARNESS, LOCAL, "claude-sonnet-5").options).toHaveLength(
-      2,
+    const field = buildThreadModelField(buildCatalogs([profile]), STORED);
+
+    expect(field.options.map((option) => option.problem)).toEqual(["expired", null]);
+  });
+
+  it("selects nothing when no model is stored", () => {
+    const field = buildThreadModelField(buildCatalogs([MAIN]), { ...STORED, model: null });
+
+    expect(field.selectedKey).toBeNull();
+    expect(field.options).toHaveLength(4);
+  });
+
+  it("is dimmed, with nothing to choose, when the profile holds no entry", () => {
+    const empty = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [])]);
+
+    expect(buildThreadModelField(buildCatalogs([empty]), { ...STORED, model: null })).toEqual({
+      dimmed: "no models in your profile yet",
+      options: [],
+      selectedKey: null,
+    });
+    expect(buildThreadModelField(buildCatalogs([]), { ...STORED, model: null }).dimmed).toBe(
+      "no models in your profile yet",
     );
   });
 });

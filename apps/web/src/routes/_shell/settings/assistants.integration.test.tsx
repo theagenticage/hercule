@@ -23,6 +23,7 @@ import {
   type ProviderAccount,
 } from "@hercule/contract";
 import {
+  buildCatalogFields,
   buildErrorBody,
   expectInDocumentOrder,
   readPageText,
@@ -47,6 +48,7 @@ const buildAccount = (id: string, label: string | null): ProviderAccount => ({
   usage: [],
   failure: null,
   snapshots: [],
+  ...buildCatalogFields([]),
   createdAt: AT,
   updatedAt: AT,
 });

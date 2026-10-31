@@ -49,6 +49,8 @@ const definition: ProviderDefinition = {
     },
   ],
   defaultHarnessId: "pi/pi",
+  catalogSource: { kind: "harness-probe", harnessId: "pi/pi" },
+  defaultSelection: "current-models",
   // The slug as pi's own model list shows it (`pi --list-models` prints
   // `glm-5.3-flash` under the `zai` provider).
   suggestedTextGenerationModel: "glm-5.3-flash",

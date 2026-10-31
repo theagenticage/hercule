@@ -66,6 +66,8 @@ import type {
   Input,
   MemoryDocument,
   MemoryEntry,
+  ModelCatalog,
+  ModelProfile,
   PluginDetail,
   Profile,
   Project,
@@ -89,6 +91,7 @@ import {
   type FetchLike,
   type HerculeClient,
   type Live,
+  type RecentModel,
   type ThreadPicks,
 } from "@hercule/client-core";
 import { HARNESSES, PROVIDERS } from "@hercule/client-core/testing";
@@ -111,6 +114,7 @@ import {
   localRunnerQuery,
   memoryDocumentQuery,
   memoryIndexQuery,
+  modelProfilesQuery,
   newestRunsQuery,
   pluginsQuery,
   previewSkillsQuery,
@@ -161,6 +165,7 @@ import {
   type PendingSubmissions,
 } from "../app/pending-submissions";
 import { createAppearanceStore } from "../app/appearance";
+import { rememberRecentModel } from "../app/recent-models";
 import { createQueryClient } from "../app/query-client";
 import { DoneMovesProvider } from "../app/done-moves";
 import { SessionPresentationProvider } from "../app/session-presentation";
@@ -214,6 +219,8 @@ export interface SidebarRecords {
   readonly resources: ReadonlyArray<Resource>;
   readonly runners: ReadonlyArray<Runner>;
   readonly accounts: ReadonlyArray<ProviderAccount>;
+  /** The Model Profiles, whose entries the composer's model menu lists. None when left out. */
+  readonly modelProfiles?: ReadonlyArray<ModelProfile>;
   readonly user: SignedInUser;
   /**
    * The Connections, which decide the red dot on the Connections row of the
@@ -295,6 +302,11 @@ export interface DraftScreenRecords {
   readonly connections: ReadonlyArray<Connection>;
   /** What the user picked in the draft's composer, which the draft's pending submission holds. */
   readonly picks: ThreadPicks;
+  /**
+   * The entries the user picked lately, oldest first, which the composer's
+   * model menu shows in its Recent lane. None when left out.
+   */
+  readonly recent?: ReadonlyArray<RecentModel>;
   /**
    * The filter the composer reads the draft's skills by: the runner and the
    * repos the picks open, or the empty filter when they open no repo. The
@@ -397,6 +409,8 @@ export interface ProvidersSettingsRecords {
   readonly controllerRunnerId: string;
   /** The account `providerAccount.create` answers with. */
   readonly createdAccount: ProviderAccount;
+  /** The Model Catalog `providerAccount.readCatalog` answers with, for the account it names. */
+  readonly catalog: ModelCatalog;
 }
 
 /**
@@ -588,6 +602,7 @@ const seedQueryCache = (
   queryClient.setQueryData(resourcesQuery(client).queryKey, records.resources);
   queryClient.setQueryData(runnersQuery(client).queryKey, records.runners);
   queryClient.setQueryData(providerAccountsQuery(client).queryKey, records.accounts);
+  queryClient.setQueryData(modelProfilesQuery(client).queryKey, records.modelProfiles ?? []);
   // The providers and harnesses are what the plugins register, so every
   // specimen shows the same ones.
   queryClient.setQueryData(providersQuery(client).queryKey, PROVIDERS);
@@ -1298,19 +1313,25 @@ async function mountShellSpecimen(
   applySheetAppearance();
   const answerMove = screens.intake?.answerMove;
   const created = screens.providersSettings?.createdAccount;
+  const catalog = screens.providersSettings?.catalog;
+  const answerJson = (body: unknown): Promise<Response> =>
+    Promise.resolve(
+      new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } }),
+    );
   const client = createClient({
     baseUrl: CONTROLLER_URL,
     fetch:
       created !== undefined
         ? // The add-account sheet creates an account, and the page then reads the list again.
+          // A model picker reads the account's catalog.
           (url, init) =>
             init?.method === "POST" && url.endsWith("/api/v1/provider-accounts")
-              ? Promise.resolve(
-                  new Response(JSON.stringify(created), {
-                    headers: { "content-type": "application/json" },
-                  }),
-                )
-              : refuseRequest(url, init)
+              ? answerJson(created)
+              : catalog !== undefined &&
+                  (init?.method ?? "GET") === "GET" &&
+                  url.endsWith(`/api/v1/provider-accounts/${catalog.providerAccountId}/catalog`)
+                ? answerJson(catalog)
+                : refuseRequest(url, init)
         : answerMove === undefined
           ? refuseRequest
           : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init)),
@@ -1404,6 +1425,7 @@ export async function mountDraftSpecimen(
   records: SidebarRecords,
   draft: DraftScreenRecords,
 ): Promise<void> {
+  for (const entry of draft.recent ?? []) rememberRecentModel(CONTROLLER_URL, entry);
   await mountShellSpecimen(records, `/?project=${draft.projectId}`, { draft });
 }
 

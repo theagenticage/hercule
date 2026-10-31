@@ -49,6 +49,8 @@ const definition: ProviderDefinition = {
     },
   ],
   defaultHarnessId: "codex/codex",
+  catalogSource: { kind: "harness-probe", harnessId: "codex/codex" },
+  defaultSelection: "current-models",
   // Codex lists this model from release 0.162 on. On an older release it is
   // not in the account's model list, so Automatic passes over this provider
   // rather than ask for a model that is not there.

@@ -11,7 +11,9 @@
  * `provider`, `kind` (Anthropic's three), `key` (Z.ai's), `label` (after
  * Z.ai's key) or `sign-in` (Anthropic's subscription, after its label). The
  * stubbed controller answers the create. `&focus` leaves the focus where the
- * sheet put it, so the ring shows.
+ * sheet put it, so the ring shows. `?picker=<account>` opens the picker of the
+ * account's "Add a model" (`?picker=Anthropic`), and `?rowmenu=<model>` opens
+ * the ⋯ menu of that model's first row (`?rowmenu=Fable%205.1`).
  */
 import { mountProvidersSettingsSpecimen } from "./shell-page";
 import { markSheetReady } from "./sheet-page";
@@ -107,6 +109,26 @@ if (sheet !== null) {
   await new Promise((resolve) => requestAnimationFrame(resolve));
   (document.activeElement as HTMLElement | null)?.blur();
   await new Promise((resolve) => requestAnimationFrame(resolve));
+}
+// `?picker=<account>` opens the picker of that account's "Add a model", and
+// `?rowmenu=<model>` opens the ⋯ menu of the first row of that model.
+const picker = new URLSearchParams(location.search).get("picker");
+if (picker !== null) {
+  const button = document.querySelector<HTMLElement>(
+    `button[aria-label="Add a model from ${picker}"]`,
+  );
+  if (button === null) throw new Error(`The page has no "Add a model" for ${picker}.`);
+  button.click();
+  await waitFor(() => document.querySelector(".pm-models .line"), "the picker's models");
+}
+const rowMenu = new URLSearchParams(location.search).get("rowmenu");
+if (rowMenu !== null) {
+  const button = [...document.querySelectorAll<HTMLElement>(".pm-row")]
+    .find((row) => row.querySelector("b")?.textContent === rowMenu)
+    ?.querySelector<HTMLElement>(".pm-more");
+  if (button === undefined || button === null)
+    throw new Error(`The page has no row for ${rowMenu}.`);
+  button.click();
 }
 const add = new URLSearchParams(location.search).get("add");
 if (add !== null) {

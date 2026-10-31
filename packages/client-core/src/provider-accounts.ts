@@ -9,6 +9,7 @@ import type {
   CapabilitySnapshot,
   Provider,
   ProviderAccount,
+  ProviderAccountReadinessState,
 } from "@hercule/contract";
 import type { CredentialField } from "./connection-types";
 
@@ -90,6 +91,22 @@ export const listSignedInDefaultHarnessSnapshots = (
     (snapshot) => snapshot.harnessId === account.defaultHarnessId && snapshot.auth.status === "ok",
   );
 
+/**
+ * Returns whether `account` can run in `harnessId` on the runner `runnerId`,
+ * as the controller worked it out when it sent the account. Returns
+ * `harness-missing` when the account has no row for that pair: the account's
+ * kind or the harness does not allow the combination, or the runner is
+ * retired or unknown. Online or draining is not part of the answer; the
+ * caller reads that from the runner.
+ */
+export const findProviderAccountReadiness = (
+  account: Pick<ProviderAccount, "readiness">,
+  harnessId: string,
+  runnerId: string,
+): ProviderAccountReadinessState =>
+  account.readiness.find((row) => row.harnessId === harnessId && row.runnerId === runnerId)
+    ?.state ?? "harness-missing";
+
 /** Returns the Account Kind the account was created as, or `undefined` when its provider no longer declares it. */
 export const findProviderAccountKind = (
   providers: readonly Provider[],
@@ -131,34 +148,6 @@ export const signsInPerMachine = (
   providers: readonly Provider[],
   account: Pick<ProviderAccount, "providerId" | "kind">,
 ): boolean => findHarnessLoginMethod(providers, account) === "sign-in";
-
-/**
- * Decides whether the credential the controller keeps for the account can be
- * used now:
- *
- * - `not-kept`: the controller keeps no credential for the account: it signs
- *   in on each machine, or its kind is no longer declared;
- * - `usable`: the controller keeps a credential and it can be used;
- * - `token-missing`: the account's kind makes a token and none was made yet;
- * - `token-expired`: the token is past its `expiresAt`.
- *
- * The controller sets `expiresAt` exactly when it stores a token. A token is
- * judged against the clock at the call, so a caller that draws again later
- * sees it expire.
- */
-export const decideStoredCredentialState = (
-  providers: readonly Provider[],
-  account: Pick<ProviderAccount, "providerId" | "kind" | "expiresAt">,
-): "not-kept" | "usable" | "token-missing" | "token-expired" => {
-  if (findProviderAccountKind(providers, account) === undefined) return "not-kept";
-  if (signsInPerMachine(providers, account)) return "not-kept";
-  if (account.expiresAt === null) {
-    return findHarnessLoginMethod(providers, account) === "create-token"
-      ? "token-missing"
-      : "usable";
-  }
-  return Date.parse(account.expiresAt) <= Date.now() ? "token-expired" : "usable";
-};
 
 /**
  * Returns the fields the user types in to set the account's credential, from

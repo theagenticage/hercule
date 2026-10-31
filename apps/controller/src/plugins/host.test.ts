@@ -623,12 +623,12 @@ describe("a plugin that registers a provider", () => {
       providerPlugin("vendor", [
         {
           ...buildProviderDefinition("vendor"),
-          catalogSource: "provider-api",
+          favouriteColour: "blue",
         } as ProviderDefinition,
       ]),
     );
 
-    expect(message).toContain("catalogSource");
+    expect(message).toContain("favouriteColour");
   });
 
   it("is errored, naming the fields, when a credentials step is not exactly one field named apiKey", async () => {
@@ -960,6 +960,18 @@ describe("a plugin that registers a provider", () => {
 
     expect(message).toContain("the provider vendor/vendor has the default harness alpha/alpha");
     expect(message).toContain("other-key");
+  });
+
+  it("is errored when an account kind does not list the harness its catalog is read from", async () => {
+    const definition = buildProviderDefinition("vendor", ["alpha/alpha"]);
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        { ...definition, catalogSource: { kind: "harness-probe", harnessId: "beta/beta" } },
+      ]),
+    );
+
+    expect(message).toContain("reads its Model Catalog from the harness beta/beta");
+    expect(message).toContain("api-key");
   });
 
   it("is errored when an account kind has a setup step the core cannot draw", async () => {

@@ -21,6 +21,7 @@
 import type {
   IDENTITY_PORT,
   IDENTITY_PORT_COUNT,
+  ModelProfile,
   Project,
   ProviderAccount,
   Resource,
@@ -164,6 +165,39 @@ export async function connectFleet(url: string): Promise<Fleet> {
     await call("POST", "/provider-accounts", {
       providerId: "anthropic/anthropic",
       kind: "subscription-per-machine",
+    });
+  }
+  // An account made through the API is in no Model Profile, and a thread's
+  // composer offers only what its profile holds. A user puts the account in
+  // "Main" from the Models page; the fleet does it here, with the account's
+  // Default Selection, which the first scripted probe fills in.
+  const [main] = await call<ReadonlyArray<ModelProfile>>("GET", "/model-profiles");
+  const everyAccount = await call<ReadonlyArray<ProviderAccount>>("GET", "/provider-accounts");
+  const joined = new Set(main!.accounts.map((section) => section.providerAccountId));
+  if (everyAccount.some((account) => !joined.has(account.id))) {
+    await call("PATCH", `/model-profiles/${main!.id}`, {
+      expectedRevision: main!.revision,
+      name: main!.name,
+      accounts: [
+        ...main!.accounts.map(({ providerAccountId, harnessId, selectionPending, entries }) => ({
+          providerAccountId,
+          harnessId,
+          ...(selectionPending
+            ? {}
+            : {
+                entries: entries.map(({ model, harnessId: entryHarnessId }) => ({
+                  providerAccountId,
+                  model,
+                  harnessId: entryHarnessId,
+                })),
+              }),
+        })),
+        ...everyAccount
+          .filter((account) => !joined.has(account.id))
+          .map((account) => ({ providerAccountId: account.id, harnessId: null })),
+      ],
+      defaultEntry: main!.defaultEntry,
+      dismissedNewModels: main!.dismissedNewModels,
     });
   }
   // A real install gets the default assistant with its first ready account

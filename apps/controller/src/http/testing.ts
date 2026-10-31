@@ -97,6 +97,7 @@ import {
   type MasterKeyBackend,
   type SecurityRunner,
 } from "../secrets";
+import { ModelProfileMembershipLayer } from "../model-profiles";
 import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
 import {
   findCredentialSecretName,
@@ -109,6 +110,7 @@ import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../pl
 import {
   providerAccountRepository,
   HarnessAccountsLayer,
+  ModelCatalogsLayer,
   ProviderAccountProbesLayer,
   ProviderAccountRunnersLayer,
   ProviderAccountServiceLayer,
@@ -159,6 +161,7 @@ const buildServices = (
   providerKeyHttpClient: HttpClient.HttpClient,
   masterKeyBackend: MasterKeyBackend = "file",
   securityRunner?: SecurityRunner,
+  readLocalRunnerId: () => string | undefined = () => undefined,
 ) =>
   // The routes' layer includes the controller daemon, which uses the session
   // and workspace services and the plugin host. So this block's output is
@@ -202,7 +205,9 @@ const buildServices = (
     Layer.provideMerge(
       ProviderAccountProbingLayer.pipe(
         Layer.provideMerge(ProviderAccountProbesLayer),
+        Layer.provideMerge(ModelCatalogsLayer),
         Layer.provideMerge(ProviderAccountRunnersLayer),
+        Layer.provideMerge(Layer.succeed(LocalRunnerId, { read: readLocalRunnerId })),
         Layer.provideMerge(HarnessAccountsLayer),
         Layer.provideMerge(RunnerConnectionsLayer),
         Layer.provideMerge(
@@ -225,6 +230,8 @@ const buildServices = (
         PermissionProfilesLayer,
         AuditLogLayer,
         PlatformEventsLayer,
+        // As in the real boot: Provider Accounts declares this port.
+        ModelProfileMembershipLayer,
         controllerIdentityLayer,
         JoinTokensLayer,
         SessionTokensLayer,
@@ -682,6 +689,7 @@ export const withServer = (
           options.providerKeyHttpClient ?? acceptingProviderKeyClient,
           options.masterKeyBackend,
           options.securityRunner,
+          options.readLocalRunnerId,
         ).pipe(
           // The same listener `hercule serve` builds, including the body size
           // limit. The limit is enforced by the transport, so without it the
@@ -692,9 +700,6 @@ export const withServer = (
         ),
       ),
       Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),
-      Effect.provideService(LocalRunnerId, {
-        read: options.readLocalRunnerId ?? (() => undefined),
-      }),
       provideTimings(options),
     ),
   ).finally(() => rmSync(home, { recursive: true, force: true }));

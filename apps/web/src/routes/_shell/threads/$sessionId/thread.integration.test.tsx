@@ -46,7 +46,9 @@ import {
   buildSubagentTapTopic,
 } from "@hercule/contract";
 import {
+  buildCatalogFields,
   buildErrorBody,
+  buildMainProfile,
   fakeMainScrollGeometry,
   pickRow,
   readPageText,
@@ -89,6 +91,19 @@ const buildProviderAccountSnapshot = (
   models,
 });
 
+const SNAPSHOTS_STARTED = [
+  buildProviderAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    {
+      slug: "claude-sonnet-5",
+      name: "Claude Sonnet 5",
+      imageInput: { maxBytes: null },
+      isDefault: true,
+      options: [],
+    },
+    { slug: "claude-opus-5", name: "Claude Opus 5", imageInput: { maxBytes: null }, options: [] },
+  ]),
+];
+
 const ACCOUNT_STARTED: ProviderAccount = {
   id: SESSION.providerAccountId,
   providerId: "anthropic/anthropic",
@@ -100,18 +115,8 @@ const ACCOUNT_STARTED: ProviderAccount = {
   expiresAt: null,
   usage: [],
   failure: null,
-  snapshots: [
-    buildProviderAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
-      {
-        slug: "claude-sonnet-5",
-        name: "Claude Sonnet 5",
-        imageInput: { maxBytes: null },
-        isDefault: true,
-        options: [],
-      },
-      { slug: "claude-opus-5", name: "Claude Opus 5", imageInput: { maxBytes: null }, options: [] },
-    ]),
-  ],
+  snapshots: SNAPSHOTS_STARTED,
+  ...buildCatalogFields(SNAPSHOTS_STARTED),
   createdAt: "2026-09-08T09:00:00.000Z",
   updatedAt: "2026-09-08T09:00:00.000Z",
 };
@@ -221,17 +226,25 @@ const buildThreadRoutes = (
   fixture: Session,
   rows: readonly TranscriptRow[],
   extra: Readonly<Record<string, Handler>> = {},
-): Readonly<Record<string, Handler>> =>
-  buildController(
+): Readonly<Record<string, Handler>> => {
+  // The Model Profile holds the models of whichever accounts the test serves.
+  const served = extra["GET /api/v1/provider-accounts"];
+  const accounts =
+    served !== undefined && "body" in served
+      ? (served.body as readonly ProviderAccount[])
+      : [ACCOUNT_STARTED, ACCOUNT_OTHER];
+  return buildController(
     { session: fixture, subagents: [] },
     {
       [`GET /api/v1/sessions/${fixture.id}/transcript`]: { body: { items: rows } },
       "GET /api/v1/provider-accounts": { body: [ACCOUNT_STARTED, ACCOUNT_OTHER] },
+      "GET /api/v1/model-profiles": { body: [buildMainProfile(accounts)] },
       "GET /api/v1/runners": { body: { items: [RUNNER_STARTED, RUNNER_OTHER] } },
       "GET /api/v1/profiles": { body: { items: [PROFILE_STARTED, PROFILE_OTHER] } },
       ...extra,
     },
   );
+};
 
 const openApp = async (
   fixture: Session,
@@ -2314,16 +2327,23 @@ describe("Thread: composer read-only fields and model switch", () => {
     expect(screen.queryByText("Full access")).toBeNull();
   });
 
-  it("dims the model menu's other accounts with the note account fixed", async () => {
+  it("offers a running thread one flat list of its account's models, and says other models start a new thread", async () => {
     const user = userEvent.setup();
     await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
+    const menu = await screen.findByRole("dialog");
 
-    expect(readPageText()).toContain("account fixed");
-    // The current account's other model can still be picked, unlike the
-    // other account's group.
-    expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
+    // The account and the harness are fixed once the thread has started, so
+    // the menu has no lanes, no Recent, and none of the other account's models.
+    expect(within(menu).getByRole("button", { name: /claude sonnet 5/i }).textContent).toContain(
+      "✓",
+    );
+    expect(within(menu).getByRole("button", { name: /claude opus 5/i })).toBeDefined();
+    expect(within(menu).queryByText(/claude haiku 5/i)).toBeNull();
+    expect(within(menu).queryByText("Recent")).toBeNull();
+    expect(within(menu).queryByText("Anthropic · work")).toBeNull();
+    expect(readPageText(menu)).toContain("Other models start a new thread.");
   });
 
   // Picking a model does not patch the session. The pick is draft state that

@@ -1,209 +1,266 @@
 /**
- * Tests the model menu's content: Recent, the thread's account with its older
- * models folded, the other accounts, the filter, and the choice each row makes,
- * on a thread that has started and on a Draft Thread.
+ * Tests the model menu's content: on a Draft Thread, Recent and one lane per
+ * account with the entries that cannot run dimmed with their reason and a
+ * Sign in link; on a thread that has started, the flat list and its note; and
+ * the choice each row makes.
  */
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   readThreadConfig,
   type RecentModel,
+  type SignInTarget,
   type ThreadCatalogs,
   type ThreadChoice,
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
-import type { ProviderAccount } from "@hercule/contract";
-import { HARNESSES, PROVIDERS } from "@hercule/client-core/testing";
-import { FIXTURE_ACCOUNT, SIDEBAR_FIXTURE, THREAD_FIXTURES } from "../../app/testing";
+import type { ModelProfile, ProviderAccount, ResolvedModelProfileEntry } from "@hercule/contract";
+import {
+  ANTHROPIC_IDENTITY,
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
+  buildProviderAccount,
+  HARNESSES,
+  OPENAI_IDENTITY,
+  PROVIDERS,
+} from "@hercule/client-core/testing";
+import { SIDEBAR_FIXTURE, THREAD_FIXTURES } from "../../app/testing";
 import { ModelMenu } from "./model-menu";
 
-/** The fixture account's one snapshot, from moss. */
-const SNAPSHOT = FIXTURE_ACCOUNT.snapshots[0]!;
+const MOSS = SIDEBAR_FIXTURE.runners[0]!;
 
-/** A second Claude Code account on moss, which only a Draft Thread can switch to. */
-const WORK_ACCOUNT: ProviderAccount = {
-  ...FIXTURE_ACCOUNT,
-  id: "01a06d02-7600-7000-8000-000000000002",
-  label: "work",
-  identity: "work@example.com",
-  planLabel: "Claude Pro",
-  snapshots: [
-    {
-      ...SNAPSHOT,
-      auth: { status: "ok", identity: "work@example.com", planLabel: "Claude Pro" },
-      models: [
-        {
-          slug: "claude-haiku-5",
-          name: "Claude Haiku 5",
-          imageInput: { maxBytes: null },
-          isDefault: true,
-          options: [],
-        },
-      ],
-    },
-  ],
-};
+const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [], [{ runnerId: MOSS.id }]);
+/** Codex is not signed in on moss, so its entries cannot run there. */
+const CODEX = buildProviderAccount(
+  OPENAI_IDENTITY,
+  [],
+  [{ runnerId: MOSS.id, state: "not-signed-in" }],
+);
 
-/** The fixture account with five more models, so the accounts hold more than eight. */
-const MANY_ACCOUNT: ProviderAccount = {
-  ...FIXTURE_ACCOUNT,
-  snapshots: [
-    {
-      ...SNAPSHOT,
-      models: [
-        ...SNAPSHOT.models,
-        ...["4.1", "4.2", "4.3", "4.4", "4.5"].map((version) => ({
-          slug: `claude-haiku-${version}`,
-          name: `Claude Haiku ${version}`,
-          imageInput: { maxBytes: null },
-          options: [],
-        })),
-      ],
-    },
-  ],
-};
+/** Returns a Claude Code entry of the Anthropic account named after its model. */
+const claudeEntry = (
+  model: string,
+  name: string,
+  fields: Partial<ResolvedModelProfileEntry> = {},
+): ResolvedModelProfileEntry => buildProfileEntry(ANTHROPIC_IDENTITY, model, { name, ...fields });
 
-/** The idle fixture thread's config: Claude Sonnet 5, on the fixture account. */
-const CONFIG = readThreadConfig({ kind: "active", session: THREAD_FIXTURES.finished.session });
-
-/** Returns the catalogs with `accounts` on moss. */
-const buildCatalogs = (accounts: readonly ProviderAccount[]): ThreadCatalogs => ({
-  accounts,
-  providers: PROVIDERS,
-  harnesses: HARNESSES,
-  runners: SIDEBAR_FIXTURE.runners,
-  thisMacRunnerId: null,
+const SONNET = claudeEntry("claude-sonnet-5", "Claude Sonnet 5");
+const OPUS = claudeEntry("claude-opus-5", "Claude Opus 5");
+const OPUS_IN_PI = claudeEntry("claude-opus-5", "Claude Opus 5", {
+  harnessId: "pi/pi",
+  resolvedHarnessId: "pi/pi",
+});
+const GPT = buildProfileEntry(OPENAI_IDENTITY, "gpt-5.4", {
+  name: "GPT-5.4",
+  resolvedHarnessId: "codex/codex",
+  problem: { reason: "not-signed-in", message: "Not signed in to Codex." },
 });
 
-/** Renders the menu and returns the function that received each choice. */
+/** The profile "Main": Claude's two models, then Codex's one, with Sonnet as the default. */
+const MAIN: ModelProfile = buildModelProfile(
+  [
+    buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS]),
+    buildProfileSection(OPENAI_IDENTITY, [GPT]),
+  ],
+  { defaultEntry: { providerAccountId: CLAUDE.id, model: SONNET.model, harnessId: null } },
+);
+
+/** The idle fixture thread's config, moved to the Anthropic account and its Sonnet. */
+const CONFIG: ThreadConfig = {
+  ...readThreadConfig({ kind: "active", session: THREAD_FIXTURES.finished.session }),
+  providerAccountId: CLAUDE.id,
+  harnessId: null,
+  model: SONNET.model,
+  runnerId: MOSS.id,
+};
+
+/** Returns the recent entry for `entry`. */
+const recentOf = (entry: ResolvedModelProfileEntry): RecentModel => ({
+  providerAccountId: entry.providerAccountId,
+  harnessId: entry.resolvedHarnessId,
+  model: entry.model,
+});
+
+/** Renders the menu and returns the functions that received each choice and each sign-in. */
 const renderMenu = ({
-  accounts = [FIXTURE_ACCOUNT, WORK_ACCOUNT],
+  accounts = [CLAUDE, CODEX],
+  profiles = [MAIN],
   config = CONFIG,
-  kind = "active",
+  kind = "draft",
   recent = [],
 }: {
   readonly accounts?: readonly ProviderAccount[];
+  readonly profiles?: readonly ModelProfile[];
   readonly config?: ThreadConfig;
   readonly kind?: ThreadKind;
   readonly recent?: readonly RecentModel[];
 } = {}) => {
+  const catalogs: ThreadCatalogs = {
+    accounts,
+    providers: PROVIDERS,
+    harnesses: HARNESSES,
+    modelProfiles: profiles,
+    runners: SIDEBAR_FIXTURE.runners,
+    thisMacRunnerId: null,
+  };
   const onChoose = vi.fn<(choice: ThreadChoice) => void>();
+  const onSignIn = vi.fn<(target: SignInTarget) => void>();
   render(
     <ModelMenu
-      catalogs={buildCatalogs(accounts)}
+      catalogs={catalogs}
+      plugins={[]}
       config={config}
       kind={kind}
+      runnerId={null}
       readRecent={() => recent}
       onChoose={onChoose}
+      onSignIn={onSignIn}
     />,
   );
-  return onChoose;
+  return { onChoose, onSignIn };
+};
+
+/** Returns the words of a row, without the words a Provider's mark draws as its fallback initial. */
+const readWords = (row: Element): string => {
+  const copy = row.cloneNode(true) as Element;
+  for (const mark of copy.querySelectorAll("svg")) mark.remove();
+  return copy.textContent;
 };
 
 /** Returns the text of each row of each section, in order. A section's label is its first row. */
 const readSections = (): readonly (readonly string[])[] =>
-  [...document.querySelectorAll(".pop-sec")].map((section) =>
-    [...section.children].map((row) => row.textContent),
-  );
+  [...document.querySelectorAll(".pop-sec")].map((section) => [...section.children].map(readWords));
 
-/** Returns the text of each row that can be picked, in order. */
-const readPickable = (): readonly string[] =>
-  screen.getAllByRole("button").map((button) => button.textContent);
-
-describe("the model menu", () => {
-  it("lists Recent, the thread's account, then the other accounts, dimmed because the account is fixed", () => {
-    renderMenu({
-      recent: [
-        { providerAccountId: WORK_ACCOUNT.id, model: "claude-haiku-5" },
-        { providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-opus-5" },
-      ],
-    });
+describe("the model menu of a Draft Thread", () => {
+  it("lists Recent, then a lane per account named after it, with the entries in the profile's order", () => {
+    renderMenu({ recent: [recentOf(OPUS), recentOf(SONNET)] });
 
     expect(readSections()).toEqual([
-      ["Recent", "Claude Haiku 5 · Anthropic · workaccount fixed", "Claude Opus 5 · Anthropic"],
-      ["Anthropic", "Claude Sonnet 5", "Claude Opus 5", "older models (1)"],
-      ["Anthropic · work · work@example.com · Claude Proaccount fixed"],
+      ["Recent", "Claude Opus 5", "Claude Sonnet 5"],
+      ["Anthropic", "Claude Sonnet 5", "Claude Opus 5"],
+      ["OpenAI", "GPT-5.4not signed in on mossSign in"],
     ]);
-    expect(readPickable()).toEqual([
-      "Claude Opus 5 · Anthropic",
-      "Claude Sonnet 5",
-      "Claude Opus 5",
-      "older models (1)",
-    ]);
-    // Four models are too few to need a filter.
+    // Three entries are too few to need a filter.
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("checks the model in use, and marks the default model when it is another", () => {
-    renderMenu({ config: { ...CONFIG, model: "claude-opus-5" } });
+  it("checks the entry in use and marks the profile's default entry when it is another", () => {
+    renderMenu({ config: { ...CONFIG, model: OPUS.model } });
 
-    const current = screen.getByRole("button", { current: true });
-    expect(current.textContent).toBe("Claude Opus 5");
-    expect(current.querySelector("svg:last-child")).not.toBeNull();
+    expect(screen.getByRole("button", { current: true }).textContent).toBe("Claude Opus 5");
     expect(screen.getByRole("button", { name: "Claude Sonnet 5 · default" })).toBeTruthy();
   });
 
-  it("shows the older models on request, and hands each row's model choice to onChoose", async () => {
-    const user = userEvent.setup();
-    const onChoose = renderMenu({
-      recent: [{ providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-opus-5" }],
-    });
+  it("names the other harness of an entry that runs in one, and keeps both entries of one model", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS, OPUS_IN_PI]),
+    ]);
+    renderMenu({ profiles: [profile] });
 
-    await user.click(screen.getByRole("button", { name: "older models (1)" }));
-    expect(readSections()[1]).toEqual([
+    expect(readSections()[0]).toEqual([
       "Anthropic",
       "Claude Sonnet 5",
       "Claude Opus 5",
-      "Claude Sonnet 4",
-    ]);
-    await user.click(screen.getByRole("button", { name: "Claude Opus 5 · Anthropic" }));
-    await user.click(screen.getByRole("button", { name: "Claude Sonnet 4" }));
-
-    expect(onChoose.mock.calls).toEqual([
-      [{ kind: "model", providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-opus-5" }],
-      [{ kind: "model", providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-sonnet-4" }],
+      "Claude Opus 5 · in pi",
     ]);
   });
 
-  it("offers a filter once the accounts hold more than eight models, focused, which narrows every section", async () => {
+  it("dims an entry that cannot run with its reason, and signs in from the row", async () => {
     const user = userEvent.setup();
-    renderMenu({ accounts: [MANY_ACCOUNT, WORK_ACCOUNT] });
+    const { onChoose, onSignIn } = renderMenu();
+
+    // The row is not a button to pick, but its Sign in link is a button.
+    expect(screen.queryByRole("button", { name: /GPT-5.4/ })).toBeNull();
+    const row = screen.getByText("GPT-5.4").closest(".line")!;
+    expect(row.classList.contains("line--dimmed")).toBe(true);
+    expect(within(row as HTMLElement).getByText("not signed in on moss")).toBeTruthy();
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "Sign in" }));
+
+    expect(onSignIn.mock.calls).toEqual([
+      [expect.objectContaining({ providerAccountId: CODEX.id, runnerId: MOSS.id })],
+    ]);
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it("shows a note in the lane of an account whose models are still being read", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET]),
+      buildProfileSection(OPENAI_IDENTITY, "pending"),
+    ]);
+    renderMenu({ profiles: [profile] });
+
+    expect(readSections()[1]).toEqual(["OpenAI", "Reading models…"]);
+  });
+
+  it("hands the account, the harness and the model of the picked row to onChoose", async () => {
+    const user = userEvent.setup();
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS_IN_PI]),
+    ]);
+    const { onChoose } = renderMenu({ profiles: [profile] });
+
+    await user.click(screen.getByRole("button", { name: "Claude Opus 5 · in pi" }));
+
+    expect(onChoose.mock.calls).toEqual([
+      [{ kind: "model", providerAccountId: CLAUDE.id, harnessId: "pi/pi", model: OPUS.model }],
+    ]);
+  });
+
+  it("offers a focused filter once the profile holds more than eight entries, which narrows every lane", async () => {
+    const user = userEvent.setup();
+    const many = ["1", "2", "3", "4", "5", "6", "7", "8"].map((version) =>
+      claudeEntry(`claude-haiku-${version}`, `Claude Haiku ${version}`),
+    );
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, ...many]),
+      buildProfileSection(OPENAI_IDENTITY, [GPT]),
+    ]);
+    renderMenu({ profiles: [profile] });
 
     const filter = screen.getByRole("textbox", { name: "Filter models" });
     expect(document.activeElement).toBe(filter);
-    await user.type(filter, "haiku 4.2");
+    await user.type(filter, "haiku 3");
 
-    expect(readSections().slice(1)).toEqual([["Anthropic", "Claude Haiku 4.2"]]);
+    expect(readSections().slice(1)).toEqual([["Anthropic", "Claude Haiku 3"]]);
+    await user.clear(filter);
+    await user.type(filter, "zzz");
+    expect(screen.getByText("No model matches.")).toBeTruthy();
   });
 
-  it("lets a Draft Thread switch to another account, which chooses the account alone", async () => {
-    const user = userEvent.setup();
-    const onChoose = renderMenu({ kind: "draft" });
+  it("says so when the user has no model in the menu yet", () => {
+    renderMenu({ profiles: [buildModelProfile([])] });
 
-    expect(readSections()[1]).toEqual(["Anthropic · work · work@example.com · Claude Pro1 model"]);
-    await user.click(
-      screen.getByRole("button", {
-        name: "Anthropic · work · work@example.com · Claude Pro1 model",
-      }),
-    );
+    expect(screen.getByText("No models in your profile yet.")).toBeTruthy();
+  });
+});
 
-    expect(onChoose.mock.calls).toEqual([
-      [{ kind: "account", providerAccountId: WORK_ACCOUNT.id }],
-    ]);
+describe("the model menu of a thread that has started", () => {
+  it("lists the models of its account and harness as one flat list, with the note under it", () => {
+    renderMenu({ kind: "active", recent: [recentOf(OPUS)] });
+
+    // No Recent, no lane label, and no entry of another account.
+    expect(readSections()).toEqual([["Claude Sonnet 5", "Claude Opus 5"]]);
+    expect(screen.getByText("Other models start a new thread.")).toBeTruthy();
   });
 
-  it("lists another account's matching models on a Draft Thread, each choosing the account and the model together", async () => {
+  it("hands the picked model to onChoose with the thread's account and harness", async () => {
     const user = userEvent.setup();
-    const onChoose = renderMenu({ kind: "draft", accounts: [MANY_ACCOUNT, WORK_ACCOUNT] });
+    const { onChoose } = renderMenu({ kind: "active" });
 
-    await user.type(screen.getByRole("textbox", { name: "Filter models" }), "haiku 5");
-    expect(readSections().slice(1)).toEqual([["Anthropic · work", "Claude Haiku 5 · default"]]);
-    await user.click(screen.getByRole("button", { name: "Claude Haiku 5 · default" }));
+    await user.click(screen.getByRole("button", { name: "Claude Opus 5" }));
 
     expect(onChoose.mock.calls).toEqual([
-      [{ kind: "model", providerAccountId: WORK_ACCOUNT.id, model: "claude-haiku-5" }],
+      [
+        {
+          kind: "model",
+          providerAccountId: CLAUDE.id,
+          harnessId: ANTHROPIC_IDENTITY.harnessId,
+          model: OPUS.model,
+        },
+      ],
     ]);
   });
 });

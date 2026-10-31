@@ -279,6 +279,24 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the id and name of every runner that can receive frames now:
+     * online and not draining or retired (`buildOnlineClause`). A reserved
+     * runner is included, because it still runs work that names it. Sorted by
+     * name.
+     */
+    listOnline: (): Effect.Effect<
+      ReadonlyArray<{ readonly id: string; readonly name: string }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array; readonly name: string }>`
+          SELECT id, name FROM runners WHERE ${sql.literal(buildOnlineClause("runners"))}
+          ORDER BY name, id
+        `,
+        (rows) => rows.map((row) => ({ id: uuidToString(row.id), name: row.name })),
+      ),
+
+    /**
      * Returns the runners a placement that names no runner may choose: online,
      * active, and not reserved.
      *

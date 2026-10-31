@@ -75,6 +75,12 @@ describe("the Z.ai provider", () => {
     expect(registered).toEqual([{ "api-key": parseQuotaBody }]);
   });
 
+  it("reads its Model Catalog from pi and brings the current models into a profile", () => {
+    const definition = captureProviderDefinition();
+    expect(definition.catalogSource).toEqual({ kind: "harness-probe", harnessId: "pi/pi" });
+    expect(definition.defaultSelection).toBe("current-models");
+  });
+
   it("suggests glm-5.3-flash for text generation", () => {
     expect(captureProviderDefinition().suggestedTextGenerationModel).toBe("glm-5.3-flash");
   });

@@ -71,6 +71,15 @@ describe("the Anthropic provider", () => {
     expect(captureProviderDefinition().defaultHarnessId).toBe("claude-code/claude-code");
   });
 
+  it("reads its Model Catalog from Claude Code and brings the current models into a profile", () => {
+    const definition = captureProviderDefinition();
+    expect(definition.catalogSource).toEqual({
+      kind: "harness-probe",
+      harnessId: "claude-code/claude-code",
+    });
+    expect(definition.defaultSelection).toBe("current-models");
+  });
+
   it("suggests the haiku alias for text generation", () => {
     expect(captureProviderDefinition().suggestedTextGenerationModel).toBe("haiku");
   });

@@ -41,13 +41,20 @@ const MOSS: Runner = {
 
 const SIGNED_IN = FIXTURE_ACCOUNT.snapshots[0]!;
 
-/** Returns the fixture account with one snapshot on moss, probed at `probedAt`. */
+/**
+ * Returns the fixture account with one snapshot on moss, probed at `probedAt`,
+ * and its readiness there: ready when the snapshot is signed in, else not
+ * signed in.
+ */
 const buildAccount = (
   auth: CapabilitySnapshot["auth"],
   probedAt = SIGNED_IN.probedAt,
 ): ProviderAccount => ({
   ...FIXTURE_ACCOUNT,
   snapshots: [{ ...SIGNED_IN, auth, probedAt }],
+  readiness: [
+    { ...FIXTURE_ACCOUNT.readiness[0]!, state: auth.status === "ok" ? "ready" : "not-signed-in" },
+  ],
 });
 
 const SIGNED_OUT = buildAccount({ status: "unauthenticated" });
@@ -193,6 +200,7 @@ describe("the provider sign-in dialog", () => {
       ...FIXTURE_ACCOUNT,
       kind: "subscription-token",
       expiresAt: "2020-01-01T00:00:00.000Z",
+      readiness: [{ ...FIXTURE_ACCOUNT.readiness[0]!, state: "token-expired" }],
     };
     const calls = stubApi({
       ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, runners: [MOSS], accounts: [expired] }),

@@ -98,14 +98,39 @@ export const holdsMadeToken = (kind: AccountKind): boolean =>
   kind.setup.some((step) => step.kind === "harness-login");
 
 /**
+ * Whether the account's key or token can be used:
+ *
+ * - `usable`: the secret is stored and, for a token, has not expired.
+ * - `missing`: the secret is not stored.
+ * - `expired`: the secret is stored, but the token's expiry has passed.
+ */
+export type CredentialState = "usable" | "missing" | "expired";
+
+/**
+ * Decides whether the account's key or token can be used. Call it only for an
+ * account whose kind holds a credential. `secretStored` says whether the
+ * account's credential secret exists. `nowMillis` is the current time, so
+ * every caller judges expiry against the same kind of clock reading.
+ */
+export const decideCredentialState = (
+  account: Pick<StoredProviderAccount, "credentialExpiresAt">,
+  secretStored: boolean,
+  nowMillis: number,
+): CredentialState => {
+  if (!secretStored) return "missing";
+  return account.credentialExpiresAt !== null &&
+    Date.parse(account.credentialExpiresAt) <= nowMillis
+    ? "expired"
+    : "usable";
+};
+
+/**
  * Returns why the account's key or token cannot be used, in words a user can
- * act on, or `null` when it can: the secret is stored and, for a token, has
- * not expired. Call it only for an account whose kind holds a credential.
+ * act on, or `null` when it can (see `decideCredentialState`). Call it only
+ * for an account whose kind holds a credential.
  *
  * `provider` and `kind` are the account's, as `decideProviderAccountHarness`
- * returns them. `secretStored` says whether the account's credential secret exists.
- * `nowMillis` is the current time, so every caller judges expiry against the
- * same kind of clock reading.
+ * returns them.
  */
 export const findCredentialProblem = (
   account: Pick<StoredProviderAccount, "label" | "credentialExpiresAt">,
@@ -115,19 +140,17 @@ export const findCredentialProblem = (
   nowMillis: number,
 ): string | null => {
   const name = nameProviderAccount(provider.displayName, account.label);
-  if (!secretStored) {
-    // A token is made by a sign-in, a key is typed in; the message says which to do.
-    return holdsMadeToken(kind)
-      ? `${name} has no token. Make one in Settings › Providers.`
-      : `${name} has no key. Add one in Settings › Providers.`;
+  switch (decideCredentialState(account, secretStored, nowMillis)) {
+    case "usable":
+      return null;
+    case "missing":
+      // A token is made by a sign-in, a key is typed in; the message says which to do.
+      return holdsMadeToken(kind)
+        ? `${name} has no token. Make one in Settings › Providers.`
+        : `${name} has no key. Add one in Settings › Providers.`;
+    case "expired":
+      return `${name}'s token expired on ${account.credentialExpiresAt?.slice(0, 10)}. Make a new one in Settings › Providers.`;
   }
-  if (
-    account.credentialExpiresAt !== null &&
-    Date.parse(account.credentialExpiresAt) <= nowMillis
-  ) {
-    return `${name}'s token expired on ${account.credentialExpiresAt.slice(0, 10)}. Make a new one in Settings › Providers.`;
-  }
-  return null;
 };
 
 /**

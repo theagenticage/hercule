@@ -13,6 +13,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_ACCOUNT,
+  FIXTURE_MODEL_PROFILE,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -109,6 +110,7 @@ describe("Settings > System", () => {
 });
 
 describe("Settings > System, text generation", () => {
+  /** The models as the setting stores them: a model in the account's default harness names no harness. */
   const OPUS = { providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-opus-5" };
   const SONNET = { providerAccountId: FIXTURE_ACCOUNT.id, model: "claude-sonnet-5" };
 
@@ -137,7 +139,11 @@ describe("Settings > System, text generation", () => {
       user: {},
     };
     const calls = stubApi({
-      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
+      ...buildSidebarHandlers({
+        ...SIDEBAR_FIXTURE,
+        accounts: [FIXTURE_ACCOUNT],
+        modelProfiles: [FIXTURE_MODEL_PROFILE],
+      }),
       "GET /api/v1/settings": () => ({ body: stored }),
       "PATCH /api/v1/settings": (call) => {
         stored = { controller: (call.body as SettingsPatch).controller ?? {}, user: {} };

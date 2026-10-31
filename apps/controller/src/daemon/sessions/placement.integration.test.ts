@@ -109,6 +109,8 @@ const buildPlugins = (): ReadonlyArray<Plugin> => [
           },
         ],
         defaultHarnessId: "multi/delta",
+        catalogSource: { kind: "harness-probe", harnessId: "multi/delta" },
+        defaultSelection: "current-models",
       },
     ],
   }).plugin,

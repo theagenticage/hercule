@@ -25,6 +25,7 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_ACCOUNT,
+  FIXTURE_MODEL_PROFILE,
   holdAnswer,
   neverAnswer,
   type Answer,
@@ -114,6 +115,7 @@ const openAssistants = async (
     ...buildSidebarHandlers({
       ...SIDEBAR_FIXTURE,
       accounts: [FIXTURE_ACCOUNT],
+      modelProfiles: [FIXTURE_MODEL_PROFILE],
       assistants: [
         { assistant: ADA, session: null },
         { assistant: MILO, session: null },

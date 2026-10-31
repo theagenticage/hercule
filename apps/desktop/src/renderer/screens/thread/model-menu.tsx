@@ -1,166 +1,174 @@
-import { Fragment, useState, type JSX } from "react";
+import { useState, type JSX } from "react";
 import {
   buildModelMenu,
-  describeProviderAccountRow,
   describeModelRow,
-  type ModelMenu as ModelMenuModel,
+  findProviderPluginId,
+  type ModelMenuRow,
+  type PluginIdentity,
   type RecentModel,
+  type SignInTarget,
   type ThreadCatalogs,
   type ThreadChoice,
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
-import { ChevronRightIcon } from "../../icons/chevron-right";
+import { ProviderMark } from "../settings/providers/provider-mark";
 import { MenuLine } from "./menu-line";
-import { HarnessLogo } from "./harness-logo";
 
-type ModelRow = ModelMenuModel["current"]["rows"][number];
+/** The size of the Provider's mark beside a lane's name and a Recent row. */
+const MARK_SIZE = 12;
 
 /**
  * Renders the content of a thread's model menu, as `buildModelMenu` builds
- * it:
+ * it from the user's Model Profile:
  *
- * - a filter, when the accounts together offer more than eight models;
- * - Recent: the models picked most recently;
- * - the models of the thread's account, with its older models behind one
- *   row that shows them;
- * - every other account.
+ * - a filter, when the profile holds more than eight entries;
+ * - on a Draft Thread: Recent, the entries picked most recently, then one lane
+ *   per Provider Account with its entries in the profile's order. A lane
+ *   whose models are still being read shows a note in place of rows;
+ * - on a thread that has started: one flat list of the models it can switch
+ *   to, and a note that other models start a new thread.
  *
- * `kind` decides what the other accounts offer. A thread that has started
- * keeps its account, so they are dimmed with the reason. A Draft Thread can
- * switch: an account's row picks the account and its default model, and
- * while the filter matches an account's models, they are listed under its
- * name and each picks the account and the model together. An account that
- * is not signed in on the machine stays dimmed.
+ * An entry that cannot run now is dimmed with its reason at the right, never
+ * hidden. When signing in would fix it and `onSignIn` is given, the row also
+ * has a Sign in link.
  *
- * `readRecent` returns the Recent list as the app stores it, and `config`
- * is what the thread runs with, picks included, so the check marks the model
- * the next message will use. `onChoose` receives the one choice a row makes.
+ * `readRecent` returns the Recent list as the app stores it, and `config` is
+ * what the thread runs with, picks included, so the check marks the entry the
+ * next message will use. `runnerId` is the machine a Draft Thread is bound to,
+ * or `null` while any machine will do (see `ModelMenuView`). `plugins` give
+ * the Providers their marks. `onChoose` receives the one choice a row makes.
  *
- * The filter's text and whether the older models show are held here, so
- * they start afresh each time the menu opens. The Recent list is read once,
- * when the menu opens: it changes only when a message is sent.
+ * The filter's text starts afresh each time the menu opens. The Recent list is
+ * read once, when the menu opens: it changes only when a message is sent.
  */
 export function ModelMenu({
   catalogs,
+  plugins,
   config,
   kind,
+  runnerId,
   readRecent,
   onChoose,
+  onSignIn,
 }: {
   readonly catalogs: ThreadCatalogs;
+  readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly config: ThreadConfig;
   readonly kind: ThreadKind;
+  readonly runnerId: string | null;
   readonly readRecent: () => readonly RecentModel[];
   readonly onChoose: (choice: ThreadChoice) => void;
+  readonly onSignIn?: ((target: SignInTarget) => void) | undefined;
 }): JSX.Element {
   const [filter, setFilter] = useState("");
-  const [older, setOlder] = useState(false);
   const [recent] = useState(readRecent);
-  const menu = buildModelMenu(catalogs, config, { kind, filter, recent });
-  const { current } = menu;
+  const menu = buildModelMenu(catalogs, config, { kind, filter, recent, runnerId });
 
-  const renderModelRow = (harnessId: string | null, row: ModelRow): JSX.Element => (
-    <MenuLine
-      key={`${row.providerAccountId}:${row.slug}`}
-      glyph={harnessId === null ? null : <HarnessLogo harnessId={harnessId} size={13} />}
-      name={row.name}
-      detail={describeModelRow(row)}
-      current={row.current}
-      onPick={() => {
-        onChoose({ kind: "model", providerAccountId: row.providerAccountId, model: row.slug });
-      }}
+  const renderMark = (providerId: string): JSX.Element => (
+    <ProviderMark
+      pluginId={findProviderPluginId(catalogs.providers, { providerId })}
+      plugins={plugins}
+      size={MARK_SIZE}
     />
   );
 
+  const renderRow = (
+    row: ModelMenuRow,
+    options: { readonly account?: string | null; readonly mark?: boolean } = {},
+  ): JSX.Element => {
+    const detail = [options.account ?? null, describeModelRow(row)]
+      .filter((part) => part !== null)
+      .join(" · ");
+    const { problem } = row;
+    const signIn = problem?.signIn ?? null;
+    return (
+      <MenuLine
+        key={`${row.providerAccountId}:${row.harnessId}:${row.model}`}
+        glyph={options.mark === true ? renderMark(row.providerId) : null}
+        name={row.name}
+        detail={detail === "" ? null : detail}
+        note={problem?.message}
+        current={row.isCurrent}
+        inert={problem !== null}
+        action={
+          signIn === null || onSignIn === undefined
+            ? null
+            : {
+                label: "Sign in",
+                onAct: () => {
+                  onSignIn(signIn);
+                },
+              }
+        }
+        onPick={() => {
+          onChoose({
+            kind: "model",
+            providerAccountId: row.providerAccountId,
+            harnessId: row.harnessId,
+            model: row.model,
+          });
+        }}
+      />
+    );
+  };
+
+  const filterField = menu.filterable ? (
+    <div className="pop-sec">
+      <input
+        className="field menu-filter"
+        aria-label="Filter models"
+        placeholder="Filter models…"
+        // The filter is what the user came to the menu for when there are
+        // this many entries.
+        autoFocus
+        value={filter}
+        onChange={(event) => {
+          setFilter(event.target.value);
+        }}
+      />
+    </div>
+  ) : null;
+  const emptyNote = menu.empty === null ? null : <p className="menu-note">{menu.empty}</p>;
+
+  if (menu.kind === "active") {
+    return (
+      <>
+        {filterField}
+        {emptyNote ?? <div className="pop-sec">{menu.rows.map((row) => renderRow(row))}</div>}
+        <p className="pop-foot">{menu.note}</p>
+      </>
+    );
+  }
+
+  const { profile } = menu;
+  if (profile === null || emptyNote !== null) {
+    return (
+      <>
+        {filterField}
+        {emptyNote}
+      </>
+    );
+  }
   return (
     <>
-      {menu.filterable ? (
-        <div className="pop-sec">
-          <input
-            className="field menu-filter"
-            aria-label="Filter models"
-            placeholder="Filter models…"
-            // The filter is what the user came to the menu for when there
-            // are this many models.
-            autoFocus
-            value={filter}
-            onChange={(event) => {
-              setFilter(event.target.value);
-            }}
-          />
-        </div>
-      ) : null}
-      {menu.recent.length === 0 ? null : (
+      {filterField}
+      {profile.recent.length === 0 ? null : (
         <div className="pop-sec">
           <div className="q-h">Recent</div>
-          {menu.recent.map((row) => (
-            <MenuLine
-              key={`${row.providerAccountId}:${row.model}`}
-              glyph={<HarnessLogo harnessId={row.harnessId} size={13} />}
-              name={row.name}
-              detail={row.account}
-              note={row.dimmed}
-              current={false}
-              inert={row.dimmed !== null}
-              onPick={() => {
-                onChoose({
-                  kind: "model",
-                  providerAccountId: row.providerAccountId,
-                  model: row.model,
-                });
-              }}
-            />
-          ))}
+          {profile.recent.map((row) => renderRow(row, { account: row.account, mark: true }))}
         </div>
       )}
-      {/* A filter that matches none of the account's models leaves nothing under its name. */}
-      {current.rows.length === 0 && current.older.length === 0 ? null : (
-        <div className="pop-sec">
-          {current.label === null ? null : <div className="q-h">{current.label}</div>}
-          {current.rows.map((row) => renderModelRow(current.harnessId, row))}
-          {current.older.length === 0 ? null : older ? (
-            current.older.map((row) => renderModelRow(current.harnessId, row))
-          ) : (
-            <button
-              type="button"
-              className="line"
-              onClick={() => {
-                setOlder(true);
-              }}
-            >
-              <span className="grow">older models ({current.older.length})</span>
-              <ChevronRightIcon size={13} />
-            </button>
-          )}
+      {profile.lanes.map((lane) => (
+        <div key={lane.providerAccountId} className="pop-sec">
+          <div className="q-h">
+            {renderMark(lane.providerId)}
+            {lane.name}
+          </div>
+          {lane.note === null ? lane.rows.map((row) => renderRow(row)) : null}
+          {lane.note === null ? null : <p className="menu-note">{lane.note}</p>}
         </div>
-      )}
-      {menu.others.length === 0 ? null : (
-        <div className="pop-sec">
-          {menu.others.map((account) =>
-            account.dimmed === null && account.rows.length > 0 ? (
-              <Fragment key={account.providerAccountId}>
-                <div className="q-h">{account.name}</div>
-                {account.rows.map((row) => renderModelRow(account.harnessId, row))}
-              </Fragment>
-            ) : (
-              <MenuLine
-                key={account.providerAccountId}
-                glyph={<HarnessLogo harnessId={account.harnessId} size={13} />}
-                name={account.name}
-                detail={describeProviderAccountRow(account)}
-                note={account.dimmed ?? account.models}
-                current={false}
-                chevron={account.dimmed === null}
-                inert={account.dimmed !== null}
-                onPick={() => {
-                  onChoose({ kind: "account", providerAccountId: account.providerAccountId });
-                }}
-              />
-            ),
-          )}
-        </div>
-      )}
+      ))}
     </>
   );
 }

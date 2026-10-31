@@ -119,6 +119,35 @@ export const AccountKind = Schema.Struct({
 export type AccountKind = Schema.Schema.Type<typeof AccountKind>;
 
 /**
+ * Where the controller reads a provider's Model Catalog from. Only one source
+ * exists so far: probing a harness.
+ *
+ * - `harness-probe` reads the catalog from the list of models that a probe of
+ *   `harnessId` returns for the account, on a runner where the account is
+ *   ready in that harness. A probe of any other harness never changes the
+ *   catalog.
+ */
+export const CatalogSource = Schema.Struct({
+  kind: Schema.Literal("harness-probe"),
+  /** The qualified id of the harness to probe, such as `claude-code/claude-code`. */
+  harnessId: QualifiedContributionId,
+});
+
+export type CatalogSource = Schema.Schema.Type<typeof CatalogSource>;
+
+/**
+ * Which models of a provider's catalog go into a Model Profile when the
+ * account is first added to it (spec 06 section 17).
+ *
+ * - `current-models`: every model the catalog read returned that is not marked
+ *   legacy, in the catalog's order.
+ * - `none`: nothing. The user picks each model.
+ */
+export const DefaultSelection = Schema.Literals(["current-models", "none"]);
+
+export type DefaultSelection = Schema.Schema.Type<typeof DefaultSelection>;
+
+/**
  * A provider's static self-description, which is all a provider plugin
  * contributes for now. `id` is the plugin's bare word; the host mints the
  * qualified id (`anthropic/anthropic`) at registration.
@@ -133,6 +162,15 @@ export const ProviderDefinition = Schema.Struct({
    * lists it in `harnesses`, because a new account of any kind starts with it. The harness need not be installed anywhere yet.
    */
   defaultHarnessId: QualifiedContributionId,
+  /**
+   * Where the controller reads an account's Model Catalog from. The host
+   * refuses a provider when one of its account kinds does not list
+   * `catalogSource.harnessId` in `harnesses`, because an account of that kind
+   * could never be read.
+   */
+  catalogSource: CatalogSource,
+  /** Which models of the catalog an account brings into a Model Profile when it is first added. */
+  defaultSelection: DefaultSelection,
   /**
    * The model slug this provider suggests for text generation: a small, cheap
    * model from its catalog, written as the provider's own model id. Absent

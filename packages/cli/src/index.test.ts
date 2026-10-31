@@ -851,6 +851,10 @@ describe("id tails", () => {
       usage: [],
       failure: null,
       snapshots: [],
+      modelCount: 0,
+      catalogReadAt: null,
+      catalogError: null,
+      readiness: [],
       createdAt: "2026-09-07T00:00:00.000Z",
       updatedAt: "2026-09-07T00:00:00.000Z",
     };

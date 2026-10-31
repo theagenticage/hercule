@@ -1,462 +1,805 @@
 /**
- * Tests `buildModelMenu(catalogs, config, { kind, filter, recent })`, which
- * builds what the model selector renders: a filter field only when there are
- * more than eight models, the recent models, the current account's models
- * with its legacy models collapsed, and one row per other account.
+ * Tests `buildModelMenu(catalogs, current, view)`, which builds what the model
+ * selector renders from the user's Model Profiles:
+ *
+ * - a draft shows the open profile: Recent, then one lane per account with
+ *   its entries, a filter only for more than eight entries;
+ * - an entry that cannot run is dimmed with its reason, and offers a sign-in
+ *   when signing in would fix it;
+ * - a running thread shows one flat list of its account and harness.
  */
 import { describe, expect, it } from "vitest";
-import type { ProviderAccount, Runner } from "@hercule/contract";
+import type { ProviderAccount, ResolvedModelProfileEntry, Runner } from "@hercule/contract";
 import {
-  BARE,
-  WITH_AGENTS,
-  buildProviderAccount,
-  buildSnapshot,
   ANTHROPIC_IDENTITY,
-  OPENAI_IDENTITY,
-  ZAI_IDENTITY,
   HARNESSES,
+  OPENAI_IDENTITY,
   PROVIDERS,
+  WITH_AGENTS,
+  ZAI_IDENTITY,
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
+  buildProviderAccount,
 } from "../providers.testing";
-import type { ThreadConfig } from "./config";
-import { buildModelMenu } from "./model-menu";
+import type { ThreadCatalogs } from "./config";
+import { buildModelMenu, type ModelMenu, type ModelMenuView } from "./model-menu";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
   ...WITH_AGENTS,
   ...overrides,
 });
 
-const LOCAL = buildRunner({ id: "r-local", name: "moss" });
+const MOSS = buildRunner({ id: "r-moss", name: "moss" });
+const COVE = buildRunner({ id: "r-cove", name: "cove" });
 
-const SONNET = {
-  slug: "claude-sonnet-5",
-  name: "Claude Sonnet 5",
-  imageInput: { maxBytes: null },
-  isDefault: true,
-  options: [],
-};
-const OPUS = {
-  slug: "claude-opus-5",
-  name: "Claude Opus 5",
-  imageInput: { maxBytes: null },
-  options: [],
-};
-const LEGACY = {
-  slug: "claude-sonnet-3",
-  name: "Claude Sonnet 3",
-  imageInput: { maxBytes: null },
-  isLegacy: true,
-  options: [],
-};
-const GPT = { slug: "gpt-5", name: "GPT-5", imageInput: { maxBytes: null }, options: [] };
+const CLAUDE_HARNESS = ANTHROPIC_IDENTITY.harnessId;
+const CODEX_HARNESS = OPENAI_IDENTITY.harnessId;
 
-const withModels = (
-  base: ProviderAccount,
-  id: string,
-  label: string | null,
-  models: ProviderAccount["snapshots"][number]["models"],
-): ProviderAccount => ({
-  ...base,
-  id,
-  label,
-  snapshots: [buildSnapshot({ runnerId: LOCAL.id, harnessId: base.defaultHarnessId, models })],
-});
+/** Anthropic: ready on both machines. */
+const CLAUDE = buildProviderAccount(
+  ANTHROPIC_IDENTITY,
+  [],
+  [{ runnerId: MOSS.id }, { runnerId: COVE.id }],
+);
+/** OpenAI: signed in on cove only. */
+const CODEX = buildProviderAccount(
+  OPENAI_IDENTITY,
+  [],
+  [{ runnerId: MOSS.id, state: "not-signed-in" }, { runnerId: COVE.id }],
+);
+/** Z.ai: pi is on neither machine. */
+const ZAI = buildProviderAccount(
+  ZAI_IDENTITY,
+  [],
+  [
+    { runnerId: MOSS.id, state: "harness-missing" },
+    { runnerId: COVE.id, state: "harness-missing" },
+  ],
+);
 
-/** An unlabelled Anthropic account. */
-const CLAUDE: ProviderAccount = buildProviderAccount(ANTHROPIC_IDENTITY, [
-  buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS, LEGACY] }),
-]);
+const SONNET = buildProfileEntry(ANTHROPIC_IDENTITY, "claude-sonnet-5", { name: "Sonnet 5" });
+const OPUS = buildProfileEntry(ANTHROPIC_IDENTITY, "claude-opus-5", { name: "Opus 5" });
+const GPT = buildProfileEntry(OPENAI_IDENTITY, "gpt-6", { name: "GPT-6" });
+const GLM = buildProfileEntry(ZAI_IDENTITY, "glm-5.3", { name: "GLM 5.3" });
 
-const WORK = withModels(CLAUDE, "account-claude-work", "work", [SONNET, OPUS, LEGACY]);
-const PERSONAL = withModels(CLAUDE, "account-claude-personal", "personal", [OPUS]);
-
-const CODEX = buildProviderAccount(OPENAI_IDENTITY, [
-  buildSnapshot({
-    runnerId: LOCAL.id,
-    auth: { status: "ok", identity: "rogier@example.com", planLabel: "Pro" },
-    models: [GPT],
-  }),
-]);
-
-const CODEX_OUT = buildProviderAccount(OPENAI_IDENTITY, [
-  buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
-]);
-
-/** Found on no runner: it has no snapshot for any runner. */
-const PI = buildProviderAccount(ZAI_IDENTITY, []);
-
-const buildCatalogs = (accounts: readonly ProviderAccount[]) => ({
+const buildCatalogs = (
+  modelProfiles: ThreadCatalogs["modelProfiles"],
+  accounts: readonly ProviderAccount[] = [CLAUDE, CODEX, ZAI],
+  runners: readonly Runner[] = [MOSS, COVE],
+): ThreadCatalogs => ({
   accounts,
-  runners: [LOCAL],
-  thisMacRunnerId: LOCAL.id,
+  runners,
+  thisMacRunnerId: MOSS.id,
   providers: PROVIDERS,
   harnesses: HARNESSES,
+  modelProfiles,
 });
 
-/** Returns the thread's config. The menu reads only the account, the harness and the model. */
-const buildConfig = (providerAccountId: string, model: string): ThreadConfig => ({
-  providerAccountId,
+/** The open profile: Claude's two models, Codex's, and Z.ai's. Opus is the default. */
+const MAIN = buildModelProfile(
+  [
+    buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS]),
+    buildProfileSection(OPENAI_IDENTITY, [GPT]),
+    buildProfileSection(ZAI_IDENTITY, [GLM]),
+  ],
+  { defaultEntry: { providerAccountId: CLAUDE.id, model: "claude-opus-5", harnessId: null } },
+);
+
+const CURRENT = {
+  providerAccountId: CLAUDE.id,
   harnessId: null,
-  model,
-  accessMode: "approval-required",
-  runnerId: LOCAL.id,
-  profileId: "p-unrestricted",
-  options: {},
-});
+  model: "claude-sonnet-5",
+  runnerId: null,
+};
 
-const DRAFT = { kind: "draft" as const, filter: "", recent: [] };
+const DRAFT: ModelMenuView = { kind: "draft", filter: "", recent: [], runnerId: null };
 
-/** Returns one account with `count` models, to test the filter threshold. */
-const buildCountedProviderAccount = (
-  id: string,
-  label: string | null,
-  count: number,
-): ProviderAccount =>
-  withModels(
-    CLAUDE,
-    id,
-    label,
-    Array.from({ length: count }, (_, index) => ({
-      slug: `model-${id}-${index}`,
-      name: `Model ${index}`,
-      imageInput: { maxBytes: null },
-      options: [],
-    })),
-  );
+/** Returns the open profile of a draft menu. */
+const readDraftProfile = (menu: ModelMenu) => {
+  if (menu.kind !== "draft" || menu.profile === null) throw new Error("expected a draft profile");
+  return menu.profile;
+};
 
-describe("buildModelMenu: filterable", () => {
-  it("offers no filter at eight models across all accounts", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([
-        buildCountedProviderAccount("account-a", "a", 5),
-        buildCountedProviderAccount("account-b", "b", 3),
-      ]),
-      buildConfig("account-a", "model-account-a-0"),
-      DRAFT,
-    );
+const readActive = (menu: ModelMenu) => {
+  if (menu.kind !== "active") throw new Error("expected a running thread's menu");
+  return menu;
+};
 
-    expect(menu.filterable).toBe(false);
-  });
-
-  it("offers a filter at nine models across all accounts", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([
-        buildCountedProviderAccount("account-a", "a", 5),
-        buildCountedProviderAccount("account-b", "b", 4),
-      ]),
-      buildConfig("account-a", "model-account-a-0"),
-      DRAFT,
-    );
-
-    expect(menu.filterable).toBe(true);
-  });
-});
-
-describe("buildModelMenu: filtering", () => {
-  it("keeps the matching rows in every account, case-insensitively, and omits accounts with no match", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([WORK, PERSONAL, CODEX]),
-      buildConfig(WORK.id, SONNET.slug),
-      {
-        ...DRAFT,
-        filter: "OPUS",
-      },
-    );
-
-    expect(menu.current.rows.map((row) => row.slug)).toEqual([OPUS.slug]);
-    expect(menu.others.map((row) => row.providerAccountId)).toEqual([PERSONAL.id]);
-    expect(menu.others[0]!.rows.map((row) => row.slug)).toEqual([OPUS.slug]);
-  });
-
-  it("matches a model by its slug as well as by its display name", () => {
-    const menu = buildModelMenu(buildCatalogs([WORK]), buildConfig(WORK.id, SONNET.slug), {
-      ...DRAFT,
-      filter: "sonnet-5",
-    });
-
-    expect(menu.current.rows.map((row) => row.slug)).toEqual([SONNET.slug]);
-  });
-});
-
-describe("buildModelMenu: recent", () => {
-  it("lists the given pairs in order, naming the account only for a provider with more than one account", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([WORK, PERSONAL, CODEX]),
-      buildConfig(WORK.id, SONNET.slug),
-      {
-        ...DRAFT,
-        recent: [
-          { providerAccountId: CODEX.id, model: GPT.slug },
-          { providerAccountId: PERSONAL.id, model: OPUS.slug },
-        ],
-      },
-    );
-
-    expect(menu.recent).toHaveLength(2);
-    expect(menu.recent[0]).toMatchObject({
-      providerAccountId: CODEX.id,
-      model: GPT.slug,
-      name: "GPT-5",
-      harnessId: "codex/codex",
-      account: null,
-    });
-    expect(menu.recent[1]).toMatchObject({
-      providerAccountId: PERSONAL.id,
-      model: OPUS.slug,
-      name: "Claude Opus 5",
-      harnessId: "claude-code/claude-code",
-      account: "Anthropic · personal",
+describe("buildModelMenu for a draft", () => {
+  it("has no profile when the user has none", () => {
+    expect(buildModelMenu(buildCatalogs([]), CURRENT, DRAFT)).toEqual({
+      kind: "draft",
+      filterable: false,
+      profile: null,
+      empty: "No models in your profile yet.",
     });
   });
 
-  it("holds at most three rows", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([buildCountedProviderAccount("account-a", "a", 5)]),
-      buildConfig("account-a", "model-account-a-0"),
-      {
-        ...DRAFT,
-        recent: [0, 1, 2, 3].map((index) => ({
-          providerAccountId: "account-a",
-          model: `model-account-a-${index}`,
-        })),
-      },
-    );
+  it("shows one lane per account in the profile's order, with the account's name and logo, and its entries in order", () => {
+    const profile = readDraftProfile(buildModelMenu(buildCatalogs([MAIN]), CURRENT, DRAFT));
 
-    expect(menu.recent).toHaveLength(3);
+    expect(profile).toMatchObject({ profileId: MAIN.id, name: "Main" });
+    expect(
+      profile.lanes.map((lane) => [lane.name, lane.providerId, lane.rows.map((row) => row.name)]),
+    ).toEqual([
+      ["Anthropic", "anthropic/anthropic", ["Sonnet 5", "Opus 5"]],
+      ["OpenAI", "openai/openai", ["GPT-6"]],
+      ["Z.ai", "zai/zai", ["GLM 5.3"]],
+    ]);
   });
 
-  it("drops a pair whose account or model is no longer in the catalog", () => {
-    const menu = buildModelMenu(buildCatalogs([WORK, CODEX]), buildConfig(WORK.id, SONNET.slug), {
-      ...DRAFT,
-      recent: [
-        { providerAccountId: "account-that-went-away", model: SONNET.slug },
-        { providerAccountId: WORK.id, model: "claude-model-that-went-away" },
-        { providerAccountId: CODEX.id, model: GPT.slug },
-      ],
-    });
+  it("builds a row that names its entry fully, marks the default and the current entry, and has no problem when it can run", () => {
+    const profile = readDraftProfile(buildModelMenu(buildCatalogs([MAIN]), CURRENT, DRAFT));
+    const [sonnet, opus] = profile.lanes[0]!.rows;
 
-    expect(menu.recent.map((row) => row.model)).toEqual([GPT.slug]);
-  });
-
-  it("dims a recent row from another account as account fixed on an active thread", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([WORK, PERSONAL, CODEX]),
-      buildConfig(WORK.id, SONNET.slug),
-      {
-        ...DRAFT,
-        kind: "active",
-        recent: [
-          { providerAccountId: PERSONAL.id, model: OPUS.slug },
-          { providerAccountId: WORK.id, model: OPUS.slug },
-        ],
-      },
-    );
-
-    expect(menu.recent[0]).toMatchObject({
-      providerAccountId: PERSONAL.id,
-      dimmed: "account fixed",
-    });
-    expect(menu.recent[1]).toMatchObject({ providerAccountId: WORK.id, dimmed: null });
-  });
-});
-
-describe("buildModelMenu: the current account", () => {
-  it("labels the section with the account name, label included", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([WORK, PERSONAL]),
-      buildConfig(WORK.id, SONNET.slug),
-      DRAFT,
-    );
-
-    expect(menu.current.label).toBe("Anthropic · work");
-  });
-
-  it("labels the section with the provider's name when the account has no label", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([CLAUDE, CODEX]),
-      buildConfig(CLAUDE.id, SONNET.slug),
-      DRAFT,
-    );
-
-    expect(menu.current.label).toBe("Anthropic");
-  });
-
-  it("marks which row is the default and which is current", () => {
-    const menu = buildModelMenu(buildCatalogs([CLAUDE]), buildConfig(CLAUDE.id, OPUS.slug), DRAFT);
-
-    expect(menu.current.rows.find((row) => row.slug === SONNET.slug)).toMatchObject({
-      isDefault: true,
-      current: false,
-    });
-    expect(menu.current.rows.find((row) => row.slug === OPUS.slug)).toMatchObject({
+    expect(sonnet).toEqual({
+      providerAccountId: CLAUDE.id,
+      providerId: "anthropic/anthropic",
+      harnessId: CLAUDE_HARNESS,
+      model: "claude-sonnet-5",
+      name: "Sonnet 5",
+      inHarness: null,
       isDefault: false,
-      current: true,
+      isCurrent: true,
+      problem: null,
     });
+    expect(opus).toMatchObject({ isDefault: true, isCurrent: false });
   });
 
-  it("moves legacy models from rows into older", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([CLAUDE]),
-      buildConfig(CLAUDE.id, SONNET.slug),
-      DRAFT,
-    );
-
-    expect(menu.current.rows.map((row) => row.slug)).toEqual([SONNET.slug, OPUS.slug]);
-    expect(menu.current.older.map((row) => row.slug)).toEqual([LEGACY.slug]);
-  });
-
-  it("keeps legacy models in rows while filtering", () => {
-    const menu = buildModelMenu(buildCatalogs([CLAUDE]), buildConfig(CLAUDE.id, SONNET.slug), {
-      ...DRAFT,
-      filter: "sonnet",
-    });
-
-    expect(menu.current.rows.map((row) => row.slug)).toEqual([SONNET.slug, LEGACY.slug]);
-    expect(menu.current.older).toEqual([]);
-  });
-});
-
-describe("buildModelMenu: the other accounts", () => {
-  it("gives one row per remaining account with its model count and identity", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([CLAUDE, CODEX]),
-      buildConfig(CLAUDE.id, SONNET.slug),
-      DRAFT,
-    );
-
-    expect(menu.others).toHaveLength(1);
-    expect(menu.others[0]).toMatchObject({
-      providerAccountId: CODEX.id,
-      models: "1 model",
-      identity: "rogier@example.com",
-      planLabel: "Pro",
-      dimmed: null,
-    });
-  });
-
-  it("dims an account that is not signed in on the runner, and includes the sign-in it needs", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([CLAUDE, CODEX_OUT]),
-      buildConfig(CLAUDE.id, SONNET.slug),
-      DRAFT,
-    );
-
-    expect(menu.others[0]).toMatchObject({
-      dimmed: "not signed in",
-      signIn: { providerAccountId: CODEX_OUT.id, runnerId: LOCAL.id, subject: "OpenAI on moss" },
-    });
-  });
-
-  it("dims an account with no snapshot on the runner, naming the runner", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([CLAUDE, PI]),
-      buildConfig(CLAUDE.id, SONNET.slug),
-      DRAFT,
-    );
-
-    expect(menu.others[0]).toMatchObject({ providerAccountId: PI.id, dimmed: "not on moss" });
-  });
-
-  it("reads the current account in the thread's harness and every other account in its default harness", () => {
-    const account = buildCountedProviderAccount("account-a", null, 1);
-    const inPi = buildSnapshot({
-      runnerId: LOCAL.id,
+  it("names the harness of an entry that runs in another harness than its lane's, and tells two entries of one model apart", () => {
+    const inPi = buildProfileEntry(ANTHROPIC_IDENTITY, "claude-sonnet-5", {
+      name: "Sonnet 5",
       harnessId: "pi/pi",
-      models: [{ slug: "glm-5.3", name: "GLM 5.3", imageInput: null, options: [] }],
+      resolvedHarnessId: "pi/pi",
     });
-    const current = { ...account, snapshots: [...account.snapshots, inPi] };
-    const other = { ...buildCountedProviderAccount("account-b", null, 1), snapshots: [inPi] };
+    const profile = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, inPi])]);
+    const claude = buildProviderAccount(
+      ANTHROPIC_IDENTITY,
+      [],
+      [{ runnerId: MOSS.id }, { runnerId: MOSS.id, harnessId: "pi/pi" }],
+    );
 
-    const menu = buildModelMenu(
-      buildCatalogs([current, other]),
-      {
-        ...buildConfig("account-a", "glm-5.3"),
+    const lane = readDraftProfile(
+      buildModelMenu(buildCatalogs([profile], [claude]), CURRENT, DRAFT),
+    ).lanes[0]!;
+
+    expect(lane.rows.map((row) => [row.harnessId, row.inHarness, row.isCurrent])).toEqual([
+      [CLAUDE_HARNESS, null, true],
+      ["pi/pi", "pi", false],
+    ]);
+  });
+
+  it("does not call an entry that follows a section harness 'in' another harness", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(
+        ANTHROPIC_IDENTITY,
+        [
+          buildProfileEntry(ANTHROPIC_IDENTITY, "claude-sonnet-5", {
+            resolvedHarnessId: "pi/pi",
+          }),
+        ],
+        { harnessId: "pi/pi" },
+      ),
+    ]);
+
+    const row = readDraftProfile(buildModelMenu(buildCatalogs([profile]), CURRENT, DRAFT)).lanes[0]!
+      .rows[0]!;
+
+    expect(row.inHarness).toBeNull();
+  });
+
+  it("marks the current entry by harness too, not by account and model alone", () => {
+    const inPi = buildProfileEntry(ANTHROPIC_IDENTITY, "claude-sonnet-5", {
+      harnessId: "pi/pi",
+      resolvedHarnessId: "pi/pi",
+    });
+    const profile = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, inPi])]);
+
+    const lane = readDraftProfile(
+      buildModelMenu(buildCatalogs([profile]), { ...CURRENT, harnessId: "pi/pi" }, DRAFT),
+    ).lanes[0]!;
+
+    expect(lane.rows.map((row) => row.isCurrent)).toEqual([false, true]);
+  });
+
+  it("names a lane by its account's label, and shows the open profile only", () => {
+    const work = buildProviderAccount({ ...ANTHROPIC_IDENTITY, id: "account-work", label: "work" });
+    const workIdentity = { ...ANTHROPIC_IDENTITY, id: "account-work" };
+    const second = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [OPUS])], {
+      id: "profile-second",
+      name: "Second",
+    });
+    const first = buildModelProfile([
+      buildProfileSection(workIdentity, [buildProfileEntry(workIdentity, "claude-opus-5")]),
+    ]);
+
+    const profile = readDraftProfile(
+      buildModelMenu(buildCatalogs([first, second], [work, CLAUDE]), CURRENT, DRAFT),
+    );
+
+    expect(profile.profileId).toBe(first.id);
+    expect(profile.lanes.map((lane) => lane.name)).toEqual(["Anthropic · work"]);
+  });
+
+  it("offers a filter only when the profile holds more than eight entries", () => {
+    const entries = (count: number) =>
+      Array.from({ length: count }, (_, index) =>
+        buildProfileEntry(ANTHROPIC_IDENTITY, `model-${String(index)}`),
+      );
+    const profileOf = (count: number) =>
+      buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, entries(count))]);
+
+    const filterable = (count: number) =>
+      buildModelMenu(buildCatalogs([profileOf(count)]), CURRENT, DRAFT).filterable;
+
+    expect(filterable(8)).toBe(false);
+    expect(filterable(9)).toBe(true);
+  });
+
+  it("counts the entries of every account towards the filter", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(
+        ANTHROPIC_IDENTITY,
+        Array.from({ length: 5 }, (_, i) =>
+          buildProfileEntry(ANTHROPIC_IDENTITY, `a-${String(i)}`),
+        ),
+      ),
+      buildProfileSection(
+        OPENAI_IDENTITY,
+        Array.from({ length: 4 }, (_, i) => buildProfileEntry(OPENAI_IDENTITY, `o-${String(i)}`)),
+      ),
+    ]);
+
+    expect(buildModelMenu(buildCatalogs([profile]), CURRENT, DRAFT).filterable).toBe(true);
+  });
+
+  describe("the filter", () => {
+    it("matches the display name and the model id, in any case, and drops the lanes with no match", () => {
+      const catalogs = buildCatalogs([MAIN]);
+
+      const byName = readDraftProfile(
+        buildModelMenu(catalogs, CURRENT, { ...DRAFT, filter: " opus " }),
+      );
+      expect(byName.lanes.map((lane) => lane.rows.map((row) => row.model))).toEqual([
+        ["claude-opus-5"],
+      ]);
+
+      const byId = readDraftProfile(
+        buildModelMenu(catalogs, CURRENT, { ...DRAFT, filter: "GPT-6" }),
+      );
+      expect(byId.lanes.map((lane) => lane.name)).toEqual(["OpenAI"]);
+    });
+
+    it("finds a model by words from its name and its id together", () => {
+      const byWords = readDraftProfile(
+        buildModelMenu(buildCatalogs([MAIN]), CURRENT, { ...DRAFT, filter: "opus 5" }),
+      );
+
+      expect(byWords.lanes.map((lane) => lane.rows.map((row) => row.model))).toEqual([
+        ["claude-opus-5"],
+      ]);
+    });
+
+    it("shows nothing, and says that no model matches, when nothing matches", () => {
+      const menu = buildModelMenu(buildCatalogs([MAIN]), CURRENT, { ...DRAFT, filter: "zzz" });
+      const profile = readDraftProfile(menu);
+
+      expect(profile.lanes).toEqual([]);
+      expect(profile.recent).toEqual([]);
+      expect(menu).toMatchObject({ empty: "No model matches." });
+    });
+
+    it("says nothing about being empty while something is listed", () => {
+      expect(buildModelMenu(buildCatalogs([MAIN]), CURRENT, DRAFT)).toMatchObject({ empty: null });
+    });
+
+    it("says the profile is empty when it holds nothing and the user is not filtering", () => {
+      const empty = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [])]);
+
+      expect(buildModelMenu(buildCatalogs([empty]), CURRENT, DRAFT)).toMatchObject({
+        empty: "No models in your profile yet.",
+      });
+    });
+
+    it("filters Recent too", () => {
+      const recent = [
+        { providerAccountId: CLAUDE.id, harnessId: CLAUDE_HARNESS, model: "claude-opus-5" },
+        { providerAccountId: CODEX.id, harnessId: CODEX_HARNESS, model: "gpt-6" },
+      ];
+
+      const profile = readDraftProfile(
+        buildModelMenu(buildCatalogs([MAIN]), CURRENT, { ...DRAFT, filter: "gpt", recent }),
+      );
+
+      expect(profile.recent.map((row) => row.model)).toEqual(["gpt-6"]);
+    });
+  });
+
+  describe("Recent", () => {
+    it("lists the entries of this profile the user picked, newest first, at most three", () => {
+      const recent = [
+        { providerAccountId: CODEX.id, harnessId: CODEX_HARNESS, model: "gpt-6" },
+        { providerAccountId: CLAUDE.id, harnessId: CLAUDE_HARNESS, model: "claude-opus-5" },
+        { providerAccountId: ZAI.id, harnessId: "pi/pi", model: "glm-5.3" },
+        { providerAccountId: CLAUDE.id, harnessId: CLAUDE_HARNESS, model: "claude-sonnet-5" },
+      ];
+
+      const profile = readDraftProfile(
+        buildModelMenu(buildCatalogs([MAIN]), CURRENT, { ...DRAFT, recent }),
+      );
+
+      expect(profile.recent.map((row) => row.name)).toEqual(["GPT-6", "Opus 5", "GLM 5.3"]);
+    });
+
+    it("skips an entry the profile no longer holds, and one that runs in another harness than the one recorded", () => {
+      const recent = [
+        { providerAccountId: CLAUDE.id, harnessId: CLAUDE_HARNESS, model: "claude-haiku-5" },
+        { providerAccountId: CLAUDE.id, harnessId: "pi/pi", model: "claude-opus-5" },
+        { providerAccountId: CLAUDE.id, harnessId: CLAUDE_HARNESS, model: "claude-opus-5" },
+      ];
+
+      const profile = readDraftProfile(
+        buildModelMenu(buildCatalogs([MAIN]), CURRENT, { ...DRAFT, recent }),
+      );
+
+      expect(profile.recent.map((row) => row.model)).toEqual(["claude-opus-5"]);
+    });
+
+    it("keeps the full row on a recent entry, and names its account only when the user has two at its provider", () => {
+      const recent = [
+        { providerAccountId: CLAUDE.id, harnessId: CLAUDE_HARNESS, model: "claude-opus-5" },
+      ];
+      const alone = readDraftProfile(
+        buildModelMenu(buildCatalogs([MAIN]), CURRENT, { ...DRAFT, recent }),
+      );
+      expect(alone.recent[0]).toMatchObject({ isDefault: true, account: null });
+
+      const work = buildProviderAccount({
+        ...ANTHROPIC_IDENTITY,
+        id: "account-work",
+        label: "work",
+      });
+      const withTwo = readDraftProfile(
+        buildModelMenu(buildCatalogs([MAIN], [CLAUDE, work, CODEX, ZAI]), CURRENT, {
+          ...DRAFT,
+          recent,
+        }),
+      );
+      expect(withTwo.recent[0]).toMatchObject({ account: "Anthropic" });
+    });
+  });
+
+  describe("an entry that cannot run", () => {
+    it("is dimmed with the machine's name when the account is not signed in on the selected machine", () => {
+      const profile = readDraftProfile(
+        buildModelMenu(buildCatalogs([MAIN]), CURRENT, { ...DRAFT, runnerId: MOSS.id }),
+      );
+
+      expect(profile.lanes[1]!.rows[0]!.problem).toEqual({
+        message: "not signed in on moss",
+        signIn: {
+          providerAccountId: CODEX.id,
+          runnerId: MOSS.id,
+          subject: "OpenAI on moss",
+        },
+      });
+    });
+
+    it("is not dimmed on a selected machine where the account is ready, whatever the other machines say", () => {
+      const profile = readDraftProfile(
+        buildModelMenu(buildCatalogs([MAIN]), CURRENT, { ...DRAFT, runnerId: COVE.id }),
+      );
+
+      expect(profile.lanes[1]!.rows[0]!.problem).toBeNull();
+    });
+
+    it("reads the readiness of the entry's own harness, not the account's default", () => {
+      const inPi = buildProfileEntry(ANTHROPIC_IDENTITY, "claude-sonnet-5", {
         harnessId: "pi/pi",
-      },
-      DRAFT,
-    );
+        resolvedHarnessId: "pi/pi",
+      });
+      const profile = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, inPi])]);
 
-    expect(menu.current.harnessId).toBe("pi/pi");
-    expect(menu.current.rows.map((row) => row.slug)).toEqual(["glm-5.3"]);
-    // The other account has only a Pi snapshot, but picking it would run its default harness.
-    expect(menu.others[0]).toMatchObject({
-      harnessId: ANTHROPIC_IDENTITY.harnessId,
-      dimmed: "not on moss",
+      const rows = readDraftProfile(
+        buildModelMenu(buildCatalogs([profile]), CURRENT, { ...DRAFT, runnerId: MOSS.id }),
+      ).lanes[0]!.rows;
+
+      expect(rows.map((row) => row.problem?.message ?? null)).toEqual([null, "pi is not on moss"]);
+    });
+
+    it("says why for each state the controller reports on the selected machine", () => {
+      const states = [
+        ["not-signed-in", "not signed in on moss"],
+        ["credential-missing", "no key"],
+        ["token-expired", "expired"],
+        ["harness-missing", "Claude Code is not on moss"],
+        ["harness-too-old", "Claude Code on moss is too old"],
+      ] as const;
+
+      for (const [state, message] of states) {
+        const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [], [{ runnerId: MOSS.id, state }]);
+        const profile = readDraftProfile(
+          buildModelMenu(buildCatalogs([MAIN], [claude, CODEX, ZAI]), CURRENT, {
+            ...DRAFT,
+            runnerId: MOSS.id,
+          }),
+        );
+        expect(profile.lanes[0]!.rows[0]!.problem?.message).toBe(message);
+      }
+    });
+
+    it("offers a sign-in only for a missing sign-in, and only on a machine that is online", () => {
+      const offline = buildRunner({ id: MOSS.id, name: "moss", connectivity: "offline" });
+      const draining = buildRunner({ id: MOSS.id, name: "moss", lifecycle: "draining" });
+      const claude = buildProviderAccount(
+        ANTHROPIC_IDENTITY,
+        [],
+        [{ runnerId: MOSS.id, state: "token-expired" }],
+      );
+
+      const expired = readDraftProfile(
+        buildModelMenu(buildCatalogs([MAIN], [claude, CODEX, ZAI]), CURRENT, {
+          ...DRAFT,
+          runnerId: MOSS.id,
+        }),
+      );
+      expect(expired.lanes[0]!.rows[0]!.problem?.signIn).toBeNull();
+
+      const signInOn = (runners: readonly Runner[]) =>
+        readDraftProfile(
+          buildModelMenu(buildCatalogs([MAIN], [CLAUDE, CODEX, ZAI], runners), CURRENT, {
+            ...DRAFT,
+            runnerId: MOSS.id,
+          }),
+        ).lanes[1]!.rows[0]!.problem;
+      expect(signInOn([offline, COVE])).toMatchObject({
+        message: "not signed in on moss",
+        signIn: null,
+      });
+      expect(signInOn([draining, COVE])?.signIn).toMatchObject({ runnerId: MOSS.id });
+    });
+
+    describe("for an account whose login makes a token", () => {
+      const TOKEN_KIND = {
+        id: "subscription-token",
+        title: "Claude subscription token",
+        description: "A token made once and used on every machine.",
+        setup: [{ kind: "harness-login", method: "create-token" }],
+        harnesses: [CLAUDE_HARNESS],
+      } as const;
+      const providers = PROVIDERS.map((provider) =>
+        provider.id === ANTHROPIC_IDENTITY.providerId
+          ? { ...provider, kinds: [...provider.kinds, TOKEN_KIND] }
+          : provider,
+      );
+      const tokenAccount = (state: "credential-missing" | "token-expired") => ({
+        ...buildProviderAccount(ANTHROPIC_IDENTITY, [], [{ runnerId: MOSS.id, state }]),
+        kind: TOKEN_KIND.id,
+      });
+      const rowOn = (account: ProviderAccount, runnerId: string | null) =>
+        readDraftProfile(
+          buildModelMenu({ ...buildCatalogs([MAIN], [account, CODEX, ZAI]), providers }, CURRENT, {
+            ...DRAFT,
+            runnerId,
+          }),
+        ).lanes[0]!.rows[0]!.problem;
+
+      it("offers to make a token when there is none or it expired", () => {
+        for (const [state, message] of [
+          ["credential-missing", "no token"],
+          ["token-expired", "expired"],
+        ] as const) {
+          expect(rowOn(tokenAccount(state), MOSS.id)).toEqual({
+            message,
+            signIn: {
+              providerAccountId: CLAUDE.id,
+              runnerId: MOSS.id,
+              subject: "Anthropic on moss",
+            },
+          });
+        }
+      });
+
+      it("offers it on the first online machine that has the problem when no machine is selected", () => {
+        const expired: ResolvedModelProfileEntry = {
+          ...SONNET,
+          problem: { reason: "token-expired", message: "controller words" },
+        };
+        const profile = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [expired])]);
+
+        const { lanes } = readDraftProfile(
+          buildModelMenu(
+            { ...buildCatalogs([profile], [tokenAccount("token-expired")]), providers },
+            CURRENT,
+            DRAFT,
+          ),
+        );
+
+        expect(lanes[0]!.rows[0]!.problem).toMatchObject({
+          message: "expired",
+          signIn: { runnerId: MOSS.id },
+        });
+      });
+    });
+
+    it("keeps the controller's sentence for a problem with the model itself, on any machine, with no sign-in", () => {
+      const gone: ResolvedModelProfileEntry = {
+        ...SONNET,
+        problem: { reason: "model-left-catalog", message: "Anthropic no longer lists this model" },
+      };
+      const lacks: ResolvedModelProfileEntry = {
+        ...OPUS,
+        problem: { reason: "harness-lacks-model", message: "pi does not list this model" },
+      };
+      const profile = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [gone, lacks])]);
+
+      for (const runnerId of [null, MOSS.id]) {
+        const rows = readDraftProfile(
+          buildModelMenu(buildCatalogs([profile]), CURRENT, { ...DRAFT, runnerId }),
+        ).lanes[0]!.rows;
+        expect(rows.map((row) => row.problem)).toEqual([
+          { message: "Anthropic no longer lists this model", signIn: null },
+          { message: "pi does not list this model", signIn: null },
+        ]);
+      }
+    });
+
+    it("keeps the controller's sentence for a harness the account may not use, on any machine, with no sign-in", () => {
+      const refused: ResolvedModelProfileEntry = {
+        ...SONNET,
+        problem: { reason: "harness-not-allowed", message: "controller words" },
+      };
+      const profile = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [refused])]);
+
+      for (const runnerId of [null, MOSS.id]) {
+        const row = readDraftProfile(
+          buildModelMenu(buildCatalogs([profile]), CURRENT, { ...DRAFT, runnerId }),
+        ).lanes[0]!.rows[0]!;
+        expect(row.problem).toEqual({ message: "controller words", signIn: null });
+      }
+    });
+
+    describe("with no machine selected", () => {
+      const withProblem = (
+        entry: ResolvedModelProfileEntry,
+        problem: ResolvedModelProfileEntry["problem"],
+      ) => buildModelProfile([buildProfileSection(OPENAI_IDENTITY, [{ ...entry, problem }])]);
+
+      it("is not dimmed while some machine can run the entry", () => {
+        const profile = readDraftProfile(buildModelMenu(buildCatalogs([MAIN]), CURRENT, DRAFT));
+
+        expect(profile.lanes.every((lane) => lane.rows[0]!.problem === null)).toBe(true);
+      });
+
+      it("signs in on the first connected machine where the account is not signed in", () => {
+        const codex = buildProviderAccount(
+          OPENAI_IDENTITY,
+          [],
+          [
+            { runnerId: MOSS.id, state: "harness-missing" },
+            { runnerId: COVE.id, state: "not-signed-in" },
+          ],
+        );
+        const profile = withProblem(GPT, { reason: "not-signed-in", message: "controller words" });
+
+        const row = readDraftProfile(
+          buildModelMenu(buildCatalogs([profile], [codex]), CURRENT, DRAFT),
+        ).lanes[0]!.rows[0]!;
+
+        expect(row.problem).toEqual({
+          message: "not signed in on cove",
+          signIn: { providerAccountId: codex.id, runnerId: COVE.id, subject: "OpenAI on cove" },
+        });
+      });
+
+      it("skips a machine that is offline when it looks for the machine to sign in on", () => {
+        const codex = buildProviderAccount(
+          OPENAI_IDENTITY,
+          [],
+          [
+            { runnerId: MOSS.id, state: "not-signed-in" },
+            { runnerId: COVE.id, state: "not-signed-in" },
+          ],
+        );
+        const profile = withProblem(GPT, { reason: "not-signed-in", message: "controller words" });
+        const offline = buildRunner({ id: MOSS.id, name: "moss", connectivity: "offline" });
+
+        const row = readDraftProfile(
+          buildModelMenu(buildCatalogs([profile], [codex], [offline, COVE]), CURRENT, DRAFT),
+        ).lanes[0]!.rows[0]!;
+
+        expect(row.problem?.signIn).toMatchObject({ runnerId: COVE.id });
+      });
+
+      it("says the other reasons without naming a machine", () => {
+        const reasons = [
+          ["credential-missing", "no key"],
+          ["token-expired", "expired"],
+          ["harness-missing", "Codex is not on any machine"],
+          ["harness-too-old", "Codex is too old"],
+          ["no-runner", "no machine is connected"],
+        ] as const;
+
+        for (const [reason, message] of reasons) {
+          const profile = withProblem(GPT, { reason, message: "controller words" });
+          const row = readDraftProfile(
+            buildModelMenu(buildCatalogs([profile], [CODEX]), CURRENT, DRAFT),
+          ).lanes[0]!.rows[0]!;
+          expect(row.problem).toEqual({ message, signIn: null });
+        }
+      });
     });
   });
 
-  it("lists every other account, however many there are; only the recent models are capped", () => {
-    const others = [1, 2, 3, 4].map((n) =>
-      buildCountedProviderAccount(`account-${String(n)}`, `account ${String(n)}`, 1),
-    );
-    const menu = buildModelMenu(
-      buildCatalogs([CLAUDE, ...others]),
-      buildConfig(CLAUDE.id, SONNET.slug),
-      DRAFT,
-    );
+  describe("a section whose account has not been read yet", () => {
+    const pending = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET]),
+      buildProfileSection(OPENAI_IDENTITY, "pending"),
+    ]);
 
-    expect(menu.others.map((row) => row.providerAccountId)).toEqual(others.map((each) => each.id));
-  });
+    it("shows its lane with a note and no rows", () => {
+      const lanes = readDraftProfile(
+        buildModelMenu(buildCatalogs([pending]), CURRENT, DRAFT),
+      ).lanes;
 
-  it("offers no rows of another account while filtering on an active thread, whose account is fixed", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([CLAUDE, CODEX]),
-      buildConfig(CLAUDE.id, SONNET.slug),
-      {
-        ...DRAFT,
-        kind: "active",
-        filter: "gpt",
-      },
-    );
-
-    expect(menu.others[0]).toMatchObject({ providerAccountId: CODEX.id, dimmed: "account fixed" });
-    expect(menu.others[0]?.rows).toEqual([]);
-  });
-
-  it("dims every other account as account fixed on an active thread", () => {
-    const menu = buildModelMenu(
-      buildCatalogs([CLAUDE, CODEX]),
-      buildConfig(CLAUDE.id, SONNET.slug),
-      {
-        ...DRAFT,
-        kind: "active",
-      },
-    );
-
-    expect(menu.others[0]).toMatchObject({
-      providerAccountId: CODEX.id,
-      dimmed: "account fixed",
-      signIn: null,
+      expect(lanes.map((lane) => [lane.name, lane.rows.length, lane.note])).toEqual([
+        ["Anthropic", 1, null],
+        ["OpenAI", 0, "Reading models…"],
+      ]);
     });
+
+    it("does not count towards the filter, and shows no lane while the user is filtering", () => {
+      const profile = readDraftProfile(
+        buildModelMenu(buildCatalogs([pending]), CURRENT, { ...DRAFT, filter: "son" }),
+      );
+
+      expect(profile.lanes.map((lane) => lane.name)).toEqual(["Anthropic"]);
+    });
+  });
+
+  it("leaves out a section with no entries, since it has nothing to pick", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, []),
+      buildProfileSection(OPENAI_IDENTITY, [GPT]),
+    ]);
+
+    expect(
+      readDraftProfile(buildModelMenu(buildCatalogs([profile]), CURRENT, DRAFT)).lanes.map(
+        (lane) => lane.name,
+      ),
+    ).toEqual(["OpenAI"]);
+  });
+
+  it("leaves out a section whose account is not on the list", () => {
+    const lanes = readDraftProfile(
+      buildModelMenu(buildCatalogs([MAIN], [CLAUDE]), CURRENT, DRAFT),
+    ).lanes;
+
+    expect(lanes.map((lane) => lane.name)).toEqual(["Anthropic"]);
   });
 });
 
-describe("buildModelMenu: an account that works on every machine", () => {
-  const WITH_PI = buildRunner({
-    id: "r-pi",
-    name: "pi-box",
-    facts: {
-      ...BARE.facts!,
-      harnesses: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
-      adapters: ["pi/pi"],
-    },
-  });
-  /** Probed signed in on another runner only. */
-  const PI_ELSEWHERE = buildProviderAccount(ZAI_IDENTITY, [
-    buildSnapshot({ runnerId: "r-elsewhere", harnessId: "pi/pi", models: [GPT] }),
-  ]);
+describe("buildModelMenu for a running thread", () => {
+  const ACTIVE = { ...CURRENT, runnerId: MOSS.id };
+  const view: ModelMenuView = { kind: "active", filter: "", recent: [], runnerId: null };
 
-  it("lists the models of another runner's signed-in list on a runner it was never probed on, and does not dim it", () => {
-    const menu = buildModelMenu(
-      { ...buildCatalogs([CLAUDE, PI_ELSEWHERE]), runners: [WITH_PI], thisMacRunnerId: WITH_PI.id },
-      { ...buildConfig(CLAUDE.id, SONNET.slug), runnerId: WITH_PI.id },
-      { ...DRAFT, filter: "gpt" },
+  it("is one flat list of the entries with the session's account and harness, with the note, and no Recent", () => {
+    const menu = readActive(buildModelMenu(buildCatalogs([MAIN]), ACTIVE, view));
+
+    expect(menu.rows.map((row) => [row.name, row.isCurrent])).toEqual([
+      ["Sonnet 5", true],
+      ["Opus 5", false],
+    ]);
+    expect(menu.note).toBe("Other models start a new thread.");
+    expect(menu).not.toHaveProperty("recent");
+  });
+
+  it("says that no model matches when the filter matches none, and nothing otherwise", () => {
+    const catalogs = buildCatalogs([MAIN]);
+
+    expect(buildModelMenu(catalogs, ACTIVE, view)).toMatchObject({ empty: null });
+    expect(buildModelMenu(catalogs, ACTIVE, { ...view, filter: "zzz" })).toMatchObject({
+      rows: [],
+      empty: "No model matches.",
+    });
+  });
+
+  it("lists each model once, the first profile that has it winning, across all profiles", () => {
+    const first = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [OPUS])], {
+      id: "profile-first",
+    });
+    const second = buildModelProfile(
+      [buildProfileSection(ANTHROPIC_IDENTITY, [{ ...OPUS, name: "Opus (second)" }, SONNET])],
+      { id: "profile-second" },
     );
 
-    expect(menu.others[0]).toMatchObject({
-      providerAccountId: PI_ELSEWHERE.id,
-      dimmed: null,
-      signIn: null,
+    const menu = readActive(buildModelMenu(buildCatalogs([first, second]), ACTIVE, view));
+
+    expect(menu.rows.map((row) => row.name)).toEqual(["Opus 5", "Sonnet 5"]);
+  });
+
+  it("leaves out the entries of other accounts and of other harnesses", () => {
+    const inPi = buildProfileEntry(ANTHROPIC_IDENTITY, "claude-haiku-5", {
+      harnessId: "pi/pi",
+      resolvedHarnessId: "pi/pi",
     });
-    expect(menu.others[0]?.rows.map((row) => row.slug)).toEqual(["gpt-5"]);
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, inPi]),
+      buildProfileSection(OPENAI_IDENTITY, [GPT]),
+    ]);
+
+    const menu = readActive(buildModelMenu(buildCatalogs([profile]), ACTIVE, view));
+
+    expect(menu.rows.map((row) => row.model)).toEqual(["claude-sonnet-5"]);
+  });
+
+  it("shows a model that no profile holds as the current row, under its id", () => {
+    const menu = readActive(
+      buildModelMenu(buildCatalogs([MAIN]), { ...ACTIVE, model: "claude-haiku-5" }, view),
+    );
+
+    expect(menu.rows[0]).toMatchObject({
+      model: "claude-haiku-5",
+      name: "claude-haiku-5",
+      isCurrent: true,
+      problem: null,
+      harnessId: CLAUDE_HARNESS,
+    });
+    expect(menu.rows.slice(1).map((row) => row.isCurrent)).toEqual([false, false]);
+  });
+
+  it("shows the session's model alone when the user has no profile", () => {
+    const menu = readActive(buildModelMenu(buildCatalogs([]), ACTIVE, view));
+
+    expect(menu.rows.map((row) => [row.model, row.isCurrent])).toEqual([["claude-sonnet-5", true]]);
+  });
+
+  it("dims an entry by the readiness on the session's own machine", () => {
+    const claude = buildProviderAccount(ANTHROPIC_IDENTITY, [], [{ runnerId: MOSS.id }]);
+    const broken: ResolvedModelProfileEntry = {
+      ...OPUS,
+      problem: { reason: "model-left-catalog", message: "Anthropic no longer lists this model" },
+    };
+    const profile = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, broken])]);
+
+    const menu = readActive(
+      buildModelMenu(buildCatalogs([profile], [claude]), { ...ACTIVE, runnerId: MOSS.id }, view),
+    );
+
+    expect(menu.rows.map((row) => row.problem?.message ?? null)).toEqual([
+      null,
+      "Anthropic no longer lists this model",
+    ]);
+
+    const elsewhere = readActive(
+      buildModelMenu(buildCatalogs([profile], [claude]), { ...ACTIVE, runnerId: COVE.id }, view),
+    );
+    expect(elsewhere.rows[0]!.problem?.message).toBe("Claude Code is not on cove");
+  });
+
+  it("marks no row as the profile's default, and names no harness on a row", () => {
+    const menu = readActive(buildModelMenu(buildCatalogs([MAIN]), ACTIVE, view));
+
+    expect(menu.rows.every((row) => !row.isDefault && row.inHarness === null)).toBe(true);
+  });
+
+  it("offers a filter for more than eight models, and applies it", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(
+        ANTHROPIC_IDENTITY,
+        Array.from({ length: 9 }, (_, index) =>
+          buildProfileEntry(ANTHROPIC_IDENTITY, `model-${String(index)}`),
+        ),
+      ),
+    ]);
+
+    const unfiltered = readActive(buildModelMenu(buildCatalogs([profile]), ACTIVE, view));
+    const filtered = readActive(
+      buildModelMenu(buildCatalogs([profile]), ACTIVE, { ...view, filter: "model-3" }),
+    );
+
+    expect(unfiltered.filterable).toBe(true);
+    expect(filtered.rows.map((row) => row.model)).toEqual(["model-3"]);
   });
 });

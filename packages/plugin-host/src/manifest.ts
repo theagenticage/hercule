@@ -10,8 +10,11 @@ import { Schema } from "effect";
  * - Version 4 made `defaultHarnessId` and the `method` of a `harness-login`
  *   step required, and added the `keyCheck` of an account kind. A plugin built
  *   against version 3 declares neither, so the host refuses it at load.
+ * - Version 5 made `catalogSource` and `defaultSelection` required on
+ *   `ProviderDefinition`. A provider plugin built against version 4 declares
+ *   neither, so the host refuses it at load.
  */
-export const HOST_API = 4;
+export const HOST_API = 5;
 
 /**
  * The named parts of the host API a plugin may request. Only some of them are

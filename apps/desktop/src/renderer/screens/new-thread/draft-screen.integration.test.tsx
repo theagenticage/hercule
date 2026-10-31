@@ -23,6 +23,7 @@ import {
   createFakeBridge,
   FIXTURE_GITHUB_CONNECTION,
   FIXTURE_ACCOUNT,
+  FIXTURE_MODEL_PROFILE,
   holdAnswer,
   readFieldText,
   renderApp,
@@ -64,7 +65,11 @@ const CART_TASK: Task = {
  */
 const openDraft = async (path: string, handlers: Readonly<Record<string, Handler>> = {}) => {
   const calls = stubApi({
-    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
+    ...buildSidebarHandlers({
+      ...SIDEBAR_FIXTURE,
+      accounts: [FIXTURE_ACCOUNT],
+      modelProfiles: [FIXTURE_MODEL_PROFILE],
+    }),
     ...buildThreadHandlers(STARTED),
     "POST /api/v1/sessions": { body: STARTED.session },
     ...handlers,
@@ -173,8 +178,13 @@ describe("the new-thread screen", () => {
           {
             ...FIXTURE_ACCOUNT,
             snapshots: [...FIXTURE_ACCOUNT.snapshots, { ...snapshot!, runnerId: studio.id }],
+            readiness: [
+              ...FIXTURE_ACCOUNT.readiness,
+              { ...FIXTURE_ACCOUNT.readiness[0]!, runnerId: studio.id },
+            ],
           },
         ],
+        modelProfiles: [FIXTURE_MODEL_PROFILE],
       }),
     });
     await renderApp(
@@ -250,6 +260,7 @@ describe("the new-thread screen", () => {
       {
         prompt: "Fix the cart",
         providerAccountId: FIXTURE_ACCOUNT.id,
+        harnessId: "claude-code/claude-code",
         model: "claude-sonnet-5",
         options: {},
         accessMode: "approval-required",
@@ -367,9 +378,13 @@ describe("the new-thread screen", () => {
     expect(readSpawns(calls)).toHaveLength(1);
   });
 
-  it("reads the settings and the profiles once each time it opens", async () => {
+  it("reads the settings and the permission profiles once each time it opens, and not the Model Profiles", async () => {
     const calls = stubApi({
-      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
+      ...buildSidebarHandlers({
+        ...SIDEBAR_FIXTURE,
+        accounts: [FIXTURE_ACCOUNT],
+        modelProfiles: [FIXTURE_MODEL_PROFILE],
+      }),
       ...buildThreadHandlers(STARTED),
     });
     const { router, context } = await renderApp(
@@ -394,6 +409,16 @@ describe("the new-thread screen", () => {
       router.navigate({ to: "/threads/$sessionId", params: { sessionId: STARTED.session.id } }),
     );
     expect(await openAndCountReads()).toEqual([2, 2]);
+    // The Model Profiles are a shell read, so opening the draft, and the model
+    // menu in it, never reads them again.
+    const readsOfProfiles = calls.filter((call) => call.path === "/api/v1/model-profiles").length;
+    await act(() =>
+      router.navigate({ to: "/threads/$sessionId", params: { sessionId: STARTED.session.id } }),
+    );
+    await openAndCountReads();
+    expect(calls.filter((call) => call.path === "/api/v1/model-profiles")).toHaveLength(
+      readsOfProfiles,
+    );
   });
 
   it("keeps each place's draft while the user is elsewhere", async () => {
@@ -540,8 +565,13 @@ describe("the machine of a joined workspace", () => {
           {
             ...FIXTURE_ACCOUNT,
             snapshots: [...FIXTURE_ACCOUNT.snapshots, { ...snapshot!, runnerId: studio.id }],
+            readiness: [
+              ...FIXTURE_ACCOUNT.readiness,
+              { ...FIXTURE_ACCOUNT.readiness[0]!, runnerId: studio.id },
+            ],
           },
         ],
+        modelProfiles: [FIXTURE_MODEL_PROFILE],
       }),
       ...buildThreadHandlers(STARTED),
       "POST /api/v1/sessions": { body: STARTED.session },

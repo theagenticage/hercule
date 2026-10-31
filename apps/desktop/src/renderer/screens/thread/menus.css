@@ -152,6 +152,26 @@ button.line:hover {
 .line--dimmed {
   opacity: 0.5;
 }
+/* Not in the book. A dimmed row with an action, such as Sign in, fades its
+   own content and keeps the action at full strength, so the one thing the
+   user can do on the row reads as clickable. */
+.line--acting {
+  opacity: 1;
+}
+.line--acting > :not(.line-action) {
+  opacity: 0.5;
+}
+.line-action {
+  flex: none;
+  white-space: nowrap;
+}
+/* Not in the book. What stands in a lane while its account's models are
+   still being read, in the place of its rows. */
+.menu-note {
+  padding: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
 /* Not in the book. The filter spans its section. The section's top padding
    matches its sides, so the focus ring, 4px outside the field, keeps an even
    gap to the menu's edge. */

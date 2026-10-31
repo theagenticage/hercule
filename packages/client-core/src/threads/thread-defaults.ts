@@ -1,14 +1,16 @@
 /**
  * Computes what a new thread starts with: the `thread.*` settings the user
- * has set, and built-in defaults for the rest (spec 02 §Thread). The rule is
- * written once here because two screens use it: the composer prefills a new
- * thread from it, and Settings > Threads shows it as the form's state. Two
- * copies of a rule drift apart.
+ * has set, then the open Model Profile's default entry, and built-in defaults
+ * for the rest (spec 02 §Thread, spec 06 §17.9). The rule is written once here
+ * because two screens use it: the composer prefills a new thread from it, and
+ * Settings > Threads shows it as the form's state. Two copies of a rule drift
+ * apart.
  *
  * "Nothing picked" is always `null`, never an empty string. That happens when:
  *
  * - no account exists;
- * - no runner is signed in to the picked account;
+ * - no runner is ready for the picked account;
+ * - the Model Profile has no entry and no model is stored;
  * - no profile has been created.
  *
  * The caller decides what to do (dim the field, disable Send); it never gets
@@ -16,16 +18,20 @@
  */
 import type {
   AccessMode,
+  ModelProfile,
   Profile,
   ProviderAccount,
+  ResolvedModelProfileEntry,
   Runner,
   SettingsState,
 } from "@hercule/contract";
+import {
+  findAccountDefaultEntry,
+  findProfileDefaultEntry,
+} from "../model-profiles/profile-entries";
 import type { ThreadConfig } from "./config";
 import { resolveThreadHarnessId } from "../provider-accounts";
 import { findDefaultProviderAccountId } from "./default-provider-account";
-import { buildThreadModelField, type ThreadModelField } from "./model-field";
-import type { AccountCatalogs } from "./account-readiness";
 import { buildRunnerMenu } from "./runner-menu";
 
 const DEFAULT_PROFILE_NAME = "unrestricted";
@@ -41,100 +47,107 @@ export interface ThreadDefaults {
   readonly profileId: string | null;
 }
 
-/**
- * Returns the slug of the model a new thread starts with, from `field`: the
- * model marked as default, else the first one, else `null` when there are none.
- */
-const chooseDefaultModel = (field: ThreadModelField): string | null =>
-  field.options.find((option) => option.isDefault)?.slug ?? field.options[0]?.slug ?? null;
+/** The account, harness and model a new thread starts on, before a runner is chosen for it. */
+interface StartingEntry {
+  readonly account: ProviderAccount | undefined;
+  /** The qualified harness id, or `null` for the account's default harness. */
+  readonly harnessId: string | null;
+  readonly model: string | null;
+}
 
 /**
- * Returns the slug of the model a new thread on `account` starts with when it
- * runs in `harnessId` on `runnerId`: the default model of the model list
- * `findModelSnapshot` picks, else its first model, else `null` when the
- * account is signed in on no runner in that harness. A runner without its own
- * signed-in snapshot reads the newest list from another runner, as the
- * controller does.
+ * Returns the starting entry that runs the profile `entry` on `account`, in
+ * the harness the entry resolved to, so the thread runs where the menu showed.
  */
-export const findDefaultModel = (
+const buildStartingEntry = (
   account: ProviderAccount,
-  harnessId: string,
-  runnerId: string | null,
-): string | null =>
-  chooseDefaultModel(buildThreadModelField(account, harnessId, runnerId, undefined));
+  entry: ResolvedModelProfileEntry,
+): StartingEntry => ({ account, harnessId: entry.resolvedHarnessId, model: entry.model });
 
 /**
- * Returns the runner a new thread on this account would be placed on, and
- * the default model on that runner. The runner is resolved first, and the
- * model is read from that runner's snapshot. When no runner is usable, the
- * model comes from the account's first snapshot in the harness, so Settings
- * still lists the models of an account whose runners are all offline.
+ * Returns the account, harness and model a new thread starts on:
+ *
+ * - the stored `thread.*` settings, when the stored account still exists. A
+ *   stored harness and model belong to the stored account. With no stored
+ *   model, the open profile's entry for that account applies;
+ * - otherwise (nothing stored, or the stored account is gone) the open
+ *   profile's default entry. A model stored without an account is ignored,
+ *   because it belonged to no account that exists;
+ * - otherwise the first account that is ready, with no model.
+ *
+ * A stored model that no profile holds is still the user's choice. It stays
+ * picked and the menu shows it is not offered, rather than silently replacing
+ * it with another model.
  */
-export const computeProviderAccountDefaults = (
-  account: ProviderAccount,
-  harnessId: string,
-  runners: readonly Runner[],
-  thisMacRunnerId: string | null,
-  catalogs: AccountCatalogs,
-): { readonly runnerId: string | null; readonly model: string | null } => {
-  const runnerId = buildRunnerMenu(
-    runners,
-    thisMacRunnerId,
-    account,
-    harnessId,
-    catalogs,
-  ).defaultRunnerId;
+const chooseStartingEntry = (
+  settingsUser: SettingsState["user"],
+  accounts: readonly ProviderAccount[],
+  openProfile: ModelProfile | undefined,
+): StartingEntry => {
+  const storedAccount = accounts.find(
+    (each) => each.id === settingsUser["thread.providerAccountId"],
+  );
+  if (storedAccount !== undefined) {
+    const storedModel = settingsUser["thread.model"];
+    if (storedModel !== undefined) {
+      return {
+        account: storedAccount,
+        harnessId: settingsUser["thread.harnessId"] ?? null,
+        model: storedModel,
+      };
+    }
+    const entry =
+      openProfile === undefined
+        ? undefined
+        : findAccountDefaultEntry(openProfile, storedAccount.id);
+    return entry === undefined
+      ? { account: storedAccount, harnessId: settingsUser["thread.harnessId"] ?? null, model: null }
+      : buildStartingEntry(storedAccount, entry);
+  }
+  const entry = openProfile === undefined ? undefined : findProfileDefaultEntry(openProfile);
+  const entryAccount = accounts.find((each) => each.id === entry?.providerAccountId);
+  if (entry !== undefined && entryAccount !== undefined)
+    return buildStartingEntry(entryAccount, entry);
   return {
-    runnerId,
-    model: chooseDefaultModel(buildThreadModelField(account, harnessId, runnerId, undefined)),
+    account: accounts.find((each) => each.id === findDefaultProviderAccountId(accounts)),
+    harnessId: null,
+    model: null,
   };
 };
 
-/** Returns the defaults for a new thread, from the user's settings and the available catalogs. */
+/**
+ * Returns the defaults for a new thread, from the user's settings, the open
+ * Model Profile (the first one) and the available runners.
+ */
 export const computeThreadDefaults = (
   settingsUser: SettingsState["user"],
   accounts: readonly ProviderAccount[],
   runners: readonly Runner[],
   profiles: readonly Profile[],
   thisMacRunnerId: string | null,
-  catalogs: AccountCatalogs,
+  modelProfiles: readonly ModelProfile[],
 ): ThreadDefaults => {
-  // A stored account id that no longer exists (dangling) falls back the same
-  // way an unset one does. So there is always an account to read a catalog
-  // from, rather than an empty field with no explanation.
-  const storedProviderAccountId = settingsUser["thread.providerAccountId"];
-  const storedAccount = accounts.find((each) => each.id === storedProviderAccountId);
-  const isDangling = storedProviderAccountId !== undefined && storedAccount === undefined;
-  const account =
-    storedAccount ?? accounts.find((each) => each.id === findDefaultProviderAccountId(accounts));
-  // A stored harness belongs to the stored account. When the stored account
-  // is gone, the fallback account runs in its own default harness.
-  const harnessId = storedAccount === undefined ? null : (settingsUser["thread.harnessId"] ?? null);
-  const forProviderAccount =
+  const { account, harnessId, model } = chooseStartingEntry(
+    settingsUser,
+    accounts,
+    modelProfiles[0],
+  );
+  const runnerId =
     account === undefined
-      ? { runnerId: null, model: null }
-      : computeProviderAccountDefaults(
-          account,
-          resolveThreadHarnessId(account, harnessId),
+      ? null
+      : buildRunnerMenu(
           runners,
           thisMacRunnerId,
-          catalogs,
-        );
+          account,
+          resolveThreadHarnessId(account, harnessId),
+        ).defaultRunnerId;
 
   return {
     providerAccountId: account?.id ?? null,
     harnessId,
-    // A stored model that the resolved runner does not offer is still the
-    // user's choice. It stays picked and the model menu shows that it is not
-    // offered there, rather than silently replacing it with another model.
-    // The exception is a dangling account: its model belonged to the deleted
-    // account, so the fallback account's default model is used instead, as
-    // the controller does.
-    model: isDangling
-      ? forProviderAccount.model
-      : (settingsUser["thread.model"] ?? forProviderAccount.model),
+    model,
     accessMode: settingsUser["thread.accessMode"] ?? DEFAULT_ACCESS_MODE,
-    runnerId: forProviderAccount.runnerId,
+    runnerId,
     profileId:
       settingsUser["thread.profileId"] ??
       profiles.find((profile) => profile.name === DEFAULT_PROFILE_NAME)?.id ??
@@ -160,7 +173,7 @@ export const buildDraftConfig = ({
   runners,
   profiles,
   thisMacRunnerId,
-  catalogs,
+  modelProfiles,
   projectId,
   workspaceId,
 }: {
@@ -169,11 +182,18 @@ export const buildDraftConfig = ({
   readonly runners: readonly Runner[];
   readonly profiles: readonly Profile[];
   readonly thisMacRunnerId: string | null;
-  readonly catalogs: AccountCatalogs;
+  readonly modelProfiles: readonly ModelProfile[];
   readonly projectId: string | null;
   readonly workspaceId: string | null;
 }): ThreadConfig => ({
-  ...computeThreadDefaults(settingsUser, accounts, runners, profiles, thisMacRunnerId, catalogs),
+  ...computeThreadDefaults(
+    settingsUser,
+    accounts,
+    runners,
+    profiles,
+    thisMacRunnerId,
+    modelProfiles,
+  ),
   options: {},
   projectId,
   workspace: workspaceId === null ? null : { kind: "existing", workspaceId },
