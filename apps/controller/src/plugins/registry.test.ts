@@ -56,11 +56,14 @@ const SHIPPED = [
         {
           providerId: "anthropic/anthropic",
           kinds: [
-            { kind: "subscription-per-machine" },
-            { kind: "subscription-token", credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN" },
-            { kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" },
+            { kind: "subscription-per-machine", modelArgument: "{model}" },
+            {
+              kind: "subscription-token",
+              modelArgument: "{model}",
+              credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN",
+            },
+            { kind: "api-key", modelArgument: "{model}", credentialVariable: "ANTHROPIC_API_KEY" },
           ],
-          modelArgument: "{model}",
           models: "all",
         },
       ],
@@ -91,10 +94,9 @@ const SHIPPED = [
         {
           providerId: "openai/openai",
           kinds: [
-            { kind: "subscription-per-machine" },
-            { kind: "api-key", credentialVariable: "OPENAI_API_KEY" },
+            { kind: "subscription-per-machine", modelArgument: "{model}" },
+            { kind: "api-key", modelArgument: "{model}", credentialVariable: "OPENAI_API_KEY" },
           ],
-          modelArgument: "{model}",
           models: "all",
         },
       ],
@@ -124,20 +126,63 @@ const SHIPPED = [
       runs: [
         {
           providerId: "anthropic/anthropic",
-          kinds: [{ kind: "api-key", credentialVariable: "ANTHROPIC_API_KEY" }],
-          modelArgument: "anthropic/{model}",
+          kinds: [
+            {
+              kind: "api-key",
+              modelArgument: "anthropic/{model}",
+              credentialVariable: "ANTHROPIC_API_KEY",
+            },
+          ],
           models: "own-list",
         },
         {
           providerId: "openai/openai",
-          kinds: [{ kind: "api-key", credentialVariable: "OPENAI_API_KEY" }],
-          modelArgument: "openai/{model}",
+          kinds: [
+            {
+              kind: "api-key",
+              modelArgument: "openai/{model}",
+              credentialVariable: "OPENAI_API_KEY",
+            },
+          ],
           models: "own-list",
         },
         {
           providerId: "zai/zai",
-          kinds: [{ kind: "api-key", credentialVariable: "ZAI_API_KEY" }],
-          modelArgument: "zai/{model}",
+          kinds: [
+            { kind: "api-key", modelArgument: "zai/{model}", credentialVariable: "ZAI_API_KEY" },
+          ],
+          models: "own-list",
+        },
+        {
+          providerId: "opencode/opencode",
+          kinds: [
+            {
+              kind: "go-key",
+              modelArgument: "opencode-go/{model}",
+              credentialVariable: "OPENCODE_API_KEY",
+            },
+            {
+              kind: "zen-key",
+              modelArgument: "opencode/{model}",
+              credentialVariable: "OPENCODE_API_KEY",
+            },
+          ],
+          models: "own-list",
+        },
+        {
+          providerId: "minimax/minimax",
+          kinds: [
+            {
+              kind: "pay-as-you-go-key",
+              modelArgument: "minimax/{model}",
+              credentialVariable: "MINIMAX_API_KEY",
+            },
+            {
+              kind: "plan-key",
+              modelArgument: "minimax/{model}",
+              credentialVariable: "MINIMAX_API_KEY",
+            },
+          ],
           models: "own-list",
         },
       ],
@@ -257,6 +302,92 @@ const SHIPPED_PROVIDERS = [
       suggestedTextGenerationModel: "glm-5.3-flash",
     },
   },
+  {
+    id: "opencode",
+    displayName: "OpenCode",
+    definition: {
+      id: "opencode/opencode",
+      displayName: "OpenCode",
+      kinds: [
+        {
+          id: "go-key",
+          title: "OpenCode Go key",
+          description:
+            "From your OpenCode Go subscription, in the OpenCode console at opencode.ai. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+          setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+          keyCheck: {
+            url: "https://opencode.ai/zen/go/v1/usage",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
+          usage: {
+            readBy: "endpoint",
+            url: "https://opencode.ai/zen/go/v1/usage",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
+          harnesses: ["pi/pi"],
+        },
+        {
+          id: "zen-key",
+          title: "OpenCode Zen key",
+          description:
+            "From your OpenCode Zen balance, in the OpenCode console at opencode.ai. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+          setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+          keyCheck: {
+            url: "https://opencode.ai/zen/v1/models",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
+          harnesses: ["pi/pi"],
+        },
+      ],
+      defaultHarnessId: "pi/pi",
+      catalogSource: { kind: "harness-probe", harnessId: "pi/pi" },
+      defaultSelection: "current-models",
+      suggestedTextGenerationModel: "glm-5.3-flash",
+    },
+  },
+  {
+    id: "minimax",
+    displayName: "MiniMax",
+    definition: {
+      id: "minimax/minimax",
+      displayName: "MiniMax",
+      kinds: [
+        {
+          id: "pay-as-you-go-key",
+          title: "Pay-as-you-go key",
+          description:
+            "From the API keys page of the MiniMax platform (platform.minimax.io). A pay-as-you-go key and a plan key are not interchangeable, so pick the kind that matches your key. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+          setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+          keyCheck: {
+            url: "https://api.minimax.io/v1/models",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
+          harnesses: ["pi/pi"],
+        },
+        {
+          id: "plan-key",
+          title: "Plan key",
+          description:
+            "From your MiniMax M Plan subscription, on platform.minimax.io. A pay-as-you-go key and a plan key are not interchangeable, so pick the kind that matches your key. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+          setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+          keyCheck: {
+            url: "https://api.minimax.io/v1/models",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
+          usage: {
+            readBy: "endpoint",
+            url: "https://www.minimax.io/v1/token_plan/remains",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
+          harnesses: ["pi/pi"],
+        },
+      ],
+      defaultHarnessId: "pi/pi",
+      catalogSource: { kind: "harness-probe", harnessId: "pi/pi" },
+      defaultSelection: "current-models",
+      suggestedTextGenerationModel: "MiniMax-M2.7",
+    },
+  },
 ];
 
 let details: ReadonlyArray<PluginDetail>;
@@ -276,7 +407,7 @@ describe("the shipped registry after a boot", () => {
     );
   });
 
-  it("holds the three harness plugins, the three provider plugins and the github, sentry and linear plugins, in registry order", () => {
+  it("holds the three harness plugins, the five provider plugins and the github, sentry and linear plugins, in registry order", () => {
     expect(details.map((detail) => detail.id)).toEqual([
       "claude-code",
       "codex",
@@ -284,6 +415,8 @@ describe("the shipped registry after a boot", () => {
       "anthropic",
       "openai",
       "zai",
+      "opencode",
+      "minimax",
       "github",
       "sentry",
       "linear",

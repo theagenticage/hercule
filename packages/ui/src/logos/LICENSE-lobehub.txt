@@ -1,4 +1,4 @@
-The harness marks in `marks.ts` are taken from lobehub's icon set: each is
+The marks below are taken from lobehub's icon set: each is
 the `d` of the single path in the file named below, on its 24x24 box.
 
 Source:  https://github.com/lobehub/lobe-icons
@@ -13,6 +13,18 @@ Package: @lobehub/icons-static-svg 1.95.0
 
 Copied on 2026-09-12, unchanged. Nothing is fetched from lobehub at build time
 or at runtime.
+
+Two provider plugins carry a mark from the same set, scaled from the 24x24 box
+to the 16x16 box a plugin's mark uses (every coordinate times 2/3, rounded to
+six decimals). The plugin file named below holds each mark and says how it was
+changed:
+
+  opencode.svg -> OPENCODE_MARK_PATH in plugins/opencode/src/index.ts
+    https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/opencode.svg
+    commit 63c800e3db6427b3f156f7b88d426ccb3f7277a1
+  minimax.svg -> MINIMAX_MARK_PATH in plugins/minimax/src/index.ts
+    https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/minimax.svg
+    commit f25f22c0e7295a76077fe417d23deeb56eefdf3e
 
 ---
 

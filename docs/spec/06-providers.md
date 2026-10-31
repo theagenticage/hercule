@@ -92,12 +92,13 @@ interface HarnessDefinition {
 interface HarnessProviderSupport {
   providerId: string                  // "anthropic/anthropic"
   kinds: HarnessKindSupport[]         // the account kinds it can run for that provider
-  modelArgument: string               // how the harness names one of the provider's models: "{model}", "zai/{model}"
+  ~~modelArgument: string~~           // moved to HarnessKindSupport (#941)
   models: "all" | "own-list"          // which of the account's models it can run (section 15.4)
 }
 
 interface HarnessKindSupport {
   kind: string                        // the account kind id
+  modelArgument: string               // how the harness names one of the provider's models for accounts of this kind: "{model}", "zai/{model}"
   credentialVariable?: string         // the environment variable the credential goes in: "CLAUDE_CODE_OAUTH_TOKEN";
                                       // absent for a per-machine kind, whose login is in the Harness Home
 }
@@ -122,9 +123,9 @@ interface AccountKind {
 
 - A harness no longer has `supportsMultipleInstances`, `configSchema` or `defaultConfig`. What an instance's config held is now an account's kind and credential (section 15). `suggestedTextGenerationModel` moves to the provider, because it names one of the provider's models.
 - A provider whose catalog source is `provider-api` also contributes the code that reads a catalog, usage and expiry with an account's credential, run on the controller (sections 16 and 18). That code is functions, so it is not part of the stored definition, just as a Connection type's `validate` is not ([./08-events-and-connections.md](./08-events-and-connections.md)).
-- A provider plugin never names a harness's flags or variables. A harness declares what it runs (`runs`): for each provider, how it names a model, and for each kind, the variable the credential goes in. Its adapter applies those declarations (section 10.4); anything beyond them, such as pi's `models.json`, is adapter code. The provider names harnesses only to say which ones its terms allow (`AccountKind.harnesses`) and which one lists its models (`catalogSource`).
+- A provider plugin never names a harness's flags or variables. A harness declares what it runs (`runs`): ~~for each provider, how it names a model, and for each kind, the variable the credential goes in.~~ for each provider and kind, how it names a model and the variable the credential goes in *(amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941))*. Its adapter applies those declarations (section 10.4); anything beyond them, such as pi's `models.json`, is adapter code. The provider names harnesses only to say which ones its terms allow (`AccountKind.harnesses`) and which one lists its models (`catalogSource`).
 
-*(Amended 2026-10-31, [#933](https://github.com/theagenticage/hercule/issues/933).)* **What is built so far.** `HarnessDefinition` and `HarnessProviderSupport` are as above, and `modelArgument` has exactly one `{model}`. `ProviderDefinition` has `id`, `displayName`, `kinds` (at least one) and `suggestedTextGenerationModel`. ~~`catalogSource` and `defaultSelection` are not there yet: the tickets that read Model Catalogs and build Model Profiles add them.~~ *(Amended 2026-10-31, [#935](https://github.com/theagenticage/hercule/issues/935).: `hostApi` is now 5 and `ProviderDefinition` has both, required. `catalogSource` is `{ kind: "harness-probe", harnessId }` (Anthropic: Claude Code, OpenAI: Codex, Z.ai: pi) and `defaultSelection` is `current-models` for all three.)* `AccountKind.id` is the bare kind id (`api-key`), not a qualified one, and `AccountKind.harnesses` lists qualified harness ids. A setup step is a Connection setup step or `harness-login`, which a Connection type cannot declare. The hosting rules for the three shipped providers are in [./05-plugins.md](./05-plugins.md) section 9 (`hostApi` 3). *(Amended 2026-10-31, [#934](https://github.com/theagenticage/hercule/issues/934).)* `hostApi` is now 4: `AccountKind` gained `keyCheck` (section 15.2), the `harness-login` step gained a required `method` (`sign-in` or `create-token`), and `ProviderDefinition` gained a required `defaultHarnessId` (section 15.4).
+*(Amended 2026-10-31, [#933](https://github.com/theagenticage/hercule/issues/933).)* **What is built so far.** `HarnessDefinition` and `HarnessProviderSupport` are as above, and `modelArgument` has exactly one `{model}`. *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* ~~`modelArgument` is on `HarnessProviderSupport`.~~ `modelArgument` is on `HarnessKindSupport`, and required there, because OpenCode's two kinds run under different pi provider names (`opencode-go/{model}` and `opencode/{model}`). `models` stays on the provider entry, and a harness still has one `runs` entry per provider. `ProviderDefinition` has `id`, `displayName`, `kinds` (at least one) and `suggestedTextGenerationModel`. ~~`catalogSource` and `defaultSelection` are not there yet: the tickets that read Model Catalogs and build Model Profiles add them.~~ *(Amended 2026-10-31, [#935](https://github.com/theagenticage/hercule/issues/935).: `hostApi` is now 5 and `ProviderDefinition` has both, required. `catalogSource` is `{ kind: "harness-probe", harnessId }` (Anthropic: Claude Code, OpenAI: Codex, Z.ai: pi) and `defaultSelection` is `current-models` for all three.)* `AccountKind.id` is the bare kind id (`api-key`), not a qualified one, and `AccountKind.harnesses` lists qualified harness ids. A setup step is a Connection setup step or `harness-login`, which a Connection type cannot declare. The hosting rules for the three shipped providers are in [./05-plugins.md](./05-plugins.md) section 9 (`hostApi` 3). *(Amended 2026-10-31, [#934](https://github.com/theagenticage/hercule/issues/934).)* `hostApi` is now 4: `AccountKind` gained `keyCheck` (section 15.2), the `harness-login` step gained a required `method` (`sign-in` or `create-token`), and `ProviderDefinition` gained a required `defaultHarnessId` (section 15.4).
 
 ### 2.1 Instance config
 
@@ -1370,7 +1371,7 @@ These rules hold for the desktop composer ([#743](https://github.com/theagentica
 - **pi's `models.json`.** Over RPC, pi refuses a model id it does not know ("Model not found"). The CLI's fallback for unknown ids cannot be reached from RPC. So for an OpenRouter account, the controller sends, with the start, resume and fork frames, the details of every catalog model that pi's snapshot for the account lacks: id, name, context window, output limit, image input and reasoning. The adapter writes them as `models.json` entries into the Harness Home before pi starts, so switching to any of them inside the session works too. Missing details take pi's defaults: 128,000 context and 16,384 output. **Verify at build time:** that pi reads `models.json` only when it starts, so a file rewritten for one session does not change another session that is already running.
 - **Options** come from the harness that runs the entry (section 16.4).
 - A harness process gets only its own account's credential, never another account's.
-- **Verify at build time:** the pi provider ids and key variables in this table against the pinned pi. They come from pi's source at 1.4.0 (`research/model-catalogs.md`, `research/usage-sources.md`).
+- **Verify at build time:** the pi provider ids and key variables in this table against the pinned pi. They come from pi's source at 1.4.0 (`research/model-catalogs.md`, `research/usage-sources.md`). *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* Checked against pi 0.85.1's source (`packages/ai` env-api-keys, tag v0.85.1): `opencode` and `opencode-go` read `OPENCODE_API_KEY`, and `minimax` reads `MINIMAX_API_KEY`, as the table says. **Known limit:** pi 0.85.1 lists 68 `opencode` (Zen) models and a probe's model list is capped at 64 with no message, so 4 are cut until [#956](https://github.com/theagenticage/hercule/issues/956).
 
 ## 11. Harness install portability and per-runner login
 
@@ -1684,11 +1685,18 @@ An account kind declares its setup as steps from the fixed set a Connection type
 - OpenAI: `GET https://api.openai.com/v1/models`, with `Authorization: Bearer`.
 - OpenRouter: `GET https://openrouter.ai/api/v1/key`, which also returns the key's limit and `expires_at`.
 - Z.ai: `GET https://api.z.ai/api/coding/paas/v4/models`, with `Authorization: Bearer`.
-- OpenCode and MiniMax: the provider's own models or account endpoint.
+- ~~OpenCode and MiniMax: the provider's own models or account endpoint.~~ *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)*
+  - OpenCode `go-key`: `GET https://opencode.ai/zen/go/v1/usage`, with `Authorization: Bearer`.
+  - OpenCode `zen-key`: `GET https://opencode.ai/zen/v1/models`, with `Authorization: Bearer`.
+  - MiniMax, both kinds: `GET https://api.minimax.io/v1/models`, with `Authorization: Bearer`.
 
 A key the provider refuses fails `providerAccount.create`, or the `update` that replaces it, with `validation` carrying the provider's own words, and nothing is stored. When the provider cannot be reached, the call fails with `invalid_state`, saying which provider could not be reached and to try again: a key that could not be checked is never stored. Calling a provider with an API key is what the key is for; only a subscription credential is never sent to a vendor by Hercule itself (section 18.2).
 
-**Verify at build time:** the key-check endpoint for Z.ai, OpenCode (Go and Zen) and MiniMax (both kinds). *(Amended 2026-10-31, [#934](https://github.com/theagenticage/hercule/issues/934).)* Z.ai is answered in part. Its endpoint is above, and its refusal is verified: a bogus key answers 401 with `error.message`. That a valid key answers 2xx is not yet verified with a real key. OpenCode and MiniMax have no provider plugin yet, so their endpoints stay open.
+**Verify at build time:** the key-check endpoint for Z.ai, OpenCode (Go and Zen) and MiniMax (both kinds). *(Amended 2026-10-31, [#934](https://github.com/theagenticage/hercule/issues/934).)* Z.ai is answered in part. Its endpoint is above, and its refusal is verified: a bogus key answers 401 with `error.message`. That a valid key answers 2xx is not yet verified with a real key. ~~OpenCode and MiniMax have no provider plugin yet, so their endpoints stay open.~~ *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* OpenCode and MiniMax are answered in part, with the endpoints listed above, checked on 2026-10-31 without a real key. A valid key's 2xx is unverified for both ([./16-open-items.md](./16-open-items.md)).
+
+  - **OpenCode `go-key`** uses the Go usage endpoint, not the Go models list. A key without an OpenCode Go subscription answers 403 `EntitlementError` "OpenCode Go subscription required." (from OpenCode's route source). The key check reads that as a refused key, so a Zen key entered as a Go key is refused at entry. A bogus key answers 401 `AuthError` "Unauthorized" (live).
+  - **OpenCode `zen-key`:** a bogus key answers 401 `{"error":{"type":"server_error","message":"Invalid credential"}}` (live).
+  - **MiniMax:** the endpoint is documented ([platform.minimax.io/docs/api-reference/models/openai/list-models](https://platform.minimax.io/docs/api-reference/models/openai/list-models)). A bogus key answers 401 with an `error.message` like "login fail: ... (1004)" (live). The plan's quota endpoint cannot be the key check, because it answers a bogus key with HTTP 200 and `base_resp.status_code` 1004.
 
 *(Amended 2026-10-31, [#934](https://github.com/theagenticage/hercule/issues/934).)* **How the check runs.**
 
@@ -1932,9 +1940,9 @@ Per account, Account Usage holds readings. A reading is either a **window**, wit
 | Anthropic `subscription-token` | `rate_limit_event`s from running sessions only. The token lacks the `user:profile` scope, so the SDK's usage read returns nothing |
 | OpenAI `subscription-per-machine` | Codex's `account/rateLimits/read` in a probe, and `account/rateLimits/updated` from running sessions |
 | OpenRouter | `GET /api/v1/key`: the limit, the usage and `expires_at` |
-| OpenCode `go-key` | `GET https://opencode.ai/zen/go/v1/usage` with the key: the five-hour, weekly and monthly windows |
+| OpenCode `go-key` | `GET https://opencode.ai/zen/go/v1/usage` with the key: the five-hour, weekly and monthly windows. *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* Built. |
 | Z.ai | its quota endpoint, `api.z.ai/api/monitor/usage/quota/limit` |
-| MiniMax `plan-key` | `GET https://www.minimax.io/v1/token_plan/remains` |
+| MiniMax `plan-key` | `GET https://www.minimax.io/v1/token_plan/remains`. *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* Built. |
 | Anthropic and OpenAI `api-key`, OpenCode `zen-key`, MiniMax `pay-as-you-go-key` | none; the account shows no gauge |
 
 - **Subscriptions are read only through the vendor's harness.** Hercule never calls a vendor itself with a subscription credential ([./13-security.md](./13-security.md), [ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md)). The controller reads keys with the provider's own endpoint.
@@ -1973,8 +1981,13 @@ The account card and the account's composer entries show the expiry from 30 days
   | OpenAI `subscription-per-machine` | `harness`, `codex/codex` |
   | Z.ai `api-key` | `endpoint`, `https://api.z.ai/api/monitor/usage/quota/limit`, with `authorization: {apiKey}` |
   | Anthropic and OpenAI `api-key` | none |
+  | OpenCode `go-key` | `endpoint`, `https://opencode.ai/zen/go/v1/usage`, with `authorization: Bearer {apiKey}` |
+  | MiniMax `plan-key` | `endpoint`, `https://www.minimax.io/v1/token_plan/remains`, with `authorization: Bearer {apiKey}` |
+  | OpenCode `zen-key`, MiniMax `pay-as-you-go-key` | none |
 
-  OpenRouter, OpenCode and MiniMax have no plugin yet, so their rows of section 18.2 are not built.
+  ~~OpenRouter, OpenCode and MiniMax have no plugin yet, so their rows of section 18.2 are not built.~~ *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* OpenCode `go-key` and MiniMax `plan-key` are built, each with a parser in its plugin. OpenRouter has no plugin yet, so its row of section 18.2 is not built.
+  - **OpenCode Go:** `rolling` is the five-hour window, then `weekly` and `monthly`. A window is `hit` when OpenCode says its status is `rate-limited`, or at 100% or more. A key OpenCode refuses answers HTTP 401, which is a refusal. A key without a Go subscription answers 403, which the key check refuses at entry; on a later read (a lapsed subscription) it is not a refusal, and the account shows no gauge.
+  - **MiniMax plan:** only the text model row (`MiniMax-M*`) is read, as the five-hour and weekly windows. A window with status 3 (unlimited) or with no usable number gives no reading, and status 2 is a window that is used up and hit. **Trap:** MiniMax's `current_interval_usage_count` (and the weekly one) holds the count REMAINING, not the count used. `*_remaining_percent` is preferred over the counts where a plan sends it. MiniMax answers a refused key as HTTP 200 with `base_resp.status_code` 1004 (also 2049, and 2057 for a pay-as-you-go key), which the parser reads as refused.
 - **The active reads.** The controller daemon's loop ticks at once and then every minute, after the previous tick ends. A tick warns about expiring credentials (section 18.3 above), then reads the account usage that is due.
   - **A read starts only after `claimRead` grants it.** It is granted when the last claim is at least 15 minutes old and no session reported usage taken within the last 15 minutes. The claim is stored before the read and never given back, so a read that fails still counts and the next one waits.
   - **`endpoint`:** the controller sends one GET request with the account's key, with a 10 second timeout, and follows no redirect.

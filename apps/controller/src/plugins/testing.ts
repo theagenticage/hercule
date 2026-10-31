@@ -126,8 +126,7 @@ export const buildPluginWithProviderPerHarness = (
           : [
               {
                 providerId: `${pluginId}/${definition.id}`,
-                kinds: [{ kind: SUBSCRIPTION_KIND }],
-                modelArgument: "{model}",
+                kinds: [{ kind: SUBSCRIPTION_KIND, modelArgument: "{model}" }],
                 models: "all",
               },
             ],

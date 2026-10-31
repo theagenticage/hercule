@@ -25,6 +25,7 @@ import {
 } from "@hercule/protocol/testing";
 import { ensureRootBoundary } from "../../workspaces";
 import { pi } from "./adapter";
+import { readPiProvider } from "./provider";
 import type { HarnessRunnerContext, UserMaterial } from "../index";
 import { buildContext, SPEC } from "./testing";
 import {
@@ -34,7 +35,12 @@ import {
   NO_USER_MATERIAL_PATHS,
   waitUntil,
 } from "../testing";
-import { pointAtFakeModel, startFakeModelServer, type FakeModelServer } from "./upstream";
+import {
+  pointAtFakeModel,
+  startFakeModelServer,
+  startScriptedModelServer,
+  type FakeModelServer,
+} from "./upstream";
 
 const binary = Bun.which("pi") ?? undefined;
 
@@ -304,14 +310,14 @@ const sendFirstRequest = async (
   const upstream = startFakeModelServer();
   upstreams.push(upstream);
   const home = createScratchDir();
-  pointAtFakeModel(home, upstream.baseUrl);
+  pointAtFakeModel(home, "zai", upstream.baseUrl);
   const userHome = user.home ?? createScratchDir();
   // The user's own pi points at the fake model too. A session that reads the
   // user's agent directory by mistake then still asks the model, so the
   // test's assertion reports the mistake rather than a timeout.
   const userAgentDir = join(userHome, ".pi", "agent");
   mkdirSync(userAgentDir, { recursive: true });
-  pointAtFakeModel(userAgentDir, upstream.baseUrl);
+  pointAtFakeModel(userAgentDir, "zai", upstream.baseUrl);
 
   const sessionId = crypto.randomUUID();
   await Effect.runPromise(
@@ -520,3 +526,69 @@ describe.skipIf(binary === undefined)(
     );
   },
 );
+
+/**
+ * Checks that the real pi runs each kind of key the `pi` plugin pairs with a
+ * provider that has a built-in pi provider of its own. A session gets only the
+ * account's model argument and its key in a variable, so what matters is that
+ * pi picks the provider the argument names and sends the key to it. The model
+ * server is the fake one: `models.json` points the pi provider at it, and it
+ * records the `Authorization` header it received.
+ *
+ * The rows repeat what the plugins declare, because the runner cannot import
+ * a plugin.
+ */
+describe.skipIf(binary === undefined)("a real pi on the keys of OpenCode and MiniMax", () => {
+  const REPLY = "The fake model answers.";
+
+  it.each([
+    { kind: "go-key", modelArgument: "opencode-go/{model}", variable: "OPENCODE_API_KEY" },
+    { kind: "zen-key", modelArgument: "opencode/{model}", variable: "OPENCODE_API_KEY" },
+    { kind: "pay-as-you-go-key", modelArgument: "minimax/{model}", variable: "MINIMAX_API_KEY" },
+    { kind: "plan-key", modelArgument: "minimax/{model}", variable: "MINIMAX_API_KEY" },
+  ])(
+    "completes a turn on a $kind and sends the key to the model server",
+    async ({ kind, modelArgument, variable }) => {
+      const upstream = startScriptedModelServer(() => ({ text: REPLY }));
+      upstreams.push(upstream);
+      const home = createScratchDir();
+      pointAtFakeModel(home, readPiProvider(modelArgument), upstream.baseUrl);
+      const fakeKey = `fake-${kind}-key-${crypto.randomUUID()}`;
+      const sessionId = crypto.randomUUID();
+      const seen: Array<HarnessEvent> = [];
+      Effect.runFork(
+        Stream.runForEach(pi.events, (event) =>
+          Effect.sync(() => {
+            if (event.sessionId === sessionId) seen.push(event);
+          }),
+        ),
+      );
+
+      await Effect.runPromise(
+        pi.startSession(
+          sessionId,
+          { ...buildSpec("fake-model"), providerAccountId: crypto.randomUUID() },
+          {
+            ...buildContext(home, createScratchDir(), { variable, value: fakeKey }),
+            binary: binary!,
+            env: { PATH: process.env["PATH"] ?? "" },
+            modelArgument,
+            credentialVariables: [variable],
+          },
+        ),
+      );
+      await Effect.runPromise(pi.sendInput(sessionId, { text: "Say anything." }));
+      await waitReportingEvents(
+        seen,
+        "completed the turn",
+        () => listCompletedTurns(seen).length === 1,
+      );
+      await Effect.runPromise(pi.stopSession(sessionId, "stopped"));
+
+      expect(listCompletedTurns(seen)[0]?.state).toBe("completed");
+      expect(readAssistantText(seen)).toBe(REPLY);
+      expect(upstream.authorizations()).toEqual([`Bearer ${fakeKey}`]);
+    },
+    BUDGET_MS,
+  );
+});

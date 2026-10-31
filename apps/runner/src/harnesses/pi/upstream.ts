@@ -80,6 +80,8 @@ export interface FakeModelServer {
   readonly asked: () => number;
   /** Returns the body of every completion request pi has sent so far, in order. */
   readonly requests: () => ReadonlyArray<string>;
+  /** Returns the `Authorization` header of every completion request so far, in order; null for a request that sent none. */
+  readonly authorizations: () => ReadonlyArray<string | null>;
   readonly stop: () => void;
 }
 
@@ -186,6 +188,7 @@ const formatReply = (reply: FakeModelReply, asked: number): string =>
 export const startScriptedModelServer = (script: FakeModelScript): FakeModelServer => {
   let asked = 0;
   const requests: Array<string> = [];
+  const authorizations: Array<string | null> = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -198,6 +201,7 @@ export const startScriptedModelServer = (script: FakeModelScript): FakeModelServ
       }
       const body = await request.text();
       requests.push(body);
+      authorizations.push(request.headers.get("authorization"));
       asked += 1;
       const reply = script(JSON.parse(body) as FakeModelRequest, asked);
       return new Response(formatReply(reply, asked), {
@@ -213,6 +217,7 @@ export const startScriptedModelServer = (script: FakeModelScript): FakeModelServ
     baseUrl: `http://127.0.0.1:${server.port}/v1`,
     asked: () => asked,
     requests: () => requests,
+    authorizations: () => authorizations,
     stop: () => void server.stop(true),
   };
 };
@@ -222,19 +227,20 @@ export const startFakeModelServer = (firstTurn: FakeModelFirstTurn = {}): FakeMo
   startScriptedModelServer(buildDefaultScript(firstTurn));
 
 /**
- * Writes a `models.json` that points the `zai` provider at the fake model
- * server, so the adapter's `--model zai/<slug>` reaches it. The built-in
- * models stay; `fake-model` is added beside them.
+ * Writes a `models.json` that points the given pi provider (`zai`,
+ * `opencode-go`, `minimax`) at the fake model server, so the adapter's
+ * `--model <provider>/<slug>` reaches it. The built-in models stay;
+ * `fake-model` is added beside them. The file holds no key, so pi sends the
+ * one in the provider's environment variable.
  */
-export const pointAtFakeModel = (home: string, baseUrl: string): void => {
+export const pointAtFakeModel = (home: string, provider: string, baseUrl: string): void => {
   writeFileSync(
     join(home, "models.json"),
     JSON.stringify({
       providers: {
-        zai: {
+        [provider]: {
           baseUrl,
           api: "openai-completions",
-          apiKey: "not-a-real-key",
           models: [
             {
               id: "fake-model",

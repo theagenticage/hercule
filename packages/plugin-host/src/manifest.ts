@@ -13,8 +13,11 @@ import { Schema } from "effect";
  * - Version 5 made `catalogSource` and `defaultSelection` required on
  *   `ProviderDefinition`. A provider plugin built against version 4 declares
  *   neither, so the host refuses it at load.
+ * - Version 6 moved `modelArgument` from the provider entry of a harness's
+ *   `runs` onto each account kind in it. A harness plugin built against
+ *   version 5 declares it in the wrong place, so the host refuses it at load.
  */
-export const HOST_API = 5;
+export const HOST_API = 6;
 
 /**
  * The named parts of the host API a plugin may request. Only some of them are

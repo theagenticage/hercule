@@ -162,7 +162,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     }
   }, 30_000);
 
-  it("lists the eight shipped plugins, each one active", async () => {
+  it("lists the eleven shipped plugins, each one active", async () => {
     // There is no CLI command for this, so the route is called the way the
     // web app calls it: over HTTP, with the key the login above created.
     const response = await fetch(`${url}/api/v1/plugins`, {
@@ -182,6 +182,8 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "anthropic",
       "openai",
       "zai",
+      "opencode",
+      "minimax",
       "github",
       "sentry",
       "linear",
@@ -189,7 +191,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     for (const plugin of plugins) {
       expect(plugin.status, plugin.id).toEqual({ _tag: "active" });
     }
-    // The three harness plugins and the three provider plugins have no capabilities asserted here. github is the connection type, the
+    // The three harness plugins and the five provider plugins have no capabilities asserted here. github is the connection type, the
     // event source with the GitHub event kinds it emits, the reader of the
     // linked repo Resources it watches, and the GitHub workflow actions.
     // sentry is the same without Resources, and linear is sentry without

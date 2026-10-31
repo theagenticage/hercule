@@ -4958,7 +4958,7 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
 46. **New models.** The "New" rows on Models and in the composer, with Add and Not now. Blocked by slice 43.
 47. **Usage and expiry.** The cards' gauges, the account sheet's usage, the expiry and failed states with their buttons, and the notifications. Blocked by slice 42. *(Amended 2026-10-31, [#939](https://github.com/theagenticage/hercule/issues/939).)* Built, except the composer's expiry entries. The notifications are the controller's, and the slice adds no screen for them (see What slice 47 builds, in the Providers section).
 48. **OpenRouter and the model browser.** OpenRouter's mark and kind, and the model browser with its facets, sort, tray and Refresh. Blocked by slices 43 and 47. Records: [The Providers page's budgets](#the-providers-pages-budgets).
-49. **OpenCode and MiniMax.** Their marks, and nothing else on the desktop, which is what the slice shows: a provider is a definition. Blocked by slices 43 and 47.
+49. **OpenCode and MiniMax.** Their marks, and nothing else on the desktop, which is what the slice shows: a provider is a definition. Blocked by slices 43 and 47. *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* Built: the two marks, with the plugins `plugins/opencode` and `plugins/minimax` behind them. No screen code changed.
 
 ## Testing
 

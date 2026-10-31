@@ -88,11 +88,14 @@ const buildPlugins = (): ReadonlyArray<Plugin> => [
         {
           providerId: METERED_PROVIDER_ID,
           kinds: [
-            { kind: METERED_KEY_KIND, credentialVariable: "METERED_API_KEY" },
-            { kind: MACHINE_KIND },
-            { kind: SESSIONS_KIND },
+            {
+              kind: METERED_KEY_KIND,
+              modelArgument: "{model}",
+              credentialVariable: "METERED_API_KEY",
+            },
+            { kind: MACHINE_KIND, modelArgument: "{model}" },
+            { kind: SESSIONS_KIND, modelArgument: "{model}" },
           ],
-          modelArgument: "{model}",
           models: "own-list",
         },
       ]),

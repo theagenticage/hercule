@@ -18,6 +18,8 @@
     "@hercule/plugin-github": "workspace:*",
     "@hercule/plugin-host": "workspace:*",
     "@hercule/plugin-linear": "workspace:*",
+    "@hercule/plugin-minimax": "workspace:*",
+    "@hercule/plugin-opencode": "workspace:*",
     "@hercule/plugin-openai": "workspace:*",
     "@hercule/plugin-pi": "workspace:*",
     "@hercule/plugin-sentry": "workspace:*",

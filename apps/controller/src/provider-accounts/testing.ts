@@ -109,11 +109,10 @@ export const buildAccountPlugins = (): ReadonlyArray<Plugin> => [
         {
           providerId: ACME_PROVIDER_ID,
           kinds: [
-            { kind: KEY_KIND, credentialVariable: "ACME_API_KEY" },
-            { kind: MACHINE_KIND },
-            { kind: TOKEN_KIND, credentialVariable: "ACME_API_KEY" },
+            { kind: KEY_KIND, modelArgument: "acme/{model}", credentialVariable: "ACME_API_KEY" },
+            { kind: MACHINE_KIND, modelArgument: "acme/{model}" },
+            { kind: TOKEN_KIND, modelArgument: "acme/{model}", credentialVariable: "ACME_API_KEY" },
           ],
-          modelArgument: "acme/{model}",
           models: "own-list",
         },
       ]),

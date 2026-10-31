@@ -41,8 +41,7 @@ const buildPlugin = (id: string, usage: ProviderDefinition["kinds"][number]["usa
       buildHarnessDefinition(id, [
         {
           providerId: harnessId,
-          kinds: [{ kind: "subscription" }],
-          modelArgument: "{model}",
+          kinds: [{ kind: "subscription", modelArgument: "{model}" }],
           models: "all",
         },
       ]),

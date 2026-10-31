@@ -1594,8 +1594,7 @@ const buildMeteredPlugin = () =>
       buildHarnessDefinition("metered", [
         {
           providerId: "metered/metered",
-          kinds: [{ kind: "subscription" }],
-          modelArgument: "{model}",
+          kinds: [{ kind: "subscription", modelArgument: "{model}" }],
           models: "all",
         },
       ]),

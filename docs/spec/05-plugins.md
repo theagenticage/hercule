@@ -580,6 +580,7 @@ Core events (`run.failed`, `cron.tick`) have no plugin and no Connection, so in 
 - *(Amended 2026-10-31, [#935](https://github.com/theagenticage/hercule/issues/935).)* **`hostApi` is 5.** ~~`hostApi` is 4.~~ `ProviderDefinition` gains two required fields, so a provider plugin built against 4 is refused at load:
   - `catalogSource`: where an account's Model Catalog is read from. Only `{ kind: "harness-probe", harnessId }` exists. The host refuses a provider when one of its account kinds does not list `harnessId`, because an account of that kind could never be read ([./06-providers.md](./06-providers.md) section 16).
   - `defaultSelection`: `current-models` or `none`, the models an account brings into a Model Profile when it is first added (section 17).
+- *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* **`hostApi` is 6.** ~~`hostApi` is 5.~~ `modelArgument` moves from the provider entry of a harness's `runs` onto each account kind in it, and is required there. A harness plugin built against 5 declares it in the wrong place, so it is refused at load. The reason: pi names the two OpenCode kinds differently (`opencode-go/{model}` and `opencode/{model}`), so one name per provider is not enough ([./06-providers.md](./06-providers.md) section 2).
 
 ## 10. Connections and plugin-defined connection types
 

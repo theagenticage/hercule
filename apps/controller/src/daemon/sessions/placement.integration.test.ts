@@ -77,8 +77,7 @@ const GAMMA: HarnessDefinition = {
 /** What both multi-harness harnesses run: one provider's subscription, signed in on each machine. */
 const MULTI_RUN = {
   providerId: "multi/multi",
-  kinds: [{ kind: "subscription" }],
-  modelArgument: "{model}",
+  kinds: [{ kind: "subscription", modelArgument: "{model}" }],
   models: "all",
 } as const;
 

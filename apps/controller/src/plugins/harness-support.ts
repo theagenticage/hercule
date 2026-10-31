@@ -20,7 +20,7 @@ export const listCredentialVariables = (harness: RegisteredHarness): ReadonlyArr
 
 /** How a harness runs a Provider Account: the entry of the harness's `runs` that covers the account's provider and kind. */
 interface HarnessSupport {
-  /** How the harness names a model of this provider, with `{model}` where the model id goes. */
+  /** How the harness names a model of this provider for accounts of this kind, with `{model}` where the model id goes. */
   readonly modelArgument: string;
   /** The environment variable the account's key goes in, or absent when the login is in the Harness Home. */
   readonly credentialVariable: string | undefined;
@@ -126,7 +126,7 @@ export const decideProviderAccountHarness = (
     kind,
     harness,
     support: {
-      modelArgument: support.modelArgument,
+      modelArgument: supportedKind.modelArgument,
       credentialVariable: supportedKind.credentialVariable,
       credentialSecretName: findCredentialSecretName(kind),
     },
