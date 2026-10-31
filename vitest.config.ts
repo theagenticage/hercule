@@ -98,7 +98,6 @@ const binaryTests = [
   "e2e/logs.test.ts",
   "e2e/home-in-session.test.ts",
   "e2e/promote.test.ts",
-  "e2e/model-profile.test.ts",
   "e2e/skills.test.ts",
   "e2e/skill-library-session.test.ts",
   "e2e/repository-skills-session.test.ts",

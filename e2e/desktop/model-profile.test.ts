@@ -15,24 +15,29 @@
  * default is the first account on the model `scripted`; the second profile's
  * default entry is the second account on `scripted-large`. A Thread that
  * starts on the second account can only have got there through the profile.
+ *
+ * It sits in `e2e/desktop` like `fleet.test.ts`, with no app window, because
+ * the scripted runner's files import each other by full `.ts` name, which only
+ * this folder's TypeScript program allows. `pnpm test:desktop` runs it. Run
+ * `pnpm build:binary` first.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { connectFleet, type Fleet } from "../apps/desktop/scripts/fleet";
-import { pollUntil } from "../apps/desktop/scripts/poll";
+import { connectFleet, type Fleet } from "../../apps/desktop/scripts/fleet";
+import { pollUntil } from "../../apps/desktop/scripts/poll";
 import {
   findCompiledBinary,
   runCli,
   startController,
   type Controller,
   type Ran,
-} from "../scripts/controller-process";
+} from "../../scripts/controller-process";
 import {
   completeSetupAndLogin,
   createTemporaryHome,
   listProviderAccounts,
   parseJsonOutputOrFail,
   type TemporaryHome,
-} from "./harness";
+} from "../harness";
 
 /** Each CLI call starts the compiled binary, so a step takes a moment; the whole test stays well under this. */
 const TEST_TIMEOUT_MS = 60_000;
