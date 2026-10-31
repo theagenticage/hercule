@@ -97,6 +97,19 @@ describe("usePopoverMenu", () => {
     expect(listActiveItems()).toEqual(["third"]);
   });
 
+  it("moves the highlight to the last item on End and back to the first on Home", async () => {
+    render(<TestMenu onTake={vi.fn()} />);
+    act(() => {
+      getItem("first").focus();
+    });
+
+    await userEvent.keyboard("{End}");
+    expect(listActiveItems()).toEqual(["third"]);
+
+    await userEvent.keyboard("{Home}");
+    expect(listActiveItems()).toEqual(["first"]);
+  });
+
   it("gives an item that is one of a group of choices the role of a radio item", () => {
     function ChoiceMenu(): JSX.Element {
       const { menuProps, buildItemProps } = usePopoverMenu();

@@ -380,6 +380,9 @@ const expectSealedWithPointer = async (
 const addProviderAccount = (home: string): void => {
   const database = new Database(join(home, "data", "hercule.db"));
   try {
+    // The controller keeps running and writes its own rows while it boots. Without
+    // a timeout SQLite fails at once with "database is locked" instead of waiting.
+    database.run("PRAGMA busy_timeout = 5000");
     const now = new Date().toISOString();
     database
       .query(

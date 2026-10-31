@@ -147,6 +147,140 @@
   opacity: 1;
 }
 
+/* ---------- The harness pill in a section's head, and its popover ---------- */
+.pm-hpill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px 0 7px;
+  border-radius: var(--r-pill);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  cursor: default;
+  transition:
+    background var(--dur-1),
+    color var(--dur-1);
+}
+.pm-hpill > .br,
+.pm-hpill > .pi {
+  opacity: 0.75;
+}
+.pm-hpill:hover {
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+}
+/* Fewer than two harnesses can be picked: no outline, no chevron. */
+.pm-hpill.is-fixed {
+  box-shadow: none;
+  color: var(--faint);
+}
+.pm-hpill.is-fixed:hover {
+  color: var(--ink);
+}
+/* The profile names the harness: the pill is raised. */
+.pm-hpill.is-set {
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line),
+    var(--shadow-1);
+  color: var(--ink);
+}
+.pm-hpill:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+/* The chevron is the app's right chevron, turned to point down. */
+.pm-hpill > .ic {
+  transform: rotate(90deg);
+}
+/* The head grabs with its hand; the popover sits in the head, so it takes the arrow back. */
+.pm-hpop {
+  width: 340px;
+  margin-top: 4px;
+  cursor: default;
+  position-area: block-end span-inline-start;
+  position-try-fallbacks: flip-block;
+}
+.pm-hpop .pm-hrow {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  height: auto;
+  min-height: 32px;
+  padding: 7px 8px;
+  border-radius: var(--r-md);
+}
+/* A choice's text column: the name, then the small lines under it. */
+.pm-htext,
+.pm-choice-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.pm-hname {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: var(--w-medium);
+}
+.pm-hname > .br,
+.pm-hname > .pi {
+  opacity: 0.75;
+}
+.pm-htext > small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: 1.4;
+}
+/* Only the name is struck through; the reason under it stays readable. */
+.pm-hrow.is-off .pm-hname {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+  text-decoration: line-through;
+  text-decoration-color: var(--line);
+}
+.pm-hrow.is-off .pm-radio {
+  opacity: 0.4;
+}
+/* "Change it" is its own item, under the first option, in the option's text column. */
+.pm-hpop .pm-hchange {
+  width: auto;
+  height: 20px;
+  margin: -7px 0 4px 28px;
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-11);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+}
+.pm-hpop .pm-hchange.is-active {
+  color: var(--ink);
+}
+/* A radio dot, from the prototype's `.vi-radio`. */
+.pm-radio {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.25px color-mix(in oklab, var(--faint) 65%, transparent);
+}
+.pm-radio.is-on {
+  box-shadow:
+    inset 0 0 0 1.25px var(--ink),
+    inset 0 0 0 3.5px var(--raised),
+    inset 0 0 0 7px var(--ink);
+}
+
 /* ---------- A row ---------- */
 .pm-rows {
   margin: 0;
@@ -255,6 +389,54 @@
 .pm-rowmenu .pm-danger,
 .pm-rowmenu .pm-danger > .ic {
   color: var(--fail-ink);
+}
+/* The "Runs in" heading, as the prototype's `.md-gh--other`. */
+.pm-menu-h {
+  padding: 6px 8px 3px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+}
+.pm-menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--line-soft);
+}
+/* A "Runs in" radio: the dot, then the harness's name with its note, and under
+   it the reason the harness cannot be picked. A long reason wraps under the
+   name, so the item grows past the 32px of a one-line item. */
+.pm-rowmenu [role="menuitemradio"] {
+  align-items: flex-start;
+  /* The radio is 14px wide and the icons are 13px; 9px keeps the texts aligned. */
+  gap: 9px;
+  height: auto;
+  min-height: 32px;
+  padding-block: 7px;
+}
+.pm-rowmenu [role="menuitemradio"] > .pm-radio {
+  margin-top: 2px;
+}
+.pm-choice-note,
+.pm-choice-why {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.pm-choice-why {
+  line-height: 1.35;
+}
+/* A harness that cannot be picked has its name struck through, not its note
+   or its reason. A line does not run through an inline-block, and `pre` keeps
+   the space that separates the note from the name. */
+.pm-rowmenu [role="menuitemradio"][aria-disabled="true"] .pm-choice-text > span:first-child {
+  text-decoration: line-through;
+  text-decoration-color: var(--line);
+}
+.pm-choice-note {
+  display: inline-block;
+  white-space: pre;
+}
+.pm-rowmenu [role="menuitemradio"][aria-disabled="true"] .pm-radio {
+  opacity: 0.4;
 }
 
 /* ---------- Add a model, and its picker ---------- */

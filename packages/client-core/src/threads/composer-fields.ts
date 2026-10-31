@@ -52,11 +52,20 @@ export interface ComposerField {
   readonly locked: string | null;
 }
 
-/** The model pill: the harness logo, the account name when it is needed, and the model. */
+/**
+ * The model pill: the harness logo, the account name when it is needed, the
+ * model, and the harness when it is not the account's default.
+ */
 export interface ModelPill {
   readonly harnessId: string | null;
   readonly account: string | null;
   readonly name: string | null;
+  /**
+   * The display name of the harness the thread runs in, such as "pi", when
+   * that is not the account's default harness; else `null`. It is also `null`
+   * when the account or the harness is unknown.
+   */
+  readonly inHarness: string | null;
 }
 
 export interface ComposerBlocked {
@@ -313,6 +322,10 @@ export const buildComposerFields = (
         // A model no profile offers is still the thread's model, so the pill
         // shows its id rather than going blank.
         name: description?.name ?? config.model,
+        inHarness:
+          account === undefined || harness === undefined || harness.id === account.defaultHarnessId
+            ? null
+            : harness.displayName,
       },
       imageInput: description?.imageInput ?? null,
       modelName: description?.name ?? config.model ?? "The model",

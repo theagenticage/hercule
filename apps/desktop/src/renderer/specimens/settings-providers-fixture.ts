@@ -120,10 +120,10 @@ const buildFacts = (installed: ReadonlyArray<string>): NonNullable<Runner["facts
   identityPort: 4939,
 });
 
-/** The user's own Mac, online, with Claude Code and Codex. */
+/** The user's own Mac, online, with Claude Code, Codex and pi. */
 const STUDIO_MAC: Runner = {
   ...buildRunner("r-studio-mac", "studio-mac"),
-  facts: buildFacts(["claude", "codex"]),
+  facts: buildFacts(["claude", "codex", "pi"]),
 };
 /** A server, online, with Claude Code only. */
 const ATLAS: Runner = { ...buildRunner("r-atlas", "atlas"), facts: buildFacts(["claude"]) };
@@ -484,12 +484,15 @@ const ANTHROPIC = identityOf("01a06d02-8000-7000-8000-000000000a01");
 const ANTHROPIC_WORK = identityOf("01a06d02-8000-7000-8000-000000000a02");
 const OPENAI = identityOf("01a06d02-8000-7000-8000-000000000a03");
 const OPENAI_PERSONAL = identityOf("01a06d02-8000-7000-8000-000000000a04");
+const OPENAI_API = identityOf("01a06d02-8000-7000-8000-000000000a09");
 
 /**
  * The one Model Profile, "Main": Anthropic with Opus 5.5 as the profile's
- * default; Anthropic's Work account with one model; OpenAI with a model that
- * also runs in pi; and OpenAI's Personal account, which has not read its
- * catalog yet, so its section waits.
+ * default; Anthropic's Work account with one model; OpenAI's ChatGPT
+ * subscription with two models (it runs only in Codex); OpenAI's Personal
+ * account, which has not read its catalog yet, so its section waits; and
+ * OpenAI's API key account, which the profile runs in pi, with one model that
+ * follows the section and one that is offered twice, the second time in Codex.
  */
 export const PROVIDER_MODEL_PROFILES: ReadonlyArray<ModelProfile> = [
   buildModelProfile(
@@ -506,13 +509,29 @@ export const PROVIDER_MODEL_PROFILES: ReadonlyArray<ModelProfile> = [
       buildProfileSection(OPENAI, [
         buildProfileEntry(OPENAI, "gpt-6-1-sol", { name: "GPT-6.1 Sol" }),
         buildProfileEntry(OPENAI, "gpt-6-luna", { name: "GPT-6 Luna" }),
-        buildProfileEntry(OPENAI, "gpt-6-1-sol", {
-          name: "GPT-6.1 Sol",
-          harnessId: "pi/pi",
-          resolvedHarnessId: "pi/pi",
-        }),
       ]),
       buildProfileSection(OPENAI_PERSONAL, "pending"),
+      // A key account, which pi can run. The profile names pi for it, so its pill is raised.
+      buildProfileSection(
+        OPENAI_API,
+        [
+          buildProfileEntry(OPENAI_API, "gpt-6-luna", {
+            name: "GPT-6 Luna",
+            resolvedHarnessId: "pi/pi",
+          }),
+          // Offered twice: once following the section (pi), once named in Codex.
+          buildProfileEntry(OPENAI_API, "gpt-6-1-sol", {
+            name: "GPT-6.1 Sol",
+            resolvedHarnessId: "pi/pi",
+          }),
+          buildProfileEntry(OPENAI_API, "gpt-6-1-sol", {
+            name: "GPT-6.1 Sol",
+            harnessId: "codex/codex",
+            resolvedHarnessId: "codex/codex",
+          }),
+        ],
+        { harnessId: "pi/pi", resolvedHarnessId: "pi/pi" },
+      ),
     ],
     {
       id: "01a06d02-8000-7000-8000-000000000b01",
@@ -563,9 +582,73 @@ const SPECIMEN_HARNESSES: ReadonlyArray<Harness> = HARNESSES.map((harness) => {
       : harness.id === "codex/codex"
         ? [{ kind: "api-key", modelArgument: "{model}", credentialVariable: "OPENAI_API_KEY" }]
         : [];
+  // pi runs the keys of Anthropic, OpenAI, OpenCode and MiniMax too, as the
+  // pi plugin declares (the shared harness lists only Z.ai's).
+  const extraRuns: Harness["runs"] =
+    harness.id === "pi/pi"
+      ? [
+          {
+            providerId: "anthropic/anthropic",
+            kinds: [
+              {
+                kind: "api-key",
+                modelArgument: "anthropic/{model}",
+                credentialVariable: "ANTHROPIC_API_KEY",
+              },
+            ],
+            models: "own-list",
+          },
+          {
+            providerId: "openai/openai",
+            kinds: [
+              {
+                kind: "api-key",
+                modelArgument: "openai/{model}",
+                credentialVariable: "OPENAI_API_KEY",
+              },
+            ],
+            models: "own-list",
+          },
+          {
+            providerId: "opencode/opencode",
+            kinds: [
+              {
+                kind: "go-key",
+                modelArgument: "opencode-go/{model}",
+                credentialVariable: "OPENCODE_API_KEY",
+              },
+              {
+                kind: "zen-key",
+                modelArgument: "opencode/{model}",
+                credentialVariable: "OPENCODE_API_KEY",
+              },
+            ],
+            models: "own-list",
+          },
+          {
+            providerId: "minimax/minimax",
+            kinds: [
+              {
+                kind: "pay-as-you-go-key",
+                modelArgument: "minimax/{model}",
+                credentialVariable: "MINIMAX_API_KEY",
+              },
+              {
+                kind: "plan-key",
+                modelArgument: "minimax/{model}",
+                credentialVariable: "MINIMAX_API_KEY",
+              },
+            ],
+            models: "own-list",
+          },
+        ]
+      : [];
   return {
     ...harness,
-    runs: harness.runs.map((run) => ({ ...run, kinds: [...run.kinds, ...extraKinds] })),
+    runs: [
+      ...harness.runs.map((run) => ({ ...run, kinds: [...run.kinds, ...extraKinds] })),
+      ...extraRuns,
+    ],
   };
 });
 

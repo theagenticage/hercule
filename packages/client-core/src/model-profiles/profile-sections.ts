@@ -10,9 +10,15 @@ import type {
   Provider,
   ProviderAccount,
   ResolvedModelProfileEntry,
+  Runner,
 } from "@hercule/contract";
 import { buildProviderAccountName, findProviderPluginId } from "../provider-accounts";
 import { isMachineProblemReason } from "./entry-problem";
+import {
+  buildSectionHarnessChoices,
+  type ModelProfileHarnessChoice,
+  type SectionHarness,
+} from "./profile-harnesses";
 import {
   buildProfileEntryKey,
   findOtherHarnessName,
@@ -39,6 +45,10 @@ export interface ModelSectionRow {
    * card shows those.
    */
   readonly problem: string | null;
+  /** The harnesses the entry can run in, struck through where it cannot; empty when there are fewer than two. */
+  readonly runsIn: readonly ModelProfileHarnessChoice[];
+  /** The harnesses the model can be offered in as another entry. */
+  readonly alsoOfferIn: readonly ModelProfileHarnessChoice[];
 }
 
 /** One account's section of the profile. */
@@ -50,6 +60,8 @@ export interface ModelSection {
   readonly pluginId: string | null;
   /** Whether the section waits for the account's first Model Catalog read, which will fill it. */
   readonly selectionPending: boolean;
+  /** The harness pill in the section's head. */
+  readonly harness: SectionHarness;
   readonly rows: readonly ModelSectionRow[];
   /**
    * The slugs of the entries that run in the section's harness, whether they
@@ -73,18 +85,21 @@ export const buildModelProfileSections = (
     readonly accounts: readonly ProviderAccount[];
     readonly providers: readonly Provider[];
     readonly harnesses: readonly Harness[];
+    readonly runners: readonly Runner[];
   },
 ): readonly ModelSection[] => {
   const { defaultEntry } = profile;
   return profile.accounts.flatMap((section) => {
     const account = catalogs.accounts.find(({ id }) => id === section.providerAccountId);
     if (account === undefined) return [];
+    const { harness, buildRowChoices } = buildSectionHarnessChoices(section, account, catalogs);
     return [
       {
         providerAccountId: account.id,
         name: buildProviderAccountName(catalogs.providers, account),
         pluginId: findProviderPluginId(catalogs.providers, account),
         selectionPending: section.selectionPending,
+        harness,
         sectionHarnessModels: section.entries
           .filter((entry) => entry.resolvedHarnessId === section.resolvedHarnessId)
           .map((entry) => entry.model),
@@ -98,6 +113,7 @@ export const buildModelProfileSections = (
             entry.problem !== null && !isMachineProblemReason(entry.problem.reason)
               ? entry.problem.message
               : null,
+          ...buildRowChoices(entry),
         })),
       },
     ];

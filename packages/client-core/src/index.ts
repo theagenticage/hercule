@@ -769,7 +769,10 @@ export {
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,
   moveModelProfileEntry,
+  moveModelProfileEntryToHarness,
+  offerModelProfileEntryIn,
   renameModelProfile,
+  setModelProfileAccountHarness,
   setModelProfileEntryIncluded,
   takeOutModelProfileEntry,
 } from "./model-profiles/profile-edits";
@@ -778,6 +781,7 @@ export {
   type ModelSection,
   type ModelSectionRow,
 } from "./model-profiles/profile-sections";
+export type { ModelProfileHarnessChoice, SectionHarness } from "./model-profiles/profile-harnesses";
 export { searchPickerModels, type PickerModels } from "./model-profiles/catalog-search";
 export {
   findModelProfileOrFirst,
@@ -785,7 +789,7 @@ export {
   listAccountModelProfiles,
   listProjectsOfModelProfile,
 } from "./model-profiles/profile-lookup";
-export { countProfileEntries } from "./model-profiles/profile-entries";
+export { countProfileEntries, formatProfileEntryKey } from "./model-profiles/profile-entries";
 export { buildModelProfileCopyName } from "./model-profiles/profile-tabs";
 export { updateModelProfile } from "./model-profiles/update-profile";
 export {

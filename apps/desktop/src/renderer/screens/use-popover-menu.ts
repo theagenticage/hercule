@@ -8,7 +8,7 @@ import {
   type RefObject,
   type ToggleEvent,
 } from "react";
-import { FOCUSABLE_MENU_ITEM_SELECTOR, moveMenuFocus } from "./move-menu-focus";
+import { FOCUSABLE_MENU_ITEM_SELECTOR, isMenuFocusKey, moveMenuFocus } from "./move-menu-focus";
 
 /** What `usePopoverMenu` returns: the props of the trigger, the menu and each item. */
 export interface PopoverMenu {
@@ -28,7 +28,8 @@ export interface PopoverMenu {
   /**
    * Returns the props of the item named `item`: its role, its name in
    * `data-item`, and the class that draws it active. A `disabled` item is
-   * marked `aria-disabled`, and the pointer and the arrow keys pass over it.
+   * marked `aria-disabled`, and the pointer and the keys that move the focus
+   * pass over it.
    * An item that is one of a group of choices passes `checked`, whether it is
    * the chosen one: its role is then `menuitemradio` and it carries
    * `aria-checked`.
@@ -62,7 +63,8 @@ export interface PopoverMenu {
  * - the first item that can be taken gets the focus when the menu opens, so
  *   the arrow keys work at once, and it is drawn active when the menu was
  *   opened by a key;
- * - the arrow keys move the focus, wrapping around at either end;
+ * - the arrow keys move the focus, wrapping around at either end, and Home
+ *   and End move it to the first and the last item;
  * - the item with the focus is drawn active, whether Tab, the arrow keys or
  *   the pointer moved it there, and a disabled item is never drawn active.
  *   The pointer moves the focus to the item it enters, so Enter always takes
@@ -87,7 +89,7 @@ export function usePopoverMenu(): PopoverMenu {
   };
 
   const handleKeys = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    if (!isMenuFocusKey(event.key)) return;
     event.preventDefault();
     moveMenuFocus(event.currentTarget, event.key);
   };

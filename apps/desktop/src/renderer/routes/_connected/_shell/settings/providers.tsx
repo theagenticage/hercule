@@ -139,6 +139,9 @@ function Providers(): JSX.Element {
         onAddAccount={() => {
           setAdding(true);
         }}
+        onOpenAccount={(providerAccountId, name) => {
+          setSheet({ providerAccountId, name });
+        }}
       />
       {adding && (
         // Without its own boundary, the sheet's load would suspend the page behind it.

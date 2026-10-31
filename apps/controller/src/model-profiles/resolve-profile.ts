@@ -6,16 +6,18 @@
  * harnesses once for all profiles, and passes them in, so resolving an entry
  * never queries.
  */
-import type {
-  EntryProblem,
-  ModelCatalog,
-  ModelProfile,
-  ProviderAccount,
-  ProviderAccountReadinessState,
-  ResolvedModelProfileAccount,
-  ResolvedModelProfileEntry,
+import {
+  findSnapshotModel,
+  isModelMissingFromHarness,
+  type EntryProblem,
+  type ModelCatalog,
+  type ModelProfile,
+  type ModelProfileEntry,
+  type ProviderAccount,
+  type ProviderAccountReadinessState,
+  type ResolvedModelProfileAccount,
+  type ResolvedModelProfileEntry,
 } from "@hercule/contract";
-import type { ModelProfileEntry } from "@hercule/contract";
 import {
   decideProviderAccountHarness,
   findCredentialSecretName,
@@ -23,11 +25,7 @@ import {
   type RegisteredProvider,
 } from "../plugins";
 import { describeProviderAccount } from "../provider-accounts";
-import {
-  describeHarnessLacksModel,
-  findSnapshotModel,
-  isModelMissingFromHarness,
-} from "./harness-evidence";
+import { describeHarnessLacksModel } from "./harness-evidence";
 import { findNamedHarnessId, type StoredSection } from "./profile-body";
 import type { StoredModelProfile } from "./repository";
 

@@ -72,7 +72,8 @@ export function OptionsPick({
 
 /**
  * Renders the model pick in a composer's row: the pill with the harness's
- * logo, the account and the model, as a trigger that opens the model menu,
+ * logo, the account, the model and "in pi" when the harness is not the
+ * account's default, as a trigger that opens the model menu,
  * see `ModelMenu`.
  *
  * `pill` is what the trigger shows, and `catalogs`, `config`, `kind` and
@@ -124,6 +125,7 @@ export function ModelPick({
           {pill.harnessId === null ? null : <HarnessLogo harnessId={pill.harnessId} size={13} />}
           {pill.account === null ? null : <span className="faint">{pill.account}</span>}
           <span className="pick-name">{pill.name ?? "No model"}</span>
+          {pill.inHarness === null ? null : <span className="faint">in {pill.inHarness}</span>}
         </>
       }
     >

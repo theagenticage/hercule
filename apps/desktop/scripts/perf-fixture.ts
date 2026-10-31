@@ -313,40 +313,150 @@ const EXTRA_PROFILE_ACCOUNTS: ReadonlyArray<readonly [string, ReadonlyArray<numb
 ];
 
 /**
+ * One section of "Main" in the Providers launch: the harness the section runs
+ * in (`null` for the account's own), and its models. A model is a slug, or a
+ * slug with the harness that entry names for itself.
+ */
+interface MainSectionFixture {
+  readonly harnessId: string | null;
+  readonly models: ReadonlyArray<string | readonly [model: string, harnessId: string]>;
+}
+
+/**
+ * The sections of "Main" in the Providers launch, as positions in the list of
+ * `buildProviderAccountFixtures`: 60 model rows in all, so the page draws
+ * sections as long as a real setup's, with a section and some rows set to run
+ * in a harness other than their account's default:
+ *
+ * - position 4 (an Anthropic key) is set to run in pi;
+ * - position 6 (an OpenAI key) offers `gpt-5` twice, in Codex and in pi, and
+ *   `gpt-5-mini` in pi alone, so two of its rows say "in pi".
+ *
+ * A harness here is one the account's kind may run in. The write is refused
+ * otherwise.
+ */
+const MAIN_SECTION_FIXTURES: ReadonlyArray<MainSectionFixture> = [
+  {
+    harnessId: null,
+    models: [
+      "claude-opus-4-5",
+      "claude-opus-4-1",
+      "claude-opus-4-0",
+      "claude-sonnet-4-5",
+      "claude-sonnet-4-0",
+      "claude-3-7-sonnet-latest",
+      "claude-haiku-4-5",
+      "claude-3-5-haiku-latest",
+      "claude-3-5-sonnet-latest",
+      "claude-3-opus-latest",
+      "claude-3-5-sonnet-20241022",
+      "claude-3-haiku-20240307",
+    ],
+  },
+  {
+    harnessId: null,
+    models: [
+      "gpt-5",
+      "gpt-5-codex",
+      "gpt-5-mini",
+      "gpt-5-nano",
+      "gpt-5-pro",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "gpt-4.1-nano",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "o3",
+      "o4-mini",
+    ],
+  },
+  {
+    harnessId: null,
+    models: [
+      "claude-opus-4-5",
+      "claude-sonnet-4-5",
+      "claude-sonnet-4-0",
+      "claude-haiku-4-5",
+      "claude-3-5-haiku-latest",
+      "claude-opus-4-1",
+    ],
+  },
+  {
+    harnessId: null,
+    models: ["gpt-5", "gpt-5-codex", "gpt-5-mini", "gpt-4.1", "o3", "o4-mini"],
+  },
+  {
+    harnessId: "pi/pi",
+    models: [
+      "claude-opus-4-5",
+      "claude-sonnet-4-5",
+      "claude-sonnet-4-0",
+      "claude-haiku-4-5",
+      "claude-3-7-sonnet-latest",
+      "claude-3-5-haiku-latest",
+      "claude-opus-4-1",
+      "claude-opus-4-0",
+    ],
+  },
+  {
+    harnessId: null,
+    models: [
+      "glm-4.6",
+      "glm-4.5",
+      "glm-4.5-air",
+      "glm-4.5-flash",
+      "glm-4.5v",
+      "glm-4-32b-0414-128k",
+    ],
+  },
+  {
+    harnessId: null,
+    models: [
+      "gpt-5",
+      ["gpt-5", "pi/pi"],
+      ["gpt-5-mini", "pi/pi"],
+      "gpt-5-nano",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "o3",
+      "o4-mini",
+    ],
+  },
+];
+
+/**
  * Makes the Model Profiles of the Providers launch through the API of the
- * running controller: puts every account in "Main", then creates the profiles
- * of `EXTRA_PROFILE_ACCOUNTS`, each with its accounts. The sections have no
- * entries, because no catalog is read in this fixture (the scripted runners
- * probe only the fleet's account). `resetProviderAccounts` undoes it.
+ * running controller: puts every account in "Main" with the models of
+ * `MAIN_SECTION_FIXTURES`, then creates the profiles of
+ * `EXTRA_PROFILE_ACCOUNTS`, each with its accounts and no models yet. Entries
+ * sent by hand are not checked against a catalog, and no catalog is read in
+ * this fixture (the scripted runners probe only the fleet's account).
+ * `resetProviderAccounts` undoes it.
  */
 const makeModelProfiles = async (
   call: <T>(method: string, path: string, body?: unknown) => Promise<T>,
 ): Promise<void> => {
   const accounts = await call<ReadonlyArray<ProviderAccount>>("GET", "/provider-accounts");
   const [main] = await call<ReadonlyArray<ModelProfile>>("GET", "/model-profiles");
-  const held = new Set(main!.accounts.map((section) => section.providerAccountId));
+  const sections = accounts.map((account, position) => {
+    const { harnessId, models } = MAIN_SECTION_FIXTURES[position]!;
+    return {
+      providerAccountId: account.id,
+      harnessId,
+      entries: models.map((model) => ({
+        providerAccountId: account.id,
+        model: typeof model === "string" ? model : model[0],
+        harnessId: typeof model === "string" ? null : model[1],
+      })),
+    };
+  });
   await call("PATCH", `/model-profiles/${main!.id}`, {
     expectedRevision: main!.revision,
     name: main!.name,
-    accounts: [
-      ...main!.accounts.map(({ providerAccountId, harnessId, selectionPending, entries }) => ({
-        providerAccountId,
-        harnessId,
-        ...(selectionPending
-          ? {}
-          : {
-              entries: entries.map(({ model, harnessId: entryHarnessId }) => ({
-                providerAccountId,
-                model,
-                harnessId: entryHarnessId,
-              })),
-            }),
-      })),
-      ...accounts
-        .filter((account) => !held.has(account.id))
-        .map((account) => ({ providerAccountId: account.id, harnessId: null })),
-    ],
-    defaultEntry: main!.defaultEntry,
+    accounts: sections,
+    defaultEntry: sections[0]!.entries[0],
     dismissedNewModels: main!.dismissedNewModels,
   });
   for (const [name, positions] of EXTRA_PROFILE_ACCOUNTS) {

@@ -7,9 +7,16 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import type { ModelSection, ModelSectionRow } from "@hercule/client-core";
+import {
+  formatProfileEntryKey,
+  type ModelProfileHarnessChoice,
+  type ModelSection,
+  type ModelSectionRow,
+} from "@hercule/client-core";
 import type { ResolvedModelProfileEntry } from "@hercule/contract";
 import { GripIcon } from "../../../icons/grip";
+import { HarnessPill } from "./harness-pill";
+import { joinClassNames } from "./join-class-names";
 import { ModelRow } from "./model-row";
 import { useDragReorder } from "./use-drag-reorder";
 import { useOptimisticOrder } from "./use-optimistic-order";
@@ -32,13 +39,9 @@ const readAltArrowOffset = (event: KeyboardEvent): -1 | 1 | null => {
   return event.key === "ArrowUp" ? -1 : 1;
 };
 
-/** Joins the class names that are not empty. */
-const joinClassNames = (...names: readonly string[]): string =>
-  names.filter((name) => name !== "").join(" ");
-
 /**
  * Renders one account's section of a Model Profile: its head, with the
- * provider's `mark` and the account's name, then its entries in order, then
+ * provider's `mark`, the account's name and the harness pill, then its entries in order, then
  * `addModel` (the "Add a model" button and its picker) at the foot.
  *
  * - The head drags the section, and Alt+Up and Alt+Down move it, through
@@ -48,7 +51,8 @@ const joinClassNames = (...names: readonly string[]): string =>
  *   when a drag drops and once for each key press, and the order the
  *   controller sends back replaces the one shown. After a key press the
  *   focus stays on the moved row, though the browser drops the focus of an
- *   element that its list moves.
+ *   element that its list moves. So it does after "Runs in" moves a row to
+ *   another harness, which replaces the row: its key holds its harness.
  * - A section that waits for its account's first Model Catalog read says so
  *   and offers no "Add a model", because the read will fill the section.
  * - A section with no entry says so.
@@ -63,7 +67,11 @@ export function ModelProfileSection({
   drag,
   addModel,
   onMoveEntry,
+  onSetHarness,
+  onOpenAccount,
   onMakeDefault,
+  onMoveToHarness,
+  onAlsoOfferIn,
   onTakeOut,
 }: {
   readonly section: ModelSection;
@@ -73,7 +81,15 @@ export function ModelProfileSection({
   readonly drag: SectionDrag;
   readonly addModel: ReactNode;
   readonly onMoveEntry: (entry: ResolvedModelProfileEntry, toIndex: number) => Promise<void>;
+  /** Sets the harness the account's models run in; `null` follows the account's default. */
+  readonly onSetHarness: (harnessId: string | null) => void;
+  /** Opens the account's sheet, where its default harness is set, with the account's id and name. */
+  readonly onOpenAccount: (providerAccountId: string, name: string) => void;
   readonly onMakeDefault: (entry: ResolvedModelProfileEntry) => void;
+  /** Saves the move of the model's entry to the harness `harnessId`. */
+  readonly onMoveToHarness: (entry: ResolvedModelProfileEntry, harnessId: string | null) => void;
+  /** Saves the second entry of the model, which runs in `harnessId`. */
+  readonly onAlsoOfferIn: (entry: ResolvedModelProfileEntry, harnessId: string | null) => void;
   readonly onTakeOut: (entry: ResolvedModelProfileEntry) => void;
 }): JSX.Element {
   const rowsByKey = new Map<string, ModelSectionRow>(section.rows.map((row) => [row.key, row]));
@@ -88,15 +104,25 @@ export function ModelProfileSection({
     void saveMove(key, toIndex);
   });
   const rowElements = useRef(new Map<string, HTMLLIElement>());
-  // The row to focus once the controller's order arrives and the list moves it.
+  // The row to focus once the controller's order arrives and the list moves
+  // or replaces it.
   const refocus = useRef<{ readonly key: string; readonly order: string } | null>(null);
   const orderText = order.keys.join("\n");
 
   useLayoutEffect(() => {
     const pending = refocus.current;
     if (pending === null || pending.order === orderText) return;
+    const element = rowElements.current.get(pending.key);
+    if (element === undefined) return;
     refocus.current = null;
-    rowElements.current.get(pending.key)?.focus({ preventScroll: true });
+    // The user may have moved on while the save ran: take the focus back only
+    // when the move dropped it, or left it in one of the section's rows.
+    const { activeElement } = document;
+    const dropped =
+      activeElement === null ||
+      activeElement === document.body ||
+      [...rowElements.current.values()].some((row) => row.contains(activeElement));
+    if (dropped) element.focus({ preventScroll: true });
   }, [orderText]);
 
   const moveBy = (key: string, offset: -1 | 1): void => {
@@ -104,6 +130,24 @@ export function ModelProfileSection({
     if (to < 0 || to >= order.keys.length) return;
     refocus.current = { key, order: orderText };
     void saveMove(key, to);
+  };
+
+  /**
+   * Moves the row to the harness of `choice` and focuses it once it comes
+   * back under its new key. The key exists only if the move was saved, so a
+   * failed save leaves nothing to focus. A later move replaces the pending
+   * key, and the effect leaves the focus alone when the user has moved on.
+   */
+  const moveToHarness = (row: ModelSectionRow, choice: ModelProfileHarnessChoice): void => {
+    refocus.current = {
+      key: formatProfileEntryKey({
+        providerAccountId: row.entry.providerAccountId,
+        harnessId: choice.resolvedHarnessId,
+        model: row.entry.model,
+      }),
+      order: orderText,
+    };
+    onMoveToHarness(row.entry, choice.harnessId);
   };
 
   const rows = order.keys.flatMap((key) => rowsByKey.get(key) ?? []);
@@ -150,6 +194,8 @@ export function ModelProfileSection({
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
         title={`Drag to move ${section.name}'s models up or down the menu`}
         onKeyDown={(event) => {
+          // The pill and its popover inside the head take their own keys.
+          if (event.target !== event.currentTarget) return;
           const offset = readAltArrowOffset(event);
           if (offset === null) return;
           event.preventDefault();
@@ -161,6 +207,15 @@ export function ModelProfileSection({
         </span>
         {mark}
         <b>{section.name}</b>
+        <HarnessPill
+          harness={section.harness}
+          accountName={section.name}
+          profileName={profileName}
+          onPick={onSetHarness}
+          onChangeAccountHarness={() => {
+            onOpenAccount(section.providerAccountId, section.name);
+          }}
+        />
       </div>
       {rows.length === 0 ? null : (
         <ul className="pm-rows">
@@ -172,6 +227,12 @@ export function ModelProfileSection({
               rowProps={buildRowProps(row.key)}
               onMakeDefault={() => {
                 onMakeDefault(row.entry);
+              }}
+              onMoveToHarness={(choice) => {
+                moveToHarness(row, choice);
+              }}
+              onAlsoOfferIn={(harnessId) => {
+                onAlsoOfferIn(row.entry, harnessId);
               }}
               onTakeOut={() => {
                 onTakeOut(row.entry);
