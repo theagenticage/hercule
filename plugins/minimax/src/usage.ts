@@ -5,15 +5,15 @@ const OptionalNumber = Schema.optionalKey(Schema.NullOr(Schema.Finite));
 
 /**
  * One entry of the answer's `model_remains`: the plan's limits for one model
- * family. Every field is optional except the name, because MiniMax adds
- * fields over time (the status and percent fields only exist on newer plans)
- * and a field we do not read must not fail the whole answer.
+ * family. Every field but the name is optional, because newer plans send
+ * different fields than older ones and a field we do not read must not fail
+ * the answer.
  */
 const ModelRemain = Schema.Struct({
   model_name: Schema.String,
-  /** When the short window ends, in milliseconds since the epoch. */
+  /** When the five-hour window ends, in milliseconds since the epoch. */
   end_time: OptionalNumber,
-  /** Newer plans send this instead of `end_time`: the milliseconds left in the short window. */
+  /** Newer plans send this instead of `end_time`: the milliseconds left in the window. */
   remains_time: OptionalNumber,
   current_interval_total_count: OptionalNumber,
   /** Despite its name, the count that is left in the window, not the count used. */
@@ -35,10 +35,7 @@ const ModelRemain = Schema.Struct({
 
 type ModelRemain = Schema.Schema.Type<typeof ModelRemain>;
 
-/**
- * The answer of MiniMax's plan usage endpoint. Errors come back as HTTP 200
- * with a non-zero `base_resp.status_code`, so the same shape holds both.
- */
+/** The answer of MiniMax's plan usage endpoint. Errors are HTTP 200 with a non-zero `status_code`. */
 const PlanUsageBody = Schema.Struct({
   base_resp: Schema.Struct({
     status_code: Schema.Number,
@@ -50,29 +47,20 @@ const PlanUsageBody = Schema.Struct({
 const decodePlanUsageBody = Schema.decodeUnknownSync(PlanUsageBody);
 
 /**
- * The status codes that mean MiniMax refused the key, from its error code
- * list (https://platform.minimax.io/docs/api-reference/errorcode):
+ * The status codes that mean MiniMax refused the key, from its error code list
+ * (https://platform.minimax.io/docs/api-reference/errorcode): `1004` (not
+ * authorized) and `2049` (invalid API key). `2057` is handled on its own.
  *
- * - `1004`, not authorized. A request with a bogus key got exactly this on
- *   2026-10-31, as HTTP 200.
- * - `2049`, invalid API key.
- * - `2057`, "not token plan token": the key is a pay-as-you-go key, and this
- *   endpoint needs a plan key.
- *
- * Not here: `2062`, "no active M Plan subscription when querying usage". The
- * key may be fine and the subscription lapsed or not started, which Hercule
- * does not tell apart yet, so it is thrown like any other failure: the caller
- * logs it and the account keeps its last readings.
+ * Not here: `2062`, "no active M Plan subscription". The key may be fine and the
+ * subscription lapsed or not started, which is not told apart yet, so it is
+ * thrown like any other failure and the account keeps its last readings.
  */
-const KEY_REFUSED_CODES: ReadonlySet<number> = new Set([1004, 2049, 2057]);
+const KEY_REFUSED_CODES: ReadonlySet<number> = new Set([1004, 2049]);
 
-/** Code 2057, "not token plan token", whose refusal text is ours rather than MiniMax's. */
+/** Code 2057, "not token plan token": the key is a pay-as-you-go key, which this endpoint refuses. */
 const PAY_AS_YOU_GO_KEY_CODE = 2057;
 
-/**
- * What the user reads when a pay-as-you-go key was added as a plan key.
- * MiniMax's own words for it ("not token plan token") do not say what to do.
- */
+/** What the user reads for code 2057. MiniMax's own words do not say what to do. */
 const PAY_AS_YOU_GO_KEY_REFUSAL =
   "This is a pay-as-you-go key, not a plan key. Add it to MiniMax as a pay-as-you-go key.";
 
@@ -183,32 +171,24 @@ const readTextModelWindows = (row: ModelRemain, takenAt: Timestamp): Array<Usage
   ].filter((reading) => reading !== undefined);
 
 /**
- * Turns the JSON answer of MiniMax's plan usage endpoint
- * (`GET /v1/token_plan/remains`) into readings, stamping each with `takenAt`.
+ * Turns the JSON answer of MiniMax's plan usage endpoint into readings,
+ * stamping each with `takenAt`.
  *
- * - Only the text model row is read: `general` on newer plans, `MiniMax-M*`
- *   on older ones. When an answer has both, `general` wins: a plan that lists
- *   both has moved to `general`. The
- *   image, speech and video rows have limits of their own and are not shown,
- *   and counting them too would count the same plan twice.
- * - The short window is the five-hour window and the long one is the weekly
- *   window. MiniMax's plan FAQ gives them as five hours and seven days, and
- *   the fields of an official sample answer span exactly five hours.
- * - A window with status 3 (unlimited), or with no percent and a total of 0,
- *   gives no reading. Status 2 (exhausted) is a window that is used up and hit.
- * - `*_usage_count` holds the count that is left, in spite of its name, as
- *   MiniMax's own command line tool reads it. The `*_remaining_percent`
- *   fields, where a plan sends them, are preferred over the counts.
- * - `resetsAt` is the window's end time. Newer plans send the milliseconds
- *   left (`remains_time`, `weekly_remains_time`) instead, and then it is
- *   `takenAt` plus those. It is `null` when MiniMax sent neither.
+ * - Only the text model row is read: `general` on newer plans, `MiniMax-M*` on
+ *   older ones, and `general` wins when both are present. The image, speech and
+ *   video rows have limits of their own and are not shown.
+ * - The two windows are the five-hour and the weekly one.
+ * - `*_usage_count` holds the count that is LEFT, despite its name. A
+ *   `*_remaining_percent` is preferred over the counts.
+ * - Status 3 (unlimited) gives no reading. Status 2 (exhausted) is 100 percent
+ *   and hit.
+ * - `resetsAt` is the end time, or `takenAt` plus the milliseconds left on
+ *   newer plans, or `null` when neither is sent.
  *
- * Returns `{ refused }` with MiniMax's own message when the answer says the
- * key is refused (see `KEY_REFUSED_CODES`), except for a pay-as-you-go key,
- * where it says what to do about it. Throws when the answer is not the
- * documented shape, or is a failure that says nothing about the key, such as
- * 2062 (no active plan): the caller logs the failure and the account keeps its
- * last readings.
+ * Returns `{ refused }` for a key MiniMax refuses (see `KEY_REFUSED_CODES`),
+ * with MiniMax's message, or with our own text for a pay-as-you-go key. Throws
+ * on an unexpected shape or a failure that says nothing about the key, such as
+ * 2062: the account then keeps its last readings.
  */
 export const parsePlanUsageBody: ParseUsageBody = (body, takenAt) => {
   const answer = decodePlanUsageBody(body);

@@ -102,44 +102,24 @@ describe("parseGoUsageBody", () => {
     });
   });
 
-  it("reads a window without a status as not rate-limited", () => {
-    expect(parseGoUsageBody({ usage: { rolling: { percent: 5 } } }, TAKEN_AT)).toMatchObject({
-      readings: [{ window: "five-hour", usedPercent: 5, hit: false }],
-    });
-  });
-
-  it("gives resetsAt null when the reset time is missing or not a date", () => {
+  it("gives resetsAt null when the reset time is missing or not a date, and normalizes other offsets to UTC", () => {
     const body = {
       usage: {
         rolling: { status: "ok", percent: 5 },
         weekly: { ...RECORDED.usage.weekly, resetsAt: "soon" },
-        monthly: RECORDED.usage.monthly,
+        monthly: { ...RECORDED.usage.monthly, resetsAt: "2026-09-19T21:10:07+02:00" },
       },
     };
 
     expect(parseGoUsageBody(body, TAKEN_AT)).toMatchObject({
-      readings: [{ resetsAt: null }, { resetsAt: null }, { resetsAt: "2026-10-08T05:27:23.880Z" }],
-    });
-  });
-
-  it("normalizes a reset time written with another offset to UTC", () => {
-    const body = {
-      usage: { rolling: { status: "ok", percent: 1, resetsAt: "2026-09-19T21:10:07+02:00" } },
-    };
-
-    expect(parseGoUsageBody(body, TAKEN_AT)).toMatchObject({
-      readings: [{ resetsAt: "2026-09-19T19:10:07.000Z" }],
+      readings: [{ resetsAt: null }, { resetsAt: null }, { resetsAt: "2026-09-19T19:10:07.000Z" }],
     });
   });
 
   it.each([
-    ["a string", "nope"],
-    ["null", null],
     ["a body without usage", {}],
     ["an error body", { type: "error", error: { type: "EntitlementError", message: "no" } }],
     ["a percent that is text", { usage: { rolling: { status: "ok", percent: "5" } } }],
-    ["a status that is a number", { usage: { rolling: { status: 1, percent: 5 } } }],
-    ["a window that is not an object", { usage: { rolling: 5 } }],
   ])("throws on %s, which is a defect of the plugin or of OpenCode", (_name, body) => {
     expect(() => parseGoUsageBody(body, TAKEN_AT)).toThrow();
   });

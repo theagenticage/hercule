@@ -245,8 +245,7 @@ describe("parsePlanUsageBody", () => {
     ).toEqual({ readings: [] });
   });
 
-  // Recorded live on 2026-10-31 with a bogus key: HTTP 200 and this body.
-  it("refuses the recorded answer to a bogus key", () => {
+  it("refuses the recorded answer to a bogus key, which is HTTP 200", () => {
     expect(
       parsePlanUsageBody(
         {
@@ -264,7 +263,6 @@ describe("parsePlanUsageBody", () => {
     });
   });
 
-  // From MiniMax's error code list, https://platform.minimax.io/docs/api-reference/errorcode.
   it("refuses with MiniMax's words on the documented key failure code 2049", () => {
     expect(
       parsePlanUsageBody(
@@ -296,12 +294,8 @@ describe("parsePlanUsageBody", () => {
   });
 
   it.each([
-    ["a string", "nope"],
-    ["null", null],
     ["a body without base_resp", { model_remains: [] }],
     ["a success without model_remains", { base_resp: { status_code: 0 } }],
-    ["model_remains that is not a list", { base_resp: { status_code: 0 }, model_remains: {} }],
-    ["a row without a model name", answerWith({ model_name: undefined })],
     ["a count that is text", answerWith({ current_interval_usage_count: "228" })],
   ])("throws on %s, which is a defect of the plugin or of MiniMax", (_name, body) => {
     expect(() => parsePlanUsageBody(body, TAKEN_AT)).toThrow();

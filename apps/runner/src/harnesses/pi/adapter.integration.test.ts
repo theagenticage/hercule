@@ -311,14 +311,14 @@ const sendFirstRequest = async (
   const upstream = startFakeModelServer();
   upstreams.push(upstream);
   const home = createScratchDir();
-  pointAtFakeModel(home, "zai", upstream.baseUrl);
+  pointAtFakeModel(home, upstream.baseUrl);
   const userHome = user.home ?? createScratchDir();
   // The user's own pi points at the fake model too. A session that reads the
   // user's agent directory by mistake then still asks the model, so the
   // test's assertion reports the mistake rather than a timeout.
   const userAgentDir = join(userHome, ".pi", "agent");
   mkdirSync(userAgentDir, { recursive: true });
-  pointAtFakeModel(userAgentDir, "zai", upstream.baseUrl);
+  pointAtFakeModel(userAgentDir, upstream.baseUrl);
 
   const sessionId = crypto.randomUUID();
   await Effect.runPromise(

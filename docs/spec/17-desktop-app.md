@@ -4822,10 +4822,7 @@ The sidebar was drawn from a specimen with 3,000 and with 200 threads, every sec
 - **The menu's time is one run on a busy Mac,** with up to 60 entries. The profile of 7 accounts and 4 profiles that spec 17's budget names was not built for this reading. A menu with more than 60 entries in one profile was not measured.
 - **Not measured:** processes, memory, idle work and the work per streamed token with the Models section open (the perf script was not run), and the picker's time to open on a catalog of hundreds of models. The section and the menu add no timer, no polling and no live topic of their own: `modelProfile.query` is a shell read renewed by the `provider` topic the shell already holds.
 
-**OpenCode and MiniMax, slice 49,** recorded 2026-10-31 for [#941](https://github.com/theagenticage/hercule/issues/941). No renderer or main-process code changed, so there is nothing to measure in processes, memory, idle work, work per streamed token or bundle bytes.
-
-- **The cost is plugin data only.** Each read of the plugins' marks carries about 1.9 kB more: MiniMax's path is 1,827 bytes and OpenCode's about 95.
-- **Not measured:** everything else in the table above, because nothing on the desktop ran differently.
+**OpenCode and MiniMax, slice 49,** recorded 2026-10-31 for [#941](https://github.com/theagenticage/hercule/issues/941). No renderer or main-process code changed, so there is nothing to measure. The only cost is plugin data: the plugins' marks add about 1.9 kB to each read of them (MiniMax's path is 1,827 bytes, OpenCode's about 95).
 
 ## Slices
 
@@ -4963,7 +4960,7 @@ Each slice is a reviewable change. The performance budgets guide it and do not g
 46. **New models.** The "New" rows on Models and in the composer, with Add and Not now. Blocked by slice 43.
 47. **Usage and expiry.** The cards' gauges, the account sheet's usage, the expiry and failed states with their buttons, and the notifications. Blocked by slice 42. *(Amended 2026-10-31, [#939](https://github.com/theagenticage/hercule/issues/939).)* Built, except the composer's expiry entries. The notifications are the controller's, and the slice adds no screen for them (see What slice 47 builds, in the Providers section).
 48. **OpenRouter and the model browser.** OpenRouter's mark and kind, and the model browser with its facets, sort, tray and Refresh. Blocked by slices 43 and 47. Records: [The Providers page's budgets](#the-providers-pages-budgets).
-49. **OpenCode and MiniMax.** Their marks, and nothing else on the desktop, which is what the slice shows: a provider is a definition. Blocked by slices 43 and 47. *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* Built: the two marks, with the plugins `plugins/opencode` and `plugins/minimax` behind them. No screen code changed.
+49. **OpenCode and MiniMax.** Their marks, and nothing else on the desktop, which is what the slice shows: a provider is a definition. Blocked by slices 43 and 47. *(Amended 2026-10-31, [#941](https://github.com/theagenticage/hercule/issues/941).)* Built: the two marks and the plugins `plugins/opencode` and `plugins/minimax`.
 
 ## Testing
 

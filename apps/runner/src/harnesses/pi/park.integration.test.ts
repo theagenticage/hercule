@@ -67,7 +67,7 @@ const startLiveSession = async (
   const upstream = startFakeModelServer(firstTurn);
   upstreams.push(upstream);
   const home = createScratchDir();
-  pointAtFakeModel(home, "zai", upstream.baseUrl);
+  pointAtFakeModel(home, upstream.baseUrl);
   const cwd = createScratchDir();
   // The fake server checks no key. The real PATH is passed so pi can find
   // the shell it runs the command with.

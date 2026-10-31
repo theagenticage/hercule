@@ -19,12 +19,7 @@ import {
 } from "@hercule/protocol";
 import type { InstallOutcome, HarnessRunnerContext, ProbeOptions } from "../index";
 import { makeInstall } from "../install";
-import {
-  PROBE_DEADLINE,
-  buildFailedProbe,
-  limitModelCatalog,
-  readUsageWithinProbeBudget,
-} from "../probe";
+import { PROBE_DEADLINE, buildFailedProbe, readUsageWithinProbeBudget } from "../probe";
 import type { Run } from "../process";
 import { now } from "../../report";
 import { truncateFact } from "../text";
@@ -251,7 +246,7 @@ export const makeProbe =
             onFailure: (error) =>
               Effect.succeed(buildFailedProbe(null, describeRpcError(host, error))),
             onSuccess: (initialized) =>
-              Effect.matchEffect(
+              Effect.match(
                 Effect.gen(function* () {
                   const account = yield* readAccount(host);
                   const hasApiKey = ctx.credential !== undefined;
@@ -271,22 +266,16 @@ export const makeProbe =
                 }),
                 {
                   onFailure: (error) =>
-                    Effect.succeed(
-                      buildFailedProbe(
-                        parseVersion(initialized.userAgent),
-                        describeRpcError(host, error),
-                      ),
+                    buildFailedProbe(
+                      parseVersion(initialized.userAgent),
+                      describeRpcError(host, error),
                     ),
-                  onSuccess: ({ account, hasApiKey, models, usage }) =>
-                    Effect.map(
-                      limitModelCatalog("Codex", buildCatalog(models.data)),
-                      (catalog) => ({
-                        harnessVersion: parseVersion(initialized.userAgent),
-                        auth: buildAuth(account, hasApiKey),
-                        models: catalog,
-                        usage,
-                      }),
-                    ),
+                  onSuccess: ({ account, hasApiKey, models, usage }) => ({
+                    harnessVersion: parseVersion(initialized.userAgent),
+                    auth: buildAuth(account, hasApiKey),
+                    models: buildCatalog(models.data),
+                    usage,
+                  }),
                 },
               ),
           }),

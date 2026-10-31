@@ -17,7 +17,7 @@ import * as Option from "effect/Option";
 import type { ModelDescriptor, ModelOption, ProbeResult, SnapshotAuth } from "@hercule/protocol";
 import type { InstallOutcome } from "../index";
 import { makeInstall } from "../install";
-import { PROBE_DEADLINE, buildFailedProbe, limitModelCatalog } from "../probe";
+import { PROBE_DEADLINE, buildFailedProbe } from "../probe";
 import type { Ran, Run } from "../process";
 import { truncateFact } from "../text";
 import { makeRpc, type PiSpawn } from "./rpc";
@@ -280,11 +280,11 @@ const fetchCatalog = (
       Effect.runFork(rpc.pump);
       return rpc.send({ type: "get_available_models" }).pipe(
         Effect.mapError((failure) => failure.message),
-        Effect.flatMap((answer) => {
+        Effect.map((answer) => {
           const models = (
             answer["data"] as { readonly models?: ReadonlyArray<PiModel> } | undefined
           )?.models;
-          return limitModelCatalog("pi", buildCatalog(models ?? [], provider));
+          return buildCatalog(models ?? [], provider);
         }),
       );
     },

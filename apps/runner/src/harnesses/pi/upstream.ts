@@ -290,20 +290,19 @@ export const startFakeModelServer = (firstTurn: FakeModelFirstTurn = {}): FakeMo
   startScriptedModelServer(buildDefaultScript(firstTurn));
 
 /**
- * Writes a `models.json` that points the given pi provider (pi's own provider
- * name: `zai`, `opencode-go`, `minimax`) at the fake model server, so the
- * adapter's `--model <piProvider>/<slug>` reaches it. The built-in models stay;
- * `fake-model` is added beside them. The file holds no key, so pi sends the
- * one in the provider's environment variable.
+ * Writes a `models.json` that points the `zai` provider at the fake model
+ * server, so the adapter's `--model zai/<slug>` reaches it. The built-in
+ * models stay; `fake-model` is added beside them.
  */
-export const pointAtFakeModel = (home: string, piProvider: string, baseUrl: string): void => {
+export const pointAtFakeModel = (home: string, baseUrl: string): void => {
   writeFileSync(
     join(home, "models.json"),
     JSON.stringify({
       providers: {
-        [piProvider]: {
+        zai: {
           baseUrl,
           api: "openai-completions",
+          apiKey: "not-a-real-key",
           models: [
             {
               id: "fake-model",

@@ -115,12 +115,7 @@ import {
   type ClaudeUsageAnswer,
 } from "./claude-code-usage";
 import { makeInstall } from "./install";
-import {
-  PROBE_DEADLINE,
-  buildFailedProbe,
-  limitModelCatalog,
-  readUsageWithinProbeBudget,
-} from "./probe";
+import { PROBE_DEADLINE, buildFailedProbe, readUsageWithinProbeBudget } from "./probe";
 import type { LoginCommand } from "./login";
 import { SETUP_TOKEN_FOLDER_PREFIX } from "./setup-token-folder";
 import { runProcess, type Run } from "./process";
@@ -1955,15 +1950,14 @@ export const makeClaudeCodeAdapter = (seam: ClaudeSeam): HarnessAdapter => {
       const gather = Effect.gen(function* () {
         const startedAt = yield* Clock.currentTimeMillis;
         const harnessVersion = yield* readVersion(ctx, binary);
-        return yield* Effect.matchEffect(queryHarness(ctx, binary, options, startedAt), {
-          onFailure: (message) => Effect.succeed(buildFailedProbe(harnessVersion, message)),
-          onSuccess: ({ account, models, usage }) =>
-            Effect.map(limitModelCatalog("Claude Code", buildCatalog(models)), (catalog) => ({
-              harnessVersion,
-              auth: buildAuth(account),
-              models: catalog,
-              usage,
-            })),
+        return yield* Effect.match(queryHarness(ctx, binary, options, startedAt), {
+          onFailure: (message) => buildFailedProbe(harnessVersion, message),
+          onSuccess: ({ account, models, usage }) => ({
+            harnessVersion,
+            auth: buildAuth(account),
+            models: buildCatalog(models),
+            usage,
+          }),
         });
       });
       return Effect.map(
