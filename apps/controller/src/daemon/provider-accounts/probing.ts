@@ -54,6 +54,7 @@ import {
   HarnessAccounts,
   ModelCatalogs,
   ProviderAccountProbes,
+  ProviderAccountService,
   type ProbeOutcome,
   type ProbePair,
 } from "../../provider-accounts";
@@ -762,5 +763,6 @@ export const ProviderAccountProbingLayer: Layer.Layer<
   | AccountUsage
   | PromotionState
   | ModelCatalogs
+  | ProviderAccountService
   | LocalRunnerId
 > = Layer.effect(ProviderAccountProbing)(make);

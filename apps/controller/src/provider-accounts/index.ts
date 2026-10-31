@@ -30,6 +30,7 @@ export {
   computeDefaultSelection,
   ModelCatalogs,
   ModelCatalogsLayer,
+  type ApiRead,
   type CatalogWithFirstRead,
   type ChosenReads,
   type UnservedRead,
@@ -52,6 +53,7 @@ export {
   type StoredSnapshot,
 } from "./repository";
 export { describeProviderAccount } from "./runnability";
+export { UnlistedModels, UnlistedModelsLayer } from "./unlisted-models";
 export {
   ProviderAccountService,
   ProviderAccountServiceLayer,

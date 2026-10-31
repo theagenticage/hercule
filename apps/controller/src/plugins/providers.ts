@@ -210,6 +210,10 @@ const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
  * an `oauth`, `device` or `pairing` setup step (see `findUnsupportedStepProblem`), that has
  * a key kind without a valid `keyCheck` (one that sends the key), a kind whose `usage` is invalid (see `findUsageProblem`), an `endpoint` kind with no parser or a parser for any other kind, one of whose account kinds does not list the provider's `defaultHarnessId`
  * or its `catalogSource.harnessId`, or that the plugin registered twice.
+ * A `provider-api` catalog source is refused without a `parseCatalogBody`, with
+ * a kind that has no `credentials` step, or with a request that breaks the key
+ * request rules (see `findKeyRequestProblem`). A `parseCatalogBody` is refused
+ * for any other catalog source.
  *
  * The harnesses an account kind lists are qualified ids and are not checked
  * against the harnesses that are loaded: their plugin may be absent or
@@ -306,6 +310,40 @@ export const registerProviderContribution = (
           }),
         );
       }
+    }
+    // A `provider-api` catalog is read with the account's key and turned into
+    // models by the plugin's parser, so the source, the parser and a key on
+    // every kind must come together.
+    if (decoded.catalogSource.kind === "provider-api") {
+      if (options.parseCatalogBody === undefined) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the provider ${id} reads its Model Catalog from its API but registers no parseCatalogBody; pass a parser beside the definition`,
+          }),
+        );
+      }
+      const kindsWithoutKey = decoded.kinds.filter(
+        (kind) => !kind.setup.some((step) => step.kind === "credentials"),
+      );
+      if (kindsWithoutKey.length > 0) {
+        return yield* Effect.fail(
+          new PluginError({
+            message: `the provider ${id} reads its Model Catalog from its API with the account's key, but its account kinds ${kindsWithoutKey.map((kind) => kind.id).join(", ")} have no credentials step and so hold no key; read the catalog through a harness probe, or give every kind a credentials step`,
+          }),
+        );
+      }
+      const catalogSourceProblem = findKeyRequestProblem("catalogSource", decoded.catalogSource);
+      if (catalogSourceProblem !== undefined) {
+        return yield* Effect.fail(
+          new PluginError({ message: `the provider ${id}: ${catalogSourceProblem}` }),
+        );
+      }
+    } else if (options.parseCatalogBody !== undefined) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the provider ${id} registers a parseCatalogBody but its Model Catalog is not read from its API; remove it, or declare catalogSource kind provider-api`,
+        }),
+      );
     }
     // `providerAccount.create` gives every new account the provider's default
     // harness, whatever its kind, so each kind must allow it.

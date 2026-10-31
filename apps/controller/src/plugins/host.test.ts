@@ -19,6 +19,7 @@ import {
   registerEventSource,
   type AccountKind,
   type FeedDeclaration,
+  type ParseCatalogBody,
   type ParseUsageBody,
   type Plugin,
   type PluginCapability,
@@ -841,6 +842,89 @@ describe("a plugin that registers a provider", () => {
         );
 
         expect(message, kindId).toContain(`registers a parseUsageBody for ${kindId}`);
+      }
+    });
+  });
+
+  describe("the catalog read through a provider's API", () => {
+    const apiSource = {
+      kind: "provider-api",
+      url: "https://api.example.com/v1/models",
+      headers: { authorization: "Bearer {apiKey}" },
+    } as const;
+    const parseCatalogBody: ParseCatalogBody = () => [];
+    const withSource = (
+      catalogSource: ProviderDefinition["catalogSource"],
+    ): ProviderDefinition => ({
+      ...buildProviderDefinition("vendor"),
+      catalogSource,
+    });
+
+    it("registers a provider that has the source, the parser and a key on every kind", async () => {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [withSource(apiSource)], { parseCatalogBody }),
+      );
+
+      expect(message).toBeUndefined();
+    });
+
+    it("is errored when the source has no parser", async () => {
+      const message = await bootAndReadError(providerPlugin("vendor", [withSource(apiSource)]));
+
+      expect(message).toContain("the provider vendor/vendor reads its Model Catalog from its API");
+      expect(message).toContain("registers no parseCatalogBody");
+    });
+
+    it("is errored when a parser is registered for a catalog read through a harness", async () => {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [buildProviderDefinition("vendor")], { parseCatalogBody }),
+      );
+
+      expect(message).toContain("registers a parseCatalogBody");
+      expect(message).toContain("catalogSource kind provider-api");
+    });
+
+    it("is errored when a kind has no credentials step, because the read needs the account's key", async () => {
+      const definition = withSource(apiSource);
+      const { title, description, harnesses } = definition.kinds[0];
+      const message = await bootAndReadError(
+        providerPlugin(
+          "vendor",
+          [
+            {
+              ...definition,
+              kinds: [
+                ...definition.kinds,
+                { id: "subscription", title, description, harnesses, setup: [] },
+              ],
+            },
+          ],
+          { parseCatalogBody },
+        ),
+      );
+
+      expect(message).toContain("its account kinds subscription have no credentials step");
+    });
+
+    it("is errored when the request breaks the key request rules", async () => {
+      const cases = [
+        {
+          source: { ...apiSource, url: "http://api.example.com/v1/models" },
+          expected:
+            "its catalogSource url http://api.example.com/v1/models is not a fixed https:// URL",
+        },
+        {
+          source: { ...apiSource, headers: { authorization: "Bearer {token}" } },
+          expected: "its catalogSource header authorization holds a placeholder",
+        },
+        { source: { ...apiSource, headers: {} }, expected: "its catalogSource sends no key" },
+      ];
+      for (const { source, expected } of cases) {
+        const message = await bootAndReadError(
+          providerPlugin("vendor", [withSource(source)], { parseCatalogBody }),
+        );
+
+        expect(message).toContain(expected);
       }
     });
   });

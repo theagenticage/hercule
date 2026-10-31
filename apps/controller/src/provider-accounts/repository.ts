@@ -324,16 +324,20 @@ const make = Effect.gen(function* () {
     },
 
     /**
-     * Sets when the account's token stops working. Does nothing when the
-     * account does not exist.
+     * Sets when the account's key or token stops working, or clears it when
+     * `expiresAt` is null (the credential has none). It also clears the
+     * account's expiry warning, because that warning was about the previous
+     * expiry and the new one must warn again. Does nothing when the account
+     * does not exist.
      */
     setCredentialExpiry: (
       id: string,
-      expiresAt: string,
+      expiresAt: string | null,
       at: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
-        UPDATE provider_accounts SET credential_expires_at = ${expiresAt}, updated_at = ${at}
+        UPDATE provider_accounts
+        SET credential_expires_at = ${expiresAt}, expiry_notified_at = NULL, updated_at = ${at}
         WHERE id = ${uuidFromString(id)}
       `),
 

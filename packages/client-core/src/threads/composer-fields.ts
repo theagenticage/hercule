@@ -224,9 +224,11 @@ const findBlocker = (
           })
         : stop(`${name} has no key; add one`);
     case "token-expired":
-      return stop(`${name}'s token expired; make a new one`, {
-        signIn: buildSignInTarget(providers, account, runner),
-      });
+      return findHarnessLoginMethod(providers, account) === "create-token"
+        ? stop(`${name}'s token expired; make a new one`, {
+            signIn: buildSignInTarget(providers, account, runner),
+          })
+        : stop(`${name}'s key expired; add a new one`);
     case "harness-too-old":
       return stop(`The harness on ${runner.name} is older than Hercule supports; update it`);
     case "harness-missing":

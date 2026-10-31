@@ -10,15 +10,28 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Redacted } from "effect";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { HarnessDefinition, Plugin } from "@hercule/plugin-host";
-import type { ModelDescriptor, ProbeRequest, RunnerFacts, SessionStart } from "@hercule/protocol";
+import type { Session } from "@hercule/contract";
+import type {
+  CatalogModel,
+  ModelDescriptor,
+  ProbeRequest,
+  RunnerFacts,
+  SessionStart,
+} from "@hercule/protocol";
 import { withTransaction } from "../../db";
 import { send } from "../../http/testing";
 import { createPluginFixture, buildHarnessDefinition } from "../../plugins/testing";
+import { modelCatalogRepository } from "../../provider-accounts";
 import { buildProviderAccountOwner } from "../../secrets";
 import {
+  at,
   listFrames,
+  reportEvent,
   waitForFrames,
+  waitForSession,
+  waitForStartFrames,
   findProviderAccountId,
   spawnSessionOrFail,
   waitUntil,
@@ -65,14 +78,19 @@ const MAIN: HarnessDefinition = buildHarnessDefinition("main", [
   },
 ]);
 
-/** A second harness for the same provider and account kind, like pi next to Claude Code. */
+/**
+ * A second harness for the same provider and account kind, like pi next to
+ * Claude Code. It can run any model of the provider, and the provider's
+ * catalog is not read from it, so a session in it is told about the catalog
+ * models it does not list.
+ */
 const SECOND: HarnessDefinition = buildHarnessDefinition("second", [
   {
     providerId: "harnesses/dual",
     kinds: [
       { kind: "api-key", modelArgument: "dual/{model}", credentialVariable: SECOND_KEY_VARIABLE },
     ],
-    models: "own-list",
+    models: "all",
   },
 ]);
 
@@ -412,4 +430,142 @@ describe("the harness account a frame carries to a runner", () => {
       });
     },
   );
+});
+
+/** A model that only the provider's API lists, with the details a probe does not give. */
+const API_ONLY_MODEL: CatalogModel = {
+  slug: "api-only",
+  name: "API only",
+  imageInput: null,
+  options: [],
+  maker: "Dual",
+  contextWindow: 200_000,
+  inputPrice: 1.5,
+  reasoning: true,
+};
+
+/**
+ * Stores a catalog for the account that holds the model the runner lists and
+ * `API_ONLY_MODEL`, as if it had been read from the provider's API. It waits
+ * until the runner's probe of the account in `harnessId` is stored, because
+ * the models a harness lists come from that snapshot.
+ */
+const storeCatalogWithApiOnlyModel = async (
+  arranged: Arranged,
+  providerAccountId: string,
+  harnessId: string,
+): Promise<void> => {
+  await waitUntil(`stored the probe of the account in ${harnessId}`, async () => {
+    const response = await send("GET", arranged.harness.base, "/api/v1/provider-accounts", {
+      token: arranged.token,
+    });
+    const accounts = (await response.json()) as ReadonlyArray<{
+      readonly id: string;
+      readonly snapshots: ReadonlyArray<{ readonly harnessId: string }>;
+    }>;
+    return accounts
+      .find((account) => account.id === providerAccountId)
+      ?.snapshots.some((snapshot) => snapshot.harnessId === harnessId)
+      ? true
+      : undefined;
+  });
+  await Effect.runPromise(
+    Effect.orDie(
+      withTransaction(
+        arranged.harness.sql,
+        Effect.flatMap(modelCatalogRepository, (catalogs) =>
+          catalogs.recordSuccess(
+            providerAccountId,
+            [{ ...MODELS[0]! }, API_ONLY_MODEL],
+            at,
+            // Later than the stamp of any probe, so a probe that is still
+            // running cannot replace these models.
+            "2999-01-01T00:00:00.000Z",
+          ),
+        ),
+      ).pipe(Effect.provideService(SqlClient.SqlClient, arranged.harness.sql)),
+    ),
+  );
+};
+
+/** Ends a session the way a runner does: its native id is bound, then it reports that it exited. */
+const endSession = async (arranged: Arranged, session: Session): Promise<void> => {
+  reportEvent(arranged.wire, 1, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at,
+    _tag: "session.started",
+  });
+  await waitForSession(arranged, session.id, (one) => one.status === "busy");
+  arranged.wire.send({
+    _tag: "sessionsReport",
+    sessions: [
+      {
+        sessionId: session.id,
+        nativeSessionId: "native-1",
+        providerAccountId: session.providerAccountId,
+      },
+    ],
+  });
+  await waitForSession(arranged, session.id, (one) => one.nativeSessionId !== null);
+  reportEvent(arranged.wire, 2, {
+    eventId: crypto.randomUUID(),
+    sessionId: session.id,
+    at,
+    _tag: "session.exited",
+    reason: "stopped",
+  });
+  await waitForSession(arranged, session.id, (one) => one.status === "exited");
+};
+
+describe("the catalog models a harness does not list, on a session's start frame", () => {
+  it("carries them on a start, a resume and a fork in a harness that runs any model, and the others on none", async () => {
+    await withFleet(async (arranged) => {
+      const dual = findProviderAccountId(arranged, "harnesses/main");
+      await setKey(arranged, dual, KEY_VALUE);
+      await storeCatalogWithApiOnlyModel(arranged, dual, "harnesses/second");
+
+      const parent = await spawnSessionOrFail(arranged, {
+        prompt: "hello",
+        providerAccountId: dual,
+        harnessId: "harnesses/second",
+      });
+      await waitForStartFrames(arranged, parent.id, 1);
+      await endSession(arranged, parent);
+      const forked = await send(
+        "POST",
+        arranged.harness.base,
+        `/api/v1/sessions/${parent.id}/continue`,
+        { body: { mode: "fork", prompt: "more" }, token: arranged.token },
+      );
+      expect(forked.status, await forked.clone().text()).toBe(200);
+      const child = (await forked.json()) as Session;
+      const resumed = await send(
+        "POST",
+        arranged.harness.base,
+        `/api/v1/sessions/${parent.id}/input`,
+        { body: { text: "still there?" }, token: arranged.token },
+      );
+      expect(resumed.status, await resumed.clone().text()).toBe(200);
+
+      const [start, resume] = await waitForStartFrames(arranged, parent.id, 2);
+      const [fork] = await waitForStartFrames(arranged, child.id, 1);
+      expect(resume!.spec.continue?.mode).toBe("resume");
+      expect(fork!.spec.continue?.mode).toBe("fork");
+      // The runner lists `clever`, so only the model it lacks is sent.
+      for (const frame of [start!, resume!, fork!]) {
+        expect(frame.unlistedModels).toEqual([API_ONLY_MODEL]);
+      }
+
+      // The harness the catalog is read from lists what the catalog holds.
+      const inMain = await spawnSessionOrFail(arranged, {
+        prompt: "hello",
+        providerAccountId: dual,
+        harnessId: "harnesses/main",
+      });
+      const [main] = await waitForStartFrames(arranged, inMain.id, 1);
+      expect(main!.harnessId).toBe("harnesses/main");
+      expect("unlistedModels" in main!).toBe(false);
+    });
+  });
 });

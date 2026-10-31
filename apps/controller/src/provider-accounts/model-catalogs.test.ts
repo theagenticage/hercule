@@ -22,6 +22,10 @@ import {
   addSnapshot,
   ALPHA_HARNESS_ID,
   BETA_HARNESS_ID,
+  buildAccountPlugins,
+  buildCataloguedPlugin,
+  CATALOGUED_KEY_KIND,
+  CATALOGUED_PROVIDER_ID,
   KEY_KIND,
   MACHINE_KIND,
   runWithAccounts,
@@ -569,6 +573,7 @@ describe("which catalog reads are due, and where they go", () => {
 
     const pair = (runnerId: string) => ({
       reads: [{ runnerId, providerAccountId: outcome.account.id, harnessId: ALPHA_HARNESS_ID }],
+      apiReads: [],
       unserved: [],
     });
     expect(outcome.withLocal).toEqual(pair(outcome.local));
@@ -661,6 +666,59 @@ describe("which catalog reads are due, and where they go", () => {
 
     expect(chosen.reads).toEqual([]);
     expect(chosen.unserved[0]?.message).toContain("not signed in on any connected machine");
+  });
+
+  describe("for a provider that lists its models through its API", () => {
+    const runWithCatalogued = <A, E>(body: Parameters<typeof runWithAccounts<A, E>>[0]) =>
+      runWithAccounts(body, undefined, [...buildAccountPlugins(), buildCataloguedPlugin()]);
+
+    it("returns the account as an API read, with no runner connected and no complaint about it", async () => {
+      const outcome = await runWithCatalogued(
+        Effect.gen(function* () {
+          const account = yield* addAccount({
+            providerId: CATALOGUED_PROVIDER_ID,
+            kind: CATALOGUED_KEY_KIND,
+          });
+          return { account, chosen: yield* choose() };
+        }),
+      );
+
+      expect(outcome.chosen).toEqual({
+        reads: [],
+        apiReads: [{ providerAccountId: outcome.account.id }],
+        unserved: [],
+      });
+    });
+
+    it("keeps the rule for when a read is due: not within four hours of a good read, unless forced", async () => {
+      const outcome = await runWithCatalogued(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const catalogs = yield* ModelCatalogs;
+          const probes = yield* ProviderAccountProbes;
+          const account = yield* addAccount({
+            providerId: CATALOGUED_PROVIDER_ID,
+            kind: CATALOGUED_KEY_KIND,
+          });
+          yield* catalogs.recordCatalogRead(
+            account.id,
+            { _tag: "listed", models: [model("a")] },
+            yield* probes.readProbeStamp(account.id, false),
+          );
+          const fresh = yield* choose();
+          const forced = yield* choose({ force: true });
+          yield* withTransaction(
+            sql,
+            sql`UPDATE model_catalogs SET read_at = '2020-01-01T00:00:00.000Z'`,
+          );
+          return { fresh, forced, stale: yield* choose() };
+        }),
+      );
+
+      expect(outcome.fresh.apiReads).toEqual([]);
+      expect(outcome.forced.apiReads).toHaveLength(1);
+      expect(outcome.stale.apiReads).toHaveLength(1);
+    });
   });
 
   it("serves a sign-in account on the machine where it is signed in", async () => {

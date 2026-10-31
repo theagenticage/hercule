@@ -72,9 +72,10 @@ const joinNames = (names: ReadonlyArray<string>): string =>
 /**
  * Describes why an account cannot run in the harness on the connected runners
  * that are in `state`. The sentence names the account, the harness or the
- * machines, and says where to fix it. `holdsToken` tells a missing token from
- * a missing key. `not-signed-in` is only reached by an account that signs in
- * on each machine, because the controller keeps the credential of the others.
+ * machines, and says where to fix it. `holdsToken` tells a token from a key,
+ * for a missing or an expired credential. `not-signed-in` is only reached by
+ * an account that signs in on each machine, because the controller keeps the
+ * credential of the others.
  */
 const describeRunnerProblem = (
   state: (typeof MOST_ACTIONABLE_FIRST)[number],
@@ -87,7 +88,9 @@ const describeRunnerProblem = (
     case "not-signed-in":
       return `${accountName} is not signed in on ${joinNames(machines)}. Sign in from Settings › Providers.`;
     case "token-expired":
-      return `${accountName}'s token has expired. Make a new one in Settings › Providers.`;
+      return holdsToken
+        ? `${accountName}'s token has expired. Make a new one in Settings › Providers.`
+        : `${accountName}'s key has expired. Add a new key in Settings › Providers.`;
     case "credential-missing":
       return holdsToken
         ? `${accountName} has no token. Make one in Settings › Providers.`

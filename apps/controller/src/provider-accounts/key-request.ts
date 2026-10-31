@@ -28,9 +28,9 @@ import * as Stream from "effect/Stream";
 const MAX_REFUSAL_LENGTH = 500;
 
 /**
- * The most bytes of a response body that are read. The provider is a third
- * party, so a body that never ends must not hold the request open or fill
- * memory.
+ * The most bytes of a key check's or usage read's response body that are read.
+ * The provider is a third party, so a body that never ends must not hold the
+ * request open or fill memory.
  */
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -76,12 +76,17 @@ export const readRefusalMessage = (body: string, fallback: string): string => {
 };
 
 /**
- * Reads at most 64 kB of the response body as text and ignores the rest.
- * Returns an empty string when the body cannot be read.
+ * Reads at most `maxBytes` of the response body as text and ignores the rest.
+ * Returns the text and whether the whole body fitted. Returns an empty,
+ * complete body when the body cannot be read.
+ *
+ * It reads on until it has seen one byte more than `maxBytes`, so a body of
+ * exactly `maxBytes` is complete and a longer one is told apart from it.
  */
-export const readBoundedBody = (
+export const readBodyWithin = (
   response: HttpClientResponse.HttpClientResponse,
-): Effect.Effect<string> =>
+  maxBytes: number,
+): Effect.Effect<{ readonly text: string; readonly complete: boolean }> =>
   Effect.gen(function* () {
     const chunks: Array<Uint8Array> = [];
     let size = 0;
@@ -89,11 +94,24 @@ export const readBoundedBody = (
       Effect.sync(() => {
         chunks.push(chunk);
         size += chunk.length;
-        return size < MAX_BODY_BYTES;
+        return size <= maxBytes;
       }),
     );
-    return new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_BODY_BYTES));
-  }).pipe(Effect.orElseSucceed(() => ""));
+    return {
+      text: new TextDecoder().decode(Buffer.concat(chunks).subarray(0, maxBytes)),
+      complete: size <= maxBytes,
+    };
+  }).pipe(Effect.orElseSucceed(() => ({ text: "", complete: true })));
+
+/**
+ * Reads at most 64 kB of the response body as text and ignores the rest. It is
+ * the bound for the small answers: a key check's refusal and a usage reading.
+ * Returns an empty string when the body cannot be read.
+ */
+export const readBoundedBody = (
+  response: HttpClientResponse.HttpClientResponse,
+): Effect.Effect<string> =>
+  Effect.map(readBodyWithin(response, MAX_BODY_BYTES), ({ text }) => text);
 
 /** Checks that the key holds only visible ASCII characters, which is all a header value may safely hold. */
 export const isHeaderSafe = (apiKey: string): boolean => !/[^!-~]/.test(apiKey);

@@ -154,8 +154,11 @@ const make = Effect.gen(function* () {
 
     /**
      * Deletes the account's readings and stores `at` as the time they were
-     * cleared. The rest of the bookkeeping of active reads stays. Does nothing
-     * for an account that does not exist. Must run in a transaction.
+     * cleared. It also forgets when the account was last read and when a
+     * session last reported, so a claim (`claimRead`) succeeds at once: the
+     * rule that keeps reads rare was about the old credential. The time of the
+     * last announcement stays. Does nothing for an account that does not
+     * exist. Must run in a transaction.
      */
     deleteReadings: (providerAccountId: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
@@ -166,7 +169,8 @@ const make = Effect.gen(function* () {
         yield* sql`
           INSERT INTO account_usage_reads (provider_account_id, cleared_at)
           SELECT id, ${at} FROM provider_accounts WHERE id = ${uuidFromString(providerAccountId)}
-          ON CONFLICT (provider_account_id) DO UPDATE SET cleared_at = excluded.cleared_at
+          ON CONFLICT (provider_account_id) DO UPDATE
+          SET cleared_at = excluded.cleared_at, read_started_at = NULL, reported_at = NULL
         `;
       }),
 

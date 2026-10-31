@@ -416,7 +416,7 @@ describe("recording readings", () => {
 describe("clearing readings", () => {
   const { run } = setup();
 
-  it("deletes the account's readings but keeps the 15-minute limit on reads", async () => {
+  it("deletes the account's readings and makes the account due for a read at once", async () => {
     const result = await run(
       Effect.gen(function* () {
         const accountUsage = yield* AccountUsage;
@@ -425,19 +425,44 @@ describe("clearing readings", () => {
         yield* accountUsage.record(id, [fiveHour(40, NOW)], READ);
         yield* accountUsage.record(other, [fiveHour(50, NOW)], READ);
         const claimed = yield* accountUsage.claimRead(id);
+        const claimedOther = yield* accountUsage.claimRead(other);
         yield* accountUsage.clear(id);
         return {
           claimed,
           cleared: yield* accountUsage.read(id),
           untouched: yield* accountUsage.read(other),
+          dueAfterClear: yield* accountUsage.listDueAccounts([id, other]),
           claimedAgain: yield* accountUsage.claimRead(id),
+          claimedAgainTwice: yield* accountUsage.claimRead(id),
+          claimedOtherAgain: yield* accountUsage.claimRead(other),
+          ids: { id, other },
+          claimedOther,
         };
       }),
     );
     expect(result.claimed).toBe(true);
     expect(result.cleared).toEqual([]);
     expect(result.untouched).toHaveLength(1);
-    expect(result.claimedAgain).toBe(false);
+    // The cleared account is due at once, the other still waits its 15 minutes.
+    expect(result.dueAfterClear).toEqual([result.ids.id]);
+    expect(result.claimedAgain).toBe(true);
+    // The new claim starts the 15 minutes over.
+    expect(result.claimedAgainTwice).toBe(false);
+    expect(result.claimedOtherAgain).toBe(false);
+  });
+
+  it("makes an account due again even when a session reported usage just now", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const accountUsage = yield* AccountUsage;
+        const id = yield* addAccount;
+        yield* accountUsage.record(id, [fiveHour(40, minutesFromNow(-5))], SESSION);
+        const beforeClear = yield* accountUsage.claimRead(id);
+        yield* accountUsage.clear(id);
+        return { beforeClear, afterClear: yield* accountUsage.claimRead(id) };
+      }),
+    );
+    expect(result).toEqual({ beforeClear: false, afterClear: true });
   });
 });
 

@@ -120,6 +120,8 @@ import {
   ProviderAccountService,
   ProviderAccountServiceLayer,
   ProviderKeyRequestsLayer,
+  UnlistedModels,
+  UnlistedModelsLayer,
 } from "./provider-accounts";
 import { seed } from "./seed";
 import { readSetupComplete } from "./setup";
@@ -271,6 +273,7 @@ export type ControllerServices =
   | ConnectionTypes
   | RunnerConnections
   | HarnessAccounts
+  | UnlistedModels
   | ModelCatalogs
   | ModelProfileLookup
   | ProviderAccountProbes
@@ -401,11 +404,15 @@ export const bootWith = <A, E>(
      * inbound driver use the same `ProviderAccountProbing`.
      */
     const withFleet = ProviderAccountProbingLayer.pipe(
+      // Probing reads the catalogs that the provider's own API lists, which
+      // the provider account service does.
+      Layer.provideMerge(ProviderAccountServiceLayer),
       Layer.provideMerge(ProviderAccountProbesLayer),
       Layer.provideMerge(ModelCatalogsLayer),
       Layer.provideMerge(ProviderAccountRunnersLayer),
       Layer.provideMerge(localRunnerIdLayer),
       Layer.provideMerge(HarnessAccountsLayer),
+      Layer.provideMerge(UnlistedModelsLayer),
       Layer.provideMerge(RunnerConnectionsLayer),
       Layer.provideMerge(catalog),
     );
@@ -449,7 +456,6 @@ export const bootWith = <A, E>(
      */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
-      ProviderAccountServiceLayer,
       sessionService,
       ConnectionServiceWithReferencesLayer,
     ).pipe(

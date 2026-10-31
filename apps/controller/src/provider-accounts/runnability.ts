@@ -10,8 +10,8 @@
  * - The harness can run on the runner: its binary is present, the runner's
  *   build has an adapter for it, and its version is not below the floor
  *   (`decideHarnessOnRunner`).
- * - The account works: a key or token account has its secret stored and a
- *   token has not expired (`findCredentialProblem`); a per-machine account
+ * - The account works: a key or token account has its secret stored and it
+ *   has not expired (`findCredentialProblem`); a per-machine account
  *   has a signed-in snapshot of the same person on that runner
  *   (`isIdentityCompatible`).
  */
@@ -100,9 +100,9 @@ export const holdsMadeToken = (kind: AccountKind): boolean =>
 /**
  * Whether the account's key or token can be used:
  *
- * - `usable`: the secret is stored and, for a token, has not expired.
+ * - `usable`: the secret is stored and has not expired.
  * - `missing`: the secret is not stored.
- * - `expired`: the secret is stored, but the token's expiry has passed.
+ * - `expired`: the secret is stored, but the expiry of the key or token has passed.
  */
 export type CredentialState = "usable" | "missing" | "expired";
 
@@ -148,8 +148,12 @@ export const findCredentialProblem = (
       return holdsMadeToken(kind)
         ? `${name} has no token. Make one in Settings › Providers.`
         : `${name} has no key. Add one in Settings › Providers.`;
-    case "expired":
-      return `${name}'s token expired on ${account.credentialExpiresAt?.slice(0, 10)}. Make a new one in Settings › Providers.`;
+    case "expired": {
+      const date = account.credentialExpiresAt?.slice(0, 10);
+      return holdsMadeToken(kind)
+        ? `${name}'s token expired on ${date}. Make a new one in Settings › Providers.`
+        : `${name}'s key expired on ${date}. Add a new key in Settings › Providers.`;
+    }
   }
 };
 

@@ -17,7 +17,12 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { ParseUsageBody, Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import type {
+  ParseCatalogBody,
+  ParseUsageBody,
+  Plugin,
+  ProviderDefinition,
+} from "@hercule/plugin-host";
 import type { ProbeResult } from "@hercule/protocol";
 import { mintUuid, nowIso, uuidFromString, withTransaction } from "../db";
 import { NotifierLayer } from "../notifications";
@@ -157,10 +162,17 @@ export const METERED: ProviderDefinition = {
 /**
  * Reads Metered's usage body: `{ "used": 40 }` is a five-hour reading of 40%,
  * `{ "refuse": "..." }` is a refusal, `{ "nothing": true }` makes the parser
- * return nothing, and any other body is a defect the parser throws on.
+ * return nothing, and any other body is a defect the parser throws on. A
+ * reading may also carry `"expires"`: a timestamp is the key's expiry, `null`
+ * says the key does not expire, and leaving it out says nothing about expiry.
  */
 const parseMeteredUsageBody: ParseUsageBody = (body, takenAt) => {
-  const answer = body as { used?: number; refuse?: string; nothing?: boolean };
+  const answer = body as {
+    used?: number;
+    refuse?: string;
+    nothing?: boolean;
+    expires?: string | null;
+  };
   if (typeof answer.refuse === "string") return { refused: answer.refuse };
   if (answer.nothing === true) return undefined as never;
   if (typeof answer.used !== "number") {
@@ -177,6 +189,7 @@ const parseMeteredUsageBody: ParseUsageBody = (body, takenAt) => {
         takenAt,
       },
     ],
+    ...(answer.expires === undefined ? {} : { expiresAt: answer.expires }),
   };
 };
 
@@ -188,6 +201,74 @@ export const buildMeteredPlugin = (provider: ProviderDefinition = METERED): Plug
     definitions: [],
     providers: [provider],
     providerOptions: { parseUsageBody: { [METERED_KEY_KIND]: parseMeteredUsageBody } },
+  }).plugin;
+
+export const CATALOGUED_PROVIDER_ID = "catalogued/catalogued";
+export const CATALOGUED_CATALOG_URL = "https://api.catalogued.test/v1/models";
+
+/** The account kind of Catalogued, which holds a key. */
+export const CATALOGUED_KEY_KIND = "api-key";
+
+/** A provider whose Model Catalog is read from `CATALOGUED_CATALOG_URL` with the account's key, on no runner. */
+export const CATALOGUED: ProviderDefinition = {
+  id: "catalogued",
+  displayName: "Catalogued",
+  kinds: [
+    {
+      id: CATALOGUED_KEY_KIND,
+      title: "API key",
+      description: "A key for Catalogued.",
+      setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      keyCheck: {
+        url: "https://api.catalogued.test/v1/key",
+        headers: { authorization: "Bearer {apiKey}" },
+      },
+      harnesses: [ALPHA_HARNESS_ID],
+    },
+  ],
+  defaultHarnessId: ALPHA_HARNESS_ID,
+  catalogSource: {
+    kind: "provider-api",
+    url: CATALOGUED_CATALOG_URL,
+    headers: { authorization: "Bearer {apiKey}" },
+  },
+  defaultSelection: "current-models",
+};
+
+/**
+ * Reads Catalogued's catalog body: `{ "models": [{ "id": "a", "name": "A",
+ * "context": 1000, "price": 2 }] }`. An item with no id is skipped, and any
+ * body without a `models` list is a defect the parser throws on.
+ */
+export const parseCataloguedBody: ParseCatalogBody = (body) => {
+  const { models } = body as {
+    models?: ReadonlyArray<{ id?: string; name?: string; context?: number; price?: number }>;
+  };
+  if (!Array.isArray(models)) throw new Error("the body has no models list");
+  return models.flatMap((model) =>
+    typeof model.id === "string"
+      ? [
+          {
+            slug: model.id,
+            name: model.name ?? model.id,
+            imageInput: null,
+            options: [],
+            ...(model.context === undefined ? {} : { contextWindow: model.context }),
+            ...(model.price === undefined ? {} : { inputPrice: model.price }),
+          },
+        ]
+      : [],
+  );
+};
+
+/** Builds the plugin that registers `CATALOGUED` with its catalog parser. */
+export const buildCataloguedPlugin = (): Plugin =>
+  createPluginFixture({
+    id: "catalogued",
+    capabilities: ["providers"],
+    definitions: [],
+    providers: [CATALOGUED],
+    providerOptions: { parseCatalogBody: parseCataloguedBody },
   }).plugin;
 
 /** What the fake provider API does with a request: answer it, fail to connect, or never answer. */

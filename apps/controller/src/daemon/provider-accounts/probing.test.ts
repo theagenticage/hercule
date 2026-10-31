@@ -4,6 +4,8 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { Deferred, Duration, Effect, Fiber, Layer, Logger, Option, Redacted, Stream } from "effect";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { ControllerToRunner, ProbeResult, RunnerToController } from "@hercule/protocol";
 import { InvalidState } from "@hercule/contract";
@@ -27,6 +29,8 @@ import {
   ProviderAccountProbesLayer,
   ProviderAccountRunners,
   ProviderAccountRunnersLayer,
+  ProviderAccountServiceLayer,
+  ProviderKeyRequestsLayer,
   providerAccountRepository,
 } from "../../provider-accounts";
 import {
@@ -36,6 +40,11 @@ import {
   addSnapshot,
   ALPHA_HARNESS_ID,
   buildAccountPlugins,
+  buildCataloguedPlugin,
+  buildFakeProviderApi,
+  CATALOGUED_CATALOG_URL,
+  CATALOGUED_KEY_KIND,
+  CATALOGUED_PROVIDER_ID,
   KEY_KIND,
   MACHINE_KIND,
   setTokenExpiry,
@@ -44,6 +53,8 @@ import {
 } from "../../provider-accounts/testing";
 import { LocalRunnerId, RunnerConnections } from "../../runners";
 import { buildProviderAccountOwner, Secrets } from "../../secrets";
+import { NotifierLayer } from "../../notifications";
+import { SettingsLayer } from "../../settings";
 import { AccountUsage, AccountUsageLayer } from "../../usage";
 import {
   ProviderAccountProbeInterval,
@@ -190,24 +201,34 @@ const run = <A, E>(
     | Secrets
   >,
   logged: Array<Logged> = [],
+  providerApi: HttpClient.HttpClient = buildFakeProviderApi().client,
 ) =>
   Effect.runPromise(
     Effect.gen(function* () {
       yield* Effect.flatMap(PluginHost, (host) =>
-        host.boot([...buildAccountPlugins(), ...buildMultiHarnessPlugins()]),
+        host.boot([
+          ...buildAccountPlugins(),
+          ...buildMultiHarnessPlugins(),
+          buildCataloguedPlugin(),
+        ]),
       );
       return yield* body;
     }).pipe(
       Effect.provide(
         ProviderAccountProbingLayer.pipe(
+          Layer.provideMerge(ProviderAccountServiceLayer),
+          Layer.provideMerge(ProviderKeyRequestsLayer),
+          Layer.provide(Layer.succeed(HttpClient.HttpClient, providerApi)),
           Layer.provideMerge(ProviderAccountProbesLayer),
           Layer.provideMerge(ModelCatalogsLayer),
           Layer.provideMerge(ProviderAccountRunnersLayer),
           Layer.provideMerge(inertMembership),
           Layer.provideMerge(Layer.succeed(LocalRunnerId, { read: () => undefined })),
           Layer.provideMerge(HarnessAccountsLayer),
+          Layer.provideMerge(SettingsLayer),
           Layer.provideMerge(Layer.succeed(RunnerConnections)(buildFakeConnections(sent))),
           Layer.provideMerge(AccountUsageLayer),
+          Layer.provideMerge(NotifierLayer),
           Layer.provideMerge(buildPluginStack()),
         ),
       ),
@@ -1314,6 +1335,134 @@ describe("a catalog read in a sweep", () => {
     // The sweep's probe was stored after the read was sent, so the read is
     // out of date as a snapshot. It is still recorded as the catalog read.
     expect(catalog.models.map((one) => one.slug)).toEqual(["model-1"]);
+  });
+});
+
+describe("a catalog read through the provider's API", () => {
+  /** Answers each catalog request with `models`, after waiting for `gate` when the request is the first. */
+  const buildCatalogApi = (
+    models: ReadonlyArray<string>,
+    gate?: Deferred.Deferred<void>,
+  ): { client: HttpClient.HttpClient; requests: Array<string> } => {
+    const requests: Array<string> = [];
+    const client = HttpClient.make((request) =>
+      Effect.gen(function* () {
+        requests.push(request.url);
+        if (gate !== undefined && requests.length === 1) yield* Deferred.await(gate);
+        const body = { models: models.map((id) => ({ id, name: id })) };
+        return HttpClientResponse.fromWeb(request, new Response(JSON.stringify(body)));
+      }),
+    );
+    return { client, requests };
+  };
+
+  const addCataloguedAccount = Effect.gen(function* () {
+    const account = yield* addAccount({
+      providerId: CATALOGUED_PROVIDER_ID,
+      kind: CATALOGUED_KEY_KIND,
+    });
+    yield* storeKey(account.id);
+    return account;
+  });
+
+  it("reads the models with a forced read when no runner is connected, and sends no probe", async () => {
+    const sent: Array<Sent> = [];
+    const api = buildCatalogApi(["a", "b"]);
+
+    const catalog = await run(
+      sent,
+      Effect.gen(function* () {
+        const probing = yield* ProviderAccountProbing;
+        const account = yield* addCataloguedAccount;
+        yield* probing.readCatalog(account.id);
+        return yield* readAccountCatalog(account.id);
+      }),
+      [],
+      api.client,
+    );
+
+    expect(api.requests).toEqual([CATALOGUED_CATALOG_URL]);
+    expect(sent).toEqual([]);
+    expect(catalog.models.map((one) => one.slug)).toEqual(["a", "b"]);
+    expect(catalog.error).toBeNull();
+  });
+
+  it("is read by the sweep of the fleet when due, with no runner, and not again while the catalog is fresh", async () => {
+    const sent: Array<Sent> = [];
+    const api = buildCatalogApi(["a"]);
+
+    const catalog = await run(
+      sent,
+      Effect.gen(function* () {
+        const probing = yield* ProviderAccountProbing;
+        const account = yield* addCataloguedAccount;
+        yield* probing.sweepFleet();
+        yield* probing.sweepFleet();
+        return yield* readAccountCatalog(account.id);
+      }),
+      [],
+      api.client,
+    );
+
+    expect(api.requests).toHaveLength(1);
+    expect(catalog.models.map((one) => one.slug)).toEqual(["a"]);
+  });
+
+  it("is read when a runner connects, beside the probed catalogs, and takes no probe slot", async () => {
+    const sent: Array<Sent> = [];
+    const api = buildCatalogApi(["a"]);
+
+    const catalogs = await run(
+      sent,
+      Effect.gen(function* () {
+        const probing = yield* ProviderAccountProbing;
+        const listed = yield* addCataloguedAccount;
+        const probed = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        yield* probing.sweepRunner(runner);
+        return {
+          listed: yield* readAccountCatalog(listed.id),
+          probed: yield* readAccountCatalog(probed.id),
+        };
+      }),
+      [],
+      api.client,
+    );
+
+    expect(api.requests).toHaveLength(1);
+    // The probed account's sweep probe and its read; the listed account has none.
+    expect(probeRequestsIn(sent)).toBe(2);
+    expect(catalogs.listed.models.map((one) => one.slug)).toEqual(["a"]);
+    expect(catalogs.probed.models.map((one) => one.slug)).toEqual(["model-1"]);
+  });
+
+  it("sends one read at a time per account: a forced read waits for the one in flight, and forced reads that wait together are one", async () => {
+    const sent: Array<Sent> = [];
+    const gate = Effect.runSync(Deferred.make<void>());
+    const api = buildCatalogApi(["a"], gate);
+
+    const sentWhileWaiting = await run(
+      sent,
+      Effect.gen(function* () {
+        const probing = yield* ProviderAccountProbing;
+        const account = yield* addCataloguedAccount;
+        const reads = [yield* Effect.forkChild(probing.readCatalog(account.id))];
+        while (api.requests.length < 1) yield* Effect.sleep(Duration.millis(1));
+        reads.push(yield* Effect.forkChild(probing.readCatalog(account.id)));
+        reads.push(yield* Effect.forkChild(probing.readCatalog(account.id)));
+        yield* Effect.sleep(Duration.millis(30));
+        const waiting = api.requests.length;
+        yield* Deferred.succeed(gate, undefined);
+        yield* Fiber.joinAll(reads);
+        return waiting;
+      }),
+      [],
+      api.client,
+    );
+
+    expect(sentWhileWaiting).toBe(1);
+    // The first read, and one for the two that waited.
+    expect(api.requests).toHaveLength(2);
   });
 });
 

@@ -210,14 +210,45 @@ describe("buildComposerFields", () => {
         [],
         [{ runnerId: LOCAL.id, state: "token-expired" }],
       );
+      // An account whose sign-in makes a token, not one that signs in on each machine.
+      const tokenProviders = PROVIDERS.map((provider) => ({
+        ...provider,
+        kinds: provider.kinds.map((kind) =>
+          provider.id === ANTHROPIC_IDENTITY.providerId
+            ? {
+                ...kind,
+                setup: [{ kind: "harness-login" as const, method: "create-token" as const }],
+              }
+            : kind,
+        ),
+      }));
 
-      expect(draftOn(LOCAL, expired).blocked).toEqual({
+      const fields = composeDraft(
+        { ...buildCatalogs([expired]), providers: tokenProviders },
+        buildConfig({ providerAccountId: expired.id, runnerId: LOCAL.id, model: null }),
+      );
+
+      expect(fields.blocked).toEqual({
         reason: "Anthropic's token expired; make a new one",
         signIn: {
           providerAccountId: expired.id,
           runnerId: LOCAL.id,
           subject: "Anthropic on moss",
         },
+        addAccount: false,
+      });
+    });
+
+    it("blocks a draft whose key expired, and offers no sign-in because a key is typed in", () => {
+      const expired = buildProviderAccount(
+        ZAI_IDENTITY,
+        [],
+        [{ runnerId: LOCAL.id, state: "token-expired" }],
+      );
+
+      expect(draftOn(LOCAL, expired).blocked).toEqual({
+        reason: "Z.ai's key expired; add a new one",
+        signIn: null,
         addAccount: false,
       });
     });

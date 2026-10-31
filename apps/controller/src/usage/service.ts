@@ -246,7 +246,9 @@ const make = Effect.gen(function* () {
      * report from a session whose process started with the old credential is
      * dropped (see `record`). The caller replaces the credential in the same
      * transaction and announces the account. The 15-minute limit on active
-     * reads is kept, so replacing a credential does not allow a read sooner.
+     * reads starts over, so the new credential is read at the loop's next
+     * tick: its expiry and credit appear within a minute, not after the old
+     * credential's claim window.
      */
     clear: (providerAccountId: string): Effect.Effect<void, SqlError> =>
       withTransaction(

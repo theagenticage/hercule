@@ -23,6 +23,7 @@ import {
   SessionSpec,
   SteerRefused,
   type AdapterError,
+  type CatalogModel,
   type ModelSelection,
   type HarnessAccount,
   type HarnessEvent,
@@ -67,6 +68,7 @@ import {
   SessionService,
   SessionServiceLayer,
   type PassageQueryInput,
+  type StartNeeds,
   type StartRequest,
 } from "./service";
 
@@ -357,12 +359,14 @@ const prepareAccount = (providerAccountId: string): Effect.Effect<HarnessAccount
  * Calls `claimStarts` the way the controller daemon does: inside the caller's
  * transaction. The controller has no local runner, no connection has a GitHub
  * account, and every session gets `coordination` as its coordination
- * paragraph, or none when it is left out.
+ * paragraph, or none when it is left out. No harness is told about models it
+ * does not list, unless `listUnlistedModels` says otherwise.
  */
 const claimStarting = (
   runnerId: string,
   room: number,
   coordination?: string,
+  listUnlistedModels: StartNeeds["listUnlistedModels"] = () => Effect.succeed([]),
 ): Effect.Effect<ReadonlyArray<StartRequest>, SqlError, SessionService | SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -374,6 +378,7 @@ const claimStarting = (
         readGitIdentity: () => Effect.succeed(undefined),
         requireAccountRunnable: () => Effect.void,
         prepareHarnessAccount: prepareAccount,
+        listUnlistedModels,
         buildCoordination: () => Effect.succeed(coordination),
         runner: { name: "a runner", negotiatedCapabilities: [] },
         localRunnerId: undefined,
@@ -476,6 +481,47 @@ describe("SessionService.claimStarts", () => {
     );
   });
 
+  it("puts the models the harness does not list on the frame, asking once for each account and harness", async () => {
+    const unlisted: ReadonlyArray<CatalogModel> = [
+      { slug: "api-only", name: "API only", imageInput: null, options: [], contextWindow: 200_000 },
+    ];
+    const asked: Array<ReadonlyArray<string>> = [];
+    const result = await run(
+      Effect.gen(function* () {
+        const providerAccountId = mintId();
+        const runnerId = mintId();
+        const spec = buildSpec(providerAccountId, "clever");
+        yield* insertQueuedSession(runnerId, { providerAccountId, spec });
+        yield* insertQueuedSession(runnerId, { providerAccountId, spec });
+        const claimed = yield* claimStarting(runnerId, 2, undefined, (...args) => {
+          asked.push(args);
+          return Effect.succeed(unlisted);
+        });
+        return { claimed, providerAccountId, runnerId };
+      }),
+    );
+
+    expect(result.claimed.map((claim) => claim.frame.unlistedModels)).toEqual([unlisted, unlisted]);
+    expect(asked).toEqual([[result.providerAccountId, HARNESS_ID, result.runnerId]]);
+  });
+
+  it("leaves unlistedModels off the frame when the harness is told about no model", async () => {
+    const claimed = await run(
+      Effect.gen(function* () {
+        const providerAccountId = mintId();
+        const runnerId = mintId();
+        yield* insertQueuedSession(runnerId, {
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
+        });
+        return yield* claimStarting(runnerId, 1);
+      }),
+    );
+
+    expect(claimed).toHaveLength(1);
+    expect("unlistedModels" in claimed[0]!.frame).toBe(false);
+  });
+
   it("ends a queued session, with the reason, when its account cannot be prepared", async () => {
     // A refusal never passes by itself: retrying it on every pass would only
     // log it again and keep the account from being deleted.
@@ -508,6 +554,7 @@ describe("SessionService.claimStarts", () => {
               requireAccountRunnable: () => Effect.void,
               prepareHarnessAccount: (id) =>
                 id === refusedAccountId ? Effect.fail(refusal) : prepareAccount(id),
+              listUnlistedModels: () => Effect.succeed([]),
               buildCoordination: () => Effect.succeed(undefined),
               runner: { name: "a runner", negotiatedCapabilities: [] },
               localRunnerId: undefined,
@@ -579,6 +626,7 @@ describe("SessionService.claimStarts", () => {
                 : Effect.void;
             },
             prepareHarnessAccount: prepareAccount,
+            listUnlistedModels: () => Effect.succeed([]),
             buildCoordination: () => Effect.succeed(undefined),
             runner: { name: "a runner", negotiatedCapabilities: [] },
             localRunnerId: undefined,
@@ -898,6 +946,7 @@ describe("SessionService.claimStarts", () => {
               readGitIdentity: accounts.readGitIdentity,
               requireAccountRunnable: () => Effect.void,
               prepareHarnessAccount: prepareAccount,
+              listUnlistedModels: () => Effect.succeed([]),
               buildCoordination: () => Effect.succeed(undefined),
               runner: { name: "a runner", negotiatedCapabilities: [] },
               localRunnerId: undefined,
