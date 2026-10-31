@@ -25,7 +25,7 @@ function TestMenu({ onTake }: { readonly onTake: (item: string) => void }): JSX.
           <button
             key={item}
             type="button"
-            {...buildItemProps(item, item === "second")}
+            {...buildItemProps(item, { disabled: item === "second" })}
             onClick={() => {
               onTake(item);
             }}
@@ -102,10 +102,10 @@ describe("usePopoverMenu", () => {
       const { menuProps, buildItemProps } = usePopoverMenu();
       return (
         <div {...menuProps} role="menu" aria-label="Choices">
-          <button type="button" {...buildItemProps("on", false, true)}>
+          <button type="button" {...buildItemProps("on", { checked: true })}>
             on
           </button>
-          <button type="button" {...buildItemProps("off", false, false)}>
+          <button type="button" {...buildItemProps("off", { checked: false })}>
             off
           </button>
           <button type="button" {...buildItemProps("plain")}>

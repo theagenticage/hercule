@@ -35,8 +35,7 @@ export interface PopoverMenu {
    */
   readonly buildItemProps: (
     item: string,
-    disabled?: boolean,
-    checked?: boolean,
+    options?: { readonly disabled?: boolean; readonly checked?: boolean },
   ) => {
     readonly role: "menuitem" | "menuitemradio";
     readonly className: string | undefined;
@@ -103,7 +102,7 @@ export function usePopoverMenu(): PopoverMenu {
       },
     },
     menuProps: { ref: menuRef, id: menuId, onToggle: handleToggle, onKeyDown: handleKeys },
-    buildItemProps: (item, disabled = false, checked) => ({
+    buildItemProps: (item, { disabled = false, checked } = {}) => ({
       role: checked === undefined ? "menuitem" : "menuitemradio",
       className: item === activeItem ? "is-active" : undefined,
       "data-item": item,

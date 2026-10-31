@@ -57,16 +57,16 @@ export function ProjectProfileMenu({
   // Opens the menu where the user clicked, moved in if it would run past the
   // window's edge. The popover must be shown before its size can be measured.
   // React never sets `left` and `top`, so it never overwrites them.
-  const menuId = menuProps.id;
+  const { ref: menuRef } = menuProps;
   useLayoutEffect(() => {
-    const menu = document.getElementById(menuId)!;
+    const menu = menuRef.current!;
     menu.showPopover();
     const { width, height } = menu.getBoundingClientRect();
     const keepInside = (at: number, size: number, windowSize: number): string =>
       `${String(Math.max(WINDOW_MARGIN, Math.min(at, windowSize - size - WINDOW_MARGIN)))}px`;
     menu.style.left = keepInside(x, width, window.innerWidth);
     menu.style.top = keepInside(y, height, window.innerHeight);
-  }, [menuId, x, y]);
+  }, [menuRef, x, y]);
 
   const choose = (modelProfileId: string | null): void => {
     close();
@@ -82,7 +82,7 @@ export function ProjectProfileMenu({
       <button
         key={key}
         type="button"
-        {...buildItemProps(key, false, checked)}
+        {...buildItemProps(key, { checked })}
         onClick={() => {
           choose(id);
         }}
