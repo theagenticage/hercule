@@ -284,6 +284,46 @@ export const addModelProfileEntries = (
 };
 
 /**
+ * Returns the profile with a model announced as new taken into the account's
+ * section, as an entry that follows the section's harness (see
+ * `addModelProfileEntries`). It means "the section holds this model": nothing
+ * changes when the section already holds the model in any harness, because
+ * another window may have added it meanwhile, nor for an account the profile
+ * does not hold or whose section is still pending. So applying it again to a
+ * fresher profile (after a `conflict`) is safe.
+ */
+export const addNewModelToProfile = (
+  profile: ModelProfile,
+  providerAccountId: string,
+  model: string,
+): ModelProfileUpdateInput => {
+  const section = profile.accounts.find((each) => each.providerAccountId === providerAccountId);
+  return section?.entries.some((entry) => entry.model === model) === true
+    ? toUpdateInput(profile)
+    : addModelProfileEntries(profile, providerAccountId, [model]);
+};
+
+/**
+ * Returns the profile with a model announced as new hidden for good: the
+ * model is added to `dismissedNewModels`, and nothing else changes. A model
+ * already dismissed is not listed twice, so applying it again to a fresher
+ * profile (after a `conflict`) is safe.
+ */
+export const dismissNewModel = (
+  profile: ModelProfile,
+  providerAccountId: string,
+  model: string,
+): ModelProfileUpdateInput => {
+  const input = toUpdateInput(profile);
+  const alreadyDismissed = input.dismissedNewModels.some(
+    (each) => each.providerAccountId === providerAccountId && each.model === model,
+  );
+  return alreadyDismissed
+    ? input
+    : { ...input, dismissedNewModels: [...input.dismissedNewModels, { providerAccountId, model }] };
+};
+
+/**
  * Returns the profile in which the account's section does (`included`) or
  * does not hold `model` in the section's harness. This is the picker's
  * choice, and it says what the user wants, not what to flip, so applying it

@@ -766,6 +766,8 @@ export { applyThreadChoice, type ThreadChoice } from "./threads/thread-choice";
 export {
   addModelProfileAccount,
   addModelProfileEntries,
+  addNewModelToProfile,
+  dismissNewModel,
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,
   moveModelProfileEntry,
@@ -781,6 +783,7 @@ export {
   type ModelSection,
   type ModelSectionRow,
 } from "./model-profiles/profile-sections";
+export type { NewModelRow } from "./model-profiles/new-model-rows";
 export type { ModelProfileHarnessChoice, SectionHarness } from "./model-profiles/profile-harnesses";
 export { searchPickerModels, type PickerModels } from "./model-profiles/catalog-search";
 export {

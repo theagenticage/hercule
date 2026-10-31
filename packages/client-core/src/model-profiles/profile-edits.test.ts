@@ -19,6 +19,8 @@ import {
 import {
   addModelProfileAccount,
   addModelProfileEntries,
+  addNewModelToProfile,
+  dismissNewModel,
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,
   moveModelProfileEntry,
@@ -450,6 +452,91 @@ describe("setModelProfileEntryIncluded", () => {
     expect(readModels(added)[0]).toContain("fable");
     expect(readModels(retried)[0]).toEqual(["sonnet", "opus", "haiku", "fable"]);
     expect(retried.dismissedNewModels).toEqual(PROFILE.dismissedNewModels);
+  });
+});
+
+describe("addNewModelToProfile", () => {
+  it("appends the model to the end of the account's section, as an entry that follows the section's harness", () => {
+    const input = addNewModelToProfile(PROFILE, CLAUDE, "opus-5.6");
+
+    expect(input.accounts[0]!.entries).toEqual([
+      stored(ANTHROPIC_IDENTITY, "sonnet"),
+      stored(ANTHROPIC_IDENTITY, "opus"),
+      stored(ANTHROPIC_IDENTITY, "haiku"),
+      stored(ANTHROPIC_IDENTITY, "opus-5.6"),
+    ]);
+    expect(input.defaultEntry).toEqual(PROFILE.defaultEntry);
+  });
+
+  it("makes the model the default of a profile with none", () => {
+    const emptied = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [])]);
+
+    expect(addNewModelToProfile(emptied, CLAUDE, "opus-5.6").defaultEntry).toEqual(
+      stored(ANTHROPIC_IDENTITY, "opus-5.6"),
+    );
+  });
+
+  it("changes nothing when the section holds the model, in any harness", () => {
+    const held = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [SONNET_IN_PI])]);
+
+    expect(addNewModelToProfile(held, CLAUDE, "sonnet").accounts[0]!.entries).toEqual([
+      stored(ANTHROPIC_IDENTITY, "sonnet", "pi/pi"),
+    ]);
+  });
+
+  it("changes nothing for an account the profile does not hold, or whose section is pending", () => {
+    const pending = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, "pending")]);
+
+    expect(readModels(addNewModelToProfile(PROFILE, ZAI, "glm-5.3"))).toEqual([
+      ["sonnet", "opus", "haiku"],
+      ["gpt-6"],
+    ]);
+    expect(addNewModelToProfile(pending, CLAUDE, "opus-5.6").accounts).toEqual([
+      { providerAccountId: CLAUDE, harnessId: null },
+    ]);
+  });
+
+  it("gives the intended result when applied again to a fresher profile that another window already added the model to", () => {
+    const fresher = buildModelProfile(
+      [
+        buildProfileSection(ANTHROPIC_IDENTITY, [
+          SONNET,
+          buildProfileEntry(ANTHROPIC_IDENTITY, "opus-5.6"),
+        ]),
+      ],
+      { revision: 8 },
+    );
+
+    const input = addNewModelToProfile(fresher, CLAUDE, "opus-5.6");
+
+    expect(input.expectedRevision).toBe(8);
+    expect(input.accounts[0]!.entries).toHaveLength(2);
+  });
+});
+
+describe("dismissNewModel", () => {
+  it("adds the account's model to the dismissed models, keeps the others, and changes nothing else", () => {
+    const input = dismissNewModel(PROFILE, CLAUDE, "opus-5.6");
+
+    expect(input.dismissedNewModels).toEqual([
+      { providerAccountId: CODEX, model: "gpt-5" },
+      { providerAccountId: CLAUDE, model: "opus-5.6" },
+    ]);
+    expect(input.expectedRevision).toBe(7);
+    expect(input.defaultEntry).toEqual(PROFILE.defaultEntry);
+    expect(readModels(input)).toEqual([["sonnet", "opus", "haiku"], ["gpt-6"]]);
+  });
+
+  it("does not list a model twice when applied again to a fresher profile that already dismisses it", () => {
+    const once = dismissNewModel(PROFILE, CLAUDE, "opus-5.6");
+    const fresher = buildModelProfile(PROFILE.accounts, {
+      revision: 8,
+      dismissedNewModels: once.dismissedNewModels,
+    });
+
+    expect(dismissNewModel(fresher, CLAUDE, "opus-5.6").dismissedNewModels).toEqual(
+      once.dismissedNewModels,
+    );
   });
 });
 

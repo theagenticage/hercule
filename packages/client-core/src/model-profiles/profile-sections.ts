@@ -14,6 +14,7 @@ import type {
 } from "@hercule/contract";
 import { buildProviderAccountName, findProviderPluginId } from "../provider-accounts";
 import { isMachineProblemReason } from "./entry-problem";
+import { buildNewModelRows, type NewModelDates, type NewModelRow } from "./new-model-rows";
 import {
   buildSectionHarnessChoices,
   type ModelProfileHarnessChoice,
@@ -63,6 +64,8 @@ export interface ModelSection {
   /** The harness pill in the section's head. */
   readonly harness: SectionHarness;
   readonly rows: readonly ModelSectionRow[];
+  /** The models announced as new in this section, drawn above the rows. */
+  readonly newModels: readonly NewModelRow[];
   /**
    * The slugs of the entries that run in the section's harness, whether they
    * follow it (a stored `harnessId` of `null`) or name it outright. The
@@ -86,7 +89,7 @@ export const buildModelProfileSections = (
     readonly providers: readonly Provider[];
     readonly harnesses: readonly Harness[];
     readonly runners: readonly Runner[];
-  },
+  } & NewModelDates,
 ): readonly ModelSection[] => {
   const { defaultEntry } = profile;
   return profile.accounts.flatMap((section) => {
@@ -100,6 +103,7 @@ export const buildModelProfileSections = (
         pluginId: findProviderPluginId(catalogs.providers, account),
         selectionPending: section.selectionPending,
         harness,
+        newModels: buildNewModelRows(section, catalogs),
         sectionHarnessModels: section.entries
           .filter((entry) => entry.resolvedHarnessId === section.resolvedHarnessId)
           .map((entry) => entry.model),

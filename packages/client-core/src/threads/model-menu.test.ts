@@ -24,7 +24,12 @@ import {
   buildProviderAccount,
 } from "../providers.testing";
 import type { ThreadCatalogs } from "./config";
-import { buildModelMenu, type ModelMenu, type ModelMenuView } from "./model-menu";
+import {
+  buildModelMenu,
+  buildProfileLanes,
+  type ModelMenu,
+  type ModelMenuView,
+} from "./model-menu";
 
 const buildRunner = (overrides: Partial<Runner> & { id: string }): Runner => ({
   ...WITH_AGENTS,
@@ -101,6 +106,8 @@ const DRAFT: ModelMenuView = {
   runnerId: null,
   openedProfileId: null,
   lastOpenProfileId: null,
+  now: new Date("2026-10-31T12:00:00Z"),
+  timezone: "UTC",
 };
 
 /** Returns the draft menu's profiles. */
@@ -687,6 +694,92 @@ describe("buildModelMenu for a draft", () => {
 
     expect(lanes.map((lane) => lane.name)).toEqual(["Anthropic"]);
   });
+
+  describe("a section with new models", () => {
+    const OPUS_56 = {
+      model: "claude-opus-5.6",
+      name: "Opus 5.6",
+      firstSeenAt: "2026-10-26T08:00:00.000Z",
+    };
+    const GPT_61 = { model: "gpt-6.1", name: "GPT-6.1", firstSeenAt: "2025-12-02T08:00:00.000Z" };
+    const withNew = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS], { newModels: [OPUS_56] }),
+      buildProfileSection(OPENAI_IDENTITY, [], { newModels: [GPT_61] }),
+    ]);
+
+    it("draws them in the lane beside its entries, with the words for when they arrived", () => {
+      const lanes = readDraftProfile(
+        buildModelMenu(buildCatalogs([withNew]), CURRENT, DRAFT),
+      ).lanes;
+
+      expect(lanes.map((lane) => [lane.name, lane.newModels, lane.rows.length])).toEqual([
+        [
+          "Anthropic",
+          [
+            {
+              providerAccountId: CLAUDE.id,
+              model: "claude-opus-5.6",
+              name: "Opus 5.6",
+              arrivalText: "arrived 26 Oct",
+            },
+          ],
+          2,
+        ],
+        [
+          "OpenAI",
+          [
+            {
+              providerAccountId: CODEX.id,
+              model: "gpt-6.1",
+              name: "GPT-6.1",
+              arrivalText: "arrived 2 Dec 2025",
+            },
+          ],
+          0,
+        ],
+      ]);
+    });
+
+    it("keeps the lane of a section with no entries, and does not call the profile empty", () => {
+      const profile = buildModelProfile([
+        buildProfileSection(ANTHROPIC_IDENTITY, [], { newModels: [OPUS_56] }),
+      ]);
+
+      const drawn = readDraftProfile(buildModelMenu(buildCatalogs([profile]), CURRENT, DRAFT));
+
+      expect(drawn.lanes.map((lane) => lane.name)).toEqual(["Anthropic"]);
+      expect(drawn.empty).toBeNull();
+    });
+
+    it("applies the filter to them by name and by slug, and keeps a profile whose only match is a new model", () => {
+      const byName = buildModelMenu(buildCatalogs([withNew]), CURRENT, { ...DRAFT, filter: "5.6" });
+      const bySlug = buildModelMenu(buildCatalogs([withNew]), CURRENT, {
+        ...DRAFT,
+        filter: "gpt-6.1",
+      });
+
+      expect(
+        readDraftProfile(byName).lanes.map((lane) => [
+          lane.name,
+          lane.newModels.length,
+          lane.rows.length,
+        ]),
+      ).toEqual([["Anthropic", 1, 0]]);
+      expect(readDraftProfile(bySlug).lanes.map((lane) => lane.name)).toEqual(["OpenAI"]);
+    });
+
+    it("does not count them as entries of the profile", () => {
+      expect(
+        readDraft(buildModelMenu(buildCatalogs([withNew]), CURRENT, DRAFT)).profiles[0]?.entryCount,
+      ).toBe(2);
+    });
+
+    it("leaves them out of Settings > Threads' lanes, which also drop the section that holds nothing else", () => {
+      const lanes = buildProfileLanes(buildCatalogs([withNew]), withNew);
+
+      expect(lanes.map((lane) => [lane.name, lane.newModels])).toEqual([["Anthropic", []]]);
+    });
+  });
 });
 
 describe("buildModelMenu for a draft with several profiles", () => {
@@ -1064,6 +1157,20 @@ describe("buildModelMenu for a running thread", () => {
       buildModelMenu(buildCatalogs([profile], [claude]), { ...ACTIVE, runnerId: COVE.id }, view),
     );
     expect(elsewhere.rows[0]!.problem?.message).toBe("Claude Code is not on cove");
+  });
+
+  it("announces no new model", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET], {
+        newModels: [
+          { model: "claude-opus-5.6", name: "Opus 5.6", firstSeenAt: "2026-10-26T08:00:00.000Z" },
+        ],
+      }),
+    ]);
+
+    const menu = readActive(buildModelMenu(buildCatalogs([profile]), ACTIVE, view));
+
+    expect(menu.rows.map((row) => row.model)).toEqual(["claude-sonnet-5"]);
   });
 
   it("marks no row as the profile's default, and names no harness on a row", () => {

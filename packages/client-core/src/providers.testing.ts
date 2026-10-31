@@ -390,6 +390,7 @@ export const buildProfileSection = (
   resolvedHarnessId: fields.harnessId ?? identity.harnessId,
   selectionPending: entries === "pending",
   entries: entries === "pending" ? [] : entries,
+  newModels: [],
   ...fields,
 });
 
