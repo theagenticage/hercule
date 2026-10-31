@@ -8,7 +8,7 @@
  * never reads back through the Agent afterwards, so an edit changes only the
  * sessions spawned after the edit (ADR 0030).
  *
- * `unenforced` lists what a provider ignores. A provider may store a spec field
+ * `unenforced` lists what a harness ignores. A harness may store a spec field
  * it does not act on, and the record lists that field, so the caller does not
  * have to discover it from the harness's behaviour.
  */
@@ -46,8 +46,8 @@ const SystemPrompt = bounded(1, MAX_SYSTEM_PROMPT_LENGTH);
 const ModelSlug = Schema.NonEmptyString;
 
 /**
- * A field of a session's spec the provider stores but does not act on, read
- * from the provider instance's declared capabilities at every read.
+ * A field of a session's spec the harness stores but does not act on, read
+ * from the harness's declared capabilities at every read.
  */
 export const UnenforcedSpecField = Schema.Literals(["disallowedTools"]);
 
@@ -66,7 +66,7 @@ export const Agent = Schema.Struct({
   /** `null` runs on whatever model the instance offers by default. */
   model: Schema.NullOr(ModelSelection),
   disallowedTools: Schema.Array(DisallowedTool),
-  /** Which of the fields above this agent's provider ignores; usually empty. */
+  /** Which of the fields above this agent's harness ignores; usually empty. */
   unenforced: Schema.Array(UnenforcedSpecField),
   createdAt: Timestamp,
   updatedAt: Timestamp,

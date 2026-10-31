@@ -457,7 +457,7 @@ const make = Effect.gen(function* () {
      * Fails with `InvalidState` when the runner is not connected or does not
      * report in time. The runner reports by itself only hourly, and only when
      * something changed, so this is the only way to see a newly installed
-     * provider CLI without waiting up to an hour.
+     * harness CLI without waiting up to an hour.
      */
     refreshFacts: (id: Id): Effect.Effect<RunnerDetail, Exclude<MoveError, Validation>> =>
       Effect.gen(function* () {

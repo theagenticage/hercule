@@ -127,7 +127,7 @@ const THREAD_TITLE_INSTRUCTIONS =
  * The answer the model gives for a Thread's title and role.
  *
  * `role` has no length limit here, like `title`. A `maxLength` may be outside
- * the strict JSON Schema subset every provider shares, and an answer that
+ * the strict JSON Schema subset every harness shares, and an answer that
  * misses the schema fails the whole call as `invalid-output`, which would lose
  * a good title over a long role. The service drops a role that is too long.
  */
@@ -465,12 +465,12 @@ const make = Effect.gen(function* () {
    *
    * 1. the runner: the one named, or else the first placeable runner;
    * 2. the access mode: the nearest one at or below the requested mode that
-   *    the provider supports;
+   *    the harness supports;
    * 3. the model: the one requested, or else the runner's default model for
    *    the instance, with the requested options checked against it.
    *
    * Returns the runner id, the access mode and the model selection. Fails
-   * with `InvalidState` when no runner can take the session, the provider
+   * with `InvalidState` when no runner can take the session, the harness
    * supports no such access mode, or the runner reported no models, and with
    * `Validation` for an unknown instance, runner or option.
    */
@@ -596,7 +596,7 @@ const make = Effect.gen(function* () {
    *   rule above prevents, on the other axis (spec 13 section 6.3).
    *
    * The order is the one `findNearestSupportedAccessMode` uses, so "more
-   * permissive" means the same here as in the provider fallback.
+   * permissive" means the same here as in the harness fallback.
    */
   const mayRunOn = (actor: Actor, requested: AccessMode | undefined, agent: StoredAgent): boolean =>
     actor._tag !== "session" ||
@@ -1349,7 +1349,7 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Opens a new session that continues from the provider-native session an
+     * Opens a new session that continues from the harness-native session an
      * exited parent left behind. Returns the new session. It runs on the same
      * runner and instance as the parent, because that is where the native
      * state is (spec 06 section 4.1). Resuming the parent itself is done by
@@ -1403,7 +1403,7 @@ const make = Effect.gen(function* () {
             return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_PROFILE));
           }
           // Called only for its failures: it fails when the instance is gone, or
-          // its provider is no longer registered.
+          // its harness is no longer registered.
           yield* resolved(parent.instanceId);
           const nativeSessionId = yield* resumableNativeSession(parent);
 

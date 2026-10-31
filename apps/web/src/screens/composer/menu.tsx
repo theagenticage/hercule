@@ -4,7 +4,7 @@ import { cn } from "@hercule/ui";
 /**
  * One row of a composer menu. From left to right it has:
  *
- * - a marker column: a dot on the current row, or a provider's logo;
+ * - a marker column: a dot on the current row, or a harness's logo;
  * - the name, with its small detail beside it;
  * - a note on the right.
  *
@@ -144,7 +144,7 @@ export function Lane({ label }: { readonly label: string }): JSX.Element {
   );
 }
 
-/** Wraps a provider's logo for a row's marker column, in place of the dot. */
+/** Wraps a harness's logo for a row's marker column, in place of the dot. */
 export const renderMarker = (mark: ReactNode): ReactNode => (
   <span className="flex w-4 justify-center opacity-85">{mark}</span>
 );

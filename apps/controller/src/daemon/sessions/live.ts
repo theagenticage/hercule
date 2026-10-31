@@ -357,7 +357,7 @@ const make = Effect.gen(function* () {
    * A running harness cannot change its access mode, which is why the change
    * waits for the resume.
    *
-   * Fails with `InvalidState` when the provider supports no access mode at or
+   * Fails with `InvalidState` when the harness supports no access mode at or
    * below the assistant's, as a new session would.
    */
   const buildConversationResumeSpec = (
@@ -520,7 +520,7 @@ const make = Effect.gen(function* () {
         ).pipe(
           Effect.catchIf(
             (error): error is InvalidState => error instanceof InvalidState,
-            // The assistant's access mode has no match in the provider any
+            // The assistant's access mode has no match in the harness any
             // more, so the session cannot be resumed as the assistant now is.
             (refused) =>
               Effect.as(sessions.dropUnresumableInputs(sessionId, refused.error.message), false),
@@ -591,7 +591,7 @@ const make = Effect.gen(function* () {
    *   turn that input opens sends it.
    * - A session with any other status gets the input queued.
    * - An exited session whose transcript can be resumed goes back on the
-   *   queue, with a spec that holds its provider-native session id, and the
+   *   queue, with a spec that holds its harness-native session id, and the
    *   row is stored as waiting. The caller dispatches the session.
    *
    * Reading the session, validating the options and both writes share one
@@ -713,7 +713,7 @@ const make = Effect.gen(function* () {
     subagentId?: SubagentId,
   ): Effect.Effect<void, InvalidState | SqlError> =>
     Effect.gen(function* () {
-      // Steering a Discussion Input into a provider that cannot steer natively
+      // Steering a Discussion Input into a harness that cannot steer natively
       // interrupts the turn on the system's own account, with no actor behind
       // the request, so that interrupt is stamped `system`.
       const actor = yield* currentStampOrSystem;
@@ -738,11 +738,11 @@ const make = Effect.gen(function* () {
 
   /**
    * Gets a waiting input into the turn a busy session is running. Steering is
-   * a guarantee every session gives, whatever its provider:
+   * a guarantee every session gives, whatever its harness:
    *
-   * - a provider that steers natively is sent the input now, and the result
+   * - a harness that steers natively is sent the input now, and the result
    *   comes from the runner;
-   * - any other provider has its running turn interrupted, and the input
+   * - any other harness has its running turn interrupted, and the input
    *   stays waiting. The flush that follows the turn's end sends it as the
    *   next turn, and the result is `queued`.
    *
@@ -750,7 +750,7 @@ const make = Effect.gen(function* () {
    * flush at the end of the turn, so each caller decides what that means for
    * it. When the runner cannot fold the input into the running turn, the
    * input waits for the turn's end and the result is `queued`, as for a
-   * provider that does not steer natively. Fails with `InvalidState` when the
+   * harness that does not steer natively. Fails with `InvalidState` when the
    * runner failed the input in any other way or is not connected.
    *
    * A native steer cannot race the flush: the claim is one conditional write,
@@ -979,7 +979,7 @@ const make = Effect.gen(function* () {
      * - a session that has exited but can be resumed goes back on the queue
      *   in place, with a resume spec, in the same transaction, whatever made
      *   it exit. It resumes under the assistant's current access mode and
-     *   permission profile, and fails with `InvalidState` when the provider
+     *   permission profile, and fails with `InvalidState` when the harness
      *   supports no access mode at or below the assistant's;
      * - a busy session has the input steered into its running turn;
      * - any other session gets the input when it is next idle.
@@ -1108,7 +1108,7 @@ const make = Effect.gen(function* () {
      * - an idle session with no input on the wire is sent the input here;
      * - a busy session, when the input is steered, gets it in its running
      *   turn (`steerInto`), as `input.steer` would do for a queued input. The
-     *   result is `queued` when the provider does not steer natively, when
+     *   result is `queued` when the harness does not steer natively, when
      *   the flush at the turn's end sent the input first, or when the steer
      *   did not go through (see below);
      * - a session with any other status, or an idle one whose earlier input
@@ -1122,7 +1122,7 @@ const make = Effect.gen(function* () {
      * it, and queued for any other caller. A session that sends a message to
      * a peer wants it read while it still matters, and a queue of messages
      * the peer reads minutes late is worse than an interruption. A session
-     * that sends to itself queues: on a provider that cannot steer natively,
+     * that sends to itself queues: on a harness that cannot steer natively,
      * steering interrupts the running turn, which would cut off the command
      * that sent the message. An explicit `steer` always wins.
      *
@@ -1255,8 +1255,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Gets a queued input into the turn a busy session is running
-     * (`steerInto`): sent now to a provider that steers natively, or, for any
-     * other provider, the running turn is interrupted and the input is sent
+     * (`steerInto`): sent now to a harness that steers natively, or, for any
+     * other harness, the running turn is interrupted and the input is sent
      * as the next turn. Fails before anything is sent when:
      *
      * - the input belongs to another session, or is no longer queued;

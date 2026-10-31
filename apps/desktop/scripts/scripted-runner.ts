@@ -37,7 +37,7 @@
  * by word, tool calls that may ask for approval and wait for the user to
  * allow them, Token Usage, and subagents that play steps of their own. It
  * reports the same events, with the same details, that the Claude Code
- * adapter in `apps/runner/src/providers` reports for that work, so a screen
+ * adapter in `apps/runner/src/harnesses` reports for that work, so a screen
  * sees what it would see from a real agent.
  *
  * Like the root `scripts/controller-process.ts`, it uses only Node's APIs,
@@ -62,7 +62,7 @@ import type {
   PROTOCOL_VERSION,
   ProbeResult,
   RUNNER_ATTACHMENTS_PATH,
-  ProviderEvent,
+  HarnessEvent,
   REPOSITORY_SKILLS_CAPABILITY,
   RepositorySkill,
   RequestResolution,
@@ -95,8 +95,8 @@ const FACTS: Omit<RunnerFacts, "identityPort"> = {
   totalMemoryBytes: 64 * 1024 ** 3,
   docker: false,
   toolchains: [],
-  providers: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
-  adapters: ["claude-code"],
+  harnesses: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
+  adapters: ["claude-code/claude-code"],
 };
 
 /**
@@ -483,7 +483,7 @@ export async function enlistScriptedRunner(
   };
 
   /** Sends one event of a session with the session's next sequence number. */
-  const reportEvent = (session: HostedSession, event: ProviderEvent): void => {
+  const reportEvent = (session: HostedSession, event: HarnessEvent): void => {
     session.seq += 1;
     send({ _tag: "sessionEvent", seq: session.seq, event });
   };
@@ -1196,7 +1196,7 @@ export async function enlistScriptedRunner(
         reportEvent(session, {
           _tag: "session.started",
           ...stampEvent(frame.sessionId),
-          providerRefs: { nativeSessionId: buildNativeSessionId(frame.sessionId) },
+          harnessRefs: { nativeSessionId: buildNativeSessionId(frame.sessionId) },
         });
         return deliverInput(session, frame);
       }
@@ -1290,7 +1290,7 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 13 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 14 satisfies typeof PROTOCOL_VERSION,
             capabilities: [
               "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,
@@ -1516,7 +1516,7 @@ function buildOpenRequest(kind: RequestKind): OpenRequest {
 }
 
 /**
- * Returns the provider-native id a session reports when it starts, which
+ * Returns the harness-native id a session reports when it starts, which
  * makes the session resumable, as it is with a real harness.
  */
 function buildNativeSessionId(sessionId: string): string {

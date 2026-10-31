@@ -51,12 +51,12 @@ const ACTIVE: Fixture = {
   id: "quiet-sink",
   displayName: "Quiet Sink",
   hostApi: 1,
-  capabilities: ["providers"],
+  capabilities: ["harnesses"],
   enabled: true,
   status: { _tag: "active" },
   configSchema: EMPTY_SCHEMA,
   config: {},
-  contributions: [{ extensionPoint: "provider", id: "acme", definition: {} }],
+  contributions: [{ extensionPoint: "harness", id: "acme", definition: {} }],
   intake: NO_INTAKE,
 };
 
@@ -67,7 +67,7 @@ const ERRORED: Fixture = {
   id: "borked-relay",
   displayName: "Borked Relay",
   hostApi: 1,
-  capabilities: ["providers"],
+  capabilities: ["harnesses"],
   enabled: true,
   status: { _tag: "errored", message: ACTIVATION_FAILURE },
   configSchema: EMPTY_SCHEMA,
@@ -81,7 +81,7 @@ const REFUSED: Fixture = {
   id: "ancient-source",
   displayName: "Ancient Source",
   hostApi: 2,
-  capabilities: ["providers"],
+  capabilities: ["harnesses"],
   enabled: true,
   status: { _tag: "refused", reason: { kind: "hostApi", expected: 1, actual: 2 } },
   config: {},
@@ -94,7 +94,7 @@ const CONFIGURABLE: Fixture = {
   id: "notes-sink",
   displayName: "Notes Sink",
   hostApi: 1,
-  capabilities: ["providers", "kv"],
+  capabilities: ["harnesses", "kv"],
   enabled: true,
   status: { _tag: "active" },
   configSchema: {
@@ -116,7 +116,7 @@ const CONFIGURABLE: Fixture = {
     mode: "fast",
     tags: ["alpha", "beta"],
   },
-  contributions: [{ extensionPoint: "provider", id: "notes", definition: {} }],
+  contributions: [{ extensionPoint: "harness", id: "notes", definition: {} }],
   intake: NO_INTAKE,
 };
 
@@ -185,7 +185,7 @@ describe("Settings > Plugins", () => {
 
     const active = readPageText(await findPluginCard(ACTIVE));
     expect(active).toMatch(/active/i);
-    expect(active).toMatch(/provider/i);
+    expect(active).toMatch(/harness/i);
     expect(active).toContain("acme");
 
     const errored = readPageText(await findPluginCard(ERRORED));
@@ -468,7 +468,7 @@ describe("Settings > Plugins > nothing installed", () => {
 
     expect(readPageText()).toContain("No plugins are installed.");
     expect(readPageText()).toContain(
-      "Plugins bring channels, event sources, providers and workflow actions. Each one declares what it contributes, and Hercule generates its configuration form from that.",
+      "Plugins bring channels, event sources, harnesses and workflow actions. Each one declares what it contributes, and Hercule generates its configuration form from that.",
     );
   });
 });

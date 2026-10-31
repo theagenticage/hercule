@@ -30,7 +30,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
-import { CLAUDE_CODE, CODEX, PI, type UserMaterial } from "../providers";
+import { CLAUDE_CODE, CODEX, PI, type UserMaterial } from "../harnesses";
 
 /**
  * User Material with no paths. A Claude Code Thread always gets it, because
@@ -263,11 +263,11 @@ const findPiMaterial = (home: string): FoundMaterial => {
 };
 
 /**
- * Provisions the user's material for one Thread of `providerId`, read from the
+ * Provisions the user's material for one Thread of `harnessId`, read from the
  * default locations under `env.HOME`, and returns the paths the adapter
  * passes to the harness. For Claude Code it writes links to that material
- * into `instanceHome` and returns no paths; for every other provider it
- * writes nothing. Returns no paths when `env` has no `HOME` or the provider
+ * into `instanceHome` and returns no paths; for every other harness it
+ * writes nothing. Returns no paths when `env` has no `HOME` or the harness
  * has no material.
  *
  * Never fails. A missing source is skipped quietly, and a filesystem error is
@@ -275,7 +275,7 @@ const findPiMaterial = (home: string): FoundMaterial => {
  * the user's material.
  */
 export const provisionUserMaterial = (
-  providerId: string,
+  harnessId: string,
   instanceHome: string,
   env: Readonly<Record<string, string | undefined>>,
 ): Effect.Effect<UserMaterial> =>
@@ -283,7 +283,7 @@ export const provisionUserMaterial = (
     const home = env["HOME"];
     if (home === undefined || home === "") return NO_PATHS;
     const found = yield* Effect.sync((): FoundMaterial => {
-      switch (providerId) {
+      switch (harnessId) {
         case CLAUDE_CODE:
           return { material: NO_PATHS, warnings: linkClaudeMaterial(home, instanceHome) };
         case CODEX:

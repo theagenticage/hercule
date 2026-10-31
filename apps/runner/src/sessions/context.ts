@@ -1,7 +1,7 @@
 /**
  * Resolves what one session needs on this machine from its start frame. The
  * frame holds ids, and this file turns them into paths and an environment.
- * Only this file resolves the runner's provider homes and working directories.
+ * Only this file resolves the runner's harness homes and working directories.
  * Managed workspace paths stay on the runner; an attached checkout's path is
  * explicitly registered on the controller.
  */
@@ -19,7 +19,7 @@ import {
   switchBranch,
   type Workspaces,
 } from "../workspaces";
-import type { ProviderRunnerContext } from "../providers";
+import type { HarnessRunnerContext } from "../harnesses";
 import { endSentence } from "../report";
 import {
   listWorkspaceRepositorySkills,
@@ -33,7 +33,10 @@ import { buildSessionCheckouts, type SessionCheckout } from "./edited-files";
 
 /** The facts about this machine that a session's context is built from. */
 export interface Machine {
-  /** `<runner storage>/providers`: one isolated provider home per instance. */
+  /**
+   * `<runner storage>/providers`: one isolated harness home per instance. The folder keeps
+   * its old name, because renaming it would move the logins stored in it.
+   */
   readonly providersDir: string;
   /** Where a workspace-less session's empty cwd is made, one directory per session. */
   readonly scratchDir: string;
@@ -55,7 +58,7 @@ export interface Machine {
   /** `<home>/runner/bin`, holding the `hercule` symlink, prepended to a session's `PATH`. */
   readonly binDir: string;
   /** The skill and the Claude plugin directory, prepared once at runner start (spec 06 section 9.3). */
-  readonly herculeTool: ProviderRunnerContext["herculeTool"];
+  readonly herculeTool: HarnessRunnerContext["herculeTool"];
   /** What a session reads as `HERCULE_API_URL`. */
   readonly controllerUrl: string;
   /** The runner's own environment. A session's environment is built on top of it. */
@@ -75,7 +78,7 @@ const PRIMARY_WORKSPACE_REASON =
 /** The context a session start resolved on this machine. */
 export interface Resolved {
   /** The adapter's context, except for its edit marks, which need the session's edit watch. */
-  readonly ctx: Omit<ProviderRunnerContext, "editMarks">;
+  readonly ctx: Omit<HarnessRunnerContext, "editMarks">;
   /** The scratch directory, removed when the session exits. Undefined for a session that has a workspace. */
   readonly scratch: string | undefined;
   /** The directory the session's images are cached in, removed when the session exits. */
@@ -106,7 +109,7 @@ export interface Resolved {
 /**
  * Returns the string-valued variables in the `env` object of an instance's
  * config: the "extra environment for the spawned process" (spec 06 section
- * 2.1). No shipped provider declares a `configSchema` field for it yet, so the
+ * 2.1). No shipped harness declares a `configSchema` field for it yet, so the
  * config is read leniently: anything else is ignored rather than failing the
  * session start.
  *
@@ -318,7 +321,7 @@ const placeSession = (
 
 /**
  * Resolves the context an adapter needs to start a session: its cwd, the
- * instance's provider home, the harness binary, the environment and the
+ * instance's harness home, the harness binary, the environment and the
  * secrets. When the frame's `userMaterial` flag is set, the context also
  * carries the user's own material (spec 06 section 9.1). Fails with a message the user can read
  * when the session cannot be placed on this machine.
@@ -371,7 +374,7 @@ export const resolveSessionContext = (
       // keeps the harness isolated from the user's installation.
       const userMaterial =
         frame.userMaterial === true
-          ? yield* provisionUserMaterial(frame.providerId, home, machine.baseEnv)
+          ? yield* provisionUserMaterial(frame.harnessId, home, machine.baseEnv)
           : undefined;
       return {
         scratch: placed.scratch,

@@ -30,7 +30,7 @@
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Schema } from "effect";
-import { truncateFact } from "../providers/text";
+import { truncateFact } from "../harnesses/text";
 
 /**
  * The environment variable that holds a session's marks directory in the

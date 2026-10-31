@@ -41,7 +41,7 @@ const LOST: Fixture = { ...MOSS, connectivity: "unreachable" };
 
 const BARE: Fixture = {
   ...ONLINE,
-  facts: { ...ONLINE.facts!, providers: [{ name: "claude", present: false }] },
+  facts: { ...ONLINE.facts!, harnesses: [{ name: "claude", present: false }] },
 };
 
 /** Provider declarations every instance needs; this page does not test them. */
@@ -71,16 +71,17 @@ interface Snapshot {
 
 const buildProviderInstance = (
   id: string,
-  providerId: string,
+  harnessId: string,
   displayName: string,
+  binaryName: string,
   snapshots: readonly Snapshot[],
 ) => ({
   id,
-  providerId,
+  harnessId,
   name: displayName,
   config: {},
   displayName,
-  binaryName: providerId === "claude-code" ? "claude" : providerId,
+  binaryName,
   declared: DECLARED,
   secretFields: [] as ReadonlyArray<ProviderSecretField>,
   snapshots,
@@ -116,9 +117,9 @@ const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 const CODEX_ID = "01a06d02-1000-7000-8000-000000000002";
 
 const buildClaudeCodeInstance = (snapshots: readonly Snapshot[]) =>
-  buildProviderInstance(CLAUDE_ID, "claude-code", "Claude Code", snapshots);
+  buildProviderInstance(CLAUDE_ID, "claude-code/claude-code", "Claude Code", "claude", snapshots);
 
-const CODEX = buildProviderInstance(CODEX_ID, "codex", "Codex", [NO_ADAPTER]);
+const CODEX = buildProviderInstance(CODEX_ID, "codex/codex", "Codex", "codex", [NO_ADAPTER]);
 
 const INSTANCES = [buildClaudeCodeInstance([LOGGED_IN]), CODEX];
 
@@ -626,7 +627,7 @@ describe("Runner > providers", () => {
     expect(claude.queryByRole("button", { name: /install/i })).toBeNull();
   });
 
-  it("offers to install a missing harness, and disables Install for a provider with no adapter", async () => {
+  it("offers to install a missing harness, and disables Install for a harness with no adapter", async () => {
     await openApp(BARE, { instances: [buildClaudeCodeInstance([]), CODEX] });
 
     const claude = within(await findClaudeRow());
@@ -938,11 +939,11 @@ describe("Runner > a provider that needs a key", () => {
     ...ONLINE,
     facts: {
       ...ONLINE.facts!,
-      providers: [
+      harnesses: [
         { name: "claude", present: true },
         { name: "pi", present: true },
       ],
-      adapters: ["claude-code", "pi"],
+      adapters: ["claude-code/claude-code", "pi/pi"],
     },
   };
 
@@ -953,7 +954,7 @@ describe("Runner > a provider that needs a key", () => {
   });
 
   const buildPiInstance = (set: boolean) => ({
-    ...buildProviderInstance(PI_ID, "pi", "pi", [PI_SNAPSHOT]),
+    ...buildProviderInstance(PI_ID, "pi/pi", "pi", "pi", [PI_SNAPSHOT]),
     secretFields: [{ name: "zaiApiKey", title: KEY_TITLE, description: KEY_DESCRIPTION, set }],
   });
 

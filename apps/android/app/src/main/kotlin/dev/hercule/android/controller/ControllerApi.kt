@@ -13,7 +13,7 @@ import dev.hercule.android.wire.LoginResult
 import dev.hercule.android.wire.MintedApiKey
 import dev.hercule.android.wire.Page
 import dev.hercule.android.wire.Project
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.QuestionAnswers
 import dev.hercule.android.wire.Runner
 import dev.hercule.android.wire.Session
@@ -151,7 +151,7 @@ class ControllerApi(
             }
             val page = send("GET", url, null, pageSerializer)
             rowsNewestFirst += page.items
-            if (page.items.any { it.event is ProviderEvent.TurnStarted }) break
+            if (page.items.any { it.event is HarnessEvent.TurnStarted }) break
             cursor = page.nextCursor
         } while (cursor != null)
         return trimToRunningTurn(rowsNewestFirst.asReversed())

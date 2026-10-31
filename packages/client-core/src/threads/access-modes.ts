@@ -3,7 +3,7 @@
  * mode menu.
  *
  * The menu lists the four access modes, always in the same order. A mode the
- * provider does not support is dimmed, with a note naming the mode it falls
+ * harness does not support is dimmed, with a note naming the mode it falls
  * back to. The fallback uses the same downward-only rule the controller uses
  * when it starts a session, `findNearestSupportedAccessMode`, so a mode the
  * menu shows as available is one the controller actually grants. Spec 06 §8.4
@@ -49,14 +49,14 @@ export const formatAccessMode = (mode: AccessMode): string => LABELS[mode];
 /** Returns the rows of the access mode menu, in order from the most asking mode to the least. */
 export const buildAccessModeMenu = (
   declared: DeclaredCapabilities["accessModes"],
-  /** The provider's display name, used in the dimmed note to say which harness falls back. */
-  providerName: string,
+  /** The harness's display name, used in the dimmed note to say which harness falls back. */
+  harnessName: string,
 ): readonly AccessModeMenuItem[] =>
   ACCESS_MODE_CHAIN.map((mode) => {
     const fallback = findNearestSupportedAccessMode(mode, declared);
     const dimmed =
       fallback === undefined || fallback === mode
         ? null
-        : `runs as ${formatAccessMode(fallback)} on ${providerName}`;
+        : `runs as ${formatAccessMode(fallback)} on ${harnessName}`;
     return { mode, label: formatAccessMode(mode), meaning: MEANINGS[mode], dimmed };
   });

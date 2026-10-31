@@ -225,16 +225,17 @@ const SPECIMEN_THREADS: ReadonlyArray<SpecimenThread> = [
 /** Returns a provider instance whose one capability snapshot lists `models`. */
 export const buildInstance = (
   id: string,
-  providerId: string,
+  harnessId: string,
   displayName: string,
+  binaryName: string,
   models: ReadonlyArray<SpecimenModel>,
 ): ProviderInstance => ({
   id,
-  providerId,
+  harnessId,
   name: displayName,
   config: {},
   displayName,
-  binaryName: providerId,
+  binaryName,
   declared: {
     steering: "native",
     fork: "native",
@@ -271,11 +272,11 @@ export const buildInstance = (
 
 /** The two provider instances, whose catalogs give the threads' models their names. */
 export const SPECIMEN_INSTANCES: ReadonlyArray<ProviderInstance> = [
-  buildInstance(CLAUDE_SONNET.instanceId, "claude-code", "Claude Code", [
+  buildInstance(CLAUDE_SONNET.instanceId, "claude-code/claude-code", "Claude Code", "claude", [
     CLAUDE_SONNET,
     CLAUDE_OPUS,
   ]),
-  buildInstance(GPT.instanceId, "codex", "Codex", [GPT]),
+  buildInstance(GPT.instanceId, "codex/codex", "Codex", "codex", [GPT]),
 ];
 
 /**

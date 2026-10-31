@@ -59,7 +59,7 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 3 + 10_000 });
  */
 const NEVER_STARTED =
   "There was a problem delivering your message to Ada: the session could not be resumed (that session left no " +
-  "provider-native session, so its transcript is gone and there is nothing to resume). " +
+  "harness-native session, so its transcript is gone and there is nothing to resume). " +
   "Send the message again to start a new session.";
 
 /** The conversation of these tests: the default assistant's, renamed to Ada, and its session, busy with the turn "hi" opened. */
@@ -608,7 +608,7 @@ describe("a conversation's start that the runner failed for good", () => {
       const conversation = await renameToAda(arranged);
       const message =
         "Claude Code is not installed on this runner. " +
-        "Install it with: `hercule runner install-harness r1 --provider claude-code`";
+        "Install it with: `hercule runner install-harness r1 --harness claude-code/claude-code`";
       arranged.wire.answering(() => ({ error: new HarnessNotInstalled({ message }) }));
 
       await sendMessage(arranged, conversation.id, "hi");
@@ -644,7 +644,7 @@ describe("a Thread", () => {
         sessionId: thread.id,
         at,
         _tag: "session.started",
-        providerRefs: { nativeSessionId: "native-thread" },
+        harnessRefs: { nativeSessionId: "native-thread" },
       });
       await waitForSession(arranged, thread.id, (one) => one.status === "busy");
 

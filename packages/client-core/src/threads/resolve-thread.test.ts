@@ -15,7 +15,13 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ModelOption, Runner } from "@hercule/contract";
-import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
+import {
+  BARE,
+  buildInstance,
+  buildSnapshot,
+  CLAUDE_CODE_IDENTITY,
+  CODEX_IDENTITY,
+} from "../providers.testing";
 import type { ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
 import { resolveThreadConfig } from "./resolve-thread";
 import { applyThreadChoice, type ThreadChoice } from "./thread-choice";
@@ -82,14 +88,14 @@ const GPT = {
   options: [],
 };
 
-const CLAUDE = buildInstance("claude-code", "Claude Code", [
+const CLAUDE = buildInstance(CLAUDE_CODE_IDENTITY, [
   buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS, HAIKU] }),
   buildSnapshot({ runnerId: REMOTE.id, models: [SONNET, OPUS, HAIKU] }),
   buildSnapshot({ runnerId: MOSS.id, models: [SONNET, OPUS, HAIKU] }),
 ]);
 
 /** Logged in on the remote runner only; on the local one it is installed but logged out. */
-const CODEX = buildInstance("codex", "Codex", [
+const CODEX = buildInstance(CODEX_IDENTITY, [
   buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
   buildSnapshot({
     runnerId: REMOTE.id,
@@ -98,7 +104,7 @@ const CODEX = buildInstance("codex", "Codex", [
 ]);
 
 /** Logged in on the local, remote and moss runners, each with another default model. */
-const TEAM = buildInstance("team", "Team", [
+const TEAM = buildInstance({ ...CODEX_IDENTITY, id: "instance-team", name: "Team" }, [
   buildSnapshot({ runnerId: LOCAL.id, models: [{ ...GPT, slug: "team-local" }] }),
   buildSnapshot({ runnerId: REMOTE.id, models: [{ ...GPT, slug: "team-remote" }] }),
   buildSnapshot({ runnerId: MOSS.id, models: [{ ...GPT, slug: "team-moss" }] }),
@@ -260,7 +266,7 @@ describe("resolveThreadConfig: a draft's model and options", () => {
   });
 
   it("gives an account with no snapshot anywhere no model, no options and no runner", () => {
-    const empty = buildInstance("empty", "Empty", []);
+    const empty = buildInstance({ ...CODEX_IDENTITY, id: "instance-empty", name: "Empty" });
     const resolved = resolveDraft(
       applyThreadChoices(pickOption("effort", "low"), { kind: "account", instanceId: empty.id }),
       { ...CATALOGS, instances: [CLAUDE, empty] },
@@ -335,7 +341,7 @@ describe("resolveThreadConfig: a draft's runner", () => {
   });
 
   it("leaves the draft with no runner when its account has no default one, and names a reference runner apart", () => {
-    const loggedOut = buildInstance("claude-code", "Claude Code", [
+    const loggedOut = buildInstance(CLAUDE_CODE_IDENTITY, [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
     ]);
     const resolved = resolveDraft(

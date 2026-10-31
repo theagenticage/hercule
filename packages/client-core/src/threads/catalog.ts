@@ -19,20 +19,20 @@ export const findSnapshotOn = (
 
 /**
  * Returns the instance's account name when another instance has the same
- * provider, or `null` when it is the only one. A single account does not need
+ * harness, or `null` when it is the only one. A single account does not need
  * a name to tell it apart.
  */
 export const findAccountName = (
   instances: readonly ProviderInstance[],
   instance: ProviderInstance,
 ): string | null =>
-  instances.filter((each) => each.providerId === instance.providerId).length > 1
+  instances.filter((each) => each.harnessId === instance.harnessId).length > 1
     ? instance.name
     : null;
 
 /**
  * Returns the label for an instance in a menu: its account name if it needs
- * one, else the provider's display name.
+ * one, else the harness's display name.
  */
 export const buildInstanceLabel = (
   instances: readonly ProviderInstance[],

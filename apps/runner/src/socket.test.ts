@@ -33,7 +33,7 @@ import {
   type RunnerFacts,
   type ProbeReport,
   type ProbeRequest,
-  type ProviderEvent,
+  type HarnessEvent,
   type RunnerFactsReport,
   type RunnerFactsRequest,
   type RunnerHello,
@@ -57,8 +57,8 @@ import {
 import { acceptControllerMove } from "./repoint";
 import { writeRunnerFile } from "./runner-file";
 import { makeCredentialRelay, makeGithubTokenCopies } from "./credentials";
-import type { ProviderAdapter } from "./providers";
-import { makeLogins, type Logins } from "./providers/login";
+import type { HarnessAdapter } from "./harnesses";
+import { makeLogins, type Logins } from "./harnesses/login";
 import { makeSupervising, type Supervising } from "./sessions/supervisor";
 import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
 import * as workspaceFixtures from "./workspaces/testing";
@@ -66,7 +66,7 @@ import { makeTestWorkspaces } from "./workspaces/testing";
 import { makeAttachmentCache } from "./attachments";
 import { makeSessionSkillsFolders } from "./skills";
 import { openFileClock } from "./edit-marks";
-import { NO_CONTROLLER_UPLOADER } from "./providers/testing";
+import { NO_CONTROLLER_UPLOADER } from "./harnesses/testing";
 
 /** This machine's facts. These tests are not about the probe. */
 const FACTS: RunnerFacts = {
@@ -75,8 +75,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-  providers: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
-  adapters: ["claude-code"],
+  harnesses: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
+  adapters: ["claude-code/claude-code"],
   identityPort: 4939,
 };
 
@@ -315,7 +315,7 @@ const IDLE_STEPS = makeWorkspaceSteps({
   baseEnv: {},
 });
 
-/** The provider logins of a runner that starts none. */
+/** The harness logins of a runner that starts none. */
 const IDLE_LOGINS = makeLogins(() => {
   throw new Error("no test in this file starts a login");
 });
@@ -369,7 +369,7 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
         githubTokenCopies: makeGithubTokenCopies({
           ask: () => Promise.reject(new Error("no test in this file asks for a token")),
         }),
-        providerLogins: IDLE_LOGINS,
+        harnessLogins: IDLE_LOGINS,
         sessions: makeSupervising([]),
         binDir: BIN_DIR,
         herculeTool: HERCULE_TOOL,
@@ -747,7 +747,7 @@ describe("a runner with workspace steps in flight", () => {
 });
 
 describe("reporting the end of a device login", () => {
-  /** Returns the idle provider logins, counting how often a connection attaches to them. */
+  /** Returns the idle harness logins, counting how often a connection attaches to them. */
   const countAttaches = (): { readonly logins: Logins; readonly attaches: () => number } => {
     let attaches = 0;
     return {
@@ -769,7 +769,7 @@ describe("reporting the end of a device login", () => {
     }));
     const counted = countAttaches();
 
-    const pending = runConnection(buildPin(stub), { providerLogins: counted.logins });
+    const pending = runConnection(buildPin(stub), { harnessLogins: counted.logins });
 
     await stub.connected();
     // The logins are attached while the hello is handled, before the proof
@@ -785,7 +785,7 @@ describe("reporting the end of a device login", () => {
     const stub = await stubController();
     const counted = countAttaches();
 
-    const pending = runConnection(buildPin(stub), { providerLogins: counted.logins });
+    const pending = runConnection(buildPin(stub), { harnessLogins: counted.logins });
 
     await stub.connected();
     await waitUntilProven(stub);
@@ -810,7 +810,7 @@ describe("reporting the end of a device login", () => {
       },
     };
 
-    const pending = runConnection(buildPin(stub), { providerLogins: logins });
+    const pending = runConnection(buildPin(stub), { harnessLogins: logins });
     await stub.connected();
     await waitUntilProven(stub);
     stub.hangUp();
@@ -947,12 +947,12 @@ describe("a controller requesting the machine's facts", () => {
   });
 });
 
-describe("a controller asking a runner to probe a provider it has no adapter for", () => {
+describe("a controller asking a runner to probe a harness it has no adapter for", () => {
   const REQUEST: ProbeRequest = {
     _tag: "probeRequest",
     requestId: "01999999-0000-7000-8000-0000000000c1",
     instanceId: "01999999-0000-7000-8000-0000000000c2",
-    providerId: "a-provider-nobody-wrote-an-adapter-for",
+    harnessId: "a-harness-nobody-wrote-an-adapter-for",
     config: {},
     secrets: {},
   };
@@ -979,7 +979,7 @@ describe("a controller asking a runner to probe a provider it has no adapter for
     expect(report?.instanceId).toBe(REQUEST.instanceId);
     expect(report?.result.auth.status).toBe("error");
     expect(report?.result.auth.message).toContain(
-      'does not support the provider "a-provider-nobody-wrote-an-adapter-for"',
+      'does not support the harness "a-harness-nobody-wrote-an-adapter-for"',
     );
     expect(report?.result.harnessVersion).toBeNull();
     expect(report?.result.models).toEqual([]);
@@ -997,7 +997,7 @@ describe("a controller asking a runner to probe a provider it has no adapter for
  * while a start is held at a chosen point.
  */
 describe("session frames on one connection", () => {
-  const PROVIDER = "fake";
+  const HARNESS_ID = "fake";
   const SESSION_A = "0199e0e7-0000-7000-8000-0000000000a1";
   const SESSION_B = "0199e0e7-0000-7000-8000-0000000000b1";
 
@@ -1028,7 +1028,7 @@ describe("session frames on one connection", () => {
 
   /** A fake adapter that records what it is given, with gates the test can hold its steps at. */
   interface Fake {
-    readonly adapter: ProviderAdapter;
+    readonly adapter: HarnessAdapter;
     /** The text of every input handed to a harness, with its session, in order. */
     readonly inputs: Array<readonly [string, string]>;
     /** Every stop the adapter was asked for, with its reason. */
@@ -1053,12 +1053,12 @@ describe("session frames on one connection", () => {
      */
     stopGate: Gate | undefined;
     /** Publishes an event as if the harness had reported it. */
-    readonly emit: (event: ProviderEvent) => void;
+    readonly emit: (event: HarnessEvent) => void;
   }
 
   const createFake = (): Fake => {
     const held = new Map<string, SessionBinding>();
-    const events = Effect.runSync(PubSub.unbounded<ProviderEvent>());
+    const events = Effect.runSync(PubSub.unbounded<HarnessEvent>());
     const fake: Fake = {
       inputs: [],
       turns: [],
@@ -1072,7 +1072,7 @@ describe("session frames on one connection", () => {
       stopGate: undefined,
       emit: (event) => PubSub.publishUnsafe(events, event),
       adapter: {
-        providerId: PROVIDER,
+        harnessId: HARNESS_ID,
         binaryName: "fake-harness",
         events: Stream.fromPubSub(events),
         probe: () => Effect.die("not probed here"),
@@ -1151,7 +1151,7 @@ describe("session frames on one connection", () => {
     requestId,
     sessionId,
     input: { text: `start ${sessionId}` },
-    providerId: PROVIDER,
+    harnessId: HARNESS_ID,
     config: {},
     secrets: {},
     spec: {

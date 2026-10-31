@@ -3,7 +3,7 @@
  * into turns, and `readUserSender`, which reads who sent a user message.
  *
  * The fixtures use the Claude adapter's real shapes (spec 06 §6.3, and
- * `apps/runner/src/providers/claude-code.ts` / `claude-code-normalize.ts`):
+ * `apps/runner/src/harnesses/claude-code.ts` / `claude-code-normalize.ts`):
  *
  * - a `user_message` item has `detail: { text }` on both `item.started` and
  *   `item.completed`;
@@ -1088,7 +1088,7 @@ describe("buildTurns: the skills of a message", () => {
 });
 
 describe("buildTurns runtime notes", () => {
-  const INSTALL_COMMAND = "hercule runner install-harness r1 --provider claude-code";
+  const INSTALL_COMMAND = "hercule runner install-harness r1 --harness claude-code/claude-code";
   const base = (position: number, at: string) => ({
     eventId: `n${position}`,
     sessionId: SESSION_ID,

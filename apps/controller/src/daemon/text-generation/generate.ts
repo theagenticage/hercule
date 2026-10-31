@@ -340,7 +340,7 @@ const make = Effect.gen(function* () {
       const { instance, model } = target;
       const started = yield* Clock.currentTimeMillis;
       const decrypted = yield* Effect.result(
-        readInstanceSecrets(secrets, yield* host.providers(), instance.id, instance.providerId),
+        readInstanceSecrets(secrets, yield* host.harnesses(), instance.id, instance.harnessId),
       );
       if (decrypted._tag === "Failure") {
         const error = decrypted.failure;
@@ -401,7 +401,7 @@ const make = Effect.gen(function* () {
                           _tag: "textGenerationRequest",
                           requestId: crypto.randomUUID(),
                           instanceId: instance.id,
-                          providerId: instance.providerId,
+                          harnessId: instance.harnessId,
                           config: instance.config,
                           secrets: decrypted.success,
                           spec: {
@@ -508,7 +508,7 @@ const make = Effect.gen(function* () {
           return yield* Effect.fail(
             new TextGenerationError({
               reason: "failed",
-              message: `the output schema is outside the JSON Schema subset every provider accepts: ${issues.join("; ")}`,
+              message: `the output schema is outside the JSON Schema subset every harness accepts: ${issues.join("; ")}`,
             }),
           );
         }

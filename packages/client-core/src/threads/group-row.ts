@@ -130,8 +130,8 @@ export interface GroupRow {
   readonly activityAt: string;
   /** What waits on the user, or `null` when no counted session waits and the row's second line shows the place. */
   readonly ask: GroupAsk | null;
-  /** The provider whose mark leads the second line: the asking session's while one asks, otherwise the lead's. */
-  readonly providerId: string | null;
+  /** The harness whose mark leads the second line: the asking session's while one asks, otherwise the lead's. */
+  readonly harnessId: string | null;
   /** Where the lead works, as the second line shows it when nothing asks. */
   readonly placeLabel: WorkspaceLabel;
   /** Where the lead works, in words, for the row's accessible description. */
@@ -335,7 +335,7 @@ export const describeGroupRows = ({
               askerLabel: asker.member.askerLabel,
               question: asker.question,
             },
-      providerId: (asker?.member ?? lead).providerId,
+      harnessId: (asker?.member ?? lead).harnessId,
       placeLabel: buildThreadPlaceLabel({ workspace, branch, machine, resources, runners }),
       placeDescription: describeThreadPlace({
         projectName,

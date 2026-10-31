@@ -19,7 +19,7 @@ import { Effect, Option } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import { LIVE_SESSION_STATUSES, type SessionKind } from "@hercule/contract";
-import type { ProviderEvent } from "@hercule/protocol";
+import type { HarnessEvent } from "@hercule/protocol";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { inputRepository } from "./inputs";
@@ -82,7 +82,7 @@ const fillStream = (sessionId: string, count: number) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
     for (let seq = 1; seq <= count; seq += 1) {
-      const event: ProviderEvent = {
+      const event: HarnessEvent = {
         _tag: "turn.started",
         eventId: mintId(),
         sessionId,
@@ -327,7 +327,7 @@ describe("a session's tool calls", () => {
         const sessions = yield* sessionRepository;
         const sessionId = yield* aSession;
         const counts: Array<number> = [];
-        const appendItem = (seq: number, event: Partial<ProviderEvent>) =>
+        const appendItem = (seq: number, event: Partial<HarnessEvent>) =>
           Effect.gen(function* () {
             yield* sessions.append(sessionId, {
               seq,
@@ -340,7 +340,7 @@ describe("a session's tool calls", () => {
                 itemId: `i${String(seq)}`,
                 detail: {},
                 ...event,
-              } as ProviderEvent,
+              } as HarnessEvent,
             });
             const session = yield* sessions.one(sessionId);
             counts.push(Option.getOrThrow(session).toolCalls);
@@ -1048,7 +1048,7 @@ describe("an event the controller writes itself", () => {
   const ingestFirstRunnerEvent = (sessionId: string) =>
     Effect.gen(function* () {
       const sessions = yield* sessionRepository;
-      const event: ProviderEvent = { _tag: "session.started", eventId: mintId(), sessionId, at };
+      const event: HarnessEvent = { _tag: "session.started", eventId: mintId(), sessionId, at };
       const folded = fold(startTracking(yield* sessions.ingestState(sessionId)), 1, event);
       if (folded === undefined) return false;
       for (const row of folded.rows) yield* sessions.append(sessionId, row);

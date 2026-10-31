@@ -44,7 +44,7 @@ const stopCapturedProcess = async (pid: number): Promise<void> => {
   await waitForProcessGone(pid);
 };
 
-/** Establishes provider facts before the real runner takes over the enrolled identity. */
+/** Establishes harness facts before the real runner takes over the enrolled identity. */
 const bootstrapRunner = async (
   arranged: Arranged,
 ): Promise<{
@@ -148,7 +148,7 @@ describe("preparation after a real runner process dies", () => {
         import { Effect } from "effect";
         import { connect } from ${JSON.stringify(join(moduleRoot, "socket.ts"))};
         import { makeCredentialRelay } from ${JSON.stringify(join(moduleRoot, "credentials/index.ts"))};
-        import { providerLogins } from ${JSON.stringify(join(moduleRoot, "providers/index.ts"))};
+        import { harnessLogins } from ${JSON.stringify(join(moduleRoot, "harnesses/index.ts"))};
         import { sessions } from ${JSON.stringify(join(moduleRoot, "sessions/index.ts"))};
         import { makeWorkspaceSteps } from ${JSON.stringify(join(moduleRoot, "workspace-steps/index.ts"))};
         import { makeWorkspaces } from ${JSON.stringify(join(moduleRoot, "workspaces/index.ts"))};
@@ -161,7 +161,7 @@ describe("preparation after a real runner process dies", () => {
           headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1024 ** 3 }),
           providersDir: storageDir + "/providers", scratchDir: storageDir + "/scratch",
           workspaces, workspaceSteps: makeWorkspaceSteps({ storageDir, workspaces, socketPath, baseEnv: process.env }),
-          socketPath, credentials: makeCredentialRelay(), providerLogins, sessions,
+          socketPath, credentials: makeCredentialRelay(), harnessLogins, sessions,
           binDir: storageDir + "/bin", herculeTool: { skill: "# fixture", claudePluginDir: storageDir + "/claude-plugin" }
         });
         })));

@@ -28,7 +28,7 @@ import {
 import { makeAttachmentCache } from "../attachments";
 import { makeSessionSkillsFolders } from "../skills";
 import { openFileClock } from "../edit-marks";
-import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
+import { NO_CONTROLLER_UPLOADER } from "../harnesses/testing";
 
 afterAll(cleanTemporaries);
 
@@ -314,7 +314,7 @@ describe("recovering attachment availability", () => {
       requestId: createId(),
       sessionId: createId(),
       input: { text: "hello" },
-      providerId: "claude-code",
+      harnessId: "claude-code/claude-code",
       config: {},
       secrets: {},
       token: "fixture-session-token",
@@ -328,7 +328,7 @@ describe("recovering attachment availability", () => {
     };
     const specifications: ReadonlyArray<SessionStart["spec"]> = [
       frame.spec,
-      { ...frame.spec, continue: { nativeSessionId: "saved-provider-transcript", mode: "resume" } },
+      { ...frame.spec, continue: { nativeSessionId: "saved-harness-transcript", mode: "resume" } },
     ];
     for (const spec of specifications) {
       const outcome = await Effect.runPromise(

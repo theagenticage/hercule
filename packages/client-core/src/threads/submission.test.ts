@@ -9,7 +9,13 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Runner, Session } from "@hercule/contract";
-import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
+import {
+  BARE,
+  buildInstance,
+  buildSnapshot,
+  CLAUDE_CODE_IDENTITY,
+  CODEX_IDENTITY,
+} from "../providers.testing";
 import { addFilesToShelf, markShelfItemUploaded } from "../attachments/shelf";
 import type { MessageDraft, ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
 import { resolveThreadConfig } from "./resolve-thread";
@@ -99,7 +105,7 @@ const SONNET = {
   ],
 };
 const OPUS = { ...SONNET, slug: "claude-opus-5", name: "Claude Opus 5", isDefault: false };
-const CLAUDE = buildInstance("claude-code", "Claude Code", [
+const CLAUDE = buildInstance(CLAUDE_CODE_IDENTITY, [
   buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS] }),
   buildSnapshot({ runnerId: REMOTE.id, models: [SONNET, OPUS] }),
 ]);
@@ -128,7 +134,7 @@ describe("buildSubmission: a draft thread", () => {
   it("sends the default runner and model of the account picked, not the draft's own", () => {
     // The draft runs Claude on the local runner. Codex is logged in on the
     // remote runner only, and the picks hold the account alone.
-    const codex = buildInstance("codex", "Codex", [
+    const codex = buildInstance(CODEX_IDENTITY, [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
       buildSnapshot({
         runnerId: REMOTE.id,

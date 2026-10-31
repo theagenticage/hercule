@@ -346,8 +346,8 @@ export interface AllSetRecap {
    * ("Claude Code and Codex"), or null when none is.
    */
   readonly providerNames: string | null;
-  /** The provider whose mark stands for the row: the first logged in, else the first listed. */
-  readonly providerId: string | null;
+  /** The harness whose mark stands for the row: the first logged in, else the first listed. */
+  readonly harnessId: string | null;
   readonly gitHubAccount: string | null;
   /**
    * The first project, with its first repository as `owner/name`, or null
@@ -377,7 +377,7 @@ export const buildAllSetRecap = (
             loggedIn.map((row) => row.name),
             "and",
           ),
-    providerId: (loggedIn[0] ?? rows[0])?.providerId ?? null,
+    harnessId: (loggedIn[0] ?? rows[0])?.harnessId ?? null,
     gitHubAccount: findGitHubAccount(reads.connections),
     project:
       project === undefined

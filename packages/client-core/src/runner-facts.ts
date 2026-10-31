@@ -1,8 +1,8 @@
 /**
  * Formats the facts a runner reported about its machine for display.
  *
- * A runner's report is raw: byte counts, a provider list that includes the
- * providers that are missing, a boolean for Docker. Turning it into text lives
+ * A runner's report is raw: byte counts, a harness list that includes the
+ * harnesses that are missing, a boolean for Docker. Turning it into text lives
  * here with a test rather than in the component that lays it out. `null`
  * means the runner has not reported that fact; the caller decides how to
  * show that.
@@ -16,16 +16,16 @@ export interface RunnerFactsReading {
   readonly memory: string | null;
   readonly diskFree: string | null;
   readonly toolchains: string | null;
-  readonly providers: string | null;
+  readonly harnesses: string | null;
   readonly docker: string | null;
   readonly binary: string | null;
 }
 
 export const describeRunnerFacts = (runner: Runner): RunnerFactsReading => {
   const { facts, watermark } = runner;
-  // A runner that reported no installed provider is different from one that
+  // A runner that reported no installed harness is different from one that
   // has not reported yet, so the two must be shown differently.
-  const installed = facts?.providers.filter((provider) => provider.present) ?? [];
+  const installed = facts?.harnesses.filter((harness) => harness.present) ?? [];
 
   return {
     machine: facts === null ? null : `${facts.os} · ${facts.arch}`,
@@ -35,12 +35,12 @@ export const describeRunnerFacts = (runner: Runner): RunnerFactsReading => {
       facts === null || facts.toolchains.length === 0
         ? null
         : facts.toolchains.map((tool) => `${tool.name} ${tool.version}`).join(" · "),
-    providers:
+    harnesses:
       facts === null
         ? null
         : installed.length === 0
           ? "none installed"
-          : installed.map((provider) => provider.name).join(" · "),
+          : installed.map((harness) => harness.name).join(" · "),
     docker: facts === null ? null : facts.docker ? "installed" : "not installed",
     binary: runner.version,
   };

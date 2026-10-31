@@ -6,7 +6,14 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ProviderInstance, Runner } from "@hercule/contract";
-import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
+import {
+  BARE,
+  buildInstance,
+  buildSnapshot,
+  CLAUDE_CODE_IDENTITY,
+  CODEX_IDENTITY,
+  PI_IDENTITY,
+} from "../providers.testing";
 import type { ThreadConfig } from "./config";
 import { buildModelMenu } from "./model-menu";
 
@@ -51,9 +58,9 @@ const withModels = (
   snapshots: [buildSnapshot({ runnerId: LOCAL.id, models })],
 });
 
-/** The only instance of its provider; its own name differs from the provider's. */
+/** The only instance of its harness; its own name differs from the harness's. */
 const CLAUDE: ProviderInstance = {
-  ...buildInstance("claude-code", "Claude Code", [
+  ...buildInstance(CLAUDE_CODE_IDENTITY, [
     buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS, LEGACY] }),
   ]),
   name: "default",
@@ -62,7 +69,7 @@ const CLAUDE: ProviderInstance = {
 const WORK = withModels(CLAUDE, "instance-claude-work", "work", [SONNET, OPUS, LEGACY]);
 const PERSONAL = withModels(CLAUDE, "instance-claude-personal", "personal", [OPUS]);
 
-const CODEX = buildInstance("codex", "Codex", [
+const CODEX = buildInstance(CODEX_IDENTITY, [
   buildSnapshot({
     runnerId: LOCAL.id,
     auth: { status: "ok", identity: "rogier@example.com", planLabel: "Pro" },
@@ -70,12 +77,12 @@ const CODEX = buildInstance("codex", "Codex", [
   }),
 ]);
 
-const CODEX_OUT = buildInstance("codex", "Codex", [
+const CODEX_OUT = buildInstance(CODEX_IDENTITY, [
   buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
 ]);
 
 /** Found on no runner: it has no snapshot for any runner. */
-const PI = buildInstance("pi", "pi", []);
+const PI = buildInstance(PI_IDENTITY, []);
 
 const buildCatalogs = (instances: readonly ProviderInstance[]) => ({
   instances,
@@ -164,7 +171,7 @@ describe("buildModelMenu: filtering", () => {
 });
 
 describe("buildModelMenu: recent", () => {
-  it("lists the given pairs in order, naming the account only for a provider with more than one instance", () => {
+  it("lists the given pairs in order, naming the account only for a harness with more than one instance", () => {
     const menu = buildModelMenu(
       buildCatalogs([WORK, PERSONAL, CODEX]),
       buildConfig(WORK.id, SONNET.slug),
@@ -182,14 +189,14 @@ describe("buildModelMenu: recent", () => {
       instanceId: CODEX.id,
       model: GPT.slug,
       name: "GPT-5",
-      providerId: "codex",
+      harnessId: "codex/codex",
       account: null,
     });
     expect(menu.recent[1]).toMatchObject({
       instanceId: PERSONAL.id,
       model: OPUS.slug,
       name: "Claude Opus 5",
-      providerId: "claude-code",
+      harnessId: "claude-code/claude-code",
       account: "personal",
     });
   });
@@ -243,7 +250,7 @@ describe("buildModelMenu: recent", () => {
 });
 
 describe("buildModelMenu: the current account", () => {
-  it("labels the section with the account name when the provider has more than one instance", () => {
+  it("labels the section with the account name when the harness has more than one instance", () => {
     const menu = buildModelMenu(
       buildCatalogs([WORK, PERSONAL]),
       buildConfig(WORK.id, SONNET.slug),
@@ -253,7 +260,7 @@ describe("buildModelMenu: the current account", () => {
     expect(menu.current.label).toBe("work");
   });
 
-  it("labels the section with the provider's display name when it has one instance", () => {
+  it("labels the section with the harness's display name when it has one instance", () => {
     const menu = buildModelMenu(
       buildCatalogs([CLAUDE, CODEX]),
       buildConfig(CLAUDE.id, SONNET.slug),

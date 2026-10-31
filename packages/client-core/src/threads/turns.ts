@@ -1,7 +1,7 @@
 /**
- * Groups a transcript into turns. A transcript is a flat log of provider
+ * Groups a transcript into turns. A transcript is a flat log of harness
  * events, and a turn is what the thread screen renders. Grouping here means
- * the transcript column only renders turns, and no provider event names leak
+ * the transcript column only renders turns, and no harness event names leak
  * into it.
  *
  * The assistant's text is never on `item.started` or `item.completed`: it
@@ -41,12 +41,12 @@ import {
   summarizeTodoList,
 } from "./item-detail";
 
-type ProviderEvent = TranscriptRow["event"];
-type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
+type HarnessEvent = TranscriptRow["event"];
+type ItemStarted = Extract<HarnessEvent, { _tag: "item.started" }>;
 type ItemKind = ItemStarted["kind"];
-type ItemUpdated = Extract<ProviderEvent, { _tag: "item.updated" }>;
-type ItemCompleted = Extract<ProviderEvent, { _tag: "item.completed" }>;
-type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
+type ItemUpdated = Extract<HarnessEvent, { _tag: "item.updated" }>;
+type ItemCompleted = Extract<HarnessEvent, { _tag: "item.completed" }>;
+type TurnEndState = Extract<HarnessEvent, { _tag: "turn.completed" }>["state"];
 
 export interface ThreadItem {
   readonly itemId: string;
@@ -258,7 +258,7 @@ interface DetailField {
  * a file search looked for, the URL a page fetch loaded, what a web search
  * searched for, or a tool call's description. The first of these that is
  * present wins, even when it is not a string. Returns `undefined` when none is
- * present. Each provider adapter shapes `detail` its own way, so every field
+ * present. Each harness adapter shapes `detail` its own way, so every field
  * is optional (spec 06 §6.3).
  */
 const findDetailField = (detail: Record<string, unknown>): DetailField | undefined => {
@@ -607,7 +607,7 @@ export const buildUnknownEventMessage = (originalType: string): string =>
 const buildRuntimeNote = (
   row: TranscriptRow,
   event: Extract<
-    ProviderEvent,
+    HarnessEvent,
     { _tag: "runtime.error" | "runtime.warning" | "runtime.notice" | "unknown" }
   >,
 ): RuntimeNote => {
@@ -673,7 +673,7 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
   let openTurnId: string | null = null;
 
   for (const row of rows) {
-    const event: ProviderEvent = row.event;
+    const event: HarnessEvent = row.event;
     switch (event._tag) {
       case "turn.started": {
         findOrStartTurn(event.turnId, event.at).startedAt = event.at;

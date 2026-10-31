@@ -45,23 +45,23 @@ describe("computeVersionVerdict", () => {
 });
 
 describe("findVersionFloor", () => {
-  it("returns the SDK's CLI version for Claude Code, and null for a provider with no pin", () => {
-    expect(findVersionFloor("claude-code")).toBe(CLAUDE_CODE_VERSION);
+  it("returns the SDK's CLI version for Claude Code, and null for a harness with no pin", () => {
+    expect(findVersionFloor("claude-code/claude-code")).toBe(CLAUDE_CODE_VERSION);
     expect(findVersionFloor("nobody-pinned-this")).toBeNull();
   });
 
   // pi is pre-1.0 with recorded breaking changes in its RPC mode, so its floor
   // and the newest anyone tested are the same release.
   it("returns the pi release this build was verified against", () => {
-    expect(findVersionFloor("pi")).toBe(PI_VERSION);
+    expect(findVersionFloor("pi/pi")).toBe(PI_VERSION);
     expect(PI_VERSION).toBe("0.85.1");
-    expect(computeVersionVerdict("0.85.1", findVersionFloor("pi"))).toBe("ok");
-    expect(computeVersionVerdict("0.84.3", findVersionFloor("pi"))).toBe("below-floor");
-    expect(computeVersionVerdict("0.86.0", findVersionFloor("pi"))).toBe("above-tested-max");
+    expect(computeVersionVerdict("0.85.1", findVersionFloor("pi/pi"))).toBe("ok");
+    expect(computeVersionVerdict("0.84.3", findVersionFloor("pi/pi"))).toBe("below-floor");
+    expect(computeVersionVerdict("0.86.0", findVersionFloor("pi/pi"))).toBe("above-tested-max");
   });
 
   it("returns the Codex release this build's types were generated from", () => {
-    expect(findVersionFloor("codex")).toBe(CODEX_VERSION);
+    expect(findVersionFloor("codex/codex")).toBe(CODEX_VERSION);
   });
 
   it("writes the Claude Code floor in one generated file and nowhere else in the source", () => {

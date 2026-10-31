@@ -1,4 +1,4 @@
-import type { ProviderEvent } from "@hercule/protocol";
+import type { HarnessEvent } from "@hercule/protocol";
 import { describe, expect, it } from "vitest";
 import type { StartMark } from "../edit-marks";
 import { makeCommandWindows } from "./command-windows";
@@ -7,8 +7,8 @@ const A = "session-a";
 const B = "session-b";
 const JOINED_AT = 1n;
 
-/** Builds a provider event from the fields the windows read. */
-const buildEvent = (fields: object) => fields as unknown as ProviderEvent;
+/** Builds a harness event from the fields the windows read. */
+const buildEvent = (fields: object) => fields as unknown as HarnessEvent;
 
 const itemStarted = (sessionId: string, itemId: string) =>
   buildEvent({ _tag: "item.started", sessionId, itemId, kind: "command_execution" });

@@ -1,5 +1,5 @@
 /**
- * Sessions: one provider-backed agent conversation, as the API sees it. A
+ * Sessions: one harness-backed agent conversation, as the API sees it. A
  * caller spawns a session, reads it and sends it input; the only thing a
  * caller can change is its model selection.
  *
@@ -289,7 +289,7 @@ export const Session = Schema.Struct({
   requestedAccessMode: AccessMode,
   /** The mode the session actually runs in, after the access-mode fallback. */
   accessMode: AccessMode,
-  /** The provider-native id, once the runner has reported its binding. */
+  /** The harness-native id, once the runner has reported its binding. */
   nativeSessionId: Schema.NullOr(Schema.String),
   /**
    * The model the session runs under now. It starts as the spec's and is
@@ -359,7 +359,7 @@ export const Session = Schema.Struct({
    */
   reopenedAt: Schema.optionalKey(Timestamp),
   /**
-   * The fields this session was spawned with that its provider ignores.
+   * The fields this session was spawned with that its harness ignores.
    * Computed from the instance's declared capabilities every time the session
    * is read.
    */
@@ -680,7 +680,7 @@ export type SessionInputCall = Schema.Schema.Type<typeof SessionInputCall>;
  * needs the `session.steer` grant. `opened` and `steered` are the runner's own
  * words for what it did with the input. `queued` is the controller's word for
  * an input the session cannot take yet, including the input that resumes an
- * exited session, and a steer on a provider that does not steer natively: the
+ * exited session, and a steer on a harness that does not steer natively: the
  * running turn is interrupted, and the input is sent as the next turn.
  */
 export const SessionInputOutcome = Schema.Struct({
@@ -752,7 +752,7 @@ export type SessionRespondToQuestionInput = Schema.Schema.Type<
 >;
 
 /**
- * Branching a session: `fork` opens a second provider-native session from the
+ * Branching a session: `fork` opens a second harness-native session from the
  * one the parent left behind, and leaves the parent's own history untouched.
  * It runs on the parent's runner and provider instance, because that is where
  * the native state is. Continuing the parent itself is not done here: an

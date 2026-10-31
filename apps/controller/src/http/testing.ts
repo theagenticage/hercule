@@ -180,7 +180,7 @@ const buildServices = (
     ),
     // One connection map and one probe driver: the socket route and every
     // service must use the same `RunnerConnections`. The catalog is provided
-    // to the probe driver, which reads provider definitions from it.
+    // to the probe driver, which reads harness definitions from it.
     Layer.provideMerge(
       ProviderProbesLayer.pipe(
         Layer.provideMerge(RunnerConnectionsLayer),
@@ -236,13 +236,13 @@ const buildServices = (
 
 /**
  * Returns the plugins a test controller boots: the test's own, plus a
- * provider plugin when none of the test's plugins offers providers. Setup
+ * harness plugin when none of the test's plugins offers harnesses. Setup
  * creates the default assistant, which needs a provider instance, so a
- * controller with no provider cannot finish setup. The provider plugin is
+ * controller with no harness cannot finish setup. The harness plugin is
  * built per call, so it holds nothing from a controller that has finished.
  */
 const buildPluginRegistry = (plugins: ReadonlyArray<Plugin>): ReadonlyArray<Plugin> =>
-  plugins.some((plugin) => plugin.manifest.capabilities.includes("providers"))
+  plugins.some((plugin) => plugin.manifest.capabilities.includes("harnesses"))
     ? plugins
     : [...plugins, createPluginFixture({ id: "test" }).plugin];
 
@@ -436,7 +436,7 @@ export interface ServerOptions {
   readonly expressionBudget?: Duration.Duration;
   /**
    * The plugin registry. The real one is compiled in, so a test passes its
-   * own. A provider plugin is added when none of these offers providers.
+   * own. A harness plugin is added when none of these offers harnesses.
    */
   readonly plugins?: ReadonlyArray<Plugin>;
   /**

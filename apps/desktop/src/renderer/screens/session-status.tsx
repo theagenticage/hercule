@@ -6,7 +6,7 @@
 import type { JSX } from "react";
 import type { ThreadRowStatus } from "@hercule/client-core";
 import { AgeLabel } from "./age-label";
-import { ProviderLogo } from "./thread/provider-logo";
+import { HarnessLogo } from "./thread/harness-logo";
 import "./session-status.css";
 
 /** The words a session's status slot shows for each status but `age`. */
@@ -55,22 +55,22 @@ export function StatusSlot({
 }
 
 /**
- * Renders the agent of a session: its provider's mark, then the name of its
+ * Renders the agent of a session: its harness's mark, then the name of its
  * model, which is left out whole, never cut short, when it has no room,
  * before the session's own name is. Both sit in the faint ink of a line's
  * second part. Used in the sidebar's rows, the hover card and the thread
  * header's menu.
  */
 export function AgentLabel({
-  providerId,
+  harnessId,
   model,
 }: {
-  readonly providerId: string | null;
+  readonly harnessId: string | null;
   readonly model: string;
 }): JSX.Element {
   return (
     <span className="side-agent">
-      {providerId === null ? null : <ProviderLogo providerId={providerId} size={11} />}
+      {harnessId === null ? null : <HarnessLogo harnessId={harnessId} size={11} />}
       <span>{model}</span>
     </span>
   );

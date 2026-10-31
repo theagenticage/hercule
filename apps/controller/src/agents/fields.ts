@@ -69,27 +69,27 @@ export const buildAgentFieldChecks = Effect.gen(function* () {
   return {
     /**
      * Returns a function that builds the API record from a stored agent, with
-     * `unenforced` computed from the provider's declaration. The provider
+     * `unenforced` computed from the harness's declaration. The harness
      * catalog is read once from memory, so one function serves a whole page
      * as well as a single agent.
      */
     buildAgentRecordComposer: Effect.map(
-      host.providers(),
+      host.harnesses(),
       (definitions) =>
         (stored: StoredAgent): Agent => ({
-          ...Struct.omit(stored, ["providerId", "kind"]),
-          unenforced: listUnenforcedFields(definitions, stored.providerId, stored.disallowedTools),
+          ...Struct.omit(stored, ["harnessId", "kind"]),
+          unenforced: listUnenforcedFields(definitions, stored.harnessId, stored.disallowedTools),
         }),
     ),
 
     /**
-     * Returns the provider id of the instance an agent names. Fails with
+     * Returns the harness id of the instance an agent names. Fails with
      * `Validation` if the instance does not exist, or if this build does not
-     * include its provider. It does not check what the machines that host the
-     * provider can do now: an agent is a stored configuration, not a
+     * include its harness. It does not check what the machines that host the
+     * harness can do now: an agent is a stored configuration, not a
      * placement.
      */
-    readProviderIdOrFail: (
+    readHarnessIdOrFail: (
       instanceId: string,
     ): Effect.Effect<string, Validation | SqlError | Schema.SchemaError> =>
       Effect.gen(function* () {
@@ -99,21 +99,21 @@ export const buildAgentFieldChecks = Effect.gen(function* () {
             createValidationError([{ path: ["instanceId"], message: NO_SUCH_INSTANCE }]),
           );
         }
-        const providerId = instance.value.providerId;
-        const definitions = yield* host.providers();
-        if (!definitions.some((definition) => definition.id === providerId)) {
+        const harnessId = instance.value.harnessId;
+        const definitions = yield* host.harnesses();
+        if (!definitions.some((definition) => definition.id === harnessId)) {
           return yield* Effect.fail(
             createValidationError([
               {
                 path: ["instanceId"],
                 message:
-                  `this build carries no ${providerId} provider; ` +
-                  "name an instance of a provider this build carries",
+                  `this build carries no ${harnessId} harness; ` +
+                  "name an instance of a harness this build carries",
               },
             ]),
           );
         }
-        return providerId;
+        return harnessId;
       }),
 
     /**

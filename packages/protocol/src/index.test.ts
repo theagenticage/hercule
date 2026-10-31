@@ -59,11 +59,11 @@ const facts = {
     { name: "git", version: "2.50.1", path: "/usr/bin/git" },
     { name: "gh", version: "2.99.0", path: "/opt/homebrew/bin/gh" },
   ],
-  providers: [
+  harnesses: [
     { name: "claude", present: true, path: "/usr/local/bin/claude" },
     { name: "codex", present: false },
   ],
-  adapters: ["claude-code"],
+  adapters: ["claude-code/claude-code"],
   identityPort: 4939,
 } as const;
 
@@ -274,19 +274,24 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     _tag: "probeRequest",
     requestId: REQUEST_ID,
     instanceId: INSTANCE_ID,
-    providerId: "claude-code",
+    harnessId: "claude-code/claude-code",
     config: {},
     secrets: {},
   },
-  { _tag: "installRequest", requestId: REQUEST_ID, providerId: "claude-code" },
-  { _tag: "loginStart", requestId: REQUEST_ID, instanceId: INSTANCE_ID, providerId: "claude-code" },
+  { _tag: "installRequest", requestId: REQUEST_ID, harnessId: "claude-code/claude-code" },
+  {
+    _tag: "loginStart",
+    requestId: REQUEST_ID,
+    instanceId: INSTANCE_ID,
+    harnessId: "claude-code/claude-code",
+  },
   { _tag: "loginCode", requestId: REQUEST_ID, instanceId: INSTANCE_ID, code: "the-pasted-code" },
   {
     _tag: "sessionStart",
     requestId: "0199e0e7-0000-7000-8000-00000000000d",
     sessionId: SESSION_ID,
     input: { text: "fix the login bug" },
-    providerId: "claude-code",
+    harnessId: "claude-code/claude-code",
     config: {},
     secrets: {},
     spec,
@@ -389,7 +394,7 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     _tag: "textGenerationRequest",
     requestId: REQUEST_ID,
     instanceId: INSTANCE_ID,
-    providerId: "claude-code",
+    harnessId: "claude-code/claude-code",
     config: {},
     secrets: {},
     spec: {
@@ -407,8 +412,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 13, the version that added the wait and image generation item kinds", () => {
-    expect(PROTOCOL_VERSION).toBe(13);
+  it("is 14, the version that renamed the harness fields and qualified the harness ids", () => {
+    expect(PROTOCOL_VERSION).toBe(14);
   });
 });
 

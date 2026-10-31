@@ -130,7 +130,7 @@ const waitForOwnRunner = async (): Promise<string> => {
 
 const findClaudeInstance = async (): Promise<Instance> => {
   const found = (await listInstances({ url, apiKey })).find(
-    (one) => one.providerId === "claude-code",
+    (one) => one.harnessId === "claude-code/claude-code",
   );
   if (found === undefined) throw new Error("no claude-code Provider Instance was seeded");
   return found;

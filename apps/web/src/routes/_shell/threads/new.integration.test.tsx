@@ -111,7 +111,7 @@ const buildProviderInstance = (
   snapshots: ProviderInstance["snapshots"],
 ): ProviderInstance => ({
   id,
-  providerId: "claude-code",
+  harnessId: "claude-code/claude-code",
   secretFields: [],
   name,
   config: {},
@@ -142,7 +142,7 @@ const INSTANCE_A = buildProviderInstance(
   ],
 );
 
-/** A second account of the same provider, one model, no options. */
+/** A second account of the same harness, one model, no options. */
 const INSTANCE_B = buildProviderInstance(
   "01a06d02-1000-7000-8000-000000000002",
   "work",
@@ -162,7 +162,7 @@ const INSTANCE_B = buildProviderInstance(
 
 /**
  * The real first-run state: the instance exists, because the controller
- * creates one provider instance per shipped provider on first run. Nothing has
+ * creates one provider instance per shipped harness on first run. Nothing has
  * logged in on the one runner yet, so there is no snapshot at all - `buildRunnerMenu`'s only row dims "not logged in" and its
  * `defaultRunnerId` is null.
  */
@@ -299,7 +299,7 @@ describe("Composer: draft defaults", () => {
       "thread.profileId": PROFILE_WORKER.id,
     });
 
-    // There are two accounts of one provider, so the pill includes the
+    // There are two accounts of one harness, so the pill includes the
     // account name. claude-haiku-5 has no options, so no options selector
     // appears next to the pill.
     await waitFor(() => {
@@ -811,7 +811,7 @@ describe("Composer: a login updates the open draft", () => {
     );
 
     // Nothing is logged in, so there is no model to show. The blocking
-    // message names the provider and the machine, and what is missing.
+    // message names the harness and the machine, and what is missing.
     await waitFor(() => {
       expect(readPageText()).toContain(
         "Can't start yet. Claude Code is on moss but not logged in.",
@@ -929,23 +929,23 @@ const WITH_LEGACY = buildProviderInstance(
   ],
 );
 
-/** A second provider with one account, so its rows never show an account name. */
+/** A second harness with one account, so its rows never show an account name. */
 const CODEX: ProviderInstance = {
   ...buildProviderInstance("01a06d02-1000-7000-8000-000000000014", "openai", "Codex", [
     buildSnapshot(RUNNER.id, "rogier@openai.test", "Plus", [
       buildModel("gpt-5-codex", "GPT-5 Codex", { isDefault: true }),
     ]),
   ]),
-  providerId: "codex",
+  harnessId: "codex/codex",
   binaryName: "codex",
 };
 
-/** Another provider's account, which nobody has logged in to on this machine. */
+/** Another harness's account, which nobody has logged in to on this machine. */
 const OTHER_LOGGED_OUT: ProviderInstance = {
   ...buildProviderInstance("01a06d02-1000-7000-8000-000000000015", "openai", "Codex", [
     buildUnauthenticatedSnapshot(RUNNER.id),
   ]),
-  providerId: "codex",
+  harnessId: "codex/codex",
   binaryName: "codex",
 };
 
@@ -996,7 +996,7 @@ describe("Composer: model menu shapes", () => {
     expect(within(menu).queryByPlaceholderText("Filter models…")).toBeNull();
   });
 
-  it("(b) lists the recent pairs newest first, and shows the account only when the provider has two", async () => {
+  it("(b) lists the recent pairs newest first, and shows the account only when the harness has two", async () => {
     const user = userEvent.setup();
     await openApp(
       [INSTANCE_A, INSTANCE_B, CODEX],
@@ -1017,7 +1017,7 @@ describe("Composer: model menu shapes", () => {
     expect(lane.indexOf("GPT-5 Codex")).toBeLessThan(lane.indexOf("Claude Opus 5"));
 
     // Claude Code has two accounts here, so its recent row shows the account.
-    // The row of the provider with one account shows none.
+    // The row of the harness with one account shows none.
     const recentOpus = within(menu).getAllByRole("button", { name: /claude opus 5/i })[0];
     expect(readPageText(recentOpus ?? null)).toContain("personal");
     expect(readPageText(within(menu).getByRole("button", { name: /gpt-5 codex/i }))).not.toContain(
@@ -1069,7 +1069,7 @@ describe("Composer: model menu shapes", () => {
     });
   });
 
-  it("(e) labels the current lane with the account name when the provider has two", async () => {
+  it("(e) labels the current lane with the account name when the harness has two", async () => {
     const user = userEvent.setup();
     await openApp([INSTANCE_A, INSTANCE_B]);
 
@@ -1078,7 +1078,7 @@ describe("Composer: model menu shapes", () => {
     expect(readPageText(menu)).toContain("personal");
   });
 
-  it("(e) labels the current lane with the provider's name when it has one", async () => {
+  it("(e) labels the current lane with the harness's name when it has one", async () => {
     const user = userEvent.setup();
     await openApp([INSTANCE_A]);
 
@@ -2302,7 +2302,7 @@ describe("The New project dialog", () => {
 /** A model that takes no images, as pi reports a text-only model. */
 const INSTANCE_TEXT_ONLY = buildProviderInstance(
   "01a06d02-1000-7000-8000-000000000004",
-  "pi",
+  "pi/pi",
   "pi",
   [
     buildSnapshot(RUNNER.id, "rogier@example.com", "Pi", [

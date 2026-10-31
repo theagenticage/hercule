@@ -96,15 +96,15 @@ const make = Effect.gen(function* () {
           _tag: "probeRequest",
           requestId: crypto.randomUUID(),
           instanceId: instance.id,
-          providerId: instance.providerId,
+          harnessId: instance.harnessId,
           config: instance.config,
           // Decrypted here, at send time: the probe runs the harness's own auth
           // check, which is only meaningful with the credential.
           secrets: yield* readInstanceSecrets(
             secrets,
-            yield* host.providers(),
+            yield* host.harnesses(),
             instance.id,
-            instance.providerId,
+            instance.harnessId,
           ),
         },
         yield* ProviderProbeDeadline,
@@ -128,7 +128,7 @@ const make = Effect.gen(function* () {
             harnessVersion: result.harnessVersion,
             versionVerdict: computeVersionVerdict(
               result.harnessVersion,
-              findVersionFloor(instance.providerId),
+              findVersionFloor(instance.harnessId),
             ),
             auth: result.auth,
             models: result.models,

@@ -1,0 +1,1984 @@
+/**
+ * The Codex adapter. It talks to Codex only through app-server connections,
+ * and every file an app-server uses lives under the instance's own home
+ * directory. Using the developer's own Codex directory would mix Hercule's
+ * sessions with the user's login, skills and memory. A session's skills come
+ * from its own library skills folder and the repository skills folders staged
+ * for it, never from the user's. A Thread on the
+ * local runner is the one session that sees the user's own instructions, and
+ * even then nothing is written into the instance's Codex directory.
+ */
+import { mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { join } from "node:path";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
+import * as Random from "effect/Random";
+import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import type {
+  AccessMode,
+  ApprovalDecision,
+  ExitReason,
+  ModelSelection,
+  ProbeResult,
+  HarnessEvent,
+  QuestionAnswers,
+  RequestResolution,
+  SendResult,
+  SessionBinding,
+  SessionSpec,
+  SubagentId,
+  TextGenerationOutcome,
+  TextGenerationSpec,
+} from "@hercule/protocol";
+import {
+  AdapterFailed,
+  AnswerNotDelivered,
+  HarnessLoginMissing,
+  HarnessNotInstalled,
+  HarnessProtocolError,
+  SessionNotRunning,
+  SteerRefused,
+  type AdapterError,
+} from "@hercule/protocol";
+import type { LoginCommand } from "../login";
+import type {
+  AdapterTurnInput,
+  EditMarks,
+  HarnessAdapter,
+  HarnessRunnerContext,
+  TextGenerationContext,
+  UserMaterial,
+} from "../index";
+import type { ResolvedSkillReference } from "../../skills";
+import { buildFailedProbe } from "../probe";
+import { buildUserMessage } from "../events";
+import { buildHarnessPrompt, joinInstructions } from "../prompt";
+import { isExecutableNotFound, runProcess, spawnAppServer, stopChild, type Run } from "../process";
+import { buildSkillSteerRefusedMessage } from "../steer-refused-message";
+import {
+  buildAdapterFailed,
+  buildAnswerNotDelivered,
+  buildHarnessNotInstalled,
+  buildHarnessNotRunnable,
+  buildHarnessProtocolError,
+  buildInputLost,
+  buildInputRefused,
+  buildSessionNotRunning,
+  describeStartFailure,
+} from "../adapter-error-builders";
+import { truncateMessage } from "../text";
+import { captureIgnoredMessageReporter, captureUnknownItemReporter } from "../message-reporting";
+import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
+import { describeError, now } from "../../report";
+import { ASKED } from "./approvals";
+import {
+  buildAnswerEnvelope,
+  buildAnswerMessage,
+  buildAsyncQuestion,
+  MAX_OPEN_ASYNC_QUESTIONS,
+  readAnswerTexts,
+  readAsyncQuestionItem,
+  type AsyncQuestion,
+  type AsyncQuestionItem,
+} from "./async-questions";
+import { normalize, readApprovalPaths } from "./normalize";
+import {
+  makeCodexThreads,
+  readCodexThreadId,
+  type CodexThreads,
+  type Park,
+  type CodexThreadFrame,
+  type CodexThreadState,
+} from "./threads";
+import {
+  makeCodexInstall,
+  initializeAppServer,
+  makeProbe,
+  describeRpcError,
+  readAccount,
+  STANDARD_TIER,
+  type AppServer,
+} from "./probe";
+import {
+  decideTextGenerationOutcome,
+  buildTextGenerationThread,
+  buildTextGenerationTurn,
+  TEXT_GENERATION_PROCESS_OVERRIDES,
+  watchTextGeneration,
+  type TextGenerationWatch,
+} from "./text-generation";
+import {
+  makeRpc,
+  type AppServerSpawn,
+  type NotificationFrame,
+  type RpcError,
+  type RpcReply,
+  type ServerRequestFrame,
+} from "./rpc";
+import type {
+  ApprovalsReviewer,
+  AskForApproval,
+  DynamicToolCallResponse,
+  GetAccountResponse,
+  ItemCompletedNotification,
+  ItemStartedNotification,
+  JsonValue,
+  SandboxMode,
+  SkillsExtraRootsSetParams,
+  ThreadForkParams,
+  ThreadResumeParams,
+  ThreadStartParams,
+  TurnInterruptParams,
+  TurnStartParams,
+  TurnSteerParams,
+  UserInput,
+} from "./types";
+
+/** The qualified id of the Codex harness (see `CLAUDE_CODE`). */
+export const CODEX = "codex/codex";
+
+const CODEX_BINARY = "codex";
+
+/** The name the user knows this harness by, as it appears in the messages shown to them. */
+const CODEX_NAME = "Codex";
+
+/**
+ * The parts of the reply to `thread/start`, `thread/resume` and `thread/fork`
+ * that the adapter reads. The reply of a request is `unknown` on the wire, so
+ * the adapter decodes it instead of casting: a success reply of another shape
+ * must fail the call, not crash it after Codex may have taken the input.
+ */
+const ThreadOpenedReply = Schema.Struct({ thread: Schema.Struct({ id: Schema.String }) });
+
+/** The part of the reply to `turn/start` that the adapter reads. */
+const TurnStartedReply = Schema.Struct({ turn: Schema.Struct({ id: Schema.String }) });
+
+/** The part of the reply to `turn/steer` that the adapter reads. */
+const TurnSteeredReply = Schema.Struct({ turnId: Schema.String });
+
+const decodeThreadOpenedReply = Schema.decodeUnknownOption(ThreadOpenedReply);
+const decodeTurnStartedReply = Schema.decodeUnknownOption(TurnStartedReply);
+const decodeTurnSteeredReply = Schema.decodeUnknownOption(TurnSteeredReply);
+
+/**
+ * Returns a function that decodes the success reply of `method` and fails with
+ * an `RpcError` when the reply does not have the shape the adapter reads. The
+ * error has no `code`, like every failure on this side of the connection, so
+ * callers treat it as a reply they cannot trust, not as a refusal by Codex.
+ */
+const readReply =
+  <A>(decode: (reply: unknown) => Option.Option<A>, method: string) =>
+  (reply: unknown): Effect.Effect<A, RpcError> =>
+    Option.match(decode(reply), {
+      onSome: (decoded) => Effect.succeed(decoded),
+      onNone: () =>
+        Effect.fail({
+          message: `${CODEX_NAME} sent a reply to ${method} that has an unexpected shape`,
+        }),
+    });
+
+const readThreadOpenedReply = (method: string) => readReply(decodeThreadOpenedReply, method);
+const readTurnStartedReply = readReply(decodeTurnStartedReply, "turn/start");
+const readTurnSteeredReply = readReply(decodeTurnSteeredReply, "turn/steer");
+
+/**
+ * How many of the app-server's last non-frame lines are kept, so they can be
+ * reported if it fails.
+ */
+const MAX_COMPLAINT_LINES = 5;
+
+/**
+ * How many notifications with no thread id a session's host keeps while the
+ * session is still being registered. Codex sends a few at start-up, such as a
+ * config warning, so the bound is far above what a real start sends and only
+ * stops a host that floods.
+ */
+const MAX_FRAMES_BEFORE_REGISTRATION = 100;
+
+/** The most bytes of those notifications a host keeps, as the frames print as JSON. */
+const MAX_BYTES_BEFORE_REGISTRATION = 1024 * 1024;
+
+/**
+ * The notifications with no thread id that arrived on a session's host before
+ * the session was registered, their size in bytes, and how many more were
+ * dropped because a bound was reached.
+ */
+interface FramesBeforeRegistration {
+  readonly frames: Array<NotificationFrame>;
+  bytes: number;
+  dropped: number;
+}
+
+export interface CodexSeam {
+  readonly appServer: AppServerSpawn;
+  readonly run: Run;
+}
+
+/** One running app-server and the session it serves. */
+interface Host extends AppServer {
+  /** The one session this host serves; a probe's own app-server serves none. */
+  readonly sessionId: string | undefined;
+  /** The text generation this host serves, if it serves one instead of a session. */
+  readonly textGeneration: TextGenerationWatch | undefined;
+  /** Stops the app-server and completes only once its process has exited (see `stopChild`). */
+  readonly stop: Effect.Effect<void>;
+  /**
+   * Keeps the notifications with no thread id that arrive before the session
+   * is registered, so `startSession` can hand them to the session once it is.
+   * A notification that names a thread is not kept: before registration, the
+   * session has no thread to give it to, and `startSession` opens the root
+   * thread itself. Absent for a host that serves no session, such as a
+   * probe's or a text generation's, and set to `undefined` by `startSession`
+   * once the session is registered.
+   */
+  framesBeforeRegistration: FramesBeforeRegistration | undefined;
+}
+
+/** One session and every Codex thread its app-server runs. */
+interface Held {
+  readonly binding: SessionBinding;
+  readonly host: Host;
+  readonly threads: CodexThreads;
+  /** How the session reports its commands to the edit watch, or null when its edits are not observed. */
+  readonly editMarks: EditMarks | null;
+  /** The async questions of the root agent that can still be answered, by Request id. */
+  readonly asyncQuestions: Map<string, AsyncQuestion>;
+  /**
+   * The native id of every async question this session has opened, answered
+   * or not. Codex may send an item again, and a question that is already
+   * answered must not open a second time.
+   */
+  readonly seenAsyncQuestionItems: Set<string>;
+}
+
+/**
+ * The Codex thread settings for each access mode (spec 06 section 8.1). Codex
+ * supports every access mode natively, so there is no fallback here and
+ * nothing is silently substituted.
+ */
+const ACCESS_MODES: Readonly<
+  Record<
+    AccessMode,
+    {
+      readonly approvalPolicy: AskForApproval;
+      readonly sandbox: SandboxMode;
+      readonly approvalsReviewer: ApprovalsReviewer;
+    }
+  >
+> = {
+  "approval-required": {
+    approvalPolicy: "untrusted",
+    sandbox: "read-only",
+    approvalsReviewer: "user",
+  },
+  "auto-accept-edits": {
+    approvalPolicy: "on-request",
+    sandbox: "workspace-write",
+    approvalsReviewer: "user",
+  },
+  auto: {
+    approvalPolicy: "on-request",
+    sandbox: "workspace-write",
+    approvalsReviewer: "auto_review",
+  },
+  "full-access": {
+    approvalPolicy: "never",
+    sandbox: "danger-full-access",
+    approvalsReviewer: "user",
+  },
+};
+
+/**
+ * How long a control request, such as an interrupt, may take. The runner handles
+ * a session's frames one at a time, in order, so without this timeout an
+ * app-server that stops replying would hold up every later frame of its
+ * session.
+ */
+export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
+
+/** The error code for a server too busy to start a turn (spec 06 section 10.2). */
+const OVERLOADED = -32001;
+
+/** The standard JSON-RPC code for a method this build does not handle. */
+const METHOD_NOT_FOUND = -32601;
+
+/**
+ * The standard JSON-RPC code for an invalid request. Codex also uses it for
+ * requests it cannot parse.
+ */
+const INVALID_REQUEST = -32600;
+
+/**
+ * Converts the failure of a request that carried an input into an adapter
+ * error. An error Codex replied with proves it did not take the input, so it
+ * becomes `InputNotDelivered`. A failure with no `code` happened on this side
+ * of the connection (a timeout, a lost connection or a failed write), and the
+ * input may have arrived before it, so it becomes `HarnessProtocolError`.
+ */
+const buildInputError = (error: RpcError): AdapterError =>
+  error.code === undefined
+    ? buildInputLost(CODEX_NAME, error.message)
+    : buildInputRefused(CODEX_NAME, error.message);
+
+/**
+ * Converts the failure of a request made while a session starts into an
+ * adapter error. An error Codex replied with (it has a `code`) means the
+ * app-server is running and refused the request, so it becomes
+ * `AdapterFailed`. A failure with no `code` means the connection broke or
+ * timed out, so it becomes `HarnessProtocolError`. `what` names the failed
+ * step and starts the message.
+ *
+ * The app-server answered a refusal, so its own message names the reason. A
+ * failure with no answer is explained better by what the process wrote to
+ * its error output (see `describeRpcError`).
+ */
+const buildStartError = (host: AppServer, what: string, error: RpcError): AdapterError =>
+  error.code === undefined
+    ? buildHarnessProtocolError(`${what}: ${describeRpcError(host, error)}`)
+    : buildAdapterFailed(`${what}: ${error.message}`);
+
+/**
+ * Checks whether an `account/read` reply shows that Codex needs a login and
+ * has none. A Codex whose model provider needs no OpenAI login
+ * (`requiresOpenaiAuth` is false) has no account and still runs, so that case
+ * is not a missing login. An API key login is an account of type `apiKey`.
+ */
+const isLoginMissing = ({ account, requiresOpenaiAuth }: GetAccountResponse): boolean =>
+  account === null && requiresOpenaiAuth;
+
+/**
+ * Checks whether Codex refused a `turn/steer` itself, with a JSON-RPC error.
+ * Codex then did not take the input: the turn ended, it is another turn than
+ * expected, or it cannot be steered (a review or a compaction). Starting a
+ * new turn with that input is safe. A failure with no `code` happened on this
+ * side of the connection, and the input may have arrived before it.
+ */
+const isSteerNotTaken = (error: RpcError): boolean => error.code !== undefined;
+
+const RETRIES = 3;
+
+const BACKOFF: Duration.Duration = Duration.millis(500);
+
+/** The maximum random delay added to each retry, so sessions do not all retry at once. */
+const JITTER_MS = 250;
+
+const backoff = Schedule.exponential(BACKOFF).pipe(
+  Schedule.modifyDelay(({ duration }) =>
+    Effect.map(Random.nextIntBetween(0, JITTER_MS), (jitter) =>
+      Duration.sum(duration, Duration.millis(jitter)),
+    ),
+  ),
+);
+
+/**
+ * Retries a request while the server reports it is overloaded, up to three
+ * times, after 500, 1000 and 2000 ms plus jitter. Other errors are not
+ * retried: a request the server rejected for its content would just be
+ * rejected three more times.
+ */
+const retryWhileOverloaded = <A>(request: Effect.Effect<A, RpcError>): Effect.Effect<A, RpcError> =>
+  Effect.retry(request, {
+    schedule: backoff,
+    times: RETRIES,
+    while: (error: RpcError) => error.code === OVERLOADED,
+  });
+
+/**
+ * The largest value Codex accepts for `model_auto_compact_token_limit`, which
+ * it reads as a signed 64-bit integer.
+ */
+const UNREACHABLE_TOKEN_LIMIT = "9223372036854775807";
+
+/**
+ * Returns the `-c` arguments that turn Codex's automatic compaction off, as
+ * far as Codex allows, for a session whose spec sets `autoCompaction: false`.
+ * Returns none for every other session, which keeps Codex's default.
+ *
+ * An assistant's session is rotated by the controller instead of being
+ * compacted (spec 06 section 9.2). The pinned Codex release has no setting
+ * that turns automatic compaction off, so this is partial:
+ *
+ * - In the default scope, Codex caps the token limit at 90% of the context
+ *   window, so a higher limit alone changes nothing. The
+ *   `body_after_prefix` scope is the one that takes the limit as given.
+ * - Codex still compacts at 95% of the window, on the turn after the model
+ *   reports the context as too long, and when the model changes. No setting
+ *   turns those off. The controller rotates well before 95%.
+ *
+ * These are arguments of the session's own app-server, never lines in the
+ * instance's `config.toml`, because every session of the instance reads that
+ * file.
+ */
+const buildCompactionOverrides = (spec: SessionSpec): ReadonlyArray<string> =>
+  spec.autoCompaction === false
+    ? [
+        "-c",
+        "model_auto_compact_token_limit_scope=body_after_prefix",
+        "-c",
+        `model_auto_compact_token_limit=${UNREACHABLE_TOKEN_LIMIT}`,
+      ]
+    : [];
+
+/**
+ * The gate of a Codex session (spec 19 section 4.1): the command of a hook
+ * that Codex runs before every shell command and every patch, and that the
+ * tool waits for. Codex writes the hook's input to it as one line of JSON,
+ * which already holds the call's `tool_use_id` and, for a subagent, its
+ * `agent_id`. The command writes that line as a mark file into the session's
+ * marks directory, so the file's ctime is the start of the call.
+ *
+ * - It runs under `/bin/sh`, because Codex runs a hook in the user's own
+ *   shell, which may not understand this script.
+ * - `set -C` keeps it from overwriting a mark: it tries three names, then
+ *   gives up.
+ * - It always exits 0 and prints nothing, so the call runs unchanged. When it
+ *   could not write the mark, the call still runs: watching edits is best
+ *   effort and never blocks a session. The edit watch then logs the call's
+ *   unknown start when its item completes.
+ */
+const START_MARK_HOOK_COMMAND = `/bin/sh -c 'set -C; IFS= read -r line; d="$${SESSION_MARKS_DIR_VARIABLE}"; for s in "" a b; do { printf %s "$line" > "$d/$$$s"; } 2>/dev/null && break; done; exit 0'`;
+
+/**
+ * The key and the hash by which Codex knows the gate's hook. Codex runs a hook
+ * given on the command line only once a trust entry names its key and holds
+ * its hash. Trusting this one hook by its hash leaves every other hook as the
+ * user's own settings make it, which `bypass_hook_trust` would not. Codex
+ * computes the hash from the hook's matcher, command and timeout, so changing
+ * any of them, or a Codex that hashes differently, changes the hash. A unit
+ * test computes the hash the way the pinned Codex does and fails when this
+ * one no longer matches the hook, and the integration test against the
+ * pinned Codex fails when Codex itself no longer accepts it.
+ */
+const START_MARK_HOOK_KEY = "/<session-flags>/config.toml:pre_tool_use:0:0";
+const START_MARK_HOOK_HASH =
+  "sha256:b1b1f9673253bed00e544c9158b9e489b4f393b0884199eb05d4f93a781b8234";
+
+/**
+ * Returns the `-c` arguments that install the gate in a session with an edit
+ * watch, trusted by its hash, or none for a session without one. `Bash` is
+ * Codex's hook name for its shell commands and `apply_patch` for its patches.
+ * TOML takes a JSON string as a basic string, so the values are written with
+ * `JSON.stringify`.
+ */
+const buildStartMarkHookOverrides = (ctx: HarnessRunnerContext): ReadonlyArray<string> =>
+  ctx.editMarks === null
+    ? []
+    : [
+        "-c",
+        `hooks.PreToolUse=[{matcher="Bash|apply_patch", hooks=[{type="command", command=${JSON.stringify(START_MARK_HOOK_COMMAND)}, timeout=10}]}]`,
+        "-c",
+        `hooks.state={${JSON.stringify(START_MARK_HOOK_KEY)}={trusted_hash=${JSON.stringify(START_MARK_HOOK_HASH)}}}`,
+      ];
+
+/**
+ * Returns the `-c` argument that gives a Thread's shell commands the user's
+ * real `HOME`, or none for any other session and for a Thread whose runner
+ * has no `HOME` set.
+ *
+ * Every Codex process runs with an empty `HOME` of its instance's own (see
+ * `prepareEnv`), so that Codex does not find the user's `.agents/skills`.
+ * `shell_environment_policy.set` changes only the environment of the
+ * commands Codex runs, not the environment of Codex itself. Under the real
+ * `HOME`, a Thread's commands get, as they would under the user's own Codex
+ * and as a Claude Thread's commands do:
+ *
+ * - git with the user's `~/.gitconfig`, including the files it includes by a
+ *   `~/` path or under an `includeIf gitdir:~/` condition;
+ * - gh's login, which it reads from the macOS Keychain;
+ * - ssh with the user's `~/.ssh`;
+ * - the user's `~/.zshenv`, which zsh reads for every command.
+ *
+ * They do not get what the user's `~/.zprofile` and `~/.zshrc` set up. Codex
+ * runs those once, when it builds its shell snapshot, and it builds the
+ * snapshot under its own `HOME`, the empty one.
+ *
+ * TOML takes a JSON string as a basic string, so the path is written with
+ * `JSON.stringify`, which also escapes any quote or backslash in it.
+ */
+const buildThreadHomeOverrides = (ctx: HarnessRunnerContext): ReadonlyArray<string> => {
+  const home = ctx.env["HOME"];
+  return ctx.userMaterial === undefined || home === undefined
+    ? []
+    : ["-c", `shell_environment_policy.set.HOME=${JSON.stringify(home)}`];
+};
+
+/**
+ * Builds the developer instructions for one thread. A Codex thread accepts only
+ * one set of instructions, so the parts are joined with a blank line between
+ * them, in this order:
+ *
+ * - the orientation every session starts with;
+ * - the session's system prompt;
+ * - the user's own instructions, for a Thread that sees the user's material;
+ * - the skill;
+ * - the coordination paragraph;
+ * - an assistant's memory.
+ *
+ * A missing or empty part is left out, so the text never starts with a blank
+ * line or has two blank lines in a row. Returns an empty string only when every
+ * part is missing, which cannot happen while the skill has text.
+ */
+const buildDeveloperInstructions = (
+  spec: SessionSpec,
+  userInstructions: string | undefined,
+  herculeTool: HarnessRunnerContext["herculeTool"],
+): string =>
+  joinInstructions([
+    herculeTool.orientation,
+    spec.systemPrompt,
+    userInstructions,
+    herculeTool.skill,
+    spec.coordination,
+    spec.memory,
+  ]) ?? "";
+
+/**
+ * Reads the user's own instructions file. Returns its text, or `undefined`
+ * when the session does not see the user's material or the user has no file.
+ * Never fails: when the path is not a regular file or cannot be read, it logs
+ * a warning with the path and the reason, never the file's text, and returns
+ * `undefined`. A Thread never fails to start because of the user's own files
+ * (spec 06 section 9.1).
+ *
+ * The file is read again every time a thread is opened, so a resumed or
+ * forked thread gets the current text.
+ */
+const readUserInstructions = (
+  material: UserMaterial | undefined,
+): Effect.Effect<string | undefined> => {
+  const path = material?.instructionsFile;
+  if (path === undefined) return Effect.succeed(undefined);
+  return Effect.try({
+    try: () => {
+      if (!statSync(path).isFile()) throw new Error("it is not a regular file");
+      return readFileSync(path, "utf8");
+    },
+    catch: describeError,
+  }).pipe(
+    Effect.catch((reason) =>
+      Effect.as(
+        Effect.logWarning(`Did not read ${path} into the Thread's instructions: ${reason}`),
+        undefined,
+      ),
+    ),
+  );
+};
+
+/** The `skill` items for a turn, and the references they were built from. */
+interface SkillInputs {
+  readonly items: ReadonlyArray<UserInput>;
+  /** One reference per item, in text order. A reference that got no item is not here. */
+  readonly translated: ReadonlyArray<ResolvedSkillReference>;
+}
+
+/**
+ * Builds one `skill` item per distinct skill the turn's text references, and
+ * returns the references that got an item. Codex ignores a plain `$name` in
+ * the text for a name that has an item, so the item decides which skill the
+ * name stands for: the library skill `release` or the repository skill
+ * `webshop:release`, which Codex also knows as `release`.
+ *
+ * Codex finds the skill by comparing the item's `path` with the SKILL.md path
+ * it reported in `skills/list`, without resolving links itself. That path has
+ * its symbolic links resolved, so this resolves them too. A skill gets no
+ * item, and is not in `translated`, when:
+ *
+ * - its SKILL.md no longer exists on disk: Codex would drop an item with a
+ *   path it does not know anyway;
+ * - its SKILL.md now resolves to a file outside the skill folder, such as a
+ *   link to another file the user can read: the item would hand that path to
+ *   Codex.
+ *
+ * A skill folder staged as a link is fine, because the check compares
+ * against the resolved folder.
+ */
+const buildSkillInputs = (references: ReadonlyArray<ResolvedSkillReference>): SkillInputs => {
+  const seen = new Set<string>();
+  const items: Array<UserInput> = [];
+  const translated: Array<ResolvedSkillReference> = [];
+  for (const reference of references) {
+    if (seen.has(reference.folder)) continue;
+    seen.add(reference.folder);
+    let path: string;
+    try {
+      path = realpathSync(join(reference.folder, "SKILL.md"));
+      if (path !== join(realpathSync(reference.folder), "SKILL.md")) continue;
+    } catch {
+      continue;
+    }
+    items.push({ type: "skill", name: reference.skillName, path });
+    translated.push(reference);
+  }
+  return { items, translated };
+};
+
+/**
+ * Builds the items Codex takes as a turn's input: the prompt
+ * `buildHarnessPrompt` builds first (the sender header when another agent
+ * sent the input, the text, and a line per image naming the file it is saved
+ * in), then one `localImage` item per image, then the `skill` items
+ * (`buildSkillInputs`). Codex reads each image from that file itself, so its
+ * bytes never cross the app-server's pipe. Item order does not matter to
+ * Codex: it collects the `skill` items from the whole list.
+ */
+const buildUserInput = (
+  input: AdapterTurnInput,
+  skillItems: ReadonlyArray<UserInput>,
+): Array<UserInput> => [
+  { type: "text", text: buildHarnessPrompt(input), text_elements: [] },
+  ...(input.attachments ?? []).map((attachment): UserInput => ({
+    type: "localImage",
+    path: attachment.path,
+  })),
+  ...skillItems,
+];
+
+/** Matches the code the device login prints for the user to type: four characters, a dash, five. */
+const USER_CODE = /\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/;
+
+/**
+ * Removes the generated image from a notification frame, in place, before
+ * anything else reads the frame. An `imageGeneration` item holds the image
+ * itself, base64 encoded, in `result`. Left in, it would be copied into the
+ * frames the adapter queues and into every event's `raw`, and make each one
+ * megabytes long, while the image reaches nobody through the stream. The frame
+ * comes straight from the decoder, so nothing else holds it yet.
+ *
+ * A `ThreadItem` sits in the params of only these notifications:
+ * `item/started` and `item/completed` hold it in `params.item`, and
+ * `turn/started` and `turn/completed` hold a turn's items in
+ * `params.turn.items`. `thread/started` holds whole threads, but it is dropped
+ * and never attached to an event. The check goes by the item's `type` alone,
+ * so an item whose other fields are malformed is covered too.
+ */
+const stripImageBytes = (frame: NotificationFrame): void => {
+  const params = frame.params as
+    | { readonly item?: unknown; readonly turn?: { readonly items?: unknown } }
+    | null
+    | undefined;
+  const dropResult = (item: unknown): void => {
+    if (
+      typeof item === "object" &&
+      item !== null &&
+      (item as { type?: unknown }).type === "imageGeneration"
+    ) {
+      Reflect.deleteProperty(item, "result");
+    }
+  };
+  dropResult(params?.item);
+  const items = params?.turn?.items;
+  if (Array.isArray(items)) items.forEach(dropResult);
+};
+
+export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
+  // Creating an unbounded PubSub allocates and nothing more, so it is safe to
+  // run here and keeps `findAdapter` the synchronous lookup every other caller
+  // already treats it as.
+  const published = Effect.runSync(PubSub.unbounded<HarnessEvent>());
+  const sessions = new Map<string, Held>();
+  /**
+   * One app-server per session, not per instance. The session's own token is
+   * in the environment its process was started with, and every shell command
+   * that process runs inherits it. If a second session shared the host, its
+   * work would run under the first session's credential, grants and actor
+   * stamp, and the host would stop working for both as soon as the first
+   * session's token was revoked (spec 06 section 9.3). As a result, the auth
+   * refresh and the model catalog are per process too.
+   */
+  const hosts = new Map<string, Host>();
+
+  const emit = (event: HarnessEvent): void => {
+    PubSub.publishUnsafe(published, event);
+  };
+
+  /** Returns only the current session hosted by this exact process. */
+  const findHostSession = (host: Host): Held | undefined => {
+    const held = host.sessionId === undefined ? undefined : sessions.get(host.sessionId);
+    return held?.host === host ? held : undefined;
+  };
+
+  /**
+   * Emits a warning about the connection to the session on this host. A
+   * connection problem belongs to no thread, but reporting it to the session
+   * is better than the session going quiet with the reason only in a log.
+   * Nothing is emitted when the host has no session: a probe's own host has
+   * none, and a session whose thread is still opening has not been reported
+   * as started yet, so a warning for it would arrive before its start.
+   */
+  const warn = (host: Host, message: string): void => {
+    const held = findHostSession(host);
+    if (held === undefined) return;
+    emit({
+      _tag: "runtime.warning",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      message: truncateMessage(message),
+    });
+  };
+
+  /**
+   * Kills a session's app-server and forgets it. The host belongs to that
+   * session alone, so killing it leaves no process running with the
+   * session's token.
+   */
+  const releaseHost = (host: Host): void => {
+    if (host.sessionId !== undefined && hosts.get(host.sessionId) === host) {
+      hosts.delete(host.sessionId);
+    }
+    host.kill();
+  };
+
+  const exitSession = (held: Held, reason: ExitReason): void => {
+    // Compared by identity: a stop waits on the harness, and in that time the
+    // server may close the thread or the app-server may die, which already
+    // ended this session. A second exit would record the same end twice.
+    if (sessions.get(held.binding.sessionId) !== held) return;
+    held.threads.close();
+    sessions.delete(held.binding.sessionId);
+    emit({
+      _tag: "session.exited",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      reason,
+    });
+    releaseHost(held.host);
+  };
+
+  /** Ends the host's session when its app-server exits on its own. */
+  const onHostGone = (host: Host): void => {
+    const held = findHostSession(host);
+    if (held !== undefined) exitSession(held, "process_exit");
+    host.textGeneration?.serverExited();
+  };
+
+  /**
+   * Builds the environment for a Codex process, creating the instance's
+   * `codex` and `home` directories if they are missing. `CODEX_HOME` alone
+   * does not isolate a session: Codex also reads skills from `.agents/skills`
+   * in the user's home directory, so `HOME` is moved to an empty directory of
+   * the instance's own. Every process gets the moved `HOME`, a Thread
+   * included: a Thread's skills come from its library skills folder (see
+   * `setSkillRoots`), and the user's `.agents/skills` would put a second skill
+   * of the same name beside them.
+   *
+   * Only the Codex process itself is isolated this way. A Thread's shell
+   * commands run in the user's real `HOME`, as a Claude Thread's do (see
+   * `buildThreadHomeOverrides`).
+   *
+   * This is done here, not in the shared session context, because a moved
+   * `HOME` breaks Claude's Keychain lookup.
+   */
+  const prepareEnv = (ctx: HarnessRunnerContext): Record<string, string | undefined> => {
+    const codexHome = join(ctx.home, "codex");
+    const neutral = join(ctx.home, "home");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    mkdirSync(neutral, { recursive: true, mode: 0o700 });
+    // The gate's hook reads the marks directory from the app-server's
+    // environment, which every hook inherits.
+    return {
+      ...ctx.env,
+      CODEX_HOME: codexHome,
+      HOME: neutral,
+      ...(ctx.editMarks === null
+        ? {}
+        : { [SESSION_MARKS_DIR_VARIABLE]: ctx.editMarks.sessionMarksDir }),
+    };
+  };
+
+  const startHost = (
+    env: Readonly<Record<string, string | undefined>>,
+    binary: string,
+    sessionId: string | undefined,
+    overrides: ReadonlyArray<string>,
+    textGeneration: TextGenerationWatch | undefined,
+  ): Host => {
+    const complaints: Array<string> = [];
+    const child = seam.appServer(
+      // `--strict-config` makes a setting renamed in an upgrade fail the start
+      // instead of being silently ignored. The updater is off because a
+      // harness that updated itself would run a version nobody chose.
+      [
+        binary,
+        "app-server",
+        "--strict-config",
+        "-c",
+        "check_for_update_on_startup=false",
+        ...overrides,
+      ],
+      env,
+    );
+    const rememberComplaint = (line: string): void => {
+      complaints.push(line);
+      if (complaints.length > MAX_COMPLAINT_LINES) complaints.shift();
+    };
+    void (async () => {
+      try {
+        for await (const line of child.stderr) if (line.trim() !== "") rememberComplaint(line);
+      } catch {
+        // A child killed while stderr is being read writes nothing more, and
+        // the lines already kept are still worth reporting.
+      }
+    })();
+    const host: Host = {
+      rpc: makeRpc(child, {
+        // Nothing Codex sends may crash the reader. A request whose handling
+        // threw still needs a reply: without one, the turn and the connection
+        // would both hang.
+        onServerRequest: (frame) => {
+          try {
+            onServerRequest(host, frame);
+          } catch {
+            refuseRequest(host, frame, {
+              code: INVALID_REQUEST,
+              message: `Hercule could not read this ${frame.method} request`,
+            });
+            warn(host, `the app-server sent a ${frame.method} that this build could not read`);
+          }
+        },
+        // Nothing Codex sends may crash the reader: a throw here would fail
+        // every request in flight on this connection.
+        onNotification: (frame) => {
+          try {
+            stripImageBytes(frame);
+            onNotification(host, frame);
+          } catch {
+            warn(host, `the app-server sent a ${frame.method} that this build could not read`);
+          }
+        },
+        onWarning: (message) => {
+          rememberComplaint(message);
+          warn(host, message);
+        },
+      }),
+      kill: child.kill,
+      stop: stopChild(child),
+      complaint: () => complaints.join("\n"),
+      sessionId,
+      textGeneration,
+      framesBeforeRegistration:
+        sessionId === undefined ? undefined : { frames: [], bytes: 0, dropped: 0 },
+    };
+    void child.exited.then(
+      () => onHostGone(host),
+      () => onHostGone(host),
+    );
+    Effect.runFork(host.rpc.pump);
+    return host;
+  };
+
+  /**
+   * Starts an app-server. Fails with `HarnessNotInstalled` when the binary
+   * does not exist, and with `AdapterFailed` for any other reason, such as a
+   * home directory the runner cannot write to: that is an expected failure,
+   * not a defect. `overrides` are more `-c` arguments for this one process; a
+   * probe has none. `textGeneration` is the watch that receives the
+   * notifications of a host that serves a text generation, not a session.
+   *
+   * The environment is prepared apart from the spawn, so that an `ENOENT`
+   * from creating the home folders is not taken for a missing binary.
+   */
+  const openHost = (
+    ctx: HarnessRunnerContext,
+    binary: string,
+    sessionId?: string,
+    overrides: ReadonlyArray<string> = [],
+    textGeneration?: TextGenerationWatch,
+  ): Effect.Effect<Host, HarnessNotInstalled | AdapterFailed> =>
+    Effect.gen(function* () {
+      const env = yield* Effect.try({
+        try: () => prepareEnv(ctx),
+        catch: (error) =>
+          buildAdapterFailed(
+            `${CODEX_NAME} could not prepare its folders on this runner: ${describeError(error)}`,
+          ),
+      });
+      return yield* Effect.try({
+        try: () => startHost(env, binary, sessionId, overrides, textGeneration),
+        catch: (error) =>
+          // Codex is spawned with no working directory, so `ENOENT` means the
+          // binary is missing or its interpreter is.
+          isExecutableNotFound(error, { binary, cwd: null })
+            ? buildHarnessNotInstalled(CODEX_NAME)
+            : buildHarnessNotRunnable(CODEX_NAME, describeError(error)),
+      });
+    });
+
+  const probe = makeProbe(openHost);
+
+  /**
+   * Tells a session's app-server to load skills from
+   * `<librarySkillsFolder>/skills`, the session's skills from the Skill
+   * Library, and from `<folder>/skills` for each of its repository skills
+   * folders (spec 06 section 9.4), all in one request. Does nothing for a
+   * session with neither. Fails with an `AdapterError` when the app-server
+   * refuses the request or does not answer it (see `buildStartError`).
+   *
+   * The app-server keeps these roots in memory only, so every new app-server
+   * process needs this call, including one started to resume or fork a thread.
+   * Skills loaded this way keep their plain names. Codex lists two skills of
+   * the same name from different roots as two skills, so a repository skill
+   * never hides a library skill.
+   */
+  const setSkillRoots = (
+    host: Host,
+    librarySkillsFolder: string | undefined,
+    repositorySkillsFolders: ReadonlyArray<string> = [],
+  ): Effect.Effect<void, AdapterError> => {
+    const folders = [
+      ...(librarySkillsFolder === undefined ? [] : [librarySkillsFolder]),
+      ...repositorySkillsFolders,
+    ];
+    return folders.length === 0
+      ? Effect.void
+      : Effect.mapError(
+          host.rpc.request("skills/extraRoots/set", {
+            extraRoots: folders.map((folder) => join(folder, "skills")),
+          } satisfies SkillsExtraRootsSetParams),
+          (error) =>
+            buildStartError(host, "Codex did not accept the session's skills folders", error),
+        );
+  };
+
+  /**
+   * Checks that Codex has the login it needs on this runner. Fails with
+   * `HarnessLoginMissing` when it needs one and has none, and with another
+   * `AdapterError` when the account cannot be read.
+   */
+  const requireLogin = (host: Host): Effect.Effect<void, AdapterError> =>
+    Effect.flatMap(
+      Effect.mapError(readAccount(host), (error) =>
+        buildStartError(host, "Codex could not tell whether it is logged in", error),
+      ),
+      (account) =>
+        isLoginMissing(account)
+          ? Effect.fail(
+              new HarnessLoginMissing({ message: "Codex is not logged in on this runner." }),
+            )
+          : Effect.void,
+    );
+
+  const startSessionHost = (
+    sessionId: string,
+    spec: SessionSpec,
+    ctx: HarnessRunnerContext,
+    binary: string,
+  ): Effect.Effect<Host, AdapterError> =>
+    Effect.suspend(() => {
+      // A session resumed in place starts again under the same id. An entry
+      // left here belongs to the run that ended: it must not be used, and must
+      // not keep running with a revoked token.
+      const stale = hosts.get(sessionId);
+      if (stale !== undefined) {
+        hosts.delete(sessionId);
+        stale.kill();
+      }
+      const overrides = [
+        ...buildCompactionOverrides(spec),
+        ...buildStartMarkHookOverrides(ctx),
+        ...buildThreadHomeOverrides(ctx),
+      ];
+      return Effect.flatMap(openHost(ctx, binary, sessionId, overrides), (host) =>
+        Effect.matchEffect(
+          Effect.andThen(
+            Effect.andThen(
+              Effect.mapError(
+                initializeAppServer(host),
+                (error) =>
+                  new HarnessProtocolError({
+                    message: describeStartFailure(CODEX_NAME, describeRpcError(host, error)),
+                  }),
+              ),
+              requireLogin(host),
+            ),
+            setSkillRoots(host, ctx.librarySkillsFolder, ctx.repositorySkillsFolders),
+          ),
+          {
+            // Registered only after the handshake, the login check and the
+            // skill roots succeed. A host registered without them could not
+            // serve the session, and its child would outlive the runner.
+            onFailure: (error) => {
+              host.kill();
+              return Effect.fail(error);
+            },
+            onSuccess: () => {
+              hosts.set(sessionId, host);
+              return Effect.succeed(host);
+            },
+          },
+        ),
+      );
+    });
+
+  /** Delivers a known thread's frame without letting malformed vendor data stop the reader. */
+  const dispatchCodexThreadFrame = (
+    held: Held,
+    thread: CodexThreadState,
+    frame: CodexThreadFrame,
+    cancelled: boolean,
+  ): void => {
+    try {
+      if ("id" in frame) {
+        openRequest(held, thread, frame, cancelled);
+        return;
+      }
+      if (frame.method === "thread/closed") {
+        if (thread === held.threads.root) exitSession(held, "idle_unload");
+        return;
+      }
+      const asyncItem = readAsyncQuestionItem(frame);
+      // Codex may send a completed item again, even after its turn ended. The
+      // root agent's repeat is dropped here, so its text is not emitted twice.
+      if (
+        asyncItem !== undefined &&
+        thread.state.subagentId === undefined &&
+        held.seenAsyncQuestionItems.has(asyncItem.id)
+      ) {
+        return;
+      }
+      for (const event of normalize(thread.state, frame)) {
+        if (event._tag !== "session.usage.updated") emit(event);
+        else held.threads.recordUsage(thread, event);
+      }
+      if (frame.method === "item/started" || frame.method === "item/completed") {
+        const { item } = frame.params as ItemStartedNotification | ItemCompletedNotification;
+        if (item.type === "fileChange") {
+          // Completed patches would otherwise keep their cached approval paths
+          // for the rest of a long turn.
+          if (frame.method === "item/completed") thread.fileChanges.delete(item.id);
+          else thread.fileChanges.set(item.id, readApprovalPaths(item));
+        }
+        if (asyncItem !== undefined) {
+          openAsyncQuestion(
+            held,
+            thread,
+            (frame.params as ItemCompletedNotification).turnId,
+            asyncItem,
+          );
+        }
+      }
+    } catch {
+      if (frame.method === "thread/tokenUsage/updated") {
+        const missingBaseline = held.threads.rejectUsageReport(thread);
+        warn(
+          held.host,
+          missingBaseline
+            ? "The app-server sent an unreadable usage report. Usage is incomplete; the next usable report will establish a baseline."
+            : "The app-server sent an unreadable usage report. Keeping the last usable counters until a valid report arrives.",
+        );
+        return;
+      }
+      if ("id" in frame)
+        refuseRequest(held.host, frame, {
+          code: INVALID_REQUEST,
+          message: `Hercule could not read this ${frame.method} request`,
+        });
+      warn(held.host, `the app-server sent a ${frame.method} that this build could not read`);
+    }
+  };
+
+  /**
+   * Opens the Request for a completed `agentMessage` item that holds async
+   * questions, and keeps what the answer needs. Does nothing for any other
+   * item, and for an item whose native id was seen before: a repeated item
+   * must not reopen a question that was answered. Codex offers the async tool
+   * to the root agent alone, so a subagent's async question is not opened and
+   * the session gets a warning instead.
+   *
+   * Codex completes the item inside its turn, so a legitimate item always
+   * belongs to the agent's running turn. An item of any other turn, or of a
+   * turn the user stopped, opens nothing however late it arrives, but its id
+   * is remembered. When the session already keeps
+   * `MAX_OPEN_ASYNC_QUESTIONS` open, the oldest is closed as cancelled first
+   * and the session gets a warning.
+   */
+  const openAsyncQuestion = (
+    held: Held,
+    thread: CodexThreadState,
+    turnId: string,
+    item: AsyncQuestionItem,
+  ): void => {
+    if (thread.state.subagentId !== undefined) {
+      warn(
+        held.host,
+        `subagent ${thread.state.subagentId} asked an async question, which Hercule shows only for the session's own agent`,
+      );
+      return;
+    }
+    if (held.seenAsyncQuestionItems.has(item.id)) return;
+    held.seenAsyncQuestionItems.add(item.id);
+    if (thread.turnId !== turnId || held.threads.isStopped(thread)) return;
+    while (held.asyncQuestions.size >= MAX_OPEN_ASYNC_QUESTIONS) {
+      const oldest = held.asyncQuestions.values().next().value!;
+      closeAsyncQuestion(held, oldest, { decision: "cancel" });
+      warn(
+        held.host,
+        `The agent asked more questions than are kept open (${String(MAX_OPEN_ASYNC_QUESTIONS)}), so the oldest one was closed.`,
+      );
+    }
+    const { request, question } = buildAsyncQuestion(item.id, item.questions);
+    held.asyncQuestions.set(question.requestId, question);
+    emit({
+      _tag: "request.opened",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      request,
+    });
+  };
+
+  /**
+   * Forgets an async question and reports its Request as resolved, either by
+   * the answers Codex took or by a cancel.
+   */
+  const closeAsyncQuestion = (
+    held: Held,
+    question: AsyncQuestion,
+    resolution: { readonly answers: QuestionAnswers } | { readonly decision: "cancel" },
+  ): void => {
+    held.asyncQuestions.delete(question.requestId);
+    emit({
+      _tag: "request.resolved",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      requestId: question.requestId,
+      ...resolution,
+    });
+  };
+
+  /**
+   * Closes every open async question of the session's own agent as cancelled,
+   * including one whose answer is being delivered. Stopping the asking agent
+   * (an interrupt, or cancelling one of its approvals) turns its questions
+   * down, as it does for every question. The records are dropped and the item
+   * ids stay in the seen set.
+   */
+  const cancelAsyncQuestions = (held: Held): void => {
+    for (const question of [...held.asyncQuestions.values()]) {
+      closeAsyncQuestion(held, question, { decision: "cancel" });
+    }
+  };
+
+  const onNotification = (host: Host, frame: NotificationFrame): void => {
+    const held = findHostSession(host);
+    if (held !== undefined) receiveGuarded(host, held, frame);
+    else keepFrameUntilRegistered(host, frame);
+    host.textGeneration?.receive(frame);
+  };
+
+  /**
+   * Gives a notification to its session. Nothing Codex sends may stop the
+   * reader or the session's start, so a notification that cannot be read
+   * becomes a warning to the session. Both the live notifications and the kept
+   * ones go through here.
+   */
+  const receiveGuarded = (host: Host, held: Held, frame: NotificationFrame): void => {
+    try {
+      held.threads.receive(frame);
+    } catch {
+      warn(host, `the app-server sent a ${frame.method} that this build could not read`);
+    }
+  };
+
+  /**
+   * Keeps a notification with no thread id on a host whose session is not
+   * registered yet, up to `MAX_FRAMES_BEFORE_REGISTRATION` frames and
+   * `MAX_BYTES_BEFORE_REGISTRATION` bytes. Keeps nothing for a host with no
+   * session, and nothing once the session has been registered.
+   */
+  const keepFrameUntilRegistered = (host: Host, frame: NotificationFrame): void => {
+    const kept = host.framesBeforeRegistration;
+    if (kept === undefined || readCodexThreadId(frame) !== undefined) return;
+    const bytes = Buffer.byteLength(JSON.stringify(frame));
+    if (
+      kept.frames.length >= MAX_FRAMES_BEFORE_REGISTRATION ||
+      kept.bytes + bytes > MAX_BYTES_BEFORE_REGISTRATION
+    ) {
+      kept.dropped += 1;
+      return;
+    }
+    kept.frames.push(frame);
+    kept.bytes += bytes;
+  };
+
+  /**
+   * Hands the session the notifications its host kept before it was
+   * registered, in the order they arrived, and stops keeping. Returns how many
+   * were dropped because a bound was reached. It does not wait, so no later
+   * notification can reach the session before the kept ones.
+   */
+  const deliverFramesBeforeRegistration = (held: Held): number => {
+    const kept = held.host.framesBeforeRegistration;
+    held.host.framesBeforeRegistration = undefined;
+    if (kept === undefined) return 0;
+    for (const frame of kept.frames) receiveGuarded(held.host, held, frame);
+    return kept.dropped;
+  };
+
+  /** Resolves one Request under its asking thread and native RPC id. */
+  const resolvePark = (
+    held: Held,
+    thread: CodexThreadState,
+    park: Park,
+    reply: RpcReply,
+    resolution: RequestResolution,
+    reportResolution = true,
+  ): void => {
+    thread.parks.delete(park.request.requestId);
+    held.host.rpc.answer(park.id, reply);
+    if (reportResolution)
+      emit({
+        _tag: "request.resolved",
+        eventId: crypto.randomUUID(),
+        sessionId: held.binding.sessionId,
+        at: now(),
+        requestId: park.request.requestId,
+        ...(thread.state.subagentId === undefined ? {} : { subagentId: thread.state.subagentId }),
+        ...resolution,
+      });
+  };
+
+  /** Cancels only the Requests of the thread whose work ended. */
+  const cancelRequests = (held: Held, thread: CodexThreadState, reportResolution = true): void => {
+    for (const park of [...thread.parks.values()])
+      resolvePark(
+        held,
+        thread,
+        park,
+        park.asked.replies("cancel", park.params),
+        { decision: "cancel" },
+        reportResolution,
+      );
+  };
+
+  /** Finds a Request in this session, regardless of which agent asked first. */
+  const findOpenPark = (sessionId: string, requestId: string) => {
+    const held = sessions.get(sessionId);
+    const found = held?.threads.findRequest(requestId);
+    return held === undefined || found === undefined ? undefined : { held, ...found };
+  };
+
+  /**
+   * Replies to a server request with an error. The request gets a reply
+   * rather than being dropped, because a request with no reply leaves the
+   * turn hanging forever, with no error anywhere.
+   */
+  const refuseRequest = (host: Host, frame: ServerRequestFrame, error: RpcError): void => {
+    host.rpc.answer(frame.id, { error });
+  };
+
+  const onServerRequest = (host: Host, frame: ServerRequestFrame): void => {
+    if (host.textGeneration !== undefined) {
+      // A text generation has no tools and nobody to ask. The request is
+      // refused so the turn does not hang, and the call is ended as failed.
+      host.textGeneration.receiveRequest(frame.method);
+      refuseRequest(host, frame, {
+        code: METHOD_NOT_FOUND,
+        message: "a text generation allows no tools and has nobody to ask",
+      });
+      return;
+    }
+    if (frame.method === "item/tool/call") {
+      // Hercule provides no dynamic tools to Codex, so there is nothing for a
+      // user to decide: the call is declined immediately.
+      host.rpc.answer(frame.id, {
+        result: {
+          contentItems: [{ type: "inputText", text: "Hercule does not host dynamic tools" }],
+          success: false,
+        } satisfies DynamicToolCallResponse,
+      });
+      return;
+    }
+    // Only the table's own keys count: a method named like an object method,
+    // such as `constructor`, is not a Request this runner handles.
+    if (!Object.hasOwn(ASKED, frame.method)) {
+      refuseRequest(host, frame, {
+        code: METHOD_NOT_FOUND,
+        message: `Hercule does not support ${frame.method}`,
+      });
+      warn(host, `the app-server sent ${frame.method}, which this runner build does not support`);
+      return;
+    }
+    const held = findHostSession(host);
+    const threadId = readCodexThreadId(frame);
+    if (threadId === undefined || held === undefined) {
+      refuseRequest(host, frame, {
+        code: INVALID_REQUEST,
+        message: `no session on this runner is on thread ${String(threadId)}`,
+      });
+      return;
+    }
+    held.threads.receive(frame);
+  };
+
+  /** Publishes every Request immediately, with the identity of its asker. */
+  const openRequest = (
+    held: Held,
+    thread: CodexThreadState,
+    frame: ServerRequestFrame,
+    cancelled: boolean,
+  ): void => {
+    const asked = ASKED[frame.method]!;
+    const request = asked.opens(frame.params, {
+      requestId: crypto.randomUUID(),
+      threadId: thread.state.threadId,
+      paths: (itemId) => thread.fileChanges.get(itemId) ?? [],
+    });
+    const park: Park = { id: frame.id, request, asked, params: frame.params };
+    thread.parks.set(request.requestId, park);
+    // Before the event, which the edit watch would otherwise take as a
+    // Request that holds back the command's start.
+    if (asked.asksAboutRunningItem?.(frame.params) === true) {
+      held.editMarks?.recordRequestOnRunningItem(request.requestId);
+    }
+    emit({
+      _tag: "request.opened",
+      eventId: crypto.randomUUID(),
+      sessionId: held.binding.sessionId,
+      at: now(),
+      request,
+      ...(thread.state.subagentId === undefined ? {} : { subagentId: thread.state.subagentId }),
+    });
+    if (cancelled)
+      resolvePark(held, thread, park, park.asked.replies("cancel", park.params), {
+        decision: "cancel",
+      });
+  };
+
+  /** Interrupts only this thread's native turn, within the control deadline. */
+  const interruptTurn = (
+    held: Held,
+    thread: CodexThreadState,
+    turnId = thread.turnId,
+  ): Effect.Effect<void> =>
+    turnId === undefined
+      ? Effect.void
+      : Effect.ignore(
+          Effect.timeout(
+            held.host.rpc.request("turn/interrupt", {
+              threadId: thread.state.threadId,
+              turnId,
+            } satisfies TurnInterruptParams),
+            CONTROL_DEADLINE,
+          ),
+        );
+
+  /** Cancels a thread's Requests before stopping the turn that asked them. */
+  const stopCodexThread = (held: Held, thread: CodexThreadState): Effect.Effect<void> =>
+    Effect.suspend(() => {
+      cancelRequests(held, thread);
+      return interruptTurn(held, thread);
+    });
+
+  /** Stops selected threads together, so a silent child cannot delay its siblings. */
+  const stopCodexThreads = (held: Held, subagentId?: SubagentId): Effect.Effect<void> =>
+    Effect.forEach(held.threads.cancelWork(subagentId), (thread) => stopCodexThread(held, thread), {
+      concurrency: "unbounded",
+      discard: true,
+    });
+
+  const getHostedSession = (sessionId: string): Effect.Effect<Held, SessionNotRunning> =>
+    Effect.suspend(() => {
+      const held = sessions.get(sessionId);
+      return held === undefined ? Effect.fail(buildSessionNotRunning()) : Effect.succeed(held);
+    });
+
+  /**
+   * Starts a turn with the input's model selection. Returns the new turn id,
+   * or fails with the server's error message. Codex takes the model,
+   * reasoning effort and service tier per turn. Every input, and every answer
+   * to an async question, carries the session's current selection, so the
+   * adapter sends the selection on every turn and keeps none of its own.
+   */
+  const startTurn = (
+    held: Held,
+    input: AdapterTurnInput,
+    skillItems: ReadonlyArray<UserInput>,
+  ): Effect.Effect<SendResult, AdapterError> =>
+    Effect.gen(function* () {
+      // Codex takes the schema per turn, not per thread, so every turn of the
+      // session sends it. If it were sent only once, the second turn of an
+      // Agent's session would answer in prose.
+      const schema = held.threads.root.state.outputSchema;
+      const params: TurnStartParams = {
+        threadId: held.binding.nativeSessionId,
+        input: buildUserInput(input, skillItems),
+        ...buildModelParams(input.modelSelection),
+        // The cast is safe because nothing here reads the value back. The
+        // schema crosses the wire as the JSON the controller stored, and
+        // Codex's own JSON type is the mutable type ts-rs writes.
+        ...(schema === undefined ? {} : { outputSchema: schema as JsonValue }),
+      };
+      // The normalizer reports this model on `turn.started`, because the
+      // notification has no model. It is set before the request is sent,
+      // because `turn/started` can arrive before this fiber resumes.
+      const before = held.threads.root.state.model;
+      if (input.modelSelection !== undefined)
+        held.threads.root.state.model = input.modelSelection.model;
+      const started = yield* Effect.mapError(
+        Effect.flatMap(
+          retryWhileOverloaded(held.host.rpc.request("turn/start", params)),
+          readTurnStartedReply,
+        ),
+        (error) => {
+          // No turn started, so restore the previous model for the next turn
+          // to report.
+          held.threads.root.state.model = before;
+          return buildInputError(error);
+        },
+      );
+      return { turnId: started.turn.id, delivery: "opened" };
+    });
+
+  /**
+   * Steers the turn the adapter believes is running. Returns `undefined` when
+   * Codex refuses the steer with a JSON-RPC error (see `isSteerNotTaken`). The
+   * caller then starts a new turn instead, because input is never rejected.
+   * A failure with no error code is returned as a failure and starts nothing,
+   * because the input may have reached the turn and a new turn would deliver
+   * it twice.
+   */
+  const steerTurn = (
+    held: Held,
+    input: AdapterTurnInput,
+    skillItems: ReadonlyArray<UserInput>,
+    expectedTurnId: string,
+  ): Effect.Effect<SendResult | undefined, AdapterError> =>
+    Effect.matchEffect(
+      Effect.flatMap(
+        retryWhileOverloaded(
+          held.host.rpc.request("turn/steer", {
+            threadId: held.binding.nativeSessionId,
+            input: buildUserInput(input, skillItems),
+            expectedTurnId,
+          } satisfies TurnSteerParams),
+        ),
+        readTurnSteeredReply,
+      ),
+      {
+        onFailure: (error) =>
+          isSteerNotTaken(error) ? Effect.succeed(undefined) : Effect.fail(buildInputError(error)),
+        onSuccess: (steered) =>
+          Effect.succeed<SendResult>({ turnId: steered.turnId, delivery: "steered" }),
+      },
+    );
+
+  /**
+   * Delivers one input to the session's root agent and returns how it was
+   * delivered. A running turn is steered, and an idle session starts a turn.
+   * Both an ordinary input and the answer to an async question go through
+   * here, so both are fenced the same way: an input that arrives after the
+   * agent was stopped is refused instead of reopening the turn.
+   *
+   * Fails with an `AdapterError`. `InputNotDelivered` means Codex did not
+   * take the input, `HarnessProtocolError` means it may have, and
+   * `SteerRefused` means the input has a skill and a turn is running.
+   */
+  const deliverInput = (
+    held: Held,
+    input: AdapterTurnInput,
+    skills: SkillInputs,
+  ): Effect.Effect<SendResult, AdapterError> =>
+    Effect.gen(function* () {
+      const ticket = held.threads.beginInput();
+      const sent = yield* Effect.onExit(
+        Effect.gen(function* () {
+          yield* held.threads.prepareUsage;
+          const running = held.threads.root.turnId;
+          // Codex's app server accepts a `skill` item on `turn/steer` but
+          // does not load the skill, so the chip would show a skill that
+          // never ran. Refuse before the input is submitted, so it stays
+          // queued and runs normally when this turn ends.
+          if (running !== undefined && skills.translated.length > 0)
+            return yield* Effect.fail(
+              new SteerRefused({ message: buildSkillSteerRefusedMessage(CODEX_NAME) }),
+            );
+          yield* held.threads.submitInput(ticket, running);
+          const steered =
+            running === undefined
+              ? undefined
+              : yield* steerTurn(held, input, skills.items, running);
+          if (steered !== undefined) return steered;
+          yield* held.threads.submitInput(ticket);
+          return yield* startTurn(held, input, skills.items);
+        }),
+        () => Effect.sync(() => held.threads.finishInput(ticket)),
+      );
+      // The turn counts as running from the reply, not from the
+      // `turn/started` notification after it: an input arriving in between
+      // would otherwise start a second turn.
+      held.threads.acceptInput(ticket, sent.turnId);
+      return sent;
+    });
+
+  /**
+   * Delivers the user's answers to an async question as one user input, with
+   * the session's current model selection in case the answer starts a turn.
+   * The delivery runs uninterruptibly to its outcome: a dropped connection to
+   * the controller must not leave the question stuck at `delivering`. A stop
+   * of the agent runs on its own fiber and does not wait for the delivery. The
+   * outcome is one of these:
+   *
+   * - Codex took the input: the transcript shows the answer and the question
+   *   closes with it.
+   * - Codex refused it, or it never left the adapter: the question stays open
+   *   and the call fails with `AnswerNotDelivered`, so the user can answer
+   *   again.
+   * - It is not known whether Codex took it (a timeout, a lost connection or a
+   *   failed write): the question closes as cancelled, the session gets a
+   *   warning, and the call fails with the same message. The answer is never
+   *   sent again, because Codex could receive it twice.
+   *
+   * The question can be closed while the answer is on its way, by stopping the
+   * agent or by the cap on open questions. If Codex took the input anyway, the
+   * transcript shows it and `request.resolved` is not reported a second time.
+   * If delivery failed, the failure says the question was closed.
+   *
+   * Fails with `AnswerNotDelivered` while an earlier answer is still on its
+   * way.
+   */
+  const answerAsyncQuestion = (
+    held: Held,
+    question: AsyncQuestion,
+    answers: QuestionAnswers,
+    modelSelection: ModelSelection,
+  ): Effect.Effect<void, AnswerNotDelivered> =>
+    Effect.suspend(() => {
+      if (question.state === "delivering") {
+        return Effect.fail(
+          new AnswerNotDelivered({
+            message: "An answer to this question is already on its way to the agent.",
+          }),
+        );
+      }
+      question.state = "delivering";
+      const sessionId = held.binding.sessionId;
+      const texts = readAnswerTexts(question, answers);
+      const input: AdapterTurnInput = {
+        text: buildAnswerEnvelope(question, texts),
+        modelSelection,
+      };
+      const isOpen = (): boolean =>
+        sessions.get(sessionId) === held &&
+        held.asyncQuestions.get(question.requestId) === question;
+      return Effect.uninterruptible(
+        Effect.matchEffect(deliverInput(held, input, { items: [], translated: [] }), {
+          onFailure: (failure) => {
+            // Only a failure of the connection leaves it unknown whether Codex took the input.
+            const maybeDelivered = failure._tag === "HarnessProtocolError";
+            if (!isOpen()) {
+              return Effect.fail(
+                new AnswerNotDelivered({
+                  message:
+                    "This question was closed while its answer was on its way: its agent was stopped, the session ended, or the agent asked more questions than are kept open. The answer may not have reached the agent.",
+                }),
+              );
+            }
+            if (!maybeDelivered) {
+              question.state = "open";
+              // The advice comes before the reason, because the reason is text
+              // from Codex and the builder cuts the end of a long message.
+              return Effect.fail(
+                buildAnswerNotDelivered(
+                  `The agent did not take the answer, so answer again to retry. The reason was: ${failure.message}`,
+                ),
+              );
+            }
+            const failed = buildAnswerNotDelivered(
+              `${CODEX_NAME} did not confirm the answer, so it may not have reached the agent, and the question was closed. If the agent does not react, reply in the thread. The reason was: ${failure.message}`,
+            );
+            closeAsyncQuestion(held, question, { decision: "cancel" });
+            warn(held.host, failed.message);
+            return Effect.fail(failed);
+          },
+          onSuccess: (sent) =>
+            Effect.sync(() => {
+              if (sessions.get(sessionId) !== held) return;
+              for (const event of buildUserMessage({
+                sessionId,
+                turnId: sent.turnId,
+                text: buildAnswerMessage(question, texts),
+                steered: sent.delivery === "steered",
+                harnessRefs: { threadId: held.binding.nativeSessionId },
+              })) {
+                emit(event);
+              }
+              if (isOpen()) closeAsyncQuestion(held, question, { answers });
+            }),
+        }),
+      );
+    });
+
+  /**
+   * Returns the service tier to send to Codex, or `undefined` for none.
+   * `STANDARD_TIER` is Hercule's name for Codex's default tier and is not an
+   * id Codex knows, so selecting it sends no `serviceTier` field.
+   */
+  const readServiceTier = (selected: unknown): string | undefined =>
+    typeof selected === "string" && selected !== STANDARD_TIER ? selected : undefined;
+
+  /**
+   * Converts a model selection into Codex's turn params. The option ids are
+   * the ones the probe put on the model descriptor, so the composer sends
+   * them back under the same names.
+   */
+  const buildModelParams = (
+    selection: ModelSelection | undefined,
+  ): Pick<TurnStartParams, "model" | "effort" | "serviceTier"> => {
+    if (selection === undefined) return {};
+    const effort = selection.options["effort"];
+    const tier = readServiceTier(selection.options["serviceTier"]);
+    return {
+      model: selection.model,
+      ...(typeof effort === "string" ? { effort } : {}),
+      ...(tier === undefined ? {} : { serviceTier: tier }),
+    };
+  };
+
+  /**
+   * Builds the params shared by starting, resuming and forking a thread: the
+   * session's directory, model and access mode, and its instructions. The
+   * system prompt, the user's own instructions and the skill are sent as
+   * developer instructions, which all three methods accept (spec 06 section
+   * 9.3). No `AGENTS.md` is written, so the scratch directory a session runs
+   * in stays empty.
+   *
+   * The user's instructions go in the developer instructions rather than into
+   * the instance's Codex directory. Codex reads an `AGENTS.md` there for every
+   * session and has no setting to turn that off, and every session of the
+   * instance shares that directory, so a file there would reach assistant
+   * sessions and workflow steps too.
+   *
+   * Nothing in this adapter reads `disallowedTools`. Codex cannot restrict
+   * tools, and the Agent record and the Session record both report the field
+   * as not enforced, so no behaviour is silently substituted.
+   */
+  const buildThreadParams = (
+    spec: SessionSpec,
+    ctx: HarnessRunnerContext,
+    userInstructions: string | undefined,
+  ): Pick<
+    ThreadStartParams,
+    | "cwd"
+    | "model"
+    | "serviceTier"
+    | "approvalPolicy"
+    | "sandbox"
+    | "approvalsReviewer"
+    | "developerInstructions"
+  > => {
+    const tier = readServiceTier(spec.modelSelection.options["serviceTier"]);
+    return {
+      cwd: ctx.cwd,
+      model: spec.modelSelection.model,
+      developerInstructions: buildDeveloperInstructions(spec, userInstructions, ctx.herculeTool),
+      ...(tier === undefined ? {} : { serviceTier: tier }),
+      ...ACCESS_MODES[spec.accessMode],
+    };
+  };
+
+  /**
+   * Makes one text generation on an app-server of its own and returns its
+   * outcome. Fails with a message when the app-server cannot start or a
+   * request to it fails. The app-server is stopped when the call ends,
+   * including when the runner stops the call at its deadline, and this
+   * returns only after its process has exited.
+   *
+   * It uses the instance's Codex directory for the login, like a session. The
+   * thread is ephemeral, so nothing of the call is saved there. The thread
+   * runs in the call's scratch directory, `ctx.cwd`.
+   */
+  const generateText = (
+    ctx: TextGenerationContext,
+    spec: TextGenerationSpec,
+  ): Effect.Effect<TextGenerationOutcome, string> => {
+    const watch = watchTextGeneration();
+    return Effect.acquireUseRelease(
+      Effect.mapError(
+        openHost(ctx, ctx.binary, undefined, TEXT_GENERATION_PROCESS_OVERRIDES, watch),
+        (error) => error.message,
+      ),
+      (host) =>
+        Effect.gen(function* () {
+          // A failure is reported by the request's own error, never by the
+          // app-server's error output: the message is stored in the audit log
+          // and shown in Settings, and error output can hold a credential or
+          // quote the input.
+          yield* Effect.mapError(initializeAppServer(host), (error) => error.message);
+          const opened = yield* Effect.mapError(
+            Effect.flatMap(
+              host.rpc.request("thread/start", buildTextGenerationThread(spec, ctx.cwd)),
+              readThreadOpenedReply("thread/start"),
+            ),
+            (error) => error.message,
+          );
+          yield* Effect.mapError(
+            host.rpc.request("turn/start", buildTextGenerationTurn(opened.thread.id, spec)),
+            (error) => error.message,
+          );
+          return decideTextGenerationOutcome(spec, yield* watch.ended);
+        }),
+      (host) => host.stop,
+    );
+  };
+
+  return {
+    harnessId: CODEX,
+    binaryName: CODEX_BINARY,
+
+    events: Stream.fromPubSub(published),
+
+    // Every shipped harness's config schema is empty, so the Codex adapter
+    // takes nothing from it and does not name the argument.
+    probe: (ctx: HarnessRunnerContext): Effect.Effect<ProbeResult> =>
+      ctx.binary === undefined
+        ? Effect.succeed(buildFailedProbe(null, `no ${CODEX_BINARY} on this machine`))
+        : probe(ctx, ctx.binary),
+
+    startSession: (sessionId, spec, ctx) =>
+      Effect.gen(function* () {
+        const binary = ctx.binary;
+        if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(CODEX_NAME));
+        const userInstructions = yield* readUserInstructions(ctx.userMaterial);
+        const host = yield* startSessionHost(sessionId, spec, ctx, binary);
+        const carried = spec.continue;
+        const method =
+          carried === undefined
+            ? "thread/start"
+            : carried.mode === "resume"
+              ? "thread/resume"
+              : "thread/fork";
+        const opened = yield* Effect.matchEffect(
+          Effect.flatMap(
+            carried === undefined
+              ? host.rpc.request(method, {
+                  ...buildThreadParams(spec, ctx, userInstructions),
+                  ephemeral: false,
+                } satisfies ThreadStartParams)
+              : host.rpc.request(method, {
+                  threadId: carried.nativeSessionId,
+                  ...buildThreadParams(spec, ctx, userInstructions),
+                } satisfies ThreadResumeParams & ThreadForkParams),
+            readThreadOpenedReply(method),
+          ),
+          {
+            onFailure: (error: RpcError) => {
+              // The thread did not open, so kill the host rather than leave a
+              // process running that nothing uses.
+              releaseHost(host);
+              return Effect.fail(
+                buildStartError(host, "Codex could not open the session's thread", error),
+              );
+            },
+            // A fork is a new thread, so the session takes the id in the
+            // reply; the thread it was forked from is left alone.
+            onSuccess: (answer) => Effect.succeed(answer.thread.id),
+          },
+        );
+        const binding: SessionBinding = {
+          sessionId,
+          nativeSessionId: opened,
+          instanceId: spec.instanceId,
+        };
+        const reports = {
+          reportUnknownMessage: yield* captureUnknownItemReporter("Codex", sessionId),
+          reportIgnoredMessage: yield* captureIgnoredMessageReporter(sessionId),
+        };
+        const held: Held = {
+          binding,
+          host,
+          editMarks: ctx.editMarks,
+          asyncQuestions: new Map(),
+          seenAsyncQuestionItems: new Set(),
+          threads: makeCodexThreads({
+            sessionId,
+            rootThreadId: opened,
+            spec,
+            rpc: host.rpc,
+            emit,
+            dispatch: (thread, frame, cancelled) =>
+              dispatchCodexThreadFrame(held, thread, frame, cancelled),
+            interrupt: (thread, turnId) => interruptTurn(held, thread, turnId),
+            cancelRequests: (thread) => cancelRequests(held, thread),
+            completeTurn: (thread) => {
+              // The turn event closes the controller's Requests. Native RPCs
+              // still need replies, without duplicate resolution events.
+              cancelRequests(held, thread, false);
+              thread.fileChanges.clear();
+            },
+            failSession: () => exitSession(held, "crash"),
+            reports,
+          }),
+        };
+        sessions.set(sessionId, held);
+        // The native id is sent on this event because the controller has no
+        // other way to learn it: a session started after the runner's hello
+        // is not listed again.
+        emit({
+          _tag: "session.started",
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at: now(),
+          harnessRefs: { nativeSessionId: opened },
+        });
+        // After `session.started`, so a warning sent during start-up reads as
+        // coming after the session began. Nothing can arrive in between: the
+        // registration above and this call run without waiting.
+        const dropped = deliverFramesBeforeRegistration(held);
+        // The dropped ones belong to no thread, so the session is not told;
+        // the runner's log is.
+        if (dropped > 0) {
+          yield* Effect.logWarning(
+            `Codex sent more notifications before session ${sessionId} started than the runner keeps (${MAX_FRAMES_BEFORE_REGISTRATION} frames or ${MAX_BYTES_BEFORE_REGISTRATION} bytes). Dropped ${dropped} of them.`,
+          );
+        }
+        return binding;
+      }),
+
+    sendInput: (
+      sessionId: string,
+      input: AdapterTurnInput,
+    ): Effect.Effect<SendResult, AdapterError> =>
+      Effect.gen(function* () {
+        const held = yield* getHostedSession(sessionId);
+        const references = input.skillReferences ?? [];
+        const skills = buildSkillInputs(references);
+        const skipped = new Set(references.map((reference) => reference.referenceName));
+        for (const reference of skills.translated) skipped.delete(reference.referenceName);
+        if (skipped.size > 0)
+          yield* Effect.logWarning(
+            `Gave Codex no skill item for ${[...skipped].join(", ")}: its SKILL.md is missing or resolves outside the skill folder.`,
+          );
+        const sent = yield* deliverInput(held, input, skills);
+        for (const event of sessions.get(sessionId) !== held
+          ? []
+          : buildUserMessage({
+              sessionId,
+              turnId: sent.turnId,
+              text: input.text,
+              attachments: input.attachments,
+              skillReferences: skills.translated,
+              senderSessionId: input.senderSessionId,
+              steered: sent.delivery === "steered",
+              harnessRefs: { threadId: held.binding.nativeSessionId },
+            })) {
+          emit(event);
+        }
+        return sent;
+      }),
+
+    interrupt: (sessionId: string, subagentId?: SubagentId): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const held = sessions.get(sessionId);
+        if (held === undefined) return Effect.void;
+        // Async questions belong to the session's own agent, and stopping a
+        // subagent leaves it running.
+        if (subagentId === undefined) cancelAsyncQuestions(held);
+        return stopCodexThreads(held, subagentId);
+      }),
+
+    respondToApprovalRequest: (
+      sessionId: string,
+      requestId: string,
+      decision: ApprovalDecision,
+    ): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const found = findOpenPark(sessionId, requestId);
+        // A decision the approval did not offer is ignored: Codex would have
+        // to replace it with something else.
+        if (
+          found === undefined ||
+          found.park.request.kind === "question" ||
+          !found.park.request.decisions.includes(decision)
+        ) {
+          return Effect.void;
+        }
+        const { held, thread, park } = found;
+        if (decision === "cancel") {
+          held.threads.cancelAskingTurn(thread);
+          // A subagent's cancel ends that subagent's turn alone.
+          if (thread.state.subagentId === undefined) cancelAsyncQuestions(held);
+        }
+        resolvePark(held, thread, park, park.asked.replies(decision, park.params), { decision });
+        // Cancel ends the asking agent alone. The explicit Stop operation is
+        // the operation that also stops descendants.
+        if (decision === "cancel") cancelRequests(held, thread);
+        return park.asked.endsTurn.includes(decision) ? interruptTurn(held, thread) : Effect.void;
+      }),
+
+    respondToQuestion: (
+      sessionId: string,
+      requestId: string,
+      answers: QuestionAnswers,
+      modelSelection: ModelSelection,
+    ): Effect.Effect<void, AnswerNotDelivered> =>
+      Effect.suspend(() => {
+        const held = sessions.get(sessionId);
+        const asyncQuestion = held?.asyncQuestions.get(requestId);
+        if (held !== undefined && asyncQuestion !== undefined) {
+          return answerAsyncQuestion(held, asyncQuestion, answers, modelSelection);
+        }
+        const found = findOpenPark(sessionId, requestId);
+        const reply =
+          found?.park.request.kind === "question"
+            ? found.park.asked.answers?.(answers, found.park.params)
+            : undefined;
+        if (found === undefined || reply === undefined) {
+          return Effect.fail(
+            new AnswerNotDelivered({
+              message:
+                "The agent is not waiting on this question any more. It was answered, or its agent was stopped.",
+            }),
+          );
+        }
+        resolvePark(found.held, found.thread, found.park, reply, { answers });
+        return Effect.void;
+      }),
+
+    stopSession: (sessionId: string, reason: ExitReason): Effect.Effect<void> =>
+      Effect.suspend(() => {
+        const held = sessions.get(sessionId);
+        // A session whose thread the server unloaded, or whose app-server
+        // died, has already exited: a second exit would record the same end
+        // twice.
+        if (held === undefined) return Effect.void;
+        held.threads.beginClosing();
+        // The turn is interrupted before the session exits. Otherwise the
+        // app-server would keep working in the workspace until it is killed,
+        // and nobody would receive its notifications.
+        return Effect.andThen(
+          stopCodexThreads(held),
+          Effect.sync(() => exitSession(held, reason)),
+        );
+      }),
+
+    listSessions: Effect.sync(() => [...sessions.values()].map((held) => held.binding)),
+    generateText: (ctx, _config, spec) => generateText(ctx, spec),
+
+    /**
+     * Uses the device login rather than the browser login: the machine the
+     * harness runs on usually has no browser, and the device login prints a
+     * code the user can type into a browser anywhere. The login uses the
+     * instance's own home directories, like a session does, so the credential
+     * is saved where the app-server looks for it.
+     */
+    login: (ctx: HarnessRunnerContext, binary: string): LoginCommand => ({
+      command: [binary, "login", "--device-auth"],
+      env: prepareEnv(ctx),
+      userCode: USER_CODE,
+    }),
+
+    install: makeCodexInstall(seam.run),
+  };
+};
+
+export const codex: HarnessAdapter = makeCodexAdapter({
+  appServer: spawnAppServer,
+  run: runProcess,
+});

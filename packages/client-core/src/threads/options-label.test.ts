@@ -25,7 +25,7 @@ const THINKING: ModelOption = {
   default: false,
 };
 
-// The shape the pi provider declares: thinking as a list of levels.
+// The shape the pi harness declares: thinking as a list of levels.
 const THINKING_LEVELS: ModelOption = {
   id: "thinking",
   label: "Thinking",

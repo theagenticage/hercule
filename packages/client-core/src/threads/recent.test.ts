@@ -6,7 +6,7 @@
  * which reads that list back from the JSON text a client stored.
  */
 import { describe, expect, it } from "vitest";
-import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
+import { BARE, buildInstance, buildSnapshot, CODEX_IDENTITY } from "../providers.testing";
 import type { ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
 import { buildRecentModel, parseRecentModels, pushRecent } from "./recent";
 import { resolveThreadConfig } from "./resolve-thread";
@@ -51,7 +51,7 @@ describe("buildRecentModel", () => {
 
   it("adds nothing for an account choice alone, whose default model is not a pick", () => {
     const runner = { ...BARE, id: "r-moss" };
-    const codex = buildInstance("codex", "Codex", [
+    const codex = buildInstance(CODEX_IDENTITY, [
       buildSnapshot({
         runnerId: runner.id,
         models: [{ slug: "gpt-5", name: "GPT-5", imageInput: null, isDefault: true, options: [] }],

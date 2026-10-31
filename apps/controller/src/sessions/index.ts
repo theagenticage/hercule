@@ -1,5 +1,5 @@
 /**
- * Sessions: one run of a provider-backed agent, and the stream of events it
+ * Sessions: one run of a harness-backed agent, and the stream of events it
  * leaves behind.
  *
  * This domain owns the session rows, their lifecycle, the inputs waiting on

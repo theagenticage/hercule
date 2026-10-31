@@ -241,7 +241,7 @@
 .side-thread:focus-within .side-name {
   color: var(--ink);
 }
-/* A row's second line: the provider's mark, then where the thread works.
+/* A row's second line: the harness's mark, then where the thread works.
    The first part ellipsizes; the part kept after it, the end of a branch
    or a machine's name, never does. */
 .side-detail {
@@ -254,7 +254,7 @@
   line-height: var(--line-16);
   white-space: nowrap;
 }
-/* The glyph's slot keeps its width when the provider is unknown, so every
+/* The glyph's slot keeps its width when the harness is unknown, so every
    second line starts at the same place. */
 .side-glyph {
   display: inline-grid;
@@ -269,7 +269,7 @@
   text-overflow: ellipsis;
 }
 /* The kept part takes the width it needs, but never more than the line has
-   after the provider's mark (12px and its 6px margin), so a long machine
+   after the harness's mark (12px and its 6px margin), so a long machine
    name in a narrow sidebar cannot run past the row. When it is cut, its head
    ends in an ellipsis and its tail stays whole, which cuts it in the middle.
    `pre` keeps the space that starts the machine's part, which a flex item
@@ -343,7 +343,7 @@
   font-weight: var(--w-bold);
 }
 /* A finished group's second line starts with a green check, where a thread's
-   starts with its provider's mark. */
+   starts with its harness's mark. */
 .side-glyph--done {
   color: var(--ok);
 }

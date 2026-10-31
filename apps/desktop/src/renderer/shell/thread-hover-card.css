@@ -52,7 +52,7 @@
   font-size: var(--t-12);
 }
 /* Every icon takes a slot of the same width, so the texts line up, also when
-   a provider has no mark. */
+   a harness has no mark. */
 .thread-hover-icon {
   display: inline-grid;
   flex: none;

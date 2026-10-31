@@ -10,9 +10,9 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Schema } from "effect";
-import { secret, type Plugin, type ProviderDefinition } from "@hercule/plugin-host";
+import { secret, type Plugin, type HarnessDefinition } from "@hercule/plugin-host";
 import type { ModelDescriptor, ProbeRequest, RunnerFacts, SessionStart } from "@hercule/protocol";
-import { createPluginFixture, buildProviderDefinition } from "../../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../../plugins/testing";
 import { withTransaction } from "../../db";
 import { send } from "../../http/testing";
 import {
@@ -30,20 +30,20 @@ const KEY_TITLE = "Z.ai API key";
 const KEY_DESCRIPTION = "From your Z.ai Coding Plan subscription.";
 const KEY_VALUE = "a-paid-credential-nobody-else-holds";
 
-/** A provider whose config has one secret field, like pi's. */
-const KEYED: ProviderDefinition = {
-  ...buildProviderDefinition("keyed-provider", { token: "t" }),
+/** A harness whose config has one secret field, like pi's. */
+const KEYED: HarnessDefinition = {
+  ...buildHarnessDefinition("keyed", { token: "t" }),
   configSchema: Schema.Struct({
     token: Schema.String,
     zaiApiKey: secret({ title: KEY_TITLE, description: KEY_DESCRIPTION }),
   }),
 };
 
-/** A provider with no secret fields, for frames that carry no secrets. */
-const PLAIN: ProviderDefinition = buildProviderDefinition("plain-provider", { token: "t" });
+/** A harness with no secret fields, for frames that carry no secrets. */
+const PLAIN: HarnessDefinition = buildHarnessDefinition("plain", { token: "t" });
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({ id: "keyed", definitions: [KEYED, PLAIN] }).plugin,
+  createPluginFixture({ id: "harnesses", definitions: [KEYED, PLAIN] }).plugin,
 ];
 
 const FACTS: RunnerFacts = {
@@ -52,8 +52,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["keyed-provider", "plain-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["harnesses/keyed", "harnesses/plain"],
   identityPort: 4939,
 };
 
@@ -96,7 +96,7 @@ const probeNow = async (arranged: Arranged, instanceId: string): Promise<ProbeRe
 describe("the secrets a frame carries to a runner", () => {
   it("puts the stored key on the probe, under the name the plugin gave it", async () => {
     await withFleet(async (arranged) => {
-      const keyed = findInstanceId(arranged, "keyed-provider");
+      const keyed = findInstanceId(arranged, "harnesses/keyed");
       await setKey(arranged, keyed, KEY_VALUE);
 
       const probe = await probeNow(arranged, keyed);
@@ -107,8 +107,8 @@ describe("the secrets a frame carries to a runner", () => {
 
   it("sends an empty set of secrets when the key has not been entered, rather than leaving the field out", async () => {
     await withFleet(async (arranged) => {
-      const keyed = await probeNow(arranged, findInstanceId(arranged, "keyed-provider"));
-      const plain = await probeNow(arranged, findInstanceId(arranged, "plain-provider"));
+      const keyed = await probeNow(arranged, findInstanceId(arranged, "harnesses/keyed"));
+      const plain = await probeNow(arranged, findInstanceId(arranged, "harnesses/plain"));
 
       expect(keyed.secrets).toEqual({});
       expect(plain.secrets).toEqual({});
@@ -117,7 +117,7 @@ describe("the secrets a frame carries to a runner", () => {
 
   it("puts the stored key on the frame that starts a session on that instance", async () => {
     await withFleet(async (arranged) => {
-      const keyed = findInstanceId(arranged, "keyed-provider");
+      const keyed = findInstanceId(arranged, "harnesses/keyed");
       await setKey(arranged, keyed, KEY_VALUE);
 
       const session = await spawnSessionOrFail(arranged, { prompt: "hello", instanceId: keyed });
@@ -136,7 +136,7 @@ describe("the secrets a frame carries to a runner", () => {
     await withFleet(async (arranged) => {
       await spawnSessionOrFail(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "plain-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/plain"),
       });
       const start = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
 
@@ -145,7 +145,7 @@ describe("the secrets a frame carries to a runner", () => {
   });
   it("sends only the secret fields the plugin declares, not other secrets stored for the instance", async () => {
     await withFleet(async (arranged) => {
-      const keyed = findInstanceId(arranged, "keyed-provider");
+      const keyed = findInstanceId(arranged, "harnesses/keyed");
       await setKey(arranged, keyed, KEY_VALUE);
       // Left behind by a plugin that dropped the field, or inserted by hand:
       // it is nobody's credential, and must not be sent to a runner.
@@ -164,7 +164,7 @@ describe("the secrets a frame carries to a runner", () => {
   });
   it("fails the probe when the key cannot be decrypted, rather than sending it without the key", async () => {
     await withFleet(async (arranged) => {
-      const keyed = findInstanceId(arranged, "keyed-provider");
+      const keyed = findInstanceId(arranged, "harnesses/keyed");
       await setKey(arranged, keyed, KEY_VALUE);
       // Corrupt the ciphertext. That looks the same as a row written under a
       // different Master Key, which a running controller has no way to set up.
@@ -199,7 +199,7 @@ describe("the secrets a frame carries to a runner", () => {
   });
   it("leaves a session whose key cannot be decrypted queued, and starts the others", async () => {
     await withFleet(async (arranged) => {
-      const keyed = findInstanceId(arranged, "keyed-provider");
+      const keyed = findInstanceId(arranged, "harnesses/keyed");
       await setKey(arranged, keyed, KEY_VALUE);
       await Effect.runPromise(
         Effect.orDie(
@@ -216,7 +216,7 @@ describe("the secrets a frame carries to a runner", () => {
       // read. If the whole batch rolled back, this one would not start either.
       const running = await spawnSessionOrFail(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "plain-provider"),
+        instanceId: findInstanceId(arranged, "harnesses/plain"),
       });
 
       const start = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;

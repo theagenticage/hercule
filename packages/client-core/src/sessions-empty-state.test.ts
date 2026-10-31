@@ -5,15 +5,23 @@ import {
   hasLoggedInRunner,
   type SessionsEmptyState,
 } from "./sessions-empty-state";
-import { BARE, buildInstance, buildSnapshot, WITH_CLAUDE } from "./providers.testing";
+import {
+  BARE,
+  buildInstance,
+  buildSnapshot,
+  CLAUDE_CODE_IDENTITY,
+  CODEX_IDENTITY,
+  PI_IDENTITY,
+  WITH_CLAUDE,
+} from "./providers.testing";
 
-const waiting = buildInstance("claude-code", "Claude Code", [
+const waiting = buildInstance(CLAUDE_CODE_IDENTITY, [
   buildSnapshot({ auth: { status: "unauthenticated" } }),
 ]);
 
-const loggedIn = buildInstance("claude-code", "Claude Code", [buildSnapshot()]);
+const loggedIn = buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshot()]);
 
-const undrivable = buildInstance("codex", "Codex", [
+const undrivable = buildInstance(CODEX_IDENTITY, [
   buildSnapshot({
     auth: { status: "error", message: "no adapter for codex in this runner build" },
   }),
@@ -67,14 +75,14 @@ describe("decideSessionsEmptyState", () => {
       ...WITH_CLAUDE,
       facts: {
         ...WITH_CLAUDE.facts!,
-        adapters: ["claude-code", "codex"],
-        providers: [
+        adapters: ["claude-code/claude-code", "codex/codex"],
+        harnesses: [
           { name: "claude", present: true, path: "/usr/local/bin/claude" },
           { name: "codex", present: true, path: "/usr/local/bin/codex" },
         ],
       },
     };
-    const second = buildInstance("codex", "Codex", [
+    const second = buildInstance(CODEX_IDENTITY, [
       buildSnapshot({ auth: { status: "unauthenticated" } }),
     ]);
     const state = decideSessionsEmptyState(machine, [waiting, second]);
@@ -86,7 +94,7 @@ describe("decideSessionsEmptyState", () => {
   it("still offers the login when the last probe of an installed harness failed", () => {
     // A failed probe does not mean the harness is missing, so an install
     // prompt would not help.
-    const stale = buildInstance("claude-code", "Claude Code", [
+    const stale = buildInstance(CLAUDE_CODE_IDENTITY, [
       buildSnapshot({
         auth: { status: "error", message: "the harness did not answer within 15s" },
       }),
@@ -107,7 +115,7 @@ describe("decideSessionsEmptyState", () => {
   it("is ready even when another instance is still waiting for a login", () => {
     // One usable harness is enough for this screen; the others are managed on
     // the Fleet screen. A "log in" headline when a harness works looks broken.
-    const second = buildInstance("codex", "Codex", [
+    const second = buildInstance(CODEX_IDENTITY, [
       buildSnapshot({ auth: { status: "unauthenticated" } }),
     ]);
     expect(decideSessionsEmptyState(WITH_CLAUDE, [second, loggedIn])).toEqual({
@@ -131,8 +139,7 @@ describe("decideSessionsEmptyState for a harness that signs in with a key", () =
   };
 
   const keyed: ProviderInstance = {
-    ...buildInstance("pi", "pi", [buildSnapshot({ auth: { status: "unauthenticated" } })]),
-    binaryName: "pi",
+    ...buildInstance(PI_IDENTITY, [buildSnapshot({ auth: { status: "unauthenticated" } })]),
     secretFields: [FIELD],
   };
 
@@ -140,8 +147,8 @@ describe("decideSessionsEmptyState for a harness that signs in with a key", () =
     ...WITH_CLAUDE,
     facts: {
       ...WITH_CLAUDE.facts!,
-      providers: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
-      adapters: ["pi"],
+      harnesses: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
+      adapters: ["pi/pi"],
     },
   };
 
@@ -156,17 +163,16 @@ describe("decideSessionsEmptyState for a harness that signs in with a key", () =
 
   it("asks for the keys in the plural when two harnesses want one", () => {
     const other: ProviderInstance = {
-      ...buildInstance("codex", "Codex", [buildSnapshot({ auth: { status: "unauthenticated" } })]),
-      binaryName: "codex",
+      ...buildInstance(CODEX_IDENTITY, [buildSnapshot({ auth: { status: "unauthenticated" } })]),
       secretFields: [{ ...FIELD, name: "codexApiKey", title: "Codex API key" }],
     };
     const machine = {
       ...WITH_PI,
       facts: {
         ...WITH_PI.facts,
-        adapters: ["pi", "codex"],
-        providers: [
-          ...WITH_PI.facts.providers,
+        adapters: ["pi/pi", "codex/codex"],
+        harnesses: [
+          ...WITH_PI.facts.harnesses,
           { name: "codex", present: true, path: "/usr/local/bin/codex" },
         ],
       },
@@ -185,8 +191,8 @@ describe("decideSessionsEmptyState for a harness that signs in with a key", () =
         ...WITH_PI,
         facts: {
           ...WITH_PI.facts,
-          adapters: ["pi", "claude-code"],
-          providers: [...WITH_PI.facts.providers, { name: "claude", present: true }],
+          adapters: ["pi/pi", "claude-code/claude-code"],
+          harnesses: [...WITH_PI.facts.harnesses, { name: "claude", present: true }],
         },
       },
       [keyed, waiting],

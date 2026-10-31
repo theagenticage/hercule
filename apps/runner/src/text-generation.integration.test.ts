@@ -25,10 +25,10 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 import type { TextGenerationOutcome, TextGenerationRequest } from "@hercule/protocol";
-import { claudeCode } from "./providers/claude-code";
-import { makePiAdapter } from "./providers/pi/adapter";
-import { spawnPi, STOP_GRACE } from "./providers/process";
-import { NO_CONTROLLER_UPLOADER } from "./providers/testing";
+import { claudeCode } from "./harnesses/claude-code";
+import { makePiAdapter } from "./harnesses/pi/adapter";
+import { spawnPi, STOP_GRACE } from "./harnesses/process";
+import { NO_CONTROLLER_UPLOADER } from "./harnesses/testing";
 import { makeTextGenerator } from "./text-generation";
 
 const HARNESS = join(import.meta.dirname, "text-generation-harness.fixture.ts");
@@ -38,7 +38,7 @@ const REQUEST: TextGenerationRequest = {
   _tag: "textGenerationRequest",
   requestId: "request-1",
   instanceId: "instance-1",
-  providerId: "pi",
+  harnessId: "pi/pi",
   config: {},
   secrets: {},
   spec: {
@@ -240,7 +240,7 @@ const generateWithClaude = async (behaviour: ClaudeBehaviour, count = 1) => {
     }),
     deadline: Duration.millis(behaviour.deadlineMillis),
   });
-  const request: TextGenerationRequest = { ...REQUEST, providerId: "claude-code" };
+  const request: TextGenerationRequest = { ...REQUEST, harnessId: "claude-code/claude-code" };
 
   const startedAt = Date.now();
   const outcomes: Array<TextGenerationOutcome> = await Promise.all(

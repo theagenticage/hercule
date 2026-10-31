@@ -208,8 +208,8 @@ const buildPlugins = () => ({
     },
   }),
   intaked: createIntakeFixture(),
-  // Declares no providers: the test server adds a working provider plugin only
-  // when none of the plugins offers providers, and setup needs one.
+  // Declares no harnesses: the test server adds a working harness plugin only
+  // when none of the plugins offers harnesses, and setup needs one.
   broken: createPluginFixture({
     id: "broken",
     capabilities: ["connections"],

@@ -1,5 +1,5 @@
 /**
- * The ways a provider adapter fails to start a session or to take an input,
+ * The ways a harness adapter fails to start a session or to take an input,
  * one class per kind of failure.
  *
  * The runner sends one of these in a refused `SessionInputResult`, and the
@@ -115,7 +115,7 @@ export class AdapterFailed extends Schema.TaggedError<AdapterFailed>()("AdapterF
   message: Message,
 }) {}
 
-/** Every failure a provider adapter can report for a session start or an input. The `_tag` identifies the class. */
+/** Every failure a harness adapter can report for a session start or an input. The `_tag` identifies the class. */
 export const AdapterError = Schema.Union([
   HarnessNotInstalled,
   HarnessLoginMissing,
@@ -132,7 +132,7 @@ export const AdapterError = Schema.Union([
 export type AdapterError = Schema.Schema.Type<typeof AdapterError>;
 
 /**
- * The failure of `ProviderAdapter.respondToQuestion` when the user's answer
+ * The failure of `HarnessAdapter.respondToQuestion` when the user's answer
  * did not reach the agent, or when the adapter cannot tell whether it did.
  *
  * The runner reports it to the controller as a failed

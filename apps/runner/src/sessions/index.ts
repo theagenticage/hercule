@@ -3,7 +3,7 @@
  * paths and an environment on this machine, and supervises the sessions it
  * starts (spec 06 sections 4.2 and 9.1).
  */
-import { adapters } from "../providers";
+import { adapters } from "../harnesses";
 import { makeSupervising } from "./supervisor";
 
 export type { Machine } from "./context";

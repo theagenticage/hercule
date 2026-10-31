@@ -31,8 +31,8 @@ import { MuteKey } from "./notification";
 import { SpawnBound } from "./workflow-definition";
 
 /**
- * The session-level access mode a provider adapter enforces. Re-exported so
- * that the wire shape and the modes a provider plugin declares support for
+ * The session-level access mode a harness adapter enforces. Re-exported so
+ * that the wire shape and the modes a harness declares support for
  * cannot drift apart.
  */
 export { AccessMode };

@@ -7,8 +7,8 @@ import { MenuLine } from "../thread/menu-line";
  * Renders the content of a Draft Thread's access-mode menu: one row per mode,
  * with what the mode means under its name, and the current mode checked.
  *
- * A mode the provider does not support keeps its row and can still be
- * picked: the controller runs the nearest mode the provider supports. The
+ * A mode the harness does not support keeps its row and can still be
+ * picked: the controller runs the nearest mode the harness supports. The
  * row says so on a line of its own, so the fallback is never silent.
  */
 export function AccessModeMenu({

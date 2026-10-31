@@ -21,12 +21,12 @@ export const BARE: Runner = {
     totalMemoryBytes: 64 * GIB,
     docker: true,
     toolchains: [],
-    providers: [
+    harnesses: [
       { name: "claude", present: false },
       { name: "codex", present: false },
       { name: "pi", present: false },
     ],
-    adapters: ["claude-code"],
+    adapters: ["claude-code/claude-code"],
     identityPort: 4939,
   },
   watermark: null,
@@ -39,7 +39,7 @@ export const WITH_CLAUDE: Runner = {
   ...BARE,
   facts: {
     ...BARE.facts!,
-    providers: [
+    harnesses: [
       { name: "claude", present: true, path: "/usr/local/bin/claude" },
       { name: "codex", present: false },
       { name: "pi", present: false },
@@ -62,17 +62,49 @@ const DECLARED: ProviderInstance["declared"] = {
   structuredOutput: "supported",
 };
 
+/** What makes a provider instance this one: its own id, the harness it runs, and its names. */
+export interface InstanceIdentity {
+  readonly id: string;
+  readonly harnessId: string;
+  readonly binaryName: string;
+  readonly name: string;
+}
+
+export const CLAUDE_CODE_IDENTITY: InstanceIdentity = {
+  id: "instance-claude-code",
+  harnessId: "claude-code/claude-code",
+  binaryName: "claude",
+  name: "Claude Code",
+};
+
+export const CODEX_IDENTITY: InstanceIdentity = {
+  id: "instance-codex",
+  harnessId: "codex/codex",
+  binaryName: "codex",
+  name: "Codex",
+};
+
+export const PI_IDENTITY: InstanceIdentity = {
+  id: "instance-pi",
+  harnessId: "pi/pi",
+  binaryName: "pi",
+  name: "pi",
+};
+
+/**
+ * Returns a provider instance with the given identity, an empty config and the
+ * same declared capabilities for every harness. The display name equals the name.
+ */
 export const buildInstance = (
-  providerId: string,
-  displayName: string,
+  identity: InstanceIdentity,
   snapshots: ProviderInstance["snapshots"] = [],
 ): ProviderInstance => ({
-  id: `instance-${providerId}`,
-  providerId,
-  name: displayName,
+  id: identity.id,
+  harnessId: identity.harnessId,
+  name: identity.name,
   config: {},
-  displayName,
-  binaryName: providerId === "claude-code" ? "claude" : providerId,
+  displayName: identity.name,
+  binaryName: identity.binaryName,
   declared: DECLARED,
   secretFields: [],
   snapshots,

@@ -1,4 +1,4 @@
-The provider marks in `marks.ts` are taken from lobehub's icon set: each is
+The harness marks in `marks.ts` are taken from lobehub's icon set: each is
 the `d` of the single path in the file named below, on its 24x24 box.
 
 Source:  https://github.com/lobehub/lobe-icons

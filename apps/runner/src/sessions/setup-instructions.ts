@@ -5,7 +5,7 @@ import { endSentence } from "../report";
 /** What the commands that set a harness up are written with. */
 interface SetupTarget {
   readonly runnerId: string;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly instanceId: string;
 }
 
@@ -23,7 +23,7 @@ export const appendSetupInstructions = (error: AdapterError, target: SetupTarget
   switch (error._tag) {
     case "HarnessNotInstalled":
       return new HarnessNotInstalled({
-        message: `${endSentence(error.message)} Install it with: \`hercule runner install-harness ${target.runnerId} --provider ${target.providerId}\``,
+        message: `${endSentence(error.message)} Install it with: \`hercule runner install-harness ${target.runnerId} --harness ${target.harnessId}\``,
       });
     case "HarnessLoginMissing":
       return new HarnessLoginMissing({

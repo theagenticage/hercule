@@ -837,10 +837,10 @@ describe("id tails", () => {
 
   it("resolves a tail through a list that is returned whole", async () => {
     // The provider instance list is returned whole rather than as a page,
-    // because there is one instance per provider and only a few providers.
+    // because there is one instance per harness and only a few harnesses.
     const instance = {
       id: buildId("cccccccc"),
-      providerId: "claude-code",
+      harnessId: "claude-code/claude-code",
       name: "Claude Code",
       config: {},
       displayName: "Claude Code",

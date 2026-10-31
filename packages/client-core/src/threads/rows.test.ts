@@ -4,12 +4,12 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Runner, Session, SessionStatus } from "@hercule/contract";
-import { buildInstance, buildSnapshot } from "../providers.testing";
+import { buildInstance, buildSnapshot, CLAUDE_CODE_IDENTITY } from "../providers.testing";
 import { buildThreadRows } from "./rows";
 import { buildRunner } from "./workspaces.testing";
 
 /** The instance whose catalog gives rows their model names. It offers two models. */
-const CLAUDE = buildInstance("claude-code", "Claude Code", [
+const CLAUDE = buildInstance(CLAUDE_CODE_IDENTITY, [
   buildSnapshot({
     models: [
       {

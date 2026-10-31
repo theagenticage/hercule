@@ -34,8 +34,8 @@ const MOSS: Runner = {
     totalMemoryBytes: 64 * GIB,
     docker: true,
     toolchains: [],
-    providers: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
-    adapters: ["claude-code"],
+    harnesses: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
+    adapters: ["claude-code/claude-code"],
     identityPort: 4939,
   },
   watermark: null,
@@ -46,7 +46,7 @@ const MOSS: Runner = {
 
 const BARE: Runner = {
   ...MOSS,
-  facts: { ...MOSS.facts!, providers: [{ name: "claude", present: false }] },
+  facts: { ...MOSS.facts!, harnesses: [{ name: "claude", present: false }] },
 };
 
 const DECLARED = {
@@ -77,7 +77,7 @@ const buildSnapshot = (auth: Readonly<Record<string, string>>) => ({
 
 const buildClaudeCodeInstance = (snapshots: ReadonlyArray<ReturnType<typeof buildSnapshot>>) => ({
   id: CLAUDE_ID,
-  providerId: "claude-code",
+  harnessId: "claude-code/claude-code",
   name: "Claude Code",
   config: {},
   displayName: "Claude Code",
@@ -304,8 +304,8 @@ describe("Sessions > a harness that needs a key", () => {
     ...MOSS,
     facts: {
       ...MOSS.facts!,
-      providers: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
-      adapters: ["pi"],
+      harnesses: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
+      adapters: ["pi/pi"],
     },
   };
 
@@ -314,7 +314,7 @@ describe("Sessions > a harness that needs a key", () => {
   const buildPiInstance = (set: boolean) => ({
     ...buildClaudeCodeInstance([PI_SNAPSHOT]),
     id: PI_ID,
-    providerId: "pi",
+    harnessId: "pi/pi",
     name: "pi",
     displayName: "pi",
     binaryName: "pi",

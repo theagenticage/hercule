@@ -33,7 +33,7 @@ const FAILURE_KEY = "test-key";
 
 const INSTANCE: StoredInstance = {
   id: "instance-1",
-  providerId: "codex",
+  harnessId: "codex/codex",
   name: "Codex",
   config: {},
   createdAt: "2026-10-11T10:00:00.000Z",
@@ -121,7 +121,7 @@ const buildServiceLayer = (
           values: () => Effect.succeed([]),
         } as unknown as Secrets["Service"]),
         Layer.succeed(PluginHost, {
-          providers: () => Effect.succeed([]),
+          harnesses: () => Effect.succeed([]),
         } as unknown as PluginHost["Service"]),
         Layer.succeed(LocalRunnerId, { read: () => undefined }),
       ),

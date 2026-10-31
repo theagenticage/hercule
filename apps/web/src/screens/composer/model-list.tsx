@@ -5,7 +5,7 @@ import {
   type LoginTarget,
   type ModelMenu,
 } from "@hercule/client-core";
-import { ProviderLogo } from "@hercule/ui";
+import { HarnessLogo } from "@hercule/ui";
 import { Lane, renderMarker, MenuRow } from "./menu";
 
 type Row = ModelMenu["current"]["rows"][number];
@@ -37,10 +37,10 @@ export function ModelList({
   readonly onPickInstance: (instanceId: string) => void;
   readonly loginSlot: (login: LoginTarget, className: string) => ReactNode;
 }): JSX.Element {
-  const renderModelRow = (providerId: string | null, row: Row): JSX.Element => (
+  const renderModelRow = (harnessId: string | null, row: Row): JSX.Element => (
     <MenuRow
       key={`${row.instanceId}:${row.slug}`}
-      marker={renderMarker(providerId === null ? null : <ProviderLogo providerId={providerId} />)}
+      marker={renderMarker(harnessId === null ? null : <HarnessLogo harnessId={harnessId} />)}
       name={row.name}
       detail={describeModelRow(row)}
       note={row.current ? "✓" : undefined}
@@ -57,7 +57,7 @@ export function ModelList({
       {menu.recent.map((row) => (
         <MenuRow
           key={`recent:${row.instanceId}:${row.model}`}
-          marker={renderMarker(<ProviderLogo providerId={row.providerId} />)}
+          marker={renderMarker(<HarnessLogo harnessId={row.harnessId} />)}
           name={row.name}
           detail={row.account}
           dimmed={row.dimmed}
@@ -67,9 +67,9 @@ export function ModelList({
         />
       ))}
       {menu.current.label === null ? null : <Lane label={menu.current.label} />}
-      {menu.current.rows.map((row) => renderModelRow(menu.current.providerId, row))}
+      {menu.current.rows.map((row) => renderModelRow(menu.current.harnessId, row))}
       {menu.current.older.length === 0 ? null : older ? (
-        menu.current.older.map((row) => renderModelRow(menu.current.providerId, row))
+        menu.current.older.map((row) => renderModelRow(menu.current.harnessId, row))
       ) : (
         <MenuRow
           marker={renderMarker(null)}
@@ -82,7 +82,7 @@ export function ModelList({
           <MenuRow
             key={instance.instanceId}
             className="mt-1 rounded-t-none border-t border-line-soft pt-[9px]"
-            marker={renderMarker(<ProviderLogo providerId={instance.providerId} />)}
+            marker={renderMarker(<HarnessLogo harnessId={instance.harnessId} />)}
             name={instance.name}
             detail={describeAccountRow(instance)}
             note={instance.dimmed === null ? `${instance.models} ›` : undefined}
@@ -95,7 +95,7 @@ export function ModelList({
         ) : (
           <Fragment key={instance.instanceId}>
             <Lane label={instance.name} />
-            {instance.rows.map((row) => renderModelRow(instance.providerId, row))}
+            {instance.rows.map((row) => renderModelRow(instance.harnessId, row))}
           </Fragment>
         ),
       )}

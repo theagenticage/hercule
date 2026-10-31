@@ -6,7 +6,7 @@ import { ChevronRightIcon } from "../../icons/chevron-right";
  * Renders one row of a composer menu: the name, up to two lines under it, a
  * note at the right, and a check on the current row.
  *
- * - `glyph` is drawn before the name, such as the logo of a model's provider.
+ * - `glyph` is drawn before the name, such as the logo of a model's harness.
  * - `detail` follows the name on its line, after " · ", in the row's muted ink.
  * - `sub` is the line under the name that explains the row.
  * - `warning` is a second line, in the attention hue, for what the user

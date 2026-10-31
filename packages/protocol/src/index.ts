@@ -131,8 +131,14 @@ export {
  * - Version 13 added the `wait` and `image_generation` item kinds. A controller
  *   on 12 could not decode an item of either kind and would close the socket
  *   on it, again after every reconnect, so the two refuse each other at hello.
+ * - Version 14 renamed the frame fields that name a harness: `harnessId` on
+ *   the probe, install, login and session start requests and on the text
+ *   generation request, `harnessRefs` on events, and `harnesses` in the runner
+ *   facts. The harness ids are now qualified (`claude-code/claude-code`). An
+ *   older peer cannot decode the renamed fields, so the two refuse each other
+ *   at hello.
  */
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 14;
 
 /**
  * The close code and reason the controller uses to end the connection of a
@@ -195,13 +201,13 @@ export const Toolchain = Schema.Struct({
 
 export type Toolchain = Schema.Schema.Type<typeof Toolchain>;
 
-export const ProviderBinary = Schema.Struct({
+export const HarnessBinary = Schema.Struct({
   name: Fact,
   present: Schema.Boolean,
   path: Schema.optionalKey(Fact),
 });
 
-export type ProviderBinary = Schema.Schema.Type<typeof ProviderBinary>;
+export type HarnessBinary = Schema.Schema.Type<typeof HarnessBinary>;
 
 /**
  * What a runner knows about the machine it is on. This is state where the
@@ -216,11 +222,12 @@ export const RunnerFacts = Schema.Struct({
   totalMemoryBytes: Bytes,
   docker: Schema.Boolean,
   toolchains: Schema.Array(Toolchain).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
-  providers: Schema.Array(ProviderBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  harnesses: Schema.Array(HarnessBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /**
-   * The provider ids this runner build has an adapter for. A fact about the
-   * binary rather than the machine, so the fleet view can show "no adapter in
-   * this runner build" instead of finding out by trying and failing.
+   * The qualified harness ids (such as `claude-code/claude-code`) this runner
+   * build has an adapter for. A fact about the binary rather than the machine,
+   * so the fleet view can show "no adapter in this runner build" instead of
+   * finding out by trying and failing.
    */
   adapters: Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /** The port that serves `GET /identity`, which is used to resolve the "local" alias. */
@@ -457,7 +464,7 @@ export const ProbeRequest = Schema.Struct({
   _tag: Schema.Literal("probeRequest"),
   requestId: RequestId,
   instanceId: InstanceId,
-  providerId: Fact,
+  harnessId: Fact,
   config: Schema.Json,
   /** The instance's credentials, which its config never holds; `{}` when none. */
   secrets: InstanceSecrets,
@@ -477,7 +484,7 @@ export type ProbeReport = Schema.Schema.Type<typeof ProbeReport>;
 export const InstallRequest = Schema.Struct({
   _tag: Schema.Literal("installRequest"),
   requestId: RequestId,
-  providerId: Fact,
+  harnessId: Fact,
 });
 
 export type InstallRequest = Schema.Schema.Type<typeof InstallRequest>;
@@ -511,13 +518,13 @@ const AuthorizeUrl = Schema.String.check(Schema.isBetweenLength(1, MAX_AUTHORIZE
 /**
  * Asks the runner to start the vendor's own login for one instance. The
  * credential lands in that instance's config directory, which is why this is
- * routed on the instance rather than on the provider.
+ * routed on the instance rather than on the harness.
  */
 export const LoginStart = Schema.Struct({
   _tag: Schema.Literal("loginStart"),
   requestId: RequestId,
   instanceId: InstanceId,
-  providerId: Fact,
+  harnessId: Fact,
 });
 
 export type LoginStart = Schema.Schema.Type<typeof LoginStart>;

@@ -163,7 +163,7 @@ function TabOverflowRow({
       <span className={tab.hasRoleLabel ? "tab-overflow-name" : "tab-overflow-name is-title"}>
         {tab.label}
       </span>
-      <AgentLabel providerId={tab.providerId} model={tab.model} />
+      <AgentLabel harnessId={tab.harnessId} model={tab.model} />
       <StatusSlot
         id={statusId}
         status={tab.status}

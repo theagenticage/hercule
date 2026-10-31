@@ -26,7 +26,7 @@ import {
   type PollResult,
   type Plugin,
   type PluginCapability,
-  type ProviderDefinition,
+  type HarnessDefinition,
   type RegistrationHost,
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
@@ -43,13 +43,13 @@ import { ServingPromotionStateLayer } from "../promotion/testing";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
 import { PluginObserver } from "./observer";
 
-/** Builds a provider definition that supports everything natively. */
-export const buildProviderDefinition = (
+/** Builds a harness definition that supports everything natively. */
+export const buildHarnessDefinition = (
   id: string,
   defaultConfig: Schema.Json = {},
-): ProviderDefinition => ({
+): HarnessDefinition => ({
   id,
-  displayName: `Provider ${id}`,
+  displayName: `Harness ${id}`,
   binaryName: "harness",
   supportsMultipleInstances: true,
   configSchema: Schema.Struct({ token: Schema.String }),
@@ -140,8 +140,8 @@ export const createPluginFixture = (options: {
   readonly hostApi?: number;
   readonly capabilities?: ReadonlyArray<PluginCapability>;
   readonly configSchema?: Schema.Top;
-  /** The providers to register, in order. By default, one provider named after the plugin. */
-  readonly definitions?: ReadonlyArray<ProviderDefinition>;
+  /** The harnesses to register, in order. By default, one harness named after the plugin. */
+  readonly definitions?: ReadonlyArray<HarnessDefinition>;
   /** A message to fail `register` with, after registering, where a plugin's own work would go. */
   readonly registerFails?: string;
   /** How many `activate` calls fail before the first one that succeeds. */
@@ -158,7 +158,7 @@ export const createPluginFixture = (options: {
   const calls: Array<string> = [];
   const contexts: Array<ActivationContext> = [];
   const hosts: Array<RegistrationHost> = [];
-  const definitions = options.definitions ?? [buildProviderDefinition(`${options.id}-provider`)];
+  const definitions = options.definitions ?? [buildHarnessDefinition(options.id)];
   let remainingFailures = options.activateFailures ?? 0;
   let up = false;
   const pause = options.slow === true ? Effect.yieldNow : Effect.void;
@@ -168,7 +168,7 @@ export const createPluginFixture = (options: {
       id: options.id,
       displayName: `Plugin ${options.id}`,
       hostApi: options.hostApi ?? HOST_API,
-      capabilities: options.capabilities ?? ["providers"],
+      capabilities: options.capabilities ?? ["harnesses"],
       configSchema: options.configSchema ?? Schema.Struct({}),
     },
     register:
@@ -177,7 +177,7 @@ export const createPluginFixture = (options: {
         Effect.gen(function* () {
           hosts.push(host);
           for (const definition of definitions) {
-            if (host.providers !== undefined) yield* host.providers.register(definition);
+            if (host.harnesses !== undefined) yield* host.harnesses.register(definition);
           }
           if (options.registerFails !== undefined) {
             return yield* Effect.fail(new PluginError({ message: options.registerFails }));

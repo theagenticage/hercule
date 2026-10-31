@@ -1033,7 +1033,7 @@ describe("the Threads face's Assistants group", () => {
 /** A Claude Code instance, logged in on moss when `loggedIn` is true and never probed otherwise. */
 const buildClaudeCode = (loggedIn: boolean): ProviderInstance => ({
   id: "01a06d02-1000-7000-8000-000000000001",
-  providerId: "claude-code",
+  harnessId: "claude-code/claude-code",
   name: "Claude Code",
   config: {},
   displayName: "Claude Code",

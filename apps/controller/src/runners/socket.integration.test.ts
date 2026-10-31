@@ -115,8 +115,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-  providers: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
-  adapters: ["claude-code"],
+  harnesses: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
+  adapters: ["claude-code/claude-code"],
   identityPort: 4939,
 };
 
@@ -484,20 +484,20 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 13 changed the shape of the item events (the wait and image_generation item kinds), which
-  // a version 12 controller cannot decode and would close the socket on. So versions 12 and 13
-  // refuse each other at hello; this is the version 13 controller refusing a version 12 runner.
-  it("refuses a runner on protocol version 12 and says to upgrade it", async () => {
+  // Version 14 renamed the frame fields that name a harness (`harnessId`, `harnessRefs`, `harnesses`),
+  // which a version 13 peer cannot decode. So versions 13 and 14 refuse each other at hello; this is
+  // the version 14 controller refusing a version 13 runner.
+  it("refuses a runner on protocol version 13 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dialRunnerSocket(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 12 }));
+      wire.send(buildHello({ protocolVersion: 13 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(13);
+      expect(PROTOCOL_VERSION).toBe(14);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 13 and the runner does not; " +
-          "upgrade the runner to a build that uses version 13",
+        "this controller uses runner protocol version 14 and the runner does not; " +
+          "upgrade the runner to a build that uses version 14",
       );
       expect(wire.frames).toEqual([]);
     });
@@ -1612,7 +1612,7 @@ describe("refreshing a runner's facts on demand", () => {
 
 /**
  * Runs `body` against a server with the real plugin registry, so "one request
- * per instance" covers the three providers the binary really includes. The
+ * per instance" covers the three harnesses the binary really includes. The
  * probe deadline and interval are passed in like the ping interval, because a
  * real Bun server cannot run on a `TestClock`.
  */
@@ -1623,7 +1623,7 @@ const withRegistry = (
 
 interface Instance {
   readonly id: string;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly snapshots: ReadonlyArray<{
     readonly runnerId: string;
     readonly harnessVersion: string | null;
@@ -1641,10 +1641,10 @@ const listInstances = async (base: string, token: string): Promise<ReadonlyArray
 const findInstanceFor = async (
   base: string,
   token: string,
-  providerId: string,
+  harnessId: string,
 ): Promise<Instance> => {
-  const found = (await listInstances(base, token)).find((one) => one.providerId === providerId);
-  expect(found, `no instance for ${providerId}`).toBeDefined();
+  const found = (await listInstances(base, token)).find((one) => one.harnessId === harnessId);
+  expect(found, `no instance for ${harnessId}`).toBeDefined();
   return found!;
 };
 
@@ -1682,9 +1682,9 @@ describe("probing a runner's provider instances", () => {
       return asked.length >= count ? asked : undefined;
     });
 
-  const buildNoAdapterResult = (providerId: string): ProbeResult => ({
+  const buildNoAdapterResult = (harnessId: string): ProbeResult => ({
     harnessVersion: null,
-    auth: { status: "error", message: `no adapter for ${providerId} in this runner build` },
+    auth: { status: "error", message: `no adapter for ${harnessId} in this runner build` },
     models: [],
   });
 
@@ -1702,20 +1702,24 @@ describe("probing a runner's provider instances", () => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const all = await listInstances(harness.base, token);
-      // The three built-in providers, each with the instance the boot created.
-      expect(all.map((one) => one.providerId).sort()).toEqual(["claude-code", "codex", "pi"]);
+      // The three built-in harnesses, each with the instance the boot created.
+      expect(all.map((one) => one.harnessId).sort()).toEqual([
+        "claude-code/claude-code",
+        "codex/codex",
+        "pi/pi",
+      ]);
 
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const asked = await waitForProbeRequests(wire, all.length);
-        // One request per instance, keyed by instance id, never provider id:
-        // one provider can have several accounts.
+        // One request per instance, keyed by instance id, never harness id:
+        // one harness can have several accounts.
         expect([...asked].map((request) => request.instanceId).sort()).toEqual(
           [...all].map((one) => one.id).sort(),
         );
         for (const request of asked) {
           const instance = all.find((one) => one.id === request.instanceId);
-          expect(request.providerId).toBe(instance?.providerId);
+          expect(request.harnessId).toBe(instance?.harnessId);
         }
 
         for (const request of asked) {
@@ -1725,24 +1729,24 @@ describe("probing a runner's provider instances", () => {
             requestId: request.requestId,
             instanceId: request.instanceId,
             result:
-              instance.providerId === "claude-code"
+              instance.harnessId === "claude-code/claude-code"
                 ? buildProbeResult("2.1.263")
-                : buildNoAdapterResult(instance.providerId),
+                : buildNoAdapterResult(instance.harnessId),
           });
         }
 
-        const claude = await findInstanceFor(harness.base, token, "claude-code");
+        const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
         const snapshot = await readSnapshot(harness.base, token, claude.id, joined.runnerId);
         expect(snapshot.harnessVersion).toBe("2.1.263");
         expect(snapshot.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
         expect(snapshot.models.map((model) => model.slug)).toEqual(["default"]);
 
-        // A provider this runner build has no adapter for still gets a
+        // A harness this runner build has no adapter for still gets a
         // snapshot, which shows why, instead of staying blank forever.
-        const codex = await findInstanceFor(harness.base, token, "codex");
+        const codex = await findInstanceFor(harness.base, token, "codex/codex");
         const refused = await readSnapshot(harness.base, token, codex.id, joined.runnerId);
         expect(refused.auth.status).toBe("error");
-        expect(refused.auth.message).toBe("no adapter for codex in this runner build");
+        expect(refused.auth.message).toBe("no adapter for codex/codex in this runner build");
       } finally {
         wire.close();
       }
@@ -1755,7 +1759,7 @@ describe("probing a runner's provider instances", () => {
       const first = await enlist(harness);
       const second = await enlist(harness);
       const all = await listInstances(harness.base, token);
-      const claude = all.find((one) => one.providerId === "claude-code")!;
+      const claude = all.find((one) => one.harnessId === "claude-code/claude-code")!;
 
       const one = await greet(harness.base, first.credential);
       const two = await greet(harness.base, second.credential);
@@ -1787,7 +1791,7 @@ describe("probing a runner's provider instances", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const opening = await waitForProbeRequests(wire, 3);
@@ -1819,7 +1823,7 @@ describe("probing a runner's provider instances", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       // A socket with no hello: it has not identified itself as a runner yet.
       const wire = await dialRunnerSocket(harness.base, joined.credential);
       try {
@@ -1838,7 +1842,7 @@ describe("probing a runner's provider instances", () => {
       async (harness) => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
-        const claude = await findInstanceFor(harness.base, token, "claude-code");
+        const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
         const { wire } = await greet(harness.base, joined.credential);
         try {
           const already = (await waitForProbeRequests(wire, 3)).length;
@@ -1862,7 +1866,7 @@ describe("probing a runner's provider instances", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const asked = await waitForProbeRequests(wire, 3);
@@ -1897,7 +1901,7 @@ describe("probing a runner's provider instances", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const first = await greet(harness.base, joined.credential);
       const asked = await waitForProbeRequests(first.wire, 3);
       const stale = asked.find((request) => request.instanceId === claude.id)!;
@@ -1933,7 +1937,7 @@ describe("probing a runner's provider instances", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const asked = await waitForProbeRequests(wire, 3);
@@ -1993,7 +1997,7 @@ describe("probing a runner's provider instances", () => {
 describe("installing a harness on a runner", () => {
   const BARE: RunnerFacts = {
     ...FACTS,
-    providers: [
+    harnesses: [
       { name: "claude", present: false },
       { name: "codex", present: false },
       { name: "pi", present: false },
@@ -2002,15 +2006,15 @@ describe("installing a harness on a runner", () => {
 
   const INSTALLED: RunnerFacts = {
     ...BARE,
-    providers: [
+    harnesses: [
       { name: "claude", present: true, path: "/root/.local/bin/claude" },
       { name: "codex", present: false },
       { name: "pi", present: false },
     ],
   };
 
-  const installHarness = (base: string, token: string, id: string, providerId: string) =>
-    send("POST", base, `/api/v1/runners/${id}/install-harness`, { body: { providerId }, token });
+  const installHarness = (base: string, token: string, id: string, harnessId: string) =>
+    send("POST", base, `/api/v1/runners/${id}/install-harness`, { body: { harnessId }, token });
 
   it("runs the installer, stores the facts the runner then reports, and probes the harness", async () => {
     await withRegistry(async (harness) => {
@@ -2028,14 +2032,19 @@ describe("installing a harness on a runner", () => {
         const claude = (
           (await providers.json()) as ReadonlyArray<{
             id: string;
-            providerId: string;
+            harnessId: string;
           }>
-        ).find((one) => one.providerId === "claude-code")!;
+        ).find((one) => one.harnessId === "claude-code/claude-code")!;
         const before = listProbeRequests(wire).length;
 
-        const pending = installHarness(harness.base, token, joined.runnerId, "claude-code");
+        const pending = installHarness(
+          harness.base,
+          token,
+          joined.runnerId,
+          "claude-code/claude-code",
+        );
         const request = await waitForFrame<InstallRequest>(wire, "installRequest");
-        expect(request.providerId).toBe("claude-code");
+        expect(request.harnessId).toBe("claude-code/claude-code");
         // The runner reports its new facts, then reports that the install
         // finished: the response must not show the machine as it was before.
         wire.send({ _tag: "factsReport", facts: INSTALLED });
@@ -2044,7 +2053,7 @@ describe("installing a harness on a runner", () => {
         const response = await pending;
         expect(response.status, await response.clone().text()).toBe(200);
         const row = (await response.json()) as RunnerDetail;
-        expect(row.facts?.providers).toEqual(INSTALLED.providers);
+        expect(row.facts?.harnesses).toEqual(INSTALLED.harnesses);
 
         // A harness that was just installed has never been probed.
         await waitUntil("probed after the install", () => listProbeRequests(wire)[before]);
@@ -2072,7 +2081,12 @@ describe("installing a harness on a runner", () => {
           (one) => one.connectivity === "online",
         );
 
-        const pending = installHarness(harness.base, token, joined.runnerId, "claude-code");
+        const pending = installHarness(
+          harness.base,
+          token,
+          joined.runnerId,
+          "claude-code/claude-code",
+        );
         const request = await waitForFrame<InstallRequest>(wire, "installRequest");
         wire.send({
           _tag: "installResult",
@@ -2108,10 +2122,41 @@ describe("installing a harness on a runner", () => {
           (one) => one.connectivity === "online",
         );
 
-        const response = await installHarness(harness.base, token, joined.runnerId, "codex");
+        const response = await installHarness(harness.base, token, joined.runnerId, "codex/codex");
         expect(response.status, await response.clone().text()).toBe(400);
         expect(await response.json()).toMatchObject({ error: { code: "validation" } });
         // The runner's hello already listed the adapters its build has.
+        expect(wire.frames.filter((frame) => frame._tag === "installRequest")).toEqual([]);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("names the registered harnesses when an install uses a bare harness name, whatever the runner's build", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential, { facts: BARE });
+      try {
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+
+        const response = await installHarness(harness.base, token, joined.runnerId, "claude-code");
+        expect(response.status, await response.clone().text()).toBe(400);
+        const refusal = (await response.json()) as {
+          error: { code: string; details?: unknown };
+        };
+        expect(refusal.error.code).toBe("validation");
+        // The refusal is about the id, not about the runner's build.
+        const details = JSON.stringify(refusal.error.details);
+        expect(details).toContain("no plugin registered the harness claude-code;");
+        expect(details).toContain("claude-code/claude-code");
+        expect(details).not.toContain("runner build");
         expect(wire.frames.filter((frame) => frame._tag === "installRequest")).toEqual([]);
       } finally {
         wire.close();
@@ -2125,7 +2170,12 @@ describe("installing a harness on a runner", () => {
       const joined = await enlist(harness);
       const wire = await dialRunnerSocket(harness.base, joined.credential);
       try {
-        const response = await installHarness(harness.base, token, joined.runnerId, "claude-code");
+        const response = await installHarness(
+          harness.base,
+          token,
+          joined.runnerId,
+          "claude-code/claude-code",
+        );
         expect(response.status, await response.clone().text()).toBe(409);
         expect(await response.json()).toMatchObject({ error: { code: "invalid_state" } });
         expect(wire.frames).toEqual([]);
@@ -2177,7 +2227,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2185,7 +2235,7 @@ describe("logging a runner's provider instance in", () => {
         // Keyed by instance, because the credential is stored in the
         // instance's own config directory.
         expect(request.instanceId).toBe(claude.id);
-        expect(request.providerId).toBe("claude-code");
+        expect(request.harnessId).toBe("claude-code/claude-code");
         wire.send({ _tag: "loginUrl", requestId: request.requestId, url: AUTHORIZE_URL });
 
         const response = await pending;
@@ -2201,7 +2251,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2228,7 +2278,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2334,11 +2384,11 @@ describe("logging a runner's provider instance in", () => {
   const TWO_ADAPTERS: Partial<RunnerHello> = {
     facts: {
       ...FACTS,
-      providers: [
-        ...FACTS.providers,
+      harnesses: [
+        ...FACTS.harnesses,
         { name: "codex", present: true, path: "/usr/local/bin/codex" },
       ],
-      adapters: ["claude-code", "codex"],
+      adapters: ["claude-code/claude-code", "codex/codex"],
     },
   };
 
@@ -2363,7 +2413,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         // Let the probe every connection starts go out first, so the one
@@ -2398,8 +2448,8 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findInstanceFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       try {
         await waitForProbe(wire, claude.id, 0);
@@ -2427,7 +2477,7 @@ describe("logging a runner's provider instance in", () => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const other = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       const intruder = await greet(harness.base, other.credential);
       try {
@@ -2459,8 +2509,8 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findInstanceFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       try {
         await waitForProbe(wire, claude.id, 0);
@@ -2493,8 +2543,8 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findInstanceFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       const login = { instanceId: claude.id, runnerId: joined.runnerId, wire };
       const sentinel = { instanceId: codex.id, runnerId: joined.runnerId, wire };
@@ -2529,8 +2579,8 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findInstanceFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       try {
         await waitForProbe(wire, claude.id, 0);
@@ -2579,7 +2629,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       const login = { instanceId: claude.id, runnerId: joined.runnerId, wire };
       try {
@@ -2612,7 +2662,7 @@ describe("logging a runner's provider instance in", () => {
       async (harness) => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
-        const claude = await findInstanceFor(harness.base, token, "claude-code");
+        const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
         const { wire } = await greet(harness.base, joined.credential);
         const login = { instanceId: claude.id, runnerId: joined.runnerId, wire };
         try {
@@ -2639,8 +2689,8 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findInstanceFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       const login = { instanceId: claude.id, runnerId: joined.runnerId, wire };
       try {
@@ -2675,8 +2725,8 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findInstanceFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       try {
         await waitForProbe(wire, claude.id, 0);
@@ -2711,8 +2761,8 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findInstanceFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       try {
         await waitForProbe(wire, claude.id, 0);
@@ -2741,7 +2791,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const first = await greet(harness.base, joined.credential);
       const requestId = await startDeviceLogin(harness, token, {
         instanceId: claude.id,
@@ -2776,7 +2826,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2805,7 +2855,7 @@ describe("logging a runner's provider instance in", () => {
       async (harness) => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
-        const claude = await findInstanceFor(harness.base, token, "claude-code");
+        const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
         const { wire } = await greet(harness.base, joined.credential);
         try {
           const response = await startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2823,11 +2873,11 @@ describe("logging a runner's provider instance in", () => {
     );
   });
 
-  it("rejects a provider this runner build has no adapter for, before asking the runner", async () => {
+  it("rejects a harness this runner build has no adapter for, before asking the runner", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const codex = await findInstanceFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const response = await startLogin(harness.base, token, codex.id, joined.runnerId);
@@ -2844,7 +2894,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const wire = await dialRunnerSocket(harness.base, joined.credential);
       try {
         const response = await startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2861,7 +2911,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const starting = startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2912,7 +2962,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const starting = startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2966,7 +3016,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findInstanceFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const pending = submitCode(harness.base, token, claude.id, {

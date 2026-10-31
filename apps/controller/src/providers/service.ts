@@ -1,10 +1,10 @@
 /**
- * The provider instance operations. An instance is a row plus its provider
+ * The provider instance operations. An instance is a row plus its harness
  * definition: `displayName` and `declared` are added when the row is read,
  * never copied into the row, so they cannot go stale.
  *
- * A row whose provider this build does not have is not listed and cannot be
- * read, but the row is kept, so a later build that has the provider again
+ * A row whose harness this build does not have is not listed and cannot be
+ * read, but the row is kept, so a later build that has the harness again
  * finds it.
  *
  * A method that takes only an id does not decode it again: the transport has
@@ -20,12 +20,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import {
-  decodeAgainst,
-  listSecretFields,
-  excludeSecretFields,
-  type ProviderDefinition,
-} from "@hercule/plugin-host";
+import { decodeAgainst, listSecretFields, excludeSecretFields } from "@hercule/plugin-host";
 import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hercule/protocol";
 import {
   createInvalidStateError,
@@ -50,7 +45,7 @@ import {
 import { currentStamp, requireGrant } from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { PluginHost } from "../plugins";
+import { PluginHost, type RegisteredHarness } from "../plugins";
 import {
   buildProviderInstanceOwner,
   Secrets,
@@ -114,7 +109,7 @@ const ProbeInput = Schema.Struct({ runnerId: Id, instanceId: Id });
 
 export type ProbeInput = Schema.Schema.Type<typeof ProbeInput>;
 
-const InstallInput = Schema.Struct({ runnerId: Id, providerId: Schema.String });
+const InstallInput = Schema.Struct({ runnerId: Id, harnessId: Schema.String });
 
 export type InstallInput = Schema.Schema.Type<typeof InstallInput>;
 
@@ -160,14 +155,14 @@ const describeLoginFailure = (answer: LoginAnswer): string =>
   answer._tag === "loginFailed" ? answer.message : "the login did not return a URL";
 
 /**
- * Validates a config against the provider's schema, and fails with every
+ * Validates a config against the harness's schema, and fails with every
  * error at once, so a form can show each message under its own field. The
  * schema excludes the secret fields: those are stored in the secrets table,
  * so a secret written into the config is an unknown key and is rejected by
  * name.
  */
 const readConfig = (
-  definition: ProviderDefinition,
+  definition: RegisteredHarness,
   config: Schema.Json,
 ): Effect.Effect<void, Validation> =>
   Effect.asVoid(
@@ -188,7 +183,7 @@ const make = Effect.gen(function* () {
   const secrets = yield* Secrets;
 
   const definitions = Effect.map(
-    host.providers(),
+    host.harnesses(),
     (registered) => new Map(registered.map((definition) => [definition.id, definition])),
   );
 
@@ -199,7 +194,7 @@ const make = Effect.gen(function* () {
    * never what it is.
    */
   const listInstanceSecretFields = (
-    definition: ProviderDefinition,
+    definition: RegisteredHarness,
     stored: ReadonlyArray<SecretNameRef>,
   ): ProviderInstance["secretFields"] =>
     listSecretFields(definition.configSchema).map((field) => ({
@@ -209,7 +204,7 @@ const make = Effect.gen(function* () {
 
   const buildProviderInstance = (
     stored: StoredInstance,
-    definition: ProviderDefinition,
+    definition: RegisteredHarness,
     snapshots: ReadonlyArray<StoredSnapshot>,
     held: ReadonlyArray<SecretNameRef>,
   ): ProviderInstance => ({
@@ -226,7 +221,7 @@ const make = Effect.gen(function* () {
         harnessVersion: snapshot.harnessVersion,
         versionVerdict: computeVersionVerdict(
           snapshot.harnessVersion,
-          findVersionFloor(stored.providerId),
+          findVersionFloor(stored.harnessId),
         ),
         auth: snapshot.auth,
         models: snapshot.models,
@@ -246,7 +241,7 @@ const make = Effect.gen(function* () {
       stored.map((row) => row.id),
     );
     return stored.flatMap((row) => {
-      const definition = known.get(row.providerId);
+      const definition = known.get(row.harnessId);
       return definition === undefined
         ? []
         : [buildProviderInstance(row, definition, snapshots, held.get(row.id) ?? [])];
@@ -256,7 +251,7 @@ const make = Effect.gen(function* () {
   /**
    * Reads one instance without a grant check, because the calling operation
    * has already checked its grant. Fails with `NotFound` if there is no such
-   * instance, or if this build does not have its provider.
+   * instance, or if this build does not have its harness.
    */
   const readInstanceOrFail = (
     id: string,
@@ -267,7 +262,7 @@ const make = Effect.gen(function* () {
       const snapshots = yield* instances.listSnapshots(id);
       const held = yield* secrets.refs(OWNER_KIND, [id]);
       const found = Option.flatMap(stored, (row) =>
-        Option.map(Option.fromNullishOr(known.get(row.providerId)), (definition) =>
+        Option.map(Option.fromNullishOr(known.get(row.harnessId)), (definition) =>
           buildProviderInstance(row, definition, snapshots, held.get(id) ?? []),
         ),
       );
@@ -277,15 +272,24 @@ const make = Effect.gen(function* () {
       });
     });
 
-  const readProviderDefinitionOrFail = (
+  /**
+   * Returns the definition of the registered harness with this qualified id.
+   * Fails with `Validation` when no plugin registered it, and the message
+   * lists the ids that are registered, so a caller who wrote a bare name such
+   * as `codex` sees the qualified one to use.
+   */
+  const readHarnessDefinitionOrFail = (
     id: string,
-  ): Effect.Effect<ProviderDefinition, Validation | SqlError> =>
+  ): Effect.Effect<RegisteredHarness, Validation | SqlError> =>
     Effect.flatMap(definitions, (known) => {
       const definition = known.get(id);
       return definition === undefined
         ? Effect.fail(
             createValidationError([
-              { path: ["providerId"], message: `no plugin registered the provider ${id}` },
+              {
+                path: ["harnessId"],
+                message: `no plugin registered the harness ${id}; the registered harnesses are ${[...known.keys()].join(", ")}`,
+              },
             ]),
           )
         : Effect.succeed(definition);
@@ -300,11 +304,11 @@ const make = Effect.gen(function* () {
 
   const validateRunnerCanDrive = (
     runnerId: string,
-    providerId: string,
+    harnessId: string,
     field: string,
   ): Effect.Effect<void, AskError> =>
     Effect.flatMap(readRunnerOrFail(runnerId), (runner) =>
-      requireAdapter(runner, providerId, field),
+      requireAdapter(runner, harnessId, field),
     );
 
   const askRunner = (
@@ -354,7 +358,7 @@ const make = Effect.gen(function* () {
           createDecodeValidationError,
         );
         const instance = yield* readInstanceOrFail(id);
-        yield* validateRunnerCanDrive(runnerId, instance.providerId, "runnerId");
+        yield* validateRunnerCanDrive(runnerId, instance.harnessId, "runnerId");
         const requestId = crypto.randomUUID();
         // Expected before the runner is asked, because a device login that
         // fails at once can report its end before this fiber reads the answer.
@@ -364,7 +368,7 @@ const make = Effect.gen(function* () {
         yield* probes.expectLoginEnd(runnerId, id, requestId);
         const answer = yield* askRunner(
           runnerId,
-          { _tag: "loginStart", requestId, instanceId: id, providerId: instance.providerId },
+          { _tag: "loginStart", requestId, instanceId: id, harnessId: instance.harnessId },
           yield* ProviderLoginDeadline,
         ).pipe(Effect.onError(() => probes.forgetLoginEnd(runnerId, requestId)));
         if (answer._tag !== "loginUrl") {
@@ -407,7 +411,7 @@ const make = Effect.gen(function* () {
           createDecodeValidationError,
         );
         const instance = yield* readInstanceOrFail(id);
-        yield* validateRunnerCanDrive(runnerId, instance.providerId, "runnerId");
+        yield* validateRunnerCanDrive(runnerId, instance.harnessId, "runnerId");
         const answer = yield* askRunner(
           runnerId,
           { _tag: "loginCode", requestId: crypto.randomUUID(), instanceId: id, code },
@@ -491,7 +495,7 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Installs a provider's harness on a runner, and returns the runner. The
+     * Installs a harness on a runner, and returns the runner. The
      * runner reports its facts before it reports that the install finished,
      * so the returned runner is up to date. Every instance is then probed on
      * that runner, because a newly installed harness has never been probed.
@@ -499,14 +503,17 @@ const make = Effect.gen(function* () {
     installHarness: (input: InstallInput): Effect.Effect<RunnerDetail, AskError> =>
       Effect.gen(function* () {
         yield* requireGrant("runner.installHarness");
-        const { runnerId, providerId } = yield* Effect.mapError(
+        const { runnerId, harnessId } = yield* Effect.mapError(
           decodeInstall(input),
           createDecodeValidationError,
         );
-        yield* validateRunnerCanDrive(runnerId, providerId, "providerId");
+        // The registry is checked first: an id no plugin registered gets the
+        // list of registered ids, not a message about the runner's build.
+        yield* readHarnessDefinitionOrFail(harnessId);
+        yield* validateRunnerCanDrive(runnerId, harnessId, "harnessId");
         const answer = yield* connections.asked(
           runnerId,
-          { _tag: "installRequest", requestId: crypto.randomUUID(), providerId },
+          { _tag: "installRequest", requestId: crypto.randomUUID(), harnessId },
           HARNESS_INSTALL_DEADLINE,
         );
         if (Option.isNone(answer) || answer.value._tag !== "installResult") {
@@ -525,27 +532,27 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Creates a second account on a provider, or the first account on a
-     * provider the boot did not seed. Returns the new instance.
+     * Creates a second instance of a harness, or the first instance of a
+     * harness the boot did not seed. Returns the new instance.
      */
     create: (input: ProviderInstanceCreateInput): Effect.Effect<ProviderInstance, CreateError> =>
       Effect.gen(function* () {
         yield* requireGrant("provider.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
-        const definition = yield* readProviderDefinitionOrFail(decoded.providerId);
+        const definition = yield* readHarnessDefinitionOrFail(decoded.harnessId);
         yield* readConfig(definition, decoded.config);
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             // Inside the transaction, so two concurrent calls cannot give a
-            // single-account provider two instances.
+            // single-account harness two instances.
             if (!definition.supportsMultipleInstances) {
               const existing = yield* instances.list();
-              if (existing.some((row) => row.providerId === definition.id)) {
+              if (existing.some((row) => row.harnessId === definition.id)) {
                 return yield* Effect.fail(
                   createValidationError([
                     {
-                      path: ["providerId"],
+                      path: ["harnessId"],
                       message: `${definition.displayName} supports only one account, and one already exists`,
                     },
                   ]),
@@ -559,7 +566,7 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "provider.created",
               actor: yield* currentStamp,
-              payload: { instanceId: stored.id, providerId: stored.providerId },
+              payload: { instanceId: stored.id, harnessId: stored.harnessId },
               record: { topic: "provider", id: stored.id },
               at,
             });
@@ -591,7 +598,7 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             const before = yield* readInstanceOrFail(id);
             if (patch.config !== undefined) {
-              yield* Effect.flatMap(readProviderDefinitionOrFail(before.providerId), (definition) =>
+              yield* Effect.flatMap(readHarnessDefinitionOrFail(before.harnessId), (definition) =>
                 readConfig(definition, patch.config as Schema.Json),
               );
             }
@@ -616,8 +623,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Deletes an instance and its stored credentials. It reads the row, not
-     * the full instance, so an instance whose provider this build no longer
-     * has can still be deleted. If this was the provider's only instance, the
+     * the full instance, so an instance whose harness this build no longer
+     * has can still be deleted. If this was the harness's only instance, the
      * next boot creates a new default one.
      */
     delete: (id: Id): Effect.Effect<Record<string, never>, Exclude<WriteError, Validation>> =>
@@ -651,7 +658,7 @@ const make = Effect.gen(function* () {
             yield* audit.append({
               kind: "provider.deleted",
               actor: yield* currentStamp,
-              payload: { instanceId: id, providerId: stored.providerId, name: stored.name },
+              payload: { instanceId: id, harnessId: stored.harnessId, name: stored.name },
               record: { topic: "provider", id },
               at,
             });

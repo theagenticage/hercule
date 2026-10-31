@@ -503,7 +503,7 @@ describe("a grant decided with outcome session", () => {
         {
           name: "deleter",
           systemPrompt: "You delete tasks.",
-          instanceId: findInstanceId(arranged, "full-provider"),
+          instanceId: findInstanceId(arranged, "harnesses/full"),
           permissionProfileId: (await createProfile(arranged, "deleter", ["task.delete"])).id,
         },
         arranged.token,

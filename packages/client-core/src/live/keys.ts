@@ -577,7 +577,7 @@ export const buildQueryKeys = (
     return [queryKeys.plugins(), queryKeys.connection(), ...SIGNAL_DESCRIBE_KEYS];
   }
   // Provider instances are read as one list (there is one per shipped
-  // provider), so the whole list is refetched whichever instance changed.
+  // harness), so the whole list is refetched whichever instance changed.
   // The controller's own read is refetched too: whether a text generation
   // can run now depends on which runners are logged in to which instance.
   if (topic === "provider") return [queryKeys.providers(), queryKeys.controller()];

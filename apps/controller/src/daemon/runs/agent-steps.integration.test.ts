@@ -18,7 +18,7 @@ import {
   type ActionStepStart,
   type ControllerToRunner,
   type FrameCarryingInput,
-  type ProviderEvent,
+  type HarnessEvent,
   type SessionInput,
   type SessionStart,
   type WorkspaceStepOutcome,
@@ -28,7 +28,7 @@ import { send } from "../../http/testing";
 import { inputRepository } from "../../sessions";
 import { Live } from "../sessions";
 import { WORKSPACE_ACTION_IDS } from "../../plugins";
-import { buildProviderDefinition, createPluginFixture } from "../../plugins/testing";
+import { buildHarnessDefinition, createPluginFixture } from "../../plugins/testing";
 import {
   buildCreateStep,
   findStepRecords,
@@ -104,8 +104,8 @@ const STEP_INPUT_FIXED =
 
 /**
  * Runs `body` against a controller with one runner that hosts the test
- * provider, so an Agent on it can run. `plugins` are loaded beside the
- * provider, and the other options go to the controller unchanged.
+ * harness, so an Agent on it can run. `plugins` are loaded beside the
+ * harness, and the other options go to the controller unchanged.
  */
 const withAgentStepFleet = (
   body: (arranged: Arranged) => Promise<void>,
@@ -118,8 +118,8 @@ const withAgentStepFleet = (
   withFleet(body, {
     plugins: [
       createPluginFixture({
-        id: "providers",
-        definitions: [buildProviderDefinition("test-provider")],
+        id: "harnesses",
+        definitions: [buildHarnessDefinition("test")],
       }).plugin,
       ...plugins,
     ],
@@ -188,7 +188,7 @@ const createSessionPlayer = () => {
       sessionId,
       at,
       ...event,
-    } as ProviderEvent);
+    } as HarnessEvent);
   };
   const turnId = (key: StepKey) => `${key.stepId}-${String(key.iteration)}`;
   const player = {
@@ -197,7 +197,7 @@ const createSessionPlayer = () => {
     reportStarted: (wire: Wire, sessionId: string): void =>
       report(wire, sessionId, {
         _tag: "session.started",
-        providerRefs: { nativeSessionId: `native-${sessionId}` },
+        harnessRefs: { nativeSessionId: `native-${sessionId}` },
       }),
     /** Reports that the turn of a step key has started. */
     startTurn: (wire: Wire, sessionId: string, key: StepKey): void =>
@@ -1088,7 +1088,7 @@ describe("agent steps over the runner socket", () => {
             {
               sessionId: takenSession,
               nativeSessionId: `native-${takenSession}`,
-              instanceId: findInstanceId(arranged, "test-provider"),
+              instanceId: findInstanceId(arranged, "harnesses/test"),
             },
           ],
         });
@@ -1333,7 +1333,7 @@ describe("agent steps over the runner socket", () => {
               {
                 sessionId,
                 nativeSessionId: `native-${sessionId}`,
-                instanceId: findInstanceId(arranged, "test-provider"),
+                instanceId: findInstanceId(arranged, "harnesses/test"),
               },
             ],
           });

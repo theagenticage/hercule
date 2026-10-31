@@ -296,7 +296,7 @@ export default tseslint.config(
       "apps/web/src/routeTree.gen.ts",
       "apps/desktop/src/renderer/routeTree.gen.ts",
       "apps/desktop/out/**",
-      "apps/runner/src/providers/codex/generated/**",
+      "apps/runner/src/harnesses/codex/generated/**",
       "/hercule",
     ],
   },

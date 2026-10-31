@@ -7,7 +7,7 @@
  * `sessions.integration.test.ts`, over a real socket.
  */
 import { describe, expect, it } from "vitest";
-import type { ProviderEvent } from "@hercule/protocol";
+import type { HarnessEvent } from "@hercule/protocol";
 import type { SessionRequest } from "@hercule/contract";
 import {
   DELTA_FLUSH_BYTES,
@@ -35,7 +35,7 @@ const turnCompleted: RequestEvent = {
 
 const exited: RequestEvent = { ...base, _tag: "session.exited", reason: "stopped" };
 
-const buildDelta = (itemId: string, text: string): ProviderEvent => ({
+const buildDelta = (itemId: string, text: string): HarnessEvent => ({
   ...base,
   _tag: "content.delta",
   turnId: TURN,
@@ -44,7 +44,7 @@ const buildDelta = (itemId: string, text: string): ProviderEvent => ({
   delta: text,
 });
 
-const buildCompletedItem = (itemId: string): ProviderEvent => ({
+const buildCompletedItem = (itemId: string): HarnessEvent => ({
   ...base,
   _tag: "item.completed",
   turnId: TURN,
@@ -80,7 +80,7 @@ const listTexts = (folded: Folded): ReadonlyArray<string> =>
 
 /** Folds a list of events in order, and fails the test if the fold skips one. */
 const applyEvents = (
-  events: ReadonlyArray<readonly [number, ProviderEvent]>,
+  events: ReadonlyArray<readonly [number, HarnessEvent]>,
   from: Tracked = startTracking({ lastSeq: 0, base: 0 }),
 ): { readonly state: Tracked; readonly folds: ReadonlyArray<Folded> } => {
   let state = from;
@@ -98,7 +98,7 @@ describe("merging deltas", () => {
   it("keeps two stream kinds on one item apart", () => {
     const { folds } = applyEvents([
       [1, buildDelta("i1", "said")],
-      [2, { ...buildDelta("i1", "thought"), streamKind: "reasoning_text" } as ProviderEvent],
+      [2, { ...buildDelta("i1", "thought"), streamKind: "reasoning_text" } as HarnessEvent],
       [3, buildCompletedItem("i1")],
     ]);
 
@@ -176,7 +176,7 @@ describe("merging deltas", () => {
 
 describe("every other event", () => {
   it("is written as its own row, verbatim", () => {
-    const usage: ProviderEvent = {
+    const usage: HarnessEvent = {
       ...base,
       _tag: "session.usage.updated",
       usage: { inputTokens: 10, outputTokens: 20 },
@@ -196,7 +196,7 @@ describe("attributeEvent", () => {
 });
 
 describe("a subagent's events", () => {
-  const ofSubagent = <E extends ProviderEvent>(event: E): E => ({ ...event, subagentId: "a1" });
+  const ofSubagent = <E extends HarnessEvent>(event: E): E => ({ ...event, subagentId: "a1" });
 
   it("are held apart from the session's own deltas on the same item id", () => {
     const { folds, state } = applyEvents([

@@ -5,11 +5,11 @@
  *
  * - `off`: nothing runs.
  * - A chosen instance and model: exactly that. It is never replaced by
- *   another provider, so a user who chose Codex never has a call quietly go
+ *   another harness, so a user who chose Codex never has a call quietly go
  *   to Claude.
- * - `automatic` (the default when the setting is unset): the first provider in
- *   `AUTOMATIC_PROVIDER_ORDER` that has an instance logged in on a runner
- *   that could make the call, whose model list there holds the provider's
+ * - `automatic` (the default when the setting is unset): the first harness in
+ *   `AUTOMATIC_HARNESS_ORDER` that has an instance logged in on a runner
+ *   that could make the call, whose model list there holds the harness's
  *   suggested text generation model. Choosing the model is visible, not
  *   hidden: Settings shows what `automatic` resolves to.
  *
@@ -37,11 +37,15 @@ import { runnerRepository, type PlacementCandidate } from "../runners";
 import { Settings } from "../settings";
 
 /**
- * The providers `automatic` tries, best first. The order is a decision of the
- * controller, not of a provider, so a plugin cannot move itself to the front.
- * Each provider names its own suggested model on its definition.
+ * The harnesses `automatic` tries, best first, by qualified id. The order is a decision of the
+ * controller, not of a harness, so a plugin cannot move itself to the front.
+ * Each harness names its own suggested model on its definition.
  */
-const AUTOMATIC_PROVIDER_ORDER: ReadonlyArray<string> = ["codex", "pi", "claude-code"];
+const AUTOMATIC_HARNESS_ORDER: ReadonlyArray<string> = [
+  "codex/codex",
+  "pi/pi",
+  "claude-code/claude-code",
+];
 
 /**
  * What the setting resolves to now:
@@ -155,18 +159,18 @@ const make = Effect.gen(function* () {
   );
 
   /**
-   * Finds the first instance, in provider order, that a runner able to make
-   * the call has logged in with its provider's suggested model.
+   * Finds the first instance, in harness order, that a runner able to make
+   * the call has logged in with its harness's suggested model.
    */
   const resolveAutomatic: Effect.Effect<TextGenerationChoice, SqlError> = Effect.gen(function* () {
     const capable = yield* readCapableRunnerIds;
-    const definitions = yield* host.providers();
+    const definitions = yield* host.harnesses();
     const all = yield* instances.list();
     const snapshots = yield* instances.snapshots();
-    for (const providerId of AUTOMATIC_PROVIDER_ORDER) {
-      const model = definitions.find((one) => one.id === providerId)?.suggestedTextGenerationModel;
+    for (const harnessId of AUTOMATIC_HARNESS_ORDER) {
+      const model = definitions.find((one) => one.id === harnessId)?.suggestedTextGenerationModel;
       if (model === undefined) continue;
-      for (const instance of all.filter((one) => one.providerId === providerId)) {
+      for (const instance of all.filter((one) => one.harnessId === harnessId)) {
         const runnerIds = listRunnersOffering(capable, snapshots, instance.id, model);
         if (runnerIds.length > 0) return { _tag: "resolved", instance, model, runnerIds } as const;
       }

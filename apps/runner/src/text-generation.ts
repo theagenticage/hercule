@@ -1,6 +1,6 @@
 /**
  * The runner's side of a text generation (spec 06 section 14): finds the
- * provider adapter and its binary, gives the call a scratch directory of its
+ * harness adapter and its binary, gives the call a scratch directory of its
  * own, stops the call at its deadline, and turns every way it can end into one
  * `TextGenerationOutcome`. An adapter does only the work specific to its
  * harness.
@@ -19,10 +19,10 @@ import {
 } from "@hercule/protocol";
 import {
   describeMissingAdapter,
-  type ProviderAdapter,
-  type ProviderRunnerContext,
-} from "./providers";
-import { truncateMessage } from "./providers/text";
+  type HarnessAdapter,
+  type HarnessRunnerContext,
+} from "./harnesses";
+import { truncateMessage } from "./harnesses/text";
 import { describeCause } from "./report";
 
 /** The message given when a harness ended a call without giving a usable one. */
@@ -40,14 +40,14 @@ const INVALID_OUTPUT_REASON = "the model's answer does not match the output sche
 export interface TextGeneratorOptions {
   /** The directory each call makes its scratch directory in. The runner deletes leftovers at start. */
   readonly scratchDir: string;
-  /** Finds the adapter for a provider id, or undefined when this build has none. */
-  readonly findAdapter: (providerId: string) => ProviderAdapter | undefined;
+  /** Finds the adapter for a harness id, or undefined when this build has none. */
+  readonly findAdapter: (harnessId: string) => HarnessAdapter | undefined;
   /** Builds the context of one provider instance, with the binary the runner found for the adapter. */
   readonly buildContext: (
-    adapter: ProviderAdapter,
+    adapter: HarnessAdapter,
     instanceId: string,
     secrets: Readonly<Record<string, string>>,
-  ) => ProviderRunnerContext;
+  ) => HarnessRunnerContext;
   /** How long a call may run before the runner stops it and answers `timeout`. */
   readonly deadline: Duration.Duration;
 }
@@ -128,9 +128,9 @@ export const makeTextGenerator = (
 
   const generate = (request: TextGenerationRequest) =>
     Effect.gen(function* () {
-      const adapter = options.findAdapter(request.providerId);
+      const adapter = options.findAdapter(request.harnessId);
       if (adapter === undefined) {
-        return buildFailedOutcome(describeMissingAdapter(request.providerId));
+        return buildFailedOutcome(describeMissingAdapter(request.harnessId));
       }
       const context = options.buildContext(adapter, request.instanceId, request.secrets);
       const binary = context.binary;

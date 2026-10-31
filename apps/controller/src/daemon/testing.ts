@@ -28,7 +28,7 @@ import { github } from "@hercule/plugin-github";
 import { withTransaction } from "../db";
 import { appendIngestedEvent } from "../events";
 import { get, post, type ServerHarness } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { createPluginFixture, buildHarnessDefinition } from "../plugins/testing";
 import {
   spawnThreadWithGrants,
   at,
@@ -87,7 +87,7 @@ export const UNKNOWN_FUNCTION = 'shout(event.kind) == "X"';
  */
 export const READS_RAW = "event.raw != null";
 
-export const PROVIDER = buildProviderDefinition("full-provider", { token: "t" });
+export const HARNESS = buildHarnessDefinition("full", { token: "t" });
 
 export const FACTS: RunnerFacts = {
   os: "darwin",
@@ -95,8 +95,8 @@ export const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["full-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["harnesses/full"],
   identityPort: 4939,
 };
 
@@ -105,7 +105,7 @@ export const MODELS: ReadonlyArray<ModelDescriptor> = [
 ];
 
 export const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({ id: "providers", definitions: [PROVIDER] }).plugin,
+  createPluginFixture({ id: "harnesses", definitions: [HARNESS] }).plugin,
   github,
 ];
 
@@ -215,7 +215,7 @@ export const spawnSubscriber = (arranged: Arranged, name: string): Promise<Spawn
 
 /**
  * Spawns a Thread that cannot be resumed once it exits: the fake runner never
- * reports a provider-native session for it, so it has no transcript.
+ * reports a harness-native session for it, so it has no transcript.
  */
 export const spawnStrandedThread = async (
   arranged: Arranged,

@@ -26,7 +26,7 @@ describe("the access-mode menu", () => {
     },
   ];
 
-  it("lists the modes with their meaning, checks the current one, and keeps a mode the provider lacks pickable", async () => {
+  it("lists the modes with their meaning, checks the current one, and keeps a mode the harness lacks pickable", async () => {
     const onPick = vi.fn<(mode: AccessMode) => void>();
     render(<AccessModeMenu value="approval-required" rows={ROWS} onPick={onPick} />);
 

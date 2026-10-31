@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import type { ProviderDefinition } from "@hercule/plugin-host";
+import type { HarnessDefinition } from "@hercule/plugin-host";
 import type { Assistant, Conversation, ProviderInstance } from "@hercule/contract";
 import {
   completeSetup,
@@ -22,13 +22,13 @@ import {
   type ServerHarness,
 } from "../http/testing";
 import { uuidFromString, withTransaction } from "../db";
-import { buildProviderDefinition, createPluginFixture } from "../plugins/testing";
+import { buildHarnessDefinition, createPluginFixture } from "../plugins/testing";
 
-/** Three providers, in the order the shipped plugin registry lists the harnesses. */
-const PROVIDERS: ReadonlyArray<ProviderDefinition> = [
-  buildProviderDefinition("claude-provider", { token: "t" }),
-  buildProviderDefinition("codex-provider", { token: "t" }),
-  buildProviderDefinition("pi-provider", { token: "t" }),
+/** Three harnesses, in the order the shipped plugin registry lists the harnesses. */
+const HARNESSES: ReadonlyArray<HarnessDefinition> = [
+  buildHarnessDefinition("claude", { token: "t" }),
+  buildHarnessDefinition("codex", { token: "t" }),
+  buildHarnessDefinition("pi", { token: "t" }),
 ];
 
 /** The system prompt an assistant gets when the create names none. */
@@ -61,7 +61,7 @@ const withAssistants = (body: (arranged: Arranged) => Promise<void>): Promise<vo
       const token = await completeSetup(harness.base);
       await body({ harness, token });
     },
-    { plugins: [createPluginFixture({ id: "providers", definitions: PROVIDERS }).plugin] },
+    { plugins: [createPluginFixture({ id: "harnesses", definitions: HARNESSES }).plugin] },
   );
 
 const requestCreate = (arranged: Arranged, fields: Record<string, unknown>): Promise<Response> =>
@@ -122,7 +122,7 @@ const listInstancesOldestFirst = async (
   const response = await get(arranged.harness.base, "/api/v1/providers", arranged.token);
   expect(response.status, await response.clone().text()).toBe(200);
   const instances = (await response.json()) as ReadonlyArray<ProviderInstance>;
-  expect(instances).toHaveLength(PROVIDERS.length);
+  expect(instances).toHaveLength(HARNESSES.length);
   return [...instances].sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
   );
@@ -251,16 +251,16 @@ describe("assistant.create", () => {
     });
   });
 
-  it("skips an instance of a provider this build no longer carries when it picks the default", async () => {
+  it("skips an instance of a harness this build no longer carries when it picks the default", async () => {
     await withAssistants(async (arranged) => {
       const [oldest, next] = await listInstancesOldestFirst(arranged);
-      // A row left behind by a provider plugin that was removed: no session
+      // A row left behind by a harness plugin that was removed: no session
       // could start on it, so the default must not be this instance.
       await Effect.runPromise(
         Effect.orDie(
           withTransaction(
             arranged.harness.sql,
-            arranged.harness.sql`UPDATE provider_instances SET provider_id = 'retired-provider'
+            arranged.harness.sql`UPDATE provider_instances SET provider_id = 'retired-harness'
                                WHERE id = ${uuidFromString(oldest!.id)}`,
           ),
         ),

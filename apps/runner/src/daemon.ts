@@ -21,7 +21,7 @@ import { makeAttachmentCache, makeAttachmentUploader } from "./attachments";
 import { openFileClock } from "./edit-marks";
 import { serveIdentity } from "./identity";
 import { probeFacts, thisMachine } from "./probe";
-import { providerLogins } from "./providers";
+import { harnessLogins } from "./harnesses";
 import { sessions } from "./sessions";
 import { makeSessionSkillsFolders } from "./skills";
 import { HERCULE_SKILL, SESSION_ORIENTATION } from "./sessions/skill";
@@ -172,7 +172,7 @@ export const runDaemon = (
       const probe = probeFacts(thisMachine, identityPort);
       const headroom = readMachineHeadroom(home);
       // Everything this machine stores for its controller lives in this
-      // directory. So when the machine joins again, every provider login,
+      // directory. So when the machine joins again, every harness login,
       // workspace and cache stays behind with the old runner identity.
       const storageDir = joinPath(locateRunnerDir(home), pin.storageDirectory);
       // No other user on the machine may read a session's workspace or the
@@ -291,7 +291,7 @@ export const runDaemon = (
             socketPath,
             credentials,
             githubTokenCopies,
-            providerLogins,
+            harnessLogins,
             sessions,
             binDir,
             herculeTool,

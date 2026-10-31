@@ -16,7 +16,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { MAX_EDITED_FILES, type ProviderEvent, type RunnerToController } from "@hercule/protocol";
+import { MAX_EDITED_FILES, type HarnessEvent, type RunnerToController } from "@hercule/protocol";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -60,8 +60,8 @@ const write = (repository: { readonly dir: string }, name: string, content = "x\
 const commit = (repository: { readonly dir: string }, ...args: ReadonlyArray<string>) =>
   runGitOrThrow(repository.dir, "-c", "commit.gpgsign=false", "commit", ...args);
 
-/** Builds a provider event from the fields the watch reads. */
-const buildEvent = (fields: object) => fields as unknown as ProviderEvent;
+/** Builds a harness event from the fields the watch reads. */
+const buildEvent = (fields: object) => fields as unknown as HarnessEvent;
 
 const itemStarted = (sessionId: string, itemId: string, kind = "command_execution") =>
   buildEvent({ _tag: "item.started", sessionId, itemId, kind });
@@ -265,7 +265,7 @@ const start = async (
     writeStartMark(sessionMarksDirs.get(sessionId)!, { toolUseId: itemId, shellCommand });
   };
   const listMarkFiles = (sessionId: string) => readdirSync(sessionMarksDirs.get(sessionId)!);
-  const observe = (event: ProviderEvent) => Effect.runSync(collectLogs(watch.observeEvent(event)));
+  const observe = (event: HarnessEvent) => Effect.runSync(collectLogs(watch.observeEvent(event)));
   const remove = (sessionId: string) => watch.removeSession(sessionId);
   /** Completes an item, then waits for the clock, so later writes are outside its window. */
   const complete = (

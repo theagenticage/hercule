@@ -17,7 +17,7 @@ import {
   type AccessMode,
   type DisallowedTool,
   type ModelSelection,
-  type ProviderEvent,
+  type HarnessEvent,
   type SubagentId,
 } from "@hercule/protocol";
 import {
@@ -63,7 +63,7 @@ const decodeSessionLibrarySkills = Schema.decodeUnknownEffect(
  * that is true when the session can be resumed. All of these must hold:
  *
  * - the session has exited
- * - its provider-native transcript is known
+ * - its harness-native transcript is known
  * - its runner is not retired
  * - its workspace is ready (see `buildReadyClause`)
  * - it answers no assistant's conversation, or that conversation still
@@ -165,13 +165,13 @@ export interface StoredSession {
    */
   readonly conversationDeleted: boolean;
   /**
-   * The provider behind the session's instance, and the tool families its
-   * spec disallowed. Both are used to work out whether the provider enforces
+   * The harness behind the session's instance, and the tool families its
+   * spec disallowed. Both are used to work out whether the harness enforces
    * the restriction. They are read on every read, not stored, because the
-   * adapter in a later binary may enforce what this one ignores. `providerId`
+   * adapter in a later binary may enforce what this one ignores. `harnessId`
    * is `null` once the instance is deleted.
    */
-  readonly providerId: string | null;
+  readonly harnessId: string | null;
   readonly disallowedTools: ReadonlyArray<DisallowedTool>;
 }
 
@@ -213,7 +213,7 @@ export interface NewSession {
 
 /**
  * What a session may do: the access mode it asked for, the one it runs under
- * after the provider's fallback, and the permission profile its token is
+ * after the harness's fallback, and the permission profile its token is
  * bound to.
  */
 export interface SessionAccess {
@@ -254,7 +254,7 @@ interface SessionRow {
   readonly conversation_id: Uint8Array | null;
   readonly run_id: Uint8Array | null;
   readonly step_id: string | null;
-  readonly provider_id: string | null;
+  readonly harness_id: string | null;
   /** The spec's disallowed tool families as a JSON array, or null for none. */
   readonly disallowed_tools: string | null;
   readonly instance_id: Uint8Array;
@@ -305,9 +305,9 @@ const buildColumnList = (): string =>
   "id, kind, title, role, permission_profile_id, agent_id, conversation_id, run_id, step_id, instance_id, runner_id, " +
   "workspace_id, project_id, " +
   "github_connection_id, requested_access_mode, " +
-  // Both are read to compute `unenforced`: the provider behind the instance,
+  // Both are read to compute `unenforced`: the harness behind the instance,
   // and the tool families this session's spec disallowed.
-  "(SELECT provider_id FROM provider_instances WHERE id = sessions.instance_id) AS provider_id, " +
+  "(SELECT provider_id FROM provider_instances WHERE id = sessions.instance_id) AS harness_id, " +
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
   "open_requests, usage, usage_process, tool_calls, created_at, started_at, exited_at, exit_reason, " +
@@ -378,7 +378,7 @@ const toSession = (row: SessionRow): StoredSession => ({
   reopenedAt: row.reopened_at,
   inputWaiting: row.input_waiting === 1,
   conversationDeleted: row.conversation_deleted === 1,
-  providerId: row.provider_id,
+  harnessId: row.harness_id,
   disallowedTools:
     row.disallowed_tools === null
       ? []
@@ -441,7 +441,7 @@ export interface QueuedSession {
   readonly spec: string;
   readonly checkoutBranch: string | null;
   readonly githubConnectionId: string | null;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly config: unknown;
   /** The Agent the session was spawned from; `null` for a Thread. */
   readonly agentId: string | null;
@@ -466,7 +466,7 @@ export interface IngestState {
 export interface StoredStreamRow {
   readonly position: number;
   readonly at: string;
-  readonly event: ProviderEvent;
+  readonly event: HarnessEvent;
 }
 
 export interface TranscriptPageRequest {
@@ -1044,7 +1044,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const id = uuidFromString(sessionId);
-        const event: ProviderEvent = {
+        const event: HarnessEvent = {
           _tag: "runtime.warning",
           eventId: crypto.randomUUID(),
           sessionId,
@@ -1372,7 +1372,7 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Stores the provider-native id a runner reported for one of its sessions.
+     * Stores the harness-native id a runner reported for one of its sessions.
      * The runner and the instance are both in the WHERE clause, because a
      * runner may report only on the sessions placed on it, and only for the
      * instance those sessions were opened against.
@@ -1392,7 +1392,7 @@ const make = Effect.gen(function* () {
     /**
      * Returns up to `limit` of this runner's oldest queued sessions, with what
      * the start frame needs: the exact spec each was queued with, and its
-     * provider. The provider is joined rather than read per row, so dispatch
+     * harness. The harness is joined rather than read per row, so dispatch
      * needs one statement. `after` continues an earlier batch from where it
      * stopped, in queue order, so a caller that skips rows never reads them
      * again.
@@ -1409,7 +1409,7 @@ const make = Effect.gen(function* () {
           readonly spec: string;
           readonly checkout_branch: string | null;
           readonly github_connection_id: Uint8Array | null;
-          readonly provider_id: string;
+          readonly harness_id: string;
           readonly config: string;
           readonly agent_id: Uint8Array | null;
           readonly conversation_id: Uint8Array | null;
@@ -1424,7 +1424,7 @@ const make = Effect.gen(function* () {
                  -- would change the branch under whatever the user has done in
                  -- that checkout since.
                  CASE WHEN s.started_at IS NULL THEN s.checkout_branch END AS checkout_branch,
-                 s.github_connection_id, pi.provider_id, pi.config, s.agent_id,
+                 s.github_connection_id, pi.provider_id AS harness_id, pi.config, s.agent_id,
                  s.conversation_id, s.model_selection, s.run_id, s.step_id
           FROM sessions s JOIN provider_instances pi ON pi.id = s.instance_id
           WHERE s.runner_id = ${uuidFromString(runnerId)} AND s.status = 'queued'
@@ -1447,7 +1447,7 @@ const make = Effect.gen(function* () {
             checkoutBranch: row.checkout_branch,
             githubConnectionId:
               row.github_connection_id === null ? null : uuidToString(row.github_connection_id),
-            providerId: row.provider_id,
+            harnessId: row.harness_id,
             config: JSON.parse(row.config) as unknown,
             agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
             conversationId: row.conversation_id === null ? null : uuidToString(row.conversation_id),

@@ -10,7 +10,7 @@
  * session in place.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { ProviderEvent } from "@hercule/protocol";
+import type { HarnessEvent } from "@hercule/protocol";
 import { get } from "../http/testing";
 import {
   WAIT_DEADLINE_MS,
@@ -44,7 +44,7 @@ const listCompletedTurns = async (
   );
   expect(response.status, await response.clone().text()).toBe(200);
   const page = (await response.json()) as {
-    items: ReadonlyArray<{ position: number; event: ProviderEvent }>;
+    items: ReadonlyArray<{ position: number; event: HarnessEvent }>;
   };
   return page.items.flatMap((row) =>
     row.event._tag === "turn.completed" ? [row.event.turnId] : [],
@@ -80,7 +80,7 @@ describe("a message after the runner unloaded the idle session", () => {
         sessionId: session.id,
         at,
         _tag: "session.started",
-        providerRefs: { nativeSessionId: "N" },
+        harnessRefs: { nativeSessionId: "N" },
       });
       await waitForSession(arranged, session.id, (one) => one.status === "busy");
       await runTurn(arranged, session.id, 2, "t2", ["answer two"]);

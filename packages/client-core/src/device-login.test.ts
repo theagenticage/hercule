@@ -7,7 +7,7 @@ import {
   startProviderLogin,
   type DeviceLogin,
 } from "./device-login";
-import { BARE, buildInstance, buildSnapshot } from "./providers.testing";
+import { BARE, buildInstance, buildSnapshot, CODEX_IDENTITY } from "./providers.testing";
 
 const STARTED_AT = "2026-09-05T09:10:00.000Z";
 const LATER = "2026-09-05T09:12:00.000Z";
@@ -30,10 +30,8 @@ describe("startProviderLogin", () => {
   const LOGIN_PATH = `POST /api/v1/providers/${INSTANCE_ID}/login`;
   const QUERY_PATH = "GET /api/v1/providers";
   const STARTED = { url: "https://vendor.example", userCode: "ABCD-1234" };
-  const buildCodex = (snapshots: Parameters<typeof buildInstance>[2]) => ({
-    ...buildInstance("codex", "Codex", snapshots),
-    id: INSTANCE_ID,
-  });
+  const buildCodex = (snapshots: Parameters<typeof buildInstance>[1]) =>
+    buildInstance({ ...CODEX_IDENTITY, id: INSTANCE_ID }, snapshots);
   const connect = (handlers: Parameters<typeof createApiStub>[0]) => {
     const api = createApiStub(handlers);
     return { api, client: createClient({ baseUrl: "http://127.0.0.1:4937", fetch: api.fetch }) };
@@ -86,7 +84,7 @@ describe("startProviderLogin", () => {
 describe("decideDeviceLoginStep", () => {
   it("waits while the only snapshot is the one from before the login", () => {
     const stale = buildSnapshot({ probedAt: STARTED_AT });
-    const instances = [buildInstance("codex", "Codex", [stale])];
+    const instances = [buildInstance(CODEX_IDENTITY, [stale])];
     expect(decideDeviceLoginStep(LOGIN, instances, 5)).toEqual({
       kind: "waiting",
       minutesLeft: 5,
@@ -96,17 +94,17 @@ describe("decideDeviceLoginStep", () => {
 
   it("waits while a fresh snapshot still shows the harness logged out", () => {
     const fresh = buildSnapshot({ probedAt: LATER, auth: { status: "unauthenticated" } });
-    const instances = [buildInstance("codex", "Codex", [fresh])];
+    const instances = [buildInstance(CODEX_IDENTITY, [fresh])];
     expect(decideDeviceLoginStep(LOGIN, instances, 5)).toMatchObject({ kind: "waiting" });
   });
 
   it("is done once a fresh snapshot shows the harness logged in", () => {
-    const instances = [buildInstance("codex", "Codex", [buildSnapshot({ probedAt: LATER })])];
+    const instances = [buildInstance(CODEX_IDENTITY, [buildSnapshot({ probedAt: LATER })])];
     expect(decideDeviceLoginStep(LOGIN, instances, 5)).toEqual({ kind: "done" });
   });
 
   it("is done for an instance that had no snapshot when the login started", () => {
-    const instances = [buildInstance("codex", "Codex", [buildSnapshot({ probedAt: LATER })])];
+    const instances = [buildInstance(CODEX_IDENTITY, [buildSnapshot({ probedAt: LATER })])];
     const login = { ...LOGIN, probedAtStart: null };
     expect(decideDeviceLoginStep(login, instances, 5)).toEqual({ kind: "done" });
   });
@@ -115,7 +113,7 @@ describe("decideDeviceLoginStep", () => {
     // The controller also probes when a runner connects, and the old
     // credential still checks as logged in, so a fresh logged-in snapshot
     // does not prove that this login ended.
-    const instances = [buildInstance("codex", "Codex", [buildSnapshot({ probedAt: LATER })])];
+    const instances = [buildInstance(CODEX_IDENTITY, [buildSnapshot({ probedAt: LATER })])];
     const login = { ...LOGIN, loggedInAtStart: true };
     expect(decideDeviceLoginStep(login, instances, 5)).toEqual({
       kind: "waiting",
@@ -126,22 +124,22 @@ describe("decideDeviceLoginStep", () => {
 
   it("ignores a fresh snapshot from another runner", () => {
     const elsewhere = buildSnapshot({ probedAt: LATER, runnerId: "another-runner" });
-    const instances = [buildInstance("codex", "Codex", [LOGGED_OUT, elsewhere])];
+    const instances = [buildInstance(CODEX_IDENTITY, [LOGGED_OUT, elsewhere])];
     expect(decideDeviceLoginStep(LOGIN, instances, 5)).toMatchObject({ kind: "waiting" });
   });
 
   it("has expired once no minute is left", () => {
-    const instances = [buildInstance("codex", "Codex", [LOGGED_OUT])];
+    const instances = [buildInstance(CODEX_IDENTITY, [LOGGED_OUT])];
     expect(decideDeviceLoginStep(LOGIN, instances, 0)).toEqual({ kind: "expired" });
   });
 
   it("is done rather than expired when the logged-in snapshot arrives late", () => {
-    const instances = [buildInstance("codex", "Codex", [buildSnapshot({ probedAt: LATER })])];
+    const instances = [buildInstance(CODEX_IDENTITY, [buildSnapshot({ probedAt: LATER })])];
     expect(decideDeviceLoginStep(LOGIN, instances, 0)).toEqual({ kind: "done" });
   });
 
   it("keeps waiting when the runner's build gave no expiry", () => {
-    const instances = [buildInstance("codex", "Codex", [LOGGED_OUT])];
+    const instances = [buildInstance(CODEX_IDENTITY, [LOGGED_OUT])];
     expect(decideDeviceLoginStep(LOGIN, instances, null)).toEqual({
       kind: "waiting",
       minutesLeft: null,

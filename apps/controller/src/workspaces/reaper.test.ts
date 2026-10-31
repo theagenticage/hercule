@@ -67,7 +67,7 @@ const spawnAutomaticIn = async (
     {
       name: `sweep-worker-${count}`,
       systemPrompt: "Complete this automatic work.",
-      instanceId: findInstanceId(arranged, "test-provider"),
+      instanceId: findInstanceId(arranged, "harnesses/test"),
       permissionProfileId: profile.id,
     },
     arranged.token,

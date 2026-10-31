@@ -1,7 +1,7 @@
 /**
- * Checks whether a runner can be asked to do anything for a provider. Install
+ * Checks whether a runner can be asked to do anything for a harness. Install
  * and login both fail here, before a frame is sent, because the runner's hello
- * already listed the providers its build has an adapter for.
+ * already listed the harnesses its build has an adapter for.
  */
 import * as Effect from "effect/Effect";
 import {
@@ -18,24 +18,24 @@ const NOT_ONLINE = "that runner is not connected, so it cannot be asked anything
 export const requireOnline = (runner: RunnerDetail): Effect.Effect<void, InvalidState> =>
   runner.connectivity === "online" ? Effect.void : Effect.fail(createInvalidStateError(NOT_ONLINE));
 
-export const describeNoAdapter = (providerId: string): string =>
-  `no adapter for ${providerId} in this runner build`;
+export const describeNoAdapter = (harnessId: string): string =>
+  `no adapter for ${harnessId} in this runner build`;
 
 /**
  * Checks that the runner is connected and its build has an adapter for this
- * provider. Fails with `InvalidState` when the runner is not connected, and
+ * harness. Fails with `InvalidState` when the runner is not connected, and
  * with a `Validation` error on `field` when it has no adapter.
  */
 export const requireAdapter = (
   runner: RunnerDetail,
-  providerId: string,
+  harnessId: string,
   /** The field of the caller's input that the validation error points at. */
   field: string,
 ): Effect.Effect<void, InvalidState | Validation> =>
   Effect.flatMap(requireOnline(runner), () =>
-    (runner.facts?.adapters ?? []).includes(providerId)
+    (runner.facts?.adapters ?? []).includes(harnessId)
       ? Effect.void
       : Effect.fail(
-          createValidationError([{ path: [field], message: describeNoAdapter(providerId) }]),
+          createValidationError([{ path: [field], message: describeNoAdapter(harnessId) }]),
         ),
   );

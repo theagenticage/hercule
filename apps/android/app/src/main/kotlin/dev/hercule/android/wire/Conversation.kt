@@ -42,9 +42,9 @@ data class ConversationMessage(
     val text: String,
     /** The session that wrote a reply or a notice; null on owner messages. */
     val sessionId: String?,
-    /** The provider's turn id; set only on replies. */
+    /** The harness's turn id; set only on replies. */
     val turnId: String?,
-    /** The provider's item id; set only on replies. */
+    /** The harness's item id; set only on replies. */
     val itemId: String?,
     /** Who wrote it: `user`, `session:<id>` or `system`. */
     val actor: String,

@@ -29,7 +29,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { ProviderEvent } from "@hercule/protocol";
+import type { HarnessEvent } from "@hercule/protocol";
 import { buildSessionStamp } from "../actor";
 import { readAssistantTexts, SessionObserver, type StoredSession } from "../sessions";
 import {
@@ -85,7 +85,7 @@ export const makeAssistantSessionObserver = Effect.gen(function* () {
    */
   const readReplyTexts = (
     session: StoredSession,
-    event: ProviderEvent,
+    event: HarnessEvent,
     answered: AnsweredConversation,
   ): Effect.Effect<ReadonlyArray<ReplyText>, SqlError> =>
     Effect.gen(function* () {

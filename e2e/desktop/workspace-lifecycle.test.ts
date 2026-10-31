@@ -37,7 +37,7 @@ import {
 
 /**
  * Runs the production workspace manager and session placement in a Bun child.
- * Only provider events are synthetic: this fixture never launches a harness.
+ * Only harness events are synthetic: this fixture never launches a harness.
  * Both runner modes use this same transport, with separate scratch storage.
  */
 const RUNNER_SOURCE = String.raw`
@@ -101,10 +101,10 @@ const handle = async (frame) => {
       const resolved = await Effect.runPromise(resolveSessionContext(frame, machine, "fixture"));
       const session = { id: frame.sessionId, instanceId: frame.spec.instanceId, workspaceId: frame.spec.workspaceId, seq: 0, turn: null };
       sessions.set(session.id, session);
-      reportEvent(session, { _tag: "session.started", providerRefs: { nativeSessionId: session.id } });
+      reportEvent(session, { _tag: "session.started", harnessRefs: { nativeSessionId: session.id } });
       await observe(session);
       input(session, frame);
-      log({ kind: "session", id: session.id, cwd: resolved.ctx.cwd, resumed: frame.providerRefs !== undefined });
+      log({ kind: "session", id: session.id, cwd: resolved.ctx.cwd, resumed: frame.harnessRefs !== undefined });
       return;
     }
     case "sessionInput": return input(sessions.get(frame.sessionId), frame);
@@ -129,7 +129,7 @@ const dial = () => new Promise((done, fail) => {
   next.onopen = () => {
     socket = next;
     send({ _tag: "runnerHello", protocolVersion: PROTOCOL_VERSION, capabilities: [WORKSPACE_LIFECYCLE_CAPABILITY], binaryVersion: "fixture", nonce: randomBytes(16).toString("base64"),
-    facts: { os: options.os, arch: "arm64", totalMemoryBytes: 64 * 1024 ** 3, docker: false, toolchains: [], providers: [{ name: "claude", present: true, path: "/fixture/never-executed" }], adapters: ["claude-code"], identityPort: options.identityPort } });
+    facts: { os: options.os, arch: "arm64", totalMemoryBytes: 64 * 1024 ** 3, docker: false, toolchains: [], harnesses: [{ name: "claude", present: true, path: "/fixture/never-executed" }], adapters: ["claude-code/claude-code"], identityPort: options.identityPort } });
   };
   next.onmessage = ({ data }) => {
     const frame = JSON.parse(String(data));
@@ -370,7 +370,7 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     await expect
       .poll(async () =>
         (await client.provider.query())
-          .find((instance) => instance.providerId === "claude-code")
+          .find((instance) => instance.harnessId === "claude-code/claude-code")
           ?.snapshots.some(
             (snapshot) => snapshot.runnerId === runnerId && snapshot.auth.status === "ok",
           ),
@@ -524,7 +524,7 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
   expect(runGit(remoteSource, "rev-parse", "HEAD")).toBe(remoteCommit);
   expect(hashUserFiles(source)).toBe(sourceHash);
   const instanceId = (await client.provider.query()).find(
-    (instance) => instance.providerId === "claude-code",
+    (instance) => instance.harnessId === "claude-code/claude-code",
   )!.id;
   const spawnThread = (startingRevision: StartingRevision, runnerId = local.runnerId) =>
     client.session.spawn({

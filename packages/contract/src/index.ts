@@ -461,7 +461,7 @@ export {
   RunnerFacts,
   RunnerFilter,
   RunnerLifecycle,
-  RunnerProvider,
+  HarnessBinary,
   RunnerRetireInput,
   RunnerToolchain,
   RunnerUpdateInput,

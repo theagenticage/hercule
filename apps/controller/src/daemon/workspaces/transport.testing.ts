@@ -134,7 +134,7 @@ export const connectProofRunner = async (
         break;
       case "sessionStart":
         if (options.finishSessions === false) break;
-        // Filesystem proofs finish the synthetic session without executing a provider or spending tokens.
+        // Filesystem proofs finish the synthetic session without executing a harness or spending tokens.
         write({
           _tag: "sessionInputResult",
           requestId: frame.requestId,
@@ -165,8 +165,8 @@ export const connectProofRunner = async (
         nonce: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64"),
         facts: {
           ...FACTS,
-          providers: [{ name: "claude", present: true, path: "/fixture/claude" }],
-          adapters: ["claude-code"],
+          harnesses: [{ name: "claude", present: true, path: "/fixture/claude" }],
+          adapters: ["claude-code/claude-code"],
         },
       });
       opened();

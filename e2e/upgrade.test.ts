@@ -30,8 +30,23 @@
  * stored sorted, that the paused trigger reads as paused manually, that
  * each spawned trigger effect started its run when it matched, and that the
  * trigger with the over-limit bound reads with the clamped bound while its
- * workflow is marked invalid. It is
- * not a matrix of session states or provider behaviour.
+ * workflow is marked invalid. Migration 94 qualifies the bare harness ids
+ * the edge binary stored: the fixture holds the three Provider Instances the
+ * edge boot seeds (`claude-code`, `codex` and `pi`) beside the one created
+ * here, a runner row with the facts as the edge binary stored them (a
+ * `providers` list and bare `adapters`), and a `session.started` event and
+ * a user-message row of the session, whose `providerRefs` key the migration
+ * renames. After the
+ * upgrade the instances read with qualified harness ids, and none is added
+ * by the boot's default instances, the runner's facts read with `harnesses`
+ * and qualified `adapters`, and both rows read with `harnessRefs`, the
+ * user message still being found by the transcript search. The
+ * runner row is written beside the real runner because that one reports
+ * fresh facts as soon as it reconnects. An edge database that already ran
+ * migration 94 is seeded in the new spelling instead (`--harness`, qualified
+ * ids, `harnesses`, `harnessRefs`), and the checks then show only that the
+ * rows survive. It is
+ * not a matrix of session states or harness behaviour.
  *
  * A live session needs a logged-in harness, which CI does not have and which
  * sits outside the two-minute added-CI budget. The session and its transcript
@@ -340,11 +355,74 @@ interface SeededInput {
   readonly attachments: ReadonlyArray<{ readonly id: string }>;
 }
 
-interface SeededProvider {
+/**
+ * A Provider Instance as the edge binary prints it: it names its harness
+ * `providerId` and, once edge has migration 94, `harnessId`.
+ */
+interface EdgeProvider {
   readonly id: string;
-  readonly providerId: string;
+  readonly providerId?: string;
+  readonly harnessId?: string;
   readonly name: string;
 }
+
+/** A Provider Instance as the upgraded binary prints it. */
+interface SeededProvider {
+  readonly id: string;
+  readonly harnessId: string;
+  readonly name: string;
+}
+
+/** The migration that qualifies harness ids and renames `providers` and `providerRefs`. */
+const QUALIFIED_HARNESS_IDS_MIGRATION = 94;
+
+/** The harness ids the edge boot seeds an instance for, as an edge before migration 94 stores them. */
+const EDGE_HARNESS_IDS = ["claude-code", "codex", "pi"] as const;
+
+/** The same harnesses by their qualified ids, which migration 94 stores. */
+const QUALIFIED_HARNESS_IDS = ["claude-code/claude-code", "codex/codex", "pi/pi"] as const;
+
+/** The native session id in the seeded session's `session.started` event. */
+const SEEDED_NATIVE_SESSION_ID = "upgrade-fixture-native";
+
+/**
+ * The text of the seeded user-message row. Codex and pi store `providerRefs`
+ * on such a row, and the transcript search indexes its text, so the search
+ * must still find it after migration 94 rewrites the row.
+ */
+const SEEDED_USER_MESSAGE = "Please recap the quarterly roadmap handshake.";
+
+/** The runner row the fixture writes beside the real one. It never connects. */
+const SEEDED_RUNNER_ID = "0199e0e7-0000-7000-8000-0000000009a1";
+
+/** The harness binaries in the seeded runner's facts, which the migration keeps as they are. */
+const SEEDED_HARNESS_BINARIES = [
+  { name: "claude", present: true, path: "/usr/local/bin/claude" },
+  { name: "codex", present: false },
+] as const;
+
+const SEEDED_RUNNER_FACTS_BASE = {
+  os: "linux",
+  arch: "x64",
+  totalMemoryBytes: 17_179_869_184,
+  docker: true,
+  toolchains: [{ name: "node", version: "v22.1.0", path: "/usr/local/bin/node" }],
+  identityPort: 8080,
+} as const;
+
+/** The facts of `SEEDED_RUNNER_ID` as an edge before migration 94 stores them. */
+const SEEDED_RUNNER_FACTS_BEFORE = {
+  ...SEEDED_RUNNER_FACTS_BASE,
+  providers: SEEDED_HARNESS_BINARIES,
+  adapters: [...EDGE_HARNESS_IDS],
+} as const;
+
+/** The same facts after migration 94, which is how they read after the upgrade. */
+const SEEDED_RUNNER_FACTS_AFTER = {
+  ...SEEDED_RUNNER_FACTS_BASE,
+  harnesses: SEEDED_HARNESS_BINARIES,
+  adapters: [...QUALIFIED_HARNESS_IDS],
+} as const;
 
 let state: TemporaryHome | undefined;
 let edgeBinary: string | undefined;
@@ -454,7 +532,28 @@ function summarizeMessage(message: SeededMessage): {
 }
 
 function summarizeProvider(provider: SeededProvider): SeededProvider {
-  return { id: provider.id, providerId: provider.providerId, name: provider.name };
+  return { id: provider.id, harnessId: provider.harnessId, name: provider.name };
+}
+
+/** Returns the harness id of an instance the edge binary printed, whichever field names it. */
+function readEdgeHarnessId(provider: EdgeProvider): string {
+  const harnessId = provider.harnessId ?? provider.providerId;
+  if (harnessId === undefined) throw new Error(`instance ${provider.id} names no harness`);
+  return harnessId;
+}
+
+/**
+ * Summarizes a Provider Instance the edge binary printed, naming its harness
+ * by the qualified id it has after migration 94: `codex` becomes `codex/codex`,
+ * and an id that is already qualified stays.
+ */
+function summarizeEdgeProvider(provider: EdgeProvider): SeededProvider {
+  const harnessId = readEdgeHarnessId(provider);
+  return {
+    id: provider.id,
+    harnessId: harnessId.includes("/") ? harnessId : `${harnessId}/${harnessId}`,
+    name: provider.name,
+  };
 }
 
 /** Returns the session's fields that survive the upgrade unchanged. */
@@ -501,6 +600,8 @@ function persistRepresentativeSession(options: {
   readonly instanceId: string;
   readonly runnerId: string;
   readonly permissionProfileId: string;
+  /** The key the edge binary stores the harness's own ids under on `session.started`. */
+  readonly refsKey: "providerRefs" | "harnessRefs";
 }): string {
   const sessionId = Bun.randomUUIDv7();
   const at = new Date().toISOString();
@@ -512,7 +613,13 @@ function persistRepresentativeSession(options: {
     timeouts: { inactivityMs: 60_000, absoluteMs: 3_600_000 },
   });
   const events: Array<Record<string, unknown>> = [
-    { _tag: "session.started", eventId: "e-start", sessionId, at },
+    {
+      _tag: "session.started",
+      eventId: "e-start",
+      sessionId,
+      at,
+      [options.refsKey]: { nativeSessionId: SEEDED_NATIVE_SESSION_ID },
+    },
   ];
   /** One item started in each turn, by the session's own agent unless a subagent is named. */
   const startedItems: ReadonlyArray<{ readonly kind: string; readonly subagentId?: string }> = [
@@ -558,6 +665,17 @@ function persistRepresentativeSession(options: {
   events.push(
     {
       _tag: "item.started",
+      eventId: "user-message",
+      sessionId,
+      at,
+      turnId: "user-turn",
+      itemId: "user-message",
+      kind: "user_message",
+      detail: { text: SEEDED_USER_MESSAGE },
+      [options.refsKey]: { nativeSessionId: SEEDED_NATIVE_SESSION_ID },
+    },
+    {
+      _tag: "item.started",
       eventId: "subagent-read",
       sessionId,
       at,
@@ -595,7 +713,7 @@ function persistRepresentativeSession(options: {
         at,
         at,
         at,
-        "upgrade-fixture-native",
+        SEEDED_NATIVE_SESSION_ID,
       );
     const insertEvent = database.query(
       `INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
@@ -623,6 +741,37 @@ function persistRepresentativeSession(options: {
     database.close();
   }
   return sessionId;
+}
+
+/**
+ * Writes a second, offline runner with `facts` into the database
+ * the edge binary created. The real runner cannot hold the fixture: it
+ * reports new facts as soon as it reconnects to the upgraded controller, which
+ * replaces what the migration rewrote.
+ */
+function persistRunnerWithEdgeFacts(
+  home: string,
+  facts: typeof SEEDED_RUNNER_FACTS_BEFORE | typeof SEEDED_RUNNER_FACTS_AFTER,
+): void {
+  const database = new Database(join(home, "data", "hercule.db"));
+  try {
+    const at = new Date().toISOString();
+    database
+      .query(
+        `INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                              credential_hash, facts, created_at, updated_at)
+         VALUES (?, 'upgrade-fixture-runner', 'offline', 'active', 0, '[]', ?, ?, ?, ?)`,
+      )
+      .run(
+        uuidBlob(SEEDED_RUNNER_ID),
+        "upgrade-fixture-credential-hash",
+        JSON.stringify(facts),
+        at,
+        at,
+      );
+  } finally {
+    database.close();
+  }
 }
 
 /**
@@ -949,21 +1098,44 @@ describe("upgrading from the previous edge release", () => {
 
       const runnerId = await waitForEnrolledRunner(edge);
 
-      const createdProvider = expectJson<SeededProvider>(
+      // The edge database exists now, and a reader does not block the
+      // running controller. Migration 94 changed how the CLI spells a harness.
+      // Once the edge release contains migration 94, delete every branch that
+      // spells the old names: this guard, the `--provider` flag, `providerId`
+      // in `EdgeProvider`, `EDGE_HARNESS_IDS`, `summarizeEdgeProvider`'s
+      // qualifying of a bare id, `SEEDED_RUNNER_FACTS_BEFORE`, and the
+      // `providerRefs` spelling of `refsKey`.
+      const edgeQualified = readMigrationVersion(home) >= QUALIFIED_HARNESS_IDS_MIGRATION;
+      const createdProvider = expectJson<EdgeProvider>(
         await runCli(
-          ["provider", "create", "--provider", "claude-code", "--name", PROVIDER_NAME, "--json"],
+          [
+            "provider",
+            "create",
+            ...(edgeQualified
+              ? ["--harness", "claude-code/claude-code"]
+              : ["--provider", "claude-code"]),
+            "--name",
+            PROVIDER_NAME,
+            "--json",
+          ],
           { ...edge, stdin: "{}" },
         ),
       );
-      expect(createdProvider).toMatchObject({
-        providerId: "claude-code",
-        name: PROVIDER_NAME,
-      });
+      expect(readEdgeHarnessId(createdProvider)).toBe(
+        edgeQualified ? "claude-code/claude-code" : "claude-code",
+      );
+      expect(createdProvider.name).toBe(PROVIDER_NAME);
 
-      const seededProviders = readListedItems<SeededProvider>(
+      const edgeProviders = readListedItems<EdgeProvider>(
         await runCli(["provider", "list", "--json"], edge),
-      )
-        .map(summarizeProvider)
+      );
+      // The edge boot seeds one instance per harness, so all three ids are
+      // stored, bare before migration 94 and qualified after it.
+      expect(new Set(edgeProviders.map(readEdgeHarnessId))).toEqual(
+        new Set(edgeQualified ? QUALIFIED_HARNESS_IDS : EDGE_HARNESS_IDS),
+      );
+      const seededProviders = edgeProviders
+        .map(summarizeEdgeProvider)
         .sort((left, right) => left.id.localeCompare(right.id));
       expect(seededProviders.some((row) => row.id === createdProvider.id)).toBe(true);
 
@@ -1118,8 +1290,13 @@ describe("upgrading from the previous edge release", () => {
         instanceId: createdProvider.id,
         runnerId,
         permissionProfileId: unrestricted.id,
+        refsKey: edgeQualified ? "harnessRefs" : "providerRefs",
       });
 
+      persistRunnerWithEdgeFacts(
+        home,
+        edgeQualified ? SEEDED_RUNNER_FACTS_AFTER : SEEDED_RUNNER_FACTS_BEFORE,
+      );
       const retiredSettingsSeeded = persistRetiredSettings(home);
       const signalSeeded = persistUnsortedSignal(home);
       const inputsSeeded = persistSessionInputs(home, sessionId);
@@ -1235,7 +1412,7 @@ describe("upgrading from the previous edge release", () => {
       );
       expect(readProvider).toMatchObject({
         id: createdProvider.id,
-        providerId: "claude-code",
+        harnessId: "claude-code/claude-code",
         name: PROVIDER_NAME,
       });
       const upgradedProviders = readListedItems<SeededProvider>(
@@ -1243,7 +1420,28 @@ describe("upgrading from the previous edge release", () => {
       )
         .map(summarizeProvider)
         .sort((left, right) => left.id.localeCompare(right.id));
+      // The same instances with qualified ids, and no second set from the
+      // boot's default instances, which would show if migration 94 had not
+      // run before the boot looked for a harness without an instance.
       expect(upgradedProviders).toEqual(seededProviders);
+      expect(new Set(upgradedProviders.map((row) => row.harnessId))).toEqual(
+        new Set(QUALIFIED_HARNESS_IDS),
+      );
+
+      // The stored facts of a runner that has not reconnected: `providers`
+      // is now `harnesses` with the same binaries, the adapters are
+      // qualified, and the other fields are as they were.
+      const upgradedRunner = expectJson<{ facts: unknown }>(
+        await runCli(["runner", "read", SEEDED_RUNNER_ID, "--json"], upgraded),
+      );
+      // The order of `adapters` is not promised and nothing reads it, so the
+      // list is compared as a set and the other fields as they are.
+      const { adapters: upgradedAdapters, ...upgradedFacts } = upgradedRunner.facts as {
+        readonly adapters: ReadonlyArray<string>;
+      };
+      const { adapters: expectedAdapters, ...expectedFacts } = SEEDED_RUNNER_FACTS_AFTER;
+      expect(upgradedFacts).toEqual(expectedFacts);
+      expect(new Set(upgradedAdapters)).toEqual(new Set(expectedAdapters));
 
       const readAssistant = expectJson<{ id: string; mainConversationId: string }>(
         await runCli(["assistant", "read", assistant.id, "--json"], upgraded),
@@ -1292,6 +1490,20 @@ describe("upgrading from the previous edge release", () => {
         summarizeRow,
       );
       expect(upgradedTranscript).toEqual(seededTranscript);
+      // Migration 94 renames `providerRefs` on stored events and keeps its value.
+      const upgradedRows = await readTranscript({ ...upgraded, id: sessionId });
+      const upgradedStart = upgradedRows.find((row) => row.event._tag === "session.started");
+      expect(upgradedStart?.event).toMatchObject({
+        harnessRefs: { nativeSessionId: SEEDED_NATIVE_SESSION_ID },
+      });
+      expect(upgradedStart?.event).not.toHaveProperty("providerRefs");
+      // The same rename on a user message, which is also a search-indexed row.
+      const upgradedUserMessage = upgradedRows.find((row) => row.event["kind"] === "user_message");
+      expect(upgradedUserMessage?.event).toMatchObject({
+        detail: { text: SEEDED_USER_MESSAGE },
+        harnessRefs: { nativeSessionId: SEEDED_NATIVE_SESSION_ID },
+      });
+      expect(upgradedUserMessage?.event).not.toHaveProperty("providerRefs");
 
       const upgradedInputs = readListedItems<SeededInput>(
         await runCli(["input", "list", sessionId, "--json"], upgraded),
@@ -1361,6 +1573,14 @@ describe("upgrading from the previous edge release", () => {
         ),
       );
       expect(passages).toMatchObject([{ sessionId, excerpt: TURNS[1] }]);
+      // The user message that migration 94 rewrote is found by its text too.
+      const rewrittenPassages = readListedItems<{ sessionId: string; excerpt: string }>(
+        await runCli(
+          ["transcript", "list", "--text", "handshake", "--session", sessionId, "--json"],
+          upgraded,
+        ),
+      );
+      expect(rewrittenPassages).toMatchObject([{ sessionId, excerpt: SEEDED_USER_MESSAGE }]);
 
       // A trigger paused before migration 74 reads as paused manually, and
       // each trigger's spawn bound comes from its source or the default.

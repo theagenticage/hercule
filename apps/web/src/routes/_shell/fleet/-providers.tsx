@@ -40,8 +40,8 @@ export function Providers({
     onSuccess: reread,
   });
   const install = useMutation({
-    mutationFn: (providerId: string) =>
-      client.runner.installHarness({ params: { id: runner.id }, payload: { providerId } }),
+    mutationFn: (harnessId: string) =>
+      client.runner.installHarness({ params: { id: runner.id }, payload: { harnessId } }),
     onSuccess: (updated) => {
       queryClient.setQueryData(queryKeys.runner(runner.id), updated);
       reread();
@@ -77,7 +77,7 @@ export function Providers({
               probe.mutate(row.id);
             }}
             onInstall={() => {
-              install.mutate(row.providerId);
+              install.mutate(row.harnessId);
             }}
             // A login ends with the controller probing the machine, so the
             // new snapshot is already stored and only needs reading.

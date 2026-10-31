@@ -30,7 +30,7 @@ const buildOffer = (field: ProviderSecretField): SecretFieldOffer => ({
 
 export interface ProviderRow {
   readonly id: string;
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly name: string;
   /**
    * Where the runner found the harness's binary, such as
@@ -89,10 +89,10 @@ export const buildProviderRows = (
 ): ReadonlyArray<ProviderRow> =>
   instances.map((instance) => {
     const snapshot = instance.snapshots.find((each) => each.runnerId === runner.id);
-    const adapter = (runner.facts?.adapters ?? []).includes(instance.providerId);
+    const adapter = (runner.facts?.adapters ?? []).includes(instance.harnessId);
     // The binary name the runner reports from its `PATH` is the instance's
     // `binaryName`, so no lookup table is needed.
-    const binary = (runner.facts?.providers ?? []).find(
+    const binary = (runner.facts?.harnesses ?? []).find(
       (each) => each.name === instance.binaryName && each.present,
     );
     const present = binary !== undefined;
@@ -104,7 +104,7 @@ export const buildProviderRows = (
     const usable = reachable && present && adapter;
     return {
       id: instance.id,
-      providerId: instance.providerId,
+      harnessId: instance.harnessId,
       name: instance.displayName,
       path: binary?.path ?? null,
       location: binary?.path ?? (present ? "installed" : adapter ? "not installed" : NO_ADAPTER),

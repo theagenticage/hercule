@@ -4,6 +4,8 @@ The buildable specification for Hercule v1: architecture, domain model, scope, a
 
 **Status:** assembled 2026-08-28. Every decision the map closed is in here. The open questions that assembly surfaced are listed in [16-open-items.md](./16-open-items.md), each either handed to a follow-up ticket on the map, marked as an implementer's choice, or marked as a build-time verification. Implementation can start on any subsystem whose open items are implementer choices only; the ticketed items are amendments, not redesigns.
 
+*(Amended 2026-10-31, [#932](https://github.com/theagenticage/hercule/issues/932).)* The older text of the spec was renamed: where "provider" meant the harness, it now reads "harness", and harness ids are qualified (`claude-code/claude-code`, `codex/codex`, `pi/pi`). Text about Provider Instances still says "provider" until the next ticket replaces them.
+
 ## How to read
 
 Start with [01-overview-and-scope.md](./01-overview-and-scope.md) (what ships, what does not, and a walk of one event through the whole system) and [02-domain-model.md](./02-domain-model.md) (every entity and how they relate). Then read the subsystem you are building. Each document ends with a `## Sources` section naming the tickets and ADRs it consolidates, and a `## Post-v1` section listing what its area deliberately leaves for later and the constraint v1 keeps to make it possible.

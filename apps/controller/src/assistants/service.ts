@@ -11,7 +11,7 @@
  *
  * A create needs only a name. Every other field takes a default from
  * `defaults.ts`, except two that depend on what this controller holds: the
- * provider instance is the oldest one whose provider this build carries, and
+ * provider instance is the oldest one whose harness this build carries, and
  * the permission profile is the shipped `assistant` profile.
  *
  * Every assistant gets its main conversation in the transaction that creates
@@ -117,7 +117,7 @@ const ASSISTANT_DELETED = "the assistant was deleted";
 
 /**
  * The errors every operation can fail with. `SchemaError` comes from the
- * provider catalog, which every operation reads to report `unenforced`.
+ * harness catalog, which every operation reads to report `unenforced`.
  */
 type ReadError = Unauthenticated | Forbidden | SqlError | Schema.SchemaError;
 
@@ -188,7 +188,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* AssistantSessions;
   const sessionService = yield* SessionService;
   const sessionRows = yield* sessionRepository;
-  const { buildAgentRecordComposer, readProviderIdOrFail, validateAgentProfile } =
+  const { buildAgentRecordComposer, readHarnessIdOrFail, validateAgentProfile } =
     yield* buildAgentFieldChecks;
 
   /**
@@ -230,19 +230,19 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns the oldest provider instance whose provider this build carries,
+   * Returns the oldest provider instance whose harness this build carries,
    * the one an assistant uses when its create names none. An instance of a
-   * provider the build no longer carries is skipped, because no session could
+   * harness the build no longer carries is skipped, because no session could
    * start on it. Fails with `InvalidState` when there is none: the user can
    * reach that by deleting every instance.
    */
   const readDefaultInstanceOrFail: Effect.Effect<
-    { readonly id: string; readonly providerId: string },
+    { readonly id: string; readonly harnessId: string },
     InvalidState | SqlError | Schema.SchemaError
   > = Effect.gen(function* () {
-    const carried = new Set((yield* host.providers()).map((definition) => definition.id));
+    const carried = new Set((yield* host.harnesses()).map((definition) => definition.id));
     const [oldest] = (yield* instances.list())
-      .filter((instance) => carried.has(instance.providerId))
+      .filter((instance) => carried.has(instance.harnessId))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
     if (oldest === undefined) {
       return yield* Effect.fail(
@@ -252,7 +252,7 @@ const make = Effect.gen(function* () {
         ),
       );
     }
-    return { id: oldest.id, providerId: oldest.providerId };
+    return { id: oldest.id, harnessId: oldest.harnessId };
   });
 
   /** Records a change to the assistant, so every client showing it reads it again. */
@@ -360,7 +360,7 @@ const make = Effect.gen(function* () {
                 ? yield* readDefaultInstanceOrFail
                 : {
                     id: decoded.instanceId,
-                    providerId: yield* readProviderIdOrFail(decoded.instanceId),
+                    harnessId: yield* readHarnessIdOrFail(decoded.instanceId),
                   };
             const permissionProfileId =
               decoded.permissionProfileId ?? (yield* readDefaultProfileIdOrFail);
@@ -371,7 +371,7 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             const agent = yield* agents.insert({
               kind: "assistant",
-              providerId: instance.providerId,
+              harnessId: instance.harnessId,
               name: decoded.name,
               systemPrompt: decoded.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
               instanceId: instance.id,
@@ -460,7 +460,7 @@ const make = Effect.gen(function* () {
             const { fields: stored } = yield* readAssistantOrFail(id);
             yield* validateScheduleTimezones({ heartbeat, rotation }, stored);
             if (agentEdit.instanceId !== undefined) {
-              yield* readProviderIdOrFail(agentEdit.instanceId);
+              yield* readHarnessIdOrFail(agentEdit.instanceId);
             }
             if (agentEdit.permissionProfileId !== undefined) {
               yield* validateAgentProfile(actor, agentEdit.permissionProfileId);

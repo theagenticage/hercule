@@ -1057,7 +1057,7 @@ export const EFFORT_OPTION: ModelOption = {
  */
 export const FIXTURE_INSTANCE: ProviderInstance = {
   id: INSTANCE_ID,
-  providerId: "claude-code",
+  harnessId: "claude-code/claude-code",
   name: "personal",
   config: {},
   displayName: "Claude Code",
@@ -1145,8 +1145,8 @@ export interface ThreadRecords {
   readonly skills?: readonly SessionSkill[];
 }
 
-/** A provider event, as a transcript row holds it. */
-type ProviderEvent = TranscriptRow["event"];
+/** A harness event, as a transcript row holds it. */
+type HarnessEvent = TranscriptRow["event"];
 
 /** Removes the fields every event has from each event type of `Event`. */
 type OmitEventBase<Event> = Event extends unknown
@@ -1154,11 +1154,11 @@ type OmitEventBase<Event> = Event extends unknown
   : never;
 
 /**
- * A provider event without the fields every event has, which `buildTranscript`
+ * A harness event without the fields every event has, which `buildTranscript`
  * and `buildNextRows` fill in. The specimens' fixtures import it too, as a
  * type only, because this module imports vitest.
  */
-export type EventBody = OmitEventBase<ProviderEvent>;
+export type EventBody = OmitEventBase<HarnessEvent>;
 
 /** One event of a fixture transcript, and how many seconds after the transcript's start it happened. */
 export type TranscriptStep = readonly [seconds: number, event: EventBody];
@@ -1228,7 +1228,7 @@ const runItem = (
   item: {
     readonly turnId: string;
     readonly itemId: string;
-    readonly kind: Extract<ProviderEvent, { _tag: "item.started" }>["kind"];
+    readonly kind: Extract<HarnessEvent, { _tag: "item.started" }>["kind"];
     readonly detail?: Record<string, string>;
     readonly text?: { readonly streamKind: TapItem["streamKind"]; readonly delta: string };
   },
@@ -1528,7 +1528,7 @@ export const THREAD_FIXTURES = {
           _tag: "turn.completed",
           turnId: "turn-1",
           state: "failed",
-          error: "The provider stopped answering: rate limit reached.",
+          error: "The harness stopped answering: rate limit reached.",
         },
       ],
     ]),

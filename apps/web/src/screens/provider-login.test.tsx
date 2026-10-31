@@ -48,7 +48,7 @@ const listSentCodes = (api: ReturnType<typeof stubApi>) =>
 /** Returns the Codex instance as the controller lists it, with `snapshot` as its only snapshot. */
 const buildCodex = (snapshot: object) => ({
   id: INSTANCE,
-  providerId: "codex",
+  harnessId: "codex/codex",
   name: "Codex",
   config: {},
   displayName: "Codex",

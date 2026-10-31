@@ -454,7 +454,7 @@ describe("the runner's user material", () => {
       'import { linkUserMaterial } from "../user-material";\nexport const ctx = linkUserMaterial;\n',
     "sessions/context.test.ts": 'import "../user-material/links";\n',
     "sessions/testing.ts": 'import "../user-material";\n',
-    "providers/claude.ts":
+    "harnesses/claude.ts":
       'import type { Link } from "../user-material";\nexport const link: Link = "";\n',
   };
 
@@ -479,10 +479,10 @@ describe("the runner's user material", () => {
   // dep-lint reports it with.
   it.each([
     [
-      "a provider imports the folder",
-      "providers/claude.ts",
+      "a harness imports the folder",
+      "harnesses/claude.ts",
       'import "../user-material";\n',
-      'providers/claude.ts imports "../user-material"',
+      'harnesses/claude.ts imports "../user-material"',
     ],
     [
       "a file beside the context resolver re-exports a file in it",
@@ -497,10 +497,10 @@ describe("the runner's user material", () => {
       'daemon.ts imports "./user-material/index"',
     ],
     [
-      "a provider imports it at runtime",
-      "providers/codex.ts",
+      "a harness imports it at runtime",
+      "harnesses/codex.ts",
       'export const load = () => import("../user-material");\n',
-      'providers/codex.ts imports "../user-material"',
+      'harnesses/codex.ts imports "../user-material"',
     ],
   ])("fails when %s", async (_, file, body, reported) => {
     const script = await createRunnerRoot({ ...CLEAN_RUNNER, [file]: body });

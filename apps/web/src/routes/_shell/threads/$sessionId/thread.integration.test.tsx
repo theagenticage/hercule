@@ -104,7 +104,7 @@ const buildInstanceSnapshot = (
 
 const INSTANCE_STARTED: ProviderInstance = {
   id: SESSION.instanceId,
-  providerId: "claude-code",
+  harnessId: "claude-code/claude-code",
   secretFields: [],
   name: "personal",
   config: {},
@@ -707,7 +707,7 @@ describe("Thread: transcript", () => {
   });
 
   it("shows the error of a thread that failed to start, with the command as inline code", async () => {
-    const command = "hercule runner install-harness r1 --provider claude-code";
+    const command = "hercule runner install-harness r1 --harness claude-code/claude-code";
     await openApp(buildSession({ status: "exited" }), [
       buildTranscriptRow(0, {
         _tag: "runtime.error",

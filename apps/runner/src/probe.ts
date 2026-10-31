@@ -1,6 +1,6 @@
 /**
  * Probes the facts a runner reports about its machine: OS, memory, tools and
- * provider binaries.
+ * harness binaries.
  *
  * The machine is passed in as a `Machine` instead of being accessed directly.
  * A probe that called `Bun.which` itself could only be tested against the
@@ -9,19 +9,19 @@
 import { arch, platform, totalmem } from "node:os";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import type { ProviderBinary, RunnerFacts, Toolchain } from "@hercule/protocol";
-import { ADAPTER_IDS } from "./providers";
-import { truncateFact } from "./providers/text";
+import type { HarnessBinary, RunnerFacts, Toolchain } from "@hercule/protocol";
+import { ADAPTER_IDS } from "./harnesses";
+import { truncateFact } from "./harnesses/text";
 
 /** Only these two on purpose: any other tool is installed by hand and marked with a label. */
 const TOOLCHAINS = ["git", "gh"] as const;
 
 /**
- * Unlike a missing toolchain, a missing provider binary is still reported, as
+ * Unlike a missing toolchain, a missing harness binary is still reported, as
  * `present: false`. The fleet needs to know which machines can host a
- * provider's sessions and which cannot.
+ * harness's sessions and which cannot.
  */
-const PROVIDER_BINARIES = ["claude", "codex", "pi"] as const;
+const HARNESS_BINARIES = ["claude", "codex", "pi"] as const;
 
 /** Docker is reported as present or absent. The probe never runs it. */
 const DOCKER = "docker";
@@ -88,7 +88,7 @@ export const probeFacts = (machine: Machine, identityPort: number): Effect.Effec
       const found = yield* findToolchain(machine, name);
       if (found !== undefined) toolchains.push(found);
     }
-    const providers: Array<ProviderBinary> = PROVIDER_BINARIES.map((name) => {
+    const harnesses: Array<HarnessBinary> = HARNESS_BINARIES.map((name) => {
       const path = machine.locate(name);
       return path === undefined
         ? { name, present: false }
@@ -100,9 +100,9 @@ export const probeFacts = (machine: Machine, identityPort: number): Effect.Effec
       totalMemoryBytes: totalmem(),
       docker: machine.locate(DOCKER) !== undefined,
       toolchains,
-      providers,
-      // A fact about this build, not about the machine: which provider
-      // binaries this runner can drive when they are installed.
+      harnesses,
+      // A fact about this build, not about the machine: which harnesses
+      // this runner can drive when their binaries are installed.
       adapters: ADAPTER_IDS,
       identityPort,
     };

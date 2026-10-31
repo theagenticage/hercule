@@ -260,12 +260,12 @@ const isClaudeLoggedIn = async (): Promise<boolean> => {
   expect(response.status, body).toBe(200);
   return (
     JSON.parse(body) as ReadonlyArray<{
-      providerId: string;
+      harnessId: string;
       snapshots: ReadonlyArray<{ auth: { status: string } }>;
     }>
   ).some(
     (one) =>
-      one.providerId === "claude-code" &&
+      one.harnessId === "claude-code/claude-code" &&
       one.snapshots.some((snapshot) => snapshot.auth.status === "ok"),
   );
 };

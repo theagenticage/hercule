@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ProviderEvent } from "@hercule/protocol";
+import type { HarnessEvent } from "@hercule/protocol";
 import {
   buildSubagentActivity,
   collectSubagentTree,
@@ -20,10 +20,7 @@ const later = "2026-10-05T10:05:00.000Z";
 const bare = createBareSubagent(SESSION, "a1", base.at);
 
 /** Applies events to a record in order. */
-const applyEvents = (
-  record: StoredSubagent,
-  events: ReadonlyArray<ProviderEvent>,
-): StoredSubagent =>
+const applyEvents = (record: StoredSubagent, events: ReadonlyArray<HarnessEvent>): StoredSubagent =>
   events.reduce((current, event) => computeSubagentAfter(current, event), record);
 
 const itemStarted = (
@@ -38,7 +35,7 @@ const itemStarted = (
     itemId: `i-${kind}`,
     kind,
     detail,
-  }) as ProviderEvent;
+  }) as HarnessEvent;
 
 describe("computeSubagentAfter", () => {
   it("fills empty fields from the introduction and never overwrites one", () => {
@@ -169,7 +166,7 @@ describe("computeSubagentAfter", () => {
   });
 
   it("keeps the latest native usage report through a process exit and a restart", () => {
-    const report = { source: "test.provider", payload: { native: [100, 80, 3], label: "opaque" } };
+    const report = { source: "test.harness", payload: { native: [100, 80, 3], label: "opaque" } };
     const event = {
       ...base,
       _tag: "session.usage.updated",

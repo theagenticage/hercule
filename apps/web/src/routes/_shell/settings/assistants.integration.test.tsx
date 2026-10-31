@@ -37,7 +37,7 @@ const AT = "2026-09-25T09:00:00.000Z";
 
 const buildProviderInstance = (id: string, displayName: string): ProviderInstance => ({
   id,
-  providerId: "claude-code",
+  harnessId: "claude-code/claude-code",
   secretFields: [],
   name: displayName,
   config: {},

@@ -11,7 +11,13 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Profile, ProviderInstance, Runner, SettingsState } from "@hercule/contract";
-import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
+import {
+  BARE,
+  buildInstance,
+  buildSnapshot,
+  CLAUDE_CODE_IDENTITY,
+  CODEX_IDENTITY,
+} from "../providers.testing";
 import {
   buildDraftConfig,
   computeInstanceDefaults,
@@ -64,9 +70,7 @@ const NO_SETTINGS: SettingsState["user"] = {};
 
 describe("findDefaultModel", () => {
   it("returns null when no runner is given, rather than reading the first snapshot", () => {
-    const claude = buildInstance("claude-code", "Claude Code", [
-      buildSnapshotOn(LOCAL.id, [SONNET]),
-    ]);
+    const claude = buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshotOn(LOCAL.id, [SONNET])]);
 
     expect(findDefaultModel(claude, null)).toBeNull();
   });
@@ -77,7 +81,7 @@ describe("computeInstanceDefaults", () => {
     // The local runner is not logged in, so the thread is placed on the remote
     // runner, and the model must come from that runner's catalog, not from
     // whichever snapshot happens to be first.
-    const claude = buildInstance("claude-code", "Claude Code", [
+    const claude = buildInstance(CLAUDE_CODE_IDENTITY, [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [SONNET] }),
       buildSnapshotOn(REMOTE.id, [HAIKU]),
     ]);
@@ -89,7 +93,7 @@ describe("computeInstanceDefaults", () => {
   });
 
   it("prefers the local runner and the catalog's default model", () => {
-    const claude = buildInstance("claude-code", "Claude Code", [
+    const claude = buildInstance(CLAUDE_CODE_IDENTITY, [
       buildSnapshotOn(REMOTE.id, [HAIKU]),
       buildSnapshotOn(LOCAL.id, [OPUS, SONNET]),
     ]);
@@ -101,15 +105,13 @@ describe("computeInstanceDefaults", () => {
   });
 
   it("falls back to the catalog's first model when none is marked default", () => {
-    const claude = buildInstance("claude-code", "Claude Code", [
-      buildSnapshotOn(LOCAL.id, [OPUS, HAIKU]),
-    ]);
+    const claude = buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshotOn(LOCAL.id, [OPUS, HAIKU])]);
 
     expect(computeInstanceDefaults(claude, [LOCAL], LOCAL.id).model).toBe("claude-opus-5");
   });
 
   it("has no runner and no model when no runner is logged in to the instance", () => {
-    const claude = buildInstance("claude-code", "Claude Code", [
+    const claude = buildInstance(CLAUDE_CODE_IDENTITY, [
       buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [SONNET] }),
     ]);
 
@@ -121,10 +123,8 @@ describe("computeInstanceDefaults", () => {
 });
 
 describe("computeThreadDefaults", () => {
-  const claude = buildInstance("claude-code", "Claude Code", [
-    buildSnapshotOn(LOCAL.id, [SONNET, OPUS]),
-  ]);
-  const codex = buildInstance("codex", "Codex", [buildSnapshotOn(LOCAL.id, [HAIKU])]);
+  const claude = buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshotOn(LOCAL.id, [SONNET, OPUS])]);
+  const codex = buildInstance(CODEX_IDENTITY, [buildSnapshotOn(LOCAL.id, [HAIKU])]);
 
   it("prefills from the built-in defaults when no thread setting is stored", () => {
     expect(
@@ -197,7 +197,7 @@ describe("computeThreadDefaults", () => {
 });
 
 describe("buildDraftConfig", () => {
-  const claude = buildInstance("claude-code", "Claude Code", [buildSnapshotOn(LOCAL.id, [SONNET])]);
+  const claude = buildInstance(CLAUDE_CODE_IDENTITY, [buildSnapshotOn(LOCAL.id, [SONNET])]);
   const reads = {
     instances: [claude],
     runners: [LOCAL],

@@ -89,7 +89,7 @@ const spawnFromAgent = async (
     {
       name,
       systemPrompt: "You carry work on.",
-      instanceId: findInstanceId(arranged, "full-provider"),
+      instanceId: findInstanceId(arranged, "harnesses/full"),
       permissionProfileId: profile.id,
     },
     arranged.token,
@@ -103,7 +103,7 @@ const spawnFromAgent = async (
     sessionId: opened.id,
     at,
     _tag: "session.started",
-    providerRefs: { nativeSessionId: "native-1" },
+    harnessRefs: { nativeSessionId: "native-1" },
   });
   return waitForSession(arranged, opened.id, (one) => one.status === "busy");
 };
@@ -188,7 +188,7 @@ describe("the token the controller mints for a session", () => {
         sessionId: session.id,
         at,
         _tag: "session.started",
-        providerRefs: { nativeSessionId: "native-1" },
+        harnessRefs: { nativeSessionId: "native-1" },
       });
       await waitForSession(arranged, session.id, (one) => one.status === "busy");
 

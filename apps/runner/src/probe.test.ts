@@ -6,7 +6,7 @@
  * the machine is passed in: `locate` stands in for the PATH, and `version` for
  * running a binary. That lets one test file cover a machine with no `gh`, a
  * machine whose `git --version` prints something unexpected, and a machine
- * with every provider installed.
+ * with every harness installed.
  *
  * The refresh runs every hour, so it runs on a `TestClock`, like the reconnect
  * loop's tests. The tests check that a report is sent only when a value
@@ -206,24 +206,24 @@ describe("toolchains", () => {
   });
 });
 
-describe("provider binaries", () => {
-  it("lists every known provider, present or not", async () => {
+describe("harness binaries", () => {
+  it("lists every known harness, present or not", async () => {
     const { codex, ...withoutCodex } = FULL;
     expect(codex).toBeDefined();
 
     const facts = await probePrinted(withoutCodex);
-    // Unlike a toolchain, a missing provider is still listed, because the fleet
-    // needs to know which machines can host a provider's sessions.
-    expect(facts.providers).toEqual([
+    // Unlike a toolchain, a missing harness is still listed, because the fleet
+    // needs to know which machines can host a harness's sessions.
+    expect(facts.harnesses).toEqual([
       { name: "claude", present: true, path: "/usr/local/bin/claude" },
       { name: "codex", present: false },
       { name: "pi", present: true, path: "/usr/local/bin/pi" },
     ]);
   });
 
-  it("lists every provider as absent on a machine with none installed", async () => {
+  it("lists every harness as absent on a machine with none installed", async () => {
     const facts = await probePrinted({ git: GIT });
-    expect(facts.providers).toEqual([
+    expect(facts.harnesses).toEqual([
       { name: "claude", present: false },
       { name: "codex", present: false },
       { name: "pi", present: false },
@@ -239,7 +239,7 @@ describe("thisMachine", () => {
     expect(facts.os).toBe(platform());
     expect(facts.arch).toBe(arch());
     expect(facts.totalMemoryBytes).toBe(totalmem());
-    expect(facts.providers.map((one) => one.name)).toEqual(["claude", "codex", "pi"]);
+    expect(facts.harnesses.map((one) => one.name)).toEqual(["claude", "codex", "pi"]);
   });
 });
 
@@ -304,7 +304,7 @@ describe("refreshFacts", () => {
         expect(sent[0]?.toolchains.map((one) => one.name)).toEqual(["git"]);
         // A report holds all the facts, not only the ones that changed.
         expect(sent[0]?.os).toBe(platform());
-        expect(sent[0]?.providers).toHaveLength(3);
+        expect(sent[0]?.harnesses).toHaveLength(3);
 
         // Once the machine stops changing, nothing more is sent. So the probe is
         // compared with the last report sent, not with the hello.
@@ -351,22 +351,30 @@ describe("refreshFacts", () => {
 });
 
 describe("adapters", () => {
-  it("lists the providers this build has an adapter for", async () => {
+  it("lists the harnesses this build has an adapter for", async () => {
     // A fact about the build, not the machine: the list is the same whether
     // the harnesses are installed or not.
-    expect((await probePrinted(FULL)).adapters).toEqual(["claude-code", "codex", "pi"]);
-    expect((await probePrinted({ git: GIT })).adapters).toEqual(["claude-code", "codex", "pi"]);
+    expect((await probePrinted(FULL)).adapters).toEqual([
+      "claude-code/claude-code",
+      "codex/codex",
+      "pi/pi",
+    ]);
+    expect((await probePrinted({ git: GIT })).adapters).toEqual([
+      "claude-code/claude-code",
+      "codex/codex",
+      "pi/pi",
+    ]);
   });
 
-  it("still reports every provider binary and whether it is installed", async () => {
+  it("still reports every harness binary and whether it is installed", async () => {
     const { codex, ...withoutCodex } = FULL;
     expect(codex).toBeDefined();
 
     const facts = await probePrinted(withoutCodex);
-    expect(facts.adapters).toEqual(["claude-code", "codex", "pi"]);
+    expect(facts.adapters).toEqual(["claude-code/claude-code", "codex/codex", "pi/pi"]);
     // Adapters do not replace the binaries: the fleet has to show both that
     // this build can drive Codex and that the machine has no `codex` binary.
-    expect(facts.providers).toEqual([
+    expect(facts.harnesses).toEqual([
       { name: "claude", present: true, path: "/usr/local/bin/claude" },
       { name: "codex", present: false },
       { name: "pi", present: true, path: "/usr/local/bin/pi" },

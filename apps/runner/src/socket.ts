@@ -76,10 +76,10 @@ import {
   describeMissingAdapter,
   buildFailedProbe,
   type InstallOutcome,
-  type ProviderAdapter,
-  type ProviderRunnerContext,
-} from "./providers";
-import type { LoginAnswer, Logins } from "./providers/login";
+  type HarnessAdapter,
+  type HarnessRunnerContext,
+} from "./harnesses";
+import type { LoginAnswer, Logins } from "./harnesses/login";
 import { makeTextGenerator } from "./text-generation";
 import type { Supervising } from "./sessions";
 import {
@@ -156,7 +156,8 @@ export interface ConnectOptions {
   readonly headroom: Effect.Effect<RunnerWatermark, Cause.UnknownError>;
   /**
    * The directory that holds one config directory per provider instance on
-   * this machine. Each instance has its own, so two accounts of one harness
+   * this machine. It keeps the name `providers`, because renaming it would
+   * move the logins stored in it. Each instance has its own, so two accounts of one harness
    * never read each other's credentials, or the user's own.
    */
   readonly providersDir: string;
@@ -194,8 +195,8 @@ export interface ConnectOptions {
   readonly credentials: CredentialRelay;
   /** The GitHub tokens this machine holds for its sessions. They outlive this connection. */
   readonly githubTokenCopies: GithubTokenCopies;
-  /** The provider logins on this machine. They outlive this connection. */
-  readonly providerLogins: Logins;
+  /** The harness logins on this machine. They outlive this connection. */
+  readonly harnessLogins: Logins;
   /**
    * The sessions on this machine. They outlive this connection, and the
    * caller has forked their `watch` already.
@@ -204,7 +205,7 @@ export interface ConnectOptions {
   /** `<home>/runner/bin`, holding the `hercule` symlink every session gets on `PATH`. */
   readonly binDir: string;
   /** How sessions call Hercule as a tool, resolved once at runner start (spec 06 section 9.3). */
-  readonly herculeTool: ProviderRunnerContext["herculeTool"];
+  readonly herculeTool: HarnessRunnerContext["herculeTool"];
   /**
    * Follows a forwarding pointer from a controller that moved. Returns
    * `accepted` when the runner rewrote its controller URL, and this
@@ -417,7 +418,7 @@ export const connect = (
     );
 
     const findBinaryPath = (binaryName: string): string | undefined =>
-      facts.providers.find((provider) => provider.name === binaryName && provider.present)?.path;
+      facts.harnesses.find((harness) => harness.name === binaryName && harness.present)?.path;
 
     /**
      * Builds the context for a probe, login or install of one provider
@@ -425,10 +426,10 @@ export const connect = (
      * keeps its credentials.
      */
     const buildContext = (
-      adapter: ProviderAdapter,
+      adapter: HarnessAdapter,
       instanceId: string,
       secrets: Readonly<Record<string, string>>,
-    ): ProviderRunnerContext => {
+    ): HarnessRunnerContext => {
       const home = joinPath(options.providersDir, instanceId);
       mkdirSync(home, { recursive: true, mode: 0o700 });
       // Probes, logins and installs have no working directory. Only sessions
@@ -551,10 +552,10 @@ export const connect = (
           }),
         );
       return Effect.gen(function* () {
-        const adapter = findAdapter(request.providerId);
+        const adapter = findAdapter(request.harnessId);
         return yield* sendProbeReport(
           adapter === undefined
-            ? buildFailedProbe(null, describeMissingAdapter(request.providerId))
+            ? buildFailedProbe(null, describeMissingAdapter(request.harnessId))
             : yield* adapter.probe(
                 buildContext(adapter, request.instanceId, request.secrets),
                 request.config,
@@ -621,11 +622,11 @@ export const connect = (
           }),
         );
       return Effect.gen(function* () {
-        const install = findAdapter(request.providerId)?.install;
+        const install = findAdapter(request.harnessId)?.install;
         if (install === undefined) {
           return yield* sendInstallResult({
             ok: false,
-            message: describeMissingAdapter(request.providerId),
+            message: describeMissingAdapter(request.harnessId),
           });
         }
         const outcome = yield* install(process.env);
@@ -666,13 +667,13 @@ export const connect = (
 
     const startLogin = (request: LoginStart): Effect.Effect<LoginAnswer> =>
       Effect.suspend(() => {
-        const adapter = findAdapter(request.providerId);
+        const adapter = findAdapter(request.harnessId);
         return adapter === undefined
           ? Effect.succeed<LoginAnswer>({
               _tag: "loginFailed",
-              message: describeMissingAdapter(request.providerId),
+              message: describeMissingAdapter(request.harnessId),
             })
-          : options.providerLogins.start(
+          : options.harnessLogins.start(
               request.requestId,
               request.instanceId,
               adapter,
@@ -777,7 +778,7 @@ export const connect = (
           // read, so the end of a device login is reported only to a
           // controller that lists the frame.
           if (message.capabilities.includes(LOGIN_ENDED_CAPABILITY)) {
-            yield* options.providerLogins
+            yield* options.harnessLogins
               .attachConnection((frame) => write(encodeFrameText(frame)))
               .pipe(Scope.provide(connection));
           }
@@ -837,7 +838,7 @@ export const connect = (
               Effect.forkIn(
                 answerLogin(
                   message.requestId,
-                  options.providerLogins.submit(message.instanceId, message.code),
+                  options.harnessLogins.submit(message.instanceId, message.code),
                 ),
                 connection,
               ),

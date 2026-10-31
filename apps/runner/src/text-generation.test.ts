@@ -21,8 +21,8 @@ import {
   type TextGenerationOutcome,
   type TextGenerationRequest,
 } from "@hercule/protocol";
-import type { ProviderAdapter, ProviderRunnerContext } from "./providers";
-import { NO_CONTROLLER_UPLOADER, waitUntil } from "./providers/testing";
+import type { HarnessAdapter, HarnessRunnerContext } from "./harnesses";
+import { NO_CONTROLLER_UPLOADER, waitUntil } from "./harnesses/testing";
 import { makeTextGenerator } from "./text-generation";
 
 const BINARY = "/usr/local/bin/harness";
@@ -31,7 +31,7 @@ const REQUEST: TextGenerationRequest = {
   _tag: "textGenerationRequest",
   requestId: "request-1",
   instanceId: "instance-1",
-  providerId: "fake",
+  harnessId: "fake",
   config: {},
   secrets: {},
   spec: {
@@ -56,10 +56,10 @@ afterEach(() => {
 });
 
 /** Builds an adapter whose `generateText` is `generateText`; nothing else of it is used. */
-const buildAdapter = (generateText: ProviderAdapter["generateText"]): ProviderAdapter =>
-  ({ providerId: "fake", binaryName: "harness", generateText }) as unknown as ProviderAdapter;
+const buildAdapter = (generateText: HarnessAdapter["generateText"]): HarnessAdapter =>
+  ({ harnessId: "fake", binaryName: "harness", generateText }) as unknown as HarnessAdapter;
 
-const buildContext = (binary: string | undefined): ProviderRunnerContext => ({
+const buildContext = (binary: string | undefined): HarnessRunnerContext => ({
   cwd: null,
   attachmentsDir: null,
   editMarks: null,
@@ -73,12 +73,12 @@ const buildContext = (binary: string | undefined): ProviderRunnerContext => ({
 
 /** Builds the function under test around `adapter`. */
 const buildGenerator = (
-  adapter: ProviderAdapter | undefined,
+  adapter: HarnessAdapter | undefined,
   options: { readonly deadlineMillis?: number; readonly binary?: string | null } = {},
 ) =>
   makeTextGenerator({
     scratchDir,
-    findAdapter: (providerId) => (providerId === "fake" ? adapter : undefined),
+    findAdapter: (harnessId) => (harnessId === "fake" ? adapter : undefined),
     // `null` means a machine without the binary.
     buildContext: () =>
       buildContext(options.binary === null ? undefined : (options.binary ?? BINARY)),
@@ -111,7 +111,7 @@ describe("the outcome of a text generation", () => {
     expect(interrupted).toBe(true);
   });
 
-  it("fails when this build has no adapter for the provider", async () => {
+  it("fails when this build has no adapter for the harness", async () => {
     const generate = buildGenerator(undefined);
 
     const message = readFailedMessage(await Effect.runPromise(generate(REQUEST)));
@@ -215,7 +215,7 @@ describe("the outcome of a text generation", () => {
 describe("the scratch directory of a text generation", () => {
   /** Runs one call with `behaviour` and returns the directory the adapter was given. */
   const runAndFindDirectory = async (
-    behaviour: (cwd: string) => ReturnType<ProviderAdapter["generateText"]>,
+    behaviour: (cwd: string) => ReturnType<HarnessAdapter["generateText"]>,
     deadlineMillis = 5_000,
   ): Promise<string> => {
     let cwd = "";

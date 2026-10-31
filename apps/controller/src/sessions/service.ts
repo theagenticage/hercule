@@ -33,7 +33,7 @@ import {
   type GitIdentity,
   SubagentId,
   type ModelSelection,
-  type ProviderEvent,
+  type HarnessEvent,
   type QuestionAnswers,
   type SessionBinding,
   type SessionInput,
@@ -333,7 +333,7 @@ export interface StartNeeds {
    */
   readonly readSecrets: (
     instanceId: string,
-    providerId: string,
+    harnessId: string,
   ) => Effect.Effect<Record<string, string>, SqlError | SecretDecryptError>;
   /**
    * Builds the session's coordination paragraph (spec 19 section 7.1), or
@@ -630,13 +630,13 @@ const describeExited = (reason: string): string =>
   `that session's harness exited (${reason}) before this input was sent`;
 
 /**
- * Returns the provider-native session id from a `session.started` event, if
+ * Returns the harness-native session id from a `session.started` event, if
  * it has one. The key is the same as `SessionBinding`'s field, because it is
  * the same value. When the event has none, the id stays null until the next
  * sessions report.
  */
-const findNativeId = (event: ProviderEvent): string | undefined =>
-  event._tag === "session.started" ? event.providerRefs?.nativeSessionId : undefined;
+const findNativeId = (event: HarnessEvent): string | undefined =>
+  event._tag === "session.started" ? event.harnessRefs?.nativeSessionId : undefined;
 
 /** The maximum length of a session title, as shown in a sidebar row. */
 const MAX_TITLE_LENGTH = 80;
@@ -1092,7 +1092,7 @@ const make = Effect.gen(function* () {
    */
   const applySubagentEvent = (
     session: StoredSession,
-    event: ProviderEvent,
+    event: HarnessEvent,
   ): Effect.Effect<ReadonlyMap<SubagentId, StoredSubagent>, SqlError> =>
     Effect.gen(function* () {
       const sessionId = session.id;
@@ -1137,7 +1137,7 @@ const make = Effect.gen(function* () {
    */
   const readSubagentEventFacts = (
     sessionId: string,
-    event: ProviderEvent,
+    event: HarnessEvent,
     records: ReadonlyMap<SubagentId, StoredSubagent>,
   ): Effect.Effect<SubagentEventFacts, SqlError> =>
     Effect.gen(function* () {
@@ -1178,7 +1178,7 @@ const make = Effect.gen(function* () {
    */
   const applySessionUsage = (
     session: StoredSession,
-    event: ProviderEvent,
+    event: HarnessEvent,
   ): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
       if (event._tag === "session.started") {
@@ -1921,7 +1921,7 @@ const make = Effect.gen(function* () {
      * the adapter puts a subagent it continues back on the record the
      * controller already has. Each entry names the subagent that started
      * it, so the adapter knows the tree a stop cascades down. Each saved
-     * provider usage report goes back unchanged, so the adapter can restore
+     * harness usage report goes back unchanged, so the adapter can restore
      * native counters without reading the transcript. Checks no grant: the
      * controller daemon calls it while it builds a resume spec.
      */
@@ -2092,7 +2092,7 @@ const make = Effect.gen(function* () {
             // read now rather than stored, like the account's token: the frame
             // is the only place it is written down.
             const secrets = yield* Effect.option(
-              needs.readSecrets(spec.value.instanceId, row.providerId),
+              needs.readSecrets(spec.value.instanceId, row.harnessId),
             );
             if (Option.isNone(secrets)) {
               keyless.push(row.id);
@@ -2186,7 +2186,7 @@ const make = Effect.gen(function* () {
                 // while the session was queued changes it, and the spec does
                 // not.
                 input: buildTurnInput(row, input),
-                providerId: row.providerId,
+                harnessId: row.harnessId,
                 config: row.config as Schema.Json,
                 secrets: secrets.value,
                 spec: coordination === undefined ? spec.value : { ...spec.value, coordination },
@@ -3150,7 +3150,7 @@ const make = Effect.gen(function* () {
     foldReport: (
       runnerId: string,
       seq: number,
-      event: ProviderEvent,
+      event: HarnessEvent,
     ): Effect.Effect<Folded | undefined, SqlError> =>
       Effect.gen(function* () {
         const id = event.sessionId;
@@ -3195,7 +3195,7 @@ const make = Effect.gen(function* () {
      */
     applyReport: (
       runnerId: string,
-      event: ProviderEvent,
+      event: HarnessEvent,
       folded: Folded,
     ): Effect.Effect<AppliedReport, SqlError> =>
       Effect.gen(function* () {
@@ -3232,7 +3232,7 @@ const make = Effect.gen(function* () {
           yield* editObserver.filesEdited(id, event.editedFiles);
         }
         // Written together with the status change from the same event, so a
-        // session that reads `idle` already has its provider-native id.
+        // session that reads `idle` already has its harness-native id.
         const native = findNativeId(event);
         if (native !== undefined) {
           yield* sessions.bind(id, runnerId, session.instanceId, native);

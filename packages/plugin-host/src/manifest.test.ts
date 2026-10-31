@@ -8,7 +8,7 @@ const manifest = {
   id: "fixture",
   displayName: "Fixture Plugin",
   hostApi: HOST_API,
-  capabilities: ["providers"],
+  capabilities: ["harnesses"],
   configSchema,
 };
 
@@ -33,14 +33,14 @@ describe("the plugin manifest", () => {
     const decoded = Effect.runSync(
       Schema.decodeUnknownEffect(PluginManifest)({
         ...manifest,
-        capabilities: ["providers", "kv"],
+        capabilities: ["harnesses", "kv"],
       }),
     );
 
     expect(decoded.id).toBe("fixture");
     expect(decoded.displayName).toBe("Fixture Plugin");
     expect(decoded.hostApi).toBe(HOST_API);
-    expect(decoded.capabilities).toEqual(["providers", "kv"]);
+    expect(decoded.capabilities).toEqual(["harnesses", "kv"]);
     // The schema is passed as the same value the plugin wrote, not a copy: the
     // host derives the JSON Schema from this object.
     expect(decoded.configSchema).toBe(configSchema);
@@ -66,7 +66,7 @@ describe("the plugin manifest", () => {
     "",
   ])("rejects the capability %j", (capability) => {
     expect(decode({ ...manifest, capabilities: [capability] })).toBe("Failure");
-    expect(decode({ ...manifest, capabilities: ["providers", capability] })).toBe("Failure");
+    expect(decode({ ...manifest, capabilities: ["harnesses", capability] })).toBe("Failure");
   });
 
   it("rejects a host API version that is not an integer", () => {

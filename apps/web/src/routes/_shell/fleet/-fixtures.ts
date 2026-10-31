@@ -25,7 +25,7 @@ export interface Fixture {
     readonly totalMemoryBytes: number;
     readonly docker: boolean;
     readonly toolchains: readonly { name: string; version: string; path: string }[];
-    readonly providers: readonly { name: string; present: boolean }[];
+    readonly harnesses: readonly { name: string; present: boolean }[];
     readonly adapters: readonly string[];
     readonly identityPort: number;
   } | null;
@@ -57,8 +57,8 @@ export const MOSS: Fixture = {
       { name: "git", version: "2.50.1", path: "/usr/bin/git" },
       { name: "gh", version: "2.99.0", path: "/opt/homebrew/bin/gh" },
     ],
-    providers: [{ name: "claude", present: true }],
-    adapters: ["claude-code"],
+    harnesses: [{ name: "claude", present: true }],
+    adapters: ["claude-code/claude-code"],
     identityPort: 4939,
   },
   watermark: {

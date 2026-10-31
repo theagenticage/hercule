@@ -25,7 +25,7 @@ import {
 } from "../http/testing";
 import { registry as shipped } from "./registry";
 import {
-  buildProviderDefinition,
+  buildHarnessDefinition,
   createIntakeFixture,
   createPluginFixture,
   IDLE_FEEDS,
@@ -65,11 +65,11 @@ const buildPlugins = (): ReadonlyArray<Plugin> =>
     createPluginFixture({
       id: "alpha",
       configSchema: Schema.Struct({ model: Schema.optionalKey(Schema.String) }),
-      definitions: [buildProviderDefinition("alpha-provider", { model: "alpha-provider-default" })],
+      definitions: [buildHarnessDefinition("alpha", { model: "alpha-default" })],
     }),
     createPluginFixture({ id: "beta" }),
     createPluginFixture({ id: "outdated", hostApi: HOST_API + 1 }),
-    createPluginFixture({ id: "greedy", capabilities: ["providers", "channels"] }),
+    createPluginFixture({ id: "greedy", capabilities: ["harnesses", "channels"] }),
     createPluginFixture({
       id: "unrenderable",
       configSchema: Schema.Struct({ nested: Schema.Struct({}) }),
@@ -162,7 +162,7 @@ describe("GET /plugins", () => {
         id: "alpha",
         displayName: "Plugin alpha",
         hostApi: HOST_API,
-        capabilities: ["providers"],
+        capabilities: ["harnesses"],
         enabled: true,
         status: { _tag: "active" },
         config: {},
@@ -220,14 +220,14 @@ describe("GET /plugins", () => {
       const alpha = plugins[0]!;
       expect(alpha.contributions).toHaveLength(1);
       const contribution = alpha.contributions[0]!;
-      expect(contribution.extensionPoint).toBe("provider");
-      expect(contribution.id).toBe("alpha-provider");
-      expect(contribution.definition).toEqual(stored.get("alpha/alpha-provider"));
+      expect(contribution.extensionPoint).toBe("harness");
+      expect(contribution.id).toBe("alpha/alpha");
+      expect(contribution.definition).toEqual(stored.get("alpha/alpha/alpha"));
       expect(contribution.definition).toMatchObject({
-        id: "alpha-provider",
-        displayName: "Provider alpha-provider",
+        id: "alpha/alpha",
+        displayName: "Harness alpha",
         supportsMultipleInstances: true,
-        defaultConfig: { model: "alpha-provider-default" },
+        defaultConfig: { model: "alpha-default" },
       });
 
       for (const refused of REFUSED) {
@@ -826,7 +826,7 @@ describe("the shipped registry over the routes", () => {
   it("loads a plugin whose manifest asks for connections, rather than refusing it", async () => {
     const asking = createPluginFixture({
       id: "asking",
-      capabilities: ["providers", "connections"],
+      capabilities: ["harnesses", "connections"],
     });
 
     await withServer(
@@ -834,7 +834,7 @@ describe("the shipped registry over the routes", () => {
         const token = await completeSetup(base);
 
         expect(await readPlugin(base, token, "asking")).toMatchObject({
-          capabilities: ["providers", "connections"],
+          capabilities: ["harnesses", "connections"],
           status: { _tag: "active" },
         });
       },

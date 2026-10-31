@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { ProviderEvent } from "@hercule/protocol";
+import type { HarnessEvent } from "@hercule/protocol";
 import { mintUuid, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { sessionRepository } from "./repository";
@@ -38,8 +38,8 @@ type Row = { readonly subagentId?: string } & (
     }
 );
 
-/** Builds the full provider event for one stored row. */
-const buildEvent = (sessionId: string, row: Row): ProviderEvent => {
+/** Builds the full harness event for one stored row. */
+const buildEvent = (sessionId: string, row: Row): HarnessEvent => {
   const base = { eventId: mintId(), sessionId, at };
   switch (row._tag) {
     case "turn.started":

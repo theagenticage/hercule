@@ -15,7 +15,7 @@
  *   titled with its name, which opens its screen.
  *
  * The controller places an assistant's session on any runner that can run
- * its provider. The harness retires the controller's own runner, so a
+ * its harness. The harness retires the controller's own runner, so a
  * session lands on the scripted runner the test enlists, which can open a
  * Request in it.
  *

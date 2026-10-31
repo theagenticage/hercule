@@ -296,7 +296,7 @@ describe("createClient", () => {
       id: "claude-code",
       displayName: "Claude Code",
       hostApi: 1,
-      capabilities: ["providers"],
+      capabilities: ["harnesses"],
       enabled: true,
       status: { _tag: "active" },
       config: {},

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MAX_FACT_LENGTH } from "@hercule/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { truncateFact } from "../providers/text";
+import { truncateFact } from "../harnesses/text";
 import { openFileClock } from "./clock";
 import { createSessionMarksDir, takeStartMarks } from "./marks";
 import { writeStartMark } from "./testing";
