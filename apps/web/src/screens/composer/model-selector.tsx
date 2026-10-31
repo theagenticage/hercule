@@ -7,7 +7,7 @@ import type {
   ThreadChoice,
 } from "@hercule/client-core";
 import { PillLabel } from "./controls";
-import { ModelList, type NewModelRefusal } from "./model-list";
+import { ModelList, type NewModelRefusal, type NewModelSaving } from "./model-list";
 import { SelectorShell } from "./selector-shell";
 
 /**
@@ -23,7 +23,7 @@ export function ModelSelector({
   onOpenProfile,
   onAddNewModel,
   onDismissNewModel,
-  savingNewModel,
+  savingNewModels,
   newModelRefusal,
   pill,
   disabled,
@@ -43,7 +43,7 @@ export function ModelSelector({
   readonly onAddNewModel: (profileId: string, row: NewModelRow) => void;
   /** Hides a New row's model in the profile whose lane holds the row. The menu stays open. */
   readonly onDismissNewModel: (profileId: string, row: NewModelRow) => void;
-  readonly savingNewModel: boolean;
+  readonly savingNewModels: readonly NewModelSaving[];
   readonly newModelRefusal: NewModelRefusal | null;
   readonly pill: ModelPill;
   readonly disabled: boolean;
@@ -88,7 +88,7 @@ export function ModelSelector({
             onOpenProfile={onOpenProfile}
             onAddNewModel={onAddNewModel}
             onDismissNewModel={onDismissNewModel}
-            savingNewModel={savingNewModel}
+            savingNewModels={savingNewModels}
             newModelRefusal={newModelRefusal}
             signInSlot={signInSlot}
           />

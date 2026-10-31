@@ -95,18 +95,22 @@ const buildAccount = (identity: ProviderAccountIdentity) => ({
  * Plays the controller's `modelProfile.update` over `initial`, whose "New"
  * models are the ones it announces for as long as the section lacks them and
  * the profile has not dismissed them. `refusal`
- * refuses every update with that message. With `hold`, an update waits until
- * the test calls `release`, so the screen can be looked at while it is saved.
+ * refuses every update with that message. With `hold`, each update waits
+ * until the test calls `release`, which answers the oldest one waiting, so the
+ * screen can be looked at while updates are saved.
  */
 const playProfile = (
   initial: ModelProfile,
   { refusal, hold = false }: { refusal?: string; hold?: boolean } = {},
 ) => {
   let stored = initial;
-  let release = (): void => {};
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  const waiting: Array<() => void> = [];
+  const release = async (): Promise<void> => {
+    await waitFor(() => {
+      expect(waiting).not.toHaveLength(0);
+    });
+    waiting.shift()!();
+  };
   const announced = new Map(
     initial.accounts.map((section) => [section.providerAccountId, section.newModels] as const),
   );
@@ -118,7 +122,11 @@ const playProfile = (
     [`GET ${PROFILE_PATH}`]: () => ({ body: stored }),
     [`PATCH ${PROFILE_PATH}`]: async (call) => {
       const input = call.body as ModelProfileUpdateInput;
-      if (hold) await gate;
+      if (hold) {
+        await new Promise<void>((resolve) => {
+          waiting.push(resolve);
+        });
+      }
       if (refusal !== undefined) {
         return { status: 400, body: buildErrorBody("validation", refusal) };
       }
@@ -351,12 +359,38 @@ describe("Settings > Providers > Models > a section's New rows", () => {
       expect(listUpdates(calls)).toHaveLength(1);
     });
 
-    release();
+    await release();
 
     await waitFor(() => {
       expect(listNewRows("Anthropic")).toEqual(["Haiku 5.6"]);
     });
     expect(listUpdates(calls)).toHaveLength(1);
+  });
+
+  it("keeps the focus request of a row while an earlier save of another row is answered", async () => {
+    const { release } = await openModels({ hold: true });
+
+    await userEvent.click(screen.getByRole("button", { name: "Not now: Opus 5.6" }));
+    await userEvent.click(screen.getByRole("button", { name: "Not now: Haiku 5.6" }));
+    const haikuNotNow = screen.getByRole("button", { name: "Not now: Haiku 5.6" });
+    expect(document.activeElement).toBe(haikuNotNow);
+
+    // The first save is answered: its row goes, and the second row is still there.
+    await release();
+    await waitFor(() => {
+      expect(listNewRows("Anthropic")).toEqual(["Haiku 5.6"]);
+    });
+    expect(document.activeElement).toBe(haikuNotNow);
+
+    await release();
+    await waitFor(() => {
+      expect(listNewRows("Anthropic")).toEqual([]);
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        within(getSection("Anthropic")).getAllByRole("listitem")[0],
+      );
+    });
   });
 
   it("shows a refusal above the sections, keeps the row, and gives its buttons back", async () => {

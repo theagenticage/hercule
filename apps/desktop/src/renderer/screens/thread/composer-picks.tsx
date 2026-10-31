@@ -2,9 +2,7 @@ import type { JSX } from "react";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
-  addNewModelToProfile,
   buildOptionsLabel,
-  dismissNewModel,
   resolveDisplayTimezone,
   type ModelPill,
   type RecentModel,
@@ -90,10 +88,12 @@ export function OptionsPick({
  * to open the menu.
  *
  * The menu reads nothing from the controller when it opens: the profiles, the
- * accounts and the plugins are the shell's reads, already in the cache, and so
- * are the settings that give the time zone, which only a Draft Thread's menu
- * uses, because only it announces new models. It reads the profile open last
- * from this device's storage, and stores the one the user opens.
+ * accounts and the plugins are the shell's reads, already in the cache. So are
+ * the settings that give the time zone, which only a Draft Thread's menu uses,
+ * because only it announces new models: the new-thread route's loader caches
+ * them, and a thread that has started never reads them. The menu reads the
+ * profile open last from this device's storage, and stores the one the user
+ * opens.
  *
  * Add and "Not now" on a "New" row save the profile through
  * `useModelProfileUpdate`, the way the Providers page does. They neither pick
@@ -166,24 +166,7 @@ export function ModelPick({
                   onSignIn(target);
                 }
           }
-          newModelSaves={{
-            add: (profileId, row) =>
-              saveProfile
-                .mutateAsync({
-                  profileId,
-                  buildChange: (profile) =>
-                    addNewModelToProfile(profile, row.providerAccountId, row.model),
-                })
-                .then(() => undefined),
-            dismiss: (profileId, row) =>
-              saveProfile
-                .mutateAsync({
-                  profileId,
-                  buildChange: (profile) =>
-                    dismissNewModel(profile, row.providerAccountId, row.model),
-                })
-                .then(() => undefined),
-          }}
+          saveProfile={saveProfile.mutateAsync}
         />
       )}
     </ComposerMenu>

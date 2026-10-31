@@ -437,6 +437,7 @@ interface ListedAccount {
 
 /** A Model Profile as `hercule model-profile list` prints it. Only the parts the upgrade check reads. */
 interface ListedModelProfile {
+  readonly id: string;
   readonly name: string;
   readonly revision: number;
   readonly accounts: ReadonlyArray<{
@@ -444,7 +445,12 @@ interface ListedModelProfile {
     readonly harnessId: string | null;
     readonly resolvedHarnessId: string;
     readonly selectionPending: boolean;
-    readonly entries: ReadonlyArray<unknown>;
+    readonly entries: ReadonlyArray<{ readonly model: string; readonly harnessId: string | null }>;
+    readonly newModels: ReadonlyArray<{
+      readonly model: string;
+      readonly name: string;
+      readonly firstSeenAt: string;
+    }>;
   }>;
   readonly defaultEntry: unknown;
   readonly dismissedNewModels: ReadonlyArray<unknown>;
@@ -2362,6 +2368,71 @@ describe("upgrading from the previous edge release", () => {
       }
 
       if (catalogReadsSeeded) {
+        // The backfilled first read drives the announcements. The profile
+        // takes in model a of the seeded OpenAI catalog and nothing else.
+        // Model b came with the first read, so it is not new. Model c came
+        // with the second read, after the first read the migration worked
+        // out, so it is. A first read that was backfilled wrongly (later, or
+        // missing) would hide c. The section is written with entries because
+        // the account's Codex stand-in never answers, so its first read never
+        // fills a waiting section.
+        const takeInModelA = async (attempt: number): Promise<ListedModelProfile> => {
+          const [main] = readListedItems<ListedModelProfile>(
+            await runCli(["model-profile", "list", "--json"], upgraded),
+          );
+          if (main === undefined) throw new Error("the upgraded controller lists no profile");
+          const storedEntry = { providerAccountId: codexAccount.id, model: "a", harnessId: null };
+          // The other sections are sent as they are, a waiting one without entries.
+          const sections = [
+            ...main.accounts
+              .filter((section) => section.providerAccountId !== codexAccount.id)
+              .map((section) => ({
+                providerAccountId: section.providerAccountId,
+                harnessId: section.harnessId,
+                ...(section.selectionPending
+                  ? {}
+                  : {
+                      entries: section.entries.map((one) => ({
+                        providerAccountId: section.providerAccountId,
+                        model: one.model,
+                        harnessId: one.harnessId,
+                      })),
+                    }),
+              })),
+            { providerAccountId: codexAccount.id, harnessId: null, entries: [storedEntry] },
+          ];
+          const updated = await runCli(
+            [
+              "model-profile",
+              "update",
+              main.id,
+              "--expected-revision",
+              String(main.revision),
+              "--name",
+              main.name,
+              "--default-entry",
+              JSON.stringify(storedEntry),
+              "--json",
+            ],
+            {
+              ...upgraded,
+              stdin: [JSON.stringify(sections), JSON.stringify(main.dismissedNewModels)].join("\n"),
+            },
+          );
+          // A first catalog read may change the profile between the list and
+          // the update, which makes the update conflict: read it again.
+          if (updated.code !== 0 && attempt < 5) return takeInModelA(attempt + 1);
+          expect(updated.code, `${updated.stdout}\n${updated.stderr}`).toBe(0);
+          return expectJson<ListedModelProfile>(updated);
+        };
+        const taken = await takeInModelA(1);
+        const codexSection = taken.accounts.find(
+          (section) => section.providerAccountId === codexAccount.id,
+        );
+        expect(codexSection?.newModels).toEqual([
+          { model: "c", name: "C", firstSeenAt: SEEDED_CATALOG_SECOND_READ },
+        ]);
+
         // The catalog the migration left still reads, with every model's
         // first-seen time from the old ledger.
         const catalog = expectJson<{

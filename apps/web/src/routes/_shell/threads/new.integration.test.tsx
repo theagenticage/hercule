@@ -484,6 +484,31 @@ describe("Composer: selector popovers", () => {
   });
 });
 
+describe("Composer: the machine menu", () => {
+  it("fades the row of a machine that cannot take the thread, and not the row of one that can", async () => {
+    const user = userEvent.setup();
+    const offline: Runner = {
+      ...RUNNER,
+      id: "01a06d02-beff-7037-9f5b-042822015953",
+      name: "drift",
+      connectivity: "offline",
+    };
+    await openApp(
+      [ACCOUNT_A, ACCOUNT_B],
+      {},
+      { "GET /api/v1/runners": { body: { items: [RUNNER, offline] } } },
+    );
+
+    await user.click(await screen.findByRole("button", { name: "machine moss" }));
+    const dialog = await screen.findByRole("dialog");
+
+    const rowOf = (name: string): HTMLElement =>
+      within(dialog).getByText(name).closest<HTMLElement>("[class*='grid']")!;
+    expect(rowOf("drift").className).toContain("opacity-50");
+    expect(rowOf("moss").className).not.toContain("opacity-50");
+  });
+});
+
 describe("Composer: model menu", () => {
   it("draws one lane per account of the profile with its models, marks the current one, and offers no free-text entry", async () => {
     const user = userEvent.setup();
@@ -1393,7 +1418,7 @@ describe("Composer: New rows in the model menu", () => {
       },
     });
 
-    const dismiss = within(menu).getByRole("button", { name: /not now/i });
+    const dismiss = within(menu).getByRole("button", { name: /not now: /i });
     expect(dismiss.getAttribute("title")).toBe("Not now");
     await user.click(dismiss);
 
@@ -1408,7 +1433,7 @@ describe("Composer: New rows in the model menu", () => {
     expect(screen.getByRole("dialog")).toBeDefined();
   });
 
-  it("disables the buttons of the New rows while a save runs", async () => {
+  it("marks the buttons of the saving row aria-disabled, keeps their focus, and ignores a second press", async () => {
     let finish: () => void = () => undefined;
     const { user, menu } = await openWithNewModel({
       [`PATCH ${NEW_MODEL_PATH}`]: () =>
@@ -1426,8 +1451,13 @@ describe("Composer: New rows in the model menu", () => {
         within(menu).getByRole("button", { name: "Add Claude Opus 5.6" }),
         within(menu).getByRole("button", { name: /not now/i }),
       ];
-      expect(buttons.every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+      expect(buttons.every((button) => button.getAttribute("aria-disabled") === "true")).toBe(true);
     });
+    // Focus stays on the pressed button, and pressing it again sends nothing.
+    const add = within(menu).getByRole("button", { name: "Add Claude Opus 5.6" });
+    expect(document.activeElement).toBe(add);
+    await user.click(add);
+    await user.click(within(menu).getByRole("button", { name: /not now/i }));
     finish();
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Add Claude Opus 5.6" })).toBeNull();
@@ -1445,9 +1475,52 @@ describe("Composer: New rows in the model menu", () => {
     await user.click(within(menu).getByRole("button", { name: "Add Claude Opus 5.6" }));
 
     const alert = await within(menu).findByRole("alert");
-    expect(alert.textContent).toBe("The profile cannot hold more models.");
+    expect(alert.textContent).toBe(
+      "The change was not saved. The profile cannot hold more models.",
+    );
     const add = within(menu).getByRole("button", { name: "Add Claude Opus 5.6" });
-    expect((add as HTMLButtonElement).disabled).toBe(false);
+    expect(add.getAttribute("aria-disabled")).toBeNull();
+  });
+
+  it("keeps a running save busy across closing and reopening the menu, and shows its refusal then", async () => {
+    let refuse: () => void = () => undefined;
+    const { user, api, menu } = await openWithNewModel({
+      [`PATCH ${NEW_MODEL_PATH}`]: () =>
+        new Promise((resolve) => {
+          refuse = () => {
+            resolve({
+              status: 400,
+              body: buildErrorBody("validation", "The profile cannot hold more models."),
+            });
+          };
+        }),
+    });
+
+    await user.click(within(menu).getByRole("button", { name: "Add Claude Opus 5.6" }));
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(1);
+    });
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    const reopened = await openModelMenu(user, /claude sonnet 5/i);
+
+    expect(
+      within(reopened)
+        .getByRole("button", { name: "Add Claude Opus 5.6" })
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
+    refuse();
+
+    expect((await within(reopened).findByRole("alert")).textContent).toBe(
+      "The change was not saved. The profile cannot hold more models.",
+    );
+    expect(
+      within(reopened)
+        .getByRole("button", { name: "Add Claude Opus 5.6" })
+        .getAttribute("aria-disabled"),
+    ).toBeNull();
   });
 });
 

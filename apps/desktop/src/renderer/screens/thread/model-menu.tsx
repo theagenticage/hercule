@@ -1,6 +1,8 @@
 import { useState, type JSX } from "react";
 import {
+  addNewModel,
   buildModelMenu,
+  dismissNewModel,
   readErrorMessage,
   type NewModelRow,
   type PluginIdentity,
@@ -11,33 +13,12 @@ import {
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
-import { ModelMenuList, type NewModelActions } from "./model-menu-list";
-
-/**
- * How the menu saves what the user does to a "New" row: `add` takes the model
- * into the profile, `dismiss` hides it for good. Each receives the id of the
- * profile and the row, and returns a promise that is rejected when the save
- * is refused.
- */
-export interface NewModelSaves {
-  readonly add: (profileId: string, row: NewModelRow) => Promise<void>;
-  readonly dismiss: (profileId: string, row: NewModelRow) => Promise<void>;
-}
+import type { ModelProfile, ModelProfileUpdateInput } from "@hercule/contract";
+import { formatLaneKey, ModelMenuList, type NewModelActions } from "./model-menu-list";
 
 /** Returns the key under which the menu tracks the save of one "New" row. */
 const formatNewModelKey = (profileId: string, row: NewModelRow): string =>
   `${profileId}:${row.providerAccountId}:${row.model}`;
-
-/** Returns the key under which the menu tracks the refusal shown in one lane. */
-const formatLaneKey = (profileId: string, providerAccountId: string): string =>
-  `${profileId}:${providerAccountId}`;
-
-/** Returns a copy of `map` without `key`. */
-const without = <V,>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<string, V> => {
-  const rest = new Map(map);
-  rest.delete(key);
-  return rest;
-};
 
 /**
  * Renders the content of a thread's model menu, as `buildModelMenu` builds
@@ -57,11 +38,15 @@ const without = <V,>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<stri
  * once, when the menu opens: they change only when a message is sent or a
  * head is clicked. `rememberOpenProfile` receives the id of each head clicked.
  *
- * `newModelSaves` saves what the user does to a "New" row (`NewModelLine`),
- * see `NewModelSaves`. Neither action picks the model or closes the menu. The
- * menu keeps the buttons of a row busy while its save runs, and shows a
- * refusal under the row's lane. `timezone` is the zone the dates of the rows
- * are read in.
+ * `saveProfile` saves a change to a Model Profile: it receives the profile's
+ * id and a function that builds the change from the profile's newest copy, and
+ * returns a promise that is rejected when the save is refused. The menu uses
+ * it for what the user does to a "New" row (`NewModelLine`): Add takes the
+ * model into the profile and "Not now" hides it for good. Neither picks the
+ * model or closes the menu. The menu keeps the buttons of a row busy while its
+ * save runs, and shows a refusal under the row's lane. Without `saveProfile`
+ * the rows have no buttons. `timezone` is the zone the dates of the rows are
+ * read in.
  *
  * `config` is what the thread runs with, picks included, so the check marks
  * the entry the next message will use. `runnerId` is the machine a Draft
@@ -81,7 +66,7 @@ export function ModelMenu({
   rememberOpenProfile,
   onChoose,
   onSignIn,
-  newModelSaves,
+  saveProfile,
 }: {
   readonly catalogs: ThreadCatalogs;
   readonly plugins: ReadonlyArray<PluginIdentity>;
@@ -94,7 +79,12 @@ export function ModelMenu({
   readonly rememberOpenProfile: (profileId: string) => void;
   readonly onChoose: (choice: ThreadChoice) => void;
   readonly onSignIn?: ((target: SignInTarget) => void) | undefined;
-  readonly newModelSaves?: NewModelSaves | undefined;
+  readonly saveProfile?:
+    | ((change: {
+        readonly profileId: string;
+        readonly buildChange: (profile: ModelProfile) => ModelProfileUpdateInput;
+      }) => Promise<unknown>)
+    | undefined;
 }): JSX.Element {
   const [filter, setFilter] = useState("");
   const [openedProfileId, setOpenedProfileId] = useState<string | null>(null);
@@ -103,7 +93,7 @@ export function ModelMenu({
   // The date the "New" rows are counted from is the one the menu opened on.
   const [now] = useState(() => new Date());
   const [savingKeys, setSavingKeys] = useState<ReadonlySet<string>>(new Set());
-  const [problems, setProblems] = useState<ReadonlyMap<string, string>>(new Map());
+  const [refusals, setRefusals] = useState<ReadonlyMap<string, string>>(new Map());
 
   /**
    * Runs `save` for a "New" row, with its buttons busy until it is over.
@@ -111,19 +101,23 @@ export function ModelMenu({
    * lane and resolves with `false`.
    */
   const saveNewModel = (
-    save: (profileId: string, row: NewModelRow) => Promise<void>,
+    save: () => Promise<unknown>,
     profileId: string,
     row: NewModelRow,
   ): Promise<boolean> => {
     const rowKey = formatNewModelKey(profileId, row);
     const laneKey = formatLaneKey(profileId, row.providerAccountId);
     setSavingKeys((keys) => new Set(keys).add(rowKey));
-    setProblems((current) => without(current, laneKey));
-    return save(profileId, row)
+    setRefusals((current) => {
+      const rest = new Map(current);
+      rest.delete(laneKey);
+      return rest;
+    });
+    return save()
       .then(
         () => true,
         (error: unknown) => {
-          setProblems((current) =>
+          setRefusals((current) =>
             new Map(current).set(laneKey, `The change was not saved. ${readErrorMessage(error)}`),
           );
           return false;
@@ -139,14 +133,33 @@ export function ModelMenu({
   };
 
   const newModelActions: NewModelActions | undefined =
-    newModelSaves === undefined
+    saveProfile === undefined
       ? undefined
       : {
-          add: (profileId, row) => saveNewModel(newModelSaves.add, profileId, row),
-          dismiss: (profileId, row) => saveNewModel(newModelSaves.dismiss, profileId, row),
+          add: (profileId, row) =>
+            saveNewModel(
+              () =>
+                saveProfile({
+                  profileId,
+                  buildChange: (profile) => addNewModel(profile, row.providerAccountId, row.model),
+                }),
+              profileId,
+              row,
+            ),
+          dismiss: (profileId, row) =>
+            saveNewModel(
+              () =>
+                saveProfile({
+                  profileId,
+                  buildChange: (profile) =>
+                    dismissNewModel(profile, row.providerAccountId, row.model),
+                }),
+              profileId,
+              row,
+            ),
           isSaving: (profileId, row) => savingKeys.has(formatNewModelKey(profileId, row)),
           findRefusal: (profileId, lane) =>
-            problems.get(formatLaneKey(profileId, lane.providerAccountId)) ?? null,
+            refusals.get(formatLaneKey(profileId, lane.providerAccountId)) ?? null,
         };
 
   const menu = buildModelMenu(catalogs, config, {

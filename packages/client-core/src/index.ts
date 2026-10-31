@@ -766,7 +766,7 @@ export { applyThreadChoice, type ThreadChoice } from "./threads/thread-choice";
 export {
   addModelProfileAccount,
   addModelProfileEntries,
-  addNewModelToProfile,
+  addNewModel,
   dismissNewModel,
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,

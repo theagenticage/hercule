@@ -14,10 +14,15 @@ import { Lane, MenuFoot, MenuRow, ProfileHead, renderMarker } from "./menu";
 const ROW_SIGN_IN =
   "p-0 text-[11px] leading-normal font-normal text-muted enabled:hover:bg-transparent";
 
-/** Why a save of a New row failed, and the lane it is shown under. */
-export interface NewModelRefusal {
+/** A New row, as a profile's lane holds it. */
+export interface NewModelSaving {
   readonly profileId: string;
   readonly providerAccountId: string;
+  readonly model: string;
+}
+
+/** Why a save of a New row failed, and the lane it is shown under. */
+export interface NewModelRefusal extends NewModelSaving {
   readonly message: string;
 }
 
@@ -33,8 +38,9 @@ export interface NewModelRefusal {
  * signing in would fix it, a Sign in on the row.
  *
  * A lane begins with a row for each model announced as new, with Add and Not
- * now. Neither picks the model or closes the menu. While `savingNewModel`
- * holds, every such button is disabled, because saves run one after another.
+ * now. Neither picks the model or closes the menu. A row listed in
+ * `savingNewModels` has both buttons `aria-disabled`: the focus stays on the
+ * pressed button and a press does nothing.
  * `newModelRefusal` shows under the lane of the row whose save was refused.
  */
 export function ModelList({
@@ -44,7 +50,7 @@ export function ModelList({
   onOpenProfile,
   onAddNewModel,
   onDismissNewModel,
-  savingNewModel,
+  savingNewModels,
   newModelRefusal,
   signInSlot,
 }: {
@@ -57,8 +63,8 @@ export function ModelList({
   readonly onAddNewModel: (profileId: string, row: NewModelRow) => void;
   /** Hides the model of a New row for good in the profile whose lane holds the row. */
   readonly onDismissNewModel: (profileId: string, row: NewModelRow) => void;
-  /** Whether a save of a New row is running. */
-  readonly savingNewModel: boolean;
+  /** The New rows whose save is running. */
+  readonly savingNewModels: readonly NewModelSaving[];
   /** The refusal of the last save of a New row, or `null`. */
   readonly newModelRefusal: NewModelRefusal | null;
   readonly signInSlot: (target: SignInTarget, className: string) => ReactNode;
@@ -92,47 +98,57 @@ export function ModelList({
       />
     );
   };
-  const renderNewModelRow = (profileId: string, row: NewModelRow): JSX.Element => (
-    <MenuRow
-      key={`new:${row.providerAccountId}:${row.model}`}
-      marker={renderMarker(null)}
-      name={
-        <>
-          <span className="mr-1.5 text-label font-emph tracking-[0.1em] text-faint uppercase">
-            New
-          </span>
-          {row.name}
-        </>
-      }
-      detail={row.arrivalText}
-      inert
-      note={
-        <>
-          <Button
-            disabled={savingNewModel}
-            aria-label={`Add ${row.name}`}
-            className="px-1.5 py-0.5 text-[11px] font-normal"
-            onClick={() => {
-              onAddNewModel(profileId, row);
-            }}
-          >
-            Add
-          </Button>
-          <Button
-            disabled={savingNewModel}
-            title="Not now"
-            aria-label={`Not now for ${row.name}`}
-            className="px-1.5 py-0.5 text-[13px] font-normal"
-            onClick={() => {
-              onDismissNewModel(profileId, row);
-            }}
-          >
-            ×
-          </Button>
-        </>
-      }
-    />
-  );
+  const renderNewModelRow = (profileId: string, row: NewModelRow): JSX.Element => {
+    const busy = savingNewModels.some(
+      (each) =>
+        each.profileId === profileId &&
+        each.providerAccountId === row.providerAccountId &&
+        each.model === row.model,
+    );
+    return (
+      <MenuRow
+        key={`new:${row.providerAccountId}:${row.model}`}
+        marker={renderMarker(null)}
+        name={
+          <>
+            <span className="mr-1.5 text-label font-emph tracking-[0.1em] text-faint uppercase">
+              New
+            </span>
+            {row.name}
+          </>
+        }
+        detail={row.arrivalText}
+        plain
+        note={
+          <>
+            <Button
+              aria-disabled={busy || undefined}
+              aria-label={`Add ${row.name}`}
+              className="px-1.5 py-0.5 text-[11px] font-normal"
+              onClick={() => {
+                if (busy) return;
+                onAddNewModel(profileId, row);
+              }}
+            >
+              Add
+            </Button>
+            <Button
+              aria-disabled={busy || undefined}
+              title="Not now"
+              aria-label={`Not now: ${row.name}`}
+              className="px-1.5 py-0.5 text-[13px] font-normal"
+              onClick={() => {
+                if (busy) return;
+                onDismissNewModel(profileId, row);
+              }}
+            >
+              ×
+            </Button>
+          </>
+        }
+      />
+    );
+  };
   const buildRowKey = (row: ModelMenuRow): string =>
     `${row.providerAccountId}:${row.harnessId}:${row.model}`;
 

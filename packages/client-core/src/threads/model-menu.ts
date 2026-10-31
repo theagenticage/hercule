@@ -338,14 +338,15 @@ const buildRow = (
 
 /**
  * Builds the lanes of `profile` from its `placed` entries, the filter applied.
- * `listNewModels` gives the "New" rows of a section. A lane with new rows
- * stays even when it has no entries.
+ * With `dates`, each lane carries its section's "New" rows, and a lane with
+ * new rows stays even when it has no entries. With `null` no lane announces a
+ * model.
  */
 const buildLanes = (
   context: MenuContext,
   profile: ModelProfile,
   placed: readonly PlacedEntry[],
-  listNewModels: (section: ResolvedModelProfileAccount) => readonly NewModelRow[],
+  dates: NewModelDates | null,
 ): readonly ModelMenuLane[] => {
   const { catalogs, filter } = context;
   return profile.accounts.flatMap((section): readonly ModelMenuLane[] => {
@@ -355,7 +356,7 @@ const buildLanes = (
       .filter((each) => each.section === section)
       .map((each) => buildRow(context, profile, each))
       .filter((row) => matchesFilter(row, filter));
-    const newModels = listNewModels(section).filter((row) =>
+    const newModels = (dates === null ? [] : buildNewModelRows(section, dates)).filter((row) =>
       matchesFilter({ name: row.name, model: row.model }, filter),
     );
     // A section with nothing to pick has no lane, and neither does a lane
@@ -390,7 +391,7 @@ export const buildProfileLanes = (
     { catalogs, runner: undefined, filter: "", currentKey: null },
     profile,
     listPlacedEntries(profile, catalogs.accounts),
-    () => [],
+    null,
   );
 
 /** What an unfolded profile shows. */
@@ -433,7 +434,7 @@ const buildProfileBody = (
 
   return {
     recent: recentRows,
-    lanes: buildLanes(context, profile, placed, (section) => buildNewModelRows(section, dates)),
+    lanes: buildLanes(context, profile, placed, dates),
   };
 };
 

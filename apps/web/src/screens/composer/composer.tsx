@@ -138,7 +138,7 @@ export function Composer({
     if (key === "model" && !next) {
       setFilter("");
       setOpenedProfileId(null);
-      newModelSave.reset();
+      newModelSave.clearRefusal();
     }
   };
   // The model menu is built only while it is open.
@@ -359,7 +359,7 @@ export function Composer({
                     }}
                     onAddNewModel={newModelSave.add}
                     onDismissNewModel={newModelSave.dismiss}
-                    savingNewModel={newModelSave.saving}
+                    savingNewModels={newModelSave.saving}
                     newModelRefusal={newModelSave.refusal}
                     pill={fields.model.pill}
                     disabled={model.readOnly !== null}

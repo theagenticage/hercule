@@ -26,7 +26,11 @@ import {
   type RegisteredHarness,
   type RegisteredProvider,
 } from "../plugins";
-import { describeProviderAccount, type ArrivedModel } from "../provider-accounts";
+import {
+  computeArrivedModels,
+  describeProviderAccount,
+  type CatalogWithFirstRead,
+} from "../provider-accounts";
 import { describeHarnessLacksModel } from "./harness-evidence";
 import { findNamedHarnessId, type StoredSection } from "./profile-body";
 import type { StoredModelProfile } from "./repository";
@@ -40,9 +44,7 @@ export interface ConnectedRunner {
 /** Everything resolving needs, read once. */
 export interface ResolutionWorld {
   readonly accounts: ReadonlyArray<ProviderAccount>;
-  readonly catalogs: ReadonlyArray<ModelCatalog>;
-  /** The models that arrived in each account's Default Selection after its first catalog read, by account id. */
-  readonly arrivedModels: ReadonlyMap<string, ReadonlyArray<ArrivedModel>>;
+  readonly catalogs: ReadonlyArray<CatalogWithFirstRead>;
   readonly connectedRunners: ReadonlyArray<ConnectedRunner>;
   readonly providers: ReadonlyArray<RegisteredProvider>;
   readonly harnesses: ReadonlyArray<RegisteredHarness>;
@@ -219,11 +221,17 @@ const findEntryProblem = (
 
 /**
  * Returns the models to announce as new in a section: the models that arrived
- * in its account's Default Selection (`ArrivedModel`) that the section holds
- * in no harness and the profile has not dismissed. A section that still waits
- * for its first catalog read announces nothing. Computed on every read, so
- * nothing is stored and a model stops being announced as soon as the profile
- * holds or dismisses it.
+ * in its account's Default Selection (`computeArrivedModels`) except those
+ * that
+ *
+ * - the section holds in any harness,
+ * - the profile has dismissed, or
+ * - the section's harness is known not to list (the rule a write is refused
+ *   by), so Add would fail. They are announced once the harness lists them.
+ *
+ * A section that still waits for its first catalog read announces nothing.
+ * Computed on every read, so nothing is stored and a model stops being
+ * announced as soon as the profile holds or dismisses it.
  */
 const findNewModels = (
   section: StoredSection,
@@ -231,13 +239,20 @@ const findNewModels = (
   world: ResolutionWorld,
 ): ReadonlyArray<NewModel> => {
   if (section.entries === null) return [];
+  const account = findStoredAccount(world, section.providerAccountId);
+  const provider = world.providers.find((one) => one.id === account.providerId);
+  const catalog = world.catalogs.find((one) => one.providerAccountId === account.id);
+  if (provider === undefined || catalog === undefined) return [];
+  const harnessId = section.harnessId ?? account.defaultHarnessId;
+  const harness = world.harnesses.find((one) => one.id === harnessId);
   const held = new Set(section.entries.map((entry) => entry.model));
-  return (world.arrivedModels.get(section.providerAccountId) ?? []).filter(
+  return computeArrivedModels(provider, catalog).filter(
     (arrived) =>
       !held.has(arrived.model) &&
       !dismissed.some(
-        (one) => one.providerAccountId === section.providerAccountId && one.model === arrived.model,
-      ),
+        (one) => one.providerAccountId === account.id && one.model === arrived.model,
+      ) &&
+      !isModelMissingFromHarness(account, harness, arrived.model),
   );
 };
 

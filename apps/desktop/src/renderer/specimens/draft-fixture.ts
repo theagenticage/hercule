@@ -157,7 +157,17 @@ const DRAFT_ACCOUNTS: ReadonlyArray<ProviderAccount> = SPECIMEN_RECORDS.accounts
 const DRAFT_MODEL_PROFILE: ModelProfile = {
   ...SPECIMEN_MODEL_PROFILE,
   accounts: [
-    buildSpecimenProfileSection([CLAUDE_OPUS, CLAUDE_SONNET]),
+    {
+      ...buildSpecimenProfileSection([CLAUDE_OPUS, CLAUDE_SONNET]),
+      newModels: [
+        { model: "opus-5-6", name: "Opus 5.6", firstSeenAt: "2026-09-26T08:00:00.000Z" },
+        {
+          model: "opus-5-6-long",
+          name: "Claude Opus 5.6 with an extended context window",
+          firstSeenAt: "2025-12-02T08:00:00.000Z",
+        },
+      ],
+    },
     {
       ...buildSpecimenProfileSection([GPT, GPT_MINI]),
       entries: buildSpecimenProfileSection([GPT, GPT_MINI]).entries.map((entry) => ({

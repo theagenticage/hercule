@@ -93,6 +93,19 @@ const SELECT_CATALOGS = `
   LEFT JOIN model_catalogs c ON c.provider_account_id = a.id
 `;
 
+/**
+ * Returns the time to record for a slug that appears in a read that ended at
+ * `readAt`: `readAt`, but never at or before the account's first read
+ * (`firstReadAt`, `null` while there is none). A clock that stepped backwards
+ * could otherwise date a later arrival before the first read, and then the
+ * model would never be announced as new.
+ */
+const pickArrivalTime = (firstReadAt: string | null, readAt: string): string => {
+  if (firstReadAt === null) return readAt;
+  const earliest = Date.parse(firstReadAt) + 1;
+  return Date.parse(readAt) >= earliest ? readAt : new Date(earliest).toISOString();
+};
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -179,7 +192,9 @@ const make = Effect.gen(function* () {
     /**
      * Stores a successful read: replaces the models, sets `readAt`, and adds
      * the slugs the catalog has not held before to `firstSeen` at `readAt`.
-     * The first successful read also sets `firstReadAt` to `readAt`.
+     * The first successful read also sets `firstReadAt` to `readAt`. A slug
+     * first seen in a later read is dated at `readAt`, or one millisecond
+     * after `firstReadAt` if `readAt` is not later than that.
      * `stamp` is when the controller sent the probe.
      *
      * Returns whether it stored: `false` when the catalog already holds models
@@ -199,8 +214,9 @@ const make = Effect.gen(function* () {
         const found = yield* readOne(providerAccountId);
         if (Option.isNone(found) || !isLater(stamp, found.value.modelsStamp)) return false;
         const firstSeen = new Map(found.value.firstSeen);
+        const arrivedAt = pickArrivalTime(found.value.firstReadAt, readAt);
         for (const model of models) {
-          if (!firstSeen.has(model.slug)) firstSeen.set(model.slug, readAt);
+          if (!firstSeen.has(model.slug)) firstSeen.set(model.slug, arrivedAt);
         }
         const newestIsLater =
           found.value.attemptStamp !== null && isLater(found.value.attemptStamp, stamp);

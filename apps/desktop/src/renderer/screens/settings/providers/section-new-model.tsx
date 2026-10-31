@@ -39,7 +39,7 @@ export function SectionNewModel({
   };
   return (
     <div className="pm-new" role="group" aria-label={`New: ${row.name}`}>
-      <span className="pm-new-pill">New</span>
+      <span className="new-pill">New</span>
       <b>{row.name}</b>
       <small>{row.arrivalText}</small>
       <span className="pm-spacer" />

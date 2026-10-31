@@ -98,20 +98,17 @@ const make = Effect.gen(function* () {
 
   /**
    * Reads everything resolving needs, once: the accounts with their readiness
-   * and snapshots, the catalogs with the models that arrived in them, the
-   * runners that can run work now, and the plugins' providers and harnesses.
-   * It checks no grant: the caller has checked the grant of its own
-   * operation, which need not include reading accounts. Callers read it
-   * inside the transaction that reads the profiles, so an account deleted
-   * meanwhile cannot leave an entry without its account.
+   * and snapshots, the catalogs, the runners that can run work now, and the
+   * plugins' providers and harnesses. It checks no grant: the caller has
+   * checked the grant of its own operation, which need not include reading
+   * accounts. Callers read it inside the transaction that reads the profiles,
+   * so an account deleted meanwhile cannot leave an entry without its account.
    */
   const readResolutionWorld = (): Effect.Effect<ResolutionWorld, ReadError> =>
     Effect.gen(function* () {
-      const { catalogs: stored, arrivedModels } = yield* catalogs.listCatalogsWithArrivedModels();
       return {
         accounts: yield* providerAccounts.readProviderAccounts(),
-        catalogs: stored,
-        arrivedModels,
+        catalogs: yield* catalogs.listCatalogs(),
         connectedRunners: yield* runners.listOnline(),
         providers: yield* host.providers(),
         harnesses: yield* host.harnesses(),

@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type HTMLAttributes, type JSX } from "react"
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   addModelProfileAccount,
-  addNewModelToProfile,
+  addNewModel,
   buildModelProfileSections,
   buildProviderAccountName,
   describeProviderAccountIdentity,
@@ -106,16 +106,13 @@ export function ModelProfileMenu({
    * `true` when it was saved, `false` when it failed, and a failure shows
    * above the sections.
    */
-  const trySave = (
+  const saveChange = (
     buildChange: (profile: ModelProfile) => ModelProfileUpdateInput,
   ): Promise<boolean> =>
     save.mutateAsync({ profileId: profile.id, buildChange }).then(
       () => true,
       () => false,
     );
-  /** Saves one change and resolves when the save is over, whether it worked or not. */
-  const change = (buildChange: (profile: ModelProfile) => ModelProfileUpdateInput): Promise<void> =>
-    trySave(buildChange).then(() => undefined);
   // What the user last asked for each model in the picker, until the save that
   // carries it is over. A second click before the first save is answered
   // reads the page as it was drawn, so it would ask for the same thing twice.
@@ -131,20 +128,17 @@ export function ModelProfileMenu({
   // takes 2 to 6 ms, which the pointer entering a section would pay each time.
   const sections = useMemo(
     () =>
-      buildModelProfileSections(profile, {
-        accounts,
-        providers,
-        harnesses,
-        runners,
-        now,
-        timezone,
-      }),
+      buildModelProfileSections(
+        profile,
+        { accounts, providers, harnesses, runners },
+        { now, timezone },
+      ),
     [profile, accounts, providers, harnesses, runners, now, timezone],
   );
   const order = useOptimisticOrder(sections.map(({ providerAccountId }) => providerAccountId));
   const moveSection = (providerAccountId: string, toIndex: number): Promise<void> =>
     order.move(providerAccountId, toIndex, () =>
-      change((current) => moveModelProfileAccount(current, providerAccountId, toIndex)),
+      saveChange((current) => moveModelProfileAccount(current, providerAccountId, toIndex)),
     );
   const sectionDrag = useDragReorder(order.keys, (providerAccountId, toIndex) => {
     void moveSection(providerAccountId, toIndex);
@@ -154,7 +148,7 @@ export function ModelProfileMenu({
   const [joinedProviderAccountId, setJoinedProviderAccountId] = useState<string | null>(null);
   const joinAccount = (providerAccountId: string): void => {
     setJoinedProviderAccountId(providerAccountId);
-    void change((current) => addModelProfileAccount(current, providerAccountId));
+    void saveChange((current) => addModelProfileAccount(current, providerAccountId));
   };
   const choices = accounts
     .filter(({ id }) => !profile.accounts.some(({ providerAccountId }) => providerAccountId === id))
@@ -259,7 +253,7 @@ export function ModelProfileMenu({
                         const key = `${providerAccountId}:${model}`;
                         const included = !(wanted.current.get(key) ?? held.has(model));
                         wanted.current.set(key, included);
-                        void change((current) =>
+                        void saveChange((current) =>
                           setModelProfileEntryIncluded(current, providerAccountId, model, included),
                         ).then(() => {
                           if (wanted.current.get(key) === included) wanted.current.delete(key);
@@ -268,33 +262,35 @@ export function ModelProfileMenu({
                     />
                   }
                   onMoveEntry={(entry, toIndex) =>
-                    change((current) => moveModelProfileEntry(current, entry, toIndex))
+                    saveChange((current) => moveModelProfileEntry(current, entry, toIndex))
                   }
                   onSetHarness={(harnessId) => {
-                    void change((current) =>
+                    void saveChange((current) =>
                       setModelProfileAccountHarness(current, providerAccountId, harnessId),
                     );
                   }}
                   onOpenAccount={onOpenAccount}
                   onMakeDefault={(entry) => {
-                    void change((current) => makeDefaultModelProfileEntry(current, entry));
+                    void saveChange((current) => makeDefaultModelProfileEntry(current, entry));
                   }}
                   onMoveToHarness={(entry, harnessId) => {
-                    void change((current) =>
+                    void saveChange((current) =>
                       moveModelProfileEntryToHarness(current, entry, harnessId),
                     );
                   }}
                   onAlsoOfferIn={(entry, harnessId) => {
-                    void change((current) => offerModelProfileEntryIn(current, entry, harnessId));
+                    void saveChange((current) =>
+                      offerModelProfileEntryIn(current, entry, harnessId),
+                    );
                   }}
                   onTakeOut={(entry) => {
-                    void change((current) => takeOutModelProfileEntry(current, entry));
+                    void saveChange((current) => takeOutModelProfileEntry(current, entry));
                   }}
                   onAddNewModel={({ model }) =>
-                    trySave((current) => addNewModelToProfile(current, providerAccountId, model))
+                    saveChange((current) => addNewModel(current, providerAccountId, model))
                   }
                   onDismissNewModel={({ model }) =>
-                    trySave((current) => dismissNewModel(current, providerAccountId, model))
+                    saveChange((current) => dismissNewModel(current, providerAccountId, model))
                   }
                 />
               );

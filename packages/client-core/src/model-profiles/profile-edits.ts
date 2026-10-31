@@ -52,6 +52,19 @@ const toUpdateInput = (profile: ModelProfile): ModelProfileUpdateInput => ({
   dismissedNewModels: profile.dismissedNewModels,
 });
 
+/**
+ * Returns `dismissed` with the model of the account added, unless it is
+ * there already, so a model is listed once however often it is dismissed.
+ */
+const addDismissedModel = (
+  dismissed: ModelProfileUpdateInput["dismissedNewModels"],
+  providerAccountId: string,
+  model: string,
+): ModelProfileUpdateInput["dismissedNewModels"] =>
+  dismissed.some((each) => each.providerAccountId === providerAccountId && each.model === model)
+    ? dismissed
+    : [...dismissed, { providerAccountId, model }];
+
 const holdsEntry = (input: ModelProfileUpdateInput, entry: ModelProfileEntry): boolean =>
   input.accounts.some((section) =>
     (section.entries ?? []).some((each) => isSameStoredEntry(each, entry)),
@@ -132,21 +145,17 @@ export const takeOutModelProfileEntry = (
       : section,
   );
   const wasDefault = input.defaultEntry !== null && isSameStoredEntry(input.defaultEntry, entry);
-  const alreadyDismissed = input.dismissedNewModels.some(
-    (each) => each.providerAccountId === entry.providerAccountId && each.model === entry.model,
-  );
   return {
     ...input,
     accounts,
     defaultEntry: wasDefault
       ? (accounts.flatMap((section) => section.entries ?? [])[0] ?? null)
       : input.defaultEntry,
-    dismissedNewModels: alreadyDismissed
-      ? input.dismissedNewModels
-      : [
-          ...input.dismissedNewModels,
-          { providerAccountId: entry.providerAccountId, model: entry.model },
-        ],
+    dismissedNewModels: addDismissedModel(
+      input.dismissedNewModels,
+      entry.providerAccountId,
+      entry.model,
+    ),
   };
 };
 
@@ -292,7 +301,7 @@ export const addModelProfileEntries = (
  * does not hold or whose section is still pending. So applying it again to a
  * fresher profile (after a `conflict`) is safe.
  */
-export const addNewModelToProfile = (
+export const addNewModel = (
   profile: ModelProfile,
   providerAccountId: string,
   model: string,
@@ -315,12 +324,10 @@ export const dismissNewModel = (
   model: string,
 ): ModelProfileUpdateInput => {
   const input = toUpdateInput(profile);
-  const alreadyDismissed = input.dismissedNewModels.some(
-    (each) => each.providerAccountId === providerAccountId && each.model === model,
-  );
-  return alreadyDismissed
-    ? input
-    : { ...input, dismissedNewModels: [...input.dismissedNewModels, { providerAccountId, model }] };
+  return {
+    ...input,
+    dismissedNewModels: addDismissedModel(input.dismissedNewModels, providerAccountId, model),
+  };
 };
 
 /**

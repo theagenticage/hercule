@@ -26,10 +26,11 @@ export {
 } from "./provider-key-requests";
 export { modelCatalogRepository, type StoredModelCatalogSummary } from "./model-catalog-repository";
 export {
+  computeArrivedModels,
   computeDefaultSelection,
   ModelCatalogs,
   ModelCatalogsLayer,
-  type ArrivedModel,
+  type CatalogWithFirstRead,
   type ChosenReads,
   type UnservedRead,
 } from "./model-catalogs";

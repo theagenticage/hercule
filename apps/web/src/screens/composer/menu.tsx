@@ -27,6 +27,7 @@ export function MenuRow({
   dimmed = null,
   clipNote = false,
   inert,
+  plain = false,
   trailing,
   className,
   onPick,
@@ -48,11 +49,17 @@ export function MenuRow({
   readonly clipNote?: boolean;
   /**
    * Whether the row cannot be picked, for a row that shows its reason
-   * somewhere other than the right-hand note, such as on its sub-line, or
-   * that has controls of its own at the right. A row with a `dimmed` reason is
-   * already inert without this flag. Only a `dimmed` row is drawn faded.
+   * somewhere other than the right-hand note, such as on its sub-line. A row
+   * with a `dimmed` reason is already inert without this flag. An inert row is
+   * drawn faded.
    */
   readonly inert?: boolean;
+  /**
+   * Whether the row is not a pick but is drawn at full strength, because it
+   * has controls of its own at the right (a New row's Add and Not now).
+   * Takes precedence over `inert`.
+   */
+  readonly plain?: boolean;
   readonly trailing?: ReactNode;
   /** Extra classes for the row, such as a rule above it. */
   readonly className?: string;
@@ -116,8 +123,10 @@ export function MenuRow({
     className,
   );
 
+  if (plain) return <div className={layout}>{body}</div>;
+
   if (inert ?? dimmed !== null) {
-    return <div className={cn(layout, dimmed !== null && "opacity-50")}>{body}</div>;
+    return <div className={cn(layout, "opacity-50")}>{body}</div>;
   }
 
   return (

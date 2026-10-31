@@ -55,10 +55,15 @@ interface FixingAccount {
  * the harnesses, the runners and the plugins, is a shell read that the live
  * connection keeps current: the `provider` topic for the accounts and the
  * profiles, which the shell holds, so opening the section sends no request
- * and the section holds no subscription of its own. The loader only makes sure
- * the cache holds them, and the settings (the time zone of the "New" rows'
- * dates), which it reads only when the cache holds none. Each card reads the lists it draws from, and the page
- * reads only the accounts.
+ * and the section holds no subscription of its own. The loader only makes
+ * sure the cache holds them.
+ *
+ * The loader also makes sure the cache holds the settings, whose time zone
+ * sets the dates on the "New" rows. It reads them only when the cache holds
+ * none.
+ *
+ * Each card reads the lists it draws from, and the page reads only the
+ * accounts.
  */
 export const Route = createFileRoute("/_connected/_shell/settings/providers")({
   staticData: { title: "Providers" },

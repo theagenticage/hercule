@@ -1876,16 +1876,21 @@ A model is **new** to a profile when all of these hold:
 - it is in its account's default selection;
 - its `firstSeenAt` is later than the account's ~~first catalog read~~ *(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* first successful catalog read;
 - the profile holds the account ~~but not the model~~ *(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)*, the section is not waiting for its first catalog read (section 17.3), and the section holds no entry of the model, in any harness;
+- *(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* the section's harness is not known to lack the model (the own-list rule of section 17.2), because Add would be refused for it. Such a model is announced once that harness lists it, so Add is never refused for the rule of section 17.2;
 - the profile has not dismissed it.
 
 ~~The check runs whenever a catalog read stores a change, so at most every 4 hours.~~ *(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* Nothing is stored for a new model. It is worked out on every `modelProfile.query` and `modelProfile.read`, so the answer changes when a catalog read stores a change or when the profile changes. Both are announced on the live topic `provider` (section 17.6).
 
+*(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* The arrival time of a model first seen after the first read is never earlier than the first read. If the controller's clock steps back between two reads, the time stored for the model is one millisecond after the first read, so the step cannot hide the model.
+
 Two consequences:
 
-- A model first seen after the first read but marked legacy is not announced, because it is not in the default selection. It is announced if it later stops being legacy.
+- A model first seen after the first read but marked legacy is not announced, because it is not in the default selection. It is announced if it later stops being legacy. *(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* It is then announced with the date it was first seen, which can be long ago. This is accepted.
 - A model of the first read is never announced.
 
 The composer and the Providers page show a new model at the top of its account's section: "New · Opus 5.6 · ~~released 26 Oct~~ arrived 26 Oct [Add] [Not now]". *(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* No catalog source that announces (the Claude Code, Codex and pi probes) reports a release date, so the row shows when the model arrived, from `firstSeenAt`: "arrived 26 Oct", and "arrived 26 Oct 2025" when that is not this year. Add puts it in the profile. Not now adds it to `dismissedNewModels`. ~~Taking a model out of a profile also dismisses it, so it is not announced again.~~ *(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* Taking a model out of a profile in the desktop app also dismisses it, so it is not announced again: the client sends the dismissal in the same write, because `modelProfile.update` replaces the whole profile and adds none by itself. A caller of the API or the CLI sends `dismissedNewModels` as it wants them. A provider whose default selection is `none`, such as OpenRouter, never announces a model.
+
+*(Amended 2026-10-31, [#938](https://github.com/theagenticage/hercule/issues/938).)* `modelProfile.update` stores only the dismissals that can still matter. It stores none for a provider whose default selection is `none`, and none for a model that the account's catalog listed in its first read, because neither is ever announced. A dismissal of a model that the catalog does not list now is kept, because the model may arrive later. Without this, a user who takes many models out of a large catalog, such as OpenRouter's, would reach the limit of dismissed models and could not save the profile.
 
 ### 17.6 What clients read
 

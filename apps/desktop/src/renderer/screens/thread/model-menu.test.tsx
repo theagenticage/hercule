@@ -5,12 +5,12 @@
  * thread that has started, the flat list and its note; and the choice each
  * row makes.
  */
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   readThreadConfig,
-  type NewModelRow,
   type RecentModel,
   type SignInTarget,
   type ThreadCatalogs,
@@ -18,7 +18,12 @@ import {
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
-import type { ModelProfile, ProviderAccount, ResolvedModelProfileEntry } from "@hercule/contract";
+import type {
+  ModelProfile,
+  ModelProfileUpdateInput,
+  ProviderAccount,
+  ResolvedModelProfileEntry,
+} from "@hercule/contract";
 import {
   ANTHROPIC_IDENTITY,
   buildModelProfile,
@@ -30,7 +35,7 @@ import {
   PROVIDERS,
 } from "@hercule/client-core/testing";
 import { SIDEBAR_FIXTURE, THREAD_FIXTURES } from "../../app/testing";
-import { ModelMenu, type NewModelSaves } from "./model-menu";
+import { ModelMenu } from "./model-menu";
 
 const MOSS = SIDEBAR_FIXTURE.runners[0]!;
 
@@ -86,6 +91,9 @@ const recentOf = (entry: ResolvedModelProfileEntry): RecentModel => ({
   model: entry.model,
 });
 
+/** The function that saves a change to a profile, as the menu receives it. */
+type SaveProfile = NonNullable<ComponentProps<typeof ModelMenu>["saveProfile"]>;
+
 /** Renders the menu and returns the functions that received each choice and each sign-in. */
 const renderMenu = ({
   accounts = [CLAUDE, CODEX],
@@ -94,7 +102,7 @@ const renderMenu = ({
   kind = "draft",
   recent = [],
   lastOpenProfileId = null,
-  newModelSaves,
+  saveProfile,
 }: {
   readonly accounts?: readonly ProviderAccount[];
   readonly profiles?: readonly ModelProfile[];
@@ -102,7 +110,7 @@ const renderMenu = ({
   readonly kind?: ThreadKind;
   readonly recent?: readonly RecentModel[];
   readonly lastOpenProfileId?: string | null;
-  readonly newModelSaves?: NewModelSaves;
+  readonly saveProfile?: SaveProfile;
 } = {}) => {
   const buildCatalogs = (modelProfiles: readonly ModelProfile[]): ThreadCatalogs => ({
     accounts,
@@ -128,7 +136,7 @@ const renderMenu = ({
       rememberOpenProfile={rememberOpenProfile}
       onChoose={onChoose}
       onSignIn={onSignIn}
-      newModelSaves={newModelSaves}
+      saveProfile={saveProfile}
     />
   );
   const { rerender } = render(draw(profiles));
@@ -428,18 +436,15 @@ const WITH_NEW_MODEL: ModelProfile = buildModelProfile([
 /** Returns the "New" row of the menu. */
 const findNewRow = (): HTMLElement => document.querySelector<HTMLElement>(".line--new")!;
 
-/** Returns the New row of `WITH_NEW_MODEL` as a pair of saves that both work at once. */
-const SAVES_AT_ONCE: NewModelSaves = {
-  add: () => Promise.resolve(),
-  dismiss: () => Promise.resolve(),
-};
+/** Saves nothing and works at once. */
+const SAVE_AT_ONCE: SaveProfile = () => Promise.resolve();
 
 describe("the New rows of a Draft Thread's menu", () => {
   it("draws the row first in its lane, with the date, and no pick on its body", async () => {
     const user = userEvent.setup();
     const { onChoose } = renderMenu({
       profiles: [WITH_NEW_MODEL],
-      newModelSaves: SAVES_AT_ONCE,
+      saveProfile: SAVE_AT_ONCE,
     });
 
     expect(readSections()[0]).toEqual([
@@ -452,6 +457,14 @@ describe("the New rows of a Draft Thread's menu", () => {
     expect(onChoose).not.toHaveBeenCalled();
   });
 
+  it("gives the whole line as the tooltip of a name that may be cut", () => {
+    renderMenu({ profiles: [WITH_NEW_MODEL], saveProfile: SAVE_AT_ONCE });
+
+    expect(findNewRow().querySelector(".grow")!.getAttribute("title")).toBe(
+      "Claude Opus 5.6 · arrived 26 Oct",
+    );
+  });
+
   it("draws the row without buttons when the screen gives no way to act on it", () => {
     renderMenu({ profiles: [WITH_NEW_MODEL] });
 
@@ -459,46 +472,43 @@ describe("the New rows of a Draft Thread's menu", () => {
     expect(within(findNewRow()).queryAllByRole("button")).toEqual([]);
   });
 
-  it("names the model on both buttons and hands the profile and the row to the saves", async () => {
+  it("saves the profile of the lane, adding the model on Add and dismissing it on Not now", async () => {
     const user = userEvent.setup();
-    const added = vi.fn<(profileId: string, row: NewModelRow) => Promise<void>>(() =>
-      Promise.resolve(),
-    );
-    const dismissed = vi.fn<(profileId: string, row: NewModelRow) => Promise<void>>(() =>
-      Promise.resolve(),
-    );
-    renderMenu({
-      profiles: [WITH_NEW_MODEL],
-      newModelSaves: { add: added, dismiss: dismissed },
-    });
+    const saveProfile = vi.fn<SaveProfile>(() => Promise.resolve());
+    renderMenu({ profiles: [WITH_NEW_MODEL], saveProfile });
 
     await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
     const dismiss = screen.getByRole("button", { name: "Not now: Claude Opus 5.6" });
     expect(dismiss.getAttribute("title")).toBe("Not now");
     await user.click(dismiss);
 
-    const row: unknown = expect.objectContaining({
-      providerAccountId: CLAUDE.id,
-      model: OPUS_5_6.model,
-    });
-    expect(added.mock.calls).toEqual([[WITH_NEW_MODEL.id, row]]);
-    expect(dismissed.mock.calls).toEqual([[WITH_NEW_MODEL.id, row]]);
+    expect(saveProfile.mock.calls.map(([{ profileId }]) => profileId)).toEqual([
+      WITH_NEW_MODEL.id,
+      WITH_NEW_MODEL.id,
+    ]);
+    const [added, dismissed] = saveProfile.mock.calls.map(([{ buildChange }]) =>
+      buildChange(WITH_NEW_MODEL),
+    );
+    expect(added!.accounts[0]!.entries!.map(({ model }) => model)).toEqual([
+      SONNET.model,
+      OPUS.model,
+      OPUS_5_6.model,
+    ]);
+    expect(dismissed!.dismissedNewModels).toEqual([
+      { providerAccountId: CLAUDE.id, model: OPUS_5_6.model },
+    ]);
   });
 
   it("keeps the buttons of a row focusable but inert while its save runs, and shows a refusal under the lane", async () => {
     const user = userEvent.setup();
-    const add = vi.fn<NewModelSaves["add"]>();
     let refuse: (error: Error) => void = () => undefined;
-    add.mockImplementation(
+    const saveProfile = vi.fn<SaveProfile>(
       () =>
         new Promise<void>((_resolve, reject) => {
           refuse = reject;
         }),
     );
-    renderMenu({
-      profiles: [WITH_NEW_MODEL],
-      newModelSaves: { add, dismiss: () => Promise.resolve() },
-    });
+    renderMenu({ profiles: [WITH_NEW_MODEL], saveProfile });
 
     await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
     const addButton = screen.getByRole("button", { name: "Add Claude Opus 5.6" });
@@ -510,7 +520,7 @@ describe("the New rows of a Draft Thread's menu", () => {
     // The pressed button keeps the focus, and pressing it again does nothing.
     expect(document.activeElement).toBe(addButton);
     await user.keyboard("{Enter}");
-    expect(add).toHaveBeenCalledTimes(1);
+    expect(saveProfile).toHaveBeenCalledTimes(1);
 
     refuse(new Error("pi does not list Claude Opus 5.6."));
 
@@ -546,21 +556,32 @@ describe("the focus after a New row leaves the menu", () => {
       buildProfileSection(OPENAI_IDENTITY, [GPT]),
     ]);
 
-  it("moves to the row of the added entry after Add", async () => {
-    const user = userEvent.setup();
-    const opus56 = claudeEntry(OPUS_5_6.model, OPUS_5_6.name);
+  /**
+   * Renders the menu on `before`. A save then draws the menu on what `after`
+   * returns for the profile the save changed, which is what the app does when
+   * the controller answers.
+   */
+  const renderMenuThatRedraws = (
+    before: ModelProfile,
+    after: (change: ModelProfileUpdateInput) => ModelProfile,
+  ) => {
     let show: (profiles: readonly ModelProfile[]) => void = () => undefined;
     const menu = renderMenu({
-      profiles: [buildProfile([SONNET, OPUS], [OPUS_5_6])],
-      newModelSaves: {
-        add: () => {
-          show([buildProfile([SONNET, OPUS, opus56], [])]);
-          return Promise.resolve();
-        },
-        dismiss: () => Promise.resolve(),
+      profiles: [before],
+      saveProfile: ({ buildChange }) => {
+        show([after(buildChange(before))]);
+        return Promise.resolve();
       },
     });
     show = menu.showProfiles;
+    return menu;
+  };
+
+  it("moves to the row of the added entry after Add", async () => {
+    const user = userEvent.setup();
+    renderMenuThatRedraws(buildProfile([SONNET, OPUS], [OPUS_5_6]), () =>
+      buildProfile([SONNET, OPUS, claudeEntry(OPUS_5_6.model, OPUS_5_6.name)], []),
+    );
 
     await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
 
@@ -569,20 +590,32 @@ describe("the focus after a New row leaves the menu", () => {
     });
   });
 
+  it("finds the added entry in another harness than the section's", async () => {
+    const user = userEvent.setup();
+    const inPi = claudeEntry(OPUS_5_6.model, OPUS_5_6.name, {
+      harnessId: "pi/pi",
+      resolvedHarnessId: "pi/pi",
+    });
+    renderMenuThatRedraws(buildProfile([SONNET, OPUS], [OPUS_5_6]), () =>
+      buildProfile([SONNET, OPUS, inPi], []),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Claude Opus 5.6 · in pi" }),
+      );
+    });
+  });
+
   it("moves to the Add button of the next New row after Not now, else to the lane's first row", async () => {
     const user = userEvent.setup();
-    let show: (profiles: readonly ModelProfile[]) => void = () => undefined;
-    const menu = renderMenu({
-      profiles: [buildProfile([SONNET, OPUS], [OPUS_5_6, OPUS_5_7])],
-      newModelSaves: {
-        add: () => Promise.resolve(),
-        dismiss: (_profileId, row) => {
-          show([buildProfile([SONNET, OPUS], row.model === OPUS_5_6.model ? [OPUS_5_7] : [])]);
-          return Promise.resolve();
-        },
-      },
+    let dismissals = 0;
+    renderMenuThatRedraws(buildProfile([SONNET, OPUS], [OPUS_5_6, OPUS_5_7]), () => {
+      dismissals += 1;
+      return buildProfile([SONNET, OPUS], dismissals === 1 ? [OPUS_5_7] : []);
     });
-    show = menu.showProfiles;
 
     await user.click(screen.getByRole("button", { name: "Not now: Claude Opus 5.6" }));
     await waitFor(() => {
@@ -601,10 +634,7 @@ describe("the focus after a New row leaves the menu", () => {
     const user = userEvent.setup();
     renderMenu({
       profiles: [WITH_NEW_MODEL],
-      newModelSaves: {
-        add: () => Promise.reject(new Error("Refused.")),
-        dismiss: () => Promise.resolve(),
-      },
+      saveProfile: () => Promise.reject(new Error("Refused.")),
     });
 
     await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
@@ -613,5 +643,22 @@ describe("the focus after a New row leaves the menu", () => {
     expect(document.activeElement).toBe(
       screen.getByRole("button", { name: "Add Claude Opus 5.6" }),
     );
+  });
+
+  it("does not take the focus later when the user moved on before the row left", async () => {
+    const user = userEvent.setup();
+    const menu = renderMenu({ profiles: [WITH_NEW_MODEL], saveProfile: SAVE_AT_ONCE });
+
+    // The save works, but the controller's answer has not removed the row yet.
+    await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
+    await user.click(screen.getByRole("button", { name: "Claude Sonnet 5" }));
+    menu.showProfiles([WITH_NEW_MODEL]);
+    // Later the focus is lost for some other reason, and the row leaves.
+    (document.activeElement as HTMLElement).blur();
+    menu.showProfiles([
+      buildProfile([SONNET, OPUS, claudeEntry(OPUS_5_6.model, OPUS_5_6.name)], []),
+    ]);
+
+    expect(document.activeElement).toBe(document.body);
   });
 });

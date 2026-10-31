@@ -163,6 +163,10 @@ button.line:hover {
 }
 .line-action {
   flex: none;
+  /* The padding gives the focus ring room around the word, and the negative
+     margin keeps the word where it was. */
+  margin-inline: -5px;
+  padding-inline: 5px;
   white-space: nowrap;
 }
 /* Not in the book. What stands in a lane while its account's models are

@@ -6,7 +6,8 @@ import { CloseIcon } from "../../icons/close";
  * Renders the row of a model the controller announced as new: a "New" pill,
  * the model's name and when it arrived, drawn like the lines around it. The
  * row is not a choice: clicking its body does nothing, and only its two
- * buttons act.
+ * buttons act. Its `data-new-model` attribute holds the model, so that code
+ * that moves the focus can find the row.
  *
  * - `actions` gives the buttons. "Add" calls `onAdd`, and "Not now" (a ×)
  *   calls `onDismiss`. While `busy` is true, which is while a save of this
@@ -27,9 +28,10 @@ export function NewModelLine({
   } | null;
 }): JSX.Element {
   return (
-    <div className="line line--new">
-      <span className="pk-new">New</span>
-      <span className="grow">
+    <div className="line line--new" data-new-model={row.model}>
+      <span className="new-pill">New</span>
+      {/* A long name is cut with an ellipsis, so the whole line is its tooltip. */}
+      <span className="grow" title={`${row.name} · ${row.arrivalText}`}>
         <b>{row.name}</b>
         {` · ${row.arrivalText}`}
       </span>

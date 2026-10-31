@@ -80,7 +80,8 @@ export interface ModelSection {
  * Returns the sections of `profile` in its order. A section whose account is
  * not in `accounts` is left out: the controller removes an account from every
  * profile when it deletes it, so such a section only shows between the two
- * reads that follow a delete.
+ * reads that follow a delete. `dates` decides how each "New" row says when
+ * its model arrived.
  */
 export const buildModelProfileSections = (
   profile: ModelProfile,
@@ -89,7 +90,8 @@ export const buildModelProfileSections = (
     readonly providers: readonly Provider[];
     readonly harnesses: readonly Harness[];
     readonly runners: readonly Runner[];
-  } & NewModelDates,
+  },
+  dates: NewModelDates,
 ): readonly ModelSection[] => {
   const { defaultEntry } = profile;
   return profile.accounts.flatMap((section) => {
@@ -103,7 +105,7 @@ export const buildModelProfileSections = (
         pluginId: findProviderPluginId(catalogs.providers, account),
         selectionPending: section.selectionPending,
         harness,
-        newModels: buildNewModelRows(section, catalogs),
+        newModels: buildNewModelRows(section, dates),
         sectionHarnessModels: section.entries
           .filter((entry) => entry.resolvedHarnessId === section.resolvedHarnessId)
           .map((entry) => entry.model),

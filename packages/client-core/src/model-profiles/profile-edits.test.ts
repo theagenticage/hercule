@@ -19,7 +19,7 @@ import {
 import {
   addModelProfileAccount,
   addModelProfileEntries,
-  addNewModelToProfile,
+  addNewModel,
   dismissNewModel,
   makeDefaultModelProfileEntry,
   moveModelProfileAccount,
@@ -455,9 +455,9 @@ describe("setModelProfileEntryIncluded", () => {
   });
 });
 
-describe("addNewModelToProfile", () => {
+describe("addNewModel", () => {
   it("appends the model to the end of the account's section, as an entry that follows the section's harness", () => {
-    const input = addNewModelToProfile(PROFILE, CLAUDE, "opus-5.6");
+    const input = addNewModel(PROFILE, CLAUDE, "opus-5.6");
 
     expect(input.accounts[0]!.entries).toEqual([
       stored(ANTHROPIC_IDENTITY, "sonnet"),
@@ -471,7 +471,7 @@ describe("addNewModelToProfile", () => {
   it("makes the model the default of a profile with none", () => {
     const emptied = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [])]);
 
-    expect(addNewModelToProfile(emptied, CLAUDE, "opus-5.6").defaultEntry).toEqual(
+    expect(addNewModel(emptied, CLAUDE, "opus-5.6").defaultEntry).toEqual(
       stored(ANTHROPIC_IDENTITY, "opus-5.6"),
     );
   });
@@ -479,7 +479,7 @@ describe("addNewModelToProfile", () => {
   it("changes nothing when the section holds the model, in any harness", () => {
     const held = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, [SONNET_IN_PI])]);
 
-    expect(addNewModelToProfile(held, CLAUDE, "sonnet").accounts[0]!.entries).toEqual([
+    expect(addNewModel(held, CLAUDE, "sonnet").accounts[0]!.entries).toEqual([
       stored(ANTHROPIC_IDENTITY, "sonnet", "pi/pi"),
     ]);
   });
@@ -487,11 +487,11 @@ describe("addNewModelToProfile", () => {
   it("changes nothing for an account the profile does not hold, or whose section is pending", () => {
     const pending = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, "pending")]);
 
-    expect(readModels(addNewModelToProfile(PROFILE, ZAI, "glm-5.3"))).toEqual([
+    expect(readModels(addNewModel(PROFILE, ZAI, "glm-5.3"))).toEqual([
       ["sonnet", "opus", "haiku"],
       ["gpt-6"],
     ]);
-    expect(addNewModelToProfile(pending, CLAUDE, "opus-5.6").accounts).toEqual([
+    expect(addNewModel(pending, CLAUDE, "opus-5.6").accounts).toEqual([
       { providerAccountId: CLAUDE, harnessId: null },
     ]);
   });
@@ -507,7 +507,7 @@ describe("addNewModelToProfile", () => {
       { revision: 8 },
     );
 
-    const input = addNewModelToProfile(fresher, CLAUDE, "opus-5.6");
+    const input = addNewModel(fresher, CLAUDE, "opus-5.6");
 
     expect(input.expectedRevision).toBe(8);
     expect(input.accounts[0]!.entries).toHaveLength(2);

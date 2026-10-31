@@ -378,8 +378,9 @@
 }
 
 /* ---------- A "New" row: a model the controller announced, under the head ---------- */
-/* The prototype's `.vh-new`. Its left padding of 30px puts the name under the
-   names of the rows below (8px of padding, the 14px grip, an 8px gap). */
+/* The prototype's `.vh-new`, with its measurements. The 30px of left padding
+   leaves room for the "New" pill, so the name starts to the right of where the
+   names of the rows below start. */
 .pm-new {
   display: flex;
   align-items: center;
@@ -397,18 +398,8 @@
   color: var(--muted);
   font-size: var(--t-12);
 }
-/* The prototype's `.pk-new`. */
-.pm-new-pill {
-  display: inline-flex;
-  align-items: center;
-  height: 17px;
+.pm-new .new-pill {
   margin-right: 6px;
-  padding: 0 5px;
-  border-radius: var(--r-pill);
-  background: var(--ok-tint);
-  color: var(--ok);
-  font-size: var(--t-11);
-  font-weight: var(--w-bold);
 }
 
 /* ---------- The row's ⋯ menu ---------- */

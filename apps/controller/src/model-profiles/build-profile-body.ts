@@ -7,6 +7,7 @@
  */
 import {
   isModelMissingFromHarness,
+  type DismissedNewModel,
   type Issue,
   type ModelProfileAccountInput,
   type ModelProfileEntry,
@@ -211,6 +212,42 @@ const findEntryIssues = (
 };
 
 /**
+ * Returns the dismissals worth storing: those of a model that could still be
+ * announced as new. A dismissal is dropped when it can never matter:
+ *
+ * - the account's provider has the Default Selection `none`, which never
+ *   announces a model; or
+ * - the catalog lists the model, and it was first seen at or before the
+ *   account's first read, so it is not new and never will be.
+ *
+ * Kept: a model the catalog does not list (it may arrive later, or it left
+ * and the catalog no longer says when it was first seen), a model first seen
+ * after the first read, and any dismissal of an account that was never read.
+ *
+ * Without this the list would grow by one for every model taken out of a
+ * profile, and at `MAX_DISMISSED_NEW_MODELS` a user who curates a catalog of
+ * hundreds of models (OpenRouter's) could not save the profile any more. A
+ * dismissal of an unknown account is kept here, because the write is refused
+ * for it anyway.
+ */
+const dropUnannounceableDismissals = (
+  dismissed: ReadonlyArray<DismissedNewModel>,
+  world: ResolutionWorld,
+): ReadonlyArray<DismissedNewModel> =>
+  dismissed.filter((one) => {
+    const account = world.accounts.find((candidate) => candidate.id === one.providerAccountId);
+    const provider = world.providers.find((candidate) => candidate.id === account?.providerId);
+    if (provider?.defaultSelection === "none") return false;
+    const catalog = world.catalogs.find((candidate) => candidate.providerAccountId === account?.id);
+    const listed = catalog?.models.find((model) => model.slug === one.model);
+    return (
+      catalog?.firstReadAt == null ||
+      listed === undefined ||
+      Date.parse(listed.firstSeenAt) > Date.parse(catalog.firstReadAt)
+    );
+  });
+
+/**
  * Builds the body that `input` asks for.
  *
  * - A section sent with `entries` keeps them as sent.
@@ -222,6 +259,8 @@ const findEntryIssues = (
  *   harness is known not to list some of them. A pending one is filled later
  *   with every selected model, and the harness's gaps show as
  *   `harness-lacks-model` on read.
+ * - The dismissed models are stored without those that can never be
+ *   announced (`dropUnannounceableDismissals`).
  * - A `defaultEntry` of `null` is allowed only when every entry of the
  *   profile comes from a Default Selection filled in this write. The default
  *   then becomes the first filled section's default model, else the first
@@ -335,7 +374,7 @@ export const buildProfileBody = (
         body: {
           accounts: sections,
           defaultEntry,
-          dismissedNewModels: input.dismissedNewModels,
+          dismissedNewModels: dropUnannounceableDismissals(input.dismissedNewModels, world),
         },
       };
 };

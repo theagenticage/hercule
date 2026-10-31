@@ -436,6 +436,26 @@ button.nav-row {
   background: var(--fail-tint);
   color: var(--fail-ink);
 }
+/* Not in the book. The "New" pill that marks a model the controller announced
+   as new, in the composer's model menu and on Settings > Providers > Models.
+   It is the prototype's `.pk-new`. Each place sets its own margin, because
+   each sets the gap to the name differently. */
+.new-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 17px;
+  /* Centred by the line box, the word sits one pixel above the baseline of the
+     names beside it, so two pixels of padding at the top bring it down to
+     that baseline. */
+  padding: 2px 5px 0;
+  border-radius: var(--r-pill);
+  background: var(--ok-tint);
+  color: var(--ok);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  line-height: 1;
+}
 
 /* ---------- Inputs ---------- */
 .field {
