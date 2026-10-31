@@ -97,7 +97,10 @@ function ProfileTabMenu({
  * tab. Enter and leaving the field end the edit. A name that is blank calls
  * `onBlank` and keeps the field, so the user can correct it. A name that did
  * not change calls `onStop`, and so does Esc. Any other name calls `onSave`.
- * The field never waits for a save: whoever receives the name saves it.
+ * Both are told whether the edit ended on the keyboard (Enter or Esc), because
+ * then focus goes back to the tab, while leaving the field means the user has
+ * already moved focus somewhere else. The field never waits for a save:
+ * whoever receives the name saves it.
  */
 function RenamingTab({
   tab,
@@ -106,9 +109,9 @@ function RenamingTab({
   onStop,
 }: {
   readonly tab: ProfileTab;
-  readonly onSave: (name: string) => void;
+  readonly onSave: (name: string, endedOnKeyboard: boolean) => void;
   readonly onBlank: () => void;
-  readonly onStop: () => void;
+  readonly onStop: (endedOnKeyboard: boolean) => void;
 }): JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(tab.name);
@@ -123,13 +126,16 @@ function RenamingTab({
     ended.current = true;
     finish();
   };
-  const commit = (): void => {
+  const commit = (endedOnKeyboard: boolean): void => {
     if (ended.current) return;
-    if (value === tab.name) end(onStop);
+    if (value === tab.name)
+      end(() => {
+        onStop(endedOnKeyboard);
+      });
     else if (value.trim() === "") onBlank();
     else
       end(() => {
-        onSave(value);
+        onSave(value, endedOnKeyboard);
       });
   };
   return (
@@ -146,15 +152,20 @@ function RenamingTab({
         onChange={(event) => {
           setValue(event.target.value);
         }}
-        onBlur={commit}
+        onBlur={() => {
+          commit(false);
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
-            commit();
+            commit(true);
           } else if (event.key === "Escape") {
             event.preventDefault();
             event.stopPropagation();
-            if (!ended.current) end(onStop);
+            if (!ended.current)
+              end(() => {
+                onStop(true);
+              });
           }
         }}
       />
@@ -199,10 +210,24 @@ export function ProfileTabs({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [blankName, setBlankName] = useState(false);
 
-  const stopRenaming = (): void => {
+  // Set when a rename ended on the keyboard: the field was focused, and
+  // focus would drop to the page when it goes away, so the tab takes it back.
+  const refocusAfterRename = useRef(false);
+  const stopRenaming = (endedOnKeyboard = false): void => {
+    refocusAfterRename.current = endedOnKeyboard;
     setRenamingId(null);
     setBlankName(false);
   };
+  const focusTab = (id: string): void => {
+    [...(listRef.current?.querySelectorAll<HTMLElement>("[role='tab']") ?? [])]
+      .find((element) => element.dataset.tabId === id)
+      ?.focus();
+  };
+  useEffect(() => {
+    if (renamingId !== null || !refocusAfterRename.current) return;
+    refocusAfterRename.current = false;
+    focusTab(openId);
+  }, [renamingId, openId]);
   const openTab = (id: string): void => {
     stopRenaming();
     onOpen(id);
@@ -224,9 +249,7 @@ export function ProfileTabs({
     if (target === undefined) return;
     event.preventDefault();
     openTab(target.id);
-    [...(listRef.current?.querySelectorAll<HTMLElement>("[role='tab']") ?? [])]
-      .find((element) => element.dataset.tabId === target.id)
-      ?.focus();
+    focusTab(target.id);
   };
 
   return (
@@ -245,8 +268,8 @@ export function ProfileTabs({
                 <RenamingTab
                   key={tab.id}
                   tab={tab}
-                  onSave={(name) => {
-                    stopRenaming();
+                  onSave={(name, endedOnKeyboard) => {
+                    stopRenaming(endedOnKeyboard);
                     onRename(tab.id, name);
                   }}
                   onBlank={() => {

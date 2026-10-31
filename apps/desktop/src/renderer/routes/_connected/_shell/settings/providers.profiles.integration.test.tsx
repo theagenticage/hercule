@@ -378,6 +378,8 @@ describe("Settings > Providers > Models, profiles", () => {
         expect(listTabNames()).toEqual(["Daily", "Work"]);
       });
       expect(screen.queryByRole("textbox")).toBeNull();
+      // Focus goes back to the renamed tab, not to the page.
+      expect(document.activeElement).toBe(screen.getByRole("tab", { name: /^Daily/ }));
       const [update] = getCalls(calls, "PATCH", `/api/v1/model-profiles/${MAIN_ID}`);
       expect(update!.body).toMatchObject({ name: "Daily", expectedRevision: 3 });
       expect((update!.body as { accounts: unknown[] }).accounts).toHaveLength(1);
@@ -407,6 +409,7 @@ describe("Settings > Providers > Models, profiles", () => {
       await userEvent.type(screen.getByRole("textbox"), "Daily{Escape}");
 
       expect(screen.queryByRole("textbox")).toBeNull();
+      expect(document.activeElement).toBe(screen.getByRole("tab", { name: /^Main/ }));
       expect(listTabNames()).toEqual(["Main", "Work"]);
       expect(calls.filter((call) => call.method === "PATCH")).toHaveLength(0);
     });
