@@ -85,7 +85,7 @@ export type ThreadRows = Schema.Schema.Type<typeof ThreadRows>;
  * as the protocol allows a model name to be, so a name that fits here can
  * always be sent to a runner.
  */
-const ModelSlug = Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH));
+export const ModelSlug = Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH));
 
 /**
  * A model from a Provider Account, run in one harness. `harnessId` left out

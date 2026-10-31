@@ -253,6 +253,12 @@ export const queryKeys = {
   secrets: (): LiveQueryKey => ["secrets"],
   /** The Provider Accounts with their snapshots. Pushed on the `provider` topic. */
   providerAccounts: (): LiveQueryKey => ["provider-accounts"],
+  /**
+   * The Model Profiles with every entry resolved, which the composer's model
+   * menu reads. Pushed on the `provider` topic: a sign-in, a catalog change or
+   * a runner coming or going changes what an entry can do.
+   */
+  modelProfiles: (): LiveQueryKey => ["model-profiles"],
   /** Not a live topic: the providers a build registers change only with the build. */
   providers: (): LiveQueryKey => ["providers"],
   /**
@@ -600,9 +606,16 @@ export const buildQueryKeys = (
   // in to which account. The harness list is refetched too: each runner's
   // version verdict for a harness comes from the probes, and a probe that
   // finishes announces this topic, so a harness upgraded after a "too old"
-  // verdict must be read again to clear it.
+  // verdict must be read again to clear it. The Model Profiles are refetched
+  // too: each entry carries whether it can run now, which every one of these
+  // changes can alter.
   if (topic === "provider") {
-    return [queryKeys.providerAccounts(), queryKeys.controller(), queryKeys.harnesses()];
+    return [
+      queryKeys.providerAccounts(),
+      queryKeys.modelProfiles(),
+      queryKeys.controller(),
+      queryKeys.harnesses(),
+    ];
   }
   return [];
 };

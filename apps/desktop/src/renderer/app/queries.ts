@@ -298,6 +298,19 @@ export const providerAccountsQuery = (client: HerculeClient) =>
     ...SHELL_READ_OPTIONS,
   });
 
+/**
+ * Reads every Model Profile with each entry resolved: its model's name, its
+ * options and whether it can run now. The composer's model menu and the
+ * Settings pages that name a model are built from it, so opening the menu
+ * reads nothing.
+ */
+export const modelProfilesQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.modelProfiles(),
+    queryFn: () => client.modelProfile.query(),
+    ...SHELL_READ_OPTIONS,
+  });
+
 /** Reads the providers the controller's plugins register, whose names name the accounts. */
 export const providersQuery = (client: HerculeClient) =>
   queryOptions({
@@ -1973,6 +1986,7 @@ export const ensureShellData = async (
     queryClient.ensureQueryData(resourcesQuery(client)),
     queryClient.ensureQueryData(runnersQuery(client)),
     queryClient.ensureQueryData(providerAccountsQuery(client)),
+    queryClient.ensureQueryData(modelProfilesQuery(client)),
     queryClient.ensureQueryData(providersQuery(client)),
     queryClient.ensureQueryData(harnessesQuery(client)),
     queryClient.ensureQueryData(connectionsQuery(client)),

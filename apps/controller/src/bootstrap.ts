@@ -97,6 +97,7 @@ import {
   type LocalRunnerOptions,
 } from "./runners";
 import { PluginIntake } from "./intake-settings";
+import { ModelProfileMembershipLayer } from "./model-profiles";
 import {
   IngestLoops,
   PluginConfigsLayer,
@@ -109,6 +110,8 @@ import {
 import {
   HarnessAccounts,
   HarnessAccountsLayer,
+  ModelCatalogs,
+  ModelCatalogsLayer,
   ProviderAccountProbes,
   ProviderAccountProbesLayer,
   ProviderAccountRunners,
@@ -267,6 +270,7 @@ export type ControllerServices =
   | ConnectionTypes
   | RunnerConnections
   | HarnessAccounts
+  | ModelCatalogs
   | ProviderAccountProbes
   | ProviderAccountRunners
   | ProviderAccountProbing
@@ -315,6 +319,18 @@ export const bootWith = <A, E>(
     // Filled by the set-up below, which opens an existing Master Key before the
     // migrations, and read by the Master Key layer so the key is read once.
     const openedMasterKey = yield* Ref.make<CryptoKey | undefined>(undefined);
+    // The local runner starts after the layers are built, and the layers that
+    // sweep the fleet read its id on every sweep. The boot sets the Ref once
+    // the runner is up; until then `LocalRunnerId` reads no id. The sweeps run
+    // from the server `use` starts, which is after the Ref is set, so the
+    // first arrival already finds the runner. Its id can still be unknown for
+    // a moment on the very first start, while the child is joining; the
+    // choice then falls to the first runner that can serve, which is the local
+    // runner itself when it is the only one connected.
+    const startedLocalRunner = yield* Ref.make<LocalRunner | undefined>(undefined);
+    const localRunnerIdLayer = Layer.succeed(LocalRunnerId, {
+      read: () => Ref.getUnsafe(startedLocalRunner)?.runnerId(),
+    });
 
     // The secrets repository is merged into the output rather than only
     // provided to the layers above it: `secret.*` are public operations, so
@@ -335,6 +351,9 @@ export const bootWith = <A, E>(
           CredentialsLayer,
           AuditLogLayer,
           PlatformEventsLayer,
+          // Provider Accounts declares this port and cannot import the Model
+          // Profiles that implement it.
+          ModelProfileMembershipLayer,
           JoinTokensLayer,
           PromotionTokensLayer,
           GithubSkillSourcesLayer.pipe(Layer.provide(FetchHttpClient.layer)),
@@ -379,7 +398,9 @@ export const bootWith = <A, E>(
      */
     const withFleet = ProviderAccountProbingLayer.pipe(
       Layer.provideMerge(ProviderAccountProbesLayer),
+      Layer.provideMerge(ModelCatalogsLayer),
       Layer.provideMerge(ProviderAccountRunnersLayer),
+      Layer.provideMerge(localRunnerIdLayer),
       Layer.provideMerge(HarnessAccountsLayer),
       Layer.provideMerge(RunnerConnectionsLayer),
       Layer.provideMerge(catalog),
@@ -498,18 +519,11 @@ export const bootWith = <A, E>(
               logLevel: bootstrap.logLevel,
             });
 
+      yield* Ref.set(startedLocalRunner, localRunner);
       return { paths, identityId: record.id, setupUrl: url, localRunner } satisfies BootOutcome;
     });
 
-    return yield* Effect.scoped(
-      Effect.flatMap(steps, (outcome) =>
-        // Provided here, next to the local runner the boot started, so a
-        // service built in `use` reads the id from the running child.
-        Effect.provideService(use(outcome), LocalRunnerId, {
-          read: () => outcome.localRunner?.runnerId(),
-        }),
-      ),
-    ).pipe(
+    return yield* Effect.scoped(Effect.flatMap(steps, use)).pipe(
       Effect.provide(
         withPlugins.pipe(
           Layer.provideMerge(

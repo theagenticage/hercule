@@ -42,6 +42,7 @@ const NO_CATALOGS: ThreadCatalogs = {
   thisMacRunnerId: null,
   providers: PROVIDERS,
   harnesses: HARNESSES,
+  modelProfiles: [],
 };
 
 it("defaults a coding project to separate files while honoring each explicit stored choice", () => {

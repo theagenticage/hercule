@@ -80,9 +80,6 @@ function Assistants(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
 
   useLiveInvalidation(live, queryClient, "assistant");
-  // The account select lists the accounts, so an account added
-  // or removed elsewhere shows without a reload.
-  useLiveInvalidation(live, queryClient, "provider");
 
   const assistants = useSuspenseQuery(assistantsQuery(client)).data.items;
   const [selectedId, setSelectedId] = useState<string | null>(null);

@@ -516,6 +516,28 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/provider-accounts/:id/sign-in-code",
   },
+  "providerAccount.readCatalog": {
+    requires: "infra.read",
+    method: "GET",
+    path: "/api/v1/provider-accounts/:id/catalog",
+  },
+  "providerAccount.refresh": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/provider-accounts/:id/refresh",
+  },
+
+  "modelProfile.query": { requires: "infra.read", method: "GET", path: "/api/v1/model-profiles" },
+  "modelProfile.read": {
+    requires: "infra.read",
+    method: "GET",
+    path: "/api/v1/model-profiles/:id",
+  },
+  "modelProfile.update": {
+    requires: "infra.write",
+    method: "PATCH",
+    path: "/api/v1/model-profiles/:id",
+  },
 
   "connection.query": { requires: "connection.read", method: "GET", path: "/api/v1/connections" },
   "connection.read": {

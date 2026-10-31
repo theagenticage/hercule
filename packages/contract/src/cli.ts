@@ -2449,13 +2449,13 @@ export const CLI = {
   },
   "providerAccount.query": {
     command: "provider-account list",
-    help: "Lists the Provider Accounts, oldest first. Each is one account at one Provider, with who is signed in, the plan, the default harness, and the Capability Snapshot each runner reported for it. A snapshot is auth state, harness version and model catalog. Sessions, Agents and assistants run on an account's id, never on a Provider's.",
+    help: "Lists the Provider Accounts, oldest first. Each is one account at one Provider, with who is signed in, the plan, the default harness, and the Capability Snapshot each runner reported for it. A snapshot is auth state, harness version and model catalog. It also has the model count, when the Model Catalog was last read, the error of a failed read, and `readiness`: for each harness the account may run in and each runner, whether it can run there now. Sessions, Agents and assistants run on an account's id, never on a Provider's.",
     examples: [{ args: [] }],
     fields: {},
   },
   "providerAccount.read": {
     command: "provider-account read",
-    help: "Reads one Provider Account in full. It shows the Capability Snapshot each runner reported for it in each harness. A snapshot is auth state, harness version and model catalog.",
+    help: "Reads one Provider Account in full. It shows the Capability Snapshot each runner reported for it in each harness. A snapshot is auth state, harness version and model catalog. It also shows `readiness`, the model count, and when the Model Catalog was last read.",
     examples: [{ args: ["1f3a9c2e"] }],
     fields: {
       id: {
@@ -2545,7 +2545,7 @@ export const CLI = {
     },
     errors: {
       validation:
-        "the Provider refused the new key (the message carries its words), or the account cannot run in that default harness",
+        "the Provider refused the new key (the message carries its words), the account cannot run in that default harness, or that default would list one model twice in a section of a Model Profile (the message names the profile and the model)",
       invalid_state: "the Provider could not be reached, or could not check the new key; try again",
       conflict: "another account at the same Provider already has that label",
     },
@@ -2601,6 +2601,103 @@ export const CLI = {
       },
       runnerId: { flag: "runner", help: "The same machine the sign-in was started on." },
       code: { flag: "code", help: "The code the browser showed; one line, no newlines." },
+    },
+  },
+  "providerAccount.readCatalog": {
+    command: "provider-account read-catalog",
+    help: "Reads the Model Catalog stored for a Provider Account. It has each model's slug, name, options, image input and the date it was first seen, when the catalog was last read, and the error of the last failed read. It fetches nothing, so it is fast; `hercule provider-account refresh` reads the catalog again. A catalog is empty until the first successful read.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "account-id",
+        help: "The account's id, or a tail of eight or more characters.",
+        resolves: "providerAccount.query",
+      },
+    },
+  },
+  "providerAccount.refresh": {
+    command: "provider-account refresh",
+    help: "Reads the account's Model Catalog again, by probing it on every runner where it can run. It returns the account at once, before the probes end. The outcome arrives later: run `hercule provider-account read` to see the new model count, the time of the read, and the error of a failed read. A failed read keeps the last good catalog.",
+    examples: [{ args: ["1f3a9c2e"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "account-id",
+        help: "The account's id, or a tail of eight or more characters.",
+        resolves: "providerAccount.query",
+      },
+    },
+  },
+
+  "modelProfile.query": {
+    command: "model-profile list",
+    help: "Lists the Model Profiles in the order they were created. A Model Profile is the menu of models a thread offers: one section per Provider Account, each with its entries in order and a default entry. Each entry shows the model's name, the harness it runs in, and whether it can run now, with the reason when it cannot. Use `hercule model-profile read` for one profile, and its revision for `hercule model-profile update`.",
+    examples: [{ args: [] }],
+    fields: {},
+  },
+  "modelProfile.read": {
+    command: "model-profile read",
+    help: "Reads one Model Profile in full. It has the revision, the sections with their entries, the default entry and the models dismissed as new. A section with `selectionPending` true is waiting for its account's first catalog read and has no entries yet.",
+    examples: [{ args: ["01a2b3c4"] }],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "profile-id",
+        help: "The Model Profile's id, or a tail of eight or more characters.",
+        resolves: "modelProfile.query",
+      },
+    },
+  },
+  "modelProfile.update": {
+    command: "model-profile update",
+    help: "Replaces a whole Model Profile: the stored profile becomes exactly what you send. Read it first with `hercule model-profile read` and send every part, changed or not, together with the revision you read. The call fails with `conflict` when the profile changed since; read it again and make your change on that. A section sent without `entries` gets its Provider's default model selection, now if the account's catalog has been read, otherwise when its first read succeeds. `entries: []` means no entries. Every entry carries the account id, the model slug and a harness id or null.",
+    examples: [
+      {
+        args: [
+          "01a2b3c4",
+          "--expected-revision",
+          "3",
+          "--name",
+          "Main",
+          "--accounts",
+          '[{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","harnessId":null,"entries":[{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","model":"claude-opus-5-5","harnessId":null}]}]',
+          "--default-entry",
+          '{"providerAccountId":"01a11891-08b4-7126-b9e7-ae3ac15ae616","model":"claude-opus-5-5","harnessId":null}',
+          "--dismissed-new-models",
+          "[]",
+        ],
+      },
+    ],
+    fields: {
+      id: {
+        positional: true,
+        placeholder: "profile-id",
+        help: "The Model Profile's id, or a tail of eight or more characters.",
+        resolves: "modelProfile.query",
+      },
+      expectedRevision: {
+        flag: "expected-revision",
+        help: "The revision you read, as a whole number. The update is refused with `conflict` when the profile is at another revision.",
+      },
+      name: { flag: "name", help: "The profile's name; unique among the profiles." },
+      accounts: {
+        flag: "accounts",
+        help: 'The sections in menu order as inline JSON: [{"providerAccountId":"<id>","harnessId":<harness id or null>,"entries":[{"providerAccountId":"<id>","model":"<slug>","harnessId":<harness id or null>}]}]. Leave "entries" off a section to give it the Provider\'s default selection.',
+      },
+      defaultEntry: {
+        flag: "default-entry",
+        help: 'The entry new threads start on as inline JSON, {"providerAccountId":"<id>","model":"<slug>","harnessId":<harness id or null>}, or null for none. It must be one of the entries.',
+      },
+      dismissedNewModels: {
+        flag: "dismissed-new-models",
+        help: 'The models the profile no longer announces as new, as inline JSON: [{"providerAccountId":"<id>","model":"<slug>"}]. Send [] for none.',
+      },
+    },
+    errors: {
+      conflict: "the profile is at another revision than --expected-revision; read it again",
+      validation:
+        "another profile has the name, an account does not exist or appears twice, an entry sits under another account's section or appears twice, a harness is one the account cannot run in, a new entry's model is not in the list its harness gave for the account, the default entry is not one of the entries, or a list is over its limit (64 accounts, 256 entries in a section, 1024 dismissed models)",
     },
   },
 
@@ -4373,7 +4470,12 @@ export const NOUNS = {
   },
   "provider-account": {
     summary: "Provider Accounts: the accounts at a Provider that sessions run on.",
-    flow: "hercule provider-account create opens an account (a key kind takes its key with --credentials-stdin and is ready; a sign-in kind is created bare), hercule provider-account list finds an account, hercule provider-account sign-in and hercule provider-account submit-sign-in-code sign it in on a machine, hercule provider-account update changes its label, default harness or key, and hercule runner probe shows whether it is usable there.",
+    flow: "hercule provider-account create opens an account (a key kind takes its key with --credentials-stdin and is ready; a sign-in kind is created bare), hercule provider-account list finds an account, hercule provider-account sign-in and hercule provider-account submit-sign-in-code sign it in on a machine, hercule provider-account update changes its label, default harness or key, hercule provider-account read-catalog shows the models it offers, hercule provider-account refresh reads them again, and hercule runner probe shows whether it is usable there.",
+  },
+  "model-profile": {
+    summary:
+      "Model Profiles: the named menus of models that threads offer, picked from the Provider Accounts.",
+    flow: "hercule model-profile list finds a profile, hercule model-profile read shows its revision and entries, and hercule model-profile update replaces it with the revision you read.",
   },
   connection: {
     summary: "Connections: the named links to external accounts Hercule acts through.",

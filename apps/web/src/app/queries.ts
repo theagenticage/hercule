@@ -358,15 +358,34 @@ export const harnessesQuery = (client: HerculeClient) =>
   });
 
 /**
- * Loads the three reads that describe the accounts: the accounts, their
- * providers and the harnesses. A screen that names or lists accounts calls it
- * in its loader, so nothing below the route suspends.
+ * Reads the Model Profiles with every entry resolved. The composer's model
+ * menu, Settings > Threads and the new-thread screen all draw from it, so it
+ * is a read of the shell: the shell's loader loads it, and it is kept for the
+ * life of the page (`gcTime: Infinity`) because Query would otherwise remove
+ * it five minutes after the last component left, and the next composer to
+ * mount would suspend. Only the `provider` live topic changes it, so it is
+ * never stale on its own.
+ */
+export const modelProfilesQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.modelProfiles(),
+    queryFn: () => client.modelProfile.query(),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+
+/**
+ * Loads the reads that describe the accounts: the accounts, their providers,
+ * the harnesses and the plugins whose marks draw the providers. A screen that
+ * names or lists accounts calls it in its loader, so nothing below the route
+ * suspends.
  */
 export const ensureProviderAccountReads = (queryClient: QueryClient, client: HerculeClient) =>
   Promise.all([
     queryClient.ensureQueryData(providerAccountsQuery(client)),
     queryClient.ensureQueryData(providersQuery(client)),
     queryClient.ensureQueryData(harnessesQuery(client)),
+    queryClient.ensureQueryData(pluginsQuery(client)),
   ]);
 
 /**

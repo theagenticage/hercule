@@ -573,7 +573,6 @@ export {
   findProviderAccountNameIfAmbiguous,
   findProviderPluginId,
   listProviderAccountCredentialFields,
-  listSignedInDefaultHarnessSnapshots,
   signsInPerMachine,
   resolveThreadHarnessId,
   type HarnessLoginMethod,
@@ -765,14 +764,31 @@ export {
 export { MAX_UNBROKEN_CODE_WORD, splitCodeSpans } from "./threads/code-spans";
 export { applyThreadChoice, type ThreadChoice } from "./threads/thread-choice";
 export {
+  addModelProfileAccount,
+  addModelProfileEntries,
+  makeDefaultModelProfileEntry,
+  moveModelProfileAccount,
+  moveModelProfileEntry,
+  setModelProfileEntryIncluded,
+  takeOutModelProfileEntry,
+} from "./model-profiles/profile-edits";
+export {
+  buildModelProfileSections,
+  type ModelSection,
+  type ModelSectionRow,
+} from "./model-profiles/profile-sections";
+export { searchPickerModels, type PickerModels } from "./model-profiles/catalog-search";
+export { updateModelProfile } from "./model-profiles/update-profile";
+export {
   resolveThreadConfig,
+  type ModelDescription,
   type OutgoingChange,
   type ResolvedActive,
   type ResolvedConfig,
   type ResolvedDraft,
   type ResolvedThread,
 } from "./threads/resolve-thread";
-export type { SignInTarget } from "./threads/catalog";
+export type { SignInTarget } from "./threads/sign-in-target";
 export {
   buildComposerFields,
   buildPendingModelNote,
@@ -806,9 +822,23 @@ export {
   describeWaitingNote,
   formatMessageTime,
 } from "./threads/message-time";
-export { buildThreadModelField } from "./threads/model-field";
-export { buildModelMenu, type ModelMenu } from "./threads/model-menu";
-export { describeProviderAccountRow, describeModelRow } from "./threads/model-menu-details";
+export {
+  buildThreadModelField,
+  type ThreadModelField,
+  type ThreadModelFieldOption,
+} from "./threads/model-field";
+export {
+  buildModelMenu,
+  type ModelMenu,
+  type ModelMenuCurrent,
+  type ModelMenuLane,
+  type ModelMenuProblem,
+  type ModelMenuProfile,
+  type ModelMenuRecentRow,
+  type ModelMenuRow,
+  type ModelMenuView,
+} from "./threads/model-menu";
+export { describeModelRow } from "./threads/model-menu-details";
 export { findOpenItem } from "./threads/open-item";
 export {
   canSteerQueuedInputs,
@@ -991,11 +1021,7 @@ export {
   describeEmptyIntake,
   type StarterThread,
 } from "./threads/starter-threads";
-export {
-  buildDraftConfig,
-  computeProviderAccountDefaults,
-  computeThreadDefaults,
-} from "./threads/thread-defaults";
+export { buildDraftConfig, computeThreadDefaults } from "./threads/thread-defaults";
 export {
   describeThreadItem,
   describeTurnDivider,

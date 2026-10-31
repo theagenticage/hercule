@@ -4,12 +4,11 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { buildDraftConfig, buildSiblingTabs } from "@hercule/client-core";
 import {
   ensureProviderAccountReads,
-  harnessesQuery,
   localRunnerQuery,
+  modelProfilesQuery,
   profilesQuery,
   projectsQuery,
   providerAccountsQuery,
-  providersQuery,
   resourcesQuery,
   runnersQuery,
   sessionsQuery,
@@ -74,8 +73,7 @@ function NewThread(): JSX.Element {
   const { client, detectLocalRunner } = Route.useRouteContext();
   const search = Route.useSearch();
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
-  const providers = useSuspenseQuery(providersQuery(client)).data;
-  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
+  const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
   const settings = useSuspenseQuery(settingsQuery(client)).data;
@@ -94,7 +92,7 @@ function NewThread(): JSX.Element {
     runners,
     profiles,
     thisMacRunnerId,
-    catalogs: { providers, harnesses },
+    modelProfiles,
     projectId: search.project ?? null,
     workspaceId: search.workspace ?? null,
   });

@@ -356,8 +356,15 @@ const dial = (
 
 /**
  * Waits until every Provider Account has been probed on this runner in its
- * default harness, and returns the accounts. A sweep probes every harness an
- * account can run in, so an account may hold more than one snapshot.
+ * default harness and its Model Catalog read has ended, and returns the
+ * accounts. A sweep probes every harness an account can run in, so an account
+ * may hold more than one snapshot.
+ *
+ * The catalog read is a probe of its own that runs after the sweep and stores
+ * a snapshot and the catalog together. Returning before it ends would let it
+ * land in the middle of a test: it could restore a snapshot the test deleted,
+ * or make an account offer a model the test expects it not to, so a test
+ * would change what it saw between its arrange and its assert steps.
  */
 const waitForEveryAccountProbed = async (
   base: string,
@@ -366,8 +373,10 @@ const waitForEveryAccountProbed = async (
   waitUntil("probed every account", async () => {
     const response = await get(base, "/api/v1/provider-accounts", token);
     const accounts = (await response.json()) as ReadonlyArray<ProviderAccount>;
-    return accounts.every((account) =>
-      account.snapshots.some((snapshot) => snapshot.harnessId === account.defaultHarnessId),
+    return accounts.every(
+      (account) =>
+        account.snapshots.some((snapshot) => snapshot.harnessId === account.defaultHarnessId) &&
+        (account.catalogReadAt !== null || account.catalogError !== null),
     )
       ? accounts
       : undefined;

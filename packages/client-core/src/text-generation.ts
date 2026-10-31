@@ -11,13 +11,26 @@
  * `controller.read`. Nothing here repeats that rule.
  */
 import type {
+  Harness,
+  ModelProfile,
   Provider,
   ProviderAccount,
   TextGenerationModel,
   TextGenerationStatus,
 } from "@hercule/contract";
-import { listSignedInDefaultHarnessSnapshots, resolveThreadHarnessId } from "./provider-accounts";
+import { describeEntryProblem } from "./model-profiles/entry-problem";
+import {
+  findHarnessName,
+  formatProfileEntryKey,
+  listProfileEntries,
+} from "./model-profiles/profile-entries";
+import {
+  buildProviderAccountName,
+  findHarnessLoginMethod,
+  resolveThreadHarnessId,
+} from "./provider-accounts";
 import { describeAge } from "./threads/age";
+
 import { describeAgent } from "./threads/model-name";
 
 /** One entry of the model select: what the user reads, and the setting picking it stores. */
@@ -85,34 +98,42 @@ const buildModelKey = (
   model: ProviderAccountModel,
 ): string => {
   const account = accounts.find((each) => each.id === model.providerAccountId);
-  return [
-    model.providerAccountId,
-    account === undefined
-      ? (model.harnessId ?? "")
-      : resolveThreadHarnessId(account, model.harnessId),
-    model.model,
-  ].join("/");
+  return formatProfileEntryKey({
+    providerAccountId: model.providerAccountId,
+    harnessId:
+      account === undefined
+        ? (model.harnessId ?? "")
+        : resolveThreadHarnessId(account, model.harnessId),
+    model: model.model,
+  });
 };
 
 /**
- * Returns the model select: Automatic first, then one entry per Provider
- * Account and model that is signed in on some runner in the account's default
- * harness, then Off. A model that a harness keeps only for old sessions
- * (`isLegacy`) is not offered, and a model several runners list appears once.
+ * Returns the model select: Automatic first, then one choice for each entry
+ * the Model Profiles hold, then Off. An entry offered by several profiles
+ * appears once, and a model offered in two harnesses appears twice, the
+ * second with "in <harness>" after its name. An entry that cannot run now,
+ * such as one whose account is signed out on a machine that is offline,
+ * stays pickable and carries a few words of the reason in parentheses
+ * (`describeEntryProblem`), not the controller's whole sentence: the setting is
+ * long-lived, so a stored choice must not read "(not offered)" while a
+ * machine is away.
  *
  * Automatic names the model it resolves to only while it is the stored
  * setting. With any other setting, `status.model` is that setting's own model,
  * so it tells nothing about what Automatic would pick.
  *
- * A stored model that no signed-in account offers any more (the account was
- * deleted, or signed out) stays in the list as "(not offered)". The setting
- * is the user's choice and does not silently change; the controller reports
- * the failures it causes.
+ * A stored model that no profile entry offers any more (the account was
+ * deleted, or the model was taken out) stays in the list as "(not offered)".
+ * The setting is the user's choice and does not silently change; the
+ * controller reports the failures it causes.
  */
 export const buildTextGenerationField = (
   stored: TextGenerationModel | undefined,
   providers: readonly Provider[],
   accounts: readonly ProviderAccount[],
+  harnesses: readonly Harness[],
+  modelProfiles: readonly ModelProfile[],
   status: TextGenerationStatus,
 ): TextGenerationField => {
   const setting = stored ?? "automatic";
@@ -123,22 +144,41 @@ export const buildTextGenerationField = (
     return `Automatic - currently ${describeTextGenerationModel(providers, accounts, status.model)}`;
   };
 
-  const offered: TextGenerationChoice[] = accounts.flatMap((account) => {
-    const slugs = new Set(
-      listSignedInDefaultHarnessSnapshots(account)
-        .flatMap((snapshot) => snapshot.models)
-        .filter((model) => model.isLegacy !== true)
-        .map((model) => model.slug),
-    );
-    return [...slugs].map((slug) => {
-      const choice = { providerAccountId: account.id, model: slug };
-      return {
-        key: buildModelKey(accounts, choice),
-        label: describeAgent(providers, account, account.defaultHarnessId, slug),
-        setting: choice,
-      };
+  const offered: TextGenerationChoice[] = [];
+  for (const entry of modelProfiles.flatMap(listProfileEntries)) {
+    const account = accounts.find((each) => each.id === entry.providerAccountId);
+    if (account === undefined) continue;
+    const inDefaultHarness = entry.resolvedHarnessId === account.defaultHarnessId;
+    const choice: ProviderAccountModel = {
+      providerAccountId: account.id,
+      model: entry.model,
+      // The default harness is left out, so a setting that names it and one
+      // that does not stay the same choice.
+      ...(inDefaultHarness ? {} : { harnessId: entry.resolvedHarnessId }),
+    };
+    const key = buildModelKey(accounts, choice);
+    if (offered.some((each) => each.key === key)) continue;
+    const harnessName = findHarnessName(harnesses, entry.resolvedHarnessId);
+    offered.push({
+      key,
+      label:
+        [
+          buildProviderAccountName(providers, account),
+          entry.name,
+          inDefaultHarness ? null : `in ${harnessName}`,
+        ]
+          .filter((part) => part !== null)
+          .join(" · ") +
+        (entry.problem === null
+          ? ""
+          : ` (${describeEntryProblem(entry.problem.reason, {
+              harnessName,
+              machineName: null,
+              loginMethod: findHarnessLoginMethod(providers, account),
+            })})`),
+      setting: choice,
     });
-  });
+  }
 
   const selectedKey = typeof setting === "string" ? setting : buildModelKey(accounts, setting);
 

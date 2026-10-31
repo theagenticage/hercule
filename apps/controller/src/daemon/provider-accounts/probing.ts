@@ -21,12 +21,23 @@
  * probes every account on a runner when it connects, and sweeps the whole
  * fleet on a timer, because a login can expire and a harness can be upgraded
  * outside Hercule, which makes a snapshot older than the interval unreliable.
+ * A watcher of its own announces a stored token on the `provider` topic when
+ * it expires, because nothing else changes at that moment. It never waits on
+ * a sweep.
+ *
+ * After the probes of a sweep, the catalogs that are due are read
+ * (`catalog-reading.ts`). A catalog read is a probe of its own, never a sweep
+ * probe reused, and it takes a probe slot of its runner like a sweep probe. A
+ * new credential, an accepted sign-in and a refresh force a read whether or
+ * not it is due.
  */
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import type * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -34,20 +45,22 @@ import type { SqlError } from "effect/sql/SqlError";
 import type { LoginCode, LoginFailed, LoginResult, LoginStart, LoginUrl } from "@hercule/protocol";
 import {
   createInvalidStateError,
+  InvalidState,
   NotFound,
   type CapabilitySnapshot,
-  type InvalidState,
 } from "@hercule/contract";
 import { CurrentActor } from "../../actor";
 import {
   HarnessAccounts,
+  ModelCatalogs,
   ProviderAccountProbes,
   type ProbeOutcome,
   type ProbePair,
 } from "../../provider-accounts";
 import { PromotionState } from "../../promotion";
-import { RunnerConnections, type Answer } from "../../runners";
+import { LocalRunnerId, RunnerConnections, type Answer } from "../../runners";
 import { AccountUsage } from "../../usage";
+import { makeCatalogReading } from "./catalog-reading";
 
 /**
  * The runner's own 15s probe timeout plus the round trip, so the runner's
@@ -72,22 +85,27 @@ export const ProviderAccountProbeInterval = Context.Reference<Duration.Duration>
 type StoreError = SqlError | Schema.SchemaError | InvalidState;
 
 /**
- * Logs a probe that failed because its account was deleted meanwhile at info,
- * since that is a race with the user and nothing is wrong, and any other
- * failure at error. Nothing is waiting on the probe, so the log is the only
- * place the failure can go.
+ * Runs `probed` and returns its result, or `none` after logging its failure.
+ * A failure because the account was deleted meanwhile is a race with the user
+ * and nothing is wrong, so it is logged at info; any other failure is logged
+ * at error. Nothing is waiting on the probe, so the log is the only place the
+ * failure can go.
  */
-const logProbeFailure = (
-  probed: Effect.Effect<unknown, StoreError | NotFound>,
+const logProbeFailure = <A>(
+  probed: Effect.Effect<A, StoreError | NotFound>,
   message: string,
-): Effect.Effect<void> =>
+): Effect.Effect<Option.Option<A>> =>
   probed.pipe(
-    Effect.asVoid,
+    Effect.map(Option.some),
     Effect.catchIf(
       (error): error is NotFound => error instanceof NotFound,
-      () => Effect.logInfo(`${message}, because the provider account was deleted meanwhile`),
+      () =>
+        Effect.as(
+          Effect.logInfo(`${message}, because the provider account was deleted meanwhile`),
+          Option.none(),
+        ),
     ),
-    Effect.catchCause((cause) => Effect.logError(message, cause)),
+    Effect.catchCause((cause) => Effect.as(Effect.logError(message, cause), Option.none())),
   );
 
 /**
@@ -124,6 +142,13 @@ export const describeSignInFailure = (answer: LoginAnswer): string =>
 /** What a sign-in asks a runner to start: the `loginStart` frame without its request id. */
 export type LoginStartRequest = Omit<LoginStart, "_tag" | "requestId">;
 
+/** Returns a key that is the same for one account in one harness on one runner. */
+const buildProviderAccountKey = (
+  runnerId: string,
+  providerAccountId: string,
+  harnessId: string,
+): string => `${runnerId}:${providerAccountId}:${harnessId}`;
+
 /** A login whose end the controller waits for the runner to report. */
 interface AwaitedLogin {
   readonly runnerId: string;
@@ -146,6 +171,7 @@ const make = Effect.gen(function* () {
   const harnessAccounts = yield* HarnessAccounts;
   const accountUsage = yield* AccountUsage;
   const promotion = yield* PromotionState;
+  const catalogs = yield* ModelCatalogs;
 
   // One semaphore per runner id, made on first use. Runners are few, so the
   // map is never pruned.
@@ -172,20 +198,28 @@ const make = Effect.gen(function* () {
    * the provider, so it may only be asked for through `readUsageByProbe`,
    * which claims the read first.
    *
+   * With `readsCatalog`, the probe is a read of the account's Model Catalog
+   * (see `catalog-reading.ts`): its outcome is stored as that read, and when
+   * the runner does not answer the read is recorded as failed.
+   *
    * Fails with `NotFound` when the account does not exist, and with
    * `InvalidState` before anything is sent when the account cannot run in the
-   * harness, or its stored key does not decrypt.
+   * harness, or its stored key does not decrypt. With `readsCatalog`, an
+   * `InvalidState` is also recorded as the failed read, with its message, so
+   * the user sees why the models cannot be listed.
    */
   const probeAndMaybeReadUsage = (
     runnerId: string,
     providerAccountId: string,
     harnessId: string,
     readUsage: boolean,
+    options: { readonly readsCatalog: boolean } = { readsCatalog: false },
   ): Effect.Effect<ProbeOutcome, StoreError | NotFound> =>
     Effect.gen(function* () {
       // Taken before the credential is read, so the snapshot never claims to
       // be newer than the state the probe saw.
       const stamp = yield* probes.readProbeStamp(providerAccountId, readUsage);
+      const deadline = yield* ProviderAccountProbeDeadline;
       const answer = yield* connections.asked(
         runnerId,
         {
@@ -194,12 +228,34 @@ const make = Effect.gen(function* () {
           harnessId,
           // Decrypted here, at send time: the probe runs the harness's own auth
           // check, which is only meaningful with the credential.
-          harnessAccount: yield* harnessAccounts.prepare(providerAccountId, harnessId),
           readUsage,
+          harnessAccount: yield* harnessAccounts
+            .prepare(providerAccountId, harnessId)
+            .pipe(
+              Effect.tapError((error) =>
+                options.readsCatalog && error instanceof InvalidState
+                  ? catalogs.recordCatalogRead(
+                      providerAccountId,
+                      { _tag: "failed", message: error.error.message },
+                      stamp,
+                    )
+                  : Effect.void,
+              ),
+            ),
         },
-        yield* ProviderAccountProbeDeadline,
+        deadline,
       );
       if (Option.isNone(answer) || answer.value._tag !== "probeReport") {
+        if (options.readsCatalog) {
+          yield* catalogs.recordCatalogRead(
+            providerAccountId,
+            {
+              _tag: "failed",
+              message: `The machine that lists this account's models did not answer within ${Duration.format(deadline)}. Try again.`,
+            },
+            stamp,
+          );
+        }
         return { _tag: "unanswered" } as const;
       }
       return yield* probes.recordProbe(
@@ -208,19 +264,22 @@ const make = Effect.gen(function* () {
         harnessId,
         answer.value.result,
         stamp,
+        options,
       );
     });
 
   /**
    * Probes one account in one harness on one runner and stores the snapshot,
-   * without reading usage. Returns and fails as `probeAndMaybeReadUsage` does.
+   * without reading usage. `options` is as in `probeAndMaybeReadUsage`. Returns
+   * and fails as it does.
    */
   const probe = (
     runnerId: string,
     providerAccountId: string,
     harnessId: string,
+    options?: { readonly readsCatalog: boolean },
   ): Effect.Effect<ProbeOutcome, StoreError | NotFound> =>
-    probeAndMaybeReadUsage(runnerId, providerAccountId, harnessId, false);
+    probeAndMaybeReadUsage(runnerId, providerAccountId, harnessId, false, options);
 
   /**
    * Probes the account in the harness on the runner to check a sign-in that
@@ -230,6 +289,9 @@ const make = Effect.gen(function* () {
    * generation while this probe runs. Fails with `InvalidState` when the
    * second answer is superseded too: the account keeps changing, and no
    * snapshot can be told to describe this sign-in. Also fails as `probe` does.
+   *
+   * When the snapshot shows the account signed in, the account's Model
+   * Catalog is read, without waiting.
    */
   const probeToCheckSignIn = (
     runnerId: string,
@@ -239,32 +301,47 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       for (let attempt = 0; attempt < 2; attempt++) {
         const outcome = yield* probe(runnerId, providerAccountId, harnessId);
-        if (outcome._tag === "stored") return Option.some(outcome.snapshot);
+        if (outcome._tag === "stored") {
+          if (outcome.snapshot.auth.status === "ok") {
+            yield* Effect.forkDetach(readCatalog(providerAccountId));
+          }
+          return Option.some(outcome.snapshot);
+        }
         if (outcome._tag === "unanswered") return Option.none();
       }
       return yield* Effect.fail(accountChangedDuringSignIn());
     });
 
   /**
-   * Probes every pair. Each probe waits for a free slot on its runner, so the
-   * runners are probed at the same time and a runner is never asked for more
-   * than `MAX_CONCURRENT_PROBES_PER_RUNNER` sweep probes at once, also while
-   * another sweep is running. The probes a person waits for (a sign-in, the
-   * probe operation, the end of a login) take no slot: they would otherwise
-   * wait behind a sweep, and they are one probe each. Each probe logs its own
-   * failure, so one account deleted mid-sweep, or one that cannot run in the
-   * harness probed, does not discard the rest of the fleet's snapshots.
+   * Probes one pair in a free slot of its runner and logs a failure instead of
+   * returning it. Each runner is asked for at most
+   * `MAX_CONCURRENT_PROBES_PER_RUNNER` of these probes at once, however many
+   * sweeps and catalog reads overlap. The probes a person waits for (a
+   * sign-in, the probe operation, the end of a login) take no slot: they would
+   * otherwise wait behind a sweep, and they are one probe each. One account
+   * deleted mid-sweep, or one that cannot run in the harness probed, does not
+   * discard the rest of the fleet's snapshots.
    */
-  const probePairs = (pairs: ReadonlyArray<ProbePair>): Effect.Effect<void> =>
-    Effect.forEach(
-      pairs,
-      ({ runnerId, providerAccountId, harnessId }) =>
-        logProbeFailure(
-          readProbeSlots(runnerId).withPermits(1)(probe(runnerId, providerAccountId, harnessId)),
-          "A provider account probe could not be recorded",
+  const probeInSlot = (
+    pair: ProbePair,
+    options?: { readonly readsCatalog: boolean },
+  ): Effect.Effect<void> =>
+    Effect.asVoid(
+      logProbeFailure(
+        readProbeSlots(pair.runnerId).withPermits(1)(
+          probe(pair.runnerId, pair.providerAccountId, pair.harnessId, options),
         ),
-      { concurrency: "unbounded", discard: true },
+        "A provider account probe could not be recorded",
+      ),
     );
+
+  /** Probes the pairs at the same time, each in a free slot of its runner (see `probeInSlot`). */
+  const probePairs = (pairs: ReadonlyArray<ProbePair>): Effect.Effect<void> =>
+    Effect.forEach(pairs, (pair) => probeInSlot(pair), { concurrency: "unbounded", discard: true });
+
+  const { readCatalog, readDueCatalogs } = yield* makeCatalogReading((pair) =>
+    probeInSlot(pair, { readsCatalog: true }),
+  );
 
   /**
    * Sends a login frame and returns the runner's answer. Fails with
@@ -319,15 +396,11 @@ const make = Effect.gen(function* () {
   // like `probingAfterLoginEnd`. The repeated probe completes as that login,
   // so it runs as the actor who started it.
   const latestOnSignedIn = new Map<string, Effect.Effect<void>>();
-  const buildProviderAccountKey = (
-    runnerId: string,
-    providerAccountId: string,
-    harnessId: string,
-  ): string => `${runnerId}:${providerAccountId}:${harnessId}`;
 
   /**
    * Probes the account in the harness once, then again for as long as another
-   * login ended while the probe ran, and returns the last snapshot. A
+   * login ended while the probe ran, and returns the last probe stored, or
+   * `none` when the runner did not answer it. A
    * superseded answer also asks for another probe (the account changed while
    * it ran), and fails with `InvalidState` when two answers in a row are
    * superseded, as `probeToCheckSignIn` does. Removes the key from
@@ -434,15 +507,91 @@ const make = Effect.gen(function* () {
       return answer;
     });
 
-  /** Probes every account and harness the runner could run. Logs a failure instead of returning it. */
+  /**
+   * Probes every account and harness the runner could run, and reads the
+   * catalogs that are due and that this runner can serve. Logs a failure
+   * instead of returning it.
+   */
   const sweepRunner = (runnerId: string): Effect.Effect<void> =>
-    logSweepFailure(Effect.flatMap(probes.listPairsOnRunner(runnerId), probePairs));
+    Effect.andThen(
+      logSweepFailure(Effect.flatMap(probes.listPairsOnRunner(runnerId), probePairs)),
+      readDueCatalogs(runnerId),
+    );
 
-  /** Probes every account on every connected runner. Logs a failure instead of returning it. */
+  /**
+   * Probes every account on every connected runner, and reads the catalogs
+   * that are due. Logs a failure instead of returning it.
+   */
   const sweepFleet = (): Effect.Effect<void> =>
-    logSweepFailure(Effect.flatMap(probes.listPairsOnFleet(), probePairs));
+    Effect.andThen(
+      logSweepFailure(Effect.flatMap(probes.listPairsOnFleet(), probePairs)),
+      readDueCatalogs(),
+    );
 
-  /** Runs forever. Sweeps each runner that connects, and the whole fleet every interval. */
+  /**
+   * Runs forever. Sweeps the whole fleet every interval, because logins expire
+   * and harnesses are upgraded outside Hercule. A sweep can take minutes on a
+   * big fleet, so it runs apart from `watchTokenExpiries`.
+   */
+  const sweepOnTimer: Effect.Effect<void> = Effect.gen(function* () {
+    const interval = yield* ProviderAccountProbeInterval;
+    while (true) {
+      yield* Effect.sleep(interval);
+      yield* sweepFleet();
+    }
+  });
+
+  /**
+   * Runs forever. Waits for the next expiry of a stored token and announces
+   * the account on the `provider` topic then, because a token that expires
+   * changes nothing that is stored. The wait is planned again whenever a
+   * snapshot is stored. A new token comes with a sign-in, and a sign-in always
+   * ends in a stored snapshot, so this covers a token that changes without a
+   * clock of its own. With no token to wait for, it waits for the next
+   * snapshot.
+   */
+  const watchTokenExpiries: Effect.Effect<void> = Effect.gen(function* () {
+    const replan = yield* Queue.dropping<void>(1);
+    yield* Effect.forkScoped(
+      Stream.runForEach(probes.snapshotChanges, () => Queue.offer(replan, undefined)),
+    );
+    let announcedUntil = yield* Clock.currentTimeMillis;
+    while (true) {
+      // A database error must not stop the watcher, so it is logged and the
+      // watcher waits for the next snapshot.
+      const nextExpiry = yield* probes
+        .findNextTokenExpiry(announcedUntil)
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.as(
+              Effect.logError("The next token expiry could not be read", cause),
+              Option.none<number>(),
+            ),
+          ),
+        );
+      const now = yield* Clock.currentTimeMillis;
+      const woken = yield* Effect.raceFirst(
+        Option.match(nextExpiry, {
+          onNone: () => Effect.never,
+          onSome: (at) =>
+            Effect.as(Effect.sleep(Duration.millis(Math.max(0, at - now))), "time" as const),
+        }),
+        Effect.as(Queue.take(replan), "replan" as const),
+      );
+      if (woken === "replan") continue;
+      const awake = yield* Clock.currentTimeMillis;
+      yield* probes
+        .announceExpiredTokens(announcedUntil, awake)
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError("Expired tokens could not be announced", cause),
+          ),
+        );
+      announcedUntil = awake;
+    }
+  }).pipe(Effect.scoped);
+
+  /** Runs forever. Sweeps each runner that connects, the fleet on a timer, and watches the tokens' expiry. */
   const driving: Effect.Effect<void> = Effect.all(
     [
       // Forked, because a runner that answers slowly must not hold up the
@@ -450,13 +599,8 @@ const make = Effect.gen(function* () {
       Stream.runForEach(connections.arrivals, (runnerId) =>
         Effect.forkChild(sweepRunner(runnerId)),
       ),
-      Effect.gen(function* () {
-        const interval = yield* ProviderAccountProbeInterval;
-        while (true) {
-          yield* Effect.sleep(interval);
-          yield* sweepFleet();
-        }
-      }),
+      sweepOnTimer,
+      watchTokenExpiries,
     ],
     { concurrency: "unbounded", discard: true },
   );
@@ -557,9 +701,12 @@ const make = Effect.gen(function* () {
             probingAfterLoginEnd.add(key);
             latestOnSignedIn.set(key, onSignedIn);
             return probeUntilSettled(runnerId, providerAccountId, harnessId, key).pipe(
-              Effect.flatMap((snapshot) =>
-                Option.isSome(snapshot) && snapshot.value.auth.status === "ok"
-                  ? (latestOnSignedIn.get(key) ?? onSignedIn)
+              Effect.flatMap((probed) =>
+                Option.isSome(probed) && probed.value.auth.status === "ok"
+                  ? Effect.andThen(
+                      latestOnSignedIn.get(key) ?? onSignedIn,
+                      readCatalog(providerAccountId),
+                    )
                   : Effect.void,
               ),
               Effect.ensuring(Effect.sync(() => latestOnSignedIn.delete(key))),
@@ -583,12 +730,20 @@ const make = Effect.gen(function* () {
 
     /**
      * Probes one account in every harness it can run in, on every connected
-     * runner that could run it there. Logs a failure instead of returning it.
+     * runner that could run it there, and reads its Model Catalog whether or
+     * not that is due. Use it when the account's credential changed, because
+     * every stored snapshot was taken with the old one. Logs a failure instead
+     * of returning it.
      */
     sweepProviderAccount: (providerAccountId: string): Effect.Effect<void> =>
-      logSweepFailure(
-        Effect.flatMap(probes.listPairsOfProviderAccount(providerAccountId), probePairs),
+      Effect.andThen(
+        logSweepFailure(
+          Effect.flatMap(probes.listPairsOfProviderAccount(providerAccountId), probePairs),
+        ),
+        readCatalog(providerAccountId),
       ),
+
+    readCatalog,
   };
 });
 
@@ -601,5 +756,11 @@ export class ProviderAccountProbing extends Context.Service<
 export const ProviderAccountProbingLayer: Layer.Layer<
   ProviderAccountProbing,
   never,
-  RunnerConnections | ProviderAccountProbes | HarnessAccounts | AccountUsage | PromotionState
+  | RunnerConnections
+  | ProviderAccountProbes
+  | HarnessAccounts
+  | AccountUsage
+  | PromotionState
+  | ModelCatalogs
+  | LocalRunnerId
 > = Layer.effect(ProviderAccountProbing)(make);

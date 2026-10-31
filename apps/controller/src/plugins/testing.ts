@@ -99,6 +99,8 @@ export const buildProviderDefinition = (
     },
   ],
   defaultHarnessId: harnesses[0] ?? "alpha/alpha",
+  catalogSource: { kind: "harness-probe", harnessId: harnesses[0] ?? "alpha/alpha" },
+  defaultSelection: "current-models",
 });
 
 /**
@@ -143,6 +145,8 @@ export const buildPluginWithProviderPerHarness = (
         },
       ],
       defaultHarnessId: `${pluginId}/${definition.id}`,
+      catalogSource: { kind: "harness-probe", harnessId: `${pluginId}/${definition.id}` },
+      defaultSelection: "current-models",
     })),
   }).plugin;
 

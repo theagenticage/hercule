@@ -5,7 +5,11 @@
 import { describe, expect, it } from "vitest";
 import type { TextGenerationStatus } from "@hercule/contract";
 import {
+  HARNESSES,
   PROVIDERS,
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
   buildProviderAccount,
   buildSnapshot,
   ANTHROPIC_IDENTITY,
@@ -40,15 +44,34 @@ const SIGNED_OUT = buildProviderAccount(ZAI_IDENTITY, [
   }),
 ]);
 
+/** The Main profile: Codex's two models, Haiku, and a Z.ai model that cannot run because the account is signed out. */
+const MAIN = buildModelProfile([
+  buildProfileSection(OPENAI_IDENTITY, [
+    buildProfileEntry(OPENAI_IDENTITY, "gpt-6-luna", { name: "GPT-6 Luna" }),
+    buildProfileEntry(OPENAI_IDENTITY, "gpt-6", { name: "GPT-6" }),
+  ]),
+  buildProfileSection(ANTHROPIC_IDENTITY, [
+    buildProfileEntry(ANTHROPIC_IDENTITY, "claude-haiku-5", { name: "Haiku 5" }),
+  ]),
+  buildProfileSection(ZAI_IDENTITY, [
+    buildProfileEntry(ZAI_IDENTITY, "glm-5.3-flash", {
+      name: "GLM 5.3 Flash",
+      problem: { reason: "not-signed-in", message: "Z.ai is not signed in on moss" },
+    }),
+  ]),
+]);
+
 const NOTHING: TextGenerationStatus = { model: null, unavailableReason: null, lastFailure: null };
 const NOW = new Date("2026-09-05T10:00:00.000Z");
 
 describe("buildTextGenerationField", () => {
-  it("lists Automatic, every signed-in account and model, then Off", () => {
+  it("lists Automatic, every entry, then Off, with the reason on an entry that cannot run now", () => {
     const field = buildTextGenerationField(
       undefined,
       PROVIDERS,
       [CODEX, CLAUDE, SIGNED_OUT],
+      HARNESSES,
+      [MAIN],
       NOTHING,
     );
 
@@ -57,6 +80,7 @@ describe("buildTextGenerationField", () => {
       "OpenAI · GPT-6 Luna",
       "OpenAI · GPT-6",
       "Anthropic · Haiku 5",
+      "Z.ai · GLM 5.3 Flash (not signed in)",
       "Off",
     ]);
   });
@@ -69,7 +93,14 @@ describe("buildTextGenerationField", () => {
     };
 
     for (const stored of [undefined, "automatic" as const]) {
-      const field = buildTextGenerationField(stored, PROVIDERS, [CODEX, CLAUDE], status);
+      const field = buildTextGenerationField(
+        stored,
+        PROVIDERS,
+        [CODEX, CLAUDE],
+        HARNESSES,
+        [MAIN],
+        status,
+      );
 
       expect(field.selectedKey).toBe("automatic");
       expect(field.choices[0]?.label).toBe("Automatic - currently OpenAI · GPT-6 Luna");
@@ -88,7 +119,14 @@ describe("buildTextGenerationField", () => {
     };
     const stored = { providerAccountId: CLAUDE.id, model: "claude-haiku-5" };
 
-    const field = buildTextGenerationField(stored, PROVIDERS, [CODEX, CLAUDE], status);
+    const field = buildTextGenerationField(
+      stored,
+      PROVIDERS,
+      [CODEX, CLAUDE],
+      HARNESSES,
+      [MAIN],
+      status,
+    );
 
     expect(field.choices[0]?.label).toBe("Automatic");
     expect(field.choices.find((choice) => choice.key === field.selectedKey)?.setting).toEqual(
@@ -97,14 +135,21 @@ describe("buildTextGenerationField", () => {
   });
 
   it("selects Off when the setting is off", () => {
-    const field = buildTextGenerationField("off", PROVIDERS, [CODEX], NOTHING);
+    const field = buildTextGenerationField("off", PROVIDERS, [CODEX], HARNESSES, [MAIN], NOTHING);
 
     expect(field.selectedKey).toBe("off");
     expect(field.choices[0]?.label).toBe("Automatic");
   });
 
   it("stores the setting the choice stands for", () => {
-    const field = buildTextGenerationField(undefined, PROVIDERS, [CODEX], NOTHING);
+    const field = buildTextGenerationField(
+      undefined,
+      PROVIDERS,
+      [CODEX],
+      HARNESSES,
+      [MAIN],
+      NOTHING,
+    );
 
     expect(field.choices.map((choice) => choice.setting)).toEqual([
       "automatic",
@@ -114,21 +159,94 @@ describe("buildTextGenerationField", () => {
     ]);
   });
 
-  it("lists a model once when several runners offer it", () => {
-    const twice = buildProviderAccount(OPENAI_IDENTITY, [
-      buildSnapshot({ models: [model("gpt-6", "GPT-6")] }),
-      buildSnapshot({ runnerId: "other", models: [model("gpt-6", "GPT-6")] }),
-    ]);
+  it("lists an entry once when several profiles hold it", () => {
+    const second = buildModelProfile(MAIN.accounts, { id: "profile-second", name: "Second" });
 
-    const field = buildTextGenerationField(undefined, PROVIDERS, [twice], NOTHING);
+    const field = buildTextGenerationField(
+      undefined,
+      PROVIDERS,
+      [CODEX],
+      HARNESSES,
+      [MAIN, second],
+      NOTHING,
+    );
 
-    expect(field.choices).toHaveLength(3);
+    expect(field.choices).toHaveLength(4);
   });
 
-  it("keeps a stored model that is no longer offered, marked as not offered", () => {
+  it("offers a model in a second harness as its own choice, naming the harness and storing it", () => {
+    const inPi = buildProfileEntry(OPENAI_IDENTITY, "gpt-6", {
+      name: "GPT-6",
+      harnessId: "pi/pi",
+      resolvedHarnessId: "pi/pi",
+    });
+    const profile = buildModelProfile([
+      buildProfileSection(OPENAI_IDENTITY, [
+        buildProfileEntry(OPENAI_IDENTITY, "gpt-6", { name: "GPT-6" }),
+        inPi,
+      ]),
+    ]);
+
+    const field = buildTextGenerationField(
+      undefined,
+      PROVIDERS,
+      [CODEX],
+      HARNESSES,
+      [profile],
+      NOTHING,
+    );
+
+    expect(field.choices.map((choice) => choice.label)).toEqual([
+      "Automatic - no model available",
+      "OpenAI · GPT-6",
+      "OpenAI · GPT-6 · in pi",
+      "Off",
+    ]);
+    expect(field.choices[1]?.setting).toEqual({ providerAccountId: CODEX.id, model: "gpt-6" });
+    expect(field.choices[2]?.setting).toEqual({
+      providerAccountId: CODEX.id,
+      model: "gpt-6",
+      harnessId: "pi/pi",
+    });
+  });
+
+  it("offers nothing but Automatic and Off when no profile holds an entry", () => {
+    const field = buildTextGenerationField(undefined, PROVIDERS, [CODEX], HARNESSES, [], NOTHING);
+
+    expect(field.choices.map((choice) => choice.label)).toEqual([
+      "Automatic - no model available",
+      "Off",
+    ]);
+  });
+
+  it("shows a stored model that cannot run now with its reason, not as not offered", () => {
     const stored = { providerAccountId: SIGNED_OUT.id, model: "glm-5.3-flash" };
 
-    const field = buildTextGenerationField(stored, PROVIDERS, [SIGNED_OUT], NOTHING);
+    const field = buildTextGenerationField(
+      stored,
+      PROVIDERS,
+      [SIGNED_OUT],
+      HARNESSES,
+      [MAIN],
+      NOTHING,
+    );
+
+    const kept = field.choices.find((choice) => choice.key === field.selectedKey);
+    expect(kept?.label).toBe("Z.ai · GLM 5.3 Flash (not signed in)");
+    expect(kept?.setting).toEqual(stored);
+  });
+
+  it("keeps a stored model that no profile holds any more, marked as not offered", () => {
+    const stored = { providerAccountId: SIGNED_OUT.id, model: "glm-5.3-flash" };
+
+    const field = buildTextGenerationField(
+      stored,
+      PROVIDERS,
+      [SIGNED_OUT],
+      HARNESSES,
+      [buildModelProfile([])],
+      NOTHING,
+    );
 
     const kept = field.choices.find((choice) => choice.key === field.selectedKey);
     expect(kept?.label).toBe("Z.ai · GLM 5.3 Flash (not offered)");
@@ -142,17 +260,17 @@ describe("buildTextGenerationField", () => {
       model: "gpt-6-luna",
     };
 
-    const field = buildTextGenerationField(stored, PROVIDERS, [CODEX], NOTHING);
+    const field = buildTextGenerationField(stored, PROVIDERS, [CODEX], HARNESSES, [MAIN], NOTHING);
 
     expect(field.choices.find((choice) => choice.key === field.selectedKey)?.label).toBe(
       "OpenAI · GPT-6 Luna",
     );
   });
 
-  it("keeps a stored model in another harness as not offered, since the list holds default harnesses only", () => {
+  it("keeps a stored model in a harness that no entry offers it in as not offered", () => {
     const stored = { providerAccountId: CODEX.id, harnessId: "pi/pi", model: "gpt-6-luna" };
 
-    const field = buildTextGenerationField(stored, PROVIDERS, [CODEX], NOTHING);
+    const field = buildTextGenerationField(stored, PROVIDERS, [CODEX], HARNESSES, [MAIN], NOTHING);
 
     expect(field.choices.find((choice) => choice.key === field.selectedKey)?.label).toBe(
       "OpenAI · gpt-6-luna (not offered)",
@@ -162,7 +280,7 @@ describe("buildTextGenerationField", () => {
   it("keeps a stored model whose account was deleted, under the model's slug", () => {
     const stored = { providerAccountId: "gone", model: "gpt-6" };
 
-    const field = buildTextGenerationField(stored, PROVIDERS, [CODEX], NOTHING);
+    const field = buildTextGenerationField(stored, PROVIDERS, [CODEX], HARNESSES, [MAIN], NOTHING);
 
     expect(field.choices.find((choice) => choice.key === field.selectedKey)?.label).toBe(
       "gpt-6 (not offered)",
@@ -204,26 +322,6 @@ describe("describeTextGenerationFailure", () => {
 
   it("returns null while text generation is off", () => {
     expect(describeTextGenerationFailure("off", failed("timeout"), NOW)).toBeNull();
-  });
-});
-
-describe("buildTextGenerationField, with models several runners list", () => {
-  it("offers each model once, and no model kept only for old sessions", () => {
-    const twoRunners = buildProviderAccount(OPENAI_IDENTITY, [
-      buildSnapshot({ models: [model("gpt-6-luna", "GPT-6 Luna")] }),
-      buildSnapshot({
-        runnerId: "other",
-        models: [model("gpt-6-luna", "GPT-6 Luna"), model("gpt-5", "GPT-5", { isLegacy: true })],
-      }),
-    ]);
-
-    const field = buildTextGenerationField("off", PROVIDERS, [twoRunners], NOTHING);
-
-    expect(field.choices.map((choice) => choice.label)).toEqual([
-      "Automatic",
-      "OpenAI · GPT-6 Luna",
-      "Off",
-    ]);
   });
 });
 

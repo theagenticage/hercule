@@ -114,6 +114,7 @@ import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ResourceService, ResourceServiceLayer } from "../resources";
 import { WorkspaceService } from "../workspaces";
 import { HarnessService, HarnessServiceLayer } from "../harnesses";
+import { ModelProfileService, ModelProfileServiceLayer } from "../model-profiles";
 import { ProviderAccountService } from "../provider-accounts";
 import { ProviderService, ProviderServiceLayer } from "../providers";
 import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
@@ -654,19 +655,38 @@ const providerAccountRoutes = HttpApiBuilder.group(api, "providerAccount", (hand
     // Signing in sends a frame to a runner, and a new key or token has the
     // account probed again, so the controller daemon runs those.
     const operations = yield* ProviderAccountRunnerOperations;
+    return (
+      handlers
+        .handle("query", () => withApiErrors(providerAccounts.query()))
+        .handle("read", ({ params }) => withApiErrors(providerAccounts.read(params.id)))
+        .handle("create", ({ payload }) => withApiErrors(operations.create(payload)))
+        .handle("update", ({ params, payload }) =>
+          withApiErrors(operations.update({ id: params.id, ...payload })),
+        )
+        .handle("delete", ({ params }) => withApiErrors(providerAccounts.delete(params.id)))
+        .handle("signIn", ({ params, payload }) =>
+          withApiErrors(operations.signIn({ id: params.id, ...payload })),
+        )
+        .handle("submitSignInCode", ({ params, payload }) =>
+          withApiErrors(operations.submitSignInCode({ id: params.id, ...payload })),
+        )
+        .handle("readCatalog", ({ params }) =>
+          withApiErrors(providerAccounts.readCatalog(params.id)),
+        )
+        // A refresh reads the catalog by probing a runner, so the daemon runs it.
+        .handle("refresh", ({ params }) => withApiErrors(operations.refresh(params.id)))
+    );
+  }),
+);
+
+const modelProfileRoutes = HttpApiBuilder.group(api, "modelProfile", (handlers) =>
+  Effect.gen(function* () {
+    const modelProfiles = yield* ModelProfileService;
     return handlers
-      .handle("query", () => withApiErrors(providerAccounts.query()))
-      .handle("read", ({ params }) => withApiErrors(providerAccounts.read(params.id)))
-      .handle("create", ({ payload }) => withApiErrors(operations.create(payload)))
+      .handle("query", () => withApiErrors(modelProfiles.query()))
+      .handle("read", ({ params }) => withApiErrors(modelProfiles.read(params.id)))
       .handle("update", ({ params, payload }) =>
-        withApiErrors(operations.update({ id: params.id, ...payload })),
-      )
-      .handle("delete", ({ params }) => withApiErrors(providerAccounts.delete(params.id)))
-      .handle("signIn", ({ params, payload }) =>
-        withApiErrors(operations.signIn({ id: params.id, ...payload })),
-      )
-      .handle("submitSignInCode", ({ params, payload }) =>
-        withApiErrors(operations.submitSignInCode({ id: params.id, ...payload })),
+        withApiErrors(modelProfiles.update({ id: params.id, ...payload })),
       );
   }),
 );
@@ -930,6 +950,7 @@ const operationServices = Layer.mergeAll(
   SettingsOperationsLayer,
   HarnessServiceLayer,
   ProviderServiceLayer,
+  ModelProfileServiceLayer,
   // The controller daemon's profile removal uses the profile service, so the
   // profile service is provided to it rather than merged next to it.
   ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
@@ -1097,6 +1118,7 @@ export const handlerLayers = Layer.mergeAll(
   harnessRoutes,
   providerRoutes,
   providerAccountRoutes,
+  modelProfileRoutes,
   sessionRoutes,
   inputRoutes,
   transcriptRoutes,

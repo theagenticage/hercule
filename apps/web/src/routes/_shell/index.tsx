@@ -40,7 +40,6 @@ function Sessions(): JSX.Element {
   const { client, queryClient, live, detectLocalRunner } = Route.useRouteContext();
 
   useLiveInvalidation(live, queryClient, "runner");
-  useLiveInvalidation(live, queryClient, "provider");
 
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
@@ -113,7 +112,6 @@ function Sessions(): JSX.Element {
                 <ProviderLogin
                   key={row.id}
                   client={client}
-                  live={live}
                   providerAccountId={row.id}
                   runnerId={local.id}
                   subject={`${row.name} on this machine`}

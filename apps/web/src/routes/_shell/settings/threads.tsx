@@ -3,11 +3,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   buildIdOptions,
-  buildProviderAccountName,
-  computeProviderAccountDefaults,
   computeThreadDefaults,
   buildThreadModelField,
-  resolveThreadHarnessId,
   resolveThreadRowsMode,
 } from "@hercule/client-core";
 import type { ThreadRows, ThreadWorkspace } from "@hercule/contract";
@@ -16,6 +13,7 @@ import {
   ensureProviderAccountReads,
   localRunnerQuery,
   harnessesQuery,
+  modelProfilesQuery,
   profilesQuery,
   providerAccountsQuery,
   providersQuery,
@@ -64,6 +62,7 @@ function Threads(): JSX.Element {
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const providers = useSuspenseQuery(providersQuery(client)).data;
   const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
+  const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const localId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
@@ -73,24 +72,21 @@ function Threads(): JSX.Element {
 
   // Every default below comes from `computeThreadDefaults`, the same function
   // the composer uses to prefill a new thread:
-  // - a stored id of an account that no longer exists falls back to another;
-  // - the model is read from the runner the account would be placed on, in
-  //   the harness the thread runs in;
+  // - a stored id of an account that no longer exists falls back to the open
+  //   profile's default entry;
   // - "nothing picked" is null.
-  const defaults = computeThreadDefaults(settings.user, accounts, runners, profiles, localId, {
-    providers,
-    harnesses,
-  });
-  const account = accounts.find((each) => each.id === defaults.providerAccountId);
-  const modelField =
-    account === undefined
-      ? { dimmed: null, options: [] }
-      : buildThreadModelField(
-          account,
-          resolveThreadHarnessId(account, defaults.harnessId),
-          defaults.runnerId,
-          defaults.model ?? undefined,
-        );
+  const defaults = computeThreadDefaults(
+    settings.user,
+    accounts,
+    runners,
+    profiles,
+    localId,
+    modelProfiles,
+  );
+  const modelField = buildThreadModelField(
+    { accounts, providers, harnesses, modelProfiles, runners, thisMacRunnerId: localId },
+    defaults,
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -101,75 +97,51 @@ function Threads(): JSX.Element {
         {accounts.length === 0 ? (
           <p className="text-fine text-faint">No account yet.</p>
         ) : (
-          <>
-            <Row label="Account" htmlFor="thread-account">
-              <Select
-                id="thread-account"
-                value={defaults.providerAccountId ?? ""}
-                onChange={(event) => {
-                  const next = accounts.find((each) => each.id === event.target.value);
-                  // The model follows the account, and is read from the runner
-                  // that account would be placed on, using the same rule
-                  // (`computeProviderAccountDefaults`) as the composer. A harness
-                  // stored for the previous account does not carry over: the
-                  // new account runs in its default harness.
-                  const nextModel =
-                    next === undefined
-                      ? null
-                      : computeProviderAccountDefaults(
-                          next,
-                          next.defaultHarnessId,
-                          runners,
-                          localId,
-                          { providers, harnesses },
-                        ).model;
-                  save({
-                    user: {
-                      "thread.providerAccountId": event.target.value,
-                      "thread.harnessId": null,
-                      ...(nextModel === null ? {} : { "thread.model": nextModel }),
-                    },
-                  });
-                }}
-              >
-                {accounts.map((each) => (
-                  <option key={each.id} value={each.id}>
-                    {buildProviderAccountName(providers, each)}
-                  </option>
-                ))}
-              </Select>
-            </Row>
-            <Row label="Model" htmlFor="thread-model">
+          <Row label="Model" htmlFor="thread-model">
+            <div className="flex flex-col gap-1">
               {modelField.dimmed !== null ? (
                 <p className="py-1.5 text-fine text-faint">{modelField.dimmed}</p>
               ) : (
                 <Select
                   id="thread-model"
-                  value={defaults.model ?? ""}
+                  value={modelField.selectedKey ?? ""}
                   onChange={(event) => {
-                    // The account shown may be a prefilled one: nothing was
-                    // saved, or the saved account was deleted. A saved model
-                    // belongs to its account, so the account is saved with it
-                    // and the default cannot drift to another account later.
+                    const option = modelField.options.find(
+                      (each) => each.key === event.target.value,
+                    );
+                    if (option === undefined) return;
+                    // The account, the harness and the model are one entry of
+                    // the profile, so they are saved together.
                     save({
                       user: {
-                        ...(account === undefined
-                          ? {}
-                          : { "thread.providerAccountId": account.id }),
-                        "thread.model": event.target.value,
+                        "thread.providerAccountId": option.providerAccountId,
+                        "thread.harnessId": option.harnessId,
+                        "thread.model": option.model,
                       },
                     });
                   }}
                 >
+                  {modelField.selectedKey === null ? (
+                    <option value="" disabled>
+                      No model chosen
+                    </option>
+                  ) : null}
                   {modelField.options.map((option) => (
-                    <option key={option.slug} value={option.slug}>
-                      {option.missing ? `${option.name} (not offered)` : option.name}
+                    <option key={option.key} value={option.key}>
+                      {option.missing
+                        ? `${option.label} (not offered)`
+                        : option.problem === null
+                          ? option.label
+                          : `${option.label} (${option.problem})`}
                     </option>
                   ))}
                 </Select>
               )}
-            </Row>
-          </>
+              <p className="text-fine text-faint">
+                A project with its own model profile starts there.
+              </p>
+            </div>
+          </Row>
         )}
         <Row label="Access mode">
           <AccessModeControl

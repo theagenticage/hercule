@@ -1034,9 +1034,10 @@ describe("buildQueryKeys", () => {
     ]);
   });
 
-  it("maps a provider push to the account list, the controller, and the harness list, whose version verdicts come from the probes", () => {
+  it("maps a provider push to the account list, the model profiles, the controller, and the harness list, whose version verdicts come from the probes", () => {
     assert.deepStrictEqual(buildQueryKeys("provider", ["codex"]), [
       queryKeys.providerAccounts(),
+      queryKeys.modelProfiles(),
       queryKeys.controller(),
       queryKeys.harnesses(),
     ]);

@@ -56,7 +56,7 @@ import {
 import type { RunnerDetail } from "@hercule/contract";
 import { nowIso, uuidFromString, withTransaction } from "../db";
 import { registry } from "../plugins";
-import { providerAccountRepository } from "../provider-accounts";
+import { modelCatalogRepository, providerAccountRepository } from "../provider-accounts";
 import { buildProviderAccountOwner } from "../secrets";
 import {
   awaitHeldWork,
@@ -1661,6 +1661,23 @@ const addMissingAccounts = (harness: ServerHarness): Promise<void> =>
   );
 
 /**
+ * Gives every account a Model Catalog that was just read. The tests that use
+ * it count the probes the controller sends, and a catalog that was never read
+ * is due, which makes the controller send a probe for the read as well.
+ */
+const markCatalogsRead = (harness: ServerHarness): Promise<void> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const accounts = yield* providerAccountRepository;
+      const catalogs = yield* modelCatalogRepository;
+      const at = yield* nowIso;
+      for (const account of yield* accounts.list()) {
+        yield* withTransaction(harness.sql, catalogs.recordSuccess(account.id, [], at, at));
+      }
+    }).pipe(Effect.provideService(SqlClient.SqlClient, harness.sql), Effect.orDie),
+  );
+
+/**
  * Runs `body` against a server with the real plugin registry, so "one request
  * per account" covers the three harnesses the binary really includes, each
  * with an account. The probe deadline and interval are passed in like the ping
@@ -1673,6 +1690,7 @@ const withRegistry = (
   withServer(
     async (harness) => {
       await addMissingAccounts(harness);
+      await markCatalogsRead(harness);
       await body(harness);
     },
     { ...options, plugins: registry },

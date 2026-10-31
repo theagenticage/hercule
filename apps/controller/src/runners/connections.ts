@@ -89,6 +89,7 @@ import { announce, nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
+import { announceProviderRunnerChange } from "./announce-provider-change";
 import { runnerRepository, type RunnerHelloRecord } from "./repository";
 
 export type Connection = symbol;
@@ -480,6 +481,7 @@ const make = Effect.gen(function* () {
   const changeConnectivity = (id: string, connectivity: RunnerConnectivity, at: string) =>
     Effect.gen(function* () {
       if (!(yield* runners.setConnectivity(id, connectivity, at))) return;
+      yield* announceProviderRunnerChange(id);
       yield* audit.append({
         kind: "runner.stateChanged",
         actor: SYSTEM_ACTOR,
@@ -593,6 +595,7 @@ const make = Effect.gen(function* () {
             // not the connectivity changed, so the row can change without an
             // audit entry. Announce it either way.
             yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
+            yield* announceProviderRunnerChange(id);
             // A departure a freeze held for an earlier connection is no longer
             // true. It is dropped inside the transaction, so that it is ordered
             // with `recordHeldDepartures`, and after the writes, so that a
@@ -943,6 +946,7 @@ const make = Effect.gen(function* () {
               // No audit entry: what a runner has installed is not an event anyone
               // reads back, so clients watching the fleet are notified instead.
               yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
+              yield* announceProviderRunnerChange(id);
               return { harnessesChanged: hasHarnessSetChanged(previous, facts) };
             }),
           );

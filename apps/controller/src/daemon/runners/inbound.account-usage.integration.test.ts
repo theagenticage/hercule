@@ -62,6 +62,8 @@ const buildPlugin = (id: string, usage: ProviderDefinition["kinds"][number]["usa
           },
         ],
         defaultHarnessId: harnessId,
+        catalogSource: { kind: "harness-probe", harnessId },
+        defaultSelection: "current-models",
       },
     ],
   }).plugin;

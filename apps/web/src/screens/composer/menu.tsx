@@ -135,11 +135,25 @@ export function MenuRow({
   );
 }
 
-/** A lane's heading inside a menu. Every lane but the first has a rule above it. */
-export function Lane({ label }: { readonly label: string }): JSX.Element {
+/**
+ * A lane's heading inside a menu. Every lane but the first has a rule above it.
+ * An optional logo sits before the label, for a lane that stands for an account.
+ */
+export function Lane({
+  label,
+  logo,
+}: {
+  readonly label: string;
+  readonly logo?: ReactNode;
+}): JSX.Element {
   return (
-    <div className="mt-1.5 border-t border-line-soft px-2 pt-2 pb-[3px] first:mt-0 first:border-t-0 first:pt-1 [input+&]:mt-0 [input+&]:border-t-0 [input+&]:pt-1">
-      <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">{label}</span>
+    <div className="mt-1.5 flex items-center gap-1.5 border-t border-line-soft px-2 pt-2 pb-[3px] first:mt-0 first:border-t-0 first:pt-1 [input+&]:mt-0 [input+&]:border-t-0 [input+&]:pt-1">
+      {logo === undefined || logo === null ? null : (
+        <span className="flex shrink-0 text-faint opacity-85">{logo}</span>
+      )}
+      <span className="min-w-0 truncate text-label font-emph tracking-[0.1em] text-faint uppercase">
+        {label}
+      </span>
     </div>
   );
 }

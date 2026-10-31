@@ -9,6 +9,7 @@ import { buildDraftKey } from "./pending-submissions";
 import {
   harnessesQuery,
   localRunnerQuery,
+  modelProfilesQuery,
   profilesQuery,
   projectsQuery,
   providerAccountsQuery,
@@ -49,6 +50,7 @@ export function useDraftThread(address: DraftAddress | null): DraftView | null {
     accounts: useSuspenseQuery(providerAccountsQuery(client)).data,
     providers: useSuspenseQuery(providersQuery(client)).data,
     harnesses: useSuspenseQuery(harnessesQuery(client)).data,
+    modelProfiles: useSuspenseQuery(modelProfilesQuery(client)).data,
     runners,
     thisMacRunnerId: useQuery({ ...localRunnerQuery(bridge, runners), enabled: open }).data ?? null,
     projects: useSuspenseQuery(projectsQuery(client)).data,

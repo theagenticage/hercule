@@ -11,8 +11,10 @@ import { describe, expect, it } from "vitest";
 import type { Runner, Session } from "@hercule/contract";
 import {
   WITH_AGENTS,
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
   buildProviderAccount,
-  buildSnapshot,
   ANTHROPIC_IDENTITY,
   OPENAI_IDENTITY,
   HARNESSES,
@@ -31,6 +33,7 @@ const NO_CATALOGS: ThreadCatalogs = {
   thisMacRunnerId: null,
   providers: PROVIDERS,
   harnesses: HARNESSES,
+  modelProfiles: [],
 };
 
 /** Returns the spawn request for a draft that starts from `config` and holds `picks`. */
@@ -96,11 +99,8 @@ const MESSAGE = { text: "ship it", attachments: [] };
 
 const LOCAL: Runner = { ...WITH_AGENTS, id: "r-local" };
 const REMOTE: Runner = { ...WITH_AGENTS, id: "r-remote" };
-const SONNET = {
-  slug: "claude-sonnet-5",
+const SONNET = buildProfileEntry(ANTHROPIC_IDENTITY, "claude-sonnet-5", {
   name: "Claude Sonnet 5",
-  imageInput: { maxBytes: null },
-  isDefault: true,
   options: [
     {
       id: "effort",
@@ -113,18 +113,31 @@ const SONNET = {
       default: "low",
     },
   ],
-};
-const OPUS = { ...SONNET, slug: "claude-opus-5", name: "Claude Opus 5", isDefault: false };
-const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [
-  buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS] }),
-  buildSnapshot({ runnerId: REMOTE.id, models: [SONNET, OPUS] }),
-]);
+});
+const OPUS = { ...SONNET, model: "claude-opus-5", name: "Claude Opus 5" };
+const GPT = buildProfileEntry(OPENAI_IDENTITY, "gpt-5", { name: "GPT-5" });
+const CLAUDE = buildProviderAccount(
+  ANTHROPIC_IDENTITY,
+  [],
+  [{ runnerId: LOCAL.id }, { runnerId: REMOTE.id }],
+);
+const CODEX = buildProviderAccount(
+  OPENAI_IDENTITY,
+  [],
+  [{ runnerId: LOCAL.id, state: "not-signed-in" }, { runnerId: REMOTE.id }],
+);
 const CATALOGS: ThreadCatalogs = {
-  accounts: [CLAUDE],
+  accounts: [CLAUDE, CODEX],
   runners: [LOCAL, REMOTE],
   thisMacRunnerId: LOCAL.id,
   providers: PROVIDERS,
   harnesses: HARNESSES,
+  modelProfiles: [
+    buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS]),
+      buildProfileSection(OPENAI_IDENTITY, [GPT]),
+    ]),
+  ],
 };
 
 describe("buildSubmission: a draft thread", () => {
@@ -153,33 +166,43 @@ describe("buildSubmission: a draft thread", () => {
     expect(unnamed.kind === "spawn" && "harnessId" in unnamed.input).toBe(false);
   });
 
-  it("sends the default runner and model of the account picked, not the draft's own", () => {
+  it("sends the account, harness and model of the entry picked, and the default runner of that account", () => {
     // The draft runs Claude on the local runner. Codex is signed in on the
-    // remote runner only, and the picks hold the account alone.
-    const codex = buildProviderAccount(OPENAI_IDENTITY, [
-      buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
-      buildSnapshot({
-        runnerId: REMOTE.id,
-        models: [{ slug: "gpt-5", name: "GPT-5", imageInput: { maxBytes: null }, options: [] }],
-      }),
-    ]);
-    const catalogs = { ...CATALOGS, accounts: [CLAUDE, codex] };
-
+    // remote runner only.
     expect(
       buildDraftSubmission(
-        catalogs,
+        CATALOGS,
         CONFIG,
-        applyThreadChoice({}, { kind: "account", providerAccountId: codex.id }),
+        applyThreadChoice(
+          {},
+          {
+            kind: "model",
+            providerAccountId: CODEX.id,
+            harnessId: GPT.resolvedHarnessId,
+            model: GPT.model,
+          },
+        ),
         MESSAGE,
       ),
     ).toMatchObject({
-      input: { providerAccountId: codex.id, model: "gpt-5", runnerId: "r-remote", options: {} },
+      input: {
+        providerAccountId: CODEX.id,
+        harnessId: "codex/codex",
+        model: "gpt-5",
+        runnerId: "r-remote",
+        options: {},
+      },
     });
   });
 
   it("sends what the user picked: model, options, access mode and runner", () => {
     const picks = [
-      { kind: "model", providerAccountId: CLAUDE.id, model: OPUS.slug },
+      {
+        kind: "model",
+        providerAccountId: CLAUDE.id,
+        harnessId: OPUS.resolvedHarnessId,
+        model: OPUS.model,
+      },
       { kind: "option", id: "effort", value: "high" },
       { kind: "accessMode", value: "full-access" },
       { kind: "runner", runnerId: REMOTE.id },
@@ -196,7 +219,8 @@ describe("buildSubmission: a draft thread", () => {
       input: {
         prompt: "ship it",
         providerAccountId: CLAUDE.id,
-        model: OPUS.slug,
+        harnessId: OPUS.resolvedHarnessId,
+        model: OPUS.model,
         options: { effort: "high" },
         accessMode: "full-access",
         runnerId: REMOTE.id,
@@ -218,10 +242,10 @@ describe("buildSubmission: an active thread", () => {
   });
 
   it("sends a picked model with the text", () => {
-    expect(buildInputSubmission(CATALOGS, session, { model: OPUS.slug }, MESSAGE)).toEqual({
+    expect(buildInputSubmission(CATALOGS, session, { model: OPUS.model }, MESSAGE)).toEqual({
       kind: "input",
       sessionId: SESSION.id,
-      payload: { text: "ship it", model: OPUS.slug },
+      payload: { text: "ship it", model: OPUS.model },
     });
   });
 
@@ -240,13 +264,13 @@ describe("buildSubmission: an active thread", () => {
       buildInputSubmission(
         CATALOGS,
         session,
-        { model: OPUS.slug, options: { effort: "high" } },
+        { model: OPUS.model, options: { effort: "high" } },
         MESSAGE,
       ),
     ).toEqual({
       kind: "input",
       sessionId: SESSION.id,
-      payload: { text: "ship it", model: OPUS.slug, options: { effort: "high" } },
+      payload: { text: "ship it", model: OPUS.model, options: { effort: "high" } },
     });
   });
 

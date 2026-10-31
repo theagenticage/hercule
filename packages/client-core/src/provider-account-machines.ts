@@ -5,7 +5,11 @@
  * account sheet's Machines section both read these, so they cannot disagree.
  */
 import type { Harness, Provider, ProviderAccount, Runner } from "@hercule/contract";
-import { findDefaultHarnessSnapshot, signsInPerMachine } from "./provider-accounts";
+import {
+  findDefaultHarnessSnapshot,
+  findProviderAccountReadiness,
+  signsInPerMachine,
+} from "./provider-accounts";
 import { buildProviderRows, type ProviderRow } from "./provider-rows";
 
 /**
@@ -30,7 +34,11 @@ export type ProviderAccountMachineAction =
 export interface ProviderAccountMachine {
   readonly runnerId: string;
   readonly runnerName: string;
-  /** Whether the machine's last probe of the account, in its default harness, found it signed in. */
+  /**
+   * Whether the account can run in its default harness on the machine, as the
+   * controller's readiness row for that pair says. Anything but `ready` reads
+   * as not signed in here, because the account only signs in per machine.
+   */
   readonly signedIn: boolean;
   /** Who the account is signed in as there, or `null` when it is not signed in or the harness named nobody. */
   readonly identity: string | null;
@@ -81,13 +89,14 @@ export const listProviderAccountMachines = (
     .filter((runner) => runner.lifecycle !== "retired")
     .map((runner) => {
       const row = buildProviderRows(runner, [account], providers, harnesses)[0];
+      const signedIn =
+        findProviderAccountReadiness(account, account.defaultHarnessId, runner.id) === "ready";
       const auth = findDefaultHarnessSnapshot(account, runner.id)?.auth;
-      const signedIn = auth?.status === "ok";
       return {
         runnerId: runner.id,
         runnerName: runner.name,
         signedIn,
-        identity: signedIn ? (auth.identity ?? null) : null,
+        identity: signedIn && auth?.status === "ok" ? (auth.identity ?? null) : null,
         action: signedIn ? null : decideMachineAction(runner, row, harnessName),
       };
     });

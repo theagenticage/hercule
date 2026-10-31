@@ -11,6 +11,8 @@ import { ACCESS_MODE_CHAIN, type TextGenerationModel } from "@hercule/contract";
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
 import {
   controllerQuery,
+  harnessesQuery,
+  modelProfilesQuery,
   providerAccountsQuery,
   providersQuery,
   readOnOpen,
@@ -104,6 +106,8 @@ function TextGenerationRow(): JSX.Element {
   const settings = useSuspenseQuery(settingsQuery(client)).data;
   const providers = useSuspenseQuery(providersQuery(client)).data;
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
+  const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   const model = useSavedSetting(
     client,
     settings.controller["textGeneration.model"] ?? "automatic",
@@ -113,6 +117,8 @@ function TextGenerationRow(): JSX.Element {
     model.value,
     providers,
     accounts,
+    harnesses,
+    modelProfiles,
     textGeneration,
   );
   const failure = describeTextGenerationFailure(model.value, textGeneration, new Date());

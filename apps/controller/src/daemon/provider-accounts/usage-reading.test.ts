@@ -21,6 +21,7 @@ import {
 } from "../../plugins/testing";
 import {
   HarnessAccountsLayer,
+  ModelCatalogsLayer,
   ProviderAccountProbesLayer,
   ProviderAccountRunners,
   ProviderAccountRunnersLayer,
@@ -35,6 +36,7 @@ import {
   ALPHA_HARNESS_ID,
   buildFakeProviderApi,
   buildMeteredPlugin,
+  inertMembership,
   METERED,
   METERED_KEY_KIND,
   METERED_PROVIDER_ID,
@@ -43,7 +45,7 @@ import {
   storeCredential,
 } from "../../provider-accounts/testing";
 import { NotifierLayer } from "../../notifications";
-import { RunnerConnections } from "../../runners";
+import { LocalRunnerId, RunnerConnections } from "../../runners";
 import { Secrets } from "../../secrets";
 import { SettingsLayer } from "../../settings";
 import { AccountUsage, AccountUsageLayer } from "../../usage";
@@ -192,8 +194,11 @@ const run = <A, E>(
           Layer.provideMerge(ProviderAccountServiceLayer),
           Layer.provideMerge(ProviderKeyRequestsLayer),
           Layer.provide(Layer.succeed(HttpClient.HttpClient, provider.client)),
-          Layer.provideMerge(ProviderAccountRunnersLayer),
           Layer.provideMerge(ProviderAccountProbesLayer),
+          Layer.provideMerge(ModelCatalogsLayer),
+          Layer.provideMerge(ProviderAccountRunnersLayer),
+          Layer.provideMerge(inertMembership),
+          Layer.provideMerge(Layer.succeed(LocalRunnerId, { read: () => undefined })),
           Layer.provideMerge(HarnessAccountsLayer),
           Layer.provideMerge(SettingsLayer),
           Layer.provideMerge(AccountUsageLayer),

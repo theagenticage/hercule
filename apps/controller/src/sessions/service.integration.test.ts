@@ -1615,6 +1615,8 @@ const buildMeteredPlugin = () =>
           },
         ],
         defaultHarnessId: "metered/metered",
+        catalogSource: { kind: "harness-probe", harnessId: "metered/metered" },
+        defaultSelection: "current-models",
       },
     ],
   }).plugin;

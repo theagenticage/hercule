@@ -50,7 +50,6 @@ function RunnerPage(): JSX.Element {
   const { runnerId } = Route.useParams();
 
   useLiveInvalidation(live, queryClient, "runner");
-  useLiveInvalidation(live, queryClient, "provider");
   useLiveInvalidation(live, queryClient, "session");
 
   const runner = useSuspenseQuery(runnerQuery(client, runnerId)).data;
@@ -95,7 +94,7 @@ function RunnerPage(): JSX.Element {
         )}
       </FormCard>
 
-      <Providers client={client} live={live} runner={runner} />
+      <Providers client={client} runner={runner} />
     </div>
   );
 }

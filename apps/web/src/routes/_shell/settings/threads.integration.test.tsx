@@ -1,13 +1,28 @@
 /**
- * Tests for Settings > Threads: the four `thread.*` defaults that prefill the
+ * Tests for Settings > Threads: the `thread.*` defaults that prefill the
  * composer, the workspace default, and their position above the Sidebar rows
- * control. The GitHub account select moved to Settings > Profile.
+ * control. The model default is one entry of the Model Profile. The GitHub
+ * account select moved to Settings > Profile.
  */
 import { describe, expect, it } from "vitest";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Connection, Profile, ProviderAccount, Runner } from "@hercule/contract";
-import { buildErrorBody, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
+import type { Connection, ModelProfile, Profile, ProviderAccount, Runner } from "@hercule/contract";
+import {
+  ANTHROPIC_IDENTITY,
+  ZAI_IDENTITY,
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
+} from "@hercule/client-core/testing";
+import {
+  buildCatalogFields,
+  buildErrorBody,
+  renderApp,
+  stubApi,
+  type Call,
+  type Handler,
+} from "../../../app/testing";
 
 const RUNNER_LOCAL: Runner = {
   id: "01a06d02-beff-7037-9f5b-042822015952",
@@ -32,10 +47,11 @@ const RUNNER_OTHER: Runner = {
 
 const buildSnapshot = (
   runnerId: string,
+  harnessId: string,
   models: ReadonlyArray<{ readonly slug: string; readonly name: string }>,
 ) => ({
   runnerId,
-  harnessId: "claude-code/claude-code",
+  harnessId,
   probedAt: "2026-09-05T09:14:00.000Z",
   harnessVersion: "2.1.263",
   versionVerdict: "ok" as const,
@@ -44,42 +60,92 @@ const buildSnapshot = (
 });
 
 const buildAccount = (
-  id: string,
+  identity: typeof ANTHROPIC_IDENTITY,
   label: string | null,
   snapshots: ProviderAccount["snapshots"],
 ): ProviderAccount => ({
-  id,
-  providerId: "anthropic/anthropic",
-  kind: "subscription-per-machine",
+  id: identity.id,
+  providerId: identity.providerId,
+  kind: identity.kind,
   label,
   identity: null,
   planLabel: null,
-  defaultHarnessId: "claude-code/claude-code",
+  defaultHarnessId: identity.harnessId,
   expiresAt: null,
   usage: [],
   failure: null,
   snapshots,
+  ...buildCatalogFields(snapshots),
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
 });
 
+const IDENTITY_LOCAL = { ...ANTHROPIC_IDENTITY, id: "01a06d02-1000-7000-8000-000000000001" };
+const IDENTITY_WORK = { ...ANTHROPIC_IDENTITY, id: "01a06d02-1000-7000-8000-000000000002" };
+const IDENTITY_NEW = { ...ANTHROPIC_IDENTITY, id: "01a06d02-1000-7000-8000-000000000003" };
+const IDENTITY_ZAI = { ...ZAI_IDENTITY, id: "01a06d02-1000-7000-8000-000000000004" };
+
 /** An account signed in on the local runner, with two models. */
-const ACCOUNT_LOCAL = buildAccount("01a06d02-1000-7000-8000-000000000001", null, [
-  buildSnapshot(RUNNER_LOCAL.id, [
+const ACCOUNT_LOCAL = buildAccount(IDENTITY_LOCAL, null, [
+  buildSnapshot(RUNNER_LOCAL.id, "claude-code/claude-code", [
     { slug: "claude-sonnet-5", name: "Sonnet 5" },
     { slug: "claude-opus-5", name: "Opus 5" },
   ]),
 ]);
 
-/** An account never probed on the local runner, with one snapshot from another runner. */
-const ACCOUNT_ELSEWHERE = buildAccount("01a06d02-1000-7000-8000-000000000002", "work", [
-  buildSnapshot(RUNNER_OTHER.id, [{ slug: "claude-haiku-5", name: "Haiku 5" }]),
+/** An account signed in on another runner only. */
+const ACCOUNT_WORK: ProviderAccount = {
+  ...buildAccount(IDENTITY_WORK, "work", [
+    buildSnapshot(RUNNER_OTHER.id, "claude-code/claude-code", [
+      { slug: "claude-haiku-5", name: "Haiku 5" },
+    ]),
+  ]),
+  readiness: [
+    { harnessId: "claude-code/claude-code", runnerId: RUNNER_OTHER.id, state: "not-signed-in" },
+  ],
+};
+
+/** An account added a moment ago, whose models are still being read. */
+const ACCOUNT_NEW = buildAccount(IDENTITY_NEW, "new", []);
+
+/** An API key account that runs in pi. */
+const ACCOUNT_ZAI = buildAccount(IDENTITY_ZAI, null, [
+  buildSnapshot(RUNNER_LOCAL.id, "pi/pi", [{ slug: "glm-5", name: "GLM-5" }]),
 ]);
 
-/** An account never probed on any runner. */
-const ACCOUNT_UNPROBED = buildAccount("01a06d02-1000-7000-8000-000000000003", "new", []);
+const ACCOUNTS: readonly ProviderAccount[] = [
+  ACCOUNT_LOCAL,
+  ACCOUNT_WORK,
+  ACCOUNT_NEW,
+  ACCOUNT_ZAI,
+];
 
-const ACCOUNTS: readonly ProviderAccount[] = [ACCOUNT_LOCAL, ACCOUNT_ELSEWHERE, ACCOUNT_UNPROBED];
+const SONNET = buildProfileEntry(IDENTITY_LOCAL, "claude-sonnet-5", { name: "Sonnet 5" });
+const OPUS = buildProfileEntry(IDENTITY_LOCAL, "claude-opus-5", { name: "Opus 5" });
+/** Cannot run now: the account is signed out on the runner it would use. */
+const HAIKU = buildProfileEntry(IDENTITY_WORK, "claude-haiku-5", {
+  name: "Haiku 5",
+  problem: { reason: "not-signed-in", message: "not signed in on cove" },
+});
+const GLM = buildProfileEntry(IDENTITY_ZAI, "glm-5", { name: "GLM-5" });
+
+/** The one Model Profile: Sonnet 5 is its default entry. */
+const MAIN: ModelProfile = buildModelProfile(
+  [
+    buildProfileSection(IDENTITY_LOCAL, [SONNET, OPUS]),
+    buildProfileSection(IDENTITY_WORK, [HAIKU]),
+    buildProfileSection(IDENTITY_NEW, "pending"),
+    buildProfileSection(IDENTITY_ZAI, [GLM]),
+  ],
+  {
+    id: "01a06d02-4000-7000-8000-000000000001",
+    defaultEntry: {
+      providerAccountId: IDENTITY_LOCAL.id,
+      model: "claude-sonnet-5",
+      harnessId: null,
+    },
+  },
+);
 
 const PROFILE_UNRESTRICTED: Profile = {
   id: "01a06d02-3000-7000-8000-000000000001",
@@ -105,6 +171,7 @@ const STORED_BASE = {
   "onboarding.completedSteps": ["timezone", "assistant"],
   timezone: "Europe/Amsterdam",
   "thread.providerAccountId": ACCOUNT_LOCAL.id,
+  "thread.harnessId": "claude-code/claude-code",
   "thread.model": "claude-sonnet-5",
   "thread.accessMode": "approval-required",
   "thread.profileId": PROFILE_UNRESTRICTED.id,
@@ -113,7 +180,7 @@ const STORED_BASE = {
 /** Builds a stub controller that responds to `settings.update` with the settings after the patch. */
 const buildController = (
   user: Record<string, unknown>,
-  update?: Handler,
+  options: { readonly update?: Handler; readonly modelProfiles?: readonly ModelProfile[] } = {},
 ): Readonly<Record<string, Handler>> => {
   const stored = { controller: {}, user: { ...STORED_BASE, ...user } };
   const applyPatch = (call: Call) => ({
@@ -125,15 +192,19 @@ const buildController = (
   return {
     "GET /api/v1/setup": { body: { complete: true } },
     "GET /api/v1/settings": { body: stored },
-    "PATCH /api/v1/settings": update ?? applyPatch,
+    "PATCH /api/v1/settings": options.update ?? applyPatch,
     "GET /api/v1/provider-accounts": { body: ACCOUNTS },
+    "GET /api/v1/model-profiles": { body: options.modelProfiles ?? [MAIN] },
     "GET /api/v1/runners": { body: { items: [RUNNER_LOCAL, RUNNER_OTHER] } },
     "GET /api/v1/profiles": { body: { items: PROFILES } },
   };
 };
 
-const openApp = async (user: Record<string, unknown> = {}, update?: Handler) => {
-  const api = stubApi(buildController(user, update));
+const openApp = async (
+  user: Record<string, unknown> = {},
+  options: Parameters<typeof buildController>[1] = {},
+) => {
+  const api = stubApi(buildController(user, options));
   const app = await renderApp({
     path: "/settings/threads",
     api: api.fetch,
@@ -146,124 +217,141 @@ const openApp = async (user: Record<string, unknown> = {}, update?: Handler) => 
 const listWrites = (api: { readonly calls: readonly Call[] }) =>
   api.calls.filter((call) => call.method === "PATCH");
 
+const findModelField = () => screen.findByLabelText<HTMLSelectElement>("Model");
+
+const listOffered = (field: HTMLSelectElement) =>
+  [...field.options].map((option) => option.textContent);
+
 describe("Settings > Threads defaults", () => {
-  it("offers the accounts by name, and writes thread.providerAccountId, thread.harnessId and thread.model together on pick", async () => {
+  it("offers one choice for each entry of the model profile, an account and a model, with the stored entry selected", async () => {
+    await openApp();
+
+    const field = await findModelField();
+
+    // The account whose models are still being read has no entry yet.
+    expect(listOffered(field)).toEqual([
+      "Anthropic · Sonnet 5",
+      "Anthropic · Opus 5",
+      "Anthropic · work · Haiku 5 (not signed in on cove)",
+      "Z.ai · GLM-5",
+    ]);
+    expect(field.selectedOptions[0]?.textContent).toBe("Anthropic · Sonnet 5");
+  });
+
+  it("offers no separate account choice, and says a project's own profile starts there", async () => {
+    await openApp();
+
+    await findModelField();
+
+    expect(screen.queryByLabelText("Account")).toBeNull();
+    expect(screen.getByText("A project with its own model profile starts there.")).toBeDefined();
+  });
+
+  it("writes thread.providerAccountId, thread.harnessId and thread.model together on pick", async () => {
     const user = userEvent.setup();
     const { api } = await openApp();
 
-    const field = await screen.findByLabelText<HTMLSelectElement>("Account");
-    const offered = [...field.options].map((option) => option.textContent);
-    expect(offered).toEqual(["Anthropic", "Anthropic · work", "Anthropic · new"]);
-
-    await user.selectOptions(field, "Anthropic · work");
+    await user.selectOptions(await findModelField(), "Anthropic · Opus 5");
 
     expect(await screen.findByRole("status")).toBeDefined();
+    // One patch, so the account, the harness and the model are never saved apart.
     expect(listWrites(api)).toHaveLength(1);
-    // One patch, not two, so switching accounts never leaves a model the new
-    // account does not offer, or a harness that belonged to the old one. The
-    // account's only snapshot has one model, "Haiku 5", with no `isDefault`,
-    // so that model is the fallback default.
     expect(listWrites(api)[0]?.body).toEqual({
       user: {
-        "thread.providerAccountId": ACCOUNT_ELSEWHERE.id,
-        "thread.harnessId": null,
-        "thread.model": "claude-haiku-5",
+        "thread.providerAccountId": ACCOUNT_LOCAL.id,
+        "thread.harnessId": "claude-code/claude-code",
+        "thread.model": "claude-opus-5",
       },
     });
   });
 
-  it("writes no model when the newly picked account has no snapshot to default from", async () => {
+  it("writes the entry's harness when it runs in another harness than its account's", async () => {
     const user = userEvent.setup();
-    const { api } = await openApp();
-
-    const field = await screen.findByLabelText<HTMLSelectElement>("Account");
-    await user.selectOptions(field, "Anthropic · new");
-
-    expect(await screen.findByRole("status")).toBeDefined();
-    expect(listWrites(api)).toHaveLength(1);
-    expect(listWrites(api)[0]?.body).toEqual({
-      user: { "thread.providerAccountId": ACCOUNT_UNPROBED.id, "thread.harnessId": null },
+    const claudeInPi = buildProfileEntry(IDENTITY_LOCAL, "claude-opus-5", {
+      name: "Opus 5",
+      harnessId: "pi/pi",
+      resolvedHarnessId: "pi/pi",
     });
-  });
+    const { api } = await openApp(
+      {},
+      {
+        modelProfiles: [
+          buildModelProfile([buildProfileSection(IDENTITY_LOCAL, [SONNET, claudeInPi])], {
+            id: MAIN.id,
+          }),
+        ],
+      },
+    );
 
-  it("offers the picked account's models from the local runner's snapshot, and writes thread.model on pick", async () => {
-    const user = userEvent.setup();
-    const { api } = await openApp();
-
-    const field = await screen.findByLabelText<HTMLSelectElement>("Model");
-    const offered = [...field.options].map((option) => option.textContent);
-    expect(offered).toContain("Sonnet 5");
-    expect(offered).toContain("Opus 5");
-
-    await user.selectOptions(field, "Opus 5");
-
-    expect(await screen.findByRole("status")).toBeDefined();
-    expect(listWrites(api)).toHaveLength(1);
-    // The prefilled account is saved with the model, so the default is explicit.
-    expect(listWrites(api)[0]?.body).toEqual({
-      user: { "thread.providerAccountId": ACCOUNT_LOCAL.id, "thread.model": "claude-opus-5" },
-    });
-  });
-
-  it("writes the prefilled account with the model when no account was ever saved", async () => {
-    const user = userEvent.setup();
-    const { api } = await openApp({ "thread.providerAccountId": undefined });
-
-    await user.selectOptions(await screen.findByLabelText<HTMLSelectElement>("Model"), "Opus 5");
+    await user.selectOptions(await findModelField(), "Anthropic · Opus 5 · in pi");
 
     expect(await screen.findByRole("status")).toBeDefined();
     expect(listWrites(api)[0]?.body).toEqual({
-      user: { "thread.providerAccountId": ACCOUNT_LOCAL.id, "thread.model": "claude-opus-5" },
+      user: {
+        "thread.providerAccountId": ACCOUNT_LOCAL.id,
+        "thread.harnessId": "pi/pi",
+        "thread.model": "claude-opus-5",
+      },
     });
   });
 
-  it("writes the fallback account with the model when the saved account was deleted", async () => {
-    const user = userEvent.setup();
-    const { api } = await openApp({
-      "thread.providerAccountId": "01a06d02-1000-7000-8000-00000000dead",
-    });
-
-    await user.selectOptions(await screen.findByLabelText<HTMLSelectElement>("Model"), "Opus 5");
-
-    expect(await screen.findByRole("status")).toBeDefined();
-    expect(listWrites(api)[0]?.body).toEqual({
-      user: { "thread.providerAccountId": ACCOUNT_LOCAL.id, "thread.model": "claude-opus-5" },
-    });
-  });
-
-  it("falls back to the account's first snapshot when none is the local runner's", async () => {
+  it("shows the profile's default entry when no default was ever saved", async () => {
     await openApp({
-      "thread.providerAccountId": ACCOUNT_ELSEWHERE.id,
-      "thread.model": "claude-haiku-5",
+      "thread.providerAccountId": undefined,
+      "thread.harnessId": undefined,
+      "thread.model": undefined,
     });
 
-    // ACCOUNT_ELSEWHERE has no snapshot for RUNNER_LOCAL (the detected local
-    // runner); its one snapshot, from RUNNER_OTHER, is offered anyway.
-    const field = await screen.findByLabelText<HTMLSelectElement>("Model");
-    const offered = [...field.options].map((option) => option.textContent);
-    expect(offered).toContain("Haiku 5");
+    const field = await findModelField();
+
+    expect(field.selectedOptions[0]?.textContent).toBe("Anthropic · Sonnet 5");
   });
 
-  it("dims the model field when the picked account has no snapshot at all", async () => {
-    await openApp({
-      "thread.providerAccountId": ACCOUNT_UNPROBED.id,
-      "thread.model": "claude-sonnet-5",
-    });
+  it("shows the profile's default entry when the saved account was deleted", async () => {
+    await openApp({ "thread.providerAccountId": "01a06d02-1000-7000-8000-00000000dead" });
 
-    expect(await screen.findByText("sign in on a runner first")).toBeDefined();
+    const field = await findModelField();
+
+    expect(field.selectedOptions[0]?.textContent).toBe("Anthropic · Sonnet 5");
+  });
+
+  it("lets the user choose an entry that cannot run now, since a default outlives an offline machine", async () => {
+    await openApp();
+
+    const field = await findModelField();
+
+    const haiku = [...field.options].find((option) => option.textContent?.includes("Haiku 5"));
+    expect(haiku?.disabled).toBe(false);
+    expect(haiku?.textContent).toBe("Anthropic · work · Haiku 5 (not signed in on cove)");
+  });
+
+  it("shows a stored entry the profile no longer holds, marked as not offered", async () => {
+    await openApp({ "thread.model": "some-retired-slug" });
+
+    const field = await findModelField();
+
+    expect(listOffered(field)).toContain("Anthropic · some-retired-slug (not offered)");
+    expect(field.selectedOptions[0]?.textContent).toBe(
+      "Anthropic · some-retired-slug (not offered)",
+    );
+  });
+
+  it("dims the model field when the profile holds no model yet", async () => {
+    await openApp(
+      {
+        "thread.providerAccountId": undefined,
+        "thread.harnessId": undefined,
+        "thread.model": undefined,
+      },
+      {
+        modelProfiles: [
+          buildModelProfile([buildProfileSection(IDENTITY_NEW, "pending")], { id: MAIN.id }),
+        ],
+      },
+    );
+
+    expect(await screen.findByText("no models in your profile yet")).toBeDefined();
     expect(screen.queryByLabelText("Model")).toBeNull();
-  });
-
-  it("shows a stored slug the snapshot no longer offers, marked as not offered", async () => {
-    await openApp({
-      "thread.providerAccountId": ACCOUNT_LOCAL.id,
-      "thread.model": "some-retired-slug",
-    });
-
-    const field = await screen.findByLabelText<HTMLSelectElement>("Model");
-    const retired = [...field.options].find((option) => option.value === "some-retired-slug");
-    expect(retired).toBeDefined();
-    expect(retired?.textContent).toBe("some-retired-slug (not offered)");
   });
 
   it("writes thread.accessMode when a different mode is picked on the segmented control", async () => {
@@ -299,7 +387,9 @@ describe("Settings > Threads defaults", () => {
     const user = userEvent.setup();
     const { api } = await openApp(
       {},
-      { status: 500, body: buildErrorBody("internal", "the settings table is locked") },
+      {
+        update: { status: 500, body: buildErrorBody("internal", "the settings table is locked") },
+      },
     );
 
     const field = await screen.findByLabelText<HTMLSelectElement>("Profile");
@@ -309,11 +399,10 @@ describe("Settings > Threads defaults", () => {
     expect(listWrites(api)).toHaveLength(1);
   });
 
-  it("places the four thread fields above the existing Sidebar rows control", async () => {
+  it("places the model, access mode and profile fields above the existing Sidebar rows control", async () => {
     await openApp();
 
-    const accountField = await screen.findByLabelText("Account");
-    const modelField = screen.getByLabelText("Model");
+    const modelField = await findModelField();
     const accessGroup = screen.getByRole("radiogroup", { name: /access mode/i });
     const profileField = screen.getByLabelText("Profile");
     const sidebarRows = screen.getByRole("radiogroup", { name: "Sidebar rows" });
@@ -321,7 +410,7 @@ describe("Settings > Threads defaults", () => {
     const isBefore = (a: Element, b: Element): boolean =>
       (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
-    for (const field of [accountField, modelField, accessGroup, profileField]) {
+    for (const field of [modelField, accessGroup, profileField]) {
       expect(isBefore(field, sidebarRows)).toBe(true);
     }
   });
@@ -405,7 +494,7 @@ describe("Settings > Threads: the GitHub account", () => {
       detectLocalRunner: () => Promise.resolve(RUNNER_LOCAL.id),
     });
 
-    await screen.findByLabelText("Account");
+    await screen.findByLabelText("Model");
     expect(screen.queryByRole("combobox", { name: /github/i })).toBeNull();
     expect(screen.queryByText(GITHUB.label)).toBeNull();
   });

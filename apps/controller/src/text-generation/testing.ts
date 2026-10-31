@@ -20,7 +20,11 @@ import { zai } from "@hercule/plugin-zai";
 import type { Plugin } from "@hercule/plugin-host";
 import { TEXT_GENERATION_CAPABILITY, type ProbeResult } from "@hercule/protocol";
 import { nowIso, uuidFromString, withTransaction } from "../db";
-import { providerAccountRepository, type StoredProviderAccount } from "../provider-accounts";
+import {
+  modelCatalogRepository,
+  providerAccountRepository,
+  type StoredProviderAccount,
+} from "../provider-accounts";
 import { runnerRepository } from "../runners";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { hashToken } from "../credentials";
@@ -194,4 +198,19 @@ export const addSnapshot = (
       sql,
       accounts.recordSnapshot(providerAccountId, harnessId, runnerId, result, yield* nowIso),
     );
+  });
+
+/**
+ * Stores a successful Model Catalog read for an account, listing the models
+ * of `result`, which is what `automatic` looks the suggested model up in.
+ */
+export const addCatalog = (
+  providerAccountId: string,
+  result: ProbeResult,
+): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const catalogs = yield* modelCatalogRepository;
+    const at = yield* nowIso;
+    yield* withTransaction(sql, catalogs.recordSuccess(providerAccountId, result.models, at, at));
   });

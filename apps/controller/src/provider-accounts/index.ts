@@ -3,10 +3,10 @@
  * subscription or a Z.ai key, and what each runner learned about it in each
  * harness it may run in.
  *
- * This domain holds the rows, the snapshots and the policy. Sending anything
- * to a runner - signing an account in, probing it, installing a harness - is
- * done by the controller daemon, which calls the finite operations here to
- * check a request and to record its outcome.
+ * This domain holds the rows, the snapshots, the Model Catalogs and the
+ * policy. Sending anything to a runner - signing an account in, probing it,
+ * installing a harness - is done by the controller daemon, which calls the
+ * finite operations here to check a request and to record its outcome.
  */
 export {
   buildRunnerRefusal,
@@ -24,11 +24,25 @@ export {
   ProviderKeyRequestsLayer,
   ProviderKeyRequestTimeout,
 } from "./provider-key-requests";
+export { modelCatalogRepository, type StoredModelCatalogSummary } from "./model-catalog-repository";
+export {
+  computeDefaultSelection,
+  ModelCatalogs,
+  ModelCatalogsLayer,
+  type ChosenReads,
+  type UnservedRead,
+} from "./model-catalogs";
+export {
+  ModelProfileMembership,
+  type DefaultHarnessClash,
+  type DefaultSelection,
+} from "./model-profile-membership";
 export {
   ProviderAccountProbes,
   ProviderAccountProbesLayer,
   type ProbeOutcome,
   type ProbePair,
+  type ProbeStamp,
 } from "./probes";
 export {
   providerAccountRepository,

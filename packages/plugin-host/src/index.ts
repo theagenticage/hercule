@@ -85,6 +85,8 @@ export {
   AccountKind,
   AccountSetupStep,
   AccountUsageDeclaration,
+  CatalogSource,
+  DefaultSelection,
   HarnessLoginStep,
   KeyCheck,
   ProviderDefinition,

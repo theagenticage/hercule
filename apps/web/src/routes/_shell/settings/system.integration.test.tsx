@@ -16,6 +16,12 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ControllerInfo, ProviderAccount } from "@hercule/contract";
 import {
+  OPENAI_IDENTITY,
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
+} from "@hercule/client-core/testing";
+import {
   buildErrorBody,
   readPageText,
   renderApp,
@@ -51,9 +57,25 @@ const CODEX: ProviderAccount = {
       ],
     },
   ],
+  modelCount: 2,
+  catalogReadAt: "2026-09-05T09:14:00.000Z",
+  catalogError: null,
+  readiness: [{ harnessId: "codex/codex", runnerId: RUNNER_ID, state: "ready" }],
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
 };
+
+/** The one Model Profile: the Codex account with both of its models. */
+const CODEX_IDENTITY = { ...OPENAI_IDENTITY, id: CODEX.id };
+const MAIN = buildModelProfile(
+  [
+    buildProfileSection(CODEX_IDENTITY, [
+      buildProfileEntry(CODEX_IDENTITY, "gpt-6-luna", { name: "GPT-6 Luna" }),
+      buildProfileEntry(CODEX_IDENTITY, "gpt-6", { name: "GPT-6" }),
+    ]),
+  ],
+  { id: "01a06d02-4000-7000-8000-000000000001" },
+);
 
 const AUTOMATIC_PICK: ControllerInfo["textGeneration"] = {
   model: { providerAccountId: CODEX.id, harnessId: "codex/codex", model: "gpt-6-luna" },
@@ -87,6 +109,7 @@ const buildController = (
       },
     }),
     "GET /api/v1/provider-accounts": { body: [CODEX] },
+    "GET /api/v1/model-profiles": { body: [MAIN] },
     "GET /api/v1/controller": {
       body: {
         id: "01a06d02-a000-7000-8000-000000000001",

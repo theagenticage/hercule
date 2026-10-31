@@ -7,6 +7,7 @@
  */
 import type {
   Harness,
+  ModelProfile,
   Project,
   Provider,
   ProviderAccount,
@@ -43,12 +44,14 @@ export interface ThreadConfig extends ThreadDefaults {
  * What the user has chosen since the last submission. A pick is kept even
  * while the current account, runner or model cannot honour it, and applies
  * again when it can (see `resolveThreadConfig`). The permission profile is not
- * included, because the composer has no control for it. Neither is the
- * harness: picking an account puts the thread in that account's default
- * harness, because a harness named for the previous account may not run this
- * one.
+ * included, because the composer has no control for it.
+ *
+ * Picking a row of the model menu sets the account, the harness and the model
+ * together (`buildEntryPicks`), so a draft never runs a model in another
+ * harness than the menu showed. A harness named for one account is never
+ * carried to another: only the pick that names the account names its harness.
  */
-export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId" | "harnessId">>;
+export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId">>;
 
 /**
  * The unsent content the composer holds for one thread: its text and the
@@ -85,6 +88,12 @@ export interface ThreadCatalogs {
   readonly providers: readonly Provider[];
   /** The harnesses, whose display names and declared capabilities the composer shows. */
   readonly harnesses: readonly Harness[];
+  /**
+   * The Model Profiles with every entry resolved. The composer reads the
+   * models it offers, their options and whether they can run from these, and
+   * never from the accounts' capability snapshots.
+   */
+  readonly modelProfiles: readonly ModelProfile[];
   readonly runners: readonly Runner[];
   readonly thisMacRunnerId: string | null;
   readonly projects?: readonly Project[];

@@ -34,6 +34,7 @@ import {
 import type { SessionInputPayload } from "@hercule/contract";
 import {
   harnessesQuery,
+  modelProfilesQuery,
   projectsQuery,
   providerAccountsQuery,
   providersQuery,
@@ -150,6 +151,7 @@ export function ThreadComposer({
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const providers = useSuspenseQuery(providersQuery(client)).data;
   const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
+  const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
@@ -171,6 +173,7 @@ export function ThreadComposer({
     accounts,
     providers,
     harnesses,
+    modelProfiles,
     runners,
     thisMacRunnerId: null,
     projects,
@@ -346,6 +349,7 @@ export function ThreadComposer({
           catalogs={catalogs}
           config={config}
           kind="active"
+          runnerId={null}
           disabled={readOnly !== null}
           readRecent={() => readRecentModels(controller.url)}
           onChoose={recordThreadChoice}

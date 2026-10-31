@@ -15,9 +15,12 @@
 import type {
   ModelDescriptor,
   ModelOption,
+  ModelProfile,
   OpenRequest,
   Project,
   ProviderAccount,
+  ResolvedModelProfileAccount,
+  ResolvedModelProfileEntry,
   Runner,
   Session,
 } from "@hercule/contract";
@@ -248,6 +251,10 @@ export const buildSpecimenProviderAccount = (
   expiresAt: null,
   usage: [],
   failure: null,
+  modelCount: models.length,
+  catalogReadAt: new Date(SPECIMEN_NOW).toISOString(),
+  catalogError: null,
+  readiness: [{ harnessId, runnerId: STUDIO_MAC.id, state: "ready" }],
   snapshots: [
     {
       runnerId: STUDIO_MAC.id,
@@ -307,6 +314,51 @@ export const buildSpecimenSession = ({
   });
 };
 
+/**
+ * Returns the resolved entry of a Model Profile for `model`: named by its
+ * catalog, offering its options, and able to run.
+ */
+export const buildSpecimenProfileEntry = (model: SpecimenModel): ResolvedModelProfileEntry => ({
+  providerAccountId: model.providerAccountId,
+  model: model.slug,
+  harnessId: null,
+  resolvedHarnessId: model.harnessId,
+  name: model.name,
+  options: model.options,
+  imageInput: model.imageInput,
+  problem: null,
+});
+
+/** Returns the section of a Model Profile that lists `models` of one account, in order. */
+export const buildSpecimenProfileSection = (
+  models: ReadonlyArray<SpecimenModel>,
+): ResolvedModelProfileAccount => ({
+  providerAccountId: models[0]!.providerAccountId,
+  harnessId: null,
+  resolvedHarnessId: models[0]!.harnessId,
+  selectionPending: false,
+  entries: models.map(buildSpecimenProfileEntry),
+});
+
+/** The user's one Model Profile, "Main": the accounts' models, the Claude model of the threads first. */
+export const SPECIMEN_MODEL_PROFILE: ModelProfile = {
+  id: "p-main",
+  name: "Main",
+  revision: 1,
+  accounts: [
+    buildSpecimenProfileSection([CLAUDE_SONNET, CLAUDE_OPUS]),
+    buildSpecimenProfileSection([GPT]),
+  ],
+  defaultEntry: {
+    providerAccountId: CLAUDE_SONNET.providerAccountId,
+    model: CLAUDE_SONNET.slug,
+    harnessId: null,
+  },
+  dismissedNewModels: [],
+  createdAt: new Date(SPECIMEN_NOW).toISOString(),
+  updatedAt: new Date(SPECIMEN_NOW).toISOString(),
+};
+
 /** Every list the sidebar reads, as its query returns it. */
 export const SPECIMEN_RECORDS: SidebarRecords = {
   threads: SPECIMEN_THREADS.map(
@@ -320,5 +372,6 @@ export const SPECIMEN_RECORDS: SidebarRecords = {
   resources: [],
   runners: [STUDIO_MAC],
   accounts: SPECIMEN_ACCOUNTS,
+  modelProfiles: [SPECIMEN_MODEL_PROFILE],
   user: { username: "Rogier" },
 };

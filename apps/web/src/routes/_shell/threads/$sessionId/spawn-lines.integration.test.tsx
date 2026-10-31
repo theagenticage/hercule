@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import type { Profile, ProviderAccount, Runner, Subagent, TranscriptRow } from "@hercule/contract";
-import { readPageText, renderApp, stubApi } from "../../../../app/testing";
+import { buildCatalogFields, readPageText, renderApp, stubApi } from "../../../../app/testing";
 import {
   SESSION_ID,
   buildController,
@@ -35,6 +35,7 @@ const ACCOUNT: ProviderAccount = {
   usage: [],
   failure: null,
   snapshots: [],
+  ...buildCatalogFields([]),
   createdAt: "2026-09-08T09:00:00.000Z",
   updatedAt: "2026-09-08T09:00:00.000Z",
 };

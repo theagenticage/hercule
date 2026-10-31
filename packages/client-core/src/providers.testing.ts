@@ -7,8 +7,12 @@
 import type {
   CapabilitySnapshot,
   Harness,
+  ModelProfile,
   Provider,
   ProviderAccount,
+  ProviderAccountReadiness,
+  ResolvedModelProfileAccount,
+  ResolvedModelProfileEntry,
   Runner,
 } from "@hercule/contract";
 
@@ -208,14 +212,24 @@ export const ZAI_IDENTITY: ProviderAccountIdentity = {
 };
 
 /**
+ * A readiness row that may leave its harness and its state open, for
+ * `buildProviderAccount` to fill in: the account's default harness, and
+ * `ready`.
+ */
+export type ReadinessDraft = Pick<ProviderAccountReadiness, "runnerId"> &
+  Partial<Omit<ProviderAccountReadiness, "runnerId">>;
+
+/**
  * Returns a Provider Account with the given identity. A snapshot built
  * without a harness id (`harnessId: undefined`) is stamped with the account's
  * default harness; a snapshot that names a harness keeps it, so an account can
- * hold snapshots in several harnesses.
+ * hold snapshots in several harnesses. A readiness row built without a
+ * harness is stamped the same way, and without a state it is `ready`.
  */
 export const buildProviderAccount = (
   identity: ProviderAccountIdentity,
   snapshots: ReadonlyArray<SnapshotDraft> = [],
+  readiness: ReadonlyArray<ReadinessDraft> = [],
 ): ProviderAccount => ({
   id: identity.id,
   providerId: identity.providerId,
@@ -230,6 +244,14 @@ export const buildProviderAccount = (
   snapshots: snapshots.map((snapshot) => ({
     ...snapshot,
     harnessId: snapshot.harnessId ?? identity.harnessId,
+  })),
+  modelCount: 0,
+  catalogReadAt: null,
+  catalogError: null,
+  readiness: readiness.map((row) => ({
+    harnessId: identity.harnessId,
+    state: "ready",
+    ...row,
   })),
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
@@ -259,3 +281,63 @@ export function buildSnapshot(fields: Partial<CapabilitySnapshot> = {}): Snapsho
     ...fields,
   };
 }
+
+/**
+ * Returns a resolved profile entry for `model` of the account `identity`. It
+ * follows its section's harness (`harnessId: null`), runs in the account's
+ * default harness, is named after its model, and can run. `fields` overrides
+ * any of it, such as a `harnessId` and the `resolvedHarnessId` it resolves to.
+ */
+export const buildProfileEntry = (
+  identity: ProviderAccountIdentity,
+  model: string,
+  fields: Partial<ResolvedModelProfileEntry> = {},
+): ResolvedModelProfileEntry => ({
+  providerAccountId: identity.id,
+  model,
+  harnessId: null,
+  resolvedHarnessId: identity.harnessId,
+  name: model,
+  options: [],
+  imageInput: null,
+  problem: null,
+  ...fields,
+});
+
+/**
+ * Returns the section of a profile for the account `identity`, with its
+ * harness following the account's default. `entries` of `"pending"` is a
+ * section still waiting for the account's first catalog read. `fields`
+ * overrides any of it.
+ */
+export const buildProfileSection = (
+  identity: ProviderAccountIdentity,
+  entries: ReadonlyArray<ResolvedModelProfileEntry> | "pending",
+  fields: Partial<ResolvedModelProfileAccount> = {},
+): ResolvedModelProfileAccount => ({
+  providerAccountId: identity.id,
+  harnessId: null,
+  resolvedHarnessId: fields.harnessId ?? identity.harnessId,
+  selectionPending: entries === "pending",
+  entries: entries === "pending" ? [] : entries,
+  ...fields,
+});
+
+/**
+ * Returns a Model Profile named "Main" with the given sections and no default
+ * entry; `fields` overrides any of it.
+ */
+export const buildModelProfile = (
+  accounts: ReadonlyArray<ResolvedModelProfileAccount>,
+  fields: Partial<ModelProfile> = {},
+): ModelProfile => ({
+  id: "profile-main",
+  name: "Main",
+  revision: 1,
+  accounts,
+  defaultEntry: null,
+  dismissedNewModels: [],
+  createdAt: "2026-09-05T09:00:00.000Z",
+  updatedAt: "2026-09-05T09:00:00.000Z",
+  ...fields,
+});

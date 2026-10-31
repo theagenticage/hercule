@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ProviderAccount, Runner } from "@hercule/contract";
+import type { ProviderAccount, ProviderAccountReadinessState, Runner } from "@hercule/contract";
 import { buildProviderRows } from "./provider-rows";
 import {
   HARNESSES,
@@ -66,7 +66,7 @@ describe("buildProviderRows", () => {
     });
   });
 
-  describe("a token account whose probe found it signed in", () => {
+  describe("a token account whose probe found it signed in, once the controller has judged the token", () => {
     const tokenProviders = PROVIDERS.map((provider) =>
       provider.id === "anthropic/anthropic"
         ? {
@@ -83,14 +83,17 @@ describe("buildProviderRows", () => {
           }
         : provider,
     );
-    const buildTokenRow = (expiresAt: string | null) =>
+    const buildTokenRow = (state: ProviderAccountReadinessState) =>
       buildProviderRows(
         WITH_CLAUDE,
         [
           {
-            ...buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshot()]),
+            ...buildProviderAccount(
+              ANTHROPIC_IDENTITY,
+              [buildSnapshot()],
+              [{ runnerId: WITH_CLAUDE.id, state }],
+            ),
             kind: "subscription-token",
-            expiresAt,
           },
         ],
         tokenProviders,
@@ -98,14 +101,14 @@ describe("buildProviderRows", () => {
       )[0]!;
 
     it("is signed in while the token lasts", () => {
-      expect(buildTokenRow("2999-01-01T00:00:00.000Z")).toMatchObject({
+      expect(buildTokenRow("ready")).toMatchObject({
         signedIn: true,
         signInLabel: "Make a new token",
       });
     });
 
     it("is not signed in once the token expired, so the row offers to make a new one", () => {
-      expect(buildTokenRow("2020-01-01T00:00:00.000Z")).toMatchObject({
+      expect(buildTokenRow("token-expired")).toMatchObject({
         signedIn: false,
         signIn: true,
         signInLabel: "Make the token",
@@ -113,8 +116,21 @@ describe("buildProviderRows", () => {
     });
 
     it("is not signed in while no token was made", () => {
-      expect(buildTokenRow(null).signedIn).toBe(false);
+      expect(buildTokenRow("credential-missing").signedIn).toBe(false);
     });
+  });
+
+  it("is not signed in when the controller says the login belongs to someone else, whatever the probe found", () => {
+    const row = buildProviderRow(
+      WITH_CLAUDE,
+      buildProviderAccount(
+        ANTHROPIC_IDENTITY,
+        [buildSnapshot()],
+        [{ runnerId: WITH_CLAUDE.id, state: "not-signed-in" }],
+      ),
+    );
+
+    expect(row).toMatchObject({ signedIn: false, signInLabel: "Sign in" });
   });
 
   it("names a labelled account by its provider and label", () => {

@@ -17,6 +17,7 @@ import {
   describeProviderAccountIdentity,
   findDefaultHarnessSnapshot,
   findHarnessLoginMethod,
+  findProviderAccountReadiness,
   findProviderAccountKind,
   findProviderAccountNameIfAmbiguous,
   findProviderPluginId,
@@ -215,6 +216,33 @@ describe("the snapshots of an account's default harness", () => {
     expect(listSignedInDefaultHarnessSnapshots({ ...account, snapshots: [otherHarness] })).toEqual(
       [],
     );
+  });
+});
+
+describe("findProviderAccountReadiness", () => {
+  const account = buildProviderAccount(
+    ANTHROPIC_IDENTITY,
+    [],
+    [
+      { runnerId: "moss" },
+      { runnerId: "atlas", state: "not-signed-in" },
+      { runnerId: "moss", harnessId: "pi/pi", state: "harness-too-old" },
+    ],
+  );
+
+  it("is the state the controller sent for the harness on the runner", () => {
+    expect(findProviderAccountReadiness(account, "claude-code/claude-code", "moss")).toBe("ready");
+    expect(findProviderAccountReadiness(account, "claude-code/claude-code", "atlas")).toBe(
+      "not-signed-in",
+    );
+    expect(findProviderAccountReadiness(account, "pi/pi", "moss")).toBe("harness-too-old");
+  });
+
+  it("is harness-missing when the account has no row for the pair", () => {
+    expect(findProviderAccountReadiness(account, "claude-code/claude-code", "cove")).toBe(
+      "harness-missing",
+    );
+    expect(findProviderAccountReadiness(account, "codex/codex", "moss")).toBe("harness-missing");
   });
 });
 

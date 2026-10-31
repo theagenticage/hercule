@@ -28,13 +28,20 @@ import {
   buildPluginStack,
   createPluginFixture,
 } from "../plugins/testing";
-import { RunnerConnections, RunnerConnectionsLayer, runnerRepository } from "../runners";
+import {
+  LocalRunnerId,
+  RunnerConnections,
+  RunnerConnectionsLayer,
+  runnerRepository,
+} from "../runners";
 import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { SettingsLayer } from "../settings";
 import { AccountUsage, AccountUsageLayer } from "../usage";
 import { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
 import { ProviderAccountRunners, ProviderAccountRunnersLayer } from "./account-runners";
 import { ProviderKeyRequestsLayer } from "./provider-key-requests";
+import { ModelCatalogs, ModelCatalogsLayer } from "./model-catalogs";
+import { ModelProfileMembership } from "./model-profile-membership";
 import { ProviderAccountProbes, ProviderAccountProbesLayer } from "./probes";
 import { providerAccountRepository, type StoredProviderAccount } from "./repository";
 import { ProviderAccountService, ProviderAccountServiceLayer } from "./service";
@@ -83,6 +90,8 @@ const ACME: ProviderDefinition = {
     },
   ],
   defaultHarnessId: ALPHA_HARNESS_ID,
+  catalogSource: { kind: "harness-probe", harnessId: ALPHA_HARNESS_ID },
+  defaultSelection: "current-models",
 };
 
 /** The plugins the tests boot: Acme, and the two harnesses that may run it. */
@@ -142,6 +151,8 @@ export const METERED: ProviderDefinition = {
     },
   ],
   defaultHarnessId: ALPHA_HARNESS_ID,
+  catalogSource: { kind: "harness-probe", harnessId: ALPHA_HARNESS_ID },
+  defaultSelection: "current-models",
 };
 
 /**
@@ -221,11 +232,33 @@ export const buildFakeProviderApi = (
   return { client, requests };
 };
 
-const buildStack = (providerApi: HttpClient.HttpClient) =>
+/**
+ * The stand-in for Model Profiles that isolated Provider Account tests run
+ * against: a layer for the `ModelProfileMembership` port that holds no
+ * profiles. A test that claims something about profiles uses
+ * `ModelProfileMembershipLayer` over the real tables instead.
+ */
+export const inertMembership: Layer.Layer<ModelProfileMembership> = Layer.succeed(
+  ModelProfileMembership,
+  {
+    removeProviderAccount: () => Effect.void,
+    fillPendingSelections: () => Effect.succeed(false),
+    findDefaultHarnessClashes: () => Effect.succeed([]),
+  },
+);
+
+const buildStack = (
+  providerApi: HttpClient.HttpClient,
+  membership: Layer.Layer<ModelProfileMembership>,
+) =>
   ProviderAccountServiceLayer.pipe(
     Layer.provideMerge(ProviderKeyRequestsLayer),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, providerApi)),
     Layer.provideMerge(ProviderAccountProbesLayer),
+    Layer.provideMerge(ModelCatalogsLayer),
+    Layer.provideMerge(membership),
+    // These tests have no local runner.
+    Layer.provideMerge(Layer.succeed(LocalRunnerId, { read: () => undefined })),
     Layer.provideMerge(ProviderAccountRunnersLayer),
     Layer.provideMerge(HarnessAccountsLayer),
     Layer.provideMerge(SettingsLayer),
@@ -238,6 +271,9 @@ const buildStack = (providerApi: HttpClient.HttpClient) =>
 export type AccountServices =
   | ProviderAccountService
   | AccountUsage
+  | ModelCatalogs
+  | ModelProfileMembership
+  | LocalRunnerId
   | ProviderAccountProbes
   | ProviderAccountRunners
   | HarnessAccounts
@@ -250,18 +286,24 @@ export type AccountServices =
  * Runs an effect as the user on a fresh database, after the fixture plugins
  * have been booted. Key checks and usage reads go to `providerApi`, which
  * accepts every key unless the test gives its own. A test that needs other
- * providers passes `plugins` in place of the fixture plugins.
+ * providers passes `plugins` in place of the fixture plugins. Model Profiles are
+ * `membership`, which holds none unless the test gives the real one.
  */
 export const runWithAccounts = <A, E>(
   body: Effect.Effect<A, E, AccountServices>,
   providerApi: HttpClient.HttpClient = buildFakeProviderApi().client,
   plugins: ReadonlyArray<Plugin> = buildAccountPlugins(),
+  membership: Layer.Layer<ModelProfileMembership> = inertMembership,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
       yield* Effect.flatMap(PluginHost, (host) => host.boot(plugins));
       return yield* body;
-    }).pipe(Effect.provide(buildStack(providerApi)), asUser) as Effect.Effect<A, E, never>,
+    }).pipe(Effect.provide(buildStack(providerApi, membership)), asUser) as Effect.Effect<
+      A,
+      E,
+      never
+    >,
   );
 
 /** Inserts an account of Acme and returns its row. */

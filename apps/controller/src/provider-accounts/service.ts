@@ -39,7 +39,9 @@ import {
   type Forbidden,
   type InvalidState,
   type NotFound,
+  type ModelCatalog,
   type ProviderAccount,
+  type ProviderAccountReadiness,
   type RunnerDetail,
   type Unauthenticated,
   type Validation,
@@ -64,9 +66,13 @@ import { buildProviderAccountOwner, Secrets } from "../secrets";
 import { AccountUsage } from "../usage";
 import type { Settings } from "../settings";
 import { buildVersionKey, harnessRepository } from "../harnesses";
+import { ProviderAccountRunners } from "./account-runners";
 import { describeSnapshot } from "./describe-snapshot";
 import { HarnessAccounts } from "./harness-account";
 import { ProviderKeyRequests } from "./provider-key-requests";
+import type { StoredModelCatalogSummary } from "./model-catalog-repository";
+import { ModelCatalogs } from "./model-catalogs";
+import { ModelProfileMembership } from "./model-profile-membership";
 import {
   providerAccountRepository,
   type StoredProviderAccount,
@@ -167,6 +173,9 @@ const make = Effect.gen(function* () {
   const notifier = yield* Notifier;
   const accountUsage = yield* AccountUsage;
   const promotion = yield* PromotionState;
+  const catalogs = yield* ModelCatalogs;
+  const accountRunners = yield* ProviderAccountRunners;
+  const membership = yield* ModelProfileMembership;
 
   const announceAccountChanged = (id: string): Effect.Effect<void> =>
     announce({ _tag: "record", topic: "provider", id, kind: "updated" });
@@ -191,6 +200,8 @@ const make = Effect.gen(function* () {
     stored: StoredProviderAccount,
     snapshots: ReadonlyArray<StoredSnapshot>,
     usage: ReadonlyArray<AccountUsageReading>,
+    catalog: StoredModelCatalogSummary | undefined,
+    readiness: ReadonlyArray<ProviderAccountReadiness>,
   ): ProviderAccount => ({
     id: stored.id,
     providerId: stored.providerId,
@@ -205,9 +216,38 @@ const make = Effect.gen(function* () {
     snapshots: snapshots
       .filter((snapshot) => snapshot.providerAccountId === stored.id)
       .map(describeSnapshot),
+    modelCount: catalog?.modelCount ?? 0,
+    catalogReadAt: catalog?.readAt ?? null,
+    catalogError: catalog?.error ?? null,
+    readiness,
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
   });
+
+  /**
+   * Builds the public record of each stored account. The snapshots are passed
+   * in, because a caller that reads one account reads only its own. The usage
+   * readings, the catalogs and the readiness rows are read once for all the
+   * accounts, so the number of queries does not grow with the number of accounts.
+   */
+  const buildProviderAccounts = (
+    stored: ReadonlyArray<StoredProviderAccount>,
+    snapshots: ReadonlyArray<StoredSnapshot>,
+  ): Effect.Effect<ReadonlyArray<ProviderAccount>, SqlError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      const usage = yield* accountUsage.readAll();
+      const summaries = yield* catalogs.listSummaries();
+      const readiness = yield* accountRunners.listReadiness(stored.map((account) => account.id));
+      return stored.map((account) =>
+        buildProviderAccount(
+          account,
+          snapshots,
+          usage.get(account.id) ?? [],
+          summaries.get(account.id),
+          readiness.get(account.id) ?? [],
+        ),
+      );
+    });
 
   /** Reads the stored row, or fails with `NotFound`. Checks no grant. */
   const readStoredOrFail = (
@@ -226,11 +266,19 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<ProviderAccount, NotFound | SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
       const stored = yield* readStoredOrFail(id);
-      return buildProviderAccount(
-        stored,
-        yield* accounts.listSnapshots(id),
-        yield* accountUsage.read(id),
-      );
+      const [account] = yield* buildProviderAccounts([stored], yield* accounts.listSnapshots(id));
+      return account!;
+    });
+
+  /** Reads every account with its snapshots, oldest account first. Checks no grant. */
+  const readProviderAccounts = (): Effect.Effect<
+    ReadonlyArray<ProviderAccount>,
+    SqlError | Schema.SchemaError
+  > =>
+    Effect.gen(function* () {
+      const stored = yield* accounts.list();
+      // One query for the whole list rather than one per account.
+      return yield* buildProviderAccounts(stored, yield* accounts.listAllSnapshots());
     });
 
   /**
@@ -429,6 +477,33 @@ const make = Effect.gen(function* () {
       }
     });
 
+  /**
+   * Checks that making `harnessId` the account's default harness leaves every
+   * Model Profile without a model listed twice in one section. An entry that
+   * follows the account's default moves with it, and lands on the entry of the
+   * same model that already names `harnessId`. Fails with `Validation` on
+   * `defaultHarnessId`, naming the profile and the model, when one does.
+   */
+  const requireNoProfileClash = (
+    account: StoredProviderAccount,
+    harnessId: string,
+  ): Effect.Effect<void, Validation | SqlError> =>
+    Effect.gen(function* () {
+      const [clash] = yield* membership.findDefaultHarnessClashes(account.id, harnessId);
+      if (clash === undefined) return;
+      const harnesses = yield* host.harnesses();
+      const nameOf = (id: string): string =>
+        harnesses.find((harness) => harness.id === id)?.displayName ?? id;
+      return yield* Effect.fail(
+        createValidationError([
+          {
+            path: ["defaultHarnessId"],
+            message: `The Model Profile "${clash.profileName}" holds ${clash.model} in ${nameOf(account.defaultHarnessId)} and in ${nameOf(harnessId)}, so ${nameOf(harnessId)} as the default would list it twice. Take one of the two out of the profile first.`,
+          },
+        ]),
+      );
+    });
+
   /** Returns the message for a label another account of the provider already has. */
   const describeLabelClash = (providerName: string, label: string | null): string =>
     label === null
@@ -507,13 +582,7 @@ const make = Effect.gen(function* () {
     query: (): Effect.Effect<ReadonlyArray<ProviderAccount>, ReadError> =>
       Effect.gen(function* () {
         yield* requireGrant("providerAccount.query");
-        const stored = yield* accounts.list();
-        // One query for the whole list rather than one per account.
-        const snapshots = yield* accounts.listAllSnapshots();
-        const usage = yield* accountUsage.readAll();
-        return stored.map((account) =>
-          buildProviderAccount(account, snapshots, usage.get(account.id) ?? []),
-        );
+        return yield* readProviderAccounts();
       }),
 
     read: (id: Id): Effect.Effect<ProviderAccount, ReadError | NotFound> =>
@@ -646,9 +715,9 @@ const make = Effect.gen(function* () {
               record: { topic: "provider", id: stored.id },
               at,
             });
-            const account = buildProviderAccount(stored, [], []);
-            if (alsoWrite !== undefined) yield* alsoWrite(account);
-            return account;
+            const [account] = yield* buildProviderAccounts([stored], []);
+            if (alsoWrite !== undefined) yield* alsoWrite(account!);
+            return account!;
           }),
           // Field names come from the kind's declaration, which the plugin host
           // rejects at registration if one contains `|`, so this cannot fail.
@@ -666,7 +735,10 @@ const make = Effect.gen(function* () {
      *   setting `null` clashes with another label-less account. A clash fails
      *   with `Conflict`.
      * - `defaultHarnessId` must be a harness the account can run in that is
-     *   installed on a runner, as for `create`, else `Validation`.
+     *   installed on a runner, as for `create`, else `Validation`. It is also
+     *   refused `Validation` when it would put one model twice into a section
+     *   of a Model Profile: an entry that follows the default would land on
+     *   the same model's entry that already names the new default.
      * - `credentials` is accepted only for a kind with a `credentials` setup
      *   step, and only with that step's field names. A token account takes
      *   none: its token is made by a sign-in. The new key is checked with the
@@ -712,6 +784,12 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             const before = yield* readStoredOrFail(id);
+            if (
+              patch.defaultHarnessId !== undefined &&
+              patch.defaultHarnessId !== before.defaultHarnessId
+            ) {
+              yield* requireNoProfileClash(before, patch.defaultHarnessId);
+            }
             if (patch.label !== undefined) {
               if (yield* accounts.isLabelTaken(before.providerId, patch.label, id)) {
                 const providers = yield* host.providers();
@@ -774,8 +852,9 @@ const make = Effect.gen(function* () {
      * message names each one and says to change them first.
      *
      * The check and the delete run in one transaction, so nothing can start
-     * using the account in between. The account's Secrets and Capability
-     * Snapshots go with it. Ended sessions keep the account's id as history.
+     * using the account in between. The account's Secrets, Capability
+     * Snapshots and Model Catalog go with it, and it leaves every Model
+     * Profile. Ended sessions keep the account's id as history.
      */
     delete: (id: Id): Effect.Effect<Record<string, never>, ReadError | NotFound | InvalidState> =>
       Effect.gen(function* () {
@@ -803,6 +882,8 @@ const make = Effect.gen(function* () {
               (ref) => secrets.delete(buildProviderAccountOwner(id), ref.name),
               { discard: true },
             );
+            // The account leaves every Model Profile in the same transaction.
+            yield* membership.removeProviderAccount(id);
             yield* accounts.delete(id);
             yield* audit.append({
               kind: "providerAccount.deleted",
@@ -826,10 +907,29 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Returns the account's stored Model Catalog: the models of the last
+     * successful read, when it ended, and why the last read failed, if it
+     * did. Reading it fetches nothing from the provider. Fails with
+     * `NotFound` when the account does not exist.
+     */
+    readCatalog: (id: Id): Effect.Effect<ModelCatalog, ReadError | NotFound> =>
+      Effect.gen(function* () {
+        yield* requireGrant("providerAccount.readCatalog");
+        return yield* catalogs.read(id);
+      }),
+
+    /**
      * Reads one account with its snapshots, or fails with `NotFound`. Checks
      * no grant: the caller has checked the grant of its own operation.
      */
     readProviderAccount: readProviderAccountOrFail,
+
+    /**
+     * Reads every account with its snapshots, oldest account first, as
+     * `query` does. Checks no grant: the caller has checked the grant of its
+     * own operation.
+     */
+    readProviderAccounts,
 
     /**
      * Checks that the account can be signed in on the runner and returns what
@@ -1112,4 +1212,7 @@ export const ProviderAccountServiceLayer: Layer.Layer<
   | HarnessAccounts
   | Notifier
   | AccountUsage
+  | ModelCatalogs
+  | ProviderAccountRunners
+  | ModelProfileMembership
 > = Layer.effect(ProviderAccountService)(make);

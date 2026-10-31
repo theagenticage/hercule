@@ -4,14 +4,18 @@
  * before any frame is sent, so no runner needs to answer.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { Effect, Layer, Option, Redacted } from "effect";
+import { Duration, Effect, Layer, Option, Redacted } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { ProbeResult } from "@hercule/protocol";
 import { CurrentActor } from "../../actor";
 import { AssistantService } from "../../assistants";
 import { withTransaction } from "../../db";
 import { readEventsOfKind } from "../../events/testing";
-import { ProviderAccountProbes, providerAccountRepository } from "../../provider-accounts";
+import {
+  ModelCatalogs,
+  ProviderAccountProbes,
+  providerAccountRepository,
+} from "../../provider-accounts";
 import {
   addAccount,
   addRunner,
@@ -20,6 +24,7 @@ import {
   KEY_KIND,
   MACHINE_KIND,
   runWithAccounts,
+  storeCredential,
   TOKEN_KIND,
   type AccountServices,
 } from "../../provider-accounts/testing";
@@ -289,6 +294,32 @@ describe("providerAccount.submitSignInCode for a token account", () => {
     expect(JSON.stringify(outcome.account)).not.toContain("tok-secret");
   });
 
+  it("reads the Model Catalog after the sign-in check, with a probe of its own", async () => {
+    const outcome = await withStubbedRunner(
+      answerWith({ ok: true, token: "tok-secret" }),
+      (service, sent) =>
+        Effect.gen(function* () {
+          const catalogs = yield* ModelCatalogs;
+          const runner = yield* addRunner("laptop");
+          const added = yield* addAccount({ kind: TOKEN_KIND });
+          yield* service.submitSignInCode({ id: added.id, runnerId: runner, code: "abc" });
+          // The read runs on a fiber of its own; wait for its outcome.
+          let catalog = yield* catalogs.read(added.id);
+          for (let attempt = 0; attempt < 200 && catalog.readAt === null; attempt++) {
+            yield* Effect.sleep(Duration.millis(5));
+            catalog = yield* catalogs.read(added.id);
+          }
+          yield* Effect.sleep(Duration.millis(30));
+          return { catalog, probes: sent.filter((one) => one._tag === "probeRequest") };
+        }),
+    );
+
+    // The check, and the read.
+    expect(outcome.probes).toHaveLength(2);
+    expect(outcome.catalog.models.map((one) => one.slug)).toEqual(["model-1"]);
+    expect(outcome.catalog.error).toBeNull();
+  });
+
   it("fails InvalidState with the snapshot's message when the probe does not find the account signed in, and keeps the sign-in recorded", async () => {
     const message = "Signed in as a@x.com; this account is b@x.com. Sign in again as b@x.com.";
     const outcome = await withStubbedRunner(
@@ -518,25 +549,27 @@ describe("a device sign-in that the runner reports as ended", () => {
 });
 
 describe("providerAccount.create", () => {
-  it("probes the new account on the runners without waiting, when it came with a key", async () => {
+  it("probes the new account on the runners and reads its catalog without waiting, when it came with a key", async () => {
     const outcome = await withStubbedRunner(answerWith({ ok: true }), (service, sent) =>
       Effect.gen(function* () {
+        const catalogs = yield* ModelCatalogs;
         yield* addRunner("laptop");
         const created = yield* service.create({
           providerId: "acme/acme",
           kind: KEY_KIND,
           credentials: { apiKey: "sk-1" },
         });
-        // The sweep runs on a fiber of its own; give it a moment.
-        for (let attempt = 0; attempt < 50 && sent.length === 0; attempt++) {
+        // The sweep runs on a fiber of its own; wait until its read is stored.
+        for (let attempt = 0; attempt < 50; attempt++) {
+          if ((yield* catalogs.read(created.id)).readAt !== null) break;
           yield* Effect.sleep("20 millis");
         }
-        const accounts = yield* providerAccountRepository;
-        return { created, sent: [...sent], stored: yield* accounts.one(created.id) };
+        return { created, sent: [...sent] };
       }),
     );
 
-    expect(outcome.sent).toHaveLength(1);
+    // The probe of the pair, and the catalog read.
+    expect(outcome.sent).toHaveLength(2);
     expect(outcome.sent[0]).toMatchObject({
       _tag: "probeRequest",
       harnessAccount: {
@@ -560,5 +593,43 @@ describe("providerAccount.create", () => {
     expect(outcome.created.kind).toBe(MACHINE_KIND);
     expect(defaultAssistantFor).toEqual([]);
     expect(outcome.sent).toEqual([]);
+  });
+});
+
+describe("providerAccount.refresh", () => {
+  it("answers the account at once, then reads its Model Catalog with one probe, however many runners it could probe", async () => {
+    const outcome = await withStubbedRunner(answerWith({ ok: true }), (service, sent) =>
+      Effect.gen(function* () {
+        const catalogs = yield* ModelCatalogs;
+        const added = yield* addAccount({ kind: KEY_KIND });
+        yield* storeCredential(added.id, "apiKey");
+        yield* addRunner("laptop");
+        yield* addRunner("server");
+        const answered = yield* service.refresh(added.id);
+        // The read runs on a fiber of its own; wait for its outcome.
+        let catalog = yield* catalogs.read(added.id);
+        while (catalog.readAt === null) {
+          yield* Effect.sleep(Duration.millis(5));
+          catalog = yield* catalogs.read(added.id);
+        }
+        // A refresh sweep would still be probing the second runner; give it time.
+        yield* Effect.sleep(Duration.millis(50));
+        return { answered, catalog, probes: sent.filter((one) => one._tag === "probeRequest") };
+      }),
+    );
+
+    expect(outcome.answered).toMatchObject({ modelCount: 0, catalogReadAt: null });
+    expect(outcome.catalog.models.map((one) => one.slug)).toEqual(["model-1"]);
+    expect(outcome.probes).toHaveLength(1);
+  });
+
+  it("fails NotFound for an account that does not exist", async () => {
+    const failure = await runWithAccounts(
+      Effect.gen(function* () {
+        return yield* withService((service) => Effect.flip(service.refresh(MISSING)));
+      }),
+    );
+
+    expect(failure).toMatchObject({ error: { code: "not_found" } });
   });
 });

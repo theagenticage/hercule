@@ -8,9 +8,9 @@ import type { Harness, Provider, ProviderAccount, Runner } from "@hercule/contra
 import { describeModelCount } from "./model-count";
 import {
   buildProviderAccountName,
-  decideStoredCredentialState,
   findDefaultHarnessSnapshot,
   findHarnessLoginMethod,
+  findProviderAccountReadiness,
   listProviderAccountCredentialFields,
   type HarnessLoginMethod,
 } from "./provider-accounts";
@@ -164,13 +164,15 @@ export const buildProviderRows = (
     // because the controller probes the runner for the account as soon as the
     // credential is saved.
     const usable = reachable && present && adapter;
-    // A token that is missing or expired signs nothing in, whatever the last
-    // probe found, so the row offers to make a new one.
-    const credential = decideStoredCredentialState(providers, account);
+    // The controller's verdict overrules the last probe: a missing or expired
+    // credential, or a login that belongs to someone else, signs nothing in,
+    // so the row offers to sign in again or to make a new token.
+    const readiness = findProviderAccountReadiness(account, harness.id, runner.id);
     const signedIn =
       snapshot?.auth.status === "ok" &&
-      credential !== "token-missing" &&
-      credential !== "token-expired";
+      readiness !== "not-signed-in" &&
+      readiness !== "credential-missing" &&
+      readiness !== "token-expired";
     // An account whose kind has a harness login gets its credential from that
     // login. Any other has nothing to sign in to, so it offers its fields.
     const loginMethod = findHarnessLoginMethod(providers, account);

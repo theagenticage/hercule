@@ -1,242 +1,442 @@
 /**
- * Builds the composer's model selector. It has:
+ * Builds the composer's model menu from the user's Model Profiles (spec 06
+ * §17, spec 14 "The composer is the thread's configuration"). The web app and
+ * the desktop app draw the result as it is, so neither interprets a profile
+ * itself.
  *
- * - a filter field, offered only when there are enough models to filter;
- * - the recently picked models;
- * - the models of the current account, with its older models collapsed;
- * - one row for every other account.
+ * - A **draft** shows the open profile: Recent, then one lane per Provider
+ *   Account in the profile's order, each with its entries in order.
+ * - A **running thread** keeps its account and harness, so it shows one flat
+ *   list of the models it can switch to.
  *
- * A catalog belongs to one account in one harness on one runner, because each
- * runner has its own copy of the harness, with its own version and login
- * (spec 06 §3.1). So every model here is read from the runner the thread is
- * placed on, in the harness the thread runs in: the current account's, for
- * the current account, and the default harness of every other account, which
- * is what picking that account would run in. Switching runners rebuilds the
- * whole menu.
+ * Whether an entry can run, and the words for why not, are not worked out
+ * from the accounts' snapshots. The controller resolves every entry
+ * (`ResolvedModelProfileEntry.problem`) and every account carries its
+ * readiness on each runner. A problem with the model itself comes from the
+ * entry. A problem with the account on a runner comes from the readiness of
+ * the runner the draft is bound to, or from the entry when the draft may go to
+ * any runner.
  */
-import type { ModelDescriptor, ProviderAccount } from "@hercule/contract";
-import { describeModelCount } from "../model-count";
+import type {
+  EntryProblem,
+  ModelProfile,
+  ProviderAccount,
+  ResolvedModelProfileAccount,
+  ResolvedModelProfileEntry,
+  Runner,
+} from "@hercule/contract";
+import { matchesModelSearch } from "../model-profiles/catalog-search";
+import {
+  describeEntryProblem,
+  isMachineProblemReason,
+  type MachineProblemReason,
+} from "../model-profiles/entry-problem";
+import {
+  buildProfileEntryKey,
+  findHarnessName,
+  findOtherHarnessName,
+  isSameProfileEntry,
+  isSameStoredEntry,
+  listProfileEntries,
+  type ProfileEntryKey,
+} from "../model-profiles/profile-entries";
 import {
   buildProviderAccountName,
+  findHarnessLoginMethod,
   findProviderAccountNameIfAmbiguous,
+  findProviderAccountReadiness,
   resolveThreadHarnessId,
+  type HarnessLoginMethod,
 } from "../provider-accounts";
-import { buildSignInTarget, findModelSnapshot, findSnapshotOn, type SignInTarget } from "./catalog";
-import { decideAccountReadiness } from "./account-readiness";
 import type { ThreadCatalogs, ThreadConfig, ThreadKind } from "./config";
 import type { RecentModel } from "./recent";
-import { findReferenceRunner } from "./runner-menu";
+import { buildSignInTarget, type SignInTarget } from "./sign-in-target";
 
-/** The menu offers a filter when all accounts together have more models than this. */
+/** The menu offers a filter when the open profile holds more entries than this. */
 const FILTER_THRESHOLD = 8;
 
-/** How many recent models the menu shows, however many the client kept. */
+/** How many recent entries the menu shows, however many the client kept. */
 const RECENT_LIMIT = 3;
 
-const ACCOUNT_FIXED = "account fixed";
+/** The line under a running thread's list. */
+const OTHER_MODELS_NOTE = "Other models start a new thread.";
+
+/** What the menu says in place of its list while the filter matches nothing. */
+const NO_MATCH_NOTE = "No model matches.";
+
+/** What the menu says in place of its list when the profile holds nothing to pick. */
+const EMPTY_PROFILE_NOTE = "No models in your profile yet.";
+
+/** What a lane says while its account's first Model Catalog read is still to come. */
+const READING_MODELS_NOTE = "Reading models…";
+
+/** Why an entry cannot be picked now, and the sign-in that would fix it when one would. */
+export interface ModelMenuProblem {
+  /** What the row shows at its right, such as `not signed in on moss`. */
+  readonly message: string;
+  readonly signIn: SignInTarget | null;
+}
 
 export interface ModelMenuRow {
-  /** The account that offers the model, so a row picked from any section knows its account. */
   readonly providerAccountId: string;
-  readonly slug: string;
-  readonly name: string;
-  readonly isDefault: boolean;
-  readonly current: boolean;
-}
-
-export interface ModelMenuRecentRow extends RecentModel {
-  readonly name: string;
+  /** The Provider's id, for its logo. */
+  readonly providerId: string;
+  /** The qualified id of the harness the entry runs in. */
   readonly harnessId: string;
-  readonly account: string | null;
-  readonly dimmed: string | null;
-}
-
-export interface ModelMenuLane {
-  readonly providerAccountId: string | null;
-  readonly harnessId: string | null;
-  /** The section's one-word label, or `null` while no account is picked. */
-  readonly label: string | null;
-  readonly rows: readonly ModelMenuRow[];
-  /** Legacy models the harness still accepts but no longer lists, shown collapsed. */
-  readonly older: readonly ModelMenuRow[];
-}
-
-export interface ModelMenuProviderAccountRow {
-  readonly providerAccountId: string;
-  readonly harnessId: string;
+  readonly model: string;
+  /** The model's display name. */
   readonly name: string;
-  readonly identity: string | null;
-  readonly planLabel: string | null;
-  /** How many models the account has, in words: "3 models". */
-  readonly models: string;
-  readonly dimmed: string | null;
-  readonly signIn: SignInTarget | null;
   /**
-   * The account's models that match the filter, filled only while filtering
-   * on a draft. An active thread's account is fixed, so it cannot pick these
-   * models and this stays empty.
+   * The display name of the harness, such as `pi`, when the entry runs in
+   * another harness than its lane's; otherwise `null`.
    */
-  readonly rows: readonly ModelMenuRow[];
+  readonly inHarness: string | null;
+  /** Whether this is the profile's default entry. */
+  readonly isDefault: boolean;
+  readonly isCurrent: boolean;
+  /** Why the row is dimmed; `null` when it can be picked. */
+  readonly problem: ModelMenuProblem | null;
 }
 
-export interface ModelMenu {
-  readonly filterable: boolean;
-  readonly recent: readonly ModelMenuRecentRow[];
-  readonly current: ModelMenuLane;
-  readonly others: readonly ModelMenuProviderAccountRow[];
+export interface ModelMenuRecentRow extends ModelMenuRow {
+  /** The account's name, only when the user has more than one account at its Provider. */
+  readonly account: string | null;
 }
+
+/** One Provider Account's section of the open profile. */
+export interface ModelMenuLane {
+  readonly providerAccountId: string;
+  readonly providerId: string;
+  /** The account's name, such as `Anthropic · work`. */
+  readonly name: string;
+  readonly rows: readonly ModelMenuRow[];
+  /** What to show in place of rows while the account's models are still being read, else `null`. */
+  readonly note: string | null;
+}
+
+/** A Model Profile as the menu draws it. */
+export interface ModelMenuProfile {
+  readonly profileId: string;
+  readonly name: string;
+  readonly recent: readonly ModelMenuRecentRow[];
+  readonly lanes: readonly ModelMenuLane[];
+}
+
+export type ModelMenu =
+  | {
+      readonly kind: "draft";
+      /** Whether the menu offers a filter field. */
+      readonly filterable: boolean;
+      /** The open profile, or `null` when the user has no profile. */
+      readonly profile: ModelMenuProfile | null;
+      /**
+       * What to draw in place of the list when it holds nothing: that no model
+       * matches the filter, or that the profile is empty. `null` when there is
+       * something to draw.
+       */
+      readonly empty: string | null;
+    }
+  | {
+      readonly kind: "active";
+      /** Whether the menu offers a filter field. */
+      readonly filterable: boolean;
+      /** Every model the thread can switch to, each once. */
+      readonly rows: readonly ModelMenuRow[];
+      /** The line shown under the list. */
+      readonly note: string;
+      /** What to draw in place of the list when `rows` is empty; `null` otherwise. */
+      readonly empty: string | null;
+    };
+
+/** What the thread runs now: the entry that gets the check mark, and for a running thread its runner. */
+export type ModelMenuCurrent = Pick<
+  ThreadConfig,
+  "providerAccountId" | "harnessId" | "model" | "runnerId"
+>;
 
 export interface ModelMenuView {
   readonly kind: ThreadKind;
   /** The text typed in the filter field; empty means no filter. */
   readonly filter: string;
+  /** The entries the user picked, newest first. */
   readonly recent: readonly RecentModel[];
+  /**
+   * The runner a draft is bound to: the one the user picked, or the one a
+   * joined workspace decides. `null` while any runner will do, and then an
+   * entry is dimmed only when no connected runner can run it. A running
+   * thread ignores it and uses the runner of its session.
+   */
+  readonly runnerId: string | null;
 }
 
-const matchesFilter = (descriptor: ModelDescriptor, filter: string): boolean =>
-  descriptor.name.toLowerCase().includes(filter) || descriptor.slug.toLowerCase().includes(filter);
+/** Checks that a sign-in started now could reach the runner. */
+const canSignInOn = (runner: Runner): boolean =>
+  runner.connectivity === "online" && runner.lifecycle !== "retired";
 
-/** Returns the model menu for the thread's current config. */
-export const buildModelMenu = (
-  catalogs: ThreadCatalogs,
-  current: ThreadConfig,
-  view: ModelMenuView,
-): ModelMenu => {
-  const runner = findReferenceRunner(catalogs.runners, current.runnerId, catalogs.thisMacRunnerId);
-  const filter = view.filter.trim().toLowerCase();
-  // The current account runs in the thread's harness. Another account would
-  // run in its own default harness once picked.
-  const findHarnessId = (account: ProviderAccount): string =>
-    account.id === current.providerAccountId
-      ? resolveThreadHarnessId(account, current.harnessId)
-      : account.defaultHarnessId;
-  const findSnapshot = (account: ProviderAccount) =>
-    findSnapshotOn(account, findHarnessId(account), runner?.id);
-  const listModels = (account: ProviderAccount): readonly ModelDescriptor[] =>
-    findModelSnapshot(account, findHarnessId(account), runner?.id)?.models ?? [];
+/** Returns the reason of `problem` when it is about running the entry on a machine, else `null`. */
+const readRunReason = (problem: EntryProblem | null): MachineProblemReason | null =>
+  problem === null || !isMachineProblemReason(problem.reason) ? null : problem.reason;
 
-  const buildRow = (account: ProviderAccount, descriptor: ModelDescriptor): ModelMenuRow => ({
-    providerAccountId: account.id,
-    slug: descriptor.slug,
-    name: descriptor.name,
-    isDefault: descriptor.isDefault === true,
-    current: account.id === current.providerAccountId && descriptor.slug === current.model,
+/** What the menu reads to name things and to decide what can run. */
+interface MenuContext {
+  readonly catalogs: ThreadCatalogs;
+  /** The runner every entry is judged on, or `undefined` when any runner will do. */
+  readonly runner: Runner | undefined;
+  readonly filter: string;
+  readonly currentKey: ProfileEntryKey | null;
+}
+
+/**
+ * Checks that signing in on a machine would fix the problem: the account's
+ * kind has a harness login, and the problem is a missing sign-in, or for an
+ * account whose login makes a token, a token that is missing or expired. An
+ * API key is typed in at Settings, so no sign-in fixes it.
+ */
+const canFixBySigningIn = (
+  reason: MachineProblemReason,
+  loginMethod: HarnessLoginMethod | null,
+): boolean =>
+  loginMethod !== null &&
+  (reason === "not-signed-in" ||
+    (loginMethod === "create-token" &&
+      (reason === "credential-missing" || reason === "token-expired")));
+
+/**
+ * Returns why `entry` cannot be picked, or `null` when it can:
+ *
+ * - a problem with the model itself, from the entry;
+ * - with a runner, the account's readiness for the entry's harness on it;
+ * - with no runner, the entry's own problem, which covers every connected
+ *   runner.
+ *
+ * The sign-in goes to the runner the reason is about, or with no runner, to
+ * the first online runner that has the same reason.
+ */
+const findProblem = (
+  context: MenuContext,
+  account: ProviderAccount,
+  entry: ResolvedModelProfileEntry,
+): ModelMenuProblem | null => {
+  const { catalogs, runner } = context;
+  const subject = {
+    harnessName: findHarnessName(catalogs.harnesses, entry.resolvedHarnessId),
+    loginMethod: findHarnessLoginMethod(catalogs.providers, account),
+  };
+  const { problem } = entry;
+  if (problem !== null && !isMachineProblemReason(problem.reason)) {
+    return { message: problem.message, signIn: null };
+  }
+  const readiness = (each: Runner) =>
+    findProviderAccountReadiness(account, entry.resolvedHarnessId, each.id);
+  const runnerState = runner === undefined ? null : readiness(runner);
+  const reason: MachineProblemReason | null =
+    runnerState === null ? readRunReason(problem) : runnerState === "ready" ? null : runnerState;
+  if (reason === null) return null;
+  const target = canFixBySigningIn(reason, subject.loginMethod)
+    ? (runner === undefined ? catalogs.runners : [runner]).find(
+        (each) => canSignInOn(each) && readiness(each) === reason,
+      )
+    : undefined;
+  return {
+    message: describeEntryProblem(reason, {
+      ...subject,
+      machineName: (runner ?? target)?.name ?? null,
+    }),
+    signIn: target === undefined ? null : buildSignInTarget(catalogs.providers, account, target),
+  };
+};
+
+const matchesFilter = (row: Pick<ModelMenuRow, "name" | "model">, filter: string): boolean =>
+  matchesModelSearch({ name: row.name, slug: row.model }, filter);
+
+/** One entry of a profile with the section and account it belongs to. */
+interface PlacedEntry {
+  readonly section: ResolvedModelProfileAccount;
+  readonly account: ProviderAccount;
+  readonly entry: ResolvedModelProfileEntry;
+}
+
+const listPlacedEntries = (
+  profile: ModelProfile,
+  accounts: readonly ProviderAccount[],
+): readonly PlacedEntry[] =>
+  profile.accounts.flatMap((section) => {
+    const account = accounts.find((each) => each.id === section.providerAccountId);
+    return account === undefined
+      ? []
+      : section.entries.map((entry) => ({ section, account, entry }));
   });
 
-  const account = catalogs.accounts.find((each) => each.id === current.providerAccountId);
-  const shown =
-    account === undefined
-      ? []
-      : listModels(account)
-          .filter((descriptor) => filter === "" || matchesFilter(descriptor, filter))
-          .map((descriptor) => ({ descriptor, row: buildRow(account, descriptor) }));
-  // Nothing is collapsed while filtering, because the user is looking for
-  // what they typed, legacy or not. The current model is never collapsed
-  // either, or the section would show no check mark.
-  const isFoldable = (descriptor: ModelDescriptor, row: ModelMenuRow): boolean =>
-    filter === "" && descriptor.isLegacy === true && !row.current;
-
+const buildRow = (
+  context: MenuContext,
+  profile: ModelProfile,
+  { section, account, entry }: PlacedEntry,
+): ModelMenuRow => {
+  const { catalogs, currentKey } = context;
+  const { defaultEntry } = profile;
   return {
-    filterable:
-      catalogs.accounts.reduce((total, each) => total + listModels(each).length, 0) >
-      FILTER_THRESHOLD,
+    providerAccountId: entry.providerAccountId,
+    providerId: account.providerId,
+    harnessId: entry.resolvedHarnessId,
+    model: entry.model,
+    name: entry.name,
+    inHarness: findOtherHarnessName(catalogs.harnesses, section, entry),
+    isDefault: defaultEntry !== null && isSameStoredEntry(defaultEntry, entry),
+    isCurrent: currentKey !== null && isSameProfileEntry(buildProfileEntryKey(entry), currentKey),
+    problem: findProblem(context, account, entry),
+  };
+};
 
-    recent: view.recent
-      .flatMap((pair) => {
-        const held = catalogs.accounts.find((each) => each.id === pair.providerAccountId);
-        const descriptor =
-          held === undefined
-            ? undefined
-            : listModels(held).find((model) => model.slug === pair.model);
-        if (held === undefined || descriptor === undefined) return [];
-        return [
-          {
-            ...pair,
-            name: descriptor.name,
-            harnessId: findHarnessId(held),
-            account: findProviderAccountNameIfAmbiguous(
-              catalogs.accounts,
-              catalogs.providers,
-              held,
-            ),
-            dimmed:
-              view.kind === "active" && held.id !== current.providerAccountId
-                ? ACCOUNT_FIXED
-                : null,
-          },
-        ];
-      })
-      .slice(0, RECENT_LIMIT),
+const buildDraftProfile = (
+  context: MenuContext,
+  profile: ModelProfile,
+  recent: readonly RecentModel[],
+): ModelMenuProfile => {
+  const { catalogs, filter } = context;
+  const placed = listPlacedEntries(profile, catalogs.accounts);
 
-    current: {
-      providerAccountId: current.providerAccountId,
-      harnessId: account === undefined ? null : findHarnessId(account),
-      label: account === undefined ? null : buildProviderAccountName(catalogs.providers, account),
-      rows: shown
-        .filter(({ descriptor, row }) => !isFoldable(descriptor, row))
-        .map(({ row }) => row),
-      older: shown
-        .filter(({ descriptor, row }) => isFoldable(descriptor, row))
-        .map(({ row }) => row),
-    },
+  const recentRows = recent
+    .flatMap((pair) => {
+      const found = placed.find(({ entry }) =>
+        isSameProfileEntry(buildProfileEntryKey(entry), {
+          providerAccountId: pair.providerAccountId,
+          harnessId: pair.harnessId,
+          model: pair.model,
+        }),
+      );
+      return found === undefined ? [] : [found];
+    })
+    .map((found) => ({
+      ...buildRow(context, profile, found),
+      account: findProviderAccountNameIfAmbiguous(
+        catalogs.accounts,
+        catalogs.providers,
+        found.account,
+      ),
+    }))
+    .filter((row) => matchesFilter(row, filter))
+    .slice(0, RECENT_LIMIT);
 
-    others: catalogs.accounts
-      .filter((each) => each.id !== current.providerAccountId)
-      .flatMap((each) => {
-        const snapshot = findSnapshot(each);
-        const models = listModels(each);
-        const matched =
-          filter === ""
-            ? []
-            : models
-                .filter((descriptor) => matchesFilter(descriptor, filter))
-                .map((d) => buildRow(each, d));
-        if (filter !== "" && matched.length === 0) return [];
+  const lanes = profile.accounts.flatMap((section): readonly ModelMenuLane[] => {
+    const account = catalogs.accounts.find((each) => each.id === section.providerAccountId);
+    if (account === undefined) return [];
+    const rows = placed
+      .filter((each) => each.section === section)
+      .map((each) => buildRow(context, profile, each))
+      .filter((row) => matchesFilter(row, filter));
+    // A section with nothing to pick has no lane, and neither does a lane
+    // that waits for its models while the user is filtering.
+    const waiting = section.selectionPending && filter === "";
+    if (rows.length === 0 && !waiting) return [];
+    return [
+      {
+        providerAccountId: account.id,
+        providerId: account.providerId,
+        name: buildProviderAccountName(catalogs.providers, account),
+        rows,
+        note: waiting ? READING_MODELS_NOTE : null,
+      },
+    ];
+  });
 
-        // An account whose credential every runner uses is ready wherever the
-        // harness is, with or without a probe of it there.
-        const readiness =
-          runner === undefined
-            ? snapshot?.auth.status === "ok"
-              ? "ready"
-              : "not-signed-in"
-            : decideAccountReadiness(catalogs, each, findHarnessId(each), runner);
-        const dimmed =
-          view.kind === "active"
-            ? ACCOUNT_FIXED
-            : readiness === "ready"
-              ? null
-              : readiness === "token-missing"
-                ? "no token"
-                : readiness === "token-expired"
-                  ? "token expired"
-                  : readiness === "harness-too-old"
-                    ? "harness too old"
-                    : readiness === "harness-missing" || snapshot === undefined
-                      ? `not on ${runner?.name ?? "this machine"}`
-                      : "not signed in";
+  return { profileId: profile.id, name: profile.name, recent: recentRows, lanes };
+};
 
-        return [
-          {
-            providerAccountId: each.id,
-            harnessId: findHarnessId(each),
-            name: buildProviderAccountName(catalogs.providers, each),
-            identity: snapshot?.auth.identity ?? null,
-            planLabel: snapshot?.auth.planLabel ?? null,
-            models: describeModelCount(models.length),
-            dimmed,
-            // Do not offer a sign-in for an account the thread cannot switch to:
-            // the sign-in would change nothing for this thread.
-            signIn:
-              view.kind !== "active" &&
-              snapshot !== undefined &&
-              readiness === "not-signed-in" &&
-              runner !== undefined
-                ? buildSignInTarget(catalogs.providers, each, runner)
-                : null,
-            rows: view.kind === "active" ? [] : matched,
-          },
-        ];
-      }),
+/** Returns what the menu says in place of an empty list: that nothing matches the filter, or that the profile is empty. */
+const describeEmptyList = (filter: string): string =>
+  filter === "" ? EMPTY_PROFILE_NOTE : NO_MATCH_NOTE;
+
+/**
+ * Builds the flat list of a running thread: every entry of every profile with
+ * the session's account and harness, each model once, the first profile
+ * listing it winning. A model the thread runs that no profile lists is added
+ * as the first, current row with its id as name, so the list always shows the
+ * model in use. No row is the default, because the profiles may disagree
+ * about which entry is.
+ */
+const buildActiveMenu = (context: MenuContext, current: ModelMenuCurrent): ModelMenu => {
+  const { catalogs, filter } = context;
+  const account = catalogs.accounts.find((each) => each.id === current.providerAccountId);
+  const harnessId =
+    account === undefined ? null : resolveThreadHarnessId(account, current.harnessId);
+  const rows: ModelMenuRow[] = [];
+  let entryCount = 0;
+  if (account !== undefined && harnessId !== null) {
+    for (const profile of catalogs.modelProfiles) {
+      for (const placed of listPlacedEntries(profile, catalogs.accounts)) {
+        const { entry } = placed;
+        if (entry.providerAccountId !== account.id || entry.resolvedHarnessId !== harnessId) {
+          continue;
+        }
+        if (rows.some((row) => row.model === entry.model)) continue;
+        rows.push({ ...buildRow(context, profile, placed), inHarness: null, isDefault: false });
+      }
+    }
+    entryCount = rows.length;
+    if (current.model !== null && !rows.some((row) => row.model === current.model)) {
+      rows.unshift({
+        providerAccountId: account.id,
+        providerId: account.providerId,
+        harnessId,
+        model: current.model,
+        name: current.model,
+        inHarness: null,
+        isDefault: false,
+        isCurrent: true,
+        problem: null,
+      });
+    }
+  }
+  const shown = rows.filter((row) => matchesFilter(row, filter));
+  return {
+    kind: "active",
+    filterable: entryCount > FILTER_THRESHOLD,
+    rows: shown,
+    note: OTHER_MODELS_NOTE,
+    empty: shown.length === 0 ? describeEmptyList(filter) : null,
+  };
+};
+
+/**
+ * Returns the model menu for the thread's current config.
+ *
+ * A draft gets its profile's lanes (the first profile; more than one is not
+ * built yet). A running thread gets the flat list of its account and harness.
+ * Picking a row is one `model` choice that names its account, harness and
+ * model together (`applyThreadChoice`), so the draft runs the entry the row
+ * showed.
+ */
+export const buildModelMenu = (
+  catalogs: ThreadCatalogs,
+  current: ModelMenuCurrent,
+  view: ModelMenuView,
+): ModelMenu => {
+  const account = catalogs.accounts.find((each) => each.id === current.providerAccountId);
+  const harnessId =
+    account === undefined ? null : resolveThreadHarnessId(account, current.harnessId);
+  const boundRunnerId = view.kind === "active" ? current.runnerId : view.runnerId;
+  const context: MenuContext = {
+    catalogs,
+    runner: catalogs.runners.find((runner) => runner.id === boundRunnerId),
+    filter: view.filter.trim(),
+    currentKey:
+      account === undefined || harnessId === null || current.model === null
+        ? null
+        : { providerAccountId: account.id, harnessId, model: current.model },
+  };
+  if (view.kind === "active") return buildActiveMenu(context, current);
+  const profile = catalogs.modelProfiles[0];
+  if (profile === undefined) {
+    return { kind: "draft", filterable: false, profile: null, empty: EMPTY_PROFILE_NOTE };
+  }
+  const built = buildDraftProfile(context, profile, view.recent);
+  return {
+    kind: "draft",
+    filterable: listProfileEntries(profile).length > FILTER_THRESHOLD,
+    profile: built,
+    empty:
+      built.lanes.length === 0 && built.recent.length === 0
+        ? describeEmptyList(context.filter)
+        : null,
   };
 };

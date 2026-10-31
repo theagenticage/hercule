@@ -4,13 +4,8 @@
  * account in the thread's harness; the sign-in state of other accounts does
  * not matter here.
  */
-import type { ProviderAccount, Runner } from "@hercule/contract";
-import {
-  decideAccountReadiness,
-  type AccountCatalogs,
-  type AccountReadiness,
-} from "./account-readiness";
-import { findSnapshotOn } from "./catalog";
+import type { ProviderAccount, ProviderAccountReadinessState, Runner } from "@hercule/contract";
+import { findProviderAccountReadiness } from "../provider-accounts";
 
 export interface RunnerMenuRow {
   readonly runnerId: string;
@@ -38,11 +33,15 @@ const isRetired = (runner: Runner): boolean => runner.lifecycle === "retired";
 /**
  * Returns why `runner` cannot host a thread of an account that is `readiness`
  * on it right now, or `null` when it can: "retired", its connectivity when it
- * is not online, "draining", "not signed in", or "not installed" when the
- * account works everywhere but the harness is not on the runner, or "harness
- * too old" when it is older than this build supports.
+ * is not online, "draining", "not signed in", "no key or token" when the
+ * controller holds no credential for the account, "token expired", "not
+ * installed" when the harness is not on the runner, or "harness too old" when
+ * it is older than this build supports.
  */
-export const findDimmedReason = (runner: Runner, readiness: AccountReadiness): string | null =>
+export const findDimmedReason = (
+  runner: Runner,
+  readiness: ProviderAccountReadinessState,
+): string | null =>
   isRetired(runner)
     ? "retired"
     : runner.connectivity !== "online"
@@ -51,8 +50,8 @@ export const findDimmedReason = (runner: Runner, readiness: AccountReadiness): s
         ? "draining"
         : readiness === "not-signed-in"
           ? "not signed in"
-          : readiness === "token-missing"
-            ? "no token"
+          : readiness === "credential-missing"
+            ? "no key or token"
             : readiness === "token-expired"
               ? "token expired"
               : readiness === "harness-too-old"
@@ -66,31 +65,28 @@ export const findDimmedReason = (runner: Runner, readiness: AccountReadiness): s
  * runner on this Mac when it is usable, else the first usable runner, else `null`.
  * A row is dimmed, with the reason, when its runner is not online, is
  * draining, or the account cannot run in `harnessId` on it
- * (`decideAccountReadiness`).
+ * (`findProviderAccountReadiness`).
  */
 export const buildRunnerMenu = (
   runners: readonly Runner[],
   localId: string | null,
   account: ProviderAccount,
   harnessId: string,
-  catalogs: AccountCatalogs,
 ): RunnerMenu => {
   const rows = runners
     .filter((runner) => !isRetired(runner))
     .map((runner) => {
-      const snapshot = findSnapshotOn(account, harnessId, runner.id);
-      const dimmed = findDimmedReason(
-        runner,
-        decideAccountReadiness(catalogs, account, harnessId, runner),
-      );
+      const readiness = findProviderAccountReadiness(account, harnessId, runner.id);
+      const dimmed = findDimmedReason(runner, readiness);
       return {
         runnerId: runner.id,
         name: runner.name,
         state: readRunnerState(runner),
         isLocal: runner.id === localId,
         reserved: runner.reserved,
-        identity: snapshot?.auth.identity ?? null,
-        planLabel: snapshot?.auth.planLabel ?? null,
+        // Who the account is signed in as is known only where it can run.
+        identity: readiness === "ready" ? account.identity : null,
+        planLabel: readiness === "ready" ? account.planLabel : null,
         dimmed,
       };
     });
@@ -106,8 +102,8 @@ export const buildRunnerMenu = (
 
 /**
  * Returns the runner the composer refers to when it needs one even though
- * none may be selectable, for example in a dimmed reason or to read the model
- * menu's catalog. Returns, in order of preference:
+ * none may be selectable, for example to name it in the reason a draft cannot
+ * start. Returns, in order of preference:
  *
  * - the selected runner, even a retired one, because a started thread keeps
  *   the runner it ran on;

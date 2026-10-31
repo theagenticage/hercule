@@ -19,7 +19,12 @@ import {
   type AssistantReply,
   type DisallowedTool,
 } from "@hercule/contract";
-import { profilesQuery, providerAccountsQuery, providersQuery } from "../../../../../app/queries";
+import {
+  modelProfilesQuery,
+  profilesQuery,
+  providerAccountsQuery,
+  providersQuery,
+} from "../../../../../app/queries";
 import type { SavedField } from "../../../../../app/saved-field";
 import { ShieldIcon } from "../../../../../icons/shield";
 import { DisallowedToolsRow } from "../../../../../screens/settings/assistants/disallowed-tools-row";
@@ -177,6 +182,7 @@ function ProviderRow({ assistant }: { readonly assistant: Assistant }): JSX.Elem
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const providers = useSuspenseQuery(providersQuery(client)).data;
+  const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   const provider = useSavedAssistantField(
     client,
     assistant.id,
@@ -190,7 +196,7 @@ function ProviderRow({ assistant }: { readonly assistant: Assistant }): JSX.Elem
   );
   // The field is built for the value on screen, so a pick that is still
   // saving shows its own account's logo and identity.
-  const field = buildAssistantProviderField(accounts, providers, provider.value);
+  const field = buildAssistantProviderField(accounts, providers, modelProfiles, provider.value);
   return (
     <SettingRow
       label="Provider"

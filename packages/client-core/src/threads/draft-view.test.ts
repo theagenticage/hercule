@@ -11,8 +11,10 @@
 import { describe, expect, it } from "vitest";
 import type { Profile, SettingsState } from "@hercule/contract";
 import {
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
   buildProviderAccount,
-  buildSnapshot,
   ANTHROPIC_IDENTITY,
   HARNESSES,
   PROVIDERS,
@@ -42,27 +44,23 @@ const UNRESTRICTED: Profile = {
   updatedAt: "2026-09-05T09:00:00.000Z",
 };
 
-const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [
-  buildSnapshot({
-    runnerId: MOSS.id,
-    models: [
-      {
-        slug: "claude-sonnet-5",
-        name: "Claude Sonnet 5",
-        imageInput: { maxBytes: null },
-        isDefault: true,
-        options: [],
-      },
-      {
-        slug: "claude-opus-5-5",
-        name: "Opus 5.5",
-        imageInput: { maxBytes: null },
-        isDefault: false,
-        options: [],
-      },
-    ],
-  }),
-]);
+const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [], [{ runnerId: MOSS.id }]);
+
+const MAIN = buildModelProfile(
+  [
+    buildProfileSection(ANTHROPIC_IDENTITY, [
+      buildProfileEntry(ANTHROPIC_IDENTITY, "claude-sonnet-5", { name: "Claude Sonnet 5" }),
+      buildProfileEntry(ANTHROPIC_IDENTITY, "claude-opus-5-5", { name: "Opus 5.5" }),
+    ]),
+  ],
+  {
+    defaultEntry: {
+      providerAccountId: ANTHROPIC_IDENTITY.id,
+      model: "claude-sonnet-5",
+      harnessId: null,
+    },
+  },
+);
 
 /** This Mac, with Claude Code installed, so the account is ready on it. */
 const MOSS_WITH_CLAUDE = { ...MOSS, facts: WITH_AGENTS.facts };
@@ -75,6 +73,7 @@ const READS: DraftReads = {
   thisMacRunnerId: MOSS.id,
   providers: PROVIDERS,
   harnesses: HARNESSES,
+  modelProfiles: [MAIN],
   projects: [WEBSHOP_PROJECT, OPS_PROJECT],
   resources: [WEBSHOP, INFRA, RUNBOOKS],
   workspaces: [PRIMARY, THREAD_3F1],

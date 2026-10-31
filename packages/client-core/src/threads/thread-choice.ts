@@ -12,10 +12,17 @@ import type { WorkspacePick } from "./workspaces";
 
 /** One selector choice. A menu row emits exactly one choice. */
 export type ThreadChoice =
-  /** A model row. It always carries its account, because a model belongs to one account. */
-  | { readonly kind: "model"; readonly providerAccountId: string; readonly model: string }
-  /** An account row that has no model to pick. */
-  | { readonly kind: "account"; readonly providerAccountId: string }
+  /**
+   * A model row. It carries the entry it stands for: its account, the harness
+   * the entry runs in and the model. The harness is part of the entry, because
+   * a profile may offer one model in two harnesses.
+   */
+  | {
+      readonly kind: "model";
+      readonly providerAccountId: string;
+      readonly harnessId: string;
+      readonly model: string;
+    }
   | { readonly kind: "runner"; readonly runnerId: string }
   | { readonly kind: "workspace"; readonly workspace: WorkspacePick }
   | { readonly kind: "option"; readonly id: string; readonly value: string | boolean }
@@ -25,10 +32,7 @@ export type ThreadChoice =
  * Returns `picks` with `choice` recorded. It reads no catalog, so it never
  * decides whether the choice can apply.
  *
- * - A model choice sets the account and the model.
- * - An account choice sets the account and removes the model pick, because
- *   the model belonged to the account that offered it. The account's default
- *   model applies instead.
+ * - A model choice sets the account, the harness and the model together.
  * - An option choice merges into the picked options. A `false` is a choice
  *   too, so it is kept.
  * - The other choices set their field.
@@ -36,11 +40,11 @@ export type ThreadChoice =
 export const applyThreadChoice = (picks: ThreadPicks, choice: ThreadChoice): ThreadPicks => {
   switch (choice.kind) {
     case "model":
-      return { ...picks, providerAccountId: choice.providerAccountId, model: choice.model };
-    case "account":
       return {
-        ...Object.fromEntries(Object.entries(picks).filter(([key]) => key !== "model")),
+        ...picks,
         providerAccountId: choice.providerAccountId,
+        harnessId: choice.harnessId,
+        model: choice.model,
       };
     case "runner":
       return { ...picks, runnerId: choice.runnerId };

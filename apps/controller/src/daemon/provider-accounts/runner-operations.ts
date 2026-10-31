@@ -221,9 +221,10 @@ const make = Effect.gen(function* () {
      * sign-in itself stays recorded.
      *
      * Once the probe finds the account signed in, the account is ready, so
-     * the default assistant is created on it when no assistant exists (see
-     * `create`). That fails the call when the caller may not create
-     * assistants, after the sign-in is recorded.
+     * its Model Catalog is read (without waiting, with a probe of its own),
+     * and the default assistant is created on it when no assistant exists (see
+     * `create`). That fails the call when the caller may not create assistants, after the
+     * sign-in is recorded.
      */
     submitSignInCode: (
       input: SignInCodeInput,
@@ -269,6 +270,23 @@ const make = Effect.gen(function* () {
         }
         yield* assistants.createDefaultIfNone(id);
         return yield* accounts.readProviderAccount(id);
+      }),
+
+    /**
+     * Refreshes an account and returns it at once: its Model Catalog is read
+     * again on the runner the catalog chooses, without waiting. That is one
+     * probe, not a probe of every harness on every runner; the hourly sweep
+     * keeps the other snapshots fresh. The outcome arrives on the `provider`
+     * live topic when the read ends.
+     *
+     * Fails with `NotFound` when the account does not exist.
+     */
+    refresh: (id: Id): Effect.Effect<ProviderAccount, ReadError | NotFound> =>
+      Effect.gen(function* () {
+        yield* requireGrant("providerAccount.refresh");
+        const account = yield* accounts.readProviderAccount(id);
+        yield* Effect.forkDetach(probing.readCatalog(id));
+        return account;
       }),
 
     /**

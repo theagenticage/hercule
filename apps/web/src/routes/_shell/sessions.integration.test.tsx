@@ -8,6 +8,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ProviderAccount, Runner } from "@hercule/contract";
 import {
+  buildCatalogFields,
   buildErrorBody,
   readPageText,
   renderApp,
@@ -78,6 +79,7 @@ const buildClaudeCodeProviderAccount = (
   usage: [],
   failure: null,
   snapshots,
+  ...buildCatalogFields(snapshots),
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
 });

@@ -11,6 +11,7 @@ import {
   queryKeys,
   setWorkspaceStartingRevision,
   buildWorkspaceMenu,
+  findProviderPluginId,
   type Thread,
   readErrorMessage,
 } from "@hercule/client-core";
@@ -18,6 +19,8 @@ import { cn, ImageLightbox } from "@hercule/ui";
 import {
   harnessesQuery,
   localRunnerQuery,
+  modelProfilesQuery,
+  pluginsQuery,
   projectsQuery,
   providerAccountsQuery,
   providersQuery,
@@ -29,6 +32,7 @@ import {
 import { AccessModeSelector } from "./access-mode-selector";
 import { AttachmentShelf, DropOverlay } from "./attachment-shelf";
 import { ComposerCard } from "./composer-card";
+import { ProviderMark } from "../provider-mark";
 import { SESSION_STOP_TITLE, StopButton } from "../stop-button";
 import { AttachButton, PreviousButton, SendButton, StepButton, VoiceButton } from "./controls";
 import { DraftHero } from "./draft-hero";
@@ -69,11 +73,13 @@ export function Composer({
   /** Called after a message is sent; an active thread uses it to scroll back to the bottom. */
   readonly onSend?: () => void;
 }): JSX.Element {
-  const { client, live, uploads, detectLocalRunner } = useRouteContext({ from: "/_shell" });
+  const { client, uploads, detectLocalRunner } = useRouteContext({ from: "/_shell" });
   const queryClient = useQueryClient();
   const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
   const providers = useSuspenseQuery(providersQuery(client)).data;
+  const plugins = useSuspenseQuery(pluginsQuery(client)).data;
   const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
+  const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const thisMacRunnerId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
   // The catalogs the workspace menu reads. If the controller cannot return
@@ -86,6 +92,7 @@ export function Composer({
     accounts,
     providers,
     harnesses,
+    modelProfiles,
     runners,
     thisMacRunnerId,
     projects,
@@ -110,7 +117,7 @@ export function Composer({
   const fields = model.fields;
   const { config } = model.resolved;
   const pending = buildPendingModelNote(model.resolved);
-  const signIn = buildSignInSlot(client, live, () => {
+  const signIn = buildSignInSlot(client, () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.providerAccounts() });
   });
   // A click that opens selector B is also a click outside selector A. So a
@@ -122,7 +129,12 @@ export function Composer({
   // The model menu is built only while it is open.
   const models =
     open === "model"
-      ? buildModelMenu(catalogs, config, { kind: model.kind, filter, recent: model.recent })
+      ? buildModelMenu(catalogs, config, {
+          kind: model.kind,
+          filter,
+          recent: model.recent,
+          runnerId: model.menuRunnerId,
+        })
       : null;
   const projectId = config.projectId ?? null;
   const pick = fields.workspace.value;
@@ -329,6 +341,13 @@ export function Composer({
                       handleOpenChange("model", next);
                     }}
                     onChoose={model.recordThreadChoice}
+                    renderProviderMark={(providerId) => (
+                      <ProviderMark
+                        pluginId={findProviderPluginId(providers, { providerId })}
+                        plugins={plugins}
+                        className="size-[11px]"
+                      />
+                    )}
                     signInSlot={signIn}
                   />
                 </span>

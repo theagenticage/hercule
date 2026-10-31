@@ -9,36 +9,37 @@ import type { ThreadPicks } from "./config";
 import { applyThreadChoice } from "./thread-choice";
 
 describe("applyThreadChoice", () => {
-  it("records a model together with its account", () => {
+  it("records a model together with its account and harness", () => {
     expect(
-      applyThreadChoice({}, { kind: "model", providerAccountId: "a-openai", model: "gpt-5" }),
-    ).toEqual({ providerAccountId: "a-openai", model: "gpt-5" });
+      applyThreadChoice(
+        {},
+        { kind: "model", providerAccountId: "a-openai", harnessId: "pi/pi", model: "gpt-5" },
+      ),
+    ).toEqual({ providerAccountId: "a-openai", harnessId: "pi/pi", model: "gpt-5" });
   });
 
-  it("replaces the account and model of an earlier model choice, and keeps the other picks", () => {
+  it("replaces the account, harness and model of an earlier model choice, and keeps the other picks", () => {
     const held: ThreadPicks = {
       providerAccountId: "a-anthropic",
+      harnessId: "claude-code/claude-code",
       model: "claude-opus-5",
       runnerId: "r-remote",
       options: { effort: "max" },
     };
     expect(
-      applyThreadChoice(held, { kind: "model", providerAccountId: "a-openai", model: "gpt-5" }),
+      applyThreadChoice(held, {
+        kind: "model",
+        providerAccountId: "a-openai",
+        harnessId: "codex/codex",
+        model: "gpt-5",
+      }),
     ).toEqual({
       providerAccountId: "a-openai",
+      harnessId: "codex/codex",
       model: "gpt-5",
       runnerId: "r-remote",
       options: { effort: "max" },
     });
-  });
-
-  it("records an account and removes the model pick, because a model belongs to its account", () => {
-    expect(
-      applyThreadChoice(
-        { providerAccountId: "a-anthropic", model: "claude-opus-5", runnerId: "r-remote" },
-        { kind: "account", providerAccountId: "a-openai" },
-      ),
-    ).toEqual({ providerAccountId: "a-openai", runnerId: "r-remote" });
   });
 
   it("merges an option into the options already picked, and keeps an explicit false", () => {

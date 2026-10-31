@@ -66,6 +66,13 @@ export interface ComposerModel {
   /** Every lock, blocker and resolved pick the composer renders. */
   readonly fields: ComposerFields;
   readonly picks: ThreadPicks;
+  /**
+   * The runner the model menu judges every entry on: for a draft, the one
+   * the user picked or the one a joined workspace decides, and `null` while
+   * any runner will do. A running thread ignores it, because its session has
+   * a runner of its own.
+   */
+  readonly menuRunnerId: string | null;
   readonly recent: readonly RecentModel[];
   /** The unsent text and the images on the shelf. */
   readonly message: MessageDraft;
@@ -228,6 +235,7 @@ export function useComposerModel(
     resolved,
     fields,
     picks,
+    menuRunnerId: resolved.kind === "draft" ? resolved.menuRunnerId : null,
     recent,
     message,
     attachmentBlock: describeSendBlock(message.attachments, fields.model),

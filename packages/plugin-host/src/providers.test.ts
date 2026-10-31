@@ -105,6 +105,8 @@ describe("a provider definition", () => {
     displayName: "Anthropic",
     kinds: [kind],
     defaultHarnessId: "claude-code/claude-code",
+    catalogSource: { kind: "harness-probe", harnessId: "claude-code/claude-code" },
+    defaultSelection: "current-models",
   };
 
   it("needs at least one account kind", () => {
@@ -117,6 +119,28 @@ describe("a provider definition", () => {
     expect(accepts(ProviderDefinition, { ...provider, defaultHarnessId: "claude-code" })).toBe(
       false,
     );
+  });
+
+  it("needs a catalog source, which can only be a harness probe of a qualified harness id", () => {
+    expect(accepts(ProviderDefinition, omitField(provider, "catalogSource"))).toBe(false);
+    expect(
+      accepts(ProviderDefinition, {
+        ...provider,
+        catalogSource: { kind: "provider-api", harnessId: "claude-code/claude-code" },
+      }),
+    ).toBe(false);
+    expect(
+      accepts(ProviderDefinition, {
+        ...provider,
+        catalogSource: { kind: "harness-probe", harnessId: "claude-code" },
+      }),
+    ).toBe(false);
+  });
+
+  it("needs a default selection of current models or none", () => {
+    expect(accepts(ProviderDefinition, omitField(provider, "defaultSelection"))).toBe(false);
+    expect(accepts(ProviderDefinition, { ...provider, defaultSelection: "none" })).toBe(true);
+    expect(accepts(ProviderDefinition, { ...provider, defaultSelection: "all" })).toBe(false);
   });
 
   it("takes an optional text generation model, which cannot be empty", () => {

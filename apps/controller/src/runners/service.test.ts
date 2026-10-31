@@ -18,7 +18,7 @@ import { AuditLogLayer } from "../events";
 import { NotifierLayer } from "../notifications";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { readEventsOfKind } from "../events/testing";
-import { TestDatabase } from "../db/testing";
+import { buildAnnouncementRecorder, TestDatabase } from "../db/testing";
 import { Settings, SettingsLayer } from "../settings";
 import { runnerRepository } from "./repository";
 import {
@@ -202,5 +202,36 @@ describe("the errors the service returns on its own", () => {
 
     expect(error).toMatchObject({ error: { code: "conflict" } });
     expect(after.reserved).toBe(false);
+  });
+});
+
+describe("a lifecycle change", () => {
+  it("is announced on the provider topic, because it changes where accounts can run", async () => {
+    const recorder = buildAnnouncementRecorder();
+
+    const runnerId = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runners = yield* RunnerService;
+        const runner = yield* insertRunner("iris");
+        yield* runners.drain(runner.id);
+        yield* runners.undrain(runner.id);
+        yield* runners.retire({ id: runner.id });
+        return runner.id;
+      }).pipe(
+        Effect.provideService(CurrentActor, USER),
+        Effect.provide(layer),
+        Effect.provide(recorder.listener),
+        Effect.orDie,
+      ),
+    );
+
+    const providerChanges = recorder.announced.filter(
+      (change) => change._tag === "record" && change.topic === "provider",
+    );
+    expect(providerChanges).toEqual([
+      { _tag: "record", topic: "provider", id: runnerId, kind: "updated" },
+      { _tag: "record", topic: "provider", id: runnerId, kind: "updated" },
+      { _tag: "record", topic: "provider", id: runnerId, kind: "updated" },
+    ]);
   });
 });

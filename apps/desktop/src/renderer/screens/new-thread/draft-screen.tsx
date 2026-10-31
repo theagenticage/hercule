@@ -294,8 +294,13 @@ export function DraftScreen({
             notice={images.notice}
             attachments={images.attachments}
             skills={skills}
+            // The machine the user picked, or the joined workspace's; never the
+            // one the draft would be placed on by default, which the menu must
+            // not dim entries by.
+            runnerId={view.resolved.menuRunnerId}
             readRecent={() => readRecentModels(controller.url)}
             fieldRef={fieldRef}
+            onSignIn={setSignIn}
             onTextChange={(text) => {
               pendingSubmissions.writeText(key, text);
             }}

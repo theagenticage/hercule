@@ -2,9 +2,14 @@
  * The Provider field of Settings > Assistants: one menu that picks both the
  * Provider Account an assistant runs on and the model it uses there.
  */
-import { toIdTail, type Provider, type ProviderAccount } from "@hercule/contract";
+import {
+  toIdTail,
+  type ModelProfile,
+  type Provider,
+  type ProviderAccount,
+} from "@hercule/contract";
+import { listProfileEntries } from "../model-profiles/profile-entries";
 import { buildProviderAccountName, resolveThreadHarnessId } from "../provider-accounts";
-import { buildThreadModelField } from "../threads/model-field";
 import type { AssistantDraft } from "./form";
 
 /** One choice in the Provider field: an account and a model on it. */
@@ -43,11 +48,11 @@ interface AssistantProviderField {
  * Builds the Provider field for `assistant`, the account and model it runs
  * on, from every Provider Account.
  *
- * Each account is one group: first its default model, then each model its
- * catalog offers. The catalog is read from the account's first snapshot in the
- * harness the assistant would run in, because an assistant is not tied to one
- * runner. An account that has no signed-in snapshot offers only its default
- * model.
+ * Each account is one group: first its default model, then each model the
+ * Model Profiles list for it in the harness the assistant would run in, each
+ * once, in profile order. A client reads no Model Catalog outside the model
+ * picker, so a model no profile lists is not offered here; the assistant's own
+ * choice always is.
  *
  * A select whose value matches none of its options shows its first option
  * instead, so the assistant's own choice is always an option:
@@ -59,6 +64,7 @@ interface AssistantProviderField {
 export const buildAssistantProviderField = (
   accounts: readonly ProviderAccount[],
   providers: readonly Provider[],
+  modelProfiles: readonly ModelProfile[],
   assistant: Pick<AssistantDraft, "providerAccountId" | "harnessId" | "model">,
 ): AssistantProviderField => {
   const buildGroup = (
@@ -91,17 +97,29 @@ export const buildAssistantProviderField = (
   const findHarnessId = (account: ProviderAccount): string | null =>
     account.id === assistant.providerAccountId ? assistant.harnessId : null;
 
+  const listModels = (
+    account: ProviderAccount,
+  ): ReadonlyArray<{ readonly slug: string; readonly name: string }> => {
+    const harnessId = resolveThreadHarnessId(account, findHarnessId(account));
+    const models: Array<{ readonly slug: string; readonly name: string }> = [];
+    for (const entry of modelProfiles.flatMap(listProfileEntries)) {
+      if (
+        entry.providerAccountId === account.id &&
+        entry.resolvedHarnessId === harnessId &&
+        !models.some(({ slug }) => slug === entry.model)
+      ) {
+        models.push({ slug: entry.model, name: entry.name });
+      }
+    }
+    return models;
+  };
+
   const groups = accounts.map((account) =>
     buildGroup(
       account.id,
       findHarnessId(account),
       buildProviderAccountName(providers, account),
-      buildThreadModelField(
-        account,
-        resolveThreadHarnessId(account, findHarnessId(account)),
-        null,
-        undefined,
-      ).options,
+      listModels(account),
     ),
   );
   const account = accounts.find(({ id }) => id === assistant.providerAccountId);

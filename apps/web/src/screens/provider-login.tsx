@@ -11,11 +11,9 @@ import {
   startProviderLogin,
   type DeviceLogin,
   type HerculeClient,
-  type Live,
   type CredentialFieldOffer,
   readErrorMessage,
 } from "@hercule/client-core";
-import { useLiveInvalidation } from "../app/live-invalidation";
 import { providerAccountsQuery } from "../app/queries";
 import { copyText } from "./clipboard";
 import { DeviceCode } from "./device-code";
@@ -45,7 +43,6 @@ import { DeviceCode } from "./device-code";
  */
 export function ProviderLogin({
   client,
-  live,
   providerAccountId,
   runnerId,
   subject,
@@ -56,8 +53,6 @@ export function ProviderLogin({
 }: {
   readonly className?: string;
   readonly client: HerculeClient;
-  /** Delivers the account's new snapshots, which end a device login. */
-  readonly live: Live;
   readonly providerAccountId: string;
   /** The machine the credential is stored on, and the only one it works on. */
   readonly runnerId: string;
@@ -205,7 +200,6 @@ export function ProviderLogin({
               </p>
               <DeviceLoginWait
                 client={client}
-                live={live}
                 login={deviceLogin}
                 onDone={finishLogin}
                 onRestart={() => {
@@ -229,25 +223,21 @@ export function ProviderLogin({
  * The end of a device login: waits until a fresh snapshot shows the
  * account signed in, then calls `onDone` once, or shows that the code
  * expired. A login of an account that was signed in already never calls
- * `onDone`, and the line asks the user to close the drawer instead. It keeps
- * the accounts current through the live connection while it is on screen,
- * because the screen that hosts the login may not.
+ * `onDone`, and the line asks the user to close the drawer instead. The
+ * snapshots arrive through the `provider` live topic, which the shell holds on
+ * every screen, so this component only reads the accounts.
  */
 function DeviceLoginWait({
   client,
-  live,
   login,
   onDone,
   onRestart,
 }: {
   readonly client: HerculeClient;
-  readonly live: Live;
   readonly login: DeviceLogin;
   readonly onDone: () => void;
   readonly onRestart: () => void;
 }): JSX.Element {
-  const queryClient = useQueryClient();
-  useLiveInvalidation(live, queryClient, "provider");
   const accounts = useQuery(providerAccountsQuery(client)).data ?? [];
   const [now, setNow] = useState(() => Date.now());
   const minutesLeft = login.expiresAt === undefined ? null : countMinutesLeft(login.expiresAt, now);

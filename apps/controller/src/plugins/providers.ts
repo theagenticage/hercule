@@ -201,8 +201,8 @@ const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
  * credentials step is not exactly one field named `apiKey`, that has an account
  * kind with two credential sources (see `findCredentialSourceProblem`), that has
  * an `oauth`, `device` or `pairing` setup step (see `findUnsupportedStepProblem`), that has
- * a key kind without a valid `keyCheck` (one that sends the key), a kind whose `usage` is invalid (see `findUsageProblem`), an `endpoint` kind with no parser or a parser for any other kind, one of whose account kinds does not list the provider's `defaultHarnessId`,
- * or that the plugin registered twice.
+ * a key kind without a valid `keyCheck` (one that sends the key), a kind whose `usage` is invalid (see `findUsageProblem`), an `endpoint` kind with no parser or a parser for any other kind, one of whose account kinds does not list the provider's `defaultHarnessId`
+ * or its `catalogSource.harnessId`, or that the plugin registered twice.
  *
  * The harnesses an account kind lists are qualified ids and are not checked
  * against the harnesses that are loaded: their plugin may be absent or
@@ -309,6 +309,18 @@ export const registerProviderContribution = (
       return yield* Effect.fail(
         new PluginError({
           message: `the provider ${id} has the default harness ${decoded.defaultHarnessId}, which its account kinds ${kindsWithoutDefault.map((kind) => kind.id).join(", ")} do not list; every account kind must list the default harness, because a new account of any kind starts with it`,
+        }),
+      );
+    }
+    // An account's Model Catalog is read by probing this harness, so an
+    // account of a kind that cannot run in it would never get a catalog.
+    const kindsWithoutCatalogSource = decoded.kinds.filter(
+      (kind) => !kind.harnesses.includes(decoded.catalogSource.harnessId),
+    );
+    if (kindsWithoutCatalogSource.length > 0) {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the provider ${id} reads its Model Catalog from the harness ${decoded.catalogSource.harnessId}, which its account kinds ${kindsWithoutCatalogSource.map((kind) => kind.id).join(", ")} do not list; every account kind must list the catalog source harness, or an account of that kind could never be read`,
         }),
       );
     }
